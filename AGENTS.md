@@ -3,9 +3,6 @@
 ## Build & Test Commands
 
 ```bash
-# Build
-npm run build
-
 # Test
 npm test <relative-path>    # Run tests for a specific file or directory
 # never run full test. always run specific test file or directory
@@ -29,7 +26,7 @@ cd frontend && npm run dev  # Run frontend dev server (port 3011)
 - `src/database/` - Database integrations (Qdrant, Nebula)
 - `src/embedders/` - Multiple embedding providers (OpenAI, Ollama, Gemini, Mistral, etc.)
 - `src/mcp/` - Model Context Protocol implementation
-- `src/utils/` - Helper functions, caching, logging
+- `src/common/` - Helper functions, caching, logging
 - `frontend/` - Independent TypeScript/Vite frontend (no framework)
 
 **Core services**:

@@ -1,1 +1,0 @@
-{"cells":[{"code":"struct Point {\r\n    int x;\r\n    int y;\r\n    \r\n    Point(int x, int y) : x(x), y(y) {}\r\n};","language":"cpp","kind":"code"},{"code":"(struct_specifier\r\n  name: (type_identifier) @type.name\r\n  body: (field_declaration_list) @type.body) @definition.struct","language":"scm","kind":"code"}]}

@@ -1,1 +1,0 @@
-{"cells":[{"code":"class Fields {\r\npublic:\r\n    int publicField;\r\n    static int staticField;\r\nprivate:\r\n    int privateField;\r\n};","language":"cpp","kind":"code"},{"code":"(class_specifier\r\n  type: (_) @field.type\r\n declarator: (field_declarator\r\n    declarator: (field_identifier) @field.name)) @definition.field","language":"scm","kind":"code"}]}

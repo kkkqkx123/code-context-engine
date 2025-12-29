@@ -1,3 +1,5 @@
+ref/hidden
+
 node_modules
 dist
 coverage
@@ -10,6 +12,7 @@ frontend/dist
 docs/ref/architecture
 docs/ref/strategies
 .venv
+*.zip
 *.rar
 **/repomix-output.xml
 test-data

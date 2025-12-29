@@ -1,1 +1,0 @@
-{"cells":[{"code":"class InitList {\r\nprivate:\r\n    int x, y;\r\npublic:\r\n    InitList(int a, int b) : x(a), y(b) {}\r\n};","language":"cpp","kind":"code"},{"code":"(field_initializer\r\n  (field_identifier) @member.name\r\n  (argument_list (_) @member.value)) @definition.member_initializer\r\n","language":"scm","kind":"code"}]}
