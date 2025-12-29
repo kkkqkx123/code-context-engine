@@ -1,4 +1,4 @@
-# Agent Guidelines for code-search-helper
+# Agent Guidelines for code-context-engine
 
 ## Build & Test Commands
 
@@ -18,7 +18,7 @@ cd frontend && npm run dev  # Run frontend dev server (port 3011)
 
 ## Architecture
 
-**Core Stack**: TypeScript, Express.js, Inversify (IoC), Tree-sitter, Qdrant (vector DB), Nebula Graph (graph DB)
+**Core Stack**: TypeScript, Express.js, Inversify (IoC), Tree-sitter, Qdrant (vector DB), tree-sitter-wasms ()
 
 **Key Modules**:
 - `src/api/` - Express routes and controllers

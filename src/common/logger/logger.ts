@@ -28,11 +28,6 @@ export class Logger {
       this.ensureLogDirectory().catch(error => {
         console.error('Failed to create log directory:', error);
       });
-
-      // 设置进程退出处理 - 只在第一个实例中设置
-      if (!Logger.instance) {
-        this.setupExitHandlers();
-      }
     }
   }
 
