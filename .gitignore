@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+.env
+.env.bak
+logs
+.env.test
+frontend/node_modules
+frontend/dist
+docs/ref/architecture
+docs/ref/strategies
+.venv
+*.rar
+**/repomix-output.xml
+test-data
+**/*.db
+**/*.db-*

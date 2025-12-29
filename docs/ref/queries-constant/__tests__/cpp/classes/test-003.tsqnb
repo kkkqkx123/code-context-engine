@@ -1,0 +1,1 @@
+{"cells":[{"code":"union Data {\r\n    int i;\r\n    float f;\r\n    char str[20];\r\n};","language":"cpp","kind":"code"},{"code":"(union_specifier\r\n  name: (type_identifier) @type.name\r\n body: (field_declaration_list) @type.body) @definition.union","language":"scm","kind":"code"}]}

@@ -1,0 +1,158 @@
+{
+  "category": "classes",
+  "totalTests": 19,
+  "requests": [
+    {
+      "id": "classes-001",
+      "language": "cpp",
+      "codeFile": "tests/test-001/code.cpp",
+      "queryFile": "tests/test-001/query.txt",
+      "metadataFile": "tests/test-001/metadata.json",
+      "description": "Test case 001: 基本类定义"
+    },
+    {
+      "id": "classes-002",
+      "language": "cpp",
+      "codeFile": "tests/test-002/code.cpp",
+      "queryFile": "tests/test-002/query.txt",
+      "metadataFile": "tests/test-002/metadata.json",
+      "description": "Test case 002: 结构体定义"
+    },
+    {
+      "id": "classes-003",
+      "language": "cpp",
+      "codeFile": "tests/test-003/code.cpp",
+      "queryFile": "tests/test-003/query.txt",
+      "metadataFile": "tests/test-003/metadata.json",
+      "description": "Test case 003: 联合体定义"
+    },
+    {
+      "id": "classes-004",
+      "language": "cpp",
+      "codeFile": "tests/test-004/code.cpp",
+      "queryFile": "tests/test-004/query.txt",
+      "metadataFile": "tests/test-004/metadata.json",
+      "description": "Test case 004: 模板类定义"
+    },
+    {
+      "id": "classes-005",
+      "language": "cpp",
+      "codeFile": "tests/test-005/code.cpp",
+      "queryFile": "tests/test-005/query.txt",
+      "metadataFile": "tests/test-005/metadata.json",
+      "description": "Test case 005: 带继承的类"
+    },
+    {
+      "id": "classes-006",
+      "language": "cpp",
+      "codeFile": "tests/test-006/code.cpp",
+      "queryFile": "tests/test-006/query.txt",
+      "metadataFile": "tests/test-006/metadata.json",
+      "description": "Test case 006: 访问说明符"
+    },
+    {
+      "id": "classes-007",
+      "language": "cpp",
+      "codeFile": "tests/test-007/code.cpp",
+      "queryFile": "tests/test-007/query.txt",
+      "metadataFile": "tests/test-007/metadata.json",
+      "description": "Test case 007: 构造函数和析构函数"
+    },
+    {
+      "id": "classes-008",
+      "language": "cpp",
+      "codeFile": "tests/test-008/code.cpp",
+      "queryFile": "tests/test-008/query.txt",
+      "metadataFile": "tests/test-008/metadata.json",
+      "description": "Test case 008: 构造函数初始化列表"
+    },
+    {
+      "id": "classes-009",
+      "language": "cpp",
+      "codeFile": "tests/test-009/code.cpp",
+      "queryFile": "tests/test-009/query.txt",
+      "metadataFile": "tests/test-009/metadata.json",
+      "description": "Test case 009: 成员字段"
+    },
+    {
+      "id": "classes-010",
+      "language": "cpp",
+      "codeFile": "tests/test-010/code.cpp",
+      "queryFile": "tests/test-010/query.txt",
+      "metadataFile": "tests/test-010/metadata.json",
+      "description": "Test case 010: 成员方法"
+    },
+    {
+      "id": "classes-011",
+      "language": "cpp",
+      "codeFile": "tests/test-011/code.cpp",
+      "queryFile": "tests/test-011/query.txt",
+      "metadataFile": "tests/test-011/metadata.json",
+      "description": "Test case 011: 静态成员"
+    },
+    {
+      "id": "classes-012",
+      "language": "cpp",
+      "codeFile": "tests/test-012/code.cpp",
+      "queryFile": "tests/test-012/query.txt",
+      "metadataFile": "tests/test-012/metadata.json",
+      "description": "Test case 012: 虚函数"
+    },
+    {
+      "id": "classes-013",
+      "language": "cpp",
+      "codeFile": "tests/test-013/code.cpp",
+      "queryFile": "tests/test-013/query.txt",
+      "metadataFile": "tests/test-013/metadata.json",
+      "description": "Test case 013: 纯虚函数"
+    },
+    {
+      "id": "classes-014",
+      "language": "cpp",
+      "codeFile": "tests/test-014/code.cpp",
+      "queryFile": "tests/test-014/query.txt",
+      "metadataFile": "tests/test-014/metadata.json",
+      "description": "Test case 014: 模板成员函数"
+    },
+    {
+      "id": "classes-015",
+      "language": "cpp",
+      "codeFile": "tests/test-015/code.cpp",
+      "queryFile": "tests/test-015/query.txt",
+      "metadataFile": "tests/test-015/metadata.json",
+      "description": "Test case 015: 友元函数"
+    },
+    {
+      "id": "classes-016",
+      "language": "cpp",
+      "codeFile": "tests/test-016/code.cpp",
+      "queryFile": "tests/test-016/query.txt",
+      "metadataFile": "tests/test-016/metadata.json",
+      "description": "Test case 016: 友元类"
+    },
+    {
+      "id": "classes-017",
+      "language": "cpp",
+      "codeFile": "tests/test-017/code.cpp",
+      "queryFile": "tests/test-017/query.txt",
+      "metadataFile": "tests/test-017/metadata.json",
+      "description": "Test case 017: 交替查询 - 统一类型声明"
+    },
+    {
+      "id": "classes-018",
+      "language": "cpp",
+      "codeFile": "tests/test-018/code.cpp",
+      "queryFile": "tests/test-018/query.txt",
+      "metadataFile": "tests/test-018/metadata.json",
+      "description": "Test case 018: 友元交替查询"
+    },
+    {
+      "id": "classes-019",
+      "language": "cpp",
+      "codeFile": "tests/test-019/code.cpp",
+      "queryFile": "tests/test-019/query.txt",
+      "metadataFile": "tests/test-019/metadata.json",
+      "description": "Test case 019: 静态成员交替查询"
+    }
+  ]
+}

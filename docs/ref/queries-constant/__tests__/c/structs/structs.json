@@ -1,0 +1,150 @@
+{
+  "category": "structs",
+  "totalTests": 18,
+  "requests": [
+    {
+      "id": "structs-001",
+      "language": "c",
+      "codeFile": "tests/test-001/code.c",
+      "queryFile": "tests/test-001/query.txt",
+      "metadataFile": "tests/test-001/metadata.json",
+      "description": "Test case 001"
+    },
+    {
+      "id": "structs-002",
+      "language": "c",
+      "codeFile": "tests/test-002/code.c",
+      "queryFile": "tests/test-002/query.txt",
+      "metadataFile": "tests/test-002/metadata.json",
+      "description": "Test case 002"
+    },
+    {
+      "id": "structs-003",
+      "language": "c",
+      "codeFile": "tests/test-003/code.c",
+      "queryFile": "tests/test-003/query.txt",
+      "metadataFile": "tests/test-003/metadata.json",
+      "description": "Test case 003"
+    },
+    {
+      "id": "structs-004",
+      "language": "c",
+      "codeFile": "tests/test-004/code.c",
+      "queryFile": "tests/test-004/query.txt",
+      "metadataFile": "tests/test-004/metadata.json",
+      "description": "Test case 004"
+    },
+    {
+      "id": "structs-005",
+      "language": "c",
+      "codeFile": "tests/test-005/code.c",
+      "queryFile": "tests/test-005/query.txt",
+      "metadataFile": "tests/test-005/metadata.json",
+      "description": "Test case 005"
+    },
+    {
+      "id": "structs-006",
+      "language": "c",
+      "codeFile": "tests/test-006/code.c",
+      "queryFile": "tests/test-006/query.txt",
+      "metadataFile": "tests/test-006/metadata.json",
+      "description": "Test case 006"
+    },
+    {
+      "id": "structs-007",
+      "language": "c",
+      "codeFile": "tests/test-007/code.c",
+      "queryFile": "tests/test-007/query.txt",
+      "metadataFile": "tests/test-007/metadata.json",
+      "description": "Test case 007"
+    },
+    {
+      "id": "structs-008",
+      "language": "c",
+      "codeFile": "tests/test-008/code.c",
+      "queryFile": "tests/test-008/query.txt",
+      "metadataFile": "tests/test-008/metadata.json",
+      "description": "Test case 008"
+    },
+    {
+      "id": "structs-009",
+      "language": "c",
+      "codeFile": "tests/test-009/code.c",
+      "queryFile": "tests/test-009/query.txt",
+      "metadataFile": "tests/test-009/metadata.json",
+      "description": "Test case 009"
+    },
+    {
+      "id": "structs-010",
+      "language": "c",
+      "codeFile": "tests/test-010/code.c",
+      "queryFile": "tests/test-010/query.txt",
+      "metadataFile": "tests/test-010/metadata.json",
+      "description": "Test case 010"
+    },
+    {
+      "id": "structs-011",
+      "language": "c",
+      "codeFile": "tests/test-011/code.c",
+      "queryFile": "tests/test-011/query.txt",
+      "metadataFile": "tests/test-011/metadata.json",
+      "description": "Test case 011"
+    },
+    {
+      "id": "structs-012",
+      "language": "c",
+      "codeFile": "tests/test-012/code.c",
+      "queryFile": "tests/test-012/query.txt",
+      "metadataFile": "tests/test-012/metadata.json",
+      "description": "Test case 012"
+    },
+    {
+      "id": "structs-013",
+      "language": "c",
+      "codeFile": "tests/test-013/code.c",
+      "queryFile": "tests/test-013/query.txt",
+      "metadataFile": "tests/test-013/metadata.json",
+      "description": "Test case 013"
+    },
+    {
+      "id": "structs-014",
+      "language": "c",
+      "codeFile": "tests/test-014/code.c",
+      "queryFile": "tests/test-014/query.txt",
+      "metadataFile": "tests/test-014/metadata.json",
+      "description": "Test case 014"
+    },
+    {
+      "id": "structs-015",
+      "language": "c",
+      "codeFile": "tests/test-015/code.c",
+      "queryFile": "tests/test-015/query.txt",
+      "metadataFile": "tests/test-015/metadata.json",
+      "description": "Test case 015"
+    },
+    {
+      "id": "structs-016",
+      "language": "c",
+      "codeFile": "tests/test-016/code.c",
+      "queryFile": "tests/test-016/query.txt",
+      "metadataFile": "tests/test-016/metadata.json",
+      "description": "Test case 016"
+    },
+    {
+      "id": "structs-017",
+      "language": "c",
+      "codeFile": "tests/test-017/code.c",
+      "queryFile": "tests/test-017/query.txt",
+      "metadataFile": "tests/test-017/metadata.json",
+      "description": "Test case 017"
+    },
+    {
+      "id": "structs-018",
+      "language": "c",
+      "codeFile": "tests/test-018/code.c",
+      "queryFile": "tests/test-018/query.txt",
+      "metadataFile": "tests/test-018/metadata.json",
+      "description": "Test case 018"
+    }
+  ]
+}

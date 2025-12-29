@@ -1,0 +1,230 @@
+{
+  "category": "concurrency-relationships",
+  "totalTests": 28,
+  "requests": [
+    {
+      "id": "concurrency-001",
+      "language": "c",
+      "codeFile": "tests/test-001/code.c",
+      "queryFile": "tests/test-001/query.txt",
+      "metadataFile": "tests/test-001/metadata.json",
+      "description": "Test case 001"
+    },
+    {
+      "id": "concurrency-002",
+      "language": "c",
+      "codeFile": "tests/test-002/code.c",
+      "queryFile": "tests/test-002/query.txt",
+      "metadataFile": "tests/test-002/metadata.json",
+      "description": "Test case 002"
+    },
+    {
+      "id": "concurrency-003",
+      "language": "c",
+      "codeFile": "tests/test-003/code.c",
+      "queryFile": "tests/test-003/query.txt",
+      "metadataFile": "tests/test-003/metadata.json",
+      "description": "Test case 003"
+    },
+    {
+      "id": "concurrency-004",
+      "language": "c",
+      "codeFile": "tests/test-004/code.c",
+      "queryFile": "tests/test-004/query.txt",
+      "metadataFile": "tests/test-004/metadata.json",
+      "description": "Test case 004"
+    },
+    {
+      "id": "concurrency-005",
+      "language": "c",
+      "codeFile": "tests/test-005/code.c",
+      "queryFile": "tests/test-005/query.txt",
+      "metadataFile": "tests/test-005/metadata.json",
+      "description": "Test case 005"
+    },
+    {
+      "id": "concurrency-006",
+      "language": "c",
+      "codeFile": "tests/test-006/code.c",
+      "queryFile": "tests/test-006/query.txt",
+      "metadataFile": "tests/test-006/metadata.json",
+      "description": "Test case 006"
+    },
+    {
+      "id": "concurrency-007",
+      "language": "c",
+      "codeFile": "tests/test-007/code.c",
+      "queryFile": "tests/test-007/query.txt",
+      "metadataFile": "tests/test-007/metadata.json",
+      "description": "Test case 007"
+    },
+    {
+      "id": "concurrency-008",
+      "language": "c",
+      "codeFile": "tests/test-008/code.c",
+      "queryFile": "tests/test-008/query.txt",
+      "metadataFile": "tests/test-008/metadata.json",
+      "description": "Test case 008"
+    },
+    {
+      "id": "concurrency-009",
+      "language": "c",
+      "codeFile": "tests/test-009/code.c",
+      "queryFile": "tests/test-009/query.txt",
+      "metadataFile": "tests/test-009/metadata.json",
+      "description": "Test case 009"
+    },
+    {
+      "id": "concurrency-010",
+      "language": "c",
+      "codeFile": "tests/test-010/code.c",
+      "queryFile": "tests/test-010/query.txt",
+      "metadataFile": "tests/test-010/metadata.json",
+      "description": "Test case 010"
+    },
+    {
+      "id": "concurrency-011",
+      "language": "c",
+      "codeFile": "tests/test-011/code.c",
+      "queryFile": "tests/test-011/query.txt",
+      "metadataFile": "tests/test-011/metadata.json",
+      "description": "Test case 011"
+    },
+    {
+      "id": "concurrency-012",
+      "language": "c",
+      "codeFile": "tests/test-012/code.c",
+      "queryFile": "tests/test-012/query.txt",
+      "metadataFile": "tests/test-012/metadata.json",
+      "description": "Test case 012"
+    },
+    {
+      "id": "concurrency-013",
+      "language": "c",
+      "codeFile": "tests/test-013/code.c",
+      "queryFile": "tests/test-013/query.txt",
+      "metadataFile": "tests/test-013/metadata.json",
+      "description": "Test case 013"
+    },
+    {
+      "id": "concurrency-014",
+      "language": "c",
+      "codeFile": "tests/test-014/code.c",
+      "queryFile": "tests/test-014/query.txt",
+      "metadataFile": "tests/test-014/metadata.json",
+      "description": "Test case 014"
+    },
+    {
+      "id": "concurrency-015",
+      "language": "c",
+      "codeFile": "tests/test-015/code.c",
+      "queryFile": "tests/test-015/query.txt",
+      "metadataFile": "tests/test-015/metadata.json",
+      "description": "Test case 015"
+    },
+    {
+      "id": "concurrency-016",
+      "language": "c",
+      "codeFile": "tests/test-016/code.c",
+      "queryFile": "tests/test-016/query.txt",
+      "metadataFile": "tests/test-016/metadata.json",
+      "description": "Test case 016"
+    },
+    {
+      "id": "concurrency-017",
+      "language": "c",
+      "codeFile": "tests/test-017/code.c",
+      "queryFile": "tests/test-017/query.txt",
+      "metadataFile": "tests/test-017/metadata.json",
+      "description": "Test case 017"
+    },
+    {
+      "id": "concurrency-018",
+      "language": "c",
+      "codeFile": "tests/test-018/code.c",
+      "queryFile": "tests/test-018/query.txt",
+      "metadataFile": "tests/test-018/metadata.json",
+      "description": "Test case 018"
+    },
+    {
+      "id": "concurrency-019",
+      "language": "c",
+      "codeFile": "tests/test-019/code.c",
+      "queryFile": "tests/test-019/query.txt",
+      "metadataFile": "tests/test-019/metadata.json",
+      "description": "Test case 019"
+    },
+    {
+      "id": "concurrency-020",
+      "language": "c",
+      "codeFile": "tests/test-020/code.c",
+      "queryFile": "tests/test-020/query.txt",
+      "metadataFile": "tests/test-020/metadata.json",
+      "description": "Test case 020"
+    },
+    {
+      "id": "concurrency-021",
+      "language": "c",
+      "codeFile": "tests/test-021/code.c",
+      "queryFile": "tests/test-021/query.txt",
+      "metadataFile": "tests/test-021/metadata.json",
+      "description": "Test case 021"
+    },
+    {
+      "id": "concurrency-022",
+      "language": "c",
+      "codeFile": "tests/test-022/code.c",
+      "queryFile": "tests/test-022/query.txt",
+      "metadataFile": "tests/test-022/metadata.json",
+      "description": "Test case 022"
+    },
+    {
+      "id": "concurrency-023",
+      "language": "c",
+      "codeFile": "tests/test-023/code.c",
+      "queryFile": "tests/test-023/query.txt",
+      "metadataFile": "tests/test-023/metadata.json",
+      "description": "Test case 023"
+    },
+    {
+      "id": "concurrency-024",
+      "language": "c",
+      "codeFile": "tests/test-024/code.c",
+      "queryFile": "tests/test-024/query.txt",
+      "metadataFile": "tests/test-024/metadata.json",
+      "description": "Test case 024"
+    },
+    {
+      "id": "concurrency-025",
+      "language": "c",
+      "codeFile": "tests/test-025/code.c",
+      "queryFile": "tests/test-025/query.txt",
+      "metadataFile": "tests/test-025/metadata.json",
+      "description": "Test case 025"
+    },
+    {
+      "id": "concurrency-026",
+      "language": "c",
+      "codeFile": "tests/test-026/code.c",
+      "queryFile": "tests/test-026/query.txt",
+      "metadataFile": "tests/test-026/metadata.json",
+      "description": "Test case 026"
+    },
+    {
+      "id": "concurrency-027",
+      "language": "c",
+      "codeFile": "tests/test-027/code.c",
+      "queryFile": "tests/test-027/query.txt",
+      "metadataFile": "tests/test-027/metadata.json",
+      "description": "Test case 027"
+    },
+    {
+      "id": "concurrency-028",
+      "language": "c",
+      "codeFile": "tests/test-028/code.c",
+      "queryFile": "tests/test-028/query.txt",
+      "metadataFile": "tests/test-028/metadata.json",
+      "description": "Test case 028"
+    }
+  ]
+}

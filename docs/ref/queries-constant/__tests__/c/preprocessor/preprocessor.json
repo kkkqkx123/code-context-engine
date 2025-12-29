@@ -1,0 +1,86 @@
+{
+  "category": "preprocessor",
+  "totalTests": 10,
+  "requests": [
+    {
+      "id": "preprocessor-001",
+      "language": "c",
+      "codeFile": "tests/test-001/code.c",
+      "queryFile": "tests/test-001/query.txt",
+      "metadataFile": "tests/test-001/metadata.json",
+      "description": "Test case 001: 对象宏定义"
+    },
+    {
+      "id": "preprocessor-002",
+      "language": "c",
+      "codeFile": "tests/test-002/code.c",
+      "queryFile": "tests/test-002/query.txt",
+      "metadataFile": "tests/test-002/metadata.json",
+      "description": "Test case 002: 函数宏定义"
+    },
+    {
+      "id": "preprocessor-003",
+      "language": "c",
+      "codeFile": "tests/test-003/code.c",
+      "queryFile": "tests/test-003/query.txt",
+      "metadataFile": "tests/test-003/metadata.json",
+      "description": "Test case 003: 系统库包含"
+    },
+    {
+      "id": "preprocessor-004",
+      "language": "c",
+      "codeFile": "tests/test-004/code.c",
+      "queryFile": "tests/test-004/query.txt",
+      "metadataFile": "tests/test-004/metadata.json",
+      "description": "Test case 004: 用户头文件包含"
+    },
+    {
+      "id": "preprocessor-005",
+      "language": "c",
+      "codeFile": "tests/test-005/code.c",
+      "queryFile": "tests/test-005/query.txt",
+      "metadataFile": "tests/test-005/metadata.json",
+      "description": "Test case 005: 条件编译-if"
+    },
+    {
+      "id": "preprocessor-006",
+      "language": "c",
+      "codeFile": "tests/test-006/code.c",
+      "queryFile": "tests/test-006/query.txt",
+      "metadataFile": "tests/test-006/metadata.json",
+      "description": "Test case 006: 条件编译-ifdef"
+    },
+    {
+      "id": "preprocessor-007",
+      "language": "c",
+      "codeFile": "tests/test-007/code.c",
+      "queryFile": "tests/test-007/query.txt",
+      "metadataFile": "tests/test-007/metadata.json",
+      "description": "Test case 007: 条件编译-elif"
+    },
+    {
+      "id": "preprocessor-008",
+      "language": "c",
+      "codeFile": "tests/test-008/code.c",
+      "queryFile": "tests/test-008/query.txt",
+      "metadataFile": "tests/test-008/metadata.json",
+      "description": "Test case 008: 条件编译-else"
+    },
+    {
+      "id": "preprocessor-009",
+      "language": "c",
+      "codeFile": "tests/test-009/code.c",
+      "queryFile": "tests/test-009/query.txt",
+      "metadataFile": "tests/test-009/metadata.json",
+      "description": "Test case 009: 条件编译-if"
+    },
+    {
+      "id": "preprocessor-010",
+      "language": "c",
+      "codeFile": "tests/test-010/code.c",
+      "queryFile": "tests/test-010/query.txt",
+      "metadataFile": "tests/test-010/metadata.json",
+      "description": "Test case 010: 条件编译-elif"
+    }
+  ]
+}

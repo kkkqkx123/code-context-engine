@@ -1,0 +1,1 @@
+{"cells":[{"code":"class AccessExample {\r\nprivate:\r\n    int privateVar;\r\nprotected:\r\n    int protectedVar;\r\npublic:\r\n    int publicVar;\r\n};","language":"cpp","kind":"code"},{"code":"(access_specifier) @definition.access.specifier","language":"scm","kind":"code"}]}

@@ -1,0 +1,1 @@
+{"cells":[{"code":"int main() {\r\n    int result = add(5, 3);\r\n    print_message(\"Hello, World!\");\r\n    calculate(10, 20, 30);\r\n    return 0;\r\n}","language":"cpp","kind":"code"},{"code":"(call_expression\r\n  function: (identifier) @call.function\r\n  arguments: (argument_list\r\n    (_) @call.argument)*) @definition.function.call","language":"scm","kind":"code"}]}
