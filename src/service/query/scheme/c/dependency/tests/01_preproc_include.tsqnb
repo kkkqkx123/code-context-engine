@@ -1,0 +1,1 @@
+{"cells":[{"code":"#include <stdbool.h>\r\n#include \"other_header.h\"","language":"cpp","kind":"code"},{"code":"(preproc_include\r\n  path: (string_literal) @include.user.path\r\n) @include.user\r\n\r\n; 系统头文件包含（标准库）\r\n(preproc_include\r\n  path: (system_lib_string) @include.system.path\r\n) @include.system","language":"scm","kind":"code"}]}
