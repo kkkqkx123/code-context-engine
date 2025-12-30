@@ -70,11 +70,13 @@ function convertToMarkdown(data) {
     let markdown = '';
     let cppCode = '';
     let scmCode = '';
+    let parserOutput = '';
+    let resultOutput = '';
     
-    // 提取C/C++代码和Scheme代码
+    // 提取C/C++代码、Scheme代码和它们的输出
     for (let i = 0; i < cells.length; i++) {
         const cell = cells[i];
-        const { code, language, kind } = cell;
+        const { code, language, kind, outputs } = cell;
         
         if (kind !== 'code') {
             continue;
@@ -83,8 +85,26 @@ function convertToMarkdown(data) {
         // 根据语言类型处理
         if (language === 'cpp' || language === 'c') {
             cppCode = code;
+            // 提取 parser 输出
+            if (outputs && outputs.length > 0) {
+                const treeSitterOutput = outputs[0].items.find(item => item.mime === 'x-application/tree-sitter');
+                if (treeSitterOutput && treeSitterOutput.data) {
+                    const jsonString = Buffer.from(treeSitterOutput.data).toString('utf-8');
+                    const jsonData = JSON.parse(jsonString);
+                    parserOutput = JSON.stringify(jsonData, null, 2);
+                }
+            }
         } else if (language === 'scm') {
             scmCode = code;
+            // 提取 result 输出
+            if (outputs && outputs.length > 0) {
+                const jsonOutput = outputs[0].items.find(item => item.mime === 'application/json');
+                if (jsonOutput && jsonOutput.data) {
+                    const jsonString = Buffer.from(jsonOutput.data).toString('utf-8');
+                    const jsonData = JSON.parse(jsonString);
+                    resultOutput = JSON.stringify(jsonData, null, 2);
+                }
+            }
         }
     }
     
@@ -95,11 +115,17 @@ function convertToMarkdown(data) {
         markdown += '\n```\n\n';
     }
     
-    // 添加parser部分占位符
+    // 添加parser部分
     markdown += '**parser**\n\n';
-    markdown += '```\n';
-    markdown += '// Parser output will be generated here\n';
-    markdown += '```\n\n';
+    if (parserOutput) {
+        markdown += '```json\n';
+        markdown += parserOutput;
+        markdown += '\n```\n\n';
+    } else {
+        markdown += '```\n';
+        markdown += '// Parser output will be generated here\n';
+        markdown += '```\n\n';
+    }
     
     // 添加分隔符
     markdown += '---\n\n';
@@ -114,11 +140,17 @@ function convertToMarkdown(data) {
     // 添加分隔符
     markdown += '---\n\n';
     
-    // 添加result部分占位符
+    // 添加result部分
     markdown += '**result**\n\n';
-    markdown += '```json\n';
-    markdown += '[]\n';
-    markdown += '```\n';
+    if (resultOutput) {
+        markdown += '```json\n';
+        markdown += resultOutput;
+        markdown += '\n```\n';
+    } else {
+        markdown += '```json\n';
+        markdown += '[]\n';
+        markdown += '```\n';
+    }
     
     return markdown;
 }
