@@ -63,6 +63,44 @@ function main() {
 }
 
 /**
+ * 将 tree-sitter JSON 格式转换为标准文本格式
+ * 例如: translation_unit [0, 0] - [0, 8]
+ */
+function convertTreeSitterJsonToText(jsonData) {
+    if (!jsonData || !jsonData.nodes || !Array.isArray(jsonData.nodes)) {
+        return '';
+    }
+    
+    const lines = [];
+    const nodes = jsonData.nodes;
+    
+    for (const item of nodes) {
+        const node = item.node;
+        const depth = item.depth || 0;
+        const indent = '  '.repeat(depth);
+        
+        let line = indent;
+        
+        // 添加 fieldName（如果有）
+        if (node.fieldName && node.fieldName !== '') {
+            line += node.fieldName + ': ';
+        }
+        
+        // 添加 node type
+        line += node.type;
+        
+        // 添加位置信息
+        const startPos = node.startPosition;
+        const endPos = node.endPosition;
+        line += ` [${startPos.row}, ${startPos.column}] - [${endPos.row}, ${endPos.column}]`;
+        
+        lines.push(line);
+    }
+    
+    return lines.join('\n');
+}
+
+/**
  * 将 tsqnb 数据转换为 markdown 格式
  */
 function convertToMarkdown(data) {
@@ -91,7 +129,8 @@ function convertToMarkdown(data) {
                 if (treeSitterOutput && treeSitterOutput.data) {
                     const jsonString = Buffer.from(treeSitterOutput.data).toString('utf-8');
                     const jsonData = JSON.parse(jsonString);
-                    parserOutput = JSON.stringify(jsonData, null, 2);
+                    // 转换为 tree-sitter 文本格式
+                    parserOutput = convertTreeSitterJsonToText(jsonData);
                 }
             }
         } else if (language === 'scm') {
@@ -118,7 +157,7 @@ function convertToMarkdown(data) {
     // 添加parser部分
     markdown += '**parser**\n\n';
     if (parserOutput) {
-        markdown += '```json\n';
+        markdown += '```\n';
         markdown += parserOutput;
         markdown += '\n```\n\n';
     } else {

@@ -1,6 +1,7 @@
 /*
 C Entities Tree-Sitter Query Patterns
 用于识别和分析代码中的实体定义
+职责：只关注实体定义，不包含依赖关系和调用关系
 基于文档：样例-函数转换.md、函数调用关系处理.md
 */
 export default `
@@ -35,7 +36,37 @@ export default `
   (preproc_endif)
 ] @entity.preproc_directive
 
-; 头文件包含在dependency.ts中实现
+; 宏取消定义
+(preproc_undef
+  name: (identifier) @entity.macro_undef.name
+) @entity.macro_undef
+
+; 条件编译块内的宏定义
+; 捕获 #if 或 #ifdef 块内部直接定义的宏
+(preproc_if
+  condition: (identifier) @entity.condition_name
+  (preproc_def
+    name: (identifier) @entity.def_name
+    value: (_)? @entity.def_value) @entity.def_node) @entity.if_scope
+
+(preproc_ifdef
+  name: (identifier) @entity.condition_name
+  (preproc_def
+    name: (identifier) @entity.def_name
+    value: (_)? @entity.def_value) @entity.def_node) @entity.ifdef_scope
+
+; 捕获 #else 块内部定义的宏
+(preproc_else
+  (preproc_def
+    name: (identifier) @entity.def_name
+    value: (_)? @entity.def_value) @entity.def_node) @entity.else_scope
+
+; 捕获 #elif 块内部定义的宏
+(preproc_elif
+  condition: (identifier) @entity.condition_name
+  (preproc_def
+    name: (identifier) @entity.def_name
+    value: (_)? @entity.def_value) @entity.def_node) @entity.elif_scope
 
 ; ============================================
 ; 2. 结构体、联合体、枚举定义
