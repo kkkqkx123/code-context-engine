@@ -12,61 +12,52 @@ export default `
 ; 宏定义
 (preproc_def
   name: (identifier) @entity.macro.name
-  value: (_) @entity.macro.value?
-) @entity.macro
+) @entity.macro.definition
 
 ; 宏函数定义
 (preproc_function_def
-  name: (identifier) @entity.macro_function.name
-  parameters: (parameter_list) @entity.macro_function.params
-  value: (_) @entity.macro_function.value?
-) @entity.macro_function
-
-; 条件编译指令
-[
-  (preproc_ifdef
-    name: (identifier) @entity.preproc_ifdef.name)
-  (preproc_ifndef
-    name: (identifier) @entity.preproc_ifndef.name)
-  (preproc_if
-    condition: (_) @entity.preproc_if.condition)
-  (preproc_elif
-    condition: (_) @entity.preproc_elif.condition)
-  (preproc_else)
-  (preproc_endif)
-] @entity.preproc_directive
+  name: (identifier) @entity.macro.function.name
+  parameters: (preproc_params) @entity.macro.function.params
+) @entity.macro.function.definition
 
 ; 宏取消定义
-(preproc_undef
-  name: (identifier) @entity.macro_undef.name
-) @entity.macro_undef
+; 匹配 #undef 指令，并捕获被取消定义的宏名
+(preproc_call
+  directive: (preproc_directive) @directive
+  argument: (preproc_arg) @entity.macro.name
+  (#eq? @directive "#undef")
+) @entity.macro.undef
 
-; 条件编译块内的宏定义
-; 捕获 #if 或 #ifdef 块内部直接定义的宏
+; 条件编译指令
+
+; 1. 捕获 #if 或 #ifdef 块内部直接定义的宏
+; 匹配结构: #if TEST -> #define TEST
 (preproc_if
-  condition: (identifier) @entity.condition_name
+  condition: (identifier) @condition_name
   (preproc_def
-    name: (identifier) @entity.def_name
-    value: (_)? @entity.def_value) @entity.def_node) @entity.if_scope
+    name: (identifier) @entity.preproc_def_name
+    value: (_)? @def_value) @def_node) @if_scope
 
 (preproc_ifdef
-  name: (identifier) @entity.condition_name
+  name: (identifier) @condition_name
   (preproc_def
-    name: (identifier) @entity.def_name
-    value: (_)? @entity.def_value) @entity.def_node) @entity.ifdef_scope
+    name: (identifier) @entity.preproc_def_name
+    value: (_)? @def_value) @def_node) @ifdef_scope
 
-; 捕获 #else 块内部定义的宏
+; 2. 捕获 #else 块内部定义的宏
+; 匹配结构: #else -> #define DEV
+; 注意：#else 的上下文（属于哪个 if）可以通过 @else_scope 的位置或父节点推断
 (preproc_else
   (preproc_def
-    name: (identifier) @entity.def_name
-    value: (_)? @entity.def_value) @entity.def_node) @entity.else_scope
+    name: (identifier) @entity.preproc_def_name
+    value: (_)? @def_value) @def_node) @entity.preproc_else_scope
 
-; 捕获 #elif 块内部定义的宏
+; 3. 捕获 #elif 块（如果代码中有，逻辑同 #if）
 (preproc_elif
-  condition: (identifier) @entity.condition_name
+  condition: (identifier) @condition_name
   (preproc_def
-    name: (identifier) @entity.def_name
-    value: (_)? @entity.def_value) @entity.def_node) @entity.elif_scope
+    name: (identifier) @entity.preproc_def_name
+    value: (_)? @def_value) @def_node) @entity.preproc_elif_scope
 
 ; ============================================
 ; 2. 结构体、联合体、枚举定义
