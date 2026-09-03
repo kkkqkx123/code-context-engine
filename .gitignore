@@ -1,0 +1,53 @@
+.translator
+
+# Server
+.dummy
+
+# Frontend
+**/node_modules
+
+# Build artifacts
+**/target/
+**/*.rs.bk
+**/*.zip
+**/*.exe
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.qdrant-initialized
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+test_output/
+
+# Benchmark results and fixtures
+**/__pycache__
+**/.pyc
+
+# Binary executables
+bin/cce
+bin/cce-cli

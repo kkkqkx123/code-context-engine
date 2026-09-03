@@ -1,0 +1,658 @@
+# Code Context Engine Configuration
+# This is an example configuration file with all available options
+
+[server]
+# Server host address
+host = "0.0.0.0"
+# Server port
+port = 9000
+
+[database]
+# Qdrant vector database configuration
+[database.qdrant]
+# Qdrant server URL
+url = "http://localhost:6333"
+# API key for authentication (optional, can use environment variable)
+# api_key = "${CCE_DB_QDRANT_API_KEY}"
+api_key = ""
+# Vector dimension
+vector_size = 1024
+# Distance metric: cosine, euclid, dot
+distance_metric = "cosine"
+# Request timeout in milliseconds
+timeout_ms = 30000
+# Maximum retry attempts
+max_retries = 3
+# Initial retry delay in milliseconds
+retry_delay_ms = 1000
+# Whether the client is enabled
+enabled = true
+# Collection configuration preset: tiny, small, medium, large
+preset = "medium"
+# Automatically start Qdrant as a managed subprocess
+auto_start = true
+# Data directory for Qdrant storage (relative to working directory)
+data_dir = "data/qdrant"
+# Startup timeout in seconds
+startup_timeout_secs = 60
+# Auto-restart on unexpected exit
+auto_restart = true
+
+# SQLite metadata database configuration
+[database.sqlite]
+# Database file path
+path = "metadata.db"
+# Enable WAL mode for better concurrency
+enable_wal = true
+# Enable foreign key constraints
+enable_fk = true
+# Synchronous mode: OFF, NORMAL, FULL, EXTRA
+# In WAL mode, NORMAL is recommended for balance of safety and performance
+synchronous = "NORMAL"
+# Cache size in KB (negative value means KB, positive means pages)
+# Default: -64000 (64MB)
+cache_size = -64000
+# Busy timeout in milliseconds for lock waiting
+# Default: 5000 (5 seconds)
+busy_timeout_ms = 5000
+# Memory-mapped I/O size in bytes (0 to disable)
+# Default: 268435456 (256MB)
+mmap_size = 268435456
+
+# BM25 index configuration
+[database.bm25]
+# Enable BM25 indexing
+enabled = true
+# Local index path for embedded Tantivy
+index_path = "bm25_index"
+# Default index name
+index_name = "code_index"
+# Connection timeout in milliseconds
+timeout_ms = 5000
+# Maximum retry attempts
+max_retries = 3
+# Retry delay in milliseconds
+retry_delay_ms = 100
+
+# BM25 algorithm parameters
+# Optimized for code search based on bm25_parameter_sweep benchmark
+# (see docs/archive/bm25-parameter-tuning.md)
+# k1: Higher value (1.8) increases term frequency impact for exact identifier matches
+# b: 0.6 gives the best average MRR@10 across benchmark fixtures
+[database.bm25.algorithm]
+# k1 parameter (term frequency saturation)
+# Range: 1.0-2.0, default: 1.2, optimized for code search: 1.8
+k1 = 1.8
+# b parameter (document length normalization)
+# Range: 0.0-1.0, default: 0.75, optimized for code search: 0.6
+b = 0.6
+
+# Index manager configuration for Tantivy
+[database.bm25.index_manager]
+# Writer memory budget in bytes (default: 50MB)
+writer_memory_budget = 50000000
+# Number of writer threads (None for auto-detection)
+# writer_num_threads = 4
+# Enable reader caching
+reader_cache_enabled = true
+# Reload policy: "on_commit", "on_commit_with_delay", "manual"
+reload_policy = "on_commit_with_delay"
+[embedder]
+# =============================================================================
+# Embedder Configuration - Runtime Settings Only
+# =============================================================================
+# Model definitions are in [llm.embedding_models] section.
+# This section only contains embedder-specific runtime configuration.
+#
+# Default model to use (references a model in [llm.embedding_models])
+default_model = "bge-m3"
+
+# Maximum tokens per batch request
+max_batch_tokens = 8192
+# Maximum tokens per single text item
+max_item_tokens = 8192
+# Request timeout in seconds
+timeout_secs = 60
+# Maximum retry attempts
+max_retries = 3
+# Initial retry delay in milliseconds
+retry_delay_ms = 2000
+# Use base64 encoding for embeddings
+use_base64 = true
+
+# =============================================================================
+# LLM Configuration - Unified Provider and Model Registry
+# =============================================================================
+# All LLM services (embedding, chat, rerank) share a unified provider registry.
+# Each model resolves to exactly one provider. Provider routing/failover is handled outside this project.
+# Define providers once, reference them from different model types.
+#
+# API Key Management:
+#   - Use environment variables: ${CCE_LLM_API_KEY_OPENAI}, ${CCE_EMB_API_KEY_SILICONFLOW}, etc.
+#   - Local services can use dummy keys or empty arrays
+#
+# Example configuration:
+#   [llm.providers.openai]
+#   name = "OpenAI"
+#   base_url = "https://api.openai.com/v1"
+#   api_keys = ["${CCE_LLM_API_KEY_OPENAI}"]
+#
+#   [llm.embedding_models.text-embedding-3-small]
+#   provider_id = "openai"
+#   model = "text-embedding-3-small"
+#   vector_dimension = 1536
+#
+#   [llm.chat_models.gpt-4o]
+#   provider_id = "openai"
+#   model = "gpt-4o"
+#   temperature = 0.7
+# =============================================================================
+
+[llm]
+# Enable LLM features (summary enhancement, etc.)
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Provider Registry - Define connection details once
+# ---------------------------------------------------------------------------
+
+# Azure Provider (disabled by default - requires additional configuration)
+[llm.providers.azure]
+name = "Azure OpenAI"
+enabled = false
+provider_type = "remote"
+base_url = "https://your-resource.openai.azure.com"
+api_keys = ["${CCE_LLM_API_KEY_AZURE}"]
+timeout_secs = 30
+max_retries = 5
+retry_delay_ms = 1000
+rate_limit_max_retries = 20
+
+# Custom endpoint paths for Azure
+[llm.providers.azure.endpoints]
+embedding = "embeddings?api-version=2024-02-01"
+chat = "chat/completions?api-version=2024-02-01"
+
+# Ollama Local Provider
+[llm.providers.ollama]
+name = "Ollama Local"
+enabled = false
+provider_type = "local"
+base_url = "http://localhost:11434/v1"
+api_keys = []  # Local service doesn't need API key
+timeout_secs = 60
+max_retries = 5
+retry_delay_ms = 2000
+rate_limit_max_retries = 20
+
+# SiliconFlow Provider (Chinese LLM provider)
+[llm.providers.siliconflow]
+enabled = true
+name = "SiliconFlow"
+provider_type = "remote"
+base_url = "https://api.siliconflow.cn/v1"
+api_keys = ["${CCE_LLM_API_KEY_SILICONFLOW}"]
+timeout_secs = 30
+max_retries = 5
+retry_delay_ms = 1000
+rate_limit_max_retries = 20
+
+# ---------------------------------------------------------------------------
+# Embedding Models - Reference providers by ID
+# ---------------------------------------------------------------------------
+
+[llm.embedding_models.nomic-embed-text]
+provider_id = "ollama"
+model = "nomic-embed-text"
+vector_dimension = 768
+max_batch_tokens = 8192
+max_item_tokens = 8192
+preprocessor = { type = "none" }
+
+[llm.embedding_models.bge-m3]
+provider_id = "siliconflow"
+model = "BAAI/bge-m3"
+vector_dimension = 1024
+max_batch_tokens = 8192
+max_item_tokens = 8192
+preprocessor = { type = "none" }
+
+[llm.embedding_models.text-embedding-3-small]
+provider_id = "openai"
+model = "text-embedding-3-small"
+vector_dimension = 1536
+max_batch_tokens = 8191
+max_item_tokens = 8191
+preprocessor = { type = "none" }
+
+# ---------------------------------------------------------------------------
+# Chat Models - For summary enhancement and other chat tasks
+# ---------------------------------------------------------------------------
+
+[llm.chat_models.qwen35-4b]
+provider_id = "siliconflow"
+model = "Qwen/Qwen3.5-4B"
+temperature = 0.1
+max_tokens = 4096
+top_p = 1.0
+max_input_tokens = 8192
+
+# ---------------------------------------------------------------------------
+# Rerank Models - For search result reranking
+# ---------------------------------------------------------------------------
+
+[llm.rerank_models.bge-reranker]
+provider_id = "siliconflow"
+model = "BAAI/bge-reranker-v2-m3"
+# Execution mode: "generative" (chat prompt) or "cross_encoder" (dedicated
+# /rerank endpoint, Cohere-compatible). bge-reranker is a cross-encoder, so
+# it must use the dedicated endpoint.
+mode = "cross_encoder"
+
+# ---------------------------------------------------------------------------
+# Default Model Selections
+# ---------------------------------------------------------------------------
+
+[llm.defaults]
+# Default embedding model (referenced by embedder.default_model)
+embedding = "bge-m3"
+# Default chat model for summary enhancement
+chat = "qwen35-4b"
+# Default rerank model (if reranking is enabled)
+rerank = "bge-reranker"
+
+# ---------------------------------------------------------------------------
+# Rerank Service Configuration
+# ---------------------------------------------------------------------------
+# Reranking uses models defined in [llm.rerank_models] above.
+# This section is the single source of runtime rerank parameters.
+
+[rerank]
+# Whether reranking is enabled (default: false)
+enabled = false
+# Reference to model in [llm.rerank_models]
+model = "bge-reranker"
+# Maximum number of candidates to rerank
+max_candidates = 50
+# Minimum number of candidates (fallback, for dynamic selection)
+min_candidates = 3
+# Score drop threshold for dynamic candidate selection
+score_drop_threshold = 0.05
+# Minimum score threshold for reranking
+min_score_for_rerank = 0.3
+# Score threshold to start detecting drop-off
+drop_detection_start = 0.6
+# Temperature parameter
+temperature = 0.0
+# Whether to return reasoning for reranking decisions
+return_reasoning = false
+# Score fusion strategy
+score_fusion_strategy = "linear_weighted"
+# Timeout in milliseconds
+timeout_ms = 5000
+
+[scanner]
+# Whether to follow symbolic links
+follow_symlinks = false
+# Whether to respect .gitignore files
+respect_gitignore = true
+# Default exclude patterns
+exclude_patterns = [
+    ".idea",
+    ".vs",
+    ".vscode",
+    "build",
+    "out",
+    ".git",
+    ".svn",
+    ".hg",
+    ".env",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    "node_modules",
+    "dist",
+    "target",
+    "vendor",
+]
+# Include patterns (glob patterns)
+include_patterns = []
+# Additional gitignore-style patterns
+gitignore_patterns = []
+# Maximum bytes to check for binary detection (default: 8KB)
+binary_check_size = 8192
+# Maximum file size to read entirely for hash computation in bytes (default: 10MB)
+max_hash_file_size = 10485760
+# Default maximum file size to read content in bytes (default: 1MB)
+default_max_content_size = 1048576
+# Maximum file size to process in bytes (default: 500KB), files larger than this will be skipped
+# Set to null to disable file size limit
+max_file_size = 512000
+
+[grouper]
+# Small class threshold (in lines)
+small_class_threshold = 30
+# Simple call merge threshold
+simple_call_merge_threshold = 3
+# Enable class-method association optimization
+enable_class_method_association = true
+# Enable simple call merging
+enable_call_merging = true
+# Enable getter/setter merging
+enable_getter_setter_merging = true
+# Getter/setter complexity threshold (in lines)
+getter_setter_complexity_threshold = 3
+# Enable builder pattern detection
+enable_builder_pattern_detection = true
+# Enable factory pattern detection
+enable_factory_pattern_detection = true
+# Enable singleton pattern detection
+enable_singleton_pattern_detection = true
+# Enable strategy pattern detection
+enable_strategy_pattern_detection = true
+# Enable observer pattern detection
+enable_observer_pattern_detection = true
+# Enable adapter pattern detection
+enable_adapter_pattern_detection = true
+# Enable decorator pattern detection
+enable_decorator_pattern_detection = true
+# Enable composite pattern detection
+enable_composite_pattern_detection = true
+# Enable composite pattern cross-entity grouping
+enable_composite_cross_entity_grouping = true
+# Enable template method pattern detection
+enable_template_method_pattern_detection = true
+# Enable DTO/VO pattern detection
+enable_dto_pattern_detection = true
+# Enable Repository/DAO pattern detection
+enable_repository_pattern_detection = true
+# Enable ORM Entity pattern detection
+enable_orm_entity_pattern_detection = true
+# Enable Service layer pattern detection
+enable_service_pattern_detection = true
+# Enable Config class pattern detection
+enable_config_pattern_detection = true
+# Enable Validator pattern detection
+enable_validator_pattern_detection = true
+# Enable Event Handler pattern detection
+enable_event_handler_pattern_detection = true
+# Enable GUI Callback pattern detection
+enable_gui_callback_pattern_detection = true
+# Minimum confidence threshold for pattern detection (0.0 to 1.0)
+pattern_confidence_threshold = 0.6
+# Enable strict pattern detection
+strict_pattern_detection = false
+# Enable test entity grouping
+enable_test_entity_grouping = true
+# Include assertions in test groups
+include_assertions_in_groups = false
+# Maximum test suite nesting depth
+max_test_suite_nesting = 3
+# Enable nested entity group extraction
+enable_nested_entity_grouping = false
+# Maximum nesting depth to extract (1-3 recommended)
+max_nesting_depth = 2
+# Minimum size for nested entity to be extracted (in lines)
+min_nested_size = 5
+
+[logger]
+# Log level: trace, debug, info, warn, error
+level = "info"
+# Output target: stdout, stderr, file
+output = "stdout"
+# Output format: pretty, compact, json
+format = "pretty"
+# Log file path (required if output is "file")
+file = ""
+
+[orchestrator]
+
+# Batch processing configuration
+[orchestrator.batch]
+# Number of files to scan before yielding to callback
+scan_batch_size = 100
+# Maximum concurrent file parsing tasks
+parse_concurrency = 10
+# Maximum concurrent file processing tasks
+process_concurrency = 5
+# Number of chunks to accumulate before storing
+store_batch_size = 50
+# Number of texts to send per embedding API call
+embedding_batch_size = 32
+# Milliseconds to sleep between embedding batches
+embedding_batch_delay_ms = 100
+
+# Hot update configuration
+[orchestrator.hot_update]
+# Enable hot update
+enabled = true
+# Whether to build relations during update
+build_relations = true
+# Whether to store summaries during update
+store_summaries = true
+# Whether to store vectors (embeddings) during update
+store_vectors = true
+# Whether to store in BM25 index during update
+store_bm25 = true
+# Batch size for file processing
+batch_size = 10
+# Batch size for embedding storage
+embedding_batch_size = 32
+# Batch size for storage operations
+storage_batch_size = 50
+
+# Debounce configuration
+[orchestrator.hot_update.debounce]
+# Short interval when changes are pending in seconds
+pending_interval_secs = 30
+# Maximum time to wait after a change before triggering in seconds
+max_wait_time_secs = 300
+
+# File watch configuration
+[orchestrator.hot_update.file_watch]
+# Enable file watching
+enabled = true
+# Event storm threshold (events per second)
+event_threshold = 100
+# Fallback scan interval in seconds (when degraded)
+fallback_interval_secs = 30
+# Verification interval in seconds
+verification_interval_secs = 600
+# Watch configuration files
+watch_config_files = true
+# Storm duration threshold (seconds)
+storm_duration_secs = 10
+# Recovery threshold (events per second)
+recovery_threshold = 50
+# Recovery duration threshold (seconds)
+recovery_duration_secs = 30
+
+# Hot update scanner configuration (inherits from main scanner)
+[orchestrator.hot_update.scanner]
+# Whether to follow symbolic links
+follow_symlinks = false
+# Whether to respect .gitignore files
+respect_gitignore = true
+exclude_patterns = [
+    ".idea",
+    ".vs",
+    ".vscode",
+    "build",
+    "out",
+    ".git",
+    ".svn",
+    ".hg",
+    ".env",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    "node_modules",
+    "dist",
+    "target",
+    "vendor",
+]
+include_patterns = []
+gitignore_patterns = []
+binary_check_size = 8192
+max_hash_file_size = 10485760
+default_max_content_size = 1048576
+max_file_size = 512000
+
+# Cache configuration
+[orchestrator.cache]
+# Maximum number of files to cache chunk results
+chunk_cache_size = 100
+# Whether caching is enabled
+enabled = true
+
+# Indexer configuration
+[orchestrator.indexer]
+# File extensions to include in indexing
+extensions = ["rs", "py", "js", "ts", "c", "cpp", "java", "go"]
+# Directories to exclude from indexing
+exclude_dirs = ["node_modules", "target", ".git", "vendor", "dist", "build"]
+# Batch size for embedding
+batch_size = 100
+# Maximum concurrent file processing
+max_concurrency = 10
+# Store in vector database
+store_vectors = true
+# Store in BM25 index
+store_bm25 = true
+# Store file summaries
+store_summaries = true
+# Build relation index
+build_relations = true
+
+[relation]
+# Maximum call chain depth for queries
+max_call_depth = 10
+# Enable import/export analysis
+analyze_imports = true
+# Enable cross-file dependency tracking
+track_cross_file_deps = true
+# Whether RelationExtract plugin symbols/relations enter the relation index
+plugin_symbols_enabled = false
+# Whether SymbolExtract plugins supply import/export extraction for custom languages
+plugin_symbol_extract_enabled = false
+
+# Index configuration
+[relation.index]
+# Enable relation indexing
+enabled = true
+# Maximum number of relations per file
+max_relations_per_file = 10000
+# Enable call chain resolution
+resolve_call_chains = true
+# Exclude standard library relations from the canonical graph
+filter_stdlib_calls = true
+
+# Search relation boost configuration
+[search.relation]
+# Number of top results to enhance with relation data
+top_n = 5
+# Query depth for relation traversal
+depth = 2
+# Timeout in milliseconds for relation queries
+timeout_ms = 500
+# Base boost factor for directly related entities, i.e. 1 hop
+boost_factor = 1.15
+# Maximum number of hops in relation graph traversal
+max_hops = 2
+# Whether to include callees (forward expansion)
+include_callees = true
+# Whether to include callers (backward expansion)
+# When enabled, low-level utility functions can receive score boosts
+# from their high-level callers, improving recall for "who uses X"
+# style queries at the cost of additional graph traversal.
+include_callers = false
+# Whether to enable relation boost by default for hybrid/hierarchical queries
+# When true, hybrid and hierarchical query types automatically
+# include relation-based score boosting without requiring the client to
+# explicitly set query_type: "semantic_with_relations".
+enabled_by_default = false
+
+[ast_to_nl]
+# Default output mode: bm25, embedding, both
+default_mode = "bm25"
+
+[ast_to_nl.bm25]
+# Maximum number of keywords to extract
+max_keywords = 10
+
+[ast_to_nl.embedding]
+# Maximum summary words
+max_summary_words = 30
+# Include docstring in output
+include_docstring = true
+
+[ast_to_nl.chunking]
+# Maximum tokens per chunk
+max_tokens = 512
+# Overlap tokens between chunks
+overlap_tokens = 50
+# Minimum chunk size in tokens
+min_chunk_tokens = 150
+# Maximum overlap ratio (0.0 - 1.0)
+max_overlap_ratio = 0.2
+# Whether to respect entity boundaries when splitting
+respect_boundaries = true
+# Shared merge ceiling for intra-group and cross-group merges (0 = use per-path max limit)
+cross_group_merge_threshold = 0
+
+[summary]
+# Summary generation strategy: auto, rule_based, model_enhanced, minimal
+strategy = "auto"
+# Maximum summary length in tokens
+max_summary_length = 2000
+
+# =============================================================================
+# Export Configuration
+# =============================================================================
+# Controls what information is included when exporting code context.
+
+[export]
+# Whether to include file summaries in exported documents
+include_summary = true
+# Whether to enable relation enhancement (adds call chains and dependencies)
+enable_relation_enhancement = false
+
+# Relation enhancement configuration
+[export.relation_enhancement]
+# Maximum number of related entities to include per entity
+max_related_entities = 10
+# Whether to include cross-file relations
+include_cross_file = true
+# Whether to include standard library calls
+include_stdlib = false
+
+# =============================================================================
+# Metrics Configuration
+# =============================================================================
+# Controls metrics collection and aggregation behavior.
+
+[metrics]
+# Aggregation configuration
+[metrics.aggregation]
+# Whether to enable automatic aggregation (default: true)
+enabled = true
+# Aggregation interval in seconds (default: 300 = 5 minutes)
+interval_secs = 300
+# Retention period in seconds for aggregated data (default: 604800 = 7 days)
+retention_seconds = 604800
+# Cleanup interval in seconds (default: 3600 = 1 hour)
+cleanup_interval_secs = 3600
+
+# =============================================================================
+# Plugin Configuration
+# =============================================================================
+# Controls the plugin system for extending code analysis capabilities.
+
+[plugins]
+# Whether to enable the plugin system
+enabled = true
+
+# Path to the plugin registry file (relative to project root)
+registry_file = "plugins/plugins.json"

@@ -1,0 +1,11 @@
+[package]
+name = "cce-stdlib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Standard library detection for multiple languages"
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+
+[dev-dependencies]

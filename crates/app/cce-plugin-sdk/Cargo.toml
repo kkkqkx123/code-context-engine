@@ -1,0 +1,19 @@
+[package]
+name = "cce-plugin-sdk"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "SDK for building native CCE (Code Context Engine) plugins as dynamic libraries"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-plugin = { path = "../../core/cce-plugin" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "docsrs"]

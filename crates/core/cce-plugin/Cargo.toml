@@ -1,0 +1,15 @@
+[package]
+name = "cce-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Plugin trait definitions for the code context engine"
+
+[dependencies]
+cce-types = { path = "../cce-types" }
+cce-utils = { path = "../cce-utils" }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+globset = { workspace = true }
+tracing = { workspace = true }

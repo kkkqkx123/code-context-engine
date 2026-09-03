@@ -1,0 +1,145 @@
+# Project-level Configuration (Minimal)
+#
+# This is a minimal configuration example with only the most commonly used settings.
+# Place this file in your project root as: .cce/config.toml
+#
+# For a complete list of all available options, see config.example.toml
+
+# ============================================================================
+# Basic Project Information
+# ============================================================================
+
+# Project name (optional, for display purposes)
+name = "my-project"
+
+# ============================================================================
+# Embedder Configuration (Optional)
+# ============================================================================
+# Uncomment to specify which embedding model to use for this project
+
+# [embedder]
+# Model name (references a model in global config's models registry)
+model = "bge-m3"
+
+# ============================================================================
+# LLM Configuration (Optional)
+# ============================================================================
+# Uncomment to override default models for this project
+
+# [llm]
+# Chat model for summary enhancement
+# chat_model = "gpt-4o"
+
+# Rerank model for search result re-ranking
+# rerank_model = "gpt-4o-mini-rerank"
+
+# Enable/disable reranking for this project
+# enable_rerank = false
+
+# ============================================================================
+# Scanner Configuration
+# ============================================================================
+
+[scanner]
+# Whether to respect .gitignore files (default: true)
+respect_gitignore = true
+
+# Additional patterns to exclude from scanning
+exclude_patterns = [
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    "coverage"
+]
+
+# ============================================================================
+# Grouper Configuration
+# ============================================================================
+
+[grouper]
+# Enable/disable specific pattern detections
+enable_builder_pattern_detection = true
+enable_factory_pattern_detection = true
+
+# Pattern confidence threshold (0.0 to 1.0, default: 0.6)
+pattern_confidence_threshold = 0.7
+
+# ============================================================================
+# Orchestrator Configuration
+# ============================================================================
+
+[orchestrator.indexer]
+# File extensions to index
+extensions = ["rs", "ts", "tsx", "js", "jsx", "py", "java", "go"]
+
+# Directories to exclude from indexing
+exclude_dirs = ["node_modules", "dist", "build", ".git", "target"]
+
+# Whether to store vectors (default: true)
+store_vectors = true
+
+# Whether to store in BM25 index (default: true)
+store_bm25 = true
+
+# Whether to build relation index (default: true)
+build_relations = true
+
+[orchestrator.batch]
+# Number of files to scan before yielding (default: 100)
+scan_batch_size = 100
+
+# Maximum concurrent file parsing tasks (default: 10)
+parse_concurrency = 10
+
+# Number of chunks to accumulate before storing (default: 50)
+store_batch_size = 50
+
+[orchestrator.hot_update]
+# Enable hot update (default: true)
+enabled = true
+
+# Whether to build relations during update (default: true)
+build_relations = true
+
+# ============================================================================
+# AST to NL Configuration
+# ============================================================================
+
+[ast_to_nl.chunking]
+# Maximum tokens per chunk (default: 512)
+max_tokens = 512
+
+# Overlap tokens between chunks (default: 50)
+overlap_tokens = 50
+
+# Whether to respect entity boundaries when splitting (default: true)
+respect_boundaries = true
+
+# ============================================================================
+# Relation Configuration
+# ============================================================================
+
+[relation]
+# Maximum call chain depth for queries (default: 10)
+max_call_depth = 10
+
+# Enable import/export analysis (default: true)
+analyze_imports = true
+
+# Enable cross-file dependency tracking (default: true)
+track_cross_file_deps = true
+
+# ============================================================================
+# Summary Configuration
+# ============================================================================
+
+[summary]
+# Summary generation strategy: auto, rule_based, model_enhanced, minimal (default: auto)
+strategy = "auto"
+
+# Enable file folding (default: true)
+enable_folding = true
+
+# Maximum summary length in tokens (default: 2000)
+max_summary_length = 2000

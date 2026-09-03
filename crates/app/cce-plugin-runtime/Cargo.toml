@@ -1,0 +1,22 @@
+[package]
+name = "cce-plugin-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-utils = { path = "../../core/cce-utils" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-plugin = { path = "../../core/cce-plugin" }
+compact_str = { workspace = true }
+smallvec = { workspace = true }
+mlua = { workspace = true, features = ["vendored", "lua55", "send"] }
+libloading = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,21 @@
+[package]
+name = "cce-storage-bm25"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-text = { path = "../../core/cce-text" }
+tantivy = { workspace = true }
+tokio = { workspace = true }
+rayon = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+aho-corasick = "1.1"
+
+[dev-dependencies]
+tempfile = { workspace = true }

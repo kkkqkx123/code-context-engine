@@ -1,0 +1,13 @@
+[package]
+name = "cce-text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Text processing utilities for the code context engine"
+
+[dependencies]
+cce-utils = { path = "../cce-utils" }
+regex = { workspace = true }
+jieba-rs = { workspace = true }
+tantivy = { workspace = true }
+serde = { workspace = true }

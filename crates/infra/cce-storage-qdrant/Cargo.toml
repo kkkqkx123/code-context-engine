@@ -1,0 +1,24 @@
+[package]
+name = "cce-storage-qdrant"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-utils = { path = "../../core/cce-utils" }
+cce-storage-common = { path = "../cce-storage-common" }
+cce-circuit-breaker = { path = "../cce-circuit-breaker" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-api = { path = "../../app/cce-api" }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

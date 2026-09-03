@@ -1,0 +1,48 @@
+[package]
+name = "cce-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cce"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+axum = { workspace = true, features = ["macros"] }
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-utils = { path = "../../core/cce-utils" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-plugin = { path = "../../core/cce-plugin" }
+cce-llm = { path = "../../core/cce-llm" }
+cce-api = { path = "../cce-api" }
+cce-plugin-runtime = { path = "../cce-plugin-runtime" }
+cce-parser = { path = "../../parser/cce-parser" }
+cce-relation = { path = "../../parser/cce-relation" }
+cce-storage-common = { path = "../../infra/cce-storage-common" }
+cce-storage-sqlite = { path = "../../infra/cce-storage-sqlite" }
+cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
+cce-storage-qdrant = { path = "../../infra/cce-storage-qdrant" }
+cce-llm-client = { path = "../../infra/cce-llm-client" }
+cce-scanner = { path = "../../infra/cce-scanner" }
+cce-metrics-infra = { path = "../../infra/cce-metrics-infra" }
+cce-orchestrator = { path = "../cce-orchestrator" }
+async-trait = { workspace = true }
+globset = { workspace = true }
+moka = { workspace = true }
+rusqlite = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

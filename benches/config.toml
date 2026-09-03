@@ -1,0 +1,93 @@
+# Code Context Engine - Global Benchmark Configuration
+# This file contains shared settings for all benchmark fixtures.
+
+[server]
+host = "127.0.0.1"
+port = 9001
+
+[database.qdrant]
+url = "http://localhost:6333"
+vector_size = 1024
+distance_metric = "cosine"
+enabled = true
+auto_start = true
+data_dir = "benches/data/qdrant"
+startup_timeout_secs = 60
+auto_restart = true
+
+[database.sqlite]
+# Global default path, can be overridden by project config
+path = "benches/data/global_metadata.db"
+enable_wal = true
+
+[database.bm25]
+enabled = true
+index_path = "benches/data/bm25_index"
+
+[llm]
+enabled = true
+
+[llm.providers.siliconflow]
+name = "SiliconFlow"
+provider_type = "remote"
+base_url = "https://api.siliconflow.cn/v1"
+api_keys = ["${CCE_LLM_API_KEY_SILICONFLOW}"]
+timeout_secs = 30
+max_retries = 3
+retry_delay_ms = 1000
+
+[llm.embedding_models.bge-m3]
+provider_id = "siliconflow"
+model = "BAAI/bge-m3"
+vector_dimension = 1024
+max_batch_tokens = 8192
+max_item_tokens = 8192
+preprocessor = { type = "none" }
+
+[llm.chat_models.qwen35-4b]
+provider_id = "siliconflow"
+model = "Qwen/Qwen3.5-4B"
+temperature = 0.1
+max_tokens = 4096
+top_p = 1.0
+max_input_tokens = 8192
+
+[llm.rerank_models.bge-reranker]
+provider_id = "siliconflow"
+model = "BAAI/bge-reranker-v2-m3"
+mode = "cross_encoder"
+
+[llm.defaults]
+embedding = "bge-m3"
+chat = "qwen35-4b"
+rerank = "bge-reranker"
+
+[rerank]
+enabled = true
+model = "bge-reranker"
+max_candidates = 50
+min_candidates = 3
+score_drop_threshold = 0.05
+
+[embedder]
+default_model = "bge-m3"
+max_batch_tokens = 8192
+max_item_tokens = 8192
+timeout_secs = 60
+max_retries = 3
+retry_delay_ms = 2000
+use_base64 = true
+
+[scanner]
+follow_symlinks = false
+respect_gitignore = true
+exclude_patterns = [".git", "target", "node_modules"]
+max_file_size = 512000
+
+[orchestrator.batch]
+scan_batch_size = 50
+parse_concurrency = 5
+process_concurrency = 3
+store_batch_size = 20
+embedding_batch_size = 10
+embedding_batch_delay_ms = 200

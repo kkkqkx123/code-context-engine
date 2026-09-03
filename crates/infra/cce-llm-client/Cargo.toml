@@ -1,0 +1,26 @@
+[package]
+name = "cce-llm-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-llm = { path = "../../core/cce-llm" }
+cce-circuit-breaker = { path = "../cce-circuit-breaker" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-utils = { path = "../../core/cce-utils" }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+tokio = { workspace = true }
+governor = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+fastrand = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

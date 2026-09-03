@@ -1,0 +1,37 @@
+use super::Visibility;
+
+pub fn visibility_from_signal(_signal: &str) -> Option<Visibility> {
+    None
+}
+
+pub fn visibility_from_name(name: &str) -> Option<Visibility> {
+    if name.starts_with("__") && name.ends_with("__") && name.len() > 4 {
+        Some(Visibility::Public)
+    } else if name.starts_with('_') {
+        Some(Visibility::Private)
+    } else {
+        Some(Visibility::Public)
+    }
+}
+
+pub fn default_visibility(name: &str) -> Visibility {
+    if name.starts_with("__") && name.ends_with("__") && name.len() > 4 {
+        Visibility::Public
+    } else if name.starts_with('_') {
+        Visibility::Private
+    } else {
+        Visibility::Public
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_naming() {
+        assert_eq!(visibility_from_name("__init__"), Some(Visibility::Public));
+        assert_eq!(visibility_from_name("_private"), Some(Visibility::Private));
+        assert_eq!(visibility_from_name("public"), Some(Visibility::Public));
+    }
+}

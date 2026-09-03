@@ -1,0 +1,19 @@
+[package]
+name = "cce-parser-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Core parser types shared between cce-parser and cce-relation"
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-metrics = { path = "../../core/cce-metrics" }
+tree-sitter = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tree-sitter-rust = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-typescript = { workspace = true }

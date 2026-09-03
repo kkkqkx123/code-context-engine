@@ -1,0 +1,602 @@
+//! Java-specific type inference.
+//!
+//! Reference: `docs/research/eclipse-jdt-type-inference.md`
+
+use cce_types::ControlFlowFactKind;
+use cce_types::ControlFlowStore;
+use cce_types::Span;
+use cce_types::entity::{Entity, EntityKind};
+
+use super::control_flow::shared::{is_valid_ident, strip_outer_parens};
+use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
+use super::traits::LanguageTypeInferer;
+use super::types::{ScopedTypeContext, TypeBinding};
+
+/// Java type inference implementation.
+///
+/// Handles Java-specific patterns:
+/// - Method signatures with generic parameters
+/// - Field type declarations
+/// - `new Constructor<T>()` patterns
+/// - `var x = expr` local variable type inference
+pub struct JavaTypeInferer;
+
+impl LanguageTypeInferer for JavaTypeInferer {
+    fn infer_declarations(&self, entities: &[Entity], ctx: &mut ScopedTypeContext) {
+        for entity in entities {
+            match entity.kind {
+                EntityKind::Function | EntityKind::Method => {
+                    extract_function_types(entity, ctx);
+
+                    // Java-specific: store generic type parameter info as metadata
+                    // on the parameter types rather than overwriting the return type.
+                    // The full generic signature (e.g. "<T extends Number>") is kept
+                    // in metadata for downstream consumers that need it.
+                    if let Some(_generic_params) = entity.metadata.get("generic_type_params") {
+                        // Generic type parameters are informational metadata; the actual
+                        // return type and parameter types are already extracted by
+                        // extract_function_types. Full generic inference would require
+                        // type parameter binding logic which is out of scope.
+                    }
+                }
+                EntityKind::Variable => {
+                    extract_variable_type(entity, ctx);
+
+                    if let Some(var_type) = entity.metadata.get("var_type") {
+                        let binding = TypeBinding {
+                            type_name: var_type.clone(),
+                            type_entity_id: None,
+                            span: entity.span,
+                            origin: Some(super::types::InferenceOrigin::TypeAnnotation),
+                            shape: None,
+                        };
+                        ctx.add_variable_type(entity.name.clone(), binding);
+                    }
+
+                    if let Some(constructor_type) = entity.metadata.get("constructor_type") {
+                        let binding = TypeBinding {
+                            type_name: constructor_type.clone(),
+                            type_entity_id: None,
+                            span: entity.span,
+                            origin: Some(super::types::InferenceOrigin::ConstructorCall),
+                            shape: None,
+                        };
+                        ctx.add_variable_type(entity.name.clone(), binding);
+                    }
+                }
+                EntityKind::Field | EntityKind::Property => {
+                    extract_field_type(entity, ctx);
+
+                    if let Some(field_types) = entity.metadata.get("field_types") {
+                        let binding = TypeBinding {
+                            type_name: field_types.clone(),
+                            type_entity_id: None,
+                            span: entity.span,
+                            origin: None,
+                            shape: None,
+                        };
+                        ctx.add_variable_type(entity.name.clone(), binding);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn infer_control_flow(
+        &self,
+        entities: &[Entity],
+        control_flow: &ControlFlowStore,
+        ctx: &mut ScopedTypeContext,
+        _inference_ctx: &super::traits::InferenceContext<'_>,
+    ) {
+        for entity in entities {
+            let Some(entity_cf) = control_flow.get(entity.id) else {
+                continue;
+            };
+            for fact in &entity_cf.facts {
+                match fact.kind {
+                    ControlFlowFactKind::If => {
+                        for result in narrow_java_if(&fact.text) {
+                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                        }
+                    }
+                    ControlFlowFactKind::Try => {
+                        for result in narrow_java_catch(&fact.text) {
+                            ctx.add_variable_type(
+                                result.variable_name.clone(),
+                                result.narrowed_type.clone(),
+                            );
+                            // Also add as narrowed for scope sensitivity
+                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        }
+    }
+}
+
+/// Result of a single narrowing operation.
+#[derive(Debug, Clone)]
+struct NarrowingResult {
+    variable_name: String,
+    narrowed_type: TypeBinding,
+}
+
+/// Narrow types from a Java `if` condition.
+///
+/// Patterns:
+/// - `if (x instanceof Type)` → x: Type
+/// - `if (!(x instanceof Type))` → conservative skip
+fn narrow_java_if(text: &str) -> Vec<NarrowingResult> {
+    let text = text.trim();
+    let mut results = vec![];
+
+    if let Some(result) = narrow_java_instanceof(text) {
+        results.push(result);
+    }
+
+    results
+}
+
+/// Parse `if (x instanceof Type)`.
+fn narrow_java_instanceof(text: &str) -> Option<NarrowingResult> {
+    let text = strip_java_condition_prefix(text)?;
+    let text = text.trim();
+
+    // Skip negated instanceof checks
+    if text.starts_with('!') {
+        return None;
+    }
+
+    let parts: Vec<&str> = text.splitn(2, " instanceof ").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let var_name = parts[0].trim();
+    let type_name = parts[1].trim();
+
+    if var_name.is_empty() || !is_valid_ident(var_name) || type_name.is_empty() {
+        return None;
+    }
+
+    Some(NarrowingResult {
+        variable_name: var_name.to_string(),
+        narrowed_type: TypeBinding {
+            type_name: type_name.to_string(),
+            type_entity_id: None,
+            span: Span::default(),
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: None,
+        },
+    })
+}
+
+/// Strip Java condition prefixes.
+fn strip_java_condition_prefix(text: &str) -> Option<&str> {
+    let text = text.trim();
+    for prefix in &["if", "while", "else if", "return", "assert"] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            let rest = rest.trim();
+            return Some(strip_outer_parens(rest));
+        }
+    }
+    None
+}
+
+/// Narrow types from a Java `try-catch` block.
+///
+/// Patterns:
+/// - `try { ... } catch (IOException e) { ... }` → e: IOException
+/// - `try { ... } catch (IOException | SQLException e) { ... }` → e: IOException | SQLException
+/// - `try { ... } catch (final IOException e) { ... }` → e: IOException
+fn narrow_java_catch(text: &str) -> Vec<NarrowingResult> {
+    let mut results = vec![];
+    let mut search = text;
+    while let Some(catch_pos) = search.find("catch") {
+        let after_catch = &search[catch_pos + 5..];
+        let after_catch = after_catch.trim_start();
+        if !after_catch.starts_with('(') {
+            search = &after_catch[1.min(after_catch.len())..];
+            continue;
+        }
+        // Find matching ')'
+        let mut depth = 0;
+        let mut end = None;
+        for (i, ch) in after_catch.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end_pos) = end else {
+            break;
+        };
+        let param = after_catch[1..end_pos].trim();
+        if let Some(result) = parse_java_catch_param(param) {
+            results.push(result);
+        }
+        search = &after_catch[end_pos + 1..];
+    }
+    results
+}
+
+/// Parse a Java catch parameter `IOException e` or `final IOException | SQLException e`.
+fn parse_java_catch_param(param: &str) -> Option<NarrowingResult> {
+    let param = param.trim();
+    if param.is_empty() {
+        return None;
+    }
+    // Strip optional modifiers like `final`
+    let param = param.strip_prefix("final").unwrap_or(param).trim();
+    // Split into type and variable: last token is variable name, rest is type
+    let last_space = param.rfind(char::is_whitespace)?;
+    let type_part = param[..last_space].trim();
+    let var_name = param[last_space + 1..].trim();
+    if type_part.is_empty() || var_name.is_empty() || !is_valid_ident(var_name) {
+        return None;
+    }
+    Some(NarrowingResult {
+        variable_name: var_name.to_string(),
+        narrowed_type: TypeBinding {
+            type_name: type_part.to_string(),
+            type_entity_id: None,
+            span: Span::default(),
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: None,
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cce_types::Span;
+    use cce_types::entity::EntityId;
+    use cce_types::language::Language;
+
+    fn dummy_span() -> Span {
+        Span::default()
+    }
+
+    #[test]
+    fn test_java_method_signature_extraction() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(1),
+                EntityKind::Method,
+                "getValue".to_string(),
+                dummy_span(),
+            )
+            .with_return_type(Some("String".to_string())),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let return_type = ctx.get_return_type(EntityId(1)).unwrap();
+        assert_eq!(return_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_java_var_declaration() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(2),
+                EntityKind::Variable,
+                "list".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("var_type", "ArrayList<String>"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let var_type = ctx.get_variable_type("list").unwrap();
+        assert_eq!(var_type.type_name, "ArrayList<String>");
+        assert!(var_type.origin.is_some());
+    }
+
+    #[test]
+    fn test_java_constructor_call() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(3),
+                EntityKind::Variable,
+                "map".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("constructor_type", "HashMap<String, Integer>"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let var_type = ctx.get_variable_type("map").unwrap();
+        assert_eq!(var_type.type_name, "HashMap<String, Integer>");
+        assert!(var_type.origin.is_some());
+    }
+
+    #[test]
+    fn test_java_field_type_extraction() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(4),
+                EntityKind::Field,
+                "userName".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("type_annotation", "String"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let field_type = ctx.get_variable_type("userName").unwrap();
+        assert_eq!(field_type.type_name, "String");
+        assert!(field_type.origin.is_some());
+    }
+
+    #[test]
+    fn test_java_generic_type_params() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(5),
+                EntityKind::Method,
+                "transform".to_string(),
+                dummy_span(),
+            )
+            .with_return_type(Some("T".to_string()))
+            .with_metadata("generic_type_params", "<T extends Number>"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let return_type = ctx.get_return_type(EntityId(5)).unwrap();
+        assert_eq!(return_type.type_name, "T");
+    }
+
+    #[test]
+    fn test_java_instanceof() {
+        let results = narrow_java_if("if (x instanceof String)");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+        assert!(results[0].narrowed_type.origin.is_some());
+    }
+
+    #[test]
+    fn test_java_negated_instanceof_skipped() {
+        let results = narrow_java_if("if (!(x instanceof String))");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_java_catch_single() {
+        let results = narrow_java_catch("try {} catch (IOException e) {}");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(results[0].narrowed_type.type_name, "IOException");
+    }
+
+    #[test]
+    fn test_java_catch_multi() {
+        let results = narrow_java_catch("try {} catch (IOException | SQLException e) {}");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(
+            results[0].narrowed_type.type_name,
+            "IOException | SQLException"
+        );
+    }
+
+    #[test]
+    fn test_java_catch_final() {
+        let results = narrow_java_catch("try {} catch (final IOException e) {}");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(results[0].narrowed_type.type_name, "IOException");
+    }
+
+    #[test]
+    fn test_java_catch_multiple_clauses() {
+        let results =
+            narrow_java_catch("try {} catch (IOException e) {} catch (SQLException ex) {}");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(results[1].variable_name, "ex");
+    }
+
+    // ==================== Additional control flow tests ====================
+
+    #[test]
+    fn test_java_catch_multi_union_types() {
+        let results =
+            narrow_java_catch("try {} catch (IOException | SQLException | TimeoutException e) {}");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(
+            results[0].narrowed_type.type_name,
+            "IOException | SQLException | TimeoutException"
+        );
+    }
+
+    #[test]
+    fn test_java_catch_final_with_multi_union() {
+        let results = narrow_java_catch("try {} catch (final IOException | SQLException e) {}");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(
+            results[0].narrowed_type.type_name,
+            "IOException | SQLException"
+        );
+    }
+
+    #[test]
+    fn test_java_catch_three_clauses() {
+        let results = narrow_java_catch(
+            "try {} catch (IOException e) {} catch (SQLException ex) {} catch (Exception err) {}",
+        );
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(results[1].variable_name, "ex");
+        assert_eq!(results[2].variable_name, "err");
+    }
+
+    #[test]
+    fn test_java_instanceof_in_while() {
+        let results = narrow_java_if("while (x instanceof String)");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_java_instanceof_in_else_if() {
+        let results = narrow_java_if("else if (x instanceof Integer)");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "Integer");
+    }
+
+    #[test]
+    fn test_java_instanceof_in_return() {
+        let results = narrow_java_if("return x instanceof List");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "List");
+    }
+
+    #[test]
+    fn test_java_catch_empty_block() {
+        let results = narrow_java_catch("try {} catch (Exception e) { }");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "e");
+        assert_eq!(results[0].narrowed_type.type_name, "Exception");
+    }
+
+    #[test]
+    fn test_java_catch_no_catch() {
+        let results = narrow_java_catch("try {} finally {}");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_java_catch_empty_param() {
+        let results = narrow_java_catch("try {} catch () {}");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_java_generic_method_multiple_params() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(10),
+                EntityKind::Method,
+                "combine".to_string(),
+                dummy_span(),
+            )
+            .with_return_type(Some("Pair<T, U>".to_string()))
+            .with_metadata("generic_type_params", "<T, U>"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let return_type = ctx.get_return_type(EntityId(10)).unwrap();
+        assert_eq!(return_type.type_name, "Pair<T, U>");
+    }
+
+    #[test]
+    fn test_java_constructor_nested_generic() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(11),
+                EntityKind::Variable,
+                "matrix".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("constructor_type", "ArrayList<ArrayList<Integer>>"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let var_type = ctx.get_variable_type("matrix").unwrap();
+        assert_eq!(var_type.type_name, "ArrayList<ArrayList<Integer>>");
+    }
+
+    #[test]
+    fn test_java_multiple_var_declarations() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(20),
+                EntityKind::Variable,
+                "name".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("var_type", "String"),
+            Entity::new(
+                EntityId(21),
+                EntityKind::Variable,
+                "count".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("var_type", "int"),
+            Entity::new(
+                EntityId(22),
+                EntityKind::Variable,
+                "items".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("constructor_type", "HashMap<String, List<String>>"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        assert_eq!(ctx.get_variable_type("name").unwrap().type_name, "String");
+        assert_eq!(ctx.get_variable_type("count").unwrap().type_name, "int");
+        assert_eq!(
+            ctx.get_variable_type("items").unwrap().type_name,
+            "HashMap<String, List<String>>"
+        );
+    }
+
+    #[test]
+    fn test_java_field_generic_type() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(30),
+                EntityKind::Field,
+                "cache".to_string(),
+                dummy_span(),
+            )
+            .with_metadata(
+                "field_types",
+                "ConcurrentHashMap<String, AtomicReference<T>>",
+            ),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let field_type = ctx.get_variable_type("cache").unwrap();
+        assert_eq!(
+            field_type.type_name,
+            "ConcurrentHashMap<String, AtomicReference<T>>"
+        );
+    }
+}

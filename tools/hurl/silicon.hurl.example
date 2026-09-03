@@ -1,0 +1,14 @@
+# SiliconFlow Embeddings API Debug
+# 用法：hurl embeddings.hurl --variable SILICONFLOW_API_KEY="你的密钥" --insecure
+# --insecure用于避免证书问题
+
+POST https://api.siliconflow.cn/v1/embeddings
+Authorization: Bearer {{SILICONFLOW_API_KEY}}
+Content-Type: application/json
+{
+    "input": "Hello, world!",
+    "model": "BAAI/bge-m3"
+}
+
+# 断言响应状态码为 200
+HTTP 200

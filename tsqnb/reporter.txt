@@ -1,0 +1,134 @@
+java:
+
+public class TestClass {
+// 测试方法定义
+public int calculateSum(int a, int b) {
+return a + b;
+}
+
+    // 测试无返回值方法
+    public void printMessage(String message) {
+        System.out.println(message);
+    }
+
+    // 测试无参数方法
+    public String getGreeting() {
+        return "Hello";
+    }
+
+}
+
+program [0, 0] - [15, 1]
+class_declaration [0, 0] - [15, 1]
+modifiers [0, 0] - [0, 6]
+name: identifier [0, 13] - [0, 22]
+body: class_body [0, 23] - [15, 1]
+line_comment [1, 4] - [1, 14]
+method_declaration [2, 4] - [4, 5]
+modifiers [2, 4] - [2, 10]
+type: integral_type [2, 11] - [2, 14]
+name: identifier [2, 15] - [2, 27]
+parameters: formal_parameters [2, 27] - [2, 41]
+formal_parameter [2, 28] - [2, 33]
+type: integral_type [2, 28] - [2, 31]
+name: identifier [2, 32] - [2, 33]
+formal_parameter [2, 35] - [2, 40]
+type: integral_type [2, 35] - [2, 38]
+name: identifier [2, 39] - [2, 40]
+body: block [2, 42] - [4, 5]
+return_statement [3, 8] - [3, 21]
+binary_expression [3, 15] - [3, 20]
+left: identifier [3, 15] - [3, 16]
+right: identifier [3, 19] - [3, 20]
+line_comment [6, 4] - [6, 16]
+method_declaration [7, 4] - [9, 5]
+modifiers [7, 4] - [7, 10]
+type: void_type [7, 11] - [7, 15]
+name: identifier [7, 16] - [7, 28]
+parameters: formal_parameters [7, 28] - [7, 44]
+formal_parameter [7, 29] - [7, 43]
+type: type_identifier [7, 29] - [7, 35]
+name: identifier [7, 36] - [7, 43]
+body: block [7, 45] - [9, 5]
+expression_statement [8, 8] - [8, 36]
+method_invocation [8, 8] - [8, 35]
+object: field_access [8, 8] - [8, 18]
+object: identifier [8, 8] - [8, 14]
+field: identifier [8, 15] - [8, 18]
+name: identifier [8, 19] - [8, 26]
+arguments: argument_list [8, 26] - [8, 35]
+identifier [8, 27] - [8, 34]
+line_comment [11, 4] - [11, 15]
+method_declaration [12, 4] - [14, 5]
+modifiers [12, 4] - [12, 10]
+type: type_identifier [12, 11] - [12, 17]
+name: identifier [12, 18] - [12, 29]
+parameters: formal_parameters [12, 29] - [12, 31]
+body: block [12, 32] - [14, 5]
+return_statement [13, 8] - [13, 23]
+string_literal [13, 15] - [13, 22]
+string_fragment [13, 16] - [13, 21]
+
+public class Animal {
+    public String name;
+    
+    public void speak() {
+        System.out.println("Animal speaks");
+    }
+}
+
+public class Dog extends Animal {
+    public void bark() {
+        System.out.println("Woof!");
+    }
+}
+
+program [0, 0] - [12, 1]
+class_declaration [0, 0] - [6, 1]
+modifiers [0, 0] - [0, 6]
+name: identifier [0, 13] - [0, 19]
+body: class_body [0, 20] - [6, 1]
+field_declaration [1, 4] - [1, 23]
+modifiers [1, 4] - [1, 10]
+type: type_identifier [1, 11] - [1, 17]
+declarator: variable_declarator [1, 18] - [1, 22]
+name: identifier [1, 18] - [1, 22]
+method_declaration [3, 4] - [5, 5]
+modifiers [3, 4] - [3, 10]
+type: void_type [3, 11] - [3, 15]
+name: identifier [3, 16] - [3, 21]
+parameters: formal_parameters [3, 21] - [3, 23]
+body: block [3, 24] - [5, 5]
+expression_statement [4, 8] - [4, 44]
+method_invocation [4, 8] - [4, 43]
+object: field_access [4, 8] - [4, 18]
+object: identifier [4, 8] - [4, 14]
+field: identifier [4, 15] - [4, 18]
+name: identifier [4, 19] - [4, 26]
+arguments: argument_list [4, 26] - [4, 43]
+string_literal [4, 27] - [4, 42]
+string_fragment [4, 28] - [4, 41]
+class_declaration [8, 0] - [12, 1]
+modifiers [8, 0] - [8, 6]
+name: identifier [8, 13] - [8, 16]
+superclass: superclass [8, 17] - [8, 31]
+type_identifier [8, 25] - [8, 31]
+body: class_body [8, 32] - [12, 1]
+method_declaration [9, 4] - [11, 5]
+modifiers [9, 4] - [9, 10]
+type: void_type [9, 11] - [9, 15]
+name: identifier [9, 16] - [9, 20]
+parameters: formal_parameters [9, 20] - [9, 22]
+body: block [9, 23] - [11, 5]
+expression_statement [10, 8] - [10, 36]
+method_invocation [10, 8] - [10, 35]
+object: field_access [10, 8] - [10, 18]
+object: identifier [10, 8] - [10, 14]
+field: identifier [10, 15] - [10, 18]
+name: identifier [10, 19] - [10, 26]
+arguments: argument_list [10, 26] - [10, 35]
+string_literal [10, 27] - [10, 34]
+string_fragment [10, 28] - [10, 33]
+
+---
+

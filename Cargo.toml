@@ -1,0 +1,203 @@
+[workspace]
+members = [
+    # core
+    "crates/core/cce-types",
+    "crates/core/cce-config",
+    "crates/core/cce-utils",
+    "crates/core/cce-metrics",
+    "crates/core/cce-text",
+    "crates/core/cce-plugin",
+    "crates/core/cce-llm",
+    # parser
+    "crates/parser/cce-parser",
+    "crates/parser/cce-parser-core",
+    "crates/parser/cce-document",
+    "crates/parser/cce-stdlib",
+    "crates/parser/cce-relation",
+    # infra
+    "crates/infra/cce-circuit-breaker",
+    "crates/infra/cce-llm-client",
+    "crates/infra/cce-storage-common",
+    "crates/infra/cce-storage-bm25",
+    "crates/infra/cce-storage-qdrant",
+    "crates/infra/cce-storage-sqlite",
+    "crates/infra/cce-scanner",
+    "crates/infra/cce-metrics-infra",
+    # app
+    "crates/app/cce-api",
+    "crates/app/cce-plugin-runtime",
+    "crates/app/cce-orchestrator",
+    "crates/app/cce-server",
+    "crates/app/cce-e2e-tests",
+    "crates/app/cce-cli",
+    "crates/app/cce-plugin-sdk",
+    # vendored
+    "crates/tree-sitter-svelte",
+    "crates/tree-sitter-vue",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+
+[workspace.dependencies]
+# asynchronous runtime
+tokio = { version = "1.50", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "fs",
+    "process",
+    "tracing",
+] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1"
+rkyv = { version = "0.8", features = ["bytecheck", "alloc", "std"] }
+zstd = "0.13"
+
+# Memory optimization
+compact_str = { version = "0.8", features = ["serde"] }
+smallvec = { version = "1.11", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Log
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "json",
+    "registry",
+] }
+tracing-appender = "0.2.4"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+axum = { version = "0.8.8", features = ["macros"] }
+
+# Tree-sitter
+tree-sitter = "0.26"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-php = "0.24"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-scala = "0.23"
+tree-sitter-html = "0.23"
+tree-sitter-css = "0.25"
+tree-sitter-dart = "0.1"
+tree-sitter-lua = "0.5"
+tree-sitter-bash = "0.25"
+streaming-iterator = "0.1"
+
+# File system
+walkdir = "2.5"
+
+# Text Processing
+regex = "1.11"
+whatlang = "0.16"
+unicase = "2.8"
+encoding_rs = "0.8"
+quick-xml = { version = "0.35", features = ["serialize"] }
+yaml-rust2 = "0.11.0"
+once_cell = "1.19"
+
+# Hash
+sha2 = "0.10"
+hex = "0.4.3"
+
+# Rate Limiting
+governor = "0.10"
+
+# SQLite
+rusqlite = { version = "0.39", features = ["bundled"] }
+
+# Async trait support
+async-trait = "0.1"
+
+# Full-text search
+jieba-rs = "0.10"
+
+# Tools
+chrono = { version = "0.4", features = ["serde"] }
+dashmap = "6.1"
+dotenvy = "0.15"
+dirs = "6.0"
+rayon = "1.11"
+fastrand = "2.1"
+tempfile = "3.12"
+lru = "0.13"
+parking_lot = "0.12"
+rand = "0.8"
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
+
+# File system watching
+notify = "8.2"
+sysinfo = "0.33"
+
+# Plugin system
+mlua = { version = "0.11", features = ["vendored", "lua55", "send"] }
+libloading = "0.9"
+globset = "0.4"
+
+# System utilities
+num_cpus = "1.16"
+uuid = { version = "1.0", features = ["v4", "v5"] }
+
+# Vendored internal crates
+# NOTE: tantivy is a vendored git submodule fork (crates/tantivy, upstream
+# 0.27 + `feat/add-configurable-k1-b` branch) redirected via `[patch.crates-io]`.
+# The version declared here MUST stay in sync with the fork's own Cargo.toml
+# version, otherwise the patch silently disengages and the crates.io build is
+# used instead (it lacks `IndexSettings.bm25_params`).
+tantivy = "0.27"
+tree-sitter-svelte = { path = "crates/tree-sitter-svelte" }
+tree-sitter-vue = { path = "crates/tree-sitter-vue" }
+cce-circuit-breaker = { path = "crates/infra/cce-circuit-breaker" }
+cce-storage-common = { path = "crates/infra/cce-storage-common" }
+cce-storage-bm25 = { path = "crates/infra/cce-storage-bm25" }
+cce-storage-qdrant = { path = "crates/infra/cce-storage-qdrant" }
+cce-storage-sqlite = { path = "crates/infra/cce-storage-sqlite" }
+cce-metrics-infra = { path = "crates/infra/cce-metrics-infra" }
+
+[patch.crates-io]
+# Vendored fork: redirect the whole tantivy family to the local submodule so
+# the fork and all its sub-crates always resolve locally (never crates.io).
+# Sub-crates not currently required by the graph are inert defensive entries.
+tantivy = { path = "crates/tantivy" }
+tantivy-columnar = { path = "crates/tantivy/columnar" }
+tantivy-sstable = { path = "crates/tantivy/sstable" }
+tantivy-stacker = { path = "crates/tantivy/stacker" }
+tantivy-query-grammar = { path = "crates/tantivy/query-grammar" }
+tantivy-bitpacker = { path = "crates/tantivy/bitpacker" }
+tantivy-common = { path = "crates/tantivy/common" }
+tantivy-tokenizer-api = { path = "crates/tantivy/tokenizer-api" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+codegen-units = 64

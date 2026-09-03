@@ -1,0 +1,14 @@
+{
+  "report_title": "CCE End-to-End Test Report — once_cell",
+  "project": "once_cell",
+  "generated_at": "2026-05-31T04:19:39.910302Z",
+  "functional": {
+    "summary": {
+      "total": 9,
+      "passed": 6,
+      "failed": 3,
+      "pass_rate": 66.7
+    },
+    "results_path": "D:\\项目\\agent\\tools\\code-context-engine\\benches\\results\\processed\\once_cell\\test_results.json"
+  }
+}

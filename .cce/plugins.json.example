@@ -1,0 +1,58 @@
+{
+  "plugins": [
+    {
+      "id": "flask-routes",
+      "path": "plugins/flask_routes.lua",
+      "enabled": true,
+      "description": "Flask Route Natural Language Template Extension",
+      "file_patterns": ["*.py"],
+      "languages": ["python"]
+    },
+    {
+      "id": "django-views",
+      "path": "plugins/django_views.lua",
+      "enabled": false,
+      "description": "Django View Natural Language Generation",
+      "file_patterns": ["**/views.py", "**/views/*.py"],
+      "languages": ["python"]
+    },
+    {
+      "id": "express-routes",
+      "path": "plugins/express_routes.lua",
+      "enabled": true,
+      "description": "Express.js Route Handler Natural Language Generation",
+      "file_patterns": ["*.js", "*.ts", "**/routes/*.js", "**/routes/*.ts"],
+      "languages": ["javascript", "typescript"]
+    },
+    {
+      "id": "react-components",
+      "path": "plugins/react_components.lua",
+      "enabled": true,
+      "description": "React Component Natural Language Generation",
+      "file_patterns": ["**/components/**/*.jsx", "**/components/**/*.tsx"],
+      "languages": ["javascript", "typescript"]
+    },
+    {
+      "id": "spring-controllers",
+      "path": "plugins/spring_controllers.lua",
+      "enabled": true,
+      "description": "Spring Boot Controller Natural Language Generation",
+      "file_patterns": ["**/controller/*.java", "**/controllers/*.java"],
+      "languages": ["java"]
+    },
+    {
+      "id": "framework-overrides",
+      "path": "plugins/framework_overrides.lua",
+      "enabled": false,
+      "description": "Multi-capability plugin with per-capability priorities",
+      "file_patterns": ["*.py", "*.java"],
+      "priority": 100,
+      "capability_priorities": {
+        "text_gen": 1000,
+        "fusion": 10,
+        "result_filter": 500
+      },
+      "capabilities": ["text_gen", "fusion", "result_filter"]
+    }
+  ]
+}

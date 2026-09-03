@@ -1,0 +1,81 @@
+[package]
+name = "cce-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+rkyv = { workspace = true, features = ["bytecheck", "alloc", "std"] }
+
+# Error handling / logging
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# String optimization
+compact_str = { workspace = true, features = ["serde"] }
+smallvec = { workspace = true, features = ["serde"] }
+
+# Text processing
+regex = { workspace = true }
+once_cell = { workspace = true }
+
+# Tree-sitter core
+tree-sitter = { workspace = true }
+streaming-iterator = { workspace = true }
+
+# Tree-sitter language grammars
+tree-sitter-c = { workspace = true }
+tree-sitter-cpp = { workspace = true }
+tree-sitter-go = { workspace = true }
+tree-sitter-java = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-c-sharp = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+tree-sitter-ruby = { workspace = true }
+tree-sitter-php = { workspace = true }
+tree-sitter-kotlin-ng = { workspace = true }
+tree-sitter-scala = { workspace = true }
+tree-sitter-html = { workspace = true }
+tree-sitter-svelte = { workspace = true }
+tree-sitter-css = { workspace = true }
+tree-sitter-vue = { workspace = true }
+tree-sitter-dart = { workspace = true }
+tree-sitter-lua = { workspace = true }
+tree-sitter-bash = { workspace = true }
+
+# Document parsers (used by document module)
+toml = { workspace = true }
+yaml-rust2 = { workspace = true }
+quick-xml = { workspace = true }
+
+# Concurrent data structures (used by tree_sitter_init and tree_sitter_query)
+dashmap = { workspace = true }
+
+# Async
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "fs"] }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Internal workspace crates
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-utils = { path = "../../core/cce-utils" }
+cce-parser-core = { path = "../cce-parser-core" }
+cce-document = { path = "../cce-document" }
+cce-stdlib = { path = "../cce-stdlib" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-text = { path = "../../core/cce-text" }
+cce-plugin = { path = "../../core/cce-plugin" }
+cce-llm = { path = "../../core/cce-llm" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
+cce-relation = { path = "../cce-relation" }
+
+

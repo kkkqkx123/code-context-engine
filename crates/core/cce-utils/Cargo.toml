@@ -1,0 +1,23 @@
+[package]
+name = "cce-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Utility functions for the code context engine"
+
+[dependencies]
+encoding_rs = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+walkdir = { workspace = true }
+regex = { workspace = true }
+globset = { workspace = true }
+tokio = { workspace = true }
+once_cell = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

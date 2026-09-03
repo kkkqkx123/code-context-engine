@@ -1,0 +1,33 @@
+# node
+node_modules
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# extra
+build
+log.txt
+
+# zig stuff
+zig-cache
+.gyro
+gyro.lock
+
+
+
+# Added by cargo
+
+/target
+
+
+# Added by cargo
+#
+# already existing elements were commented out
+
+#/target
+Cargo.lock
+
+# all .o, .a, and .so files
+*.o
+*.a
+*.so

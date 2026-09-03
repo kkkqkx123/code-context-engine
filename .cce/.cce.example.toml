@@ -1,0 +1,365 @@
+# Project-level Configuration Example
+#
+# This file shows how to customize indexing and processing settings
+# for a specific project. Place this file in your project root as:
+#   .cce/config.toml
+#
+# Only include the settings you want to override. All other settings
+# will use values from the global configuration.
+#
+# IMPORTANT: Sensitive settings (API keys, URLs) should NOT be defined
+# here. They are managed globally via:
+#   - Global config file (config.toml)
+#   - Environment variables (CCE_*)
+#   - .env files
+
+# ============================================================================
+# Basic Project Information
+# ============================================================================
+
+# Project name (optional, for display purposes)
+name = "my-project"
+
+# Project root path (optional, defaults to config file directory)
+# root_path = "."
+
+# ============================================================================
+# Embedder Configuration
+# ============================================================================
+# Allows projects to specify which embedding model to use.
+# Model metadata (dimension, parser, preprocessor) is defined in global config.
+# Projects only reference the model by name.
+
+# [embedder]
+# Model name to use (references a model in the global config's models registry)
+model = "bge-m3"
+
+# Note: vector_dimension is NOT configurable at project level
+# Different models produce incompatible vectors, so changing dimension
+# would cause index corruption. Dimension is defined in global model registry.
+
+# ============================================================================
+# LLM Configuration (Chat & Rerank Models)
+# ============================================================================
+# Allows projects to specify which models to use for chat/generation and reranking.
+# Model metadata is defined in global config under [llm.chat_models] and [llm.rerank_models].
+# API keys and base URLs remain in global config.
+
+# [llm]
+# Chat model for summary enhancement or other generation tasks
+# chat_model = "gpt-4o"
+
+# Rerank model for search result re-ranking
+# rerank_model = "gpt-4o-mini-rerank"
+
+# Enable/disable reranking for this project (overrides global setting)
+# enable_rerank = true
+
+# Maximum number of candidates to rerank (overrides model default)
+# rerank_max_candidates = 30
+
+# ============================================================================
+# Scanner Configuration
+# ============================================================================
+# Customize file scanning behavior
+
+[scanner]
+# Whether to follow symbolic links (default: false)
+follow_symlinks = false
+
+# Whether to respect .gitignore files (default: true)
+respect_gitignore = true
+
+# Additional patterns to exclude from scanning
+exclude_patterns = [
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    "coverage",
+    "*.test.ts",
+    "*.spec.ts"
+]
+
+# Include patterns (glob patterns, if you want to limit to specific files)
+# include_patterns = ["src/**/*.ts"]
+
+# Additional gitignore-style patterns
+# gitignore_patterns = ["target/", "*.log"]
+
+# Maximum bytes to check for binary detection (default: 8192 = 8KB)
+# binary_check_size = 8192
+
+# Maximum file size to read entirely for hash computation in bytes (default: 10485760 = 10MB)
+# max_hash_file_size = 10485760
+
+# Default maximum file size to read content in bytes (default: 1048576 = 1MB)
+# default_max_content_size = 1048576
+
+# Maximum file size to process in bytes (default: 512000 = 500KB)
+# Files larger than this will be skipped
+# max_file_size = 512000
+
+# ============================================================================
+# Grouper Configuration
+# ============================================================================
+# Customize entity grouping and pattern detection behavior
+
+[grouper]
+# Small class threshold in lines (default: 30)
+# small_class_threshold = 30
+
+# Enable/disable specific pattern detections
+enable_builder_pattern_detection = true
+enable_factory_pattern_detection = true
+enable_singleton_pattern_detection = false
+
+# Pattern confidence threshold (0.0 to 1.0, default: 0.6)
+pattern_confidence_threshold = 0.7
+
+# Enable strict pattern detection (default: false)
+# strict_pattern_detection = false
+
+# Enable test entity grouping (default: true)
+# enable_test_entity_grouping = true
+
+# Enable nested entity group extraction (default: false)
+# enable_nested_entity_grouping = false
+
+# Maximum nesting depth to extract (1-3 recommended, default: 2)
+# max_nesting_depth = 2
+
+# Minimum size for nested entity to be extracted in lines (default: 5)
+# min_nested_size = 5
+
+# ============================================================================
+# Orchestrator Configuration
+# ============================================================================
+# Customize indexing and batch processing behavior
+
+[orchestrator.indexer]
+# File extensions to index
+extensions = ["rs", "toml", "ts", "tsx", "js", "jsx", "json"]
+
+# Directories to exclude from indexing
+exclude_dirs = ["node_modules", "dist", "build", ".git", "target"]
+
+# Whether to store vectors (default: true)
+store_vectors = true
+
+# Whether to store in BM25 index (default: true)
+store_bm25 = true
+
+# Whether to store file summaries (default: true)
+# store_summaries = true
+
+# Whether to build relation index (default: true)
+build_relations = true
+
+[orchestrator.batch]
+# Number of files to scan before yielding to callback (default: 100)
+scan_batch_size = 100
+
+# Maximum concurrent file parsing tasks (default: 10)
+parse_concurrency = 10
+
+# Maximum concurrent file processing tasks (default: 5)
+# Includes entity grouping and NL conversion
+# process_concurrency = 5
+
+# Number of chunks to accumulate before storing (default: 50)
+store_batch_size = 50
+
+# Number of texts to send per embedding API call (default: 32)
+# Should match API token limits (typically 32-64)
+# embedding_batch_size = 32
+
+# Milliseconds to sleep between embedding batches (default: 100)
+# Helps avoid API rate limits
+# embedding_batch_delay_ms = 100
+
+[orchestrator.hot_update]
+# Enable hot update (default: true)
+enabled = true
+
+# Whether to build relations during update (default: true)
+build_relations = true
+
+# Whether to store summaries during update (default: true)
+# store_summaries = true
+
+# Whether to store vectors (embeddings) during update (default: true)
+# store_vectors = true
+
+# Whether to store in BM25 index during update (default: true)
+# store_bm25 = true
+
+# Batch size for file processing (default: 10)
+# batch_size = 10
+
+# Batch size for embedding storage (default: 32)
+# embedding_batch_size = 32
+
+# Batch size for storage operations (default: 50)
+# storage_batch_size = 50
+
+# Debounce configuration
+# [orchestrator.hot_update.debounce]
+# Short interval when changes are pending in seconds (default: 30)
+# pending_interval_secs = 30
+# Maximum time to wait after a change before triggering in seconds (default: 300)
+# max_wait_time_secs = 300
+
+# File watch configuration
+# [orchestrator.hot_update.file_watch]
+# Enable file watching (default: true)
+# enabled = true
+# Event storm threshold (events per second, default: 100)
+# event_threshold = 100
+# Fallback scan interval in seconds (when degraded, default: 30)
+# fallback_interval_secs = 30
+# Verification interval in seconds (default: 600)
+# verification_interval_secs = 600
+# Watch configuration files (default: true)
+# watch_config_files = true
+
+[orchestrator.cache]
+# Maximum number of files to cache chunk results (default: 100)
+# chunk_cache_size = 100
+# Whether caching is enabled (default: true)
+# enabled = true
+
+# ============================================================================
+# AST to NL Configuration
+# ============================================================================
+# Customize chunking and natural language conversion behavior
+
+[ast_to_nl.chunking]
+# Maximum token count for embedding (default: 512)
+max_tokens = 512
+
+# Overlap token count for embedding (default: 50)
+overlap_tokens = 50
+
+# Maximum word count for BM25 (default: 200)
+# max_bm25_words = 200
+
+# Overlap word count for BM25 (default: 20)
+# overlap_bm25_words = 20
+
+# Maximum overlap ratio (default: 0.2 = 20%)
+# max_overlap_ratio = 0.2
+
+# Minimum chunk token count (default: 150)
+# min_chunk_tokens = 150
+
+# Minimum chunk BM25 word count (default: 80)
+# min_chunk_bm25_words = 80
+
+# Whether to respect entity boundaries when splitting (default: true)
+respect_boundaries = true
+# Merge threshold, 0 = use max_tokens (merge anything that fits) (default: 0)
+# merge_threshold = 0
+
+[ast_to_nl.bm25]
+# Maximum number of keywords to extract (default: 10)
+# max_keywords = 10
+
+[ast_to_nl.embedding]
+# Maximum summary words (default: 30)
+# max_summary_words = 30
+
+# Include docstring in output (default: true)
+# include_docstring = true
+
+# ============================================================================
+# Relation Configuration
+# ============================================================================
+# Customize call chain analysis and dependency tracking
+
+[relation]
+# Maximum call chain depth for queries (default: 10)
+max_call_depth = 10
+
+
+# Enable import/export analysis (default: true)
+analyze_imports = true
+
+# Enable cross-file dependency tracking (default: true)
+track_cross_file_deps = true
+
+# Index configuration
+# [relation.index]
+# Enable relation indexing (default: true)
+# enabled = true
+# Maximum number of relations per file (default: 10000)
+# max_relations_per_file = 10000
+# Enable call chain resolution (default: true)
+# resolve_call_chains = true
+# Exclude standard library relations (default: true)
+# filter_stdlib_calls = true
+
+# Search relation boost configuration
+# [search.relation]
+# Number of top results to enhance with relation data (default: 5)
+# top_n = 5
+# Query depth for relation traversal (default: 2)
+# depth = 2
+# Timeout in milliseconds for relation queries (default: 500)
+# timeout_ms = 500
+# Base boost factor for directly related entities, i.e. 1 hop (default: 1.15)
+# boost_factor = 1.15
+# Maximum number of hops in relation graph traversal (default: 2)
+# max_hops = 2
+# Whether to include callees (forward expansion) (default: true)
+# include_callees = true
+# Whether to include callers (backward expansion) (default: false)
+# When enabled, low-level utility functions can receive score boosts
+# from their high-level callers, improving recall for "who uses X"
+# style queries at the cost of additional graph traversal.
+# include_callers = false
+# Whether to enable relation boost by default for hybrid/hierarchical queries (default: false)
+# When true, hybrid and hierarchical query types automatically
+# include relation-based score boosting without requiring the client to
+# explicitly set query_type: "semantic_with_relations".
+# enabled_by_default = false
+
+
+# ============================================================================
+# Summary Configuration
+# ============================================================================
+# Customize file summary generation behavior
+
+[summary]
+# Maximum file size to generate summary for in bytes (default: 1048576 = 1MB)
+# max_file_size = 1048576
+
+# Chunk size for large file processing (default: 4000)
+# chunk_size = 4000
+
+# Overlap size between chunks (default: 200)
+# overlap_size = 200
+
+# Summary generation strategy: auto, rule_based, model_enhanced, minimal (default: auto)
+strategy = "auto"
+
+# Enable file folding (default: true)
+enable_folding = true
+
+# Fold mode: minimal, standard, or full (default: standard)
+# fold_mode = "standard"
+
+# Maximum sections to include in summary (default: 10)
+# max_sections = 10
+
+# Minimum importance level to include (1-5, default: 2)
+# min_importance_level = 2
+
+# Enable test file summarization (default: true)
+# summarize_tests = true
+
+# Enable config file summarization (default: true)
+# summarize_configs = true
+
+# Maximum summary length in tokens (default: 2000)
+max_summary_length = 2000

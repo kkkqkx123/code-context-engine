@@ -1,0 +1,21 @@
+[package]
+name = "cce-scanner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-utils = { path = "../../core/cce-utils" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-plugin = { path = "../../core/cce-plugin" }
+cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
+
+serde = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

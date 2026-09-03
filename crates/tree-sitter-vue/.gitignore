@@ -1,0 +1,9 @@
+/build
+/node_modules
+
+/bindings/rust
+
+target
+**/*.wasm
+yarn.lock
+cargo.lock

@@ -1,0 +1,17 @@
+# Code Context Engine - Project Configuration for once_cell Benchmark
+# This file overrides global settings and defines project-specific rules.
+
+[scanner]
+include_patterns = ["*.rs", "*.toml", "*.md"]
+exclude_dirs = [".git", "target", "benches"]
+
+[orchestrator.indexer]
+extensions = ["rs", "toml", "md"]
+batch_size = 50
+max_concurrency = 5
+use_cache = false
+force_reindex = true
+store_vectors = true
+store_bm25 = true
+store_summaries = true
+build_relations = true

@@ -1,0 +1,62 @@
+[package]
+name = "cce-orchestrator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-utils = { path = "../../core/cce-utils" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-text = { path = "../../core/cce-text" }
+cce-plugin = { path = "../../core/cce-plugin" }
+cce-llm = { path = "../../core/cce-llm" }
+cce-parser = { path = "../../parser/cce-parser" }
+cce-relation = { path = "../../parser/cce-relation" }
+cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
+cce-storage-qdrant = { path = "../../infra/cce-storage-qdrant" }
+cce-storage-sqlite = { path = "../../infra/cce-storage-sqlite" }
+cce-storage-common = { path = "../../infra/cce-storage-common" }
+cce-scanner = { path = "../../infra/cce-scanner" }
+cce-llm-client = { path = "../../infra/cce-llm-client" }
+cce-circuit-breaker = { path = "../../infra/cce-circuit-breaker" }
+cce-metrics-infra = { path = "../../infra/cce-metrics-infra" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+zstd = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rkyv = { workspace = true, features = ["bytecheck", "alloc", "std"] }
+compact_str = { workspace = true, features = ["serde"] }
+smallvec = { workspace = true, features = ["serde"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+futures = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+lru = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+regex = { workspace = true }
+rayon = { workspace = true }
+walkdir = { workspace = true }
+notify = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+globset = { workspace = true }
+moka = { workspace = true }
+tantivy = { workspace = true }
+reqwest = { workspace = true }
+tree-sitter = { workspace = true }
+rusqlite = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[bench]]
+name = "hot_update_scaling"
+harness = false

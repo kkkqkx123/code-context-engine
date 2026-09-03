@@ -1,0 +1,25 @@
+[package]
+name = "cce-storage-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cce-types = { path = "../../core/cce-types" }
+cce-config = { path = "../../core/cce-config" }
+cce-metrics = { path = "../../core/cce-metrics" }
+cce-storage-common = { path = "../cce-storage-common" }
+rusqlite = { workspace = true, features = ["bundled"] }
+rkyv = { workspace = true, features = ["bytecheck", "alloc", "std"] }
+zstd = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

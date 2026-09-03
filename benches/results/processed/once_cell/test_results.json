@@ -1,0 +1,465 @@
+{
+  "test_suite": "once_cell functional tests",
+  "project": "once_cell",
+  "timestamp": "2026-05-31T04:19:39.909226Z",
+  "summary": {
+    "total": 9,
+    "passed": 6,
+    "failed": 3,
+    "pass_rate": 66.7
+  },
+  "results": [
+    {
+      "name": "TC-SETUP-001",
+      "passed": true,
+      "data": {
+        "project_id": 1
+      },
+      "checks": [
+        [
+          "project_created",
+          true,
+          "project_id=1"
+        ]
+      ]
+    },
+    {
+      "name": "TC-INDEX-001",
+      "passed": false,
+      "data": {
+        "success": true,
+        "files_scanned": 12,
+        "files_indexed": 10,
+        "failed_files": 0,
+        "total_entities": 885,
+        "total_relations": 1015,
+        "total_vectors": 809,
+        "elapsed_ms": 0,
+        "message": "Indexing completed, a total of 10 files were processed, 885 entities were extracted, and 1015 relationships were identified."
+      },
+      "checks": [
+        [
+          "files_indexed",
+          false,
+          "indexed=10 >= 14"
+        ],
+        [
+          "entities_extracted",
+          true,
+          "entities=885 > 50"
+        ],
+        [
+          "no_errors",
+          true,
+          "errors=[]"
+        ]
+      ]
+    },
+    {
+      "name": "TC-INDEX-003",
+      "passed": true,
+      "data": {
+        "success": true,
+        "files_scanned": 12,
+        "files_indexed": 10,
+        "failed_files": 0,
+        "total_entities": 885,
+        "total_relations": 1015,
+        "total_vectors": 809,
+        "elapsed_ms": 0,
+        "message": "Indexing completed, a total of 10 files were processed, 885 entities were extracted, and 1015 relationships were identified."
+      },
+      "checks": [
+        [
+          "no_errors",
+          true,
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "TC-SEARCH-001",
+      "passed": true,
+      "data": {
+        "success": true,
+        "total": 5,
+        "items": [
+          {
+            "id": 0,
+            "score": 0.6786122,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 9,
+            "score": 0.65677965,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 1,
+            "score": 0.653132,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 12,
+            "score": 0.6459439,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 6,
+            "score": 0.63640213,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          }
+        ],
+        "elapsed_ms": 345,
+        "sources_used": [
+          "dense_recall"
+        ]
+      },
+      "checks": [
+        [
+          "has_results",
+          true,
+          "results=5"
+        ],
+        [
+          "top_score_meaningful",
+          true,
+          "top_score=0.6786"
+        ]
+      ]
+    },
+    {
+      "name": "TC-SEARCH-002",
+      "passed": false,
+      "data": {
+        "success": true,
+        "total": 0,
+        "items": [],
+        "elapsed_ms": 32,
+        "sources_used": [
+          "bm25_recall"
+        ]
+      },
+      "checks": [
+        [
+          "has_results",
+          false,
+          "results=0"
+        ]
+      ]
+    },
+    {
+      "name": "TC-SEARCH-003",
+      "passed": true,
+      "data": {
+        "success": true,
+        "total": 10,
+        "items": [
+          {
+            "id": 69,
+            "score": 0.5,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 0,
+            "score": 0.5,
+            "file_path": "\\\\?\\D:\\项目\\agent\\tools\\code-context-engine\\benches\\fixtures\\once_cell\\src\\imp_std.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 58,
+            "score": 0.49999815,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 181,
+            "score": 0.44845214,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/src/lib.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 111,
+            "score": 0.44841987,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/src/race.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 200,
+            "score": 0.44836938,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/src/lib.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 94,
+            "score": 0.38830057,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 26,
+            "score": 0.35332906,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 104,
+            "score": 0.35329342,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/src/race.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          },
+          {
+            "id": 70,
+            "score": 0.3532528,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "hybrid"
+          }
+        ],
+        "elapsed_ms": 842,
+        "sources_used": [
+          "hybrid_recall(v=0.5, b=0.5)"
+        ]
+      },
+      "checks": [
+        [
+          "has_results",
+          true,
+          "results=10"
+        ]
+      ]
+    },
+    {
+      "name": "TC-SEARCH-004",
+      "passed": false,
+      "data": {
+        "success": true,
+        "total": 5,
+        "items": [
+          {
+            "id": 162,
+            "score": 0.5239613,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/src/race.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 102,
+            "score": 0.5239613,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/src/race.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 18,
+            "score": 0.50176305,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 71,
+            "score": 0.49580842,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          },
+          {
+            "id": 20,
+            "score": 0.49580842,
+            "file_path": "//?/D:/项目/agent/tools/code-context-engine/benches/fixtures/once_cell/tests/it/sync_once_cell.rs",
+            "code_chunk": "",
+            "start_line": 0,
+            "end_line": 0,
+            "source": "vector"
+          }
+        ],
+        "elapsed_ms": 1002,
+        "sources_used": [
+          "hybrid_recall(v=0.5, b=0.5)"
+        ]
+      },
+      "checks": [
+        [
+          "no_results_graceful",
+          false,
+          "items=5"
+        ],
+        [
+          "success_true",
+          true,
+          "success=True"
+        ]
+      ]
+    },
+    {
+      "name": "TC-STATUS-001",
+      "passed": true,
+      "data": {
+        "success": true,
+        "status": {
+          "vector_storage": {
+            "connected": true,
+            "item_count": 224,
+            "disk_usage_mb": 0.0
+          },
+          "bm25_storage": {
+            "connected": true,
+            "item_count": 0,
+            "disk_usage_mb": 0.0
+          },
+          "relation_storage": {
+            "connected": true,
+            "item_count": 1015,
+            "disk_usage_mb": 0.0
+          },
+          "cache_storage": {
+            "connected": true,
+            "item_count": 0,
+            "disk_usage_mb": 0.0
+          },
+          "total_disk_usage_mb": 0.0,
+          "process_status": {
+            "managed": true,
+            "status": "managed",
+            "running": true
+          }
+        }
+      },
+      "checks": [
+        [
+          "status_available",
+          true,
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "TC-STATUS-002",
+      "passed": true,
+      "data": {
+        "elapsed_ms": 0,
+        "statistics": {
+          "total_bm25_documents": 0,
+          "total_entities": 121,
+          "total_files": 0,
+          "total_relations": 1015,
+          "total_vectors": 224
+        },
+        "success": true
+      },
+      "checks": [
+        [
+          "stats_available",
+          true,
+          ""
+        ]
+      ]
+    }
+  ],
+  "failed_tests": [
+    {
+      "name": "TC-INDEX-001",
+      "checks": [
+        {
+          "name": "files_indexed",
+          "passed": false,
+          "detail": "indexed=10 >= 14"
+        },
+        {
+          "name": "entities_extracted",
+          "passed": true,
+          "detail": "entities=885 > 50"
+        },
+        {
+          "name": "no_errors",
+          "passed": true,
+          "detail": "errors=[]"
+        }
+      ]
+    },
+    {
+      "name": "TC-SEARCH-002",
+      "checks": [
+        {
+          "name": "has_results",
+          "passed": false,
+          "detail": "results=0"
+        }
+      ]
+    },
+    {
+      "name": "TC-SEARCH-004",
+      "checks": [
+        {
+          "name": "no_results_graceful",
+          "passed": false,
+          "detail": "items=5"
+        },
+        {
+          "name": "success_true",
+          "passed": true,
+          "detail": "success=True"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "plugins": [
+    {
+      "id": "flask_route_plugin",
+      "path": "./plugins/flask_routes.lua",
+      "enabled": true,
+      "description": "Flask Route Natural Language Template Extension",
+      "file_patterns": ["*.py"],
+      "languages": ["python"],
+      "capabilities": ["text_gen", "entity_extract"]
+    },
+    {
+      "id": "proto_format_plugin",
+      "path": "./plugins/proto_format.lua",
+      "enabled": true,
+      "description": "Proto document format parser (FormatParse demo)",
+      "file_patterns": ["*.proto"],
+      "capabilities": ["format_parse"]
+    },
+    {
+      "id": "group_hook_plugin",
+      "path": "./plugins/group_hook.lua",
+      "enabled": true,
+      "description": "Group post-processing hook (Group demo)",
+      "capabilities": ["group"]
+    },
+    {
+      "id": "rerank_plugin",
+      "path": "./plugins/rerank.lua",
+      "enabled": true,
+      "description": "Keyword query reranker (Rerank demo)",
+      "capabilities": ["rerank"]
+    },
+    {
+      "id": "group_override_plugin",
+      "path": "./plugins/group_override.lua",
+      "enabled": true,
+      "description": "Module-based full grouping override (GroupOverride demo)",
+      "file_patterns": ["*.module"],
+      "capabilities": ["group_override"]
+    },
+    {
+      "id": "spring_relations_plugin",
+      "path": "./plugins/spring_relations.lua",
+      "enabled": true,
+      "description": "Spring bean symbols + injection relations (RelationExtract demo)",
+      "file_patterns": ["*.java"],
+      "languages": ["java"],
+      "capabilities": ["relation_extract"]
+    },
+    {
+      "id": "query_hooks_plugin",
+      "path": "./plugins/query_hooks.lua",
+      "enabled": true,
+      "description": "Query rewrite + fusion weights + result filter (query-side demo)",
+      "capabilities": ["query_rewrite", "fusion", "result_filter"]
+    },
+    {
+      "id": "file_filter_plugin",
+      "path": "./plugins/file_filter.lua",
+      "enabled": true,
+      "description": "Force-exclude scratch dirs / force-include custom extension (FileFilter demo)",
+      "capabilities": ["file_filter"]
+    },
+    {
+      "id": "zig_symbol_extract_plugin",
+      "path": "./plugins/zig_symbol_extract.lua",
+      "enabled": true,
+      "description": "Zig @import paths + pub fn exports (SymbolExtract demo)",
+      "file_patterns": ["*.zig"],
+      "languages": ["zig"],
+      "capabilities": ["symbol_extract"]
+    },
+    {
+      "id": "tmpl_remap_plugin",
+      "path": "./plugins/tmpl_remap.lua",
+      "enabled": true,
+      "description": "Remaps 'tmpl' onto the host JavaScript grammar (LanguageRemap demo)",
+      "file_patterns": ["*.tmpl"],
+      "languages": ["tmpl"],
+      "capabilities": ["language_remap"]
+    },
+    {
+      "id": "tpl_heuristics_plugin",
+      "path": "./plugins/tpl_heuristics.lua",
+      "enabled": true,
+      "description": "Stdlib / test-file / entity-kind heuristics for the 'tmpl' language (LangHeuristics demo)",
+      "file_patterns": ["*.tmpl"],
+      "languages": ["tmpl"],
+      "capabilities": ["lang_heuristics"]
+    }
+  ]
+}

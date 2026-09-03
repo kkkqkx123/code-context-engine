@@ -1,0 +1,739 @@
+Node: _expression
+  Named: True
+  Parents: (root)
+  Direct Children: _primary_expression, binary_expression, concatenation, parenthesized_expression, postfix_expression, ternary_expression, unary_expression, word
+
+Node: _primary_expression
+  Named: True
+  Parents: _expression
+  Direct Children: ansi_c_string, arithmetic_expansion, brace_expression, command_substitution, expansion, number, process_substitution, raw_string, simple_expansion, string, translated_string, word
+
+Node: _statement
+  Named: True
+  Parents: (root)
+  Direct Children: c_style_for_statement, case_statement, command, compound_statement, declaration_command, for_statement, function_definition, if_statement, list, negated_command, pipeline, redirected_statement, subshell, test_command, unset_command, variable_assignment, variable_assignments, while_statement
+
+Node: arithmetic_expansion
+  Named: True
+  Parents: _primary_expression
+
+Node: array
+  Named: True
+  Parents: (root)
+
+Node: binary_expression
+  Named: True
+  Parents: _expression
+
+Node: brace_expression
+  Named: True
+  Parents: _primary_expression
+
+Node: c_style_for_statement
+  Named: True
+  Parents: _statement
+
+Node: case_item
+  Named: True
+  Parents: (root)
+
+Node: case_statement
+  Named: True
+  Parents: _statement
+
+Node: command
+  Named: True
+  Parents: _statement
+
+Node: command_name
+  Named: True
+  Parents: (root)
+
+Node: command_substitution
+  Named: True
+  Parents: _primary_expression
+
+Node: compound_statement
+  Named: True
+  Parents: _statement
+
+Node: concatenation
+  Named: True
+  Parents: _expression
+
+Node: declaration_command
+  Named: True
+  Parents: _statement
+
+Node: do_group
+  Named: True
+  Parents: (root)
+
+Node: elif_clause
+  Named: True
+  Parents: (root)
+
+Node: else_clause
+  Named: True
+  Parents: (root)
+
+Node: expansion
+  Named: True
+  Parents: _primary_expression
+
+Node: file_redirect
+  Named: True
+  Parents: (root)
+
+Node: for_statement
+  Named: True
+  Parents: _statement
+
+Node: function_definition
+  Named: True
+  Parents: _statement
+
+Node: heredoc_body
+  Named: True
+  Parents: (root)
+
+Node: heredoc_redirect
+  Named: True
+  Parents: (root)
+
+Node: herestring_redirect
+  Named: True
+  Parents: (root)
+
+Node: if_statement
+  Named: True
+  Parents: _statement
+
+Node: list
+  Named: True
+  Parents: _statement
+
+Node: negated_command
+  Named: True
+  Parents: _statement
+
+Node: number
+  Named: True
+  Parents: _primary_expression
+
+Node: parenthesized_expression
+  Named: True
+  Parents: _expression
+
+Node: pipeline
+  Named: True
+  Parents: _statement
+
+Node: postfix_expression
+  Named: True
+  Parents: _expression
+
+Node: process_substitution
+  Named: True
+  Parents: _primary_expression
+
+Node: program
+  Named: True
+  Parents: (root)
+
+Node: redirected_statement
+  Named: True
+  Parents: _statement
+
+Node: simple_expansion
+  Named: True
+  Parents: _primary_expression
+
+Node: string
+  Named: True
+  Parents: _primary_expression
+
+Node: subscript
+  Named: True
+  Parents: (root)
+
+Node: subshell
+  Named: True
+  Parents: _statement
+
+Node: ternary_expression
+  Named: True
+  Parents: _expression
+
+Node: test_command
+  Named: True
+  Parents: _statement
+
+Node: translated_string
+  Named: True
+  Parents: _primary_expression
+
+Node: unary_expression
+  Named: True
+  Parents: _expression
+
+Node: unset_command
+  Named: True
+  Parents: _statement
+
+Node: variable_assignment
+  Named: True
+  Parents: _statement
+
+Node: variable_assignments
+  Named: True
+  Parents: _statement
+
+Node: while_statement
+  Named: True
+  Parents: _statement
+
+Node: word
+  Named: True
+  Parents: _expression, _primary_expression
+
+Node: !
+  Named: False
+  Parents: (root)
+
+Node: !=
+  Named: False
+  Parents: (root)
+
+Node: "
+  Named: False
+  Parents: (root)
+
+Node: #
+  Named: False
+  Parents: (root)
+
+Node: ##
+  Named: False
+  Parents: (root)
+
+Node: $
+  Named: False
+  Parents: (root)
+
+Node: $(
+  Named: False
+  Parents: (root)
+
+Node: $((
+  Named: False
+  Parents: (root)
+
+Node: $[
+  Named: False
+  Parents: (root)
+
+Node: $`
+  Named: False
+  Parents: (root)
+
+Node: ${
+  Named: False
+  Parents: (root)
+
+Node: %
+  Named: False
+  Parents: (root)
+
+Node: %%
+  Named: False
+  Parents: (root)
+
+Node: %=
+  Named: False
+  Parents: (root)
+
+Node: &
+  Named: False
+  Parents: (root)
+
+Node: &&
+  Named: False
+  Parents: (root)
+
+Node: &=
+  Named: False
+  Parents: (root)
+
+Node: &>
+  Named: False
+  Parents: (root)
+
+Node: &>>
+  Named: False
+  Parents: (root)
+
+Node: (
+  Named: False
+  Parents: (root)
+
+Node: ((
+  Named: False
+  Parents: (root)
+
+Node: )
+  Named: False
+  Parents: (root)
+
+Node: ))
+  Named: False
+  Parents: (root)
+
+Node: *
+  Named: False
+  Parents: (root)
+
+Node: **
+  Named: False
+  Parents: (root)
+
+Node: **=
+  Named: False
+  Parents: (root)
+
+Node: *=
+  Named: False
+  Parents: (root)
+
+Node: +
+  Named: False
+  Parents: (root)
+
+Node: ++
+  Named: False
+  Parents: (root)
+
+Node: +=
+  Named: False
+  Parents: (root)
+
+Node: ,
+  Named: False
+  Parents: (root)
+
+Node: ,,
+  Named: False
+  Parents: (root)
+
+Node: -
+  Named: False
+  Parents: (root)
+
+Node: --
+  Named: False
+  Parents: (root)
+
+Node: -=
+  Named: False
+  Parents: (root)
+
+Node: -a
+  Named: False
+  Parents: (root)
+
+Node: -o
+  Named: False
+  Parents: (root)
+
+Node: ..
+  Named: False
+  Parents: (root)
+
+Node: /
+  Named: False
+  Parents: (root)
+
+Node: /#
+  Named: False
+  Parents: (root)
+
+Node: /%
+  Named: False
+  Parents: (root)
+
+Node: //
+  Named: False
+  Parents: (root)
+
+Node: /=
+  Named: False
+  Parents: (root)
+
+Node: :
+  Named: False
+  Parents: (root)
+
+Node: :+
+  Named: False
+  Parents: (root)
+
+Node: :-
+  Named: False
+  Parents: (root)
+
+Node: :=
+  Named: False
+  Parents: (root)
+
+Node: :?
+  Named: False
+  Parents: (root)
+
+Node: ;
+  Named: False
+  Parents: (root)
+
+Node: ;&
+  Named: False
+  Parents: (root)
+
+Node: ;;
+  Named: False
+  Parents: (root)
+
+Node: ;;&
+  Named: False
+  Parents: (root)
+
+Node: <
+  Named: False
+  Parents: (root)
+
+Node: <&
+  Named: False
+  Parents: (root)
+
+Node: <&-
+  Named: False
+  Parents: (root)
+
+Node: <(
+  Named: False
+  Parents: (root)
+
+Node: <<
+  Named: False
+  Parents: (root)
+
+Node: <<-
+  Named: False
+  Parents: (root)
+
+Node: <<<
+  Named: False
+  Parents: (root)
+
+Node: <<=
+  Named: False
+  Parents: (root)
+
+Node: <=
+  Named: False
+  Parents: (root)
+
+Node: =
+  Named: False
+  Parents: (root)
+
+Node: ==
+  Named: False
+  Parents: (root)
+
+Node: =~
+  Named: False
+  Parents: (root)
+
+Node: >
+  Named: False
+  Parents: (root)
+
+Node: >&
+  Named: False
+  Parents: (root)
+
+Node: >&-
+  Named: False
+  Parents: (root)
+
+Node: >(
+  Named: False
+  Parents: (root)
+
+Node: >=
+  Named: False
+  Parents: (root)
+
+Node: >>
+  Named: False
+  Parents: (root)
+
+Node: >>=
+  Named: False
+  Parents: (root)
+
+Node: >|
+  Named: False
+  Parents: (root)
+
+Node: ?
+  Named: False
+  Parents: (root)
+
+Node: @
+  Named: False
+  Parents: (root)
+
+Node: A
+  Named: False
+  Parents: (root)
+
+Node: E
+  Named: False
+  Parents: (root)
+
+Node: K
+  Named: False
+  Parents: (root)
+
+Node: L
+  Named: False
+  Parents: (root)
+
+Node: P
+  Named: False
+  Parents: (root)
+
+Node: Q
+  Named: False
+  Parents: (root)
+
+Node: U
+  Named: False
+  Parents: (root)
+
+Node: [
+  Named: False
+  Parents: (root)
+
+Node: [[
+  Named: False
+  Parents: (root)
+
+Node: ]
+  Named: False
+  Parents: (root)
+
+Node: ]]
+  Named: False
+  Parents: (root)
+
+Node: ^
+  Named: False
+  Parents: (root)
+
+Node: ^=
+  Named: False
+  Parents: (root)
+
+Node: ^^
+  Named: False
+  Parents: (root)
+
+Node: `
+  Named: False
+  Parents: (root)
+
+Node: ``
+  Named: False
+  Parents: (root)
+
+Node: a
+  Named: False
+  Parents: (root)
+
+Node: ansi_c_string
+  Named: True
+  Parents: _primary_expression
+
+Node: case
+  Named: False
+  Parents: (root)
+
+Node: comment
+  Named: True
+  Parents: (root)
+
+Node: declare
+  Named: False
+  Parents: (root)
+
+Node: do
+  Named: False
+  Parents: (root)
+
+Node: done
+  Named: False
+  Parents: (root)
+
+Node: elif
+  Named: False
+  Parents: (root)
+
+Node: else
+  Named: False
+  Parents: (root)
+
+Node: esac
+  Named: False
+  Parents: (root)
+
+Node: export
+  Named: False
+  Parents: (root)
+
+Node: extglob_pattern
+  Named: True
+  Parents: (root)
+
+Node: fi
+  Named: False
+  Parents: (root)
+
+Node: file_descriptor
+  Named: True
+  Parents: (root)
+
+Node: for
+  Named: False
+  Parents: (root)
+
+Node: function
+  Named: False
+  Parents: (root)
+
+Node: heredoc_content
+  Named: True
+  Parents: (root)
+
+Node: heredoc_end
+  Named: True
+  Parents: (root)
+
+Node: heredoc_start
+  Named: True
+  Parents: (root)
+
+Node: if
+  Named: False
+  Parents: (root)
+
+Node: in
+  Named: False
+  Parents: (root)
+
+Node: k
+  Named: False
+  Parents: (root)
+
+Node: local
+  Named: False
+  Parents: (root)
+
+Node: raw_string
+  Named: True
+  Parents: _primary_expression
+
+Node: readonly
+  Named: False
+  Parents: (root)
+
+Node: regex
+  Named: True
+  Parents: (root)
+
+Node: select
+  Named: False
+  Parents: (root)
+
+Node: special_variable_name
+  Named: True
+  Parents: (root)
+
+Node: string_content
+  Named: True
+  Parents: (root)
+
+Node: test_operator
+  Named: True
+  Parents: (root)
+
+Node: then
+  Named: False
+  Parents: (root)
+
+Node: typeset
+  Named: False
+  Parents: (root)
+
+Node: u
+  Named: False
+  Parents: (root)
+
+Node: unset
+  Named: False
+  Parents: (root)
+
+Node: unsetenv
+  Named: False
+  Parents: (root)
+
+Node: until
+  Named: False
+  Parents: (root)
+
+Node: variable_name
+  Named: True
+  Parents: (root)
+
+Node: while
+  Named: False
+  Parents: (root)
+
+Node: {
+  Named: False
+  Parents: (root)
+
+Node: |
+  Named: False
+  Parents: (root)
+
+Node: |&
+  Named: False
+  Parents: (root)
+
+Node: |=
+  Named: False
+  Parents: (root)
+
+Node: ||
+  Named: False
+  Parents: (root)
+
+Node: }
+  Named: False
+  Parents: (root)
+
+Node: ~
+  Named: False
+  Parents: (root)
+

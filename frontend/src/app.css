@@ -1,0 +1,446 @@
+/* Swiss Minimalist / Tech Industrial Design System */
+/* Color Palette - Strict Enforcement */
+:root {
+	--black: #0a0a0a;
+	--white: #fafafa;
+	--accent: #e63600; /* Brand emphasis only — not for body text (contrast 4.11:1 fails AA) */
+	--gray-50: #fafafa;
+	--gray-100: #f5f5f5;
+	--gray-200: #e5e5e5;
+	--gray-300: #d4d4d4;
+	--gray-400: #8a8a8a; /* Decorative / non-text only (contrast 3.31:1 on white) */
+	--gray-500: #737373; /* Small secondary text (contrast 4.6:1 on white, passes AA) */
+	--gray-600: #525252;
+	--gray-700: #404040;
+	--gray-800: #262626;
+	--gray-900: #171717;
+
+	/* Semantic status tokens — WCAG AA compliant on white (>= 4.5:1) */
+	--info: #2563eb;    /* 6.5:1 on white */
+	--success: #1b7a3d; /* 5.9:1 on white */
+	--warning: #8a6d00; /* 5.7:1 on white */
+	--danger: #c62828;  /* 6.5:1 on white */
+
+	/* Soft tinted backgrounds for status banners (light bg + dark text) */
+	--info-bg: #eff6ff;
+	--success-bg: #f0fdf4;
+	--warning-bg: #fefce8;
+	--danger-bg: #fef2f2;
+	--accent-bg: #fef2f0;
+
+	/* Status colors tuned for dark backgrounds (LogViewer, Toast) */
+	--status-created: #4ade80;  /* bright green on black */
+	--status-modified: #fbbf24; /* amber on black */
+	--status-deleted: #f87171;  /* light red on black */
+}
+
+/* Reset & Base Styles */
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html {
+	font-size: 16px;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+body {
+	font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+	background: var(--white);
+	color: var(--black);
+	line-height: 1.5;
+	overflow-x: hidden;
+}
+
+/* Typography System */
+h1, h2, h3, h4, h5, h6 {
+	font-family: 'Space Grotesk', sans-serif;
+	font-weight: 700;
+	letter-spacing: -0.03em;
+	line-height: 1.05;
+	color: var(--black);
+}
+
+h1 {
+	font-size: clamp(2.5rem, 5vw, 4rem);
+}
+
+h2 {
+	font-size: clamp(2rem, 4vw, 3rem);
+}
+
+h3 {
+	font-size: clamp(1.5rem, 3vw, 2rem);
+}
+
+p {
+	font-family: 'Space Grotesk', sans-serif;
+	font-size: 1rem;
+	color: var(--gray-600);
+	line-height: 1.7;
+}
+
+/* Labels & Meta Text */
+.label, .meta, small {
+	font-family: 'Space Mono', monospace;
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--gray-600);
+}
+
+/* Code Blocks */
+code, pre {
+	font-family: 'Space Mono', monospace;
+	font-size: 0.85rem;
+}
+
+pre {
+	background: var(--black);
+	color: var(--white);
+	padding: 1.5rem;
+	overflow-x: auto;
+	line-height: 1.8;
+}
+
+code {
+	background: var(--gray-100);
+	padding: 0.2em 0.4em;
+}
+
+pre code {
+	background: transparent;
+	padding: 0;
+}
+
+/* Layout System */
+.container {
+	max-width: 1400px;
+	margin: 0 auto;
+	padding: 0 2rem;
+}
+
+/* Grid Utilities */
+.grid {
+	display: grid;
+	gap: 2rem;
+}
+
+.grid-2 {
+	grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-3 {
+	grid-template-columns: repeat(3, 1fr);
+}
+
+.grid-4 {
+	grid-template-columns: repeat(4, 1fr);
+}
+
+/* Section Spacing */
+.section {
+	padding: 6rem 0;
+	border-bottom: 1px solid var(--black);
+}
+
+/* Borders & Dividers */
+.border-top {
+	border-top: 1px solid var(--black);
+}
+
+.border-bottom {
+	border-bottom: 1px solid var(--black);
+}
+
+.divider {
+	border-bottom: 1px solid var(--gray-200);
+}
+
+/* Component Patterns */
+
+/* Buttons - CTA Style */
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 1rem 1.75rem;
+	background: var(--black);
+	color: var(--white);
+	font-family: 'Space Mono', monospace;
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	border: none;
+	cursor: pointer;
+	transition: all 0.3s;
+	text-decoration: none;
+	width: fit-content;
+}
+
+.btn:hover {
+	background: var(--accent);
+	transform: translateX(4px);
+}
+
+.btn-secondary {
+	background: var(--white);
+	color: var(--black);
+	border: 1px solid var(--black);
+}
+
+.btn-secondary:hover {
+	background: var(--black);
+	color: var(--white);
+}
+
+.btn-danger {
+	background: var(--danger);
+	color: var(--white);
+}
+
+.btn-danger:hover {
+	background: var(--black);
+}
+
+/* Cards — hover behavior is scoped to .card-clickable in Card.svelte */
+.card {
+	background: var(--white);
+	border: 1px solid var(--black);
+	padding: 2rem;
+	transition: background 0.3s;
+}
+
+/* Forms */
+.input, .select, .textarea {
+	width: 100%;
+	padding: 0.75rem 1rem;
+	font-family: 'Space Grotesk', sans-serif;
+	font-size: 1rem;
+	color: var(--black);
+	background: var(--white);
+	border: 1px solid var(--black);
+	outline: none;
+	transition: border-color 0.3s;
+}
+
+.input:focus, .select:focus, .textarea:focus {
+	border-color: var(--accent);
+}
+
+.textarea {
+	min-height: 150px;
+	resize: vertical;
+}
+
+/* Tables */
+.table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.table th,
+.table td {
+	padding: 1rem;
+	text-align: left;
+	border-bottom: 1px solid var(--gray-200);
+}
+
+.table th {
+	font-family: 'Space Mono', monospace;
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--gray-600);
+	font-weight: 400;
+}
+
+/* Badges */
+.badge {
+	display: inline-block;
+	padding: 0.25rem 0.75rem;
+	font-family: 'Space Mono', monospace;
+	font-size: 0.65rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	border: 1px solid var(--black);
+}
+
+.badge-active {
+	background: var(--accent);
+	color: var(--white);
+	border-color: var(--accent);
+}
+
+.badge-inactive {
+	background: var(--gray-200);
+	color: var(--gray-700);
+}
+
+.badge-info {
+	background: var(--info);
+	color: var(--white);
+	border-color: var(--info);
+}
+
+.badge-success {
+	background: var(--success);
+	color: var(--white);
+	border-color: var(--success);
+}
+
+.badge-warning {
+	background: var(--warning);
+	color: var(--white);
+	border-color: var(--warning);
+}
+
+.badge-danger {
+	background: var(--danger);
+	color: var(--white);
+	border-color: var(--danger);
+}
+
+/* Progress Bar */
+.progress-bar {
+	width: 100%;
+	height: 4px;
+	background: var(--gray-200);
+	position: relative;
+	overflow: hidden;
+}
+
+.progress-fill {
+	height: 100%;
+	background: var(--black);
+	transition: width 0.3s ease;
+}
+
+/* Navigation Links */
+.nav-link {
+	font-family: 'Space Mono', monospace;
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	color: var(--black);
+	text-decoration: none;
+	position: relative;
+}
+
+.nav-link::after {
+	content: '';
+	position: absolute;
+	bottom: -4px;
+	left: 0;
+	width: 100%;
+	height: 1px;
+	background: var(--black);
+	transform: scaleX(0);
+	transition: transform 0.3s;
+}
+
+.nav-link:hover::after {
+	transform: scaleX(1);
+}
+
+/* Animation Utilities */
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.fade-in {
+	animation: fadeIn 0.55s cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+}
+
+/* Responsive Breakpoints */
+@media (max-width: 1024px) {
+	.grid-2,
+	.grid-3,
+	.grid-4 {
+		grid-template-columns: 1fr;
+	}
+
+	.container {
+		padding: 0 1.5rem;
+	}
+
+	.section {
+		padding: 4rem 0;
+	}
+}
+
+@media (max-width: 768px) {
+	html {
+		font-size: 14px;
+	}
+
+	.container {
+		padding: 0 1rem;
+	}
+
+	h1 {
+		font-size: 2rem;
+	}
+
+	h2 {
+		font-size: 1.75rem;
+	}
+	
+	/* Touch target optimization - WCAG 2.5.5 */
+	button,
+	[role="button"],
+	input,
+	select,
+	textarea,
+	a.nav-link {
+		min-height: 44px;
+		min-width: 44px;
+	}
+	
+	/* Prevent iOS zoom on input focus */
+	.input,
+	.select,
+	.textarea,
+	input,
+	select,
+	textarea {
+		font-size: 16px !important;
+	}
+}
+
+/* Mobile-specific optimizations */
+@media (max-width: 480px) {
+	.container {
+		padding: 0 0.75rem;
+	}
+	
+	.section {
+		padding: 3rem 0;
+	}
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* Focus States for Keyboard Navigation */
+*:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}

@@ -1,0 +1,14 @@
+[package]
+name = "cce-llm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "LLM trait abstractions for the code context engine"
+
+[dependencies]
+cce-types = { path = "../cce-types" }
+cce-config = { path = "../cce-config" }
+cce-circuit-breaker = { path = "../../infra/cce-circuit-breaker" }
+thiserror = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }

@@ -1,0 +1,29 @@
+[package]
+name = "cce-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "CLI client for Code Context Engine"
+
+[[bin]]
+name = "cce-cli"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+reqwest = { workspace = true, features = ["json", "rustls-tls", "multipart"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+dirs = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+cce-api = { path = "../cce-api" }
+
+clap = { version = "4.6", features = ["derive", "env", "color", "suggestions"] }
+colored = "3.1"
+comfy-table = "8.0"
+urlencoding = "2.1"

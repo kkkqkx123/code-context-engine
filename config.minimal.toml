@@ -1,0 +1,79 @@
+# Code Context Engine - Global Benchmark Configuration
+# This file contains shared settings for all benchmark fixtures.
+
+[server]
+host = "127.0.0.1"
+port = 9001
+
+[database.qdrant]
+url = "http://localhost:6333"
+vector_size = 1024
+distance_metric = "cosine"
+enabled = true
+
+[database.sqlite]
+# Global default path, can be overridden by project config
+path = "benches/data/global_metadata.db"
+enable_wal = true
+
+[database.bm25]
+enabled = true
+# Local index path for embedded Tantivy
+index_path = "benches/data/bm25_index"
+
+[llm]
+enabled = true
+# Each model resolves to exactly one provider. Provider routing/failover is handled outside this project.
+
+[llm.providers.siliconflow]
+name = "SiliconFlow"
+provider_type = "remote"
+base_url = "https://api.siliconflow.cn/v1"
+api_keys = ["${CCE_LLM_API_KEY_SILICONFLOW}"]
+timeout_secs = 30
+max_retries = 5
+retry_delay_ms = 1000
+rate_limit_max_retries = 20
+
+[llm.embedding_models.bge-m3]
+provider_id = "siliconflow"
+model = "BAAI/bge-m3"
+vector_dimension = 1024
+max_batch_tokens = 8192
+max_item_tokens = 8192
+preprocessor = { type = "none" }
+
+[llm.chat_models.qwen35-4b]
+provider_id = "siliconflow"
+model = "Qwen/Qwen3.5-4B"
+temperature = 0.1
+max_tokens = 4096
+top_p = 1.0
+max_input_tokens = 8192
+
+[llm.defaults]
+embedding = "bge-m3"
+chat = "qwen35-4b"
+
+[embedder]
+default_model = "bge-m3"
+max_batch_tokens = 8192
+max_item_tokens = 8192
+timeout_secs = 60
+max_retries = 3
+retry_delay_ms = 2000
+use_base64 = true
+
+[scanner]
+follow_symlinks = false
+respect_gitignore = true
+exclude_patterns = [".git", "target", "node_modules"]
+max_file_size = 512000
+
+[orchestrator.batch]
+scan_batch_size = 50
+parse_concurrency = 5
+process_concurrency = 3
+store_batch_size = 20
+embedding_batch_size = 10
+embedding_batch_delay_ms = 200

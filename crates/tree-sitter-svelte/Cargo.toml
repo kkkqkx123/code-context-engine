@@ -1,0 +1,29 @@
+[package]
+name = "tree-sitter-svelte"
+version = "0.10.2"
+authors = ["Himujjal <himu@tuta.io>"]
+readme = "bindings/rust/README.md"
+keywords = ["incremental", "parsing", "svelte"]
+categories = ["parsing", "text-editors", "tree_sitter"]
+repository = "https://github.com/Himujjal/tree-sitter-svelte"
+edition = "2018"
+description = "Tree sitter grammar for Svelte"
+license = "MIT"
+
+build = "bindings/rust/build.rs"
+include = [
+  "bindings/rust/*",
+  "grammar.js",
+  "queries/*",
+  "src/*",
+]
+
+[lib]
+path = "bindings/rust/lib.rs"
+
+[dependencies]
+tree-sitter = "0.26"
+
+[build-dependencies]
+cc = "1.0"
+
