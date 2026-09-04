@@ -47,15 +47,11 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
 /// Extract type information from a variable entity's metadata.
 ///
 /// Checks metadata keys populated by the parser in priority order:
-/// 1. `type_annotation` / `variable_type` — explicit type annotation (High)
+/// 1. `type_annotation` — explicit type annotation (High)
 /// 2. `constructor_type` — constructor call like `x = MyClass()` (Medium)
 /// 3. `literal_type` — literal assignment like `x = 42` (Medium)
 pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
-    if let Some(type_name) = entity
-        .metadata
-        .get("type_annotation")
-        .or_else(|| entity.metadata.get("variable_type"))
-    {
+    if let Some(type_name) = entity.metadata.get("type_annotation") {
         let binding = TypeBinding {
             type_name: type_name.clone(),
             type_entity_id: None,
@@ -97,14 +93,11 @@ pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
 /// Extract type information from a field/property entity.
 ///
 /// Checks metadata keys in priority order:
-/// 1. `type_annotation` / `variable_type` — explicit type annotation (High)
-/// 2. `field_type` — parser-inferred field type (Medium)
+/// 1. `type_annotation` — explicit type annotation (High)
+/// 2. `constructor_type` — initializer like `x = MyClass()` (Medium)
+/// 3. `literal_type` — literal initializer like `x = 42` (Medium)
 pub fn extract_field_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
-    if let Some(type_name) = entity
-        .metadata
-        .get("type_annotation")
-        .or_else(|| entity.metadata.get("variable_type"))
-    {
+    if let Some(type_name) = entity.metadata.get("type_annotation") {
         let binding = TypeBinding {
             type_name: type_name.clone(),
             type_entity_id: None,
@@ -116,16 +109,29 @@ pub fn extract_field_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
         return;
     }
 
-    if let Some(field_type) = entity.metadata.get("field_type") {
+    if let Some(init_type) = entity.metadata.get("constructor_type") {
         let binding = TypeBinding {
-            type_name: field_type.clone(),
+            type_name: init_type.clone(),
             type_entity_id: None,
             span: entity.span,
-            origin: Some(InferenceOrigin::TypeAnnotation),
-            shape: parse_type_shape(field_type, ctx.language()),
+            origin: Some(InferenceOrigin::ConstructorCall),
+            shape: parse_type_shape(init_type, ctx.language()),
         };
         ctx.add_variable_type(entity.name.clone(), binding);
-        try_bind_generic(ctx, field_type);
+        try_bind_generic(ctx, init_type);
+        return;
+    }
+
+    if let Some(lit_type) = entity.metadata.get("literal_type") {
+        let binding = TypeBinding {
+            type_name: lit_type.clone(),
+            type_entity_id: None,
+            span: entity.span,
+            origin: Some(InferenceOrigin::LiteralType),
+            shape: parse_type_shape(lit_type, ctx.language()),
+        };
+        ctx.add_variable_type(entity.name.clone(), binding);
+        try_bind_generic(ctx, lit_type);
     }
 }
 
@@ -295,13 +301,12 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_variable_type_variable_type() {
+    fn test_extract_variable_type_unrecognized_key_yields_none() {
+        // Legacy `variable_type` keys are no longer produced or consumed.
         let entity = make_variable_entity(1, "x", vec![("variable_type", "int")]);
         let mut ctx = ScopedTypeContext::new(Language::Python);
         extract_variable_type(&entity, &mut ctx);
-        let binding = ctx.get_variable_type("x").unwrap();
-        assert_eq!(binding.type_name, "int");
-        assert_eq!(binding.origin, Some(InferenceOrigin::TypeAnnotation));
+        assert!(ctx.get_variable_type("x").is_none());
     }
 
     #[test]
@@ -376,12 +381,32 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_field_type_field_type() {
+    fn test_extract_field_type_constructor_call() {
+        let entity = make_variable_entity(1, "user", vec![("constructor_type", "User")]);
+        let mut ctx = ScopedTypeContext::new(Language::Python);
+        extract_field_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("user").unwrap();
+        assert_eq!(binding.type_name, "User");
+        assert_eq!(binding.origin, Some(InferenceOrigin::ConstructorCall));
+    }
+
+    #[test]
+    fn test_extract_field_type_literal() {
+        let entity = make_variable_entity(1, "count", vec![("literal_type", "int")]);
+        let mut ctx = ScopedTypeContext::new(Language::Python);
+        extract_field_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("count").unwrap();
+        assert_eq!(binding.type_name, "int");
+        assert_eq!(binding.origin, Some(InferenceOrigin::LiteralType));
+    }
+
+    #[test]
+    fn test_extract_field_type_legacy_key_yields_none() {
+        // Legacy `field_type` keys are no longer produced or consumed.
         let entity = make_variable_entity(1, "name", vec![("field_type", "String")]);
         let mut ctx = ScopedTypeContext::new(Language::Python);
         extract_field_type(&entity, &mut ctx);
-        let binding = ctx.get_variable_type("name").unwrap();
-        assert_eq!(binding.type_name, "String");
+        assert!(ctx.get_variable_type("name").is_none());
     }
 
     #[test]
@@ -393,11 +418,11 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_field_type_priority_type_annotation_over_field() {
+    fn test_extract_field_type_priority_annotation_over_constructor() {
         let entity = make_variable_entity(
             1,
             "name",
-            vec![("type_annotation", "String"), ("field_type", "int")],
+            vec![("type_annotation", "String"), ("constructor_type", "Foo")],
         );
         let mut ctx = ScopedTypeContext::new(Language::Python);
         extract_field_type(&entity, &mut ctx);

@@ -155,6 +155,15 @@ pub fn entity_query() -> &'static str {
   value: (_) @entity.variable.normal.value?
 ) @entity.variable.normal
 
+; Initialized variable declaration, e.g. `int x = 1;`
+(declaration
+  type: (_) @entity.variable.init.type
+  declarator: (init_declarator
+    declarator: (identifier) @entity.variable.init.name
+    value: (_) @entity.variable.init.value
+  )
+) @entity.variable.init
+
 ; Array declaration (single and multi-dimensional)
 (declaration
   type: (_) @entity.variable.array.type

@@ -32,6 +32,10 @@ pub(crate) fn classify_comment(comment: &Comment) -> CommentClass {
     let trimmed = comment.text.trim_start();
     if trimmed.starts_with("///") {
         CommentClass::OuterDoc
+    } else if is_yard_doc_line(trimmed) {
+        // `# @return [T]` style API doc lines (Ruby YARD and similar `@tag`
+        // conventions) read as documentation, not plain remarks.
+        CommentClass::OuterDoc
     } else if trimmed.starts_with("//!") || trimmed.starts_with("#!") || trimmed.starts_with("/*!")
     {
         CommentClass::InnerDoc
@@ -50,6 +54,27 @@ pub(crate) fn classify_comment(comment: &Comment) -> CommentClass {
     } else {
         CommentClass::Plain
     }
+}
+
+/// Whether a `#` line comment carries an API doc tag (`@return`, `@param`,
+/// `@type`, ...). Plain `#` remarks (including `# type:` comments and
+/// shebangs, handled by earlier arms) stay on the plain channel.
+fn is_yard_doc_line(trimmed: &str) -> bool {
+    let Some(body) = trimmed.strip_prefix('#') else {
+        return false;
+    };
+    let body = body.trim_start();
+    if !body.starts_with('@') {
+        return false;
+    }
+    let tag: String = body[1..]
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    matches!(
+        tag.as_str(),
+        "return" | "param" | "type" | "option" | "raise"
+    )
 }
 
 /// Detect the doc line marker family of a comment, if any.

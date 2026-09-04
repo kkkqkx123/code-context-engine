@@ -143,7 +143,6 @@ impl ClassMethodProcessor {
                 line_count < LARGE_CLASS_THRESHOLD
                     && (!pattern_result.methods.is_empty() || has_getter_setter)
             };
-
             if should_merge {
                 // Small class: merge with fields and methods
                 let field_entities: Vec<Entity> = fields.iter().map(|f| (*f).clone()).collect();
@@ -203,6 +202,17 @@ impl ClassMethodProcessor {
                 processed_ids.insert(entity.id);
 
                 for child in &pattern_result.methods {
+                    // Constructors/destructors stay covered by the class
+                    // group span; emitting them standalone would nest a
+                    // same-named function-like group inside the class group.
+                    if matches!(
+                        child.kind,
+                        cce_types::entity::EntityKind::Constructor
+                            | cce_types::entity::EntityKind::Destructor
+                    ) {
+                        processed_ids.insert(child.id);
+                        continue;
+                    }
                     if !processed_ids.contains(&child.id) {
                         groups.push(EntityGroup::from_entity(child.clone(), language));
                         processed_ids.insert(child.id);
@@ -238,6 +248,15 @@ impl ClassMethodProcessor {
             if !processed_ids.contains(&entity.id) {
                 // Skip local variables
                 if matches!(entity.kind, cce_types::entity::EntityKind::Variable) {
+                    continue;
+                }
+                // Skip constructors/destructors — they belong to their parent class
+                // and should not appear as standalone top-level groups.
+                if matches!(
+                    entity.kind,
+                    cce_types::entity::EntityKind::Constructor
+                        | cce_types::entity::EntityKind::Destructor
+                ) {
                     continue;
                 }
                 // Skip single-char name entities (typically generic params like T, F)

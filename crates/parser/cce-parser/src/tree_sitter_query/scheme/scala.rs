@@ -68,6 +68,7 @@ pub fn entity_query() -> &'static str {
 (function_definition
   name: (identifier) @entity.function.name
   parameters: (parameters)? @entity.function.params
+  return_type: (_)? @entity.function.return_type
   body: (_)? @entity.function.body
 ) @entity.function
 
@@ -77,15 +78,17 @@ pub fn entity_query() -> &'static str {
 
 ; Val definition (immutable variable)
 (val_definition
-  pattern: (identifier) @entity.variable.val.name
-  type: (_)? @entity.variable.val.type
-) @entity.variable.val
+  pattern: (identifier) @entity.variable.name
+  type: (_)? @entity.variable.type
+  value: (_)? @entity.variable.value
+) @entity.variable
 
 ; Var definition (mutable variable)
 (var_definition
-  pattern: (identifier) @entity.variable.var.name
-  type: (_)? @entity.variable.var.type
-) @entity.variable.var
+  pattern: (identifier) @entity.variable.name
+  type: (_)? @entity.variable.type
+  value: (_)? @entity.variable.value
+) @entity.variable
 
 ; ============================================
 ; 4. Package and Imports
@@ -377,5 +380,60 @@ mod tests {
             "Comment query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    fn print_node(node: tree_sitter::Node, source: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let text = if node.child_count() == 0 {
+            let start = node.start_byte();
+            let end = node.end_byte();
+            &source[start..end]
+        } else {
+            ""
+        };
+        println!("{}{}: {:?}", indent, node.kind(), text);
+
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i as u32) {
+                if let Some(field_name) = node.field_name_for_child(i as u32) {
+                    println!("{}  [field: {}]", indent, field_name);
+                }
+                print_node(child, source, depth + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn dump_scala_node_types() {
+        let mut parser = tree_sitter::Parser::new();
+        let language: tree_sitter::Language = tree_sitter_scala::LANGUAGE.into();
+        parser.set_language(&language).unwrap();
+
+        let cases = vec![
+            (
+                "Function with return type",
+                "def add(a: Int, b: Int): Int = a + b",
+            ),
+            (
+                "Function without return type",
+                "def add(a: Int, b: Int) = a + b",
+            ),
+            ("Val with type", "val x: Int = 10"),
+            ("Val without type", "val x = 10"),
+            ("Var with type", "var y: String = \"hello\""),
+            (
+                "Match expression",
+                "x match { case s: String => s.length, case n: Int => n }",
+            ),
+            ("Constructor call", "val user = new User(\"name\")"),
+            ("Class with methods", "class Foo { def bar: String = \"\" }"),
+        ];
+
+        for (name, code) in cases {
+            println!("\n=== {} ===", name);
+            println!("Code: {}", code);
+            let tree = parser.parse(code, None).unwrap();
+            print_node(tree.root_node(), code, 0);
+        }
     }
 }

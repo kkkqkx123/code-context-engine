@@ -3,8 +3,9 @@
 //! Handles two stages of span-based deduplication:
 //! - Same-span selection: keeps the most specific entity when tree-sitter
 //!   returns multiple captures for the same byte range.
-//! - Contained-entity removal: removes implementation-detail noise (Variables)
-//!   and duplicate decorated definitions.
+//! - Contained-entity removal: removes bare implementation-detail noise
+//!   (untyped local variables) and duplicate decorated definitions, while
+//!   preserving type-bearing locals for inference.
 
 use cce_types::{Entity, EntityKind};
 use std::collections::{HashMap, HashSet};
@@ -48,9 +49,13 @@ pub(crate) fn deduplicate_entities_by_span(entities: &mut Vec<Entity>) {
 /// Remove entities whose span is fully contained within their parent and
 /// are pure implementation detail noise.
 ///
-/// Only removes `Variable` — these are never meaningful as standalone
-/// retrieval units and would pollute the index if kept. Everything else
-/// (Field, Constant, etc.) is preserved.
+/// Removes contained `Variable` entities that carry no type information —
+/// bare locals are never meaningful as standalone retrieval units and would
+/// pollute the index if kept. Variables that do carry type information
+/// (annotation, constructor call, literal, or call target) are preserved so
+/// type inference keeps working on them; the grouper already skips variable
+/// entities when forming standalone groups, so retention does not leak into
+/// retrieval. Everything else (Field, Constant, etc.) is preserved.
 ///
 /// Also removes duplicate entities created by tree-sitter queries matching
 /// both (`decorated_definition`) and (`function_definition`) for the same
@@ -88,8 +93,8 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
             }
 
             // Only remove truly low-value implementation detail entities:
-            // local variables.
-            if matches!(child.kind, EntityKind::Variable) {
+            // bare local variables. Typed locals are kept for inference.
+            if matches!(child.kind, EntityKind::Variable) && !variable_carries_type_info(child) {
                 to_remove.insert(child.id);
             }
 
@@ -118,6 +123,26 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
     if !to_remove.is_empty() {
         entities.retain(|e| !to_remove.contains(&e.id));
     }
+}
+
+/// Whether a variable entity carries type information worth preserving.
+///
+/// Any of the parser-produced type keys (annotation, constructor call,
+/// literal, call target, or legacy inference keys) counts; bare locals
+/// without them remain eligible for contained-entity removal.
+pub(crate) fn variable_carries_type_info(entity: &Entity) -> bool {
+    const TYPE_KEYS: &[&str] = &[
+        "type_annotation",
+        "constructor_type",
+        "literal_type",
+        "call_target",
+        "explicit_type",
+        "var_type",
+        "inferred_type",
+    ];
+    TYPE_KEYS
+        .iter()
+        .any(|key| entity.metadata.contains_key(*key))
 }
 
 fn select_best_entity(group: &[Entity]) -> usize {
@@ -173,12 +198,53 @@ mod tests {
         let names: Vec<_> = entities.iter().map(|e| e.name.as_str()).collect();
         assert!(
             !names.contains(&"local_var"),
-            "Contained variable should be removed"
+            "Contained bare variable should be removed"
         );
         assert!(
             names.contains(&"OnceCell"),
             "Parent struct OnceCell should be kept"
         );
+    }
+
+    #[test]
+    fn test_deduplicate_contained_entities_keeps_typed_variable() {
+        let parent = Entity::new(
+            EntityId(0),
+            EntityKind::Function,
+            "main".to_string(),
+            Span::new(0, 100, 0, 0, 5, 10),
+        );
+        let mut typed = Entity::new(
+            EntityId(1),
+            EntityKind::Variable,
+            "id".to_string(),
+            Span::new(30, 80, 2, 0, 4, 10),
+        );
+        typed.set_metadata("type_annotation", "String".to_string());
+        let mut constructed = Entity::new(
+            EntityId(2),
+            EntityKind::Variable,
+            "user".to_string(),
+            Span::new(30, 80, 2, 0, 4, 10),
+        );
+        constructed.set_metadata("constructor_type", "User".to_string());
+        let mut entities = vec![parent, typed, constructed];
+
+        deduplicate_contained_entities(&mut entities);
+
+        let names: Vec<_> = entities.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            names.contains(&"id"),
+            "Contained variable with type annotation should be kept"
+        );
+        assert!(
+            names.contains(&"user"),
+            "Contained variable with constructor type should be kept"
+        );
+        // Typed locals must not leak their types onto the parent.
+        let main = entities.iter().find(|e| e.name == "main").unwrap();
+        assert!(!main.metadata.contains_key("type_annotation"));
+        assert!(!main.metadata.contains_key("constructor_type"));
     }
 
     #[test]

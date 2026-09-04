@@ -82,7 +82,7 @@ fn entity_ts_function_method_patterns() -> &'static str {
 ; Method definition (excluding constructor)
 (method_definition
   name: (property_identifier) @entity.method.name
-  return_type: (type_annotation)? @entity.method.return_type
+  return_type: (type_annotation (_)? @entity.method.return_type)?
 ) @entity.method
 
 ; Constructor method
@@ -94,7 +94,7 @@ fn entity_ts_function_method_patterns() -> &'static str {
 ; Getter method
 (method_definition
   name: (property_identifier) @entity.method.getter.name
-  return_type: (type_annotation)? @entity.method.getter.return_type
+  return_type: (type_annotation (_)? @entity.method.getter.return_type)?
 ) @entity.method.getter
 
 ; Setter method
@@ -110,14 +110,14 @@ fn entity_ts_function_method_patterns() -> &'static str {
 (function_declaration
   name: (identifier) @entity.function.name
   parameters: (formal_parameters) @entity.function.params
-  return_type: (type_annotation)? @entity.function.return_type
+  return_type: (type_annotation (_)? @entity.function.return_type)?
   body: (_) @entity.function.body
 ) @entity.function
 
 ; Generator function declaration
 (generator_function_declaration
   name: (identifier) @entity.function.generator.name
-  return_type: (type_annotation)? @entity.function.generator.return_type
+  return_type: (type_annotation (_)? @entity.function.generator.return_type)?
 ) @entity.function.generator
 
 ; Arrow function assigned to variable (lexical declaration)
@@ -125,7 +125,7 @@ fn entity_ts_function_method_patterns() -> &'static str {
   (variable_declarator
     name: (identifier) @entity.function.arrow.name
     value: (arrow_function
-      return_type: (type_annotation)? @entity.function.arrow.return_type
+      return_type: (type_annotation (_)? @entity.function.arrow.return_type)?
     )
   )
 ) @entity.function.arrow
@@ -135,7 +135,7 @@ fn entity_ts_function_method_patterns() -> &'static str {
   (variable_declarator
     name: (identifier) @entity.function.arrow_var.name
     value: (arrow_function
-      return_type: (type_annotation)? @entity.function.arrow_var.return_type
+      return_type: (type_annotation (_)? @entity.function.arrow_var.return_type)?
     )
   )
 ) @entity.function.arrow_var
@@ -145,7 +145,7 @@ fn entity_ts_function_method_patterns() -> &'static str {
   (variable_declarator
     name: (identifier) @entity.function.expression.name
     value: (function_expression
-      return_type: (type_annotation)? @entity.function.expression.return_type
+      return_type: (type_annotation (_)? @entity.function.expression.return_type)?
     )
   )
 ) @entity.function.expression
@@ -155,7 +155,7 @@ fn entity_ts_function_method_patterns() -> &'static str {
   (variable_declarator
     name: (identifier) @entity.function.expression_var.name
     value: (function_expression
-      return_type: (type_annotation)? @entity.function.expression_var.return_type
+      return_type: (type_annotation (_)? @entity.function.expression_var.return_type)?
     )
   )
 ) @entity.function.expression_var

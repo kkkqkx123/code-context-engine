@@ -53,6 +53,43 @@ pub fn entity_query() -> String {
   )
 ) @entity.method.prototype
 
+; Method prototype in member-declaration form, e.g. `int add(int a);`
+(class_specifier
+  body: (field_declaration_list
+    (field_declaration
+      type: (_) @entity.method.prototype.return_type
+      declarator: (function_declarator
+        declarator: (field_identifier) @entity.method.prototype.name
+        parameters: (parameter_list) @entity.method.prototype.params
+      )
+    ) @entity.method.prototype
+  )
+)
+
+; Constructor prototype inside class, e.g. `C();`
+(class_specifier
+  body: (field_declaration_list
+    (declaration
+      declarator: (function_declarator
+        declarator: (identifier) @entity.constructor.prototype.name
+        parameters: (parameter_list) @entity.constructor.prototype.params
+      )
+    ) @entity.constructor.prototype
+  )
+)
+
+; Destructor prototype inside class, e.g. `~C();`
+(class_specifier
+  body: (field_declaration_list
+    (declaration
+      declarator: (function_declarator
+        declarator: (destructor_name) @entity.destructor.prototype.name
+        parameters: (parameter_list) @entity.destructor.prototype.params
+      )
+    ) @entity.destructor.prototype
+  )
+)
+
 ; Constructor definition
 (function_definition
   declarator: (function_declarator

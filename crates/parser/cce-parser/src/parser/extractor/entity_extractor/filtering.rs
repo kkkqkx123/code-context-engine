@@ -13,14 +13,27 @@ use cce_types::{Entity, EntityKind};
 /// 2. **Tiny-span entities**: Fragments covering fewer than 3 source lines
 ///    without doc comments, which are usually parameter-level or placeholder
 ///    nodes.
-/// 3. **Variable kind**: These are inherently low-value as standalone
-///    retrieval units.
+///
+/// Typed variables are always kept regardless of name length: they feed
+/// type inference (see `deduplicate_contained_entities`), and the grouper
+/// already skips variable entities when forming standalone groups, so
+/// retention does not leak into retrieval.
 pub(crate) fn filter_low_value_entities(entities: &mut Vec<Entity>) {
     let before = entities.len();
     entities.retain(|entity| {
         // Always keep impl blocks — they anchor structural relations
         // (Implementation/ImplAssociation) derived from entity metadata.
         if entity.kind.is_impl_block() {
+            return true;
+        }
+
+        // Always keep type-bearing variables, fields, and properties for
+        // inference, regardless of name length.
+        if matches!(
+            entity.kind,
+            EntityKind::Variable | EntityKind::Field | EntityKind::Property
+        ) && super::deduplication::variable_carries_type_info(entity)
+        {
             return true;
         }
 

@@ -120,6 +120,7 @@ pub fn entity_query() -> &'static str {
   (final_modifier)? @entity.method.final
   name: (name) @entity.method.name
   parameters: (formal_parameters) @entity.method.params
+  return_type: (_)? @entity.method.return_type
   body: (compound_statement)? @entity.method.body
 ) @entity.method
 

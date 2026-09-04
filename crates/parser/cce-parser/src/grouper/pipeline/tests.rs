@@ -601,3 +601,60 @@ fn test_entity_extract_error_is_tolerated() {
     assert_eq!(result.groups.len(), 1);
     assert_eq!(result.groups[0].name.as_str(), "foo");
 }
+
+/// Explicit Dart constructors share their class name. Grouping them as
+/// standalone function-like groups nested inside the same-named class group
+/// trips the same-name nesting invariant, so constructors must stay covered
+/// by the class group span. A constructor with a large body exercises the
+/// path where member merging drops it (e.g. stdlib name collisions) and the
+/// pipeline fallback would otherwise strand it as a standalone group.
+#[test]
+fn test_dart_same_name_constructor_no_nested_group() {
+    let mut source = String::from("class Point {\n  int x;\n  Point(this.x) {\n");
+    for i in 0..80 {
+        source.push_str(&format!("    print('line {i}');\n"));
+    }
+    source.push_str("  }\n}\n");
+    let mut coordinator = crate::parser::coordinator::ParseCoordinator::new();
+    let parsed = coordinator
+        .parse("point.dart", &source)
+        .expect("Dart fixture should parse");
+    assert!(
+        parsed
+            .entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Constructor),
+        "expected constructor entities, got {:?}",
+        parsed.entities.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
+
+    // Runs the same-name nesting debug assertion internally.
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+
+    let class_group = result
+        .groups
+        .iter()
+        .find(|g| g.name.as_str() == "Point")
+        .expect("class group should exist");
+    for group in &result.groups {
+        if group.group_id == class_group.group_id {
+            continue;
+        }
+        let nests =
+            class_group.span.contains(&group.span) || group.span.contains(&class_group.span);
+        let same_name = group.name.as_str().eq_ignore_ascii_case("Point");
+        let function_like = group
+            .header
+            .as_ref()
+            .is_some_and(|h| h.kind.is_function_like());
+        assert!(
+            !(nests && same_name && function_like),
+            "same-named function-like group must not nest inside the class group"
+        );
+    }
+    assert!(
+        class_group.span.start_byte == 0,
+        "class group should still cover the constructors"
+    );
+}

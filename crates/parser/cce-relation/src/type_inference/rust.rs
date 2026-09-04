@@ -125,11 +125,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                 EntityKind::Variable => {
                     // Handle variable types with reference stripping
                     let mut handled = false;
-                    if let Some(type_name) = entity
-                        .metadata
-                        .get("type_annotation")
-                        .or_else(|| entity.metadata.get("variable_type"))
-                    {
+                    if let Some(type_name) = entity.metadata.get("type_annotation") {
                         let (base, is_mut, is_ref) = strip_references(type_name);
                         let shape = if is_ref {
                             Some(TypeShape::Reference {

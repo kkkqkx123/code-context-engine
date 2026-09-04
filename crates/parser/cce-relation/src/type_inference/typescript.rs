@@ -6,7 +6,8 @@ use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 
 use super::control_flow::shared::{
-    is_valid_ident, parse_string_literal, split_comparison, strip_outer_parens,
+    extract_balanced_parens, is_valid_ident, parse_string_literal, split_comparison,
+    strip_outer_parens,
 };
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
@@ -534,7 +535,9 @@ fn strip_typescript_condition_prefix(text: &str) -> Option<&str> {
     for prefix in &["if", "while", "else if", "return", "assert"] {
         if let Some(rest) = text.strip_prefix(prefix) {
             let rest = rest.trim();
-            return Some(strip_outer_parens(rest));
+            // Real facts carry the branch body after the condition, so
+            // prefer balanced-paren extraction over naive outer stripping.
+            return Some(extract_balanced_parens(rest).unwrap_or_else(|| strip_outer_parens(rest)));
         }
     }
     None

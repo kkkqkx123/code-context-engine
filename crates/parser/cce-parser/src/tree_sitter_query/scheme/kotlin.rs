@@ -83,6 +83,7 @@ pub fn entity_query() -> &'static str {
 (function_declaration
   name: (identifier) @entity.function.name
   (function_value_parameters) @entity.function.params
+  (type)? @entity.function.return_type
   (function_body)? @entity.function.body
 ) @entity.function
 
@@ -97,6 +98,7 @@ pub fn entity_query() -> &'static str {
       (function_declaration
         name: (identifier) @entity.method.name
         (function_value_parameters) @entity.method.params
+        (type)? @entity.method.return_type
         (function_body)? @entity.method.body
       ) @entity.method
     )
@@ -129,7 +131,9 @@ pub fn entity_query() -> &'static str {
 (property_declaration
   (variable_declaration
     (identifier) @entity.property.name
+    (type)? @entity.property.type
   )
+  (_)? @entity.property.value
 ) @entity.property
 
 ; Property getter
@@ -483,5 +487,60 @@ mod tests {
             "Comment query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_kotlin_return_type_capture() {
+        let lang: tree_sitter::Language = tree_sitter_kotlin_ng::LANGUAGE.into();
+        let query_str = r#"
+(function_declaration
+  name: (identifier) @entity.function.name
+  (function_value_parameters) @entity.function.params
+  (type)? @entity.function.return_type
+  (function_body)? @entity.function.body
+) @entity.function
+"#;
+        let result = Query::new(&lang, query_str);
+        assert!(
+            result.is_ok(),
+            "Return type capture query failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_kotlin_variable_type_capture() {
+        use streaming_iterator::StreamingIterator;
+
+        let mut parser = tree_sitter::Parser::new();
+        let language: tree_sitter::Language = tree_sitter_kotlin_ng::LANGUAGE.into();
+        parser.set_language(&language).unwrap();
+
+        let code = "val x: Int = 10";
+        let tree = parser.parse(code, None).unwrap();
+
+        let query_str = r#"
+(variable_declaration
+  (identifier) @entity.variable.name
+  (type)? @entity.variable.type
+) @entity.variable
+"#;
+
+        let query = tree_sitter::Query::new(&language, query_str).unwrap();
+        let mut cursor = tree_sitter::QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), code.as_bytes());
+
+        let mut found_type = false;
+        while let Some(m) = matches.next() {
+            for c in m.captures {
+                let name = query.capture_names()[c.index as usize];
+                let text = &code[c.node.start_byte()..c.node.end_byte()];
+                if name == "entity.variable.type" {
+                    println!("Variable type captured: {:?}", text);
+                    found_type = true;
+                }
+            }
+        }
+        assert!(found_type, "Variable type should be captured");
     }
 }

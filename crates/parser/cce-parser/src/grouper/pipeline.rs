@@ -303,6 +303,17 @@ impl PreprocessingPipeline {
 
                 let language = parsed_file.language;
                 for entity in still_remaining {
+                    // Constructors/destructors belong to their parent type
+                    // and must not become standalone groups: a same-named
+                    // function-like group nested in its class trips the
+                    // nesting invariant. Their bytes stay covered by the
+                    // owning class group span.
+                    if matches!(
+                        entity.kind,
+                        EntityKind::Constructor | EntityKind::Destructor
+                    ) {
+                        continue;
+                    }
                     if entity.kind.is_impl_block() {
                         let methods: Vec<Entity> = entity
                             .children

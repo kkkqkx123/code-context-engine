@@ -3,7 +3,7 @@ use super::types::PatternProcessingResult;
 use crate::grouper::processors::method_utils::MethodType;
 use crate::grouper::types::{GetterSetterSummary, MemberRolesBuilder, PatternInfo};
 use cce_config::NestProcessorConfig;
-use cce_types::entity::Entity;
+use cce_types::entity::{Entity, EntityKind};
 use cce_types::language::Language;
 
 impl ClassMethodProcessor {
@@ -29,6 +29,20 @@ impl ClassMethodProcessor {
         // Process each method
         for method in methods {
             let mut include_method = true;
+
+            // Constructors and destructors are structural members: always
+            // keep them, even when name-matched as stdlib (e.g. a Dart
+            // `Point` colliding with a same-named library type). Dropping
+            // them here strands same-named standalone groups that trip the
+            // nesting invariant downstream.
+            if matches!(
+                method.kind,
+                EntityKind::Constructor | EntityKind::Destructor
+            ) {
+                roles_builder.mark_significant(method.id);
+                filtered_methods.push(method.clone());
+                continue;
+            }
 
             // Check if this is a standard library entity
             if method.is_stdlib {

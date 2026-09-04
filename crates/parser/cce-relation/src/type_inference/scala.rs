@@ -12,7 +12,7 @@ use cce_types::ControlFlowStore;
 use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 
-use super::control_flow::shared::{is_valid_ident, strip_outer_parens};
+use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip_outer_parens};
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{ScopedTypeContext, TypeBinding};
@@ -168,10 +168,18 @@ fn narrow_scala_match(text: &str) -> Vec<NarrowingResult> {
 
 /// Extract variable bindings from Scala match arms.
 fn narrow_scala_match_arms(arms_text: &str, results: &mut Vec<NarrowingResult>) {
-    for arm in arms_text.split("=>") {
-        let arm = arm.trim();
-        if let Some(result) = parse_scala_match_arm_pattern(arm) {
-            results.push(result);
+    let mut remaining = arms_text;
+    while let Some(case_pos) = remaining.find("case") {
+        let after_case = &remaining[case_pos..];
+        // Find the arrow separating pattern from body
+        if let Some(arrow_pos) = after_case.find("=>") {
+            let arm_text = after_case[..arrow_pos].trim();
+            if let Some(result) = parse_scala_match_arm_pattern(arm_text) {
+                results.push(result);
+            }
+            remaining = after_case[arrow_pos + 2..].trim_start();
+        } else {
+            break;
         }
     }
 }
@@ -213,7 +221,9 @@ fn strip_scala_condition_prefix(text: &str) -> Option<&str> {
     for prefix in &["if", "while", "else if", "return"] {
         if let Some(rest) = text.strip_prefix(prefix) {
             let rest = rest.trim();
-            return Some(strip_outer_parens(rest));
+            // Real facts carry the branch body after the condition, so
+            // prefer balanced-paren extraction over naive outer stripping.
+            return Some(extract_balanced_parens(rest).unwrap_or_else(|| strip_outer_parens(rest)));
         }
     }
     None
@@ -306,5 +316,16 @@ mod tests {
     fn test_scala_match_wildcard_skipped() {
         let results = narrow_scala_match("x match { case _ => 0 }");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scala_match_multi_arm() {
+        let results =
+            narrow_scala_match("x match { case s: String => s.length, case n: Int => n }");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].variable_name, "s");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+        assert_eq!(results[1].variable_name, "n");
+        assert_eq!(results[1].narrowed_type.type_name, "Int");
     }
 }

@@ -64,6 +64,7 @@ pub fn entity_query() -> &'static str {
 ; Method signature (method definition)
 (method_signature
   (function_signature
+    return_type: (_)? @entity.method.return_type
     name: (identifier) @entity.method.name
   )
 ) @entity.method
@@ -94,6 +95,7 @@ pub fn entity_query() -> &'static str {
 
 ; Top-level function signature
 (function_signature
+  return_type: (_)? @entity.function.return_type
   name: (identifier) @entity.function.name
 ) @entity.function
 
@@ -104,6 +106,17 @@ pub fn entity_query() -> &'static str {
 ; Top-level variable declaration (var)
 (initialized_identifier
   name: (identifier) @entity.variable.name
+  value: (_)? @entity.variable.value
+) @entity.variable
+
+; Local variable declaration inside function bodies, e.g.
+; `var count = 42;` or `String explicit = 'typed';`
+(local_variable_declaration
+  (initialized_variable_definition
+    (type_identifier)? @entity.variable.type
+    name: (identifier) @entity.variable.name
+    value: (_)? @entity.variable.value
+  )
 ) @entity.variable
 
 ; Static final declaration (final/const)
@@ -113,9 +126,11 @@ pub fn entity_query() -> &'static str {
 
 ; Field declaration (inside class)
 (declaration
+  (type_identifier)? @entity.field.type
   (initialized_identifier_list
     (initialized_identifier
       name: (identifier) @entity.field.name
+      value: (_)? @entity.field.value
     )
   )
 ) @entity.field
@@ -395,7 +410,6 @@ mod tests {
             result.err()
         );
     }
-
     #[test]
     fn test_comment_query_syntax_valid() {
         let result = validate_query_syntax("comment_query", comment_query());

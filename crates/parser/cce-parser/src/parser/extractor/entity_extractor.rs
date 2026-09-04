@@ -247,9 +247,14 @@ impl EntityExtractor {
         {
             Ok(_file_doc) => {}
             Err(e) => {
-                tracing::warn!("Comment processing failed: {}", e);
+                tracing::warn!("Comment processing failed: {e}");
             }
         }
+
+        // Fourth-B pass: derive doc-comment types (Ruby YARD, PHPDoc) now
+        // that doc comments are attached. Match-level extraction runs
+        // before comment association, so this cannot live in metadata.rs.
+        metadata::extract_doc_type_metadata(&mut entities, language);
 
         // Fifth pass: establish impl block -> method relationships based on span
         establish_impl_method_relationships(&mut entities);
@@ -269,7 +274,7 @@ impl EntityExtractor {
         establish_module_entity_relationships(&mut entities, &module_spans);
 
         // 7.5: extract Go receiver types for method entities
-        post_processing::extract_receiver_for_entities(&mut entities);
+        post_processing::extract_receiver_for_entities(&mut entities, language);
 
         // Eighth pass: fill children based on parent field
         post_processing::fill_children(&mut entities);
