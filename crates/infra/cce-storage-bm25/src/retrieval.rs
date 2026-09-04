@@ -16,6 +16,20 @@ use crate::types::{Bm25SearchOptions, Bm25SearchResult, TermOperator};
 #[derive(Debug, Clone, Default)]
 pub struct Bm25Retrieval;
 
+/// Wrap a filter clause so it constrains the matched set without
+/// contributing a BM25 score.
+///
+/// Tantivy has no `Filter` occurrence: every `Must` clause adds its term
+/// score to each matched document. A tenant/epoch/category filter would
+/// otherwise inflate all scores by a term-dependent constant (e.g. the
+/// project term alone adds `ln(1 + 0.5/(N + 0.5))` per doc), breaking score
+/// parity with the offline benchmark scorer and polluting cross-epoch
+/// ranking. `BoostQuery` with a zero boost keeps the constraint while
+/// zeroing the contribution.
+fn no_score(query: Box<dyn tantivy::query::Query>) -> Box<dyn tantivy::query::Query> {
+    Box::new(tantivy::query::BoostQuery::new(query, 0.0))
+}
+
 impl Bm25Retrieval {
     /// Create a new BM25 retrieval instance
     pub fn new() -> Self {
@@ -64,7 +78,10 @@ impl Bm25Retrieval {
 
             query = Box::new(tantivy::query::BooleanQuery::new(vec![
                 (tantivy::query::Occur::Must, query),
-                (tantivy::query::Occur::Must, Box::new(epoch_filter)),
+                (
+                    tantivy::query::Occur::Must,
+                    no_score(Box::new(epoch_filter)),
+                ),
             ]));
 
             // Parent-generation rows of overridden files stay hidden
@@ -117,7 +134,7 @@ impl Bm25Retrieval {
 
             query = Box::new(tantivy::query::BooleanQuery::new(vec![
                 (tantivy::query::Occur::Must, query),
-                (tantivy::query::Occur::Must, project_filter),
+                (tantivy::query::Occur::Must, no_score(project_filter)),
             ]));
         }
 
@@ -156,7 +173,10 @@ impl Bm25Retrieval {
 
             query = Box::new(tantivy::query::BooleanQuery::new(vec![
                 (tantivy::query::Occur::Must, query),
-                (tantivy::query::Occur::Must, Box::new(category_filter)),
+                (
+                    tantivy::query::Occur::Must,
+                    no_score(Box::new(category_filter)),
+                ),
             ]));
         }
 

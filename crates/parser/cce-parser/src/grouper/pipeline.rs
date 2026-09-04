@@ -303,15 +303,22 @@ impl PreprocessingPipeline {
 
                 let language = parsed_file.language;
                 for entity in still_remaining {
-                    // Constructors/destructors belong to their parent type
-                    // and must not become standalone groups: a same-named
-                    // function-like group nested in its class trips the
-                    // nesting invariant. Their bytes stay covered by the
-                    // owning class group span.
+                    // Constructors/destructors owned by a parent type belong
+                    // to their class group and must not become standalone
+                    // groups: a same-named function-like group nested in its
+                    // class trips the nesting invariant. Their bytes stay
+                    // covered by the owning class group span.
+                    //
+                    // Parent-less constructors (e.g. free-standing C++
+                    // `TEST()`/`TEST_F()` macro invocations, which parse as
+                    // constructor-shaped definitions) have no owning group;
+                    // dropping them would lose their bytes entirely, so they
+                    // fall through to standalone groups below.
                     if matches!(
                         entity.kind,
                         EntityKind::Constructor | EntityKind::Destructor
-                    ) {
+                    ) && entity.parent.is_some()
+                    {
                         continue;
                     }
                     if entity.kind.is_impl_block() {

@@ -25,12 +25,17 @@ pub(crate) fn combined_cost(a: &ChunkedResult, b: &ChunkedResult, path: ChunkPat
 
 /// Whether `prev` should absorb `next` according to merge policy.
 ///
-/// Combines two checks:
+/// Combines three checks:
 /// 1. Self-contained exemption (Embedding-only): a chunk marked
 ///    `self_contained` (own docstring/behavior) keeps its pure topic and
 ///    never merges with neighbors on the Embedding path. This overrides the
 ///    size threshold.
-/// 2. Size threshold via `boundary::can_merge`: the leading chunk must be
+/// 2. Test-boundary guard: a test chunk must never merge with a
+///    non-test chunk (and vice versa). Merging would mark production
+///    content as `Test` (or dilute a test chunk), causing the no-test
+///    evaluation variant to drop production content. This mirrors the
+///    group-level guard in `SmallFragmentMerger`.
+/// 3. Size threshold via `boundary::can_merge`: the leading chunk must be
 ///    below the path's min threshold and the combined cost must stay within
 ///    the path's merge ceiling.
 ///
@@ -46,6 +51,9 @@ pub(crate) fn should_merge(
     let self_contained_blocks =
         path == ChunkPath::Embedding && (prev.self_contained || next.self_contained);
     if self_contained_blocks {
+        return false;
+    }
+    if prev.metadata.test_info.is_test() != next.metadata.test_info.is_test() {
         return false;
     }
     can_merge(&prev.text, &next.text, path, config)
