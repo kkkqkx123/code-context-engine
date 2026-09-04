@@ -56,7 +56,7 @@ pub fn entity_query() -> &'static str {
 ; typedef type definition
 (type_definition
   type: (_) @entity.typedef.original_type
-  declarator: (type_identifier) @entity.typedef.alias
+  declarator: (type_identifier) @entity.typedef.name
 ) @entity.typedef
 
 ; typedef struct definition
@@ -65,7 +65,7 @@ pub fn entity_query() -> &'static str {
     name: (type_identifier)? @entity.typedef_struct.original_name
     body: (field_declaration_list) @entity.typedef_struct.body
   )
-  declarator: (type_identifier) @entity.typedef_struct.alias
+  declarator: (type_identifier) @entity.typedef_struct.name
 ) @entity.typedef_struct
 
 ; typedef union definition
@@ -74,7 +74,7 @@ pub fn entity_query() -> &'static str {
     name: (type_identifier)? @entity.typedef_union.original_name
     body: (field_declaration_list) @entity.typedef_union.body
   )
-  declarator: (type_identifier) @entity.typedef_union.alias
+  declarator: (type_identifier) @entity.typedef_union.name
 ) @entity.typedef_union
 
 ; typedef enum definition
@@ -83,7 +83,7 @@ pub fn entity_query() -> &'static str {
     name: (type_identifier)? @entity.typedef_enum.original_name
     body: (enumerator_list) @entity.typedef_enum.body
   )
-  declarator: (type_identifier) @entity.typedef_enum.alias
+  declarator: (type_identifier) @entity.typedef_enum.name
 ) @entity.typedef_enum
 
 ; typedef function pointer definition
@@ -93,7 +93,7 @@ pub fn entity_query() -> &'static str {
       parameters: (parameter_list) @entity.typedef_function_pointer.params
     )
   )
-  declarator: (type_identifier) @entity.typedef_function_pointer.alias
+  declarator: (type_identifier) @entity.typedef_function_pointer.name
 ) @entity.typedef_function_pointer
 
 ; ============================================

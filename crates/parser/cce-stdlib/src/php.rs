@@ -818,6 +818,16 @@ impl_list_checker!(
 );
 
 impl PhpStdlibDetector {
+    /// Check if a type name is a builtin PHP class
+    pub fn is_stdlib_type(name: &str) -> bool {
+        Self::is_builtin_class(name)
+    }
+
+    /// Check if a constant name is a builtin PHP constant
+    pub fn is_stdlib_constant(name: &str) -> bool {
+        Self::is_builtin_constant(name)
+    }
+
     /// Check if a call is to stdlib
     pub fn is_stdlib_call(call_name: &str) -> bool {
         // Check for direct builtin function

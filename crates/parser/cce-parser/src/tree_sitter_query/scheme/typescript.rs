@@ -14,6 +14,22 @@ fn entity_ts_only() -> &'static str {
 ; TypeScript-specific Entity Definitions
 ; ============================================
 
+; Class declaration (name is type_identifier in TS grammar; heritage optional)
+(class_declaration
+  name: (type_identifier) @entity.class.name
+  (class_heritage
+    (extends_clause
+      value: (_) @entity.class.base
+    )
+  )?
+  body: (class_body) @entity.class.body
+) @entity.class
+
+; Class expression
+(class
+  name: (type_identifier)? @entity.class_expression.name
+) @entity.class_expression
+
 ; Interface declaration
 (interface_declaration
   name: (type_identifier) @entity.interface.name

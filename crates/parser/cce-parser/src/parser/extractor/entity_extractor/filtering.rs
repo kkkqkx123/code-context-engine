@@ -53,10 +53,20 @@ pub(crate) fn filter_low_value_entities(entities: &mut Vec<Entity>) {
             return true;
         }
 
-        // Filter out single-character name entities
-        // These are almost always generic type params (T, F, E), lifetime params
-        // ('a), or local short bindings — none carry retrievable semantics
-        if entity.name.len() == 1 {
+        // Filter out single-character name entities, but only for locals
+        // and placeholder-like kinds. Named definitions (functions,
+        // methods, types) are kept even with short names so tiny files
+        // such as `int f() { ... }` still yield entities.
+        if entity.name.len() == 1
+            && matches!(
+                entity.kind,
+                EntityKind::Variable
+                    | EntityKind::Field
+                    | EntityKind::Property
+                    | EntityKind::Constant
+                    | EntityKind::TypeAlias
+            )
+        {
             return false;
         }
 

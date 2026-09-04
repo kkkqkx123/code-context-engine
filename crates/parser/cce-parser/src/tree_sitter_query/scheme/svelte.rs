@@ -512,18 +512,17 @@ pub fn dependency_query() -> &'static str {
 /// Returns Tree-sitter query patterns for capturing Svelte template behavior:
 /// - Expression references
 /// - Raw HTML rendering
+///
+/// Note: the Svelte grammar parses template expressions as raw text, so no
+/// operator-level captures are available here.
 pub fn behavior_query() -> String {
-    let mut query = String::from(
+    String::from(
         r#"
 (expression) @behavior.data.reference
 (html_expr) @behavior.data.reference
 (const_expr) @behavior.data.bind
 "#,
-    );
-    query.push_str(&super::common::bitwise_shift_operator_query(
-        "binary_expression",
-    ));
-    query
+    )
 }
 
 /// Get embedded block query for Svelte
@@ -627,6 +626,16 @@ mod tests {
         assert!(
             result.is_ok(),
             "Embedded block query syntax validation failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_behavior_query_syntax_valid() {
+        let result = validate_query_syntax("behavior_query", &behavior_query());
+        assert!(
+            result.is_ok(),
+            "Behavior query syntax validation failed: {:?}",
             result.err()
         );
     }

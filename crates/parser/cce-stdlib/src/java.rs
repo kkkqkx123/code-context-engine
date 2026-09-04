@@ -883,6 +883,14 @@ impl JavaStdlibDetector {
         false
     }
 
+    /// Check if a type name is from the JDK
+    pub fn is_stdlib_type(name: &str) -> bool {
+        Self::is_primitive_type(name)
+            || Self::is_wrapper_type(name)
+            || Self::is_jdk_class(name)
+            || Self::is_jdk_path(name)
+    }
+
     /// Check if a call is to stdlib
     pub fn is_stdlib_call(call_name: &str) -> bool {
         // Check for primitive type

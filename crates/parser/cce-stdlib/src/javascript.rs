@@ -320,6 +320,19 @@ impl_stdlib_categorizer!(
 );
 
 impl JavaScriptStdlibDetector {
+    /// Check if a type name is a builtin object or global
+    pub fn is_stdlib_type(name: &str) -> bool {
+        if Self::is_builtin_object(name) || Self::is_global_object(name) {
+            return true;
+        }
+        // Qualified access (`Namespace.Type`): classify by the root object.
+        if name.contains('.') {
+            let root = name.split('.').next().unwrap_or("");
+            return Self::is_builtin_object(root) || Self::is_global_object(root);
+        }
+        false
+    }
+
     pub fn is_stdlib_call(call_name: &str) -> bool {
         use cce_types::relation::RelationType;
         Self::is_stdlib_by_type(call_name, &RelationType::DirectCall)

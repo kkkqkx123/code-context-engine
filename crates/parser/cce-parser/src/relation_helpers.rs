@@ -183,10 +183,17 @@ pub fn extract_imports(
     _context: Option<()>,
 ) -> Result<ImportTable, ParseError> {
     let language_str = language.to_string();
-    let extractor =
-        create_extractor_with_registry(*language, None, "", &language_str).ok_or_else(|| {
-            ParseError::ast_parsing(format!("No extractor available for language: {}", language))
-        })?;
+    let Some(extractor) = create_extractor_with_registry(*language, None, "", &language_str) else {
+        if matches!(language, Language::Custom(_)) {
+            return Err(ParseError::ast_parsing(format!(
+                "No extractor available for language: {}",
+                language
+            )));
+        }
+        return Ok(ImportTable::from_standardized(
+            &StandardizedImportTable::new(""),
+        ));
+    };
 
     let standardized_imports = extractor.extract_imports(tree, source);
     let mut std_table = StandardizedImportTable::new("");

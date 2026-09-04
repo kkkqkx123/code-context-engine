@@ -184,9 +184,6 @@ impl<S: SqliteStore> MetricsAggregator<S> {
         let agg_state = Arc::clone(&self.aggregation_state);
         let background_metrics = self.background_metrics.clone();
 
-        let aggregate_counters = self.config.aggregate_counters;
-        let aggregate_gauges = self.config.aggregate_gauges;
-        let batch_size = self.config.batch_size.max(1);
         let agg_config = self.config.clone();
         let metric_last = Arc::clone(&self.metric_last_aggregation);
         let system_metrics = self.system_metrics.clone();
@@ -212,9 +209,6 @@ impl<S: SqliteStore> MetricsAggregator<S> {
                     &agg_state,
                     &agg_config,
                     &metric_last,
-                    aggregate_counters,
-                    aggregate_gauges,
-                    batch_size,
                 )
                 .await
                 {
@@ -346,20 +340,17 @@ impl<S: SqliteStore> MetricsAggregator<S> {
         agg_state: &Arc<std::sync::Mutex<AggregationState>>,
         agg_config: &AggregationConfig,
         metric_last: &dashmap::DashMap<String, DateTime<Utc>>,
-        aggregate_counters: bool,
-        aggregate_gauges: bool,
-        batch_size: usize,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let now = Utc::now();
         let mut records = Vec::new();
 
         Self::collect_histogram_records(metrics_registry, agg_state, now, &mut records);
 
-        if aggregate_counters {
+        if agg_config.aggregate_counters {
             Self::collect_counter_delta_records(metrics_registry, agg_state, now, &mut records);
         }
 
-        if aggregate_gauges {
+        if agg_config.aggregate_gauges {
             Self::collect_gauge_snapshot_records(metrics_registry, now, &mut records);
         }
 
@@ -371,7 +362,7 @@ impl<S: SqliteStore> MetricsAggregator<S> {
             debug!("No metrics to aggregate");
             0
         } else {
-            match Self::store_records(store, &records, batch_size).await {
+            match Self::store_records(store, &records, agg_config.batch_size).await {
                 Ok(count) => {
                     if count > 0 {
                         for record in &records {
@@ -817,9 +808,11 @@ mod tests {
 
     #[test]
     fn test_aggregation_config_from_global() {
-        let mut global = cce_config::global::MetricsAggregationConfig::default();
-        global.batch_size = 50;
-        global.aggregate_counters = false;
+        let global = cce_config::global::MetricsAggregationConfig {
+            batch_size: 50,
+            aggregate_counters: false,
+            ..Default::default()
+        };
         let config = AggregationConfig::from_global(&global);
         assert_eq!(config.batch_size, 50);
         assert!(!config.aggregate_counters);
@@ -887,8 +880,10 @@ mod tests {
             Duration::from_secs(300)
         );
 
-        let mut with_default = AggregationConfig::default();
-        with_default.default_interval_secs = 120;
+        let with_default = AggregationConfig {
+            default_interval_secs: 120,
+            ..Default::default()
+        };
         assert_eq!(with_default.effective_default_interval_secs(), 120);
         assert!(with_default.is_metric_enabled("anything"));
     }

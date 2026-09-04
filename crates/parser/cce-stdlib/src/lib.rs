@@ -24,13 +24,20 @@ pub mod rust;
 pub mod scala;
 
 // Re-export detectors
+pub use bash::BashStdlibDetector;
+pub use c::CStdlibDetector;
+pub use cpp::CppStdlibDetector;
 pub use csharp::CSharpStdlibDetector;
+pub use dart::DartStdlibDetector;
 pub use go::GoStdlibDetector;
 pub use java::JavaStdlibDetector;
 pub use javascript::JavaScriptStdlibDetector;
+pub use kotlin::KotlinStdlibDetector;
+pub use lua::LuaStdlibDetector;
 pub use php::PhpStdlibDetector;
 pub use python::PythonStdlibDetector;
 pub use ruby::RubyStdlibDetector;
 pub use rust::RustStdlibDetector;
+pub use scala::ScalaStdlibDetector;
 
 pub use detector::StdlibDetector;

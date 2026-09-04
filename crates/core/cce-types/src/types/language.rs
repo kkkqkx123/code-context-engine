@@ -176,8 +176,6 @@ impl Language {
                 | Language::TypeScript
                 | Language::Html
                 | Language::Css
-                | Language::Scss
-                | Language::Less
                 | Language::Vue
                 | Language::Svelte
                 | Language::Jsx
@@ -633,8 +631,11 @@ pub fn builtin_language_for_extension(ext: &str) -> Option<(Language, FileType)>
 
         // Style files
         "css" => Some((Language::Css, FileType::Source)),
-        "scss" | "sass" => Some((Language::Scss, FileType::Source)),
-        "less" => Some((Language::Less, FileType::Source)),
+        // SCSS/Less have no tree-sitter grammar in this project, so they
+        // ride the document pipeline as plain text instead of failing the
+        // AST pipeline. The language tag is kept for metadata.
+        "scss" | "sass" => Some((Language::Scss, FileType::Text)),
+        "less" => Some((Language::Less, FileType::Text)),
 
         // Systems languages
         "rs" => Some((Language::Rust, FileType::Source)),
@@ -1156,17 +1157,25 @@ mod tests {
     }
 
     #[test]
-    fn test_scss_file_type_is_source() {
+    fn test_scss_routes_to_document_pipeline() {
         let info = LanguageInfo::detect_from_path("style.scss");
         assert_eq!(info.language, Language::Scss);
-        assert_eq!(info.file_type, FileType::Source);
+        assert_eq!(info.file_type, FileType::Text);
+        assert_eq!(
+            ContentRoute::from_language_info(&info),
+            ContentRoute::PlainText
+        );
     }
 
     #[test]
-    fn test_less_file_type_is_source() {
+    fn test_less_routes_to_document_pipeline() {
         let info = LanguageInfo::detect_from_path("style.less");
         assert_eq!(info.language, Language::Less);
-        assert_eq!(info.file_type, FileType::Source);
+        assert_eq!(info.file_type, FileType::Text);
+        assert_eq!(
+            ContentRoute::from_language_info(&info),
+            ContentRoute::PlainText
+        );
     }
 
     #[test]

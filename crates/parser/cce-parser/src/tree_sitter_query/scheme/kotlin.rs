@@ -41,14 +41,16 @@ pub fn entity_query() -> &'static str {
   (user_type (identifier) @entity.annotation.name)
 ) @entity.annotation
 
-; Class definition
+; Class definition (matches only `class`, not `interface`)
 (class_declaration
+  "class"
   name: (identifier) @entity.class.name
   (class_body)? @entity.class.body
 ) @entity.class
 
-; Interface definition (class_declaration with interface inheritance)
+; Interface definition (matches only `interface`)
 (class_declaration
+  "interface"
   name: (identifier) @entity.interface.name
   (class_body)? @entity.interface.body
 ) @entity.interface
@@ -91,17 +93,15 @@ pub fn entity_query() -> &'static str {
 ; 3. Methods (functions inside classes)
 ; ============================================
 
-; Method inside class
+; Method inside class (class_body holds function_declaration directly)
 (class_declaration
   (class_body
-    (class_member_declaration
-      (function_declaration
-        name: (identifier) @entity.method.name
-        (function_value_parameters) @entity.method.params
-        (type)? @entity.method.return_type
-        (function_body)? @entity.method.body
-      ) @entity.method
-    )
+    (function_declaration
+      name: (identifier) @entity.method.name
+      (function_value_parameters) @entity.method.params
+      (type)? @entity.method.return_type
+      (function_body)? @entity.method.body
+    ) @entity.method
   )
 )
 

@@ -125,6 +125,15 @@ impl QueryLoader {
         Ok(query_arc)
     }
 
+    /// Check whether the built-in matrix declares a query for a language.
+    ///
+    /// Plugin-backed custom languages are excluded: their availability
+    /// depends on the registry, so absence there must keep surfacing as
+    /// an error instead of silently yielding no relations.
+    pub fn supports_builtin_query(language: Language, query_type: QueryType) -> bool {
+        Self::builtin_scheme(language, query_type).is_some()
+    }
+
     /// Get entity query for a language
     pub fn get_entity_query(&self, language: &Language) -> Result<Arc<Query>> {
         self.get_query(language, QueryType::Entity)

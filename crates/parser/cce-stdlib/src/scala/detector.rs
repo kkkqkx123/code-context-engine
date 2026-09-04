@@ -9,6 +9,18 @@ impl ScalaStdlibDetector {
         Self::BUILTIN_TYPES.contains(&name)
     }
 
+    pub fn is_stdlib_type(name: &str) -> bool {
+        if Self::is_builtin_type(name) {
+            return true;
+        }
+        // Qualified standard paths (`scala.collection.immutable.List`).
+        // Third-party frameworks (cats/zio/akka) are intentionally excluded.
+        if name.starts_with("scala.") && Self::is_scala_path(name) {
+            return true;
+        }
+        false
+    }
+
     pub fn is_builtin_function(name: &str) -> bool {
         Self::BUILTIN_FUNCTIONS.contains(&name)
     }

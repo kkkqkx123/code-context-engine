@@ -28,6 +28,14 @@ pub fn extract_modifiers(mat: &QueryMatch, entity: &mut Entity, language: &Langu
                 mat, entity,
             )
         }
+        Language::C | Language::Cpp => {
+            crate::parser::extractor::post_processing::modifier::c::extract_c_modifiers(mat, entity)
+        }
+        Language::Python => {
+            crate::parser::extractor::post_processing::modifier::python::extract_python_modifiers(
+                mat, entity,
+            )
+        }
         _ => {
             entity.modifiers = Vec::new();
         }

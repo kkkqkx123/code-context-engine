@@ -992,6 +992,11 @@ impl KotlinStdlibDetector {
         false
     }
 
+    /// Check if a type name is from the Kotlin standard library
+    pub fn is_stdlib_type(name: &str) -> bool {
+        Self::is_builtin_type(name) || Self::is_kotlin_path(name)
+    }
+
     /// Check if a call is to stdlib
     pub fn is_stdlib_call(call_name: &str) -> bool {
         // Check for builtin type

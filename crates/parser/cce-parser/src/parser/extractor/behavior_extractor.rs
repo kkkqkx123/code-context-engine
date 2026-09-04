@@ -13,7 +13,7 @@ use crate::tree_sitter_query::capture::behavior::{
 use crate::tree_sitter_query::error::QueryError;
 use crate::tree_sitter_query::executor::{QueryExecutor, QueryMatch};
 use cce_types::language::Language;
-use cce_types::{BehaviorFact, BehaviorFactKind, BehaviorStore, Entity, EntityId};
+use cce_types::{BehaviorFact, BehaviorFactKind, BehaviorStore, Entity, EntityId, EntityKind};
 use tree_sitter::Tree;
 
 /// Behavior extractor
@@ -58,6 +58,7 @@ impl BehaviorExtractor {
                 | Language::Dart
                 | Language::Bash
                 | Language::Lua
+                | Language::Svelte
         )
     }
 
@@ -78,7 +79,7 @@ impl BehaviorExtractor {
             .query_executor
             .execute_behavior_query(tree, source, language)?;
 
-        let entity_index = EntityIndex::new(entities);
+        let entity_index = EntityIndex::new(entities, language);
 
         for mat in &matches {
             self.process_match(mat, tree, source, &entity_index, behavior);
@@ -143,20 +144,29 @@ impl BehaviorExtractor {
     }
 }
 
-fn is_behavior_entity(entity: &Entity) -> bool {
-    entity.kind.is_function_like()
+fn is_behavior_entity(entity: &Entity, language: &Language) -> bool {
+    if entity.kind.is_function_like() {
+        return true;
+    }
+    // Template languages own template-expression facts through the
+    // enclosing element or component instead of a function.
+    *language == Language::Svelte
+        && matches!(
+            entity.kind,
+            EntityKind::Element | EntityKind::Component | EntityKind::Template
+        )
 }
 
-/// Sorted entity index for locating the function-like entity that owns a behavior node.
+/// Sorted entity index for locating the entity that owns a behavior node.
 struct EntityIndex {
     functions: Vec<(usize, usize, EntityId)>,
 }
 
 impl EntityIndex {
-    fn new(entities: &[Entity]) -> Self {
+    fn new(entities: &[Entity], language: &Language) -> Self {
         let mut functions: Vec<_> = entities
             .iter()
-            .filter(|entity| is_behavior_entity(entity))
+            .filter(|entity| is_behavior_entity(entity, language))
             .map(|entity| (entity.span.start_byte, entity.span.end_byte, entity.id))
             .collect();
 

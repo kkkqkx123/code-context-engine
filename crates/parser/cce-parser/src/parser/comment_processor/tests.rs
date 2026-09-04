@@ -533,7 +533,7 @@ fn test_process_once_cell_fixture_file_doc_comment() {
         .join("..")
         .join("..")
         .join("app")
-        .join("cce_e2e_tests")
+        .join("cce-e2e-tests")
         .join("fixtures")
         .join("rust")
         .join("review")

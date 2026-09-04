@@ -22,12 +22,15 @@
 //!   - `java`: Java language
 //!   - `kotlin`: Kotlin language
 //!   - `scala`: Scala language
+//!   - `bash`: Bash language
+//!   - `lua`: Lua language
 
 pub mod common;
 pub mod plugin_extractor;
 pub mod traits;
 
 // Language-specific extractors
+pub mod bash;
 pub mod c;
 pub mod cpp;
 pub mod csharp;
@@ -36,6 +39,7 @@ pub mod go;
 pub mod java;
 pub mod javascript;
 pub mod kotlin;
+pub mod lua;
 pub mod php;
 pub mod python;
 pub mod ruby;

@@ -34,7 +34,7 @@ impl StdlibDetector {
             Language::Dart => DartStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Go => GoStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Java => JavaStdlibDetector::is_stdlib_by_type(call_name, relation_type),
-            Language::JavaScript | Language::TypeScript => {
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
                 JavaScriptStdlibDetector::is_stdlib_by_type(call_name, relation_type)
             }
             Language::Kotlin => KotlinStdlibDetector::is_stdlib_by_type(call_name, relation_type),
@@ -61,7 +61,7 @@ impl StdlibDetector {
             Language::Dart => DartStdlibDetector::is_stdlib_call(call_name),
             Language::Go => GoStdlibDetector::is_stdlib_call(call_name),
             Language::Java => JavaStdlibDetector::is_stdlib_call(call_name),
-            Language::JavaScript | Language::TypeScript => {
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
                 JavaScriptStdlibDetector::is_stdlib_call(call_name)
             }
             Language::Kotlin => KotlinStdlibDetector::is_stdlib_call(call_name),
@@ -83,7 +83,17 @@ impl StdlibDetector {
             Language::Go => GoStdlibDetector::is_stdlib_type(name),
             Language::Rust => RustStdlibDetector::is_stdlib_type(name),
             Language::Python => PythonStdlibDetector::is_stdlib_type(name),
-            _ => false, // Other languages don't have this method yet
+            Language::Java => JavaStdlibDetector::is_stdlib_type(name),
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+                JavaScriptStdlibDetector::is_stdlib_type(name)
+            }
+            Language::Kotlin => KotlinStdlibDetector::is_stdlib_type(name),
+            Language::Dart => DartStdlibDetector::is_stdlib_type(name),
+            Language::Php => PhpStdlibDetector::is_stdlib_type(name),
+            Language::Ruby => RubyStdlibDetector::is_stdlib_type(name),
+            Language::CSharp => CSharpStdlibDetector::is_stdlib_type(name),
+            Language::Scala => ScalaStdlibDetector::is_stdlib_type(name),
+            _ => false,
         }
     }
 
@@ -102,7 +112,8 @@ impl StdlibDetector {
             Language::Cpp => CppStdlibDetector::is_stdlib_constant(name),
             Language::CSharp => CSharpStdlibDetector::is_stdlib_constant(name),
             Language::Go => GoStdlibDetector::is_stdlib_constant(name),
-            _ => false, // Other languages don't have this method yet
+            Language::Php => PhpStdlibDetector::is_stdlib_constant(name),
+            _ => false,
         }
     }
 }
@@ -834,6 +845,91 @@ mod tests {
         assert!(!StdlibDetector::is_stdlib_call(
             "customFunction",
             &Language::TypeScript
+        ));
+    }
+
+    #[test]
+    fn test_stdlib_type_extended_languages() {
+        assert!(StdlibDetector::is_stdlib_type("String", &Language::Java));
+        assert!(StdlibDetector::is_stdlib_type(
+            "java.util.ArrayList",
+            &Language::Java
+        ));
+        assert!(!StdlibDetector::is_stdlib_type("MyClass", &Language::Java));
+
+        assert!(StdlibDetector::is_stdlib_type(
+            "Array",
+            &Language::JavaScript
+        ));
+        assert!(StdlibDetector::is_stdlib_type("Array", &Language::Jsx));
+        assert!(StdlibDetector::is_stdlib_type("Promise", &Language::Tsx));
+        assert!(StdlibDetector::is_stdlib_type(
+            "JSON",
+            &Language::TypeScript
+        ));
+        assert!(!StdlibDetector::is_stdlib_type(
+            "customFunction",
+            &Language::JavaScript
+        ));
+
+        assert!(StdlibDetector::is_stdlib_type("String", &Language::Kotlin));
+        assert!(StdlibDetector::is_stdlib_type(
+            "kotlin.collections.List",
+            &Language::Kotlin
+        ));
+        assert!(!StdlibDetector::is_stdlib_type(
+            "myFunction",
+            &Language::Kotlin
+        ));
+
+        assert!(StdlibDetector::is_stdlib_type("String", &Language::Dart));
+        assert!(!StdlibDetector::is_stdlib_type("MyClass", &Language::Dart));
+
+        assert!(StdlibDetector::is_stdlib_type("DateTime", &Language::Php));
+        assert!(!StdlibDetector::is_stdlib_type(
+            "MyController",
+            &Language::Php
+        ));
+
+        assert!(StdlibDetector::is_stdlib_type("String", &Language::Ruby));
+        assert!(StdlibDetector::is_stdlib_type("File", &Language::Ruby));
+        assert!(!StdlibDetector::is_stdlib_type("MyModule", &Language::Ruby));
+
+        assert!(StdlibDetector::is_stdlib_type("int", &Language::CSharp));
+        assert!(StdlibDetector::is_stdlib_type(
+            "System.String",
+            &Language::CSharp
+        ));
+        assert!(!StdlibDetector::is_stdlib_type(
+            "MyClass",
+            &Language::CSharp
+        ));
+
+        assert!(StdlibDetector::is_stdlib_type("List", &Language::Scala));
+        assert!(StdlibDetector::is_stdlib_type(
+            "scala.collection.immutable.List",
+            &Language::Scala
+        ));
+        assert!(!StdlibDetector::is_stdlib_type(
+            "cats.effect.IO",
+            &Language::Scala
+        ));
+        assert!(!StdlibDetector::is_stdlib_type("MyClass", &Language::Scala));
+    }
+
+    #[test]
+    fn test_stdlib_constant_php() {
+        assert!(StdlibDetector::is_stdlib_constant(
+            "PHP_VERSION",
+            &Language::Php
+        ));
+        assert!(StdlibDetector::is_stdlib_constant(
+            "PHP_EOL",
+            &Language::Php
+        ));
+        assert!(!StdlibDetector::is_stdlib_constant(
+            "MY_CONSTANT",
+            &Language::Php
         ));
     }
 

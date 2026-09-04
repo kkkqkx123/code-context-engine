@@ -161,7 +161,11 @@ impl EntityExtractor {
                     // `test_annotations` metadata for the grouper detector).
                     if language_has_annotation_semantics(language) {
                         pending_annotations.push(entity.name.clone());
+                        continue;
                     }
+                    // Other languages (e.g. Python decorators) keep
+                    // annotations as standalone entities.
+                    entities.push(entity);
                     continue;
                 } else {
                     if !pending_annotations.is_empty() {

@@ -14,6 +14,7 @@ mod relation_handlers;
 use crate::parser::stdlib::StdlibDetector;
 use crate::tree_sitter_query::error::QueryError;
 use crate::tree_sitter_query::executor::{Capture, QueryExecutor, QueryMatch};
+use crate::tree_sitter_query::loader::{QueryLoader, QueryType};
 use cce_types::language::Language;
 use cce_types::{Entity, Relation, RelationTarget, StdlibCategory};
 use std::sync::Arc;
@@ -26,6 +27,63 @@ use relation_handlers::{
     extract_impl_block_relations, find_callee_capture, find_dependency_capture,
     normalize_callee_name,
 };
+use std::collections::{HashMap, HashSet};
+
+/// Remove generic import relations shadowed by specific ones.
+///
+/// Dependency queries pair a whole-statement pattern (e.g.
+/// `dependency.import`) with specific sub-patterns (named, default,
+/// namespace, dynamic). Both fire for a single statement such as
+/// `import { helper } from "..."`, yielding duplicate edges. When one
+/// statement span produces both a generic `ImportStandard` and a more
+/// specific import edge for the same target, the generic edge is noise
+/// and is dropped. Side-effect imports only match the generic pattern,
+/// so they are preserved.
+fn deduplicate_generic_import_relations(relations: &mut Vec<Relation>) {
+    use cce_types::RelationType;
+    if relations.len() <= 1 {
+        return;
+    }
+    let mut groups: HashMap<(usize, usize, String), Vec<usize>> = HashMap::new();
+    for (idx, rel) in relations.iter().enumerate() {
+        if !rel.relation_type.is_import() {
+            continue;
+        }
+        groups
+            .entry((
+                rel.span.start_byte,
+                rel.span.end_byte,
+                rel.dst_name().to_string(),
+            ))
+            .or_default()
+            .push(idx);
+    }
+    let mut remove: HashSet<usize> = HashSet::new();
+    for (_, idxs) in groups {
+        if idxs.len() <= 1 {
+            continue;
+        }
+        let has_specific = idxs
+            .iter()
+            .any(|&i| !matches!(relations[i].relation_type, RelationType::ImportStandard));
+        if has_specific {
+            for &i in &idxs {
+                if matches!(relations[i].relation_type, RelationType::ImportStandard) {
+                    remove.insert(i);
+                }
+            }
+        }
+    }
+    if !remove.is_empty() {
+        let mut kept = Vec::with_capacity(relations.len() - remove.len());
+        for (idx, rel) in relations.drain(..).enumerate() {
+            if !remove.contains(&idx) {
+                kept.push(rel);
+            }
+        }
+        *relations = kept;
+    }
+}
 
 /// Relation extractor
 ///
@@ -94,6 +152,13 @@ impl RelationExtractor {
         entities: &[Entity],
         file_id: Option<i64>,
     ) -> Result<Vec<Relation>, QueryError> {
+        // Template and style languages declare no call query: they have no
+        // call semantics, so absence yields no relations instead of an error.
+        if !matches!(language, Language::Custom(_))
+            && !QueryLoader::supports_builtin_query(*language, QueryType::Call)
+        {
+            return Ok(Vec::new());
+        }
         let matches = self
             .query_executor
             .execute_call_query(tree, source, language)?;
@@ -123,6 +188,13 @@ impl RelationExtractor {
         entities: &[Entity],
         file_id: Option<i64>,
     ) -> Result<Vec<Relation>, QueryError> {
+        // Languages without a declared dependency query have no dependency
+        // semantics; absence yields no relations instead of an error.
+        if !matches!(language, Language::Custom(_))
+            && !QueryLoader::supports_builtin_query(*language, QueryType::Dependency)
+        {
+            return Ok(Vec::new());
+        }
         let matches = self
             .query_executor
             .execute_dependency_query(tree, source, language)?;
@@ -144,6 +216,8 @@ impl RelationExtractor {
         // Impl blocks are parsed once during entity extraction; the
         // dependency query does not re-match impl_item nodes.
         relations.extend(extract_impl_block_relations(entities));
+
+        deduplicate_generic_import_relations(&mut relations);
 
         Ok(relations)
     }

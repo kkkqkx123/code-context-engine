@@ -46,10 +46,8 @@ use cce_storage_sqlite::SqliteClient;
 use cce_storage_sqlite::snapshot_store::SqliteSnapshotStore;
 
 use crate::export::export_config_rebuild;
-use crate::export::export_fingerprint::{
-    compute_render_fingerprint, current_relation_epoch, should_skip_export,
-};
-use crate::export::export_staging::{self, ExportStaging, StagedWrite};
+use crate::export::export_fingerprint::{current_relation_epoch, should_skip_export};
+use crate::export::export_staging::{self, ExportContext, ExportStaging, StagedWrite};
 use crate::export::export_transaction;
 use crate::export::nl_exporter::NlDocumentExporter;
 use crate::export::presentation::PresentationConverter;
@@ -272,28 +270,6 @@ impl NlDocumentUpdateProcessor {
         Ok(())
     }
 
-    /// Compute the render fingerprint that pins a rendered document to the
-    /// inputs it was produced from.
-    async fn compute_render_fingerprint(
-        &self,
-        source: &str,
-        summary: Option<&ExportSummaryView>,
-    ) -> String {
-        let exporter = self.exporter().await;
-        let export_config = exporter.config().clone();
-        let ast_to_nl_config = self.ast_to_nl_config.read().await.clone();
-        compute_render_fingerprint(
-            &exporter,
-            source,
-            summary,
-            &export_config,
-            &ast_to_nl_config,
-            &self.grouper_fingerprint,
-            current_relation_epoch(&self.sqlite, self.project_id),
-        )
-        .await
-    }
-
     /// Decide whether an already-exported document may be skipped on recovery.
     async fn should_skip_export(&self, parse_result: &ParseResultWithChanges) -> bool {
         let exporter = self.exporter().await;
@@ -332,18 +308,22 @@ impl NlDocumentUpdateProcessor {
         let ast_to_nl_config = self.ast_to_nl_config.read().await.clone();
         let epoch = current_relation_epoch(&self.sqlite, self.project_id);
 
+        let ctx = ExportContext {
+            exporter: &exporter,
+            export_config: &export_config,
+            ast_to_nl_config: &ast_to_nl_config,
+            grouper_fingerprint: &self.grouper_fingerprint,
+            relation_epoch: epoch,
+        };
+
         export_staging::stage_file_update_direct(
-            &exporter,
+            &ctx,
             &ast_converter,
             file_path,
             processing_result,
             source,
             summary,
             staging,
-            &export_config,
-            &ast_to_nl_config,
-            &self.grouper_fingerprint,
-            epoch,
         )
         .await
     }
@@ -362,19 +342,15 @@ impl NlDocumentUpdateProcessor {
         let ast_to_nl_config = self.ast_to_nl_config.read().await.clone();
         let epoch = current_relation_epoch(&self.sqlite, self.project_id);
 
-        export_staging::stage_file_update(
-            &exporter,
-            _file_path,
-            chunks,
-            source,
-            summary,
-            staging,
-            &export_config,
-            &ast_to_nl_config,
-            &self.grouper_fingerprint,
-            epoch,
-        )
-        .await
+        let ctx = ExportContext {
+            exporter: &exporter,
+            export_config: &export_config,
+            ast_to_nl_config: &ast_to_nl_config,
+            grouper_fingerprint: &self.grouper_fingerprint,
+            relation_epoch: epoch,
+        };
+
+        export_staging::stage_file_update(&ctx, _file_path, chunks, source, summary, staging).await
     }
 
     /// Stage the removal of a deleted file's document.
@@ -677,6 +653,7 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::export::export_fingerprint::compute_render_fingerprint;
     use crate::operation::OperationType;
     use cce_parser::summary::FileSummary;
 
@@ -692,6 +669,26 @@ mod tests {
 
     fn test_context() -> OperationContext {
         OperationContext::new(1, "test-operation".to_string(), OperationType::HotUpdate, 0)
+    }
+
+    async fn compute_fingerprint_for_test(
+        processor: &NlDocumentUpdateProcessor,
+        source: &str,
+        summary: Option<&ExportSummaryView>,
+    ) -> String {
+        let exporter = processor.exporter().await;
+        let export_config = exporter.config().clone();
+        let ast_to_nl_config = processor.ast_to_nl_config.read().await.clone();
+        compute_render_fingerprint(
+            &exporter,
+            source,
+            summary,
+            &export_config,
+            &ast_to_nl_config,
+            &processor.grouper_fingerprint,
+            current_relation_epoch(&processor.sqlite, processor.project_id),
+        )
+        .await
     }
 
     #[test]
@@ -758,7 +755,7 @@ mod tests {
         let processor = test_processor(tmp.path());
         let source = "fn run() {}";
 
-        let expected = processor.compute_render_fingerprint(source, None).await;
+        let expected = compute_fingerprint_for_test(&processor, source, None).await;
 
         let matching = sample_parse_result(source, None)
             .with_already_exported()
@@ -792,12 +789,8 @@ mod tests {
 
         let view_a = export_view_from_summary(&summary_a);
         let view_b = export_view_from_summary(&summary_b);
-        let fp_a = processor
-            .compute_render_fingerprint(source, Some(&view_a))
-            .await;
-        let fp_b = processor
-            .compute_render_fingerprint(source, Some(&view_b))
-            .await;
+        let fp_a = compute_fingerprint_for_test(&processor, source, Some(&view_a)).await;
+        let fp_b = compute_fingerprint_for_test(&processor, source, Some(&view_b)).await;
         assert_ne!(
             fp_a, fp_b,
             "summary content drift must change the fingerprint"
@@ -823,7 +816,7 @@ mod tests {
         let source = "fn run() {}";
 
         let base = test_processor(tmp.path());
-        let fp_base = base.compute_render_fingerprint(source, None).await;
+        let fp_base = compute_fingerprint_for_test(&base, source, None).await;
 
         let mut grouper = cce_config::NestProcessorConfig::default();
         grouper.small_class_threshold += 1;
@@ -836,7 +829,7 @@ mod tests {
                     crate::export::fingerprint::config_fingerprint(&grouper),
                     String::new(),
                 );
-        let fp_configured = configured.compute_render_fingerprint(source, None).await;
+        let fp_configured = compute_fingerprint_for_test(&configured, source, None).await;
         assert_ne!(
             fp_base, fp_configured,
             "grouper configuration drift must change the fingerprint"

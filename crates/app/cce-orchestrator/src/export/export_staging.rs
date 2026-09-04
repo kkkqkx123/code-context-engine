@@ -33,6 +33,15 @@ pub struct StagedWrite {
     pub render_fingerprint: String,
 }
 
+/// Common export configuration parameters shared across staging functions.
+pub struct ExportContext<'a> {
+    pub exporter: &'a NlDocumentExporter,
+    pub export_config: &'a ExportConfig,
+    pub ast_to_nl_config: &'a cce_config::AstToNlConfig,
+    pub grouper_fingerprint: &'a str,
+    pub relation_epoch: i64,
+}
+
 /// Per-operation staging state for the export processor.
 #[derive(Default)]
 pub struct ExportStaging {
@@ -88,17 +97,13 @@ pub async fn make_staged_write(
 
 /// Handle file update (add/modify) using enriched GroupConversions.
 pub async fn stage_file_update_direct(
-    exporter: &NlDocumentExporter,
+    ctx: &ExportContext<'_>,
     ast_converter: &cce_parser::ast_to_nl::AstToNlConverter,
     file_path: &std::path::Path,
     processing_result: &ProcessingResult,
     source: &str,
     summary: Option<&ExportSummaryView>,
     staging: &mut ExportStaging,
-    export_config: &ExportConfig,
-    ast_to_nl_config: &cce_config::AstToNlConfig,
-    grouper_fingerprint: &str,
-    relation_epoch: i64,
 ) -> Result<()> {
     if processing_result.groups.is_empty() {
         return Ok(());
@@ -112,63 +117,61 @@ pub async fn stage_file_update_direct(
         Some(source),
     );
 
-    let (source_path, content) = exporter
+    let (source_path, content) = ctx
+        .exporter
         .render_direct(&conversions, &file_path.to_string_lossy(), summary)
         .map_err(|e| HotUpdateError::export(e.to_string()))?;
 
     let render_fingerprint = compute_render_fingerprint(
-        exporter,
+        ctx.exporter,
         source,
         summary,
-        export_config,
-        ast_to_nl_config,
-        grouper_fingerprint,
-        relation_epoch,
+        ctx.export_config,
+        ctx.ast_to_nl_config,
+        ctx.grouper_fingerprint,
+        ctx.relation_epoch,
     )
     .await;
 
     staging
         .writes
-        .push(make_staged_write(exporter, &source_path, content, render_fingerprint).await?);
+        .push(make_staged_write(ctx.exporter, &source_path, content, render_fingerprint).await?);
 
     Ok(())
 }
 
 /// Handle file update (add/modify) using chunk-based fallback.
 pub async fn stage_file_update(
-    exporter: &NlDocumentExporter,
+    ctx: &ExportContext<'_>,
     _file_path: &std::path::Path,
     chunks: &[ChunkedResult],
     source: &str,
     summary: Option<&ExportSummaryView>,
     staging: &mut ExportStaging,
-    export_config: &ExportConfig,
-    ast_to_nl_config: &cce_config::AstToNlConfig,
-    grouper_fingerprint: &str,
-    relation_epoch: i64,
 ) -> Result<()> {
     if chunks.is_empty() {
         return Ok(());
     }
 
-    let (source_path, content) = exporter
+    let (source_path, content) = ctx
+        .exporter
         .render_file(chunks, summary)
         .map_err(|e| HotUpdateError::export(e.to_string()))?;
 
     let render_fingerprint = compute_render_fingerprint(
-        exporter,
+        ctx.exporter,
         source,
         summary,
-        export_config,
-        ast_to_nl_config,
-        grouper_fingerprint,
-        relation_epoch,
+        ctx.export_config,
+        ctx.ast_to_nl_config,
+        ctx.grouper_fingerprint,
+        ctx.relation_epoch,
     )
     .await;
 
     staging
         .writes
-        .push(make_staged_write(exporter, &source_path, content, render_fingerprint).await?);
+        .push(make_staged_write(ctx.exporter, &source_path, content, render_fingerprint).await?);
 
     Ok(())
 }

@@ -56,10 +56,19 @@ pub fn extract_imports_with_registry(
         .map(|c| c.file_path.to_string_lossy().to_string())
         .unwrap_or_else(|| file_path.to_string());
     let language_str = language.to_string();
-    let extractor = create_extractor_with_registry(*language, registry, &file_path, &language_str)
-        .ok_or_else(|| {
-            ParseError::ast_parsing(format!("No extractor available for language: {}", language))
-        })?;
+    let Some(extractor) =
+        create_extractor_with_registry(*language, registry, &file_path, &language_str)
+    else {
+        if matches!(language, Language::Custom(_)) {
+            return Err(ParseError::ast_parsing(format!(
+                "No extractor available for language: {}",
+                language
+            )));
+        }
+        return Ok(ImportTable::from_standardized(
+            &StandardizedImportTable::new(""),
+        ));
+    };
 
     let standardized_imports = if let Some(ctx) = context {
         // Use context-aware extraction for relative import resolution

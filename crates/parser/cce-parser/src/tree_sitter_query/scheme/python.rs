@@ -114,18 +114,21 @@ pub fn entity_query() -> &'static str {
 ; Method Definitions (within classes)
 ; ============================================
 
-; Method definition in class
+; Method definition in class (main capture on the function so the
+; method span covers only the definition, matching the generic
+; function pattern span for same-span dedup)
 (class_definition
   body: (block
     (function_definition
       name: (identifier) @entity.method.name
       parameters: (parameters) @entity.method.params
       body: (block) @entity.method.body
-    )
+    ) @entity.method
   )
-) @entity.method
+)
 
-; Decorated method definition
+; Decorated method definition (main capture on the decorated node so the
+; span matches the generic decorated-function pattern for dedup)
 (class_definition
   body: (block
     (decorated_definition
@@ -134,9 +137,9 @@ pub fn entity_query() -> &'static str {
         parameters: (parameters) @entity.method.params
         body: (block) @entity.method.body
       )
-    )
+    ) @entity.method
   )
-) @entity.method
+)
 
 ; Class method (with cls parameter)
 (class_definition
@@ -146,9 +149,9 @@ pub fn entity_query() -> &'static str {
       parameters: (parameters
         (identifier) @entity.method.class.cls_param
       )
-    )
+    ) @entity.method.class
   )
-) @entity.method.class
+)
 
 ; Instance method (with self parameter)
 (class_definition
@@ -158,9 +161,9 @@ pub fn entity_query() -> &'static str {
       parameters: (parameters
         (identifier) @entity.method.instance.self_param
       )
-    )
+    ) @entity.method.instance
   )
-) @entity.method.instance
+)
 
 ; Static method
 (class_definition
@@ -170,9 +173,9 @@ pub fn entity_query() -> &'static str {
       (function_definition
         name: (identifier) @entity.method.static.name
       )
-    )
+    ) @entity.method.static
   )
-) @entity.method.static
+)
 
 ; Property method (getter)
 (class_definition
@@ -182,9 +185,9 @@ pub fn entity_query() -> &'static str {
       (function_definition
         name: (identifier) @entity.method.getter.name
       )
-    )
+    ) @entity.method.getter
   )
-) @entity.method.getter
+)
 
 ; ============================================
 ; Lambda Expressions

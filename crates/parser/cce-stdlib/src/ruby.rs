@@ -978,6 +978,11 @@ impl RubyStdlibDetector {
         Self::is_core_module(first_component)
     }
 
+    /// Check if a type name is a Ruby core class or module
+    pub fn is_stdlib_type(name: &str) -> bool {
+        Self::is_core_module(name) || Self::is_stdlib_path(name)
+    }
+
     /// Check if a call is to stdlib
     pub fn is_stdlib_call(call_name: &str) -> bool {
         // Check for direct global function

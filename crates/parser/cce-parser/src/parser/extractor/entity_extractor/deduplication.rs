@@ -108,6 +108,21 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
                     .or_insert_with(|| child.doc_comment.clone().unwrap_or_default());
                 to_remove.insert(child.id);
             }
+
+            // Decorated method duality: the generic function patterns match
+            // the inner `function_definition` while the class-method patterns
+            // match the outer `decorated_definition` for the same decorated
+            // method. Both survive span dedup (different spans), so drop the
+            // inner Function in favor of the outer Method.
+            if parent.kind == EntityKind::Method
+                && child.kind == EntityKind::Function
+                && parent.name == child.name
+            {
+                doc_propagations
+                    .entry(parent.id)
+                    .or_insert_with(|| child.doc_comment.clone().unwrap_or_default());
+                to_remove.insert(child.id);
+            }
         }
     }
 
@@ -148,13 +163,18 @@ pub(crate) fn variable_carries_type_info(entity: &Entity) -> bool {
 fn select_best_entity(group: &[Entity]) -> usize {
     let priority = |kind: &EntityKind| -> u8 {
         match kind {
-            EntityKind::TestCase | EntityKind::TestSuite => 11,
+            EntityKind::TestCase | EntityKind::TestSuite => 12,
+            EntityKind::Method => 11,
             EntityKind::Function => 10,
-            EntityKind::Struct | EntityKind::Enum | EntityKind::Trait | EntityKind::Class => 8,
+            EntityKind::Class
+            | EntityKind::Struct
+            | EntityKind::Enum
+            | EntityKind::Trait
+            | EntityKind::Interface => 9,
+            EntityKind::TypeAlias => 8,
             EntityKind::Module | EntityKind::Namespace | EntityKind::Package => 5,
             EntityKind::InherentImpl => 4,
             EntityKind::TraitImpl => 3,
-            EntityKind::Method => 2,
             _ => 0,
         }
     };

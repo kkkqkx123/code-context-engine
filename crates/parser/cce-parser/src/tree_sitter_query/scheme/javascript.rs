@@ -230,12 +230,12 @@ pub fn entity_js_only() -> &'static str {
 ; Types (Classes)
 ; ============================================
 
-; Class declaration
+; Class declaration (heritage is optional so plain classes match)
 (class_declaration
   name: (identifier) @entity.class.name
   (class_heritage
     (identifier) @entity.class.base
-  )
+  )?
   body: (class_body) @entity.class.body
 ) @entity.class
 

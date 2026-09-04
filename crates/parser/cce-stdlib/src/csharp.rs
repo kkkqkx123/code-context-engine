@@ -881,6 +881,11 @@ impl CSharpStdlibDetector {
         Self::is_dotnet_namespace(first_component)
     }
 
+    /// Check if a type name is a .NET builtin or system type
+    pub fn is_stdlib_type(name: &str) -> bool {
+        Self::is_builtin_type(name) || Self::is_system_type(name) || Self::is_dotnet_path(name)
+    }
+
     /// Check if a call is to stdlib
     pub fn is_stdlib_call(call_name: &str) -> bool {
         // Check for builtin type

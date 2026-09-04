@@ -137,8 +137,8 @@ pub fn create_extractor(language: Language) -> Option<Box<dyn SymbolExtractor>> 
         Language::Dart => Some(Box::new(dart::DartExtractor::new())),
 
         // Shell/Scripting languages
-        Language::Bash => None, // Not implemented yet
-        Language::Lua => None,  // Not implemented yet
+        Language::Bash => Some(Box::new(bash::BashExtractor::new())),
+        Language::Lua => Some(Box::new(lua::LuaExtractor::new())),
 
         // JVM languages
         Language::Java => Some(Box::new(java::JavaExtractor::new())),

@@ -73,9 +73,9 @@ pub fn entity_query() -> &'static str {
 
 ; Function definition
 (function_item
-  name: (identifier) @entity.function.name
-  parameters: (parameters) @entity.function.params
-  return_type: (_)? @entity.function.return_type
+  name: (identifier) @entity.function.signature.name
+  parameters: (parameters) @entity.function.signature.params
+  return_type: (_)? @entity.function.signature.return_type
   body: (_) @entity.function.body
 ) @entity.function
 
@@ -578,10 +578,20 @@ mod tests {
         assert!(query.contains("@entity.function.signature.name"));
         assert!(query.contains("@entity.function.signature.params"));
         assert!(query.contains("@entity.function.signature.return_type"));
-        // No separate signature main captures should exist
-        assert!(!query.contains(") @entity.struct.signature"));
-        assert!(!query.contains(") @entity.function.signature"));
-        assert!(!query.contains(") @entity.impl.signature"));
+        // No separate whole-node signature patterns should exist: every
+        // `.signature` capture must be a sub-capture (e.g. `.signature.name`).
+        // The check is line-anchored so sub-capture lines such as
+        // `name: (identifier) @entity.function.signature.name` do not match.
+        let has_bare_signature_pattern = query.lines().any(|line| {
+            let line = line.trim_end();
+            line.ends_with(") @entity.struct.signature")
+                || line.ends_with(") @entity.function.signature")
+                || line.ends_with(") @entity.impl.signature")
+        });
+        assert!(
+            !has_bare_signature_pattern,
+            "separate whole-node signature patterns must not exist"
+        );
     }
 
     #[test]

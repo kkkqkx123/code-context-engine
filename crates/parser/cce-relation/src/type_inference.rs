@@ -13,6 +13,7 @@
 //! type bindings and never guesses. When inference fails, no binding is produced
 //! so the resolver falls back to name-based resolution.
 
+pub mod c;
 pub mod control_flow;
 pub mod cpp;
 pub mod cross_file;
@@ -66,6 +67,7 @@ pub struct TypeInferenceEngine;
 /// vtable indirection on the per-file hot path. Each variant holds a
 /// zero-sized inferer; dispatch is via `match` (monomorphized, inlined).
 enum Inferer {
+    C(c::CTypeInferer),
     Python(python::PythonTypeInferer),
     TypeScript(typescript::TypeScriptTypeInferer),
     Rust(rust::RustTypeInferer),
@@ -87,6 +89,7 @@ impl LanguageTypeInferer for Inferer {
         ctx: &mut ScopedTypeContext,
     ) {
         match self {
+            Self::C(i) => i.infer_declarations(entities, ctx),
             Self::Python(i) => i.infer_declarations(entities, ctx),
             Self::TypeScript(i) => i.infer_declarations(entities, ctx),
             Self::Rust(i) => i.infer_declarations(entities, ctx),
@@ -110,6 +113,7 @@ impl LanguageTypeInferer for Inferer {
         inference_ctx: &traits::InferenceContext<'_>,
     ) {
         match self {
+            Self::C(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
             Self::Python(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
             Self::TypeScript(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
             Self::Rust(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
@@ -131,6 +135,7 @@ impl LanguageTypeInferer for Inferer {
         ctx: &mut ScopedTypeContext,
     ) {
         match self {
+            Self::C(i) => i.collect_declarations(entities, ctx),
             Self::Python(i) => i.collect_declarations(entities, ctx),
             Self::TypeScript(i) => i.collect_declarations(entities, ctx),
             Self::Rust(i) => i.collect_declarations(entities, ctx),
@@ -152,6 +157,7 @@ impl LanguageTypeInferer for Inferer {
         ctx: &mut ScopedTypeContext,
     ) {
         match self {
+            Self::C(i) => i.resolve_references(entities, ctx),
             Self::Python(i) => i.resolve_references(entities, ctx),
             Self::TypeScript(i) => i.resolve_references(entities, ctx),
             Self::Rust(i) => i.resolve_references(entities, ctx),
@@ -171,6 +177,7 @@ impl LanguageTypeInferer for Inferer {
 impl TypeInferenceEngine {
     fn get_inferer(language: Language) -> Option<Inferer> {
         match language {
+            Language::C => Some(Inferer::C(c::CTypeInferer)),
             Language::Python => Some(Inferer::Python(python::PythonTypeInferer)),
             Language::JavaScript | Language::TypeScript | Language::Tsx | Language::Jsx => {
                 Some(Inferer::TypeScript(typescript::TypeScriptTypeInferer))
