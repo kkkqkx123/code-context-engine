@@ -478,6 +478,38 @@ impl cce_storage_common::SqliteStore for SqliteClient {
             .map_err(|e| StorageError::Sqlite(e.to_string()))
     }
 
+    fn execute_write_batch(
+        &self,
+        sql: &str,
+        batch: &[Vec<Box<dyn rusqlite::ToSql>>],
+    ) -> Result<usize, StorageError> {
+        if batch.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.write_connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| StorageError::Transaction(format!("Failed to start batch: {e}")))?;
+        let mut inserted = 0;
+        {
+            let mut stmt = tx
+                .prepare(sql)
+                .map_err(|e| StorageError::Sqlite(e.to_string()))?;
+            for params in batch {
+                let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+                match stmt.execute(refs.as_slice()) {
+                    Ok(_) => inserted += 1,
+                    Err(e) => {
+                        warn!("Skipping failed batch row: {e}");
+                    }
+                }
+            }
+        }
+        tx.commit()
+            .map_err(|e| StorageError::Transaction(format!("Failed to commit batch: {e}")))?;
+        Ok(inserted)
+    }
+
     fn query_rows(
         &self,
         sql: &str,
@@ -519,6 +551,57 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("Failed to read schema version");
         assert_eq!(schema_version, migration::LATEST_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_execute_write_batch_inserts_atomically() {
+        use cce_storage_common::SqliteStore;
+
+        let client = SqliteClient::in_memory().expect("Failed to create client");
+        const SQL: &str = "INSERT INTO metrics_aggregated
+             (timestamp, metric_name, metric_type, labels_json, count, avg, median, max, p90, p99, project_id, operation_type)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
+        let batch: Vec<Vec<Box<dyn rusqlite::ToSql>>> = (0..5)
+            .map(|i| {
+                let row: Vec<Box<dyn rusqlite::ToSql>> = vec![
+                    Box::new("2026-01-01T00:00:00Z".to_string()),
+                    Box::new(format!("metric_{i}")),
+                    Box::new("counter".to_string()),
+                    Box::new(None::<String>),
+                    Box::new(1i64),
+                    Box::new(None::<f64>),
+                    Box::new(None::<f64>),
+                    Box::new(None::<f64>),
+                    Box::new(None::<f64>),
+                    Box::new(None::<f64>),
+                    Box::new(None::<i64>),
+                    Box::new(None::<String>),
+                ];
+                row
+            })
+            .collect();
+
+        let inserted = client
+            .execute_write_batch(SQL, &batch)
+            .expect("batch insert must succeed");
+        assert_eq!(inserted, 5);
+
+        let count: i64 = client
+            .read_connection()
+            .expect("read connection")
+            .query_row("SELECT COUNT(*) FROM metrics_aggregated", [], |row| {
+                row.get(0)
+            })
+            .expect("count rows");
+        assert_eq!(count, 5);
+
+        let empty: Vec<Vec<Box<dyn rusqlite::ToSql>>> = Vec::new();
+        assert_eq!(
+            client
+                .execute_write_batch(SQL, &empty)
+                .expect("empty batch must succeed"),
+            0
+        );
     }
 
     #[test]

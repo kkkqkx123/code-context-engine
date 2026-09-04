@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::time::{self, Duration};
 use tracing::{debug, error, info, warn};
 
-use cce_metrics::{BackgroundTaskMetrics, MetricKey, MetricsRegistry};
+use cce_metrics::{BackgroundTaskMetrics, MetricKey, MetricsRegistry, MetricsSystemMetrics};
 use cce_storage_common::{AggregatedMetric, SqliteStore};
 
 /// Configuration for the aggregation engine
@@ -21,6 +21,14 @@ pub struct AggregationConfig {
     pub cleanup_interval_secs: u64,
     pub aggregate_counters: bool,
     pub aggregate_gauges: bool,
+    /// Rows per SQLite write transaction (default: 100).
+    pub batch_size: usize,
+    /// Default interval for metrics without an override (seconds).
+    /// Falls back to `interval_secs` when zero.
+    pub default_interval_secs: u64,
+    /// Per-metric aggregation overrides keyed by metric name.
+    pub metric_overrides:
+        std::collections::HashMap<String, cce_metrics::config::MetricAggregationOverride>,
 }
 
 impl Default for AggregationConfig {
@@ -32,6 +40,72 @@ impl Default for AggregationConfig {
             cleanup_interval_secs: 3600,
             aggregate_counters: true,
             aggregate_gauges: true,
+            batch_size: 100,
+            default_interval_secs: 0,
+            metric_overrides: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl AggregationConfig {
+    /// Build from the global metrics configuration section.
+    pub fn from_global(config: &cce_config::global::MetricsAggregationConfig) -> Self {
+        Self {
+            interval_secs: config.interval_secs,
+            enabled: config.enabled,
+            retention_seconds: config.retention_seconds,
+            cleanup_interval_secs: config.cleanup_interval_secs,
+            aggregate_counters: config.aggregate_counters,
+            aggregate_gauges: config.aggregate_gauges,
+            batch_size: config.batch_size.max(1),
+            default_interval_secs: config.default_interval_secs,
+            metric_overrides: config.metric_overrides.clone(),
+        }
+    }
+
+    /// Effective default interval for metrics without an override.
+    pub fn effective_default_interval_secs(&self) -> u64 {
+        if self.default_interval_secs > 0 {
+            self.default_interval_secs
+        } else {
+            self.interval_secs
+        }
+    }
+
+    /// Whether a metric participates in aggregation.
+    pub fn is_metric_enabled(&self, metric_name: &str) -> bool {
+        self.metric_overrides
+            .get(metric_name)
+            .and_then(|o| o.enabled)
+            .unwrap_or(true)
+    }
+
+    /// Aggregation interval for a metric, considering overrides.
+    pub fn interval_for_metric(&self, metric_name: &str) -> Duration {
+        let secs = self
+            .metric_overrides
+            .get(metric_name)
+            .and_then(|o| o.interval_secs)
+            .unwrap_or_else(|| self.effective_default_interval_secs());
+        Duration::from_secs(secs.max(1))
+    }
+
+    /// Decide whether a metric is due for aggregation at `now`.
+    pub fn should_aggregate_metric(
+        &self,
+        metric_name: &str,
+        now: DateTime<Utc>,
+        last_aggregation: &dashmap::DashMap<String, DateTime<Utc>>,
+    ) -> bool {
+        if !self.is_metric_enabled(metric_name) {
+            return false;
+        }
+        match last_aggregation.get(metric_name) {
+            None => true,
+            Some(last) => {
+                let elapsed = now.signed_duration_since(*last);
+                elapsed.num_seconds() >= self.interval_for_metric(metric_name).as_secs() as i64
+            }
         }
     }
 }
@@ -59,6 +133,8 @@ pub struct MetricsAggregator<S: SqliteStore> {
     last_aggregation: Arc<std::sync::Mutex<Option<DateTime<Utc>>>>,
     aggregation_state: Arc<std::sync::Mutex<AggregationState>>,
     background_metrics: Option<Arc<BackgroundTaskMetrics>>,
+    metric_last_aggregation: Arc<dashmap::DashMap<String, DateTime<Utc>>>,
+    system_metrics: Option<Arc<MetricsSystemMetrics>>,
 }
 
 impl<S: SqliteStore> MetricsAggregator<S> {
@@ -74,6 +150,8 @@ impl<S: SqliteStore> MetricsAggregator<S> {
             last_aggregation: Arc::new(std::sync::Mutex::new(None)),
             aggregation_state: Arc::new(std::sync::Mutex::new(AggregationState::default())),
             background_metrics: None,
+            metric_last_aggregation: Arc::new(dashmap::DashMap::new()),
+            system_metrics: None,
         }
     }
 
@@ -82,6 +160,11 @@ impl<S: SqliteStore> MetricsAggregator<S> {
         background_metrics: Arc<BackgroundTaskMetrics>,
     ) -> Self {
         self.background_metrics = Some(background_metrics);
+        self
+    }
+
+    pub fn with_system_metrics(mut self, system_metrics: Arc<MetricsSystemMetrics>) -> Self {
+        self.system_metrics = Some(system_metrics);
         self
     }
 
@@ -103,6 +186,10 @@ impl<S: SqliteStore> MetricsAggregator<S> {
 
         let aggregate_counters = self.config.aggregate_counters;
         let aggregate_gauges = self.config.aggregate_gauges;
+        let batch_size = self.config.batch_size.max(1);
+        let agg_config = self.config.clone();
+        let metric_last = Arc::clone(&self.metric_last_aggregation);
+        let system_metrics = self.system_metrics.clone();
 
         tokio::spawn(async move {
             info!(
@@ -123,19 +210,23 @@ impl<S: SqliteStore> MetricsAggregator<S> {
                     &metrics_registry,
                     &last_agg,
                     &agg_state,
+                    &agg_config,
+                    &metric_last,
                     aggregate_counters,
                     aggregate_gauges,
+                    batch_size,
                 )
                 .await
                 {
                     Ok(count) => {
                         debug!(aggregated_count = count, "Metrics aggregation completed");
+                        let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
                         if let Some(bg) = &background_metrics {
-                            bg.record_aggregation(
-                                count,
-                                started.elapsed().as_secs_f64() * 1000.0,
-                                Utc::now().timestamp() as u64,
-                            );
+                            bg.record_aggregation(count, elapsed_ms, Utc::now().timestamp() as u64);
+                        }
+                        if let Some(sys) = &system_metrics {
+                            sys.record_aggregation(count, elapsed_ms);
+                            sys.update_registry_size(metrics_registry.registry_size());
                         }
                     }
                     Err(e) => {
@@ -179,6 +270,17 @@ impl<S: SqliteStore> MetricsAggregator<S> {
         let cleanup_interval = Duration::from_secs(self.config.cleanup_interval_secs);
         let retention = self.config.retention_seconds;
         let background_metrics = self.background_metrics.clone();
+        let metric_retentions: Vec<(String, u64)> = self
+            .config
+            .metric_overrides
+            .iter()
+            .filter_map(|(name, metric_override)| {
+                metric_override
+                    .retention_seconds
+                    .map(|secs| (name.clone(), secs))
+            })
+            .collect();
+        let system_metrics = self.system_metrics.clone();
 
         let cleanup_handle = tokio::spawn(async move {
             info!(
@@ -204,9 +306,31 @@ impl<S: SqliteStore> MetricsAggregator<S> {
                         if let Some(bg) = &background_metrics {
                             bg.record_cleanup(Utc::now().timestamp() as u64);
                         }
+                        if let Some(sys) = &system_metrics {
+                            sys.record_cleanup(deleted);
+                        }
                     }
                     Err(e) => {
                         error!(error = %e, "Metrics cleanup failed");
+                    }
+                }
+
+                for (metric_name, metric_retention) in &metric_retentions {
+                    let metric_cutoff =
+                        Utc::now() - chrono::Duration::seconds(*metric_retention as i64);
+                    let metric_cutoff_str = metric_cutoff.to_rfc3339();
+                    if let Err(e) = store.execute_write(
+                        "DELETE FROM metrics_aggregated WHERE metric_name = ?1 AND timestamp < ?2",
+                        &[
+                            metric_name as &dyn rusqlite::ToSql,
+                            &metric_cutoff_str as &dyn rusqlite::ToSql,
+                        ],
+                    ) {
+                        error!(
+                            metric_name = %metric_name,
+                            error = %e,
+                            "Per-metric metrics cleanup failed"
+                        );
                     }
                 }
             }
@@ -220,8 +344,11 @@ impl<S: SqliteStore> MetricsAggregator<S> {
         metrics_registry: &MetricsRegistry,
         last_agg: &Arc<std::sync::Mutex<Option<DateTime<Utc>>>>,
         agg_state: &Arc<std::sync::Mutex<AggregationState>>,
+        agg_config: &AggregationConfig,
+        metric_last: &dashmap::DashMap<String, DateTime<Utc>>,
         aggregate_counters: bool,
         aggregate_gauges: bool,
+        batch_size: usize,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let now = Utc::now();
         let mut records = Vec::new();
@@ -236,12 +363,23 @@ impl<S: SqliteStore> MetricsAggregator<S> {
             Self::collect_gauge_snapshot_records(metrics_registry, now, &mut records);
         }
 
+        records.retain(|record| {
+            agg_config.should_aggregate_metric(&record.metric_name, now, metric_last)
+        });
+
         let aggregated_count = if records.is_empty() {
             debug!("No metrics to aggregate");
             0
         } else {
-            match Self::store_records(store, &records).await {
-                Ok(count) => count,
+            match Self::store_records(store, &records, batch_size).await {
+                Ok(count) => {
+                    if count > 0 {
+                        for record in &records {
+                            metric_last.insert(record.metric_name.clone(), now);
+                        }
+                    }
+                    count
+                }
                 Err(e) => {
                     error!(error = %e, "Failed to store aggregated metrics batch");
                     0
@@ -519,34 +657,38 @@ impl<S: SqliteStore> MetricsAggregator<S> {
     async fn store_records(
         store: &S,
         records: &[AggregatedMetric],
+        batch_size: usize,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        let mut inserted = 0;
-        for record in records {
-            let params: Vec<Box<dyn rusqlite::ToSql>> = vec![
-                Box::new(record.timestamp.to_rfc3339()),
-                Box::new(record.metric_name.clone()),
-                Box::new(record.metric_type.clone()),
-                Box::new(record.labels_json.clone()),
-                Box::new(record.count),
-                Box::new(record.avg),
-                Box::new(record.median),
-                Box::new(record.max),
-                Box::new(record.p90),
-                Box::new(record.p99),
-                Box::new(record.project_id),
-                Box::new(record.operation_type.clone()),
-            ];
-            let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-            if store.execute_write(
-                "INSERT INTO metrics_aggregated
+        const INSERT_SQL: &str = "INSERT INTO metrics_aggregated
                  (timestamp, metric_name, metric_type, labels_json, count, avg, median, max, p90, p99, project_id, operation_type)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                &param_refs,
-            ).is_ok() {
-                inserted += 1;
-            }
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
+        let batch_size = batch_size.max(1);
+        let mut inserted = 0;
+        for chunk in records.chunks(batch_size) {
+            let batch: Vec<Vec<Box<dyn rusqlite::ToSql>>> =
+                chunk.iter().map(Self::record_params).collect();
+            inserted += store
+                .execute_write_batch(INSERT_SQL, &batch)
+                .map_err(|e| format!("Batch insert failed: {e}"))?;
         }
         Ok(inserted)
+    }
+
+    fn record_params(record: &AggregatedMetric) -> Vec<Box<dyn rusqlite::ToSql>> {
+        vec![
+            Box::new(record.timestamp.to_rfc3339()),
+            Box::new(record.metric_name.clone()),
+            Box::new(record.metric_type.clone()),
+            Box::new(record.labels_json.clone()),
+            Box::new(record.count),
+            Box::new(record.avg),
+            Box::new(record.median),
+            Box::new(record.max),
+            Box::new(record.p90),
+            Box::new(record.p99),
+            Box::new(record.project_id),
+            Box::new(record.operation_type.clone()),
+        ]
     }
 
     pub async fn query_history(
@@ -650,6 +792,7 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.retention_seconds, 604800);
         assert_eq!(config.cleanup_interval_secs, 3600);
+        assert_eq!(config.batch_size, 100);
     }
 
     #[test]
@@ -661,11 +804,93 @@ mod tests {
             cleanup_interval_secs: 1800,
             aggregate_counters: false,
             aggregate_gauges: false,
+            batch_size: 25,
+            default_interval_secs: 0,
+            metric_overrides: std::collections::HashMap::new(),
         };
         assert_eq!(config.interval_secs, 60);
         assert!(!config.enabled);
         assert_eq!(config.retention_seconds, 86400);
         assert_eq!(config.cleanup_interval_secs, 1800);
+        assert_eq!(config.batch_size, 25);
+    }
+
+    #[test]
+    fn test_aggregation_config_from_global() {
+        let mut global = cce_config::global::MetricsAggregationConfig::default();
+        global.batch_size = 50;
+        global.aggregate_counters = false;
+        let config = AggregationConfig::from_global(&global);
+        assert_eq!(config.batch_size, 50);
+        assert!(!config.aggregate_counters);
+        assert!(config.aggregate_gauges);
+        assert_eq!(config.interval_secs, 300);
+    }
+
+    fn override_config() -> AggregationConfig {
+        let mut config = AggregationConfig {
+            interval_secs: 300,
+            default_interval_secs: 0,
+            ..AggregationConfig::default()
+        };
+        config.metric_overrides.insert(
+            "fast_metric".to_string(),
+            cce_metrics::config::MetricAggregationOverride {
+                interval_secs: Some(60),
+                retention_seconds: None,
+                enabled: None,
+            },
+        );
+        config.metric_overrides.insert(
+            "disabled_metric".to_string(),
+            cce_metrics::config::MetricAggregationOverride {
+                interval_secs: None,
+                retention_seconds: None,
+                enabled: Some(false),
+            },
+        );
+        config
+    }
+
+    #[test]
+    fn test_metric_override_aggregation() {
+        let config = override_config();
+        let last: dashmap::DashMap<String, DateTime<Utc>> = dashmap::DashMap::new();
+        let now = Utc::now();
+
+        assert!(config.should_aggregate_metric("fast_metric", now, &last));
+        assert!(config.should_aggregate_metric("normal_metric", now, &last));
+        assert!(!config.should_aggregate_metric("disabled_metric", now, &last));
+
+        last.insert("fast_metric".to_string(), now);
+        last.insert(
+            "normal_metric".to_string(),
+            now - chrono::Duration::seconds(299),
+        );
+        assert!(!config.should_aggregate_metric("fast_metric", now, &last));
+        assert!(!config.should_aggregate_metric("normal_metric", now, &last));
+
+        last.insert(
+            "fast_metric".to_string(),
+            now - chrono::Duration::seconds(60),
+        );
+        assert!(config.should_aggregate_metric("fast_metric", now, &last));
+        assert!(!config.should_aggregate_metric("normal_metric", now, &last));
+    }
+
+    #[test]
+    fn test_default_interval_falls_back_to_global_interval() {
+        let config = AggregationConfig::default();
+        assert_eq!(config.effective_default_interval_secs(), 300);
+        assert_eq!(
+            config.interval_for_metric("anything"),
+            Duration::from_secs(300)
+        );
+
+        let mut with_default = AggregationConfig::default();
+        with_default.default_interval_secs = 120;
+        assert_eq!(with_default.effective_default_interval_secs(), 120);
+        assert!(with_default.is_metric_enabled("anything"));
     }
 
     #[test]
@@ -714,6 +939,92 @@ mod tests {
         }
     }
     impl std::error::Error for DummyError {}
+
+    fn test_record(name: &str) -> AggregatedMetric {
+        AggregatedMetric {
+            timestamp: Utc::now(),
+            metric_name: name.to_string(),
+            metric_type: "counter".to_string(),
+            labels_json: None,
+            count: 1,
+            avg: None,
+            median: None,
+            max: None,
+            p90: None,
+            p99: None,
+            project_id: None,
+            operation_type: None,
+        }
+    }
+
+    struct RecordingStore {
+        batches: std::sync::Mutex<Vec<usize>>,
+    }
+
+    impl SqliteStore for RecordingStore {
+        type Error = DummyError;
+
+        fn execute_write(
+            &self,
+            _sql: &str,
+            _params: &[&dyn rusqlite::ToSql],
+        ) -> Result<usize, DummyError> {
+            Ok(1)
+        }
+
+        fn execute_write_batch(
+            &self,
+            _sql: &str,
+            batch: &[Vec<Box<dyn rusqlite::ToSql>>],
+        ) -> Result<usize, DummyError> {
+            self.batches.lock().expect("batches lock").push(batch.len());
+            Ok(batch.len())
+        }
+
+        fn query_rows(
+            &self,
+            _sql: &str,
+            _params: &[&dyn rusqlite::ToSql],
+            _f: &mut dyn FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<AggregatedMetric>,
+        ) -> Result<Vec<AggregatedMetric>, DummyError> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn test_store_records_batches_by_size() {
+        let store = RecordingStore {
+            batches: std::sync::Mutex::new(Vec::new()),
+        };
+        let records: Vec<AggregatedMetric> = (0..250)
+            .map(|i| test_record(&format!("metric_{i}")))
+            .collect();
+
+        let inserted = MetricsAggregator::<RecordingStore>::store_records(&store, &records, 100)
+            .await
+            .expect("batch store must succeed");
+        assert_eq!(inserted, 250);
+        assert_eq!(
+            *store.batches.lock().expect("batches lock"),
+            vec![100, 100, 50]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_store_records_zero_batch_size_falls_back_to_one() {
+        let store = RecordingStore {
+            batches: std::sync::Mutex::new(Vec::new()),
+        };
+        let records: Vec<AggregatedMetric> = (0..3)
+            .map(|i| test_record(&format!("metric_{i}")))
+            .collect();
+
+        let inserted = MetricsAggregator::<RecordingStore>::store_records(&store, &records, 0)
+            .await
+            .expect("batch store must succeed");
+        assert_eq!(inserted, 3);
+        assert_eq!(*store.batches.lock().expect("batches lock"), vec![1, 1, 1]);
+    }
 
     impl SqliteStore for DummyStore {
         type Error = DummyError;

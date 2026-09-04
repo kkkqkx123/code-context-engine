@@ -43,6 +43,26 @@ pub mod sqlite_store {
             params: &[&dyn rusqlite::ToSql],
             f: &mut dyn FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<AggregatedMetric>,
         ) -> Result<Vec<AggregatedMetric>, Self::Error>;
+
+        /// Insert a batch of rows, one parameter set per row.
+        ///
+        /// Implementations should wrap the batch in a single transaction when
+        /// possible. The default implementation falls back to repeated
+        /// `execute_write` calls so in-memory fakes keep working.
+        fn execute_write_batch(
+            &self,
+            sql: &str,
+            batch: &[Vec<Box<dyn rusqlite::ToSql>>],
+        ) -> Result<usize, Self::Error> {
+            let mut inserted = 0;
+            for params in batch {
+                let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+                if self.execute_write(sql, &refs).is_ok() {
+                    inserted += 1;
+                }
+            }
+            Ok(inserted)
+        }
     }
 
     /// Aggregated metric record for storage

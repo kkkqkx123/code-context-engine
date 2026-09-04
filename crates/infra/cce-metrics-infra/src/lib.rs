@@ -8,7 +8,7 @@ pub use cce_metrics::{
     BackgroundTaskMetrics, EMBEDDING_BUCKETS, EmbeddingErrorType, EmbeddingMetrics,
     FileProcessingMetrics, HistogramStats, LATENCY_BUCKETS, Label, LabeledCounter,
     LabeledFloatGauge, LabeledGauge, LabeledHistogram, Labels, LlmRetryMetrics, MetricData,
-    MetricKey, MetricValue, MetricsRegistry, MetricsSnapshot, ParserMetrics, PipelineStage,
+    MetricKey, MetricValue, MetricsRegistry, MetricsSnapshot, MetricsSystemMetrics, ParserMetrics,
     PipelineStageMetrics, PluginMetrics, ProgressPhase, RelationMetrics, RerankMetrics, SearchType,
     SummaryMetrics, THROUGHPUT_BUCKETS,
 };

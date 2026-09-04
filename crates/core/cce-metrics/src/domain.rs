@@ -37,8 +37,12 @@ pub mod storage;
 // System resource metrics
 pub mod system;
 
+// Metrics-system self-monitoring
+pub mod metrics_system;
+
 pub use http::HttpMetrics;
 pub use llm::LlmRetryMetrics;
+pub use metrics_system::MetricsSystemMetrics;
 pub use orchestrator::{HotUpdateMetrics, HotUpdateStorageMetrics, QueryMetrics, WatchMetrics};
 pub use pipeline::{
     EmbeddingMetrics, FileProcessingMetrics, ParserMetrics, PipelineStageMetrics, RelationMetrics,

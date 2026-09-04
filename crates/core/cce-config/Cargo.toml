@@ -6,6 +6,7 @@ rust-version.workspace = true
 description = "Configuration system for the code context engine"
 
 [dependencies]
+cce-metrics = { path = "../cce-metrics" }
 cce-types = { path = "../cce-types" }
 cce-utils = { path = "../cce-utils" }
 cce-text = { path = "../cce-text" }

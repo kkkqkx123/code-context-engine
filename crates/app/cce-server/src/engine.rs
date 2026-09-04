@@ -146,8 +146,16 @@ impl CodeContextEngine {
         // Resolve configuration dependencies (auto-enable required features)
         config.resolve_dependencies();
 
-        // Create global metrics registry
-        let metrics_registry = Arc::new(MetricsRegistry::new());
+        // Create global metrics registry with the configured label allowlist.
+        let metrics_registry = Arc::new(MetricsRegistry::with_label_config(
+            config.metrics.labels.clone(),
+        ));
+        metrics_registry.update_memory_config(config.metrics.memory.clone());
+        if config.metrics.memory.eviction_enabled {
+            metrics_registry.start_cleanup_task();
+        }
+        let metrics_system_metrics =
+            cce_metrics_infra::MetricsSystemMetrics::new(&metrics_registry);
 
         // Create SQLite client
         let sqlite_config = config.database.sqlite.clone();
@@ -211,19 +219,13 @@ impl CodeContextEngine {
 
         // Create metrics aggregator (optional, can be disabled via config)
         let metrics_aggregator = if config.metrics.aggregation.enabled {
-            let agg_config = AggregationConfig {
-                interval_secs: config.metrics.aggregation.interval_secs,
-                enabled: config.metrics.aggregation.enabled,
-                retention_seconds: config.metrics.aggregation.retention_seconds,
-                cleanup_interval_secs: config.metrics.aggregation.cleanup_interval_secs,
-                aggregate_counters: true,
-                aggregate_gauges: true,
-            };
+            let agg_config = AggregationConfig::from_global(&config.metrics.aggregation);
             let aggregator =
                 MetricsAggregator::new(sqlite_client.clone(), metrics_registry.clone(), agg_config)
                     .with_background_metrics(cce_metrics_infra::BackgroundTaskMetrics::new(
                         &metrics_registry,
-                    ));
+                    ))
+                    .with_system_metrics(metrics_system_metrics.clone());
             Some(Arc::new(aggregator))
         } else {
             None

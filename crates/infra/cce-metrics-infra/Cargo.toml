@@ -5,7 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+cce-config = { path = "../../core/cce-config" }
 cce-types = { path = "../../core/cce-types" }
+dashmap = { workspace = true }
 cce-metrics = { path = "../../core/cce-metrics" }
 cce-storage-common = { path = "../cce-storage-common" }
 tokio = { workspace = true }

@@ -4,7 +4,8 @@
 
 use cce_metrics::serialization::MetricData;
 use cce_metrics::{
-    HistogramStats, MetricValue, MetricsRegistry, MetricsSnapshot, metric_description,
+    HistogramStats, MetricValue, MetricsRegistry, MetricsSnapshot, MetricsSystemMetrics,
+    metric_description,
 };
 
 /// Error type for metric export operations
@@ -29,14 +30,36 @@ pub enum ExportFormat {
 
 /// Export metrics in the specified format
 pub fn export(registry: &MetricsRegistry, format: ExportFormat) -> String {
-    match format {
+    export_with_metrics(registry, format, None)
+}
+
+/// Export metrics while recording latency and volume self-monitoring.
+pub fn export_with_metrics(
+    registry: &MetricsRegistry,
+    format: ExportFormat,
+    system_metrics: Option<&MetricsSystemMetrics>,
+) -> String {
+    let started = std::time::Instant::now();
+    let output = match format {
         ExportFormat::Prometheus => format_prometheus(registry),
         ExportFormat::Json => {
             let snapshot = cce_metrics::serialization::MetricsSnapshot::from_registry(registry);
             serde_json::to_string_pretty(&snapshot)
                 .unwrap_or_else(|e| format!("{{\"error\": \"serialization failed: {}\"}}", e))
         }
+    };
+    if let Some(sys) = system_metrics {
+        let format_name = match format {
+            ExportFormat::Prometheus => "prometheus",
+            ExportFormat::Json => "json",
+        };
+        sys.record_export(
+            format_name,
+            started.elapsed().as_secs_f64() * 1000.0,
+            output.len(),
+        );
     }
+    output
 }
 
 /// Format metrics in Prometheus exposition format
@@ -183,17 +206,29 @@ fn format_labels_snapshot(labels: &Option<std::collections::HashMap<String, Stri
 }
 
 /// Multi-format exporter manager
-pub struct ExporterManager;
+pub struct ExporterManager {
+    system_metrics: Option<std::sync::Arc<MetricsSystemMetrics>>,
+}
 
 impl Default for ExporterManager {
     fn default() -> Self {
-        Self
+        Self::new()
     }
 }
 
 impl ExporterManager {
     pub fn new() -> Self {
-        Self
+        Self {
+            system_metrics: None,
+        }
+    }
+
+    pub fn with_system_metrics(
+        mut self,
+        system_metrics: std::sync::Arc<MetricsSystemMetrics>,
+    ) -> Self {
+        self.system_metrics = Some(system_metrics);
+        self
     }
 
     pub async fn export(
@@ -206,7 +241,11 @@ impl ExporterManager {
             "json" => ExportFormat::Json,
             _ => return Err(ExportError::Other(format!("Unknown format: {}", format))),
         };
-        Ok(export(registry, format))
+        Ok(export_with_metrics(
+            registry,
+            format,
+            self.system_metrics.as_deref(),
+        ))
     }
 }
 
@@ -261,6 +300,32 @@ mod tests {
 
         let result = manager.export("unknown", &registry).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_export_with_metrics_records_self_monitoring() {
+        let registry = MetricsRegistry::new();
+        registry.counter("test", &[]).increment();
+        let system_metrics = MetricsSystemMetrics::new(&registry);
+
+        let output =
+            export_with_metrics(&registry, ExportFormat::Prometheus, Some(&system_metrics));
+        assert!(output.contains("test"));
+        assert_eq!(system_metrics.export_latency_ms.get_count(), 1);
+        system_metrics.update_registry_size(registry.registry_size());
+        assert!(system_metrics.registry_size.get() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_exporter_manager_with_system_metrics() {
+        let registry = MetricsRegistry::new();
+        registry.counter("test", &[]).increment();
+        let system_metrics = MetricsSystemMetrics::new(&registry);
+        let manager = ExporterManager::new().with_system_metrics(system_metrics.clone());
+
+        let output = manager.export("json", &registry).await.unwrap();
+        assert!(output.contains("test"));
+        assert_eq!(system_metrics.export_latency_ms.get_count(), 1);
     }
 
     #[test]
