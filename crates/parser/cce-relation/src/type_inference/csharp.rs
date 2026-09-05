@@ -14,12 +14,12 @@ use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 use cce_types::language::Language;
 
-use super::control_flow::shared::{is_valid_ident, strip_outer_parens};
+use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip_outer_parens};
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, narrow_discriminated_union, parse_type_shape,
-    type_shape_to_string,
+    ScopedTypeContext, TypeBinding, declared_shape, narrow_discriminated_union, parse_type_shape,
+    subtract_union_members, type_shape_to_string,
 };
 
 /// C# type inference implementation.
@@ -101,8 +101,17 @@ impl LanguageTypeInferer for CSharpTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_csharp_if(&fact.text, ctx, inference_ctx.type_index())
-                        {
+                        for result in narrow_csharp_if(
+                            &fact.text,
+                            ctx,
+                            inference_ctx.type_index(),
+                            &entity.parameters,
+                        ) {
+                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                        }
+                    }
+                    ControlFlowFactKind::Match => {
+                        for result in narrow_csharp_switch(&fact.text) {
                             ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
@@ -132,18 +141,20 @@ struct NarrowingResult {
 /// Narrow types from a C# `if` condition.
 ///
 /// Patterns:
-/// - `if (x is Type)` → x: Type
-/// - `if (x is not Type)` → conservative skip
+/// - `if (x is Type)` → x: Type (`x is Type name` binds the designation)
+/// - `if (x is not Type)` → x: declared-minus-Type (union only)
+/// - `if (x is not null)` → x: declared (non-null)
 /// - `if (x.field == "value")` → x: narrowed union (discriminated union)
 fn narrow_csharp_if(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&crate::symbol_table::TypeMemberIndex>,
+    params: &[(String, Option<String>)],
 ) -> Vec<NarrowingResult> {
     let text = text.trim();
     let mut results = vec![];
 
-    if let Some(result) = narrow_csharp_is_check(text) {
+    if let Some(result) = narrow_csharp_is_check(text, ctx, params) {
         results.push(result);
         return results;
     }
@@ -155,14 +166,18 @@ fn narrow_csharp_if(
     results
 }
 
-/// Parse `if (x is Type)` or `if (x is not Type)`.
-fn narrow_csharp_is_check(text: &str) -> Option<NarrowingResult> {
+/// Parse `if (x is Type)`, `if (x is not Type)` and `is [not] null` checks.
+fn narrow_csharp_is_check(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
     let text = strip_csharp_condition_prefix(text)?;
     let text = text.trim();
 
-    // Skip negated is checks
-    if text.contains("is not") {
-        return None;
+    // Negated `is` checks narrow the complement instead.
+    if let Some(rest) = split_is_not(text) {
+        return narrow_csharp_is_not(text, rest, ctx, params);
     }
 
     let parts: Vec<&str> = text.splitn(2, " is ").collect();
@@ -171,20 +186,73 @@ fn narrow_csharp_is_check(text: &str) -> Option<NarrowingResult> {
     }
 
     let var_name = parts[0].trim();
-    let type_name = parts[1].trim();
+    let rhs = parts[1].trim();
 
-    if var_name.is_empty() || !is_valid_ident(var_name) || type_name.is_empty() {
+    if var_name.is_empty() || !is_valid_ident(var_name) || rhs.is_empty() {
         return None;
     }
 
+    // `x is Type name` binds the designation, not `x`.
+    let mut rhs_parts = rhs.split_whitespace();
+    let type_name = rhs_parts.next()?;
+    let (bind_name, bind_type) = match rhs_parts.next() {
+        Some(designation) if is_valid_ident(designation) && rhs_parts.next().is_none() => {
+            (designation.to_string(), type_name.to_string())
+        }
+        _ => (var_name.to_string(), rhs.to_string()),
+    };
+
     Some(NarrowingResult {
-        variable_name: var_name.to_string(),
+        variable_name: bind_name,
         narrowed_type: TypeBinding {
-            type_name: type_name.to_string(),
+            type_name: bind_type,
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
             shape: None,
+        },
+    })
+}
+
+/// Split `x is not T` into (`x`, `T`).
+fn split_is_not(text: &str) -> Option<(&str, &str)> {
+    let parts: Vec<&str> = text.splitn(2, " is not ").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    Some((parts[0].trim(), parts[1].trim()))
+}
+
+/// Parse `x is not Type` → x: declared-minus-Type (union only), and
+/// `x is not null` → x: declared (non-null).
+fn narrow_csharp_is_not(
+    _full: &str,
+    rest: (&str, &str),
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
+    let (var_name, excluded) = rest;
+    if var_name.is_empty() || !is_valid_ident(var_name) || excluded.is_empty() {
+        return None;
+    }
+    // `x is not Type name` excludes the type, not the designation.
+    let excluded = excluded.split_whitespace().next().unwrap_or(excluded);
+    let declared = declared_shape(ctx, params, Language::CSharp, var_name)?;
+    let narrowed =
+        subtract_union_members(&declared, &[excluded.to_string()]).unwrap_or(declared.clone());
+    // A bare `is not null` on a non-union declared type keeps the declared
+    // type (null excluded); other non-union complements stay conservative.
+    if excluded != "null" && type_shape_to_string(&narrowed) == type_shape_to_string(&declared) {
+        return None;
+    }
+    Some(NarrowingResult {
+        variable_name: var_name.to_string(),
+        narrowed_type: TypeBinding {
+            type_name: type_shape_to_string(&narrowed),
+            type_entity_id: None,
+            span: Span::default(),
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: Some(narrowed),
         },
     })
 }
@@ -195,10 +263,54 @@ fn strip_csharp_condition_prefix(text: &str) -> Option<&str> {
     for prefix in &["if", "while", "else if", "return", "assert"] {
         if let Some(rest) = text.strip_prefix(prefix) {
             let rest = rest.trim();
-            return Some(strip_outer_parens(rest));
+            // Fact text carries the branch body (`if (c) { ... }`), so take
+            // the balanced paren group instead of requiring a clean suffix.
+            return Some(extract_balanced_parens(rest).unwrap_or_else(|| strip_outer_parens(rest)));
         }
     }
     None
+}
+
+/// Narrow types from C# switch case arms.
+///
+/// `case string s:` / `case int i when ...:` binds the arm designation.
+/// Literal, null and multi-token (recursive/guard-heavy) labels stay
+/// conservative.
+fn narrow_csharp_switch(text: &str) -> Vec<NarrowingResult> {
+    let mut results = vec![];
+    let mut search_start = 0;
+    while let Some(case_pos) = text[search_start..].find("case ") {
+        let abs_case = search_start + case_pos;
+        // Case labels start a statement: the previous non-whitespace char
+        // must open the switch body or terminate the prior arm. This keeps
+        // string literals such as `log("case int i:")` from binding.
+        let prev = text[..abs_case].chars().rev().find(|c| !c.is_whitespace());
+        if !matches!(prev, None | Some('{') | Some('}') | Some(';')) {
+            search_start = abs_case + 5;
+            continue;
+        }
+        let after_case = &text[abs_case + 5..];
+        let label_end = after_case.find(':').unwrap_or(after_case.len());
+        let mut label = after_case[..label_end].trim();
+        if let Some(when_pos) = label.find(" when ") {
+            label = label[..when_pos].trim();
+        }
+        let tokens: Vec<&str> = label.split_whitespace().collect();
+        if tokens.len() == 2 && is_valid_ident(tokens[0]) && is_valid_ident(tokens[1]) {
+            results.push(NarrowingResult {
+                variable_name: tokens[1].to_string(),
+                narrowed_type: TypeBinding {
+                    type_name: tokens[0].to_string(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: None,
+                },
+            });
+        }
+        search_start = abs_case + 5;
+    }
+    results
 }
 
 /// C# discriminated union narrowing: `x.field == "value"` → x: narrowed union.
@@ -461,6 +573,7 @@ mod tests {
             "if (x is string)",
             &ScopedTypeContext::new(Language::CSharp),
             None,
+            &[],
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
@@ -469,11 +582,62 @@ mod tests {
     }
 
     #[test]
-    fn test_csharp_is_not_skipped() {
+    fn test_csharp_is_not_complement() {
+        let ctx = ScopedTypeContext::new(Language::CSharp);
+        let params = [("x".to_string(), Some("string | int".to_string()))];
+        let results = narrow_csharp_if("if (x is not string)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "int");
+    }
+
+    #[test]
+    fn test_csharp_is_not_plain_type_skipped() {
+        let ctx = ScopedTypeContext::new(Language::CSharp);
+        let params = [("obj".to_string(), Some("object".to_string()))];
+        let results = narrow_csharp_if("if (obj is not string)", &ctx, None, &params);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_csharp_is_not_null_narrows_declared() {
+        let ctx = ScopedTypeContext::new(Language::CSharp);
+        let params = [("value".to_string(), Some("string".to_string()))];
+        let results = narrow_csharp_if("if (value is not null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
+    }
+
+    #[test]
+    fn test_csharp_is_designation_binds_name() {
         let results = narrow_csharp_if(
-            "if (x is not string)",
+            "if (obj is string s)",
             &ScopedTypeContext::new(Language::CSharp),
             None,
+            &[],
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "s");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
+    }
+
+    #[test]
+    fn test_csharp_switch_case_arm() {
+        let results = narrow_csharp_switch(
+            "switch (obj) { case string s: a(); break; case int n when n > 0: b(); break; default: c(); break; }",
+        );
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].variable_name, "s");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
+        assert_eq!(results[1].variable_name, "n");
+        assert_eq!(results[1].narrowed_type.type_name, "int");
+    }
+
+    #[test]
+    fn test_csharp_switch_literal_skipped() {
+        let results = narrow_csharp_switch(
+            "switch (x) { case 1: a(); break; case null: b(); break; default: c(); break; }",
         );
         assert!(results.is_empty());
     }
@@ -514,6 +678,7 @@ mod tests {
             "if (shape.Kind == \"Circle\")",
             &ScopedTypeContext::new(Language::CSharp),
             None,
+            &[],
         );
         assert!(results.is_empty());
     }
@@ -574,6 +739,7 @@ mod tests {
             "while (x is string)",
             &ScopedTypeContext::new(Language::CSharp),
             None,
+            &[],
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
@@ -586,6 +752,7 @@ mod tests {
             "else if (x is int)",
             &ScopedTypeContext::new(Language::CSharp),
             None,
+            &[],
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
@@ -598,6 +765,7 @@ mod tests {
             "return x is List<string>",
             &ScopedTypeContext::new(Language::CSharp),
             None,
+            &[],
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
@@ -618,7 +786,7 @@ mod tests {
                 shape: parse_type_shape("Circle | Square | Triangle", Language::CSharp),
             },
         );
-        let results = narrow_csharp_if("if (shape.Kind == \"Circle\")", &ctx, None);
+        let results = narrow_csharp_if("if (shape.Kind == \"Circle\")", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 
@@ -636,7 +804,7 @@ mod tests {
                 shape: parse_type_shape("Circle | Square", Language::CSharp),
             },
         );
-        let results = narrow_csharp_if("if (shape.Kind == \"Triangle\")", &ctx, None);
+        let results = narrow_csharp_if("if (shape.Kind == \"Triangle\")", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 

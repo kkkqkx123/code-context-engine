@@ -18,8 +18,8 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, narrow_discriminated_union, parse_type_shape,
-    type_shape_to_string,
+    ScopedTypeContext, TypeBinding, declared_shape, narrow_discriminated_union, parse_type_shape,
+    subtract_union_members, type_shape_to_string,
 };
 
 /// Dart type inference implementation.
@@ -92,7 +92,12 @@ impl LanguageTypeInferer for DartTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_dart_if(&fact.text, ctx, inference_ctx.type_index()) {
+                        for result in narrow_dart_if(
+                            &fact.text,
+                            ctx,
+                            inference_ctx.type_index(),
+                            &entity.parameters,
+                        ) {
                             ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
@@ -114,20 +119,26 @@ struct NarrowingResult {
 ///
 /// Patterns:
 /// - `if (x is Type)` → x: Type
-/// - `if (x != null)` → x: non-null (conservative: skip, no concrete type)
-/// - `if (x == null)` → conservative skip
+/// - `if (x is! Type)` → x: declared-minus-Type (union only)
+/// - `if (x != null)` → x: declared (non-null)
+/// - `if (x == null)` → x: null
 /// - `if (x.field == "value")` → x: narrowed union (discriminated union)
 fn narrow_dart_if(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&crate::symbol_table::TypeMemberIndex>,
+    params: &[(String, Option<String>)],
 ) -> Vec<NarrowingResult> {
     let text = text.trim();
     let mut results = vec![];
 
-    if let Some(result) = narrow_dart_is_check(text) {
+    if let Some(result) = narrow_dart_is_check(text, ctx, params) {
         results.push(result);
         return results;
+    }
+
+    if let Some(result) = narrow_dart_null_check(text, ctx, params) {
+        results.push(result);
     }
 
     for result in narrow_dart_discriminated_union(text, ctx, type_index) {
@@ -137,14 +148,17 @@ fn narrow_dart_if(
     results
 }
 
-/// Parse `if (x is Type)` or `if (x is! Type)`.
-fn narrow_dart_is_check(text: &str) -> Option<NarrowingResult> {
+/// Parse `if (x is Type)` or route `if (x is! Type)` to complement narrowing.
+fn narrow_dart_is_check(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
     let text = strip_dart_condition_prefix(text)?;
     let text = text.trim();
 
-    // Skip negated is checks
     if text.contains("is!") {
-        return None;
+        return narrow_dart_negated_is(text, ctx, params);
     }
 
     let parts: Vec<&str> = text.splitn(2, " is ").collect();
@@ -169,6 +183,94 @@ fn narrow_dart_is_check(text: &str) -> Option<NarrowingResult> {
             shape: None,
         },
     })
+}
+
+/// Parse `x is! Type` → x: declared-minus-Type.
+///
+/// Only fires when the declared shape is a union that the exclusion can
+/// actually shrink; a bare null exclusion (`is! Null`) on a non-union
+/// declared type keeps the declared type, while other non-union
+/// complements stay conservative.
+fn narrow_dart_negated_is(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
+    let parts: Vec<&str> = text.splitn(2, "is!").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let var_name = parts[0].trim();
+    let excluded = parts[1].split_whitespace().next()?;
+    if var_name.is_empty() || !is_valid_ident(var_name) || excluded.is_empty() {
+        return None;
+    }
+    let declared = declared_shape(ctx, params, Language::Dart, var_name)?;
+    let narrowed =
+        subtract_union_members(&declared, &[excluded.to_string()]).unwrap_or(declared.clone());
+    if excluded != "Null"
+        && excluded != "null"
+        && type_shape_to_string(&narrowed) == type_shape_to_string(&declared)
+    {
+        return None;
+    }
+    Some(NarrowingResult {
+        variable_name: var_name.to_string(),
+        narrowed_type: TypeBinding {
+            type_name: type_shape_to_string(&narrowed),
+            type_entity_id: None,
+            span: Span::default(),
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: Some(narrowed),
+        },
+    })
+}
+
+/// Parse Dart null checks: `x != null` → x: declared, `x == null` → x: null.
+fn narrow_dart_null_check(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
+    let text = strip_dart_condition_prefix(text)?;
+    let text = text.trim();
+    for (op, negated) in [("!=", true), ("==", false)] {
+        let parts: Vec<&str> = text.splitn(2, op).collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let var_name = parts[0].trim();
+        let rhs = parts[1].trim();
+        if rhs != "null" || var_name.is_empty() || !is_valid_ident(var_name) {
+            continue;
+        }
+        if !negated {
+            return Some(NarrowingResult {
+                variable_name: var_name.to_string(),
+                narrowed_type: TypeBinding {
+                    type_name: "null".to_string(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: None,
+                },
+            });
+        }
+        let declared = declared_shape(ctx, params, Language::Dart, var_name)?;
+        let narrowed =
+            subtract_union_members(&declared, &["null".to_string()]).unwrap_or(declared.clone());
+        return Some(NarrowingResult {
+            variable_name: var_name.to_string(),
+            narrowed_type: TypeBinding {
+                type_name: type_shape_to_string(&narrowed),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
+    }
+    None
 }
 
 /// Strip Dart condition prefixes.
@@ -356,6 +458,7 @@ mod tests {
             "if (x is String)",
             &ScopedTypeContext::new(Language::Dart),
             None,
+            &[],
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
@@ -364,23 +467,97 @@ mod tests {
     }
 
     #[test]
-    fn test_dart_is_not_skipped() {
+    fn test_dart_is_check_with_body() {
+        // Fact text carries the branch body; balanced-paren extraction must
+        // still isolate the condition.
+        let results = narrow_dart_if(
+            "if (x is String) { return x; }",
+            &ScopedTypeContext::new(Language::Dart),
+            None,
+            &[],
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_dart_is_not_without_declared_skipped() {
         let results = narrow_dart_if(
             "if (x is! String)",
             &ScopedTypeContext::new(Language::Dart),
             None,
+            &[],
         );
         assert!(results.is_empty());
     }
 
     #[test]
-    fn test_dart_null_check_skipped() {
+    fn test_dart_is_not_complement() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("x".to_string(), Some("String | int".to_string()))];
+        let results = narrow_dart_if("if (x is! String)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "int");
+    }
+
+    #[test]
+    fn test_dart_is_not_with_body_complement() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("x".to_string(), Some("String | int".to_string()))];
+        let results = narrow_dart_if("if (x is! String) { return 'no'; }", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "int");
+    }
+
+    #[test]
+    fn test_dart_is_not_plain_type_skipped() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("obj".to_string(), Some("Object".to_string()))];
+        let results = narrow_dart_if("if (obj is! String)", &ctx, None, &params);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_dart_is_not_null_narrows_declared() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("value".to_string(), Some("String".to_string()))];
+        let results = narrow_dart_if("if (value is! Null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_dart_not_null_narrows_declared() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("value".to_string(), Some("String".to_string()))];
+        let results = narrow_dart_if("if (value != null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_dart_not_null_without_declared_skipped() {
         let results = narrow_dart_if(
             "if (x != null)",
             &ScopedTypeContext::new(Language::Dart),
             None,
+            &[],
         );
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_dart_equal_null_binds_null() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let results = narrow_dart_if("if (value == null)", &ctx, None, &[]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "null");
     }
 
     #[test]
@@ -409,6 +586,7 @@ mod tests {
             "if (shape.kind == \"circle\")",
             &ScopedTypeContext::new(Language::Dart),
             None,
+            &[],
         );
         assert!(results.is_empty());
     }

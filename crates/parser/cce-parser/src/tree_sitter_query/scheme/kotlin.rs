@@ -152,13 +152,16 @@ pub fn entity_query() -> &'static str {
   (type)? @entity.variable.type
 ) @entity.variable
 
-; Multi-variable declaration
+; Multi-variable declaration (destructuring)
+; e.g., `val (first, second) = pair`
+; Folded into one comma-separated entity so inference maps elements by
+; position; the right-hand side is attached as `source_type` in metadata.
 (multi_variable_declaration
   (variable_declaration
-    (identifier) @entity.variable.name
-    (type)? @entity.variable.type
+    (identifier) @entity.variable.multiple.name
+    (type)? @entity.variable.multiple.type
   )
-) @entity.variable.multi
+) @entity.variable.multiple
 
 ; ============================================
 ; 5. Package and Imports

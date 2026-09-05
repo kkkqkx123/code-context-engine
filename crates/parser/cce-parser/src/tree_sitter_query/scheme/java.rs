@@ -53,6 +53,17 @@ pub fn entity_query() -> &'static str {
   name: (identifier) @entity.record.name
 ) @entity.record
 
+; Record components (Java 14+, implicitly private final fields)
+; e.g., record Point(String name, int age)
+(record_declaration
+  parameters: (formal_parameters
+    (formal_parameter
+      type: (_) @entity.field.type
+      name: (identifier) @entity.field.name
+    ) @entity.field
+  )
+)
+
 ; Annotation type definition
 (annotation_type_declaration
   name: (identifier) @entity.annotation.name
@@ -117,6 +128,22 @@ pub fn entity_query() -> &'static str {
     name: (identifier) @entity.variable.name
   )
 ) @entity.variable
+
+; instanceof pattern variable
+; e.g., if (obj instanceof String s)
+; Note: tree-sitter-java validates `name:` against any sibling type child,
+; so the pattern binds the name only; the type comes from control-flow
+; narrowing, which parses the same condition text.
+(instanceof_expression
+  name: (identifier) @entity.variable.case.name
+) @entity.variable.case
+
+; Enhanced-for loop variable
+; e.g., for (String current : args)
+(enhanced_for_statement
+  name: (identifier) @entity.variable.loop.name
+  value: (_) @entity.variable.loop.source
+) @entity.variable.loop
 
 ; ============================================
 ; 4. Package and Module
@@ -375,6 +402,7 @@ pub fn control_flow_query() -> &'static str {
     r#"
 (if_statement) @control.flow.if
 (for_statement) @control.flow.loop
+(enhanced_for_statement) @control.flow.loop
 (while_statement) @control.flow.loop
 (do_statement) @control.flow.loop
 (switch_expression) @control.flow.match

@@ -143,8 +143,10 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
 /// Whether a variable entity carries type information worth preserving.
 ///
 /// Any of the parser-produced type keys (annotation, constructor call,
-/// literal, call target, or legacy inference keys) counts; bare locals
-/// without them remain eligible for contained-entity removal.
+/// literal, call target, destructuring source, or legacy inference keys)
+/// counts; bare locals without them remain eligible for contained-entity
+/// removal. `source_type` records destructuring provenance (tuple unpacking,
+/// loop/except/with/case bindings) and feeds positional element mapping.
 pub(crate) fn variable_carries_type_info(entity: &Entity) -> bool {
     const TYPE_KEYS: &[&str] = &[
         "type_annotation",
@@ -154,6 +156,7 @@ pub(crate) fn variable_carries_type_info(entity: &Entity) -> bool {
         "explicit_type",
         "var_type",
         "inferred_type",
+        "source_type",
     ];
     TYPE_KEYS
         .iter()

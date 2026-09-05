@@ -346,6 +346,30 @@ pub fn parse_type_shape(
         }
         return Some(TypeShape::Named(trimmed.to_string()));
     }
+    // Handle bracket generics `Base[Args]` (Python `tuple[int, str]`,
+    // `dict[str, int]`, TypeScript `Array<string>`-adjacent forms).
+    if let Some(start) = trimmed.find('[') {
+        if let Some(end) = trimmed.rfind(']') {
+            if start < end && start > 0 {
+                let base = trimmed[..start].trim().to_string();
+                if !base.is_empty()
+                    && base
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == ' ')
+                {
+                    let inner = trimmed[start + 1..end].trim();
+                    let arg_strs = split_type_args(inner);
+                    let args: Vec<TypeShape> = arg_strs
+                        .iter()
+                        .filter_map(|a| parse_type_shape(a.trim(), language))
+                        .collect();
+                    if !args.is_empty() {
+                        return Some(TypeShape::Generic { base, args });
+                    }
+                }
+            }
+        }
+    }
     // Handle generic `Base<Args>`
     if let Some(start) = trimmed.find('<') {
         if let Some(end) = trimmed.rfind('>') {
@@ -379,6 +403,20 @@ pub fn shape_members(shape: &TypeShape) -> Vec<String> {
         TypeShape::Param(p) => vec![p.clone()],
         TypeShape::Wildcard { bound: Some(b), .. } => vec![b.clone()],
         TypeShape::Wildcard { bound: None, .. } => vec!["?".to_string()],
+    }
+}
+
+/// Extract the iterated element type of a container shape.
+///
+/// Arrays yield their inner type. Generic containers with at least one type
+/// argument yield the first argument, which models iteration over sequences
+/// and key iteration over maps. All other shapes yield `None` so callers
+/// stay conservative instead of guessing.
+pub fn element_type_of_shape(shape: &TypeShape) -> Option<TypeShape> {
+    match shape {
+        TypeShape::Array(inner) => Some((**inner).clone()),
+        TypeShape::Generic { args, .. } => args.first().cloned(),
+        _ => None,
     }
 }
 
@@ -527,6 +565,77 @@ pub fn narrow_truthiness(
     } else {
         None
     }
+}
+
+/// Pure union subtraction for negated narrowing (`not isinstance(x, T)`,
+/// `x is not None`, `x !== null`, `typeof x !== "string"`).
+///
+/// Accepts `Union(members)` and `Generic{Union | Optional, args}`
+/// (`Optional` implies a `None` member). Members matching any entry of
+/// `excluded` (compared by rendered type string, quote-insensitive) are
+/// removed. Returns `None` when the shape is not union-like or nothing
+/// remains, so callers emit no binding rather than a guess.
+pub fn subtract_union_members(shape: &TypeShape, excluded: &[String]) -> Option<TypeShape> {
+    let mut members: Vec<TypeShape> = match shape {
+        TypeShape::Union(members) => members.clone(),
+        TypeShape::Generic { base, args } if base == "Union" => args.clone(),
+        TypeShape::Generic { base, args } if base == "Optional" => {
+            let mut with_none = args.clone();
+            if !with_none
+                .iter()
+                .any(|m| matches!(m, TypeShape::Named(n) if n == "None" || n == "NoneType"))
+            {
+                with_none.push(TypeShape::Named("None".to_string()));
+            }
+            with_none
+        }
+        _ => return None,
+    };
+    let normalize = |s: &str| {
+        s.trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim()
+            .to_string()
+    };
+    members.retain(|member| {
+        let rendered = normalize(&type_shape_to_string(member));
+        !excluded.iter().any(|e| normalize(e) == rendered)
+    });
+    match members.len() {
+        0 => None,
+        1 => Some(members.into_iter().next().expect("one member")),
+        _ => Some(TypeShape::Union(members)),
+    }
+}
+
+/// Look up the declared type of a variable for narrowing.
+///
+/// Parameter annotations of the enclosing function win (they describe the
+/// value at every program point); otherwise fall back to an already-known
+/// variable binding. Returns the parsed shape, or `None` when the variable
+/// has no usable declared type.
+pub fn declared_shape(
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+    language: Language,
+    name: &str,
+) -> Option<TypeShape> {
+    if let Some(ty) = params
+        .iter()
+        .find(|(n, _)| n == name)
+        .and_then(|(_, ty)| ty.as_deref())
+    {
+        if let Some(shape) = parse_type_shape(ty, language) {
+            return Some(shape);
+        }
+    }
+    ctx.get_variable_type(name).and_then(|binding| {
+        binding
+            .shape
+            .clone()
+            .or_else(|| parse_type_shape(&binding.type_name, language))
+    })
 }
 
 /// Check if a type shape represents a falsy value for a given language.
@@ -1005,6 +1114,10 @@ impl ScopedTypeContext {
 
     /// Add destructuring assignment binding
     /// Handles: `a, b = tuple()` or `a = list[0]`
+    ///
+    /// Positional mapping applies to any generic container with enough type
+    /// arguments, not just tuple-named shapes. Positions without a matching
+    /// argument bind to `unknown` so unrelated parts never inherit a guess.
     pub fn add_destructuring_binding(
         &mut self,
         target: &str,
@@ -1012,7 +1125,7 @@ impl ScopedTypeContext {
         index: Option<usize>,
     ) {
         let resolved_type = match source_type {
-            TypeShape::Generic { base, args } if base == "tuple" || base == "Tuple" => index
+            TypeShape::Generic { args, .. } => index
                 .and_then(|i| args.get(i).cloned())
                 .unwrap_or_else(|| TypeShape::Named("unknown".to_string())),
             TypeShape::Array(element_type) => (**element_type).clone(),
@@ -2545,5 +2658,59 @@ mod tests {
         ctx.narrow_union("x", &TypeShape::Named("String".to_string()));
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "String");
+    }
+
+    #[test]
+    fn test_element_type_of_array_shape() {
+        let shape = TypeShape::Array(Box::new(TypeShape::Named("User".to_string())));
+        let element = element_type_of_shape(&shape).expect("array has element type");
+        assert_eq!(element, TypeShape::Named("User".to_string()));
+    }
+
+    #[test]
+    fn test_element_type_of_generic_shape() {
+        let shape = TypeShape::Generic {
+            base: "List".to_string(),
+            args: vec![TypeShape::Named("User".to_string())],
+        };
+        let element = element_type_of_shape(&shape).expect("generic has element type");
+        assert_eq!(element, TypeShape::Named("User".to_string()));
+    }
+
+    #[test]
+    fn test_element_type_of_plain_shape_is_none() {
+        let shape = TypeShape::Named("User".to_string());
+        assert!(element_type_of_shape(&shape).is_none());
+    }
+
+    #[test]
+    fn test_destructuring_binding_maps_generic_position() {
+        let mut ctx = ScopedTypeContext::new(Language::Python);
+        let source = TypeShape::Generic {
+            base: "Pair".to_string(),
+            args: vec![
+                TypeShape::Named("String".to_string()),
+                TypeShape::Named("int".to_string()),
+            ],
+        };
+        ctx.add_destructuring_binding("second", &source, Some(1));
+        let binding = ctx
+            .get_variable_type("second")
+            .expect("destructured binding exists");
+        assert_eq!(binding.type_name, "int");
+    }
+
+    #[test]
+    fn test_destructuring_binding_out_of_range_stays_unknown() {
+        let mut ctx = ScopedTypeContext::new(Language::Python);
+        let source = TypeShape::Generic {
+            base: "Pair".to_string(),
+            args: vec![TypeShape::Named("String".to_string())],
+        };
+        ctx.add_destructuring_binding("second", &source, Some(1));
+        let binding = ctx
+            .get_variable_type("second")
+            .expect("destructured binding exists");
+        assert_eq!(binding.type_name, "unknown");
     }
 }

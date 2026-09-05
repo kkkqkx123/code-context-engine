@@ -177,6 +177,71 @@ pub fn entity_non_function_patterns() -> &'static str {
   )
 ) @entity.variable.var
 
+; Object destructuring: const {name, age} = user
+(lexical_declaration
+  (variable_declarator
+    name: (object_pattern
+      (shorthand_property_identifier_pattern) @entity.variable.multiple.name
+    )
+    value: (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+(variable_declaration
+  (variable_declarator
+    name: (object_pattern
+      (shorthand_property_identifier_pattern) @entity.variable.multiple.name
+    )
+    value: (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+; Object destructuring with rename: const {a: b} = src
+(lexical_declaration
+  (variable_declarator
+    name: (object_pattern
+      (pair_pattern
+        value: (identifier) @entity.variable.multiple.name
+      )
+    )
+    value: (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+; Array destructuring: const [first, second] = pair
+(lexical_declaration
+  (variable_declarator
+    name: (array_pattern
+      (identifier) @entity.variable.multiple.name
+    )
+    value: (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+(variable_declaration
+  (variable_declarator
+    name: (array_pattern
+      (identifier) @entity.variable.multiple.name
+    )
+    value: (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+; For-of destructuring: for (const [k, v] of scores)
+(for_in_statement
+  left: (array_pattern
+    (identifier) @entity.variable.loop.name
+  )
+  right: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+(for_in_statement
+  left: (object_pattern
+    (shorthand_property_identifier_pattern) @entity.variable.loop.name
+  )
+  right: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
 ; ============================================
 ; Object Properties
 ; ============================================
@@ -444,6 +509,23 @@ pub fn dependency_shared() -> &'static str {
 ; ============================================
 
 ; require() call
+;
+; This single pattern covers every syntactic position: bare calls,
+; `var`/`const` declarators, plain assignments, destructured bindings,
+; and typed (TS) declarators. The query engine matches the inner
+; `call_expression` node regardless of its parent, so no separate
+; declarator-level patterns are needed. (Verified with
+; `cargo run --example parse_js_require -p cce-parser`.)
+;
+; A separate declarator-level pattern must NOT be added: it would fire on
+; the same call a second time with a different span (whole declaration vs
+; call), and the pair survives `deduplicate_generic_import_relations`
+; (which groups by span), producing duplicate import edges. The earlier
+; shape without the predicate misclassified calls with literal arguments.
+;
+; The eq predicate is evaluated by the query engine and is required:
+; without it any `x = f("literal")` call with a string argument is
+; misclassified as a require() import.
 (call_expression
   function: (identifier) @dependency.require.function
   arguments: (arguments
@@ -451,32 +533,6 @@ pub fn dependency_shared() -> &'static str {
   )
   (#eq? @dependency.require.function "require")
 ) @dependency.require
-
-; require() assigned to variable
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @dependency.require.name
-    value: (call_expression
-      function: (identifier) @dependency.require.function
-      arguments: (arguments
-        (string) @dependency.require.path
-      )
-    )
-  )
-) @dependency.require.variable
-
-; lexical declaration require()
-(lexical_declaration
-  (variable_declarator
-    name: (identifier) @dependency.require.name
-    value: (call_expression
-      function: (identifier) @dependency.require.function
-      arguments: (arguments
-        (string) @dependency.require.path
-      )
-    )
-  )
-) @dependency.require.lexical
 
 ; ============================================
 ; 3. Dynamic Import

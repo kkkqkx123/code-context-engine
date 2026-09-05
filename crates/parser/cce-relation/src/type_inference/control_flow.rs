@@ -96,7 +96,10 @@ pub mod shared {
     pub fn split_comparison(text: &str) -> Option<(String, String, String)> {
         let text = text.trim();
 
-        for op in &["===", "==", "!==", "!=", ">=", "<=", ">", "<"] {
+        // Three-character operators must precede their two-character
+        // prefixes: `!==` contains `==`, so matching `==` first would
+        // mis-split `a !== b` into `a !` / `b`.
+        for op in &["===", "!==", "==", "!=", ">=", "<=", ">", "<"] {
             if let Some(pos) = text.find(op) {
                 let left = text[..pos].trim().to_string();
                 let right = text[pos + op.len()..].trim().to_string();

@@ -163,6 +163,40 @@ pub fn entity_query() -> &'static str {
   )
 ) @entity.variable
 
+; Tuple deconstruction, e.g. `var (a, b) = (1, 2);`
+(local_declaration_statement
+  (variable_declaration
+    (variable_declarator
+      (tuple_pattern
+        (identifier) @entity.variable.multiple.name
+      )
+      (tuple_expression) @entity.variable.multiple.value
+    )
+  )
+) @entity.variable.multiple
+
+; foreach loop variable, e.g. `foreach (var current in items)`
+(foreach_statement
+  left: (identifier) @entity.variable.loop.name
+  right: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+; is-pattern declaration, e.g. `if (obj is string s)`
+(is_pattern_expression
+  (declaration_pattern
+    type: (_) @entity.variable.case.source
+    name: (identifier) @entity.variable.case.name
+  )
+) @entity.variable.case
+
+; out-var declaration, e.g. `int.TryParse("1", out var result)`
+(argument
+  (declaration_expression
+    type: (_) @entity.variable.type
+    name: (identifier) @entity.variable.name
+  ) @entity.variable
+)
+
 "#
 }
 
@@ -363,6 +397,7 @@ pub fn control_flow_query() -> &'static str {
     r#"
 (if_statement) @control.flow.if
 (for_statement) @control.flow.loop
+(foreach_statement) @control.flow.loop
 (while_statement) @control.flow.loop
 (do_statement) @control.flow.loop
 (switch_statement) @control.flow.match

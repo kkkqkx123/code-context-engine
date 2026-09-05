@@ -66,12 +66,14 @@ pub fn entity_query() -> &'static str {
   (function_signature
     return_type: (_)? @entity.method.return_type
     name: (identifier) @entity.method.name
+    (formal_parameter_list) @entity.method.params
   )
 ) @entity.method
 
 ; Constructor signature
 (constructor_signature
   name: (identifier) @entity.constructor.name
+  (formal_parameter_list) @entity.constructor.params
 ) @entity.constructor
 
 ; Factory constructor
@@ -97,6 +99,7 @@ pub fn entity_query() -> &'static str {
 (function_signature
   return_type: (_)? @entity.function.return_type
   name: (identifier) @entity.function.name
+  (formal_parameter_list) @entity.function.params
 ) @entity.function
 
 ; ============================================
@@ -211,6 +214,26 @@ pub fn call_query() -> &'static str {
 (expression_statement
   (identifier) @call.function.name
   (selector
+    (argument_part
+      (arguments) @call.function.arguments
+    )
+  )
+) @call.function
+
+; Function call in local variable initializer (final x = combine(1, 2))
+(initialized_variable_definition
+  value: (identifier) @call.function.name
+  value: (selector
+    (argument_part
+      (arguments) @call.function.arguments
+    )
+  )
+) @call.function
+
+; Function call in top-level variable initializer (final x = combine(1, 2))
+(initialized_identifier
+  value: (identifier) @call.function.name
+  value: (selector
     (argument_part
       (arguments) @call.function.arguments
     )

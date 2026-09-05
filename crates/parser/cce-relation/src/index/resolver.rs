@@ -360,10 +360,12 @@ impl RelationResolver {
                 receiver_type: None,
                 arg_count: None,
                 arg_types: None,
+                language: parsed.language,
             }
         } else {
             OverloadContext {
                 receiver_type: receiver_type.clone(),
+                language: parsed.language,
                 arg_count: arg_count_via_parse.or({
                     if arg_types_vec.is_empty() {
                         None

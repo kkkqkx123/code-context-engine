@@ -227,7 +227,136 @@ impl TypeInferenceEngine {
         ctx
     }
 
+    /// Check whether a bare name is shaped like a type expression
+    /// (`ValueError`, `User`) rather than a value reference (`pair`, `items`).
+    fn looks_like_type_name(name: &str) -> bool {
+        let mut chars = name.trim().chars();
+        match chars.next() {
+            Some(c) if c.is_uppercase() => (),
+            _ => return false,
+        }
+        chars.all(|c| c.is_alphanumeric() || c == '_')
+    }
+
+    /// Collect member name → type for a named interface, class, struct or
+    /// type alias declared in the same file.
+    ///
+    /// Membership is decided by span containment, so object-literal members
+    /// outside the declaration never leak in. A leading colon in captured
+    /// annotation text is stripped. Returns `None` when the type is not
+    /// declared locally or carries no member types.
+    fn named_type_members(
+        file: &cce_types::ParsedFile,
+        type_name: &str,
+    ) -> Option<std::collections::HashMap<String, String>> {
+        let owner = file.entities.iter().find(|e| {
+            e.name == type_name
+                && matches!(
+                    e.kind,
+                    EntityKind::Interface
+                        | EntityKind::Class
+                        | EntityKind::Struct
+                        | EntityKind::TypeAlias
+                )
+        })?;
+        let mut members = std::collections::HashMap::new();
+        for member in &file.entities {
+            if !matches!(member.kind, EntityKind::Property | EntityKind::Field) {
+                continue;
+            }
+            if member.span.start_byte < owner.span.start_byte
+                || member.span.end_byte > owner.span.end_byte
+            {
+                continue;
+            }
+            let ty = member
+                .metadata
+                .get("type_annotation")
+                .or_else(|| member.metadata.get("explicit_type"))?;
+            let ty = ty.trim().trim_start_matches(':').trim();
+            if ty.is_empty() {
+                continue;
+            }
+            members.insert(member.name.clone(), ty.to_string());
+        }
+        if members.is_empty() {
+            return None;
+        }
+        Some(members)
+    }
+
+    /// Look up a parameter type in the closest enclosing function scope.
+    ///
+    /// Uses span containment (smallest enclosing function) rather than the
+    /// `parent` link, which typically points at the module for locals.
+    fn enclosing_param_type<'a>(
+        file: &'a cce_types::ParsedFile,
+        entity: &cce_types::Entity,
+        name: &str,
+    ) -> Option<&'a str> {
+        file.entities
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                ) && e.span.contains(&entity.span)
+            })
+            .min_by_key(|e| e.span.end_byte - e.span.start_byte)?
+            .parameters
+            .iter()
+            .find(|(n, _)| n == name)
+            .and_then(|(_, ty)| ty.as_deref())
+    }
+
+    /// Resolve a destructuring-source expression to a concrete [`TypeShape`].
+    ///
+    /// identifier sources resolve against (in order) enclosing-function
+    /// parameters, already-known variable bindings, and same-file function
+    /// return types; a bare type-shaped name (`ValueError`) resolves to
+    /// itself. Returns `None` when the source carries no usable type.
+    fn resolve_source_shape(
+        file: &cce_types::ParsedFile,
+        returns_by_name: &std::collections::HashMap<&str, &str>,
+        entity: &cce_types::Entity,
+        ctx: &ScopedTypeContext,
+        source: &str,
+    ) -> Option<TypeShape> {
+        let shape = crate::type_inference::types::parse_type_shape(source, file.language)?;
+        let name = match &shape {
+            TypeShape::Named(id) => id.clone(),
+            _ => return Some(shape),
+        };
+        if let Some(param_ty) = Self::enclosing_param_type(file, entity, &name) {
+            return crate::type_inference::types::parse_type_shape(param_ty, file.language);
+        }
+        if let Some(binding) = ctx.get_variable_type(&name) {
+            return crate::type_inference::types::parse_type_shape(
+                &binding.type_name,
+                file.language,
+            );
+        }
+        if let Some(ret) = returns_by_name.get(name.as_str()) {
+            return crate::type_inference::types::parse_type_shape(ret, file.language);
+        }
+        if Self::looks_like_type_name(&name) {
+            return Some(shape);
+        }
+        None
+    }
+
     fn infer_variable_patterns(file: &cce_types::ParsedFile, ctx: &mut ScopedTypeContext) {
+        let returns_by_name: std::collections::HashMap<&str, &str> = file
+            .entities
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                )
+            })
+            .filter_map(|e| e.return_type.as_deref().map(|r| (e.name.as_str(), r)))
+            .collect();
         for entity in &file.entities {
             if entity.kind != EntityKind::Variable {
                 continue;
@@ -240,23 +369,71 @@ impl TypeInferenceEngine {
                     .filter(|s| !s.is_empty())
                     .collect();
                 if parts.len() > 1 {
-                    if let Some(source_type_str) = entity
-                        .metadata
-                        .get("source_type")
-                        .or_else(|| entity.metadata.get("call_target"))
-                    {
-                        if let Some(shape) = crate::type_inference::types::parse_type_shape(
-                            source_type_str,
-                            file.language,
-                        ) {
-                            let pattern =
-                                crate::type_inference::types::Pattern::Tuple(parts.clone());
-                            ctx.add_pattern_match_binding(&pattern, &shape);
-                            for (i, part) in parts.iter().enumerate() {
-                                ctx.add_destructuring_binding(part, &shape, Some(i));
+                    // First resolvable candidate wins: a raw right-hand side
+                    // (`make_pair()`) may not parse while `call_target`
+                    // (`make_pair`) resolves through same-file returns.
+                    let mut resolved = None;
+                    for key in ["source_type", "call_target"] {
+                        if let Some(candidate) = entity.metadata.get(key) {
+                            if let Some(shape) = Self::resolve_source_shape(
+                                file,
+                                &returns_by_name,
+                                entity,
+                                ctx,
+                                candidate,
+                            ) {
+                                resolved = Some(shape);
+                                break;
                             }
-                            continue;
                         }
+                    }
+                    if let Some(mut shape) = resolved {
+                        // Loop and case subjects iterate their element type
+                        // (`for a, b in pairs` destructures one pair, not the
+                        // whole collection). Parts stay unbound when the
+                        // element type cannot be determined.
+                        if matches!(entity.subtype.as_deref(), Some("case") | Some("loop")) {
+                            match crate::type_inference::types::element_type_of_shape(&shape) {
+                                Some(element) => shape = element,
+                                None => continue,
+                            }
+                        }
+                        // Object destructuring against a named interface or
+                        // class declared in the same file binds by member
+                        // name (`const { name } = user` with `user: User`).
+                        // Parts without a matching member stay unbound rather
+                        // than guessed; tuple shapes keep positional mapping.
+                        if let TypeShape::Named(type_name) = &shape {
+                            if let Some(members) = Self::named_type_members(file, type_name) {
+                                for part in &parts {
+                                    if let Some(member_ty) = members.get(part) {
+                                        ctx.add_variable_type(
+                                            part.clone(),
+                                            TypeBinding {
+                                                type_name: member_ty.clone(),
+                                                type_entity_id: None,
+                                                span: entity.span,
+                                                origin: Some(
+                                                    InferenceOrigin::DestructuringAssignment,
+                                                ),
+                                                shape:
+                                                    crate::type_inference::types::parse_type_shape(
+                                                        member_ty,
+                                                        file.language,
+                                                    ),
+                                            },
+                                        );
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                        let pattern = crate::type_inference::types::Pattern::Tuple(parts.clone());
+                        ctx.add_pattern_match_binding(&pattern, &shape);
+                        for (i, part) in parts.iter().enumerate() {
+                            ctx.add_destructuring_binding(part, &shape, Some(i));
+                        }
+                        continue;
                     }
                     let generic = TypeShape::Generic {
                         base: "Tuple".to_string(),
@@ -264,6 +441,97 @@ impl TypeInferenceEngine {
                     };
                     let pattern = crate::type_inference::types::Pattern::Tuple(parts);
                     ctx.add_pattern_match_binding(&pattern, &generic);
+                }
+            } else if entity.metadata.contains_key("source_type")
+                || entity.metadata.contains_key("call_target")
+            {
+                // Single pattern-bound variable (`except E as e`, `y = name`).
+                // `case`/`loop` bindings iterate their subject, so they bind
+                // the subject's element type when it can be determined. Other
+                // singles bind only when the resolved shape is a bare type
+                // name: generic shapes stay unbound rather than guessed.
+                let is_element_binding =
+                    matches!(entity.subtype.as_deref(), Some("case") | Some("loop"));
+                if is_element_binding {
+                    for key in ["source_type", "call_target"] {
+                        let Some(source_str) = entity.metadata.get(key) else {
+                            continue;
+                        };
+                        let Some(shape) = Self::resolve_source_shape(
+                            file,
+                            &returns_by_name,
+                            entity,
+                            ctx,
+                            source_str,
+                        ) else {
+                            continue;
+                        };
+                        let Some(element) =
+                            crate::type_inference::types::element_type_of_shape(&shape)
+                        else {
+                            continue;
+                        };
+                        let type_name =
+                            crate::type_inference::types::type_shape_to_string(&element);
+                        let keep = ctx.get_variable_type(&entity.name).is_none_or(|existing| {
+                            crate::type_inference::types::origin_priority(Some(
+                                InferenceOrigin::DestructuringAssignment,
+                            )) >= crate::type_inference::types::origin_priority(existing.origin)
+                        });
+                        if keep {
+                            ctx.add_variable_type(
+                                entity.name.clone(),
+                                TypeBinding {
+                                    type_name,
+                                    type_entity_id: None,
+                                    span: entity.span,
+                                    origin: Some(InferenceOrigin::DestructuringAssignment),
+                                    shape: Some(element),
+                                },
+                            );
+                        }
+                        break;
+                    }
+                    continue;
+                }
+                for key in ["source_type", "call_target"] {
+                    let Some(source_str) = entity.metadata.get(key) else {
+                        continue;
+                    };
+                    let from_call =
+                        key == "call_target" && !entity.metadata.contains_key("source_type");
+                    if let Some(shape) =
+                        Self::resolve_source_shape(file, &returns_by_name, entity, ctx, source_str)
+                    {
+                        if let TypeShape::Named(type_name) = &shape {
+                            let origin = if from_call {
+                                InferenceOrigin::FunctionReturn
+                            } else {
+                                InferenceOrigin::DestructuringAssignment
+                            };
+                            // Never clobber a higher-priority binding (e.g. an
+                            // explicit annotation recorded during declarations).
+                            let keep = ctx.get_variable_type(&entity.name).is_none_or(|existing| {
+                                crate::type_inference::types::origin_priority(Some(origin))
+                                    >= crate::type_inference::types::origin_priority(
+                                        existing.origin,
+                                    )
+                            });
+                            if keep {
+                                ctx.add_variable_type(
+                                    entity.name.clone(),
+                                    TypeBinding {
+                                        type_name: type_name.clone(),
+                                        type_entity_id: None,
+                                        span: entity.span,
+                                        origin: Some(origin),
+                                        shape: Some(shape),
+                                    },
+                                );
+                            }
+                            break;
+                        }
+                    }
                 }
             } else if entity.name.trim().starts_with('{')
                 || entity.metadata.contains_key("pattern_struct")

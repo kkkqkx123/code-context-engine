@@ -14,12 +14,12 @@ use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 use cce_types::language::Language;
 
-use super::control_flow::shared::{is_valid_ident, strip_outer_parens};
+use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip_outer_parens};
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, narrow_discriminated_union, parse_type_shape,
-    type_shape_to_string,
+    ScopedTypeContext, TypeBinding, declared_shape, narrow_discriminated_union, parse_type_shape,
+    subtract_union_members, type_shape_to_string,
 };
 
 /// Kotlin type inference implementation.
@@ -80,13 +80,17 @@ impl LanguageTypeInferer for KotlinTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_kotlin_if(&fact.text, ctx, inference_ctx.type_index())
-                        {
+                        for result in narrow_kotlin_if(
+                            &fact.text,
+                            ctx,
+                            inference_ctx.type_index(),
+                            &entity.parameters,
+                        ) {
                             ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
                     ControlFlowFactKind::Match => {
-                        for result in narrow_kotlin_when(&fact.text) {
+                        for result in narrow_kotlin_when(&fact.text, ctx, &entity.parameters) {
                             ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
@@ -108,18 +112,26 @@ struct NarrowingResult {
 ///
 /// Patterns:
 /// - `if (x is Type)` → x: Type
-/// - `if (x !is Type)` → conservative skip
+/// - `if (x !is Type)` → x: declared-minus-Type (union only)
+/// - `if (x != null)` → x: declared (non-null)
+/// - `if (x == null)` → x: null
 /// - `x is Type && x.prop` → x: Type (via is check)
 /// - `if (x.field == "value")` → x: narrowed union (discriminated union)
 fn narrow_kotlin_if(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&crate::symbol_table::TypeMemberIndex>,
+    params: &[(String, Option<String>)],
 ) -> Vec<NarrowingResult> {
     let text = text.trim();
     let mut results = vec![];
 
-    if let Some(result) = narrow_kotlin_is_check(text) {
+    if let Some(result) = narrow_kotlin_is_check(text, ctx, params) {
+        results.push(result);
+        return results;
+    }
+
+    if let Some(result) = narrow_kotlin_null_check(text, ctx, params) {
         results.push(result);
         return results;
     }
@@ -131,11 +143,19 @@ fn narrow_kotlin_if(
     results
 }
 
-/// Parse `if (x is Type)` or `if (x !is Type)`.
-fn narrow_kotlin_is_check(text: &str) -> Option<NarrowingResult> {
+/// Parse `if (x is Type)` or `if (x !is Type)` (complement).
+fn narrow_kotlin_is_check(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
     let text = strip_kotlin_condition_prefix(text)?;
     let text = text.trim();
 
+    if let Some(rest) = split_not_is(text) {
+        return narrow_kotlin_not_is(rest, ctx, params);
+    }
+    // `!is` without spaces (e.g. `x!is T`) is not a valid check.
     if text.contains("!is") {
         return None;
     }
@@ -162,6 +182,103 @@ fn narrow_kotlin_is_check(text: &str) -> Option<NarrowingResult> {
             shape: None,
         },
     })
+}
+
+/// Split `x !is T` into (`x`, `T`).
+fn split_not_is(text: &str) -> Option<(&str, &str)> {
+    let parts: Vec<&str> = text.splitn(2, " !is ").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    Some((parts[0].trim(), parts[1].trim()))
+}
+
+/// Parse `x !is Type` → x: declared-minus-Type (union only).
+fn narrow_kotlin_not_is(
+    rest: (&str, &str),
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
+    let (var_name, excluded) = rest;
+    if var_name.is_empty() || !is_valid_ident(var_name) || excluded.is_empty() {
+        return None;
+    }
+    let excluded = excluded.split_whitespace().next().unwrap_or(excluded);
+    let declared = declared_shape(ctx, params, Language::Kotlin, var_name)?;
+    let narrowed = subtract_union_members(&declared, &[excluded.to_string()])?;
+    Some(NarrowingResult {
+        variable_name: var_name.to_string(),
+        narrowed_type: TypeBinding {
+            type_name: type_shape_to_string(&narrowed),
+            type_entity_id: None,
+            span: Span::default(),
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: Some(narrowed),
+        },
+    })
+}
+
+/// Parse Kotlin null checks: `x != null` → x: declared, `x == null` → x: null.
+///
+/// A forced assertion (`x!!`) acts on `x`, and a safe call (`x?.foo`)
+/// conditions on its receiver `x`. Both forms only narrow on the non-null
+/// arm; the null arm stays conservative since a null result does not prove
+/// the receiver itself is null.
+fn narrow_kotlin_null_check(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
+    let text = strip_kotlin_condition_prefix(text)?;
+    let text = text.trim();
+    // Parenthesized safety: conditions may carry grouping parens.
+    let text = extract_balanced_parens(text).unwrap_or(text);
+    for (op, negated) in [("!=", true), ("==", false)] {
+        let parts: Vec<&str> = text.splitn(2, op).collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let lhs = parts[0].trim();
+        let rhs = parts[1].trim();
+        if rhs != "null" || lhs.is_empty() {
+            continue;
+        }
+        let asserted = lhs.contains("!!") || lhs.contains("?.");
+        if asserted && !negated {
+            continue;
+        }
+        let receiver = lhs.split("?.").next().unwrap_or("").trim();
+        let var_name = receiver.trim_end_matches('!').trim();
+        if var_name.is_empty() || !is_valid_ident(var_name) {
+            continue;
+        }
+        if !negated {
+            return Some(NarrowingResult {
+                variable_name: var_name.to_string(),
+                narrowed_type: TypeBinding {
+                    type_name: "null".to_string(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: None,
+                },
+            });
+        }
+        let declared = declared_shape(ctx, params, Language::Kotlin, var_name)?;
+        let narrowed =
+            subtract_union_members(&declared, &["null".to_string()]).unwrap_or(declared.clone());
+        return Some(NarrowingResult {
+            variable_name: var_name.to_string(),
+            narrowed_type: TypeBinding {
+                type_name: type_shape_to_string(&narrowed),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
+    }
+    None
 }
 
 /// Strip Kotlin condition prefixes (if, while, else if, when).
@@ -295,13 +412,18 @@ fn parse_string_literal(text: &str) -> Option<String> {
 /// - `when (x) { is String -> ... }` → x: String
 /// - `when { x is String -> ... }` → x: String
 /// - `when (x) { is Int, is String -> ... }` → x: Int | String (first only)
-fn narrow_kotlin_when(text: &str) -> Vec<NarrowingResult> {
+/// - `when (x) { x !is String -> ... }` → x: declared-minus-String (union only)
+fn narrow_kotlin_when(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let text = text.trim();
     // Find subject variable if `when (subject)`
     let subject = extract_when_subject(text);
     if let Some(brace_start) = text.find('{') {
         let body = &text[brace_start + 1..];
-        return narrow_kotlin_when_arms(body, subject.as_deref());
+        return narrow_kotlin_when_arms(body, subject.as_deref(), ctx, params);
     }
     vec![]
 }
@@ -327,7 +449,14 @@ fn extract_when_subject(text: &str) -> Option<String> {
 /// Scans the when body for `is` type checks, handling both `is Type` (with
 /// subject) and `x is Type` forms. Each `is` occurrence is evaluated with its
 /// surrounding arm context to avoid mixing result expressions from previous arms.
-fn narrow_kotlin_when_arms(arms_text: &str, subject: Option<&str>) -> Vec<NarrowingResult> {
+/// Negated `!is` arms narrow to the declared type minus the excluded member,
+/// following the same complement convention as negated `if` checks.
+fn narrow_kotlin_when_arms(
+    arms_text: &str,
+    subject: Option<&str>,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let mut results = vec![];
     let mut search_start = 0;
     while let Some(is_pos) = arms_text[search_start..].find(" is ") {
@@ -394,6 +523,64 @@ fn narrow_kotlin_when_arms(arms_text: &str, subject: Option<&str>) -> Vec<Narrow
             },
         });
         search_start = abs_is + 4;
+    }
+    // Negated arms (`x !is Type`, `!is Type` with a subject) narrow to the
+    // declared type minus the excluded member. Without a union-shaped
+    // declaration there is nothing to subtract, so the arm stays unbound.
+    let mut neg_search = 0;
+    while let Some(rel) = arms_text[neg_search..].find("!is ") {
+        let abs_not = neg_search + rel;
+        let cond_start = arms_text[..abs_not]
+            .rfind(|c| [';', ',', '{', '}', '\n'].contains(&c))
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        let var_part = arms_text[cond_start..abs_not]
+            .trim()
+            .trim_end_matches('!')
+            .trim();
+        let after_not = arms_text[abs_not + 4..].trim_start();
+        let type_end = after_not
+            .find(|c: char| {
+                c.is_whitespace() || c == ',' || c == '-' || c == '{' || c == '}' || c == ';'
+            })
+            .unwrap_or(after_not.len());
+        let excluded = after_not[..type_end]
+            .split_whitespace()
+            .next()
+            .unwrap_or("");
+        neg_search = abs_not + 4;
+        if excluded.is_empty() {
+            continue;
+        }
+        let var_name = if var_part.is_empty() {
+            match subject {
+                Some(s) => s.to_string(),
+                None => continue,
+            }
+        } else if is_valid_ident(var_part) {
+            var_part.to_string()
+        } else {
+            continue;
+        };
+        if !is_valid_ident(&var_name) {
+            continue;
+        }
+        let Some(declared) = declared_shape(ctx, params, Language::Kotlin, &var_name) else {
+            continue;
+        };
+        let Some(narrowed) = subtract_union_members(&declared, &[excluded.to_string()]) else {
+            continue;
+        };
+        results.push(NarrowingResult {
+            variable_name: var_name,
+            narrowed_type: TypeBinding {
+                type_name: type_shape_to_string(&narrowed),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
     }
     // Also handle `is Type` at the very start of an arm without preceding space (e.g., `is String`)
     for arm in arms_text.split("->") {
@@ -497,6 +684,7 @@ mod tests {
             "if (x is String)",
             &ScopedTypeContext::new(Language::Kotlin),
             None,
+            &[],
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
@@ -505,13 +693,31 @@ mod tests {
     }
 
     #[test]
-    fn test_kotlin_not_is_skipped() {
-        let results = narrow_kotlin_if(
-            "if (x !is String)",
-            &ScopedTypeContext::new(Language::Kotlin),
-            None,
-        );
+    fn test_kotlin_not_is_complement() {
+        let ctx = ScopedTypeContext::new(Language::Kotlin);
+        let params = [("x".to_string(), Some("String | Int".to_string()))];
+        let results = narrow_kotlin_if("if (x !is String)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "Int");
+    }
+
+    #[test]
+    fn test_kotlin_not_is_plain_type_skipped() {
+        let ctx = ScopedTypeContext::new(Language::Kotlin);
+        let params = [("value".to_string(), Some("Any".to_string()))];
+        let results = narrow_kotlin_if("if (value !is String)", &ctx, None, &params);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_kotlin_not_null_narrows_declared() {
+        let ctx = ScopedTypeContext::new(Language::Kotlin);
+        let params = [("value".to_string(), Some("String?".to_string()))];
+        let results = narrow_kotlin_if("if (value != null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "String?");
     }
 
     #[test]
@@ -520,6 +726,7 @@ mod tests {
             "if(x is Int) {",
             &ScopedTypeContext::new(Language::Kotlin),
             None,
+            &[],
         );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
@@ -528,7 +735,11 @@ mod tests {
 
     #[test]
     fn test_kotlin_when_subject_is() {
-        let results = narrow_kotlin_when("when (x) { is String -> print(x) }");
+        let results = narrow_kotlin_when(
+            "when (x) { is String -> print(x) }",
+            &ScopedTypeContext::new(Language::Kotlin),
+            &[],
+        );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "String");
@@ -536,7 +747,11 @@ mod tests {
 
     #[test]
     fn test_kotlin_when_explicit_is() {
-        let results = narrow_kotlin_when("when (x) { x is String -> print(x) }");
+        let results = narrow_kotlin_when(
+            "when (x) { x is String -> print(x) }",
+            &ScopedTypeContext::new(Language::Kotlin),
+            &[],
+        );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "String");
@@ -544,7 +759,11 @@ mod tests {
 
     #[test]
     fn test_kotlin_when_multiple_arms() {
-        let results = narrow_kotlin_when("when (x) { is String -> 1; is Int -> 2 }");
+        let results = narrow_kotlin_when(
+            "when (x) { is String -> 1; is Int -> 2 }",
+            &ScopedTypeContext::new(Language::Kotlin),
+            &[],
+        );
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[1].variable_name, "x");
@@ -552,16 +771,54 @@ mod tests {
 
     #[test]
     fn test_kotlin_when_negated_skipped() {
-        let results = narrow_kotlin_when("when (x) { !is String -> print(x) }");
+        let results = narrow_kotlin_when(
+            "when (x) { !is String -> print(x) }",
+            &ScopedTypeContext::new(Language::Kotlin),
+            &[],
+        );
         assert!(results.is_empty());
     }
 
     #[test]
+    fn test_kotlin_when_negated_arm_complement() {
+        let ctx = ScopedTypeContext::new(Language::Kotlin);
+        let params = [("x".to_string(), Some("String | Int".to_string()))];
+        let results = narrow_kotlin_when("when (x) { x !is String -> print(x) }", &ctx, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "Int");
+    }
+
+    #[test]
     fn test_kotlin_when_no_subject_explicit() {
-        let results = narrow_kotlin_when("when { x is String -> print(x) }");
+        let results = narrow_kotlin_when(
+            "when { x is String -> print(x) }",
+            &ScopedTypeContext::new(Language::Kotlin),
+            &[],
+        );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_kotlin_forced_assertion_narrows_non_null() {
+        let ctx = ScopedTypeContext::new(Language::Kotlin);
+        let params = [("value".to_string(), Some("String | null".to_string()))];
+        let results = narrow_kotlin_if("if (value!! != null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_kotlin_safe_call_narrows_receiver() {
+        let ctx = ScopedTypeContext::new(Language::Kotlin);
+        let params = [("user".to_string(), Some("User | null".to_string()))];
+        let results = narrow_kotlin_if("if (user?.name != null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "user");
+        assert_eq!(results[0].narrowed_type.type_name, "User");
     }
 
     #[test]
@@ -571,6 +828,7 @@ mod tests {
             "if (shape.kind == \"circle\")",
             &ScopedTypeContext::new(Language::Kotlin),
             None,
+            &[],
         );
         assert!(results.is_empty());
     }

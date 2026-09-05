@@ -526,10 +526,13 @@ pub(crate) fn extract_variable_assignment_metadata(
             extract_go_variable_metadata(mat, entity);
         }
         Language::Java => {
-            extract_java_variable_metadata(mat, entity);
+            extract_java_variable_metadata(mat, entity, source, tree);
         }
         Language::CSharp => {
             extract_csharp_variable_metadata(mat, entity);
+        }
+        Language::Kotlin => {
+            extract_kotlin_variable_metadata(mat, entity, source, tree);
         }
         _ => {}
     }
@@ -569,13 +572,110 @@ fn extract_go_variable_metadata(_mat: &QueryMatch, _entity: &mut Entity) {
 /// Java distinguishes between:
 /// - `var x = expr` — type inferred from expression (write `var_type`)
 /// - `Type x = expr` — explicit type (write `type_annotation` from capture or source)
-fn extract_java_variable_metadata(_mat: &QueryMatch, _entity: &mut Entity) {
+/// - `x instanceof Type name` — pattern variable (write `source_type` from
+///   the `right` operand; the query cannot capture it because tree-sitter-java
+///   rejects `name:` alongside any sibling type child in one pattern)
+fn extract_java_variable_metadata(
+    mat: &QueryMatch,
+    entity: &mut Entity,
+    source: &str,
+    tree: &tree_sitter::Tree,
+) {
     // Type inference for `var` declarations requires AST-based analysis rather than
     // source-text heuristics. The previous implementation used `infer_java_type_from_expr`
     // which was a string-based heuristic that has been removed as part of the symbol
     // resolution determinization effort.
     //
     // TODO: Implement AST-based type inference for Java `var` declarations
+    if entity.subtype.as_deref() != Some("case") {
+        return;
+    }
+    if entity.metadata.contains_key("source_type") {
+        return;
+    }
+    let Some(name_capture) = mat.captures.iter().find(|c| c.name.ends_with(".name")) else {
+        return;
+    };
+    let Some(mut node) = tree
+        .root_node()
+        .descendant_for_byte_range(name_capture.start_byte, name_capture.end_byte)
+    else {
+        return;
+    };
+    while node.kind() != "instanceof_expression" {
+        let Some(parent) = node.parent() else {
+            return;
+        };
+        node = parent;
+    }
+    let type_node = node.child_by_field_name("right").or_else(|| {
+        let mut cursor = node.walk();
+        node.children(&mut cursor)
+            .find(|child| child.is_named() && child.kind() != "identifier")
+    });
+    let Some(type_node) = type_node else {
+        return;
+    };
+    let text =
+        &source[type_node.start_byte().min(source.len())..type_node.end_byte().min(source.len())];
+    let trimmed = text.trim();
+    if !trimmed.is_empty() {
+        entity.set_metadata("source_type", trimmed.to_string());
+    }
+}
+
+/// Extract Kotlin-specific variable metadata.
+///
+/// Destructuring declarations (`val (a, b) = expr`) fold into one
+/// comma-separated `.multiple` entity; the query cannot capture the
+/// right-hand side without ambiguity, so the source expression is attached
+/// here from the enclosing `property_declaration`.
+fn extract_kotlin_variable_metadata(
+    mat: &QueryMatch,
+    entity: &mut Entity,
+    source: &str,
+    tree: &tree_sitter::Tree,
+) {
+    if entity.subtype.as_deref() != Some("multiple") {
+        return;
+    }
+    if entity.metadata.contains_key("source_type") {
+        return;
+    }
+    let Some(name_capture) = mat.captures.iter().find(|c| c.name.ends_with(".name")) else {
+        return;
+    };
+    let Some(mut node) = tree
+        .root_node()
+        .descendant_for_byte_range(name_capture.start_byte, name_capture.end_byte)
+    else {
+        return;
+    };
+    while node.kind() != "property_declaration" {
+        let Some(parent) = node.parent() else {
+            return;
+        };
+        node = parent;
+    }
+    let mut cursor = node.walk();
+    let mut seen_multi = false;
+    for child in node.children(&mut cursor) {
+        if !seen_multi {
+            if child.kind() == "multi_variable_declaration" {
+                seen_multi = true;
+            }
+            continue;
+        }
+        if child.is_named() {
+            let text =
+                &source[child.start_byte().min(source.len())..child.end_byte().min(source.len())];
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                entity.set_metadata("source_type", trimmed.to_string());
+            }
+            return;
+        }
+    }
 }
 
 /// Extract C#-specific variable metadata.

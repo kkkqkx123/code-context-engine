@@ -53,6 +53,11 @@ pub fn entity_query() -> &'static str {
   body: (enumerator_list) @entity.enum_anon.body
 ) @entity.enum_anon
 
+; Enum member (enumerator constant, e.g. RED in enum Color { RED, GREEN = 2 })
+(enumerator
+  name: (identifier) @entity.enum_member.name
+) @entity.enum_member
+
 ; typedef type definition
 (type_definition
   type: (_) @entity.typedef.original_type

@@ -174,6 +174,42 @@ pub fn entity_query() -> &'static str {
   pattern: (identifier) @entity.variable.name
 ) @entity.variable
 
+; Tuple destructuring: let (a, b) = pair
+(let_declaration
+  pattern: (tuple_pattern
+    (identifier) @entity.variable.multiple.name
+  )
+  value: (_) @entity.variable.multiple.value
+) @entity.variable.multiple
+
+; Struct destructuring: let Point { x, y } = p
+(let_declaration
+  pattern: (struct_pattern
+    (field_pattern
+      (shorthand_field_identifier) @entity.variable.multiple.name
+    )
+  )
+  value: (_) @entity.variable.multiple.value
+) @entity.variable.multiple
+
+; Tuple-struct destructuring: let Some(v) = opt
+(let_declaration
+  pattern: (tuple_struct_pattern
+    type: (_)
+    (identifier) @entity.variable.multiple.name
+  )
+  value: (_) @entity.variable.multiple.value
+) @entity.variable.multiple
+
+; If-let binding: if let Some(v) = opt
+(let_condition
+  pattern: (tuple_struct_pattern
+    type: (_)
+    (identifier) @entity.variable.multiple.name
+  )
+  value: (_) @entity.variable.multiple.value
+) @entity.variable.multiple
+
 ; Struct field
 (field_declaration
   name: (field_identifier) @entity.field.name

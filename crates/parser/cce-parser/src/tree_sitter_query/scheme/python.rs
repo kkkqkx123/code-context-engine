@@ -257,14 +257,95 @@ pub fn entity_query() -> &'static str {
   )
 ) @entity.variable
 
-; Multiple assignment
+; Multiple assignment via tuple_pattern (kept for grammar variants)
 (expression_statement
   (assignment
     left: (tuple_pattern
       (identifier) @entity.variable.multiple.name
     )
+    right: (_) @entity.variable.multiple.value
   )
 ) @entity.variable.multiple
+
+; Tuple unpacking: `first, second = pair` uses pattern_list in this grammar.
+; All bound names are captured; the extractor joins them into one
+; comma-separated entity with the right-hand side as its source.
+(expression_statement
+  (assignment
+    left: (pattern_list
+      (identifier) @entity.variable.multiple.name
+    )
+    right: (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+; For-loop binding: `for item in items` and `for k, v in items`.
+; The iterable is recorded as provenance only: loop variables hold
+; elements, so inference must never bind them to the iterable type itself.
+(for_statement
+  left: (identifier) @entity.variable.loop.name
+  right: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+(for_statement
+  left: (pattern_list
+    (identifier) @entity.variable.loop.name
+  )
+  right: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+; Except-as binding: `except ValueError as e` binds e to the exception type.
+(except_clause
+  value: (as_pattern
+    (identifier) @entity.variable.except.source
+    alias: (as_pattern_target
+      (identifier) @entity.variable.except.name
+    )
+  )
+) @entity.variable.except
+
+; With-as binding: `with open('f') as fh` binds fh to the call result.
+(with_item
+  value: (as_pattern
+    (_) @entity.variable.with.value
+    alias: (as_pattern_target
+      (identifier) @entity.variable.with.name
+    )
+  )
+) @entity.variable.with
+
+; Match-case binding: `case x:` binds x to the subject.
+(match_statement
+  subject: (identifier) @entity.variable.case.source
+  body: (block
+    (case_clause
+      (case_pattern
+        (dotted_name
+          (identifier) @entity.variable.case.name
+        )
+      )
+    )
+  )
+) @entity.variable.case
+
+; Match-case tuple binding: `case (x, 0)` binds x to the subject.
+; Deeper nesting stays uncovered (documented limitation).
+(match_statement
+  subject: (identifier) @entity.variable.case.source
+  body: (block
+    (case_clause
+      (case_pattern
+        (tuple_pattern
+          (case_pattern
+            (dotted_name
+              (identifier) @entity.variable.case.name
+            )
+          )
+        )
+      )
+    )
+  )
+) @entity.variable.case
 
 ; ============================================
 ; Type Annotations

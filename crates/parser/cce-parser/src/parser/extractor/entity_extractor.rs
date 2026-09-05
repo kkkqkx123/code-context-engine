@@ -43,6 +43,10 @@ mod filtering;
 mod metadata;
 mod type_inference;
 
+/// Folded tuple-unpacking matches keyed by assignment span; values carry
+/// (name byte offset, name, template entity).
+type PendingMultiple = std::collections::HashMap<(usize, usize), Vec<(usize, String, Entity)>>;
+
 /// Entity extractor
 ///
 /// Orchestrates the extraction pipeline: query execution → capture parsing → post-processing.
@@ -137,9 +141,61 @@ impl EntityExtractor {
         let mut impl_spans: Vec<std::ops::Range<usize>> = Vec::new();
         let mut module_spans: Vec<(cce_types::EntityId, std::ops::Range<usize>)> = Vec::new();
 
+        // Tuple-unpacking matches (`first, second = pair`) yield one match
+        // per bound name sharing the assignment span. They are collected
+        // here and folded into a single comma-separated entity after the
+        // loop so inference maps elements by position. Keyed by assignment
+        // span; values carry (name byte offset, name, template entity).
+        let mut pending_multiple: PendingMultiple = std::collections::HashMap::new();
+
         for mat in &matches {
             if let Some(mut entity) = self.process_match(mat, &mut context, source, language, tree)
             {
+                let main_suffix_is_multiple = capture_module::parser::find_main_capture(mat)
+                    .is_some_and(|main| main.name.ends_with(".multiple"));
+                if main_suffix_is_multiple {
+                    if let Some(name_cap) = capture_module::parser::find_name_capture(mat) {
+                        let key = (entity.span.start_byte, entity.span.end_byte);
+                        pending_multiple.entry(key).or_default().push((
+                            name_cap.start_byte,
+                            name_cap.text.trim().to_string(),
+                            entity,
+                        ));
+                    }
+                    continue;
+                }
+                // Fan-out for pattern matches binding independent names
+                // (`case (x, y)`, `for k, v in ...`): one match carries a
+                // name capture per variable, but `process_match` keeps only
+                // the first. Clone one entity per extra name sharing the
+                // same provenance metadata. (`.multiple` instead folds into
+                // a single comma-separated entity for positional mapping.)
+                let mut pattern_siblings = Vec::new();
+                if let Some(main) = capture_module::parser::find_main_capture(mat) {
+                    if main.name.ends_with(".loop") || main.name.ends_with(".case") {
+                        let mut first_name = true;
+                        for cap in mat
+                            .captures
+                            .iter()
+                            .filter(|c| crate::tree_sitter_query::capture::is_name_capture(&c.name))
+                        {
+                            if first_name {
+                                first_name = false;
+                                continue;
+                            }
+                            let sibling_name = cap.text.trim();
+                            if sibling_name.is_empty() {
+                                continue;
+                            }
+                            let mut sibling = entity.clone();
+                            sibling.id = context.next_entity_id();
+                            sibling.name = sibling_name.to_string();
+                            sibling.span = utils::create_span_from_capture(cap);
+                            pattern_siblings.push(sibling);
+                        }
+                    }
+                }
+
                 let is_attribute_usage = entity.kind.is_annotation_like()
                     || (entity.kind.is_macro_like()
                         && entity.subtype.as_deref() == Some("attribute"));
@@ -206,7 +262,32 @@ impl EntityExtractor {
                     }
 
                     entities.push(entity);
+                    entities.extend(pattern_siblings);
                 }
+            }
+        }
+
+        // Fold per-name tuple-unpacking matches into positional entities.
+        for (_, mut group) in pending_multiple {
+            if group.is_empty() {
+                continue;
+            }
+            group.sort_by_key(|(byte, _, _)| *byte);
+            let mut names = Vec::with_capacity(group.len());
+            let mut template = None::<Entity>;
+            for (_, name, entity) in group {
+                if !name.is_empty() {
+                    names.push(name);
+                }
+                if template.is_none() {
+                    template = Some(entity);
+                }
+            }
+            if let Some(mut entity) = template {
+                if !names.is_empty() {
+                    entity.name = names.join(", ");
+                }
+                entities.push(entity);
             }
         }
 
@@ -321,7 +402,18 @@ impl EntityExtractor {
         if main_capture.name.ends_with(".inner") {
             subtype = Some("attribute.inner".to_string());
         }
-        let span = utils::create_span_from_capture(main_capture);
+        // Pattern-bound variables (loop/except/with/case) span only their
+        // bound name: statement-level spans would collapse distinct bindings
+        // (`case (x, y)`) into one entity during span deduplication.
+        let is_pattern_binding = main_capture.name.ends_with(".loop")
+            || main_capture.name.ends_with(".except")
+            || main_capture.name.ends_with(".with")
+            || main_capture.name.ends_with(".case");
+        let span = if is_pattern_binding {
+            utils::create_span_from_capture(name_capture)
+        } else {
+            utils::create_span_from_capture(main_capture)
+        };
 
         // Validate span to filter out tree-sitter phantom/error-recovery nodes
         // with inconsistent positions (end_byte < start_byte, end_row < start_row,
@@ -335,8 +427,48 @@ impl EntityExtractor {
 
         let id = context.next_entity_id();
 
-        let mut entity = Entity::new(id, kind, name_capture.text.clone(), span);
+        // Pattern matches binding several names at once (`first, second =
+        // pair`) carry one name capture per variable. `.multiple` folds them
+        // into a single comma-separated entity so the inference engine can
+        // map tuple elements by position; the right-hand side is recorded as
+        // the destructuring source.
+        let mut entity = if main_capture.name.ends_with(".multiple") {
+            let names: Vec<String> = mat
+                .captures
+                .iter()
+                .filter(|c| crate::tree_sitter_query::capture::is_name_capture(&c.name))
+                .map(|c| c.text.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+            let joined = if names.is_empty() {
+                name_capture.text.clone()
+            } else {
+                names.join(", ")
+            };
+            Entity::new(id, kind, joined, span)
+        } else {
+            Entity::new(id, kind, name_capture.text.clone(), span)
+        };
         entity.subtype = subtype;
+
+        // Generic destructuring-source hookup: any `@....source` capture
+        // records the provenance expression for pattern-bound variables
+        // (`except E as e`, `case x:` against a subject, tuple unpacking
+        // via `@....multiple.value`). The inference engine resolves
+        // identifiers against parameters and known bindings; bare type
+        // names bind directly.
+        if !entity.metadata.contains_key("source_type") {
+            if let Some(source) = mat
+                .captures
+                .iter()
+                .find(|c| c.name.ends_with(".source") || c.name.ends_with(".multiple.value"))
+            {
+                let text = source.text.trim();
+                if !text.is_empty() {
+                    entity.set_metadata("source_type", text.to_string());
+                }
+            }
+        }
 
         // Capture-level extraction
         entity.signature = capture_module::parser::extract_signature(mat, source);

@@ -68,6 +68,34 @@ fn entity_ts_only() -> &'static str {
   ) @entity.property
 )
 
+; Annotated variable declarations (const/let/var with a type annotation).
+; These duplicate the shared untyped patterns with an extra `type` capture;
+; same-span dedup keeps the first (annotated) match because ts-only patterns
+; precede the shared ones in the composed query.
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @entity.variable.const.name
+    type: (type_annotation (_) @entity.variable.const.type)
+    value: (_)? @entity.variable.const.value
+  )
+) @entity.variable.const
+
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @entity.variable.let.name
+    type: (type_annotation (_) @entity.variable.let.type)
+    value: (_)? @entity.variable.let.value
+  )
+) @entity.variable.let
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @entity.variable.var.name
+    type: (type_annotation (_) @entity.variable.var.type)
+    value: (_)? @entity.variable.var.value
+  )
+) @entity.variable.var
+
 ; ============================================
 ; Namespaces and Modules
 ; ============================================
@@ -225,6 +253,20 @@ pub fn call_query() -> String {
 /// Get TypeScript-specific dependency query patterns
 fn dependency_ts_only() -> &'static str {
     r#"
+; ============================================
+; Import-Require Declaration (import x = require("m"))
+; ============================================
+
+; TypeScript `import x = require("m")` parses as an `import_require_clause`
+; (not a `call_expression`), so the shared `dependency.require` pattern
+; never fires on it. Capture the module path directly.
+; (Verified with `cargo run --example parse_js_require -p cce-parser`.)
+(import_statement
+  (import_require_clause
+    source: (string) @dependency.require.ts_import.path
+  )
+) @dependency.require.ts_import
+
 ; ============================================
 ; Class Inheritance (extends clause)
 ; ============================================

@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use smallvec::SmallVec;
 
-use cce_types::{EntityId, RelationType, ResolvedRelation};
+use cce_types::{EntityId, RelationType, ResolvedRelation, Span};
 
 /// File-level relation record with explicit file path.
 ///
@@ -37,10 +37,18 @@ pub struct QualityReport {
 /// Internal edges are identified by `(caller, callee_id, relation_type)`.
 /// Edges without a callee ID participate as well: external edges
 /// by callee name and classification, unresolved edges by raw target.
+///
+/// Call-class edges (`relation_type.is_call()`) additionally carry their
+/// source span, so repeated calls to the same callee from different call
+/// sites are kept as distinct edges instead of collapsing into the first
+/// one. Non-call edges keep the span-free identity: their
+/// meaning does not vary by call site.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RelationEdgeIdentity {
     pub caller: EntityId,
     pub kind: RelationEdgeKind,
+    /// Source span discriminator, populated only for call-class edges.
+    pub callsite: Option<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -68,6 +76,11 @@ pub enum RelationEdgeKind {
 /// target. Classification participates only to separate genuinely distinct
 /// call sites on the same external symbol; the name is the primary
 /// discriminator so different external symbols never fold into one edge.
+///
+/// Call-class edges additionally carry their source span, so each call site
+/// is a distinct edge. This is the single funnel for index dedup
+/// (`RelationEdgeSet`), incremental diff (`index::delta`), and layered
+/// snapshot views, so all three observe the same per-callsite semantics.
 pub fn relation_identity(relation: &ResolvedRelation) -> RelationEdgeIdentity {
     let kind = match relation.callee_id {
         Some(callee_id) => RelationEdgeKind::Internal {
@@ -87,6 +100,7 @@ pub fn relation_identity(relation: &ResolvedRelation) -> RelationEdgeIdentity {
     RelationEdgeIdentity {
         caller: relation.caller,
         kind,
+        callsite: relation.relation_type.is_call().then_some(relation.span),
     }
 }
 
@@ -216,5 +230,81 @@ impl IntoIterator for RelationEdgeSet {
     type IntoIter = std::vec::IntoIter<ResolvedRelation>;
     fn into_iter(self) -> Self::IntoIter {
         self.edges.into_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cce_types::Position;
+    use cce_types::types::relation::CallContext;
+
+    fn span(start: usize, end: usize) -> Span {
+        Span {
+            start_byte: start,
+            end_byte: end,
+            start_position: Position::new(0, start),
+            end_position: Position::new(0, end),
+        }
+    }
+
+    fn call_edge(caller: u64, callee: u64, span: Span) -> ResolvedRelation {
+        ResolvedRelation {
+            caller: EntityId(caller),
+            callee_id: Some(EntityId(callee)),
+            callee_name: "combine".to_string(),
+            relation_type: RelationType::DirectCall,
+            span,
+            is_external: false,
+            external_type: None,
+            callee_symbol: None,
+            stdlib_category: None,
+            owner_type: None,
+            call_context: CallContext::default(),
+        }
+    }
+
+    #[test]
+    fn call_edges_at_distinct_callsites_are_distinct() {
+        // Calls to the same callee from distinct spans stay distinct.
+        let mut set = RelationEdgeSet::default();
+        assert!(set.insert(call_edge(1, 2, span(100, 110))));
+        assert!(set.insert(call_edge(1, 2, span(120, 130))));
+        assert!(set.insert(call_edge(1, 2, span(140, 150))));
+        assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn duplicate_call_at_same_span_still_dedups() {
+        let mut set = RelationEdgeSet::default();
+        assert!(set.insert(call_edge(1, 2, span(100, 110))));
+        assert!(!set.insert(call_edge(1, 2, span(100, 110))));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn non_call_edges_keep_span_free_identity() {
+        // Inheritance edges do not vary by call site: same
+        // (caller, callee, type) with different spans still collapses.
+        let mut inherit = call_edge(1, 2, span(100, 110));
+        inherit.relation_type = RelationType::Inheritance;
+        let mut other = inherit.clone();
+        other.span = span(500, 510);
+        let mut set = RelationEdgeSet::default();
+        assert!(set.insert(inherit));
+        assert!(!set.insert(other));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn remove_by_identity_targets_single_callsite() {
+        let mut set = RelationEdgeSet::default();
+        let first = call_edge(1, 2, span(100, 110));
+        let second = call_edge(1, 2, span(120, 130));
+        set.insert(first.clone());
+        set.insert(second);
+        assert!(set.remove_by_identity(&relation_identity(&first)));
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.edges[0].span.start_byte, 120);
     }
 }

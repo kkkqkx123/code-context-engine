@@ -274,10 +274,39 @@ fn parse_single_param(text: &str) -> (String, Option<String>) {
             (name, Some(typ))
         }
         None => {
-            let name = match eq_pos {
-                Some(epos) => text[..epos].trim().to_string(),
-                None => text.to_string(),
+            let before_eq = match eq_pos {
+                Some(epos) => text[..epos].trim(),
+                None => text,
             };
+            let mut parts: Vec<&str> = before_eq.split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let Some(last) = parts.pop() {
+                    let name = last
+                        .trim_start_matches("this.")
+                        .trim_start_matches("super.")
+                        .trim_end_matches(['?', '*'])
+                        .to_string();
+                    let typ = parts
+                        .join(" ")
+                        .replace("required ", "")
+                        .replace("covariant ", "")
+                        .replace("final ", "")
+                        .replace("var ", "")
+                        .trim()
+                        .to_string();
+                    if name.is_empty() {
+                        return (before_eq.to_string(), None);
+                    }
+                    if typ.is_empty() {
+                        return (name, None);
+                    }
+                    return (name, Some(typ));
+                }
+            }
+            let name = before_eq
+                .trim_start_matches("this.")
+                .trim_start_matches("super.")
+                .to_string();
             (name, None)
         }
     }

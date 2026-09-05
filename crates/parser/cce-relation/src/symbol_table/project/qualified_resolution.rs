@@ -21,11 +21,26 @@ use crate::type_inference::types::TypeShape;
 use cce_types::entity::EntityId;
 
 /// Context for overload-aware disambiguation.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OverloadContext {
     pub receiver_type: Option<String>,
     pub arg_count: Option<usize>,
     pub arg_types: Option<Vec<Option<TypeShape>>>,
+    /// Language of the caller, used to select the compatibility table for
+    /// overload scoring. Defaults to unknown, which falls back to generic
+    /// numeric coercions.
+    pub language: cce_types::language::Language,
+}
+
+impl Default for OverloadContext {
+    fn default() -> Self {
+        Self {
+            receiver_type: None,
+            arg_count: None,
+            arg_types: None,
+            language: cce_types::language::Language::Unknown,
+        }
+    }
 }
 
 impl ProjectSymbolTable {
@@ -724,11 +739,7 @@ impl ProjectSymbolTable {
                 set.resolve_with_args(&effective_arg_types, &std::collections::HashMap::new())
             };
             if let Some(cand) = candidate {
-                let score = cand.score(
-                    &effective_arg_types,
-                    None,
-                    cce_types::language::Language::Unknown,
-                );
+                let score = cand.score(&effective_arg_types, None, overload_ctx.language);
                 match &best_candidate {
                     None => best_candidate = Some((cand.entity_id, score)),
                     Some((_, best_score)) => {
@@ -737,16 +748,10 @@ impl ProjectSymbolTable {
                         }
                     }
                 }
-            } else if let Some(best) = set.resolve_with_score(
-                &effective_arg_types,
-                None,
-                cce_types::language::Language::Unknown,
-            ) {
-                let score = best.score(
-                    &effective_arg_types,
-                    None,
-                    cce_types::language::Language::Unknown,
-                );
+            } else if let Some(best) =
+                set.resolve_with_score(&effective_arg_types, None, overload_ctx.language)
+            {
+                let score = best.score(&effective_arg_types, None, overload_ctx.language);
                 match &best_candidate {
                     None => best_candidate = Some((best.entity_id, score)),
                     Some((_, best_score)) => {

@@ -189,6 +189,30 @@ pub fn entity_query() -> String {
 ; Using declaration
 (using_declaration) @entity.using
 
+; Range-based for loop variable, e.g. `for (auto& elem : items)`
+(for_range_loop
+  declarator: (reference_declarator
+    (identifier) @entity.variable.loop.name
+  )
+  right: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+; Range-based for loop variable without reference, e.g. `for (auto elem : items)`
+(for_range_loop
+  declarator: (identifier) @entity.variable.loop.name
+  right: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+; Structured binding declaration, e.g. `auto [a, b] = pair;`
+(declaration
+  (init_declarator
+    declarator: (structured_binding_declarator
+      (identifier) @entity.variable.multiple.name
+    )
+    value: (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
 ; Attribute declaration (C++11)
 (attribute
   name: (identifier) @entity.attribute.name
@@ -302,6 +326,7 @@ pub fn control_flow_query() -> &'static str {
     r#"
 (if_statement) @control.flow.if
 (for_statement) @control.flow.loop
+(for_range_loop) @control.flow.loop
 (while_statement) @control.flow.loop
 (do_statement) @control.flow.loop
 (switch_statement) @control.flow.match

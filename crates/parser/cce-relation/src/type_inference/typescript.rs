@@ -12,8 +12,8 @@ use super::control_flow::shared::{
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, TypeShape, narrow_discriminated_union, narrow_truthiness,
-    parse_type_shape, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, TypeShape, declared_shape, narrow_discriminated_union,
+    narrow_truthiness, parse_type_shape, subtract_union_members, type_shape_to_string,
 };
 use crate::symbol_table::TypeMemberIndex;
 use cce_types::language::Language;
@@ -56,9 +56,12 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in
-                            narrow_typescript_if(&fact.text, ctx, inference_ctx.type_index())
-                        {
+                        for result in narrow_typescript_if(
+                            &fact.text,
+                            ctx,
+                            inference_ctx.type_index(),
+                            &entity.parameters,
+                        ) {
                             ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
@@ -80,12 +83,10 @@ struct NarrowingResult {
 ///
 /// Patterns:
 /// - `typeof x === "string"` → x: string
-/// - `typeof x === "number"` → x: number
-/// - `typeof x === "boolean"` → x: boolean
-/// - `typeof x === "undefined"` → x: undefined
+/// - `typeof x !== "string"` → x: declared-union-minus-string
 /// - `x instanceof Class` → x: Class
 /// - `x === null` → x: null
-/// - `x !== null` → x: not-null (conservative skip)
+/// - `x !== null` / `x != null` → x: declared-union-minus-null
 /// - `x.kind === "circle"` → x: Circle (discriminated union)
 /// - `if (x)` → truthiness
 /// - `if (!x)` → negated truthiness
@@ -96,11 +97,12 @@ fn narrow_typescript_if(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&TypeMemberIndex>,
+    params: &[(String, Option<String>)],
 ) -> Vec<NarrowingResult> {
     let text = text.trim();
     let mut results = vec![];
 
-    if let Some(result) = narrow_typescript_typeof(text) {
+    if let Some(result) = narrow_typescript_typeof(text, ctx, params) {
         results.push(result);
         return results;
     }
@@ -108,59 +110,86 @@ fn narrow_typescript_if(
         results.push(result);
         return results;
     }
-    if let Some(result) = narrow_typescript_strict_equal_null(text) {
+    if let Some(result) = narrow_typescript_strict_equal_null(text, ctx, params) {
         results.push(result);
         return results;
     }
 
     // Additional patterns (allow multiple)
-    for r in narrow_typescript_discriminated_union(text, ctx, type_index) {
+    for r in narrow_typescript_discriminated_union(text, ctx, type_index, params) {
         results.push(r);
     }
     for r in narrow_typescript_in_operator(text) {
         results.push(r);
     }
-    for r in narrow_typescript_equality_loose(text) {
+    for r in narrow_typescript_equality_loose(text, ctx, params) {
         results.push(r);
     }
-    for r in narrow_typescript_truthiness(text, ctx) {
+    for r in narrow_typescript_truthiness(text, ctx, params) {
         results.push(r);
     }
 
     results
 }
 
+/// Declared shape for a variable: parameter annotation first, then a known
+/// binding. Shared complement/truthiness plumbing for negated narrowing.
+fn declared_shape_here(
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+    var_name: &str,
+) -> Option<TypeShape> {
+    declared_shape(ctx, params, Language::TypeScript, var_name)
+}
+
+/// Build a narrowing result with a concrete shape.
+fn narrowing_result(var_name: String, narrowed: TypeShape) -> NarrowingResult {
+    NarrowingResult {
+        variable_name: var_name,
+        narrowed_type: TypeBinding {
+            type_name: type_shape_to_string(&narrowed),
+            type_entity_id: None,
+            span: Span::default(),
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: Some(narrowed),
+        },
+    }
+}
+
 fn narrow_typescript_discriminated_union(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&TypeMemberIndex>,
+    params: &[(String, Option<String>)],
 ) -> Vec<NarrowingResult> {
     let Some((var_name, field_name, value)) = parse_typescript_strict_equality_pattern(text) else {
         return vec![];
     };
     let mut results = Vec::new();
-    if let Some(existing) = ctx.get_variable_type(&var_name) {
-        let shape_opt = existing
-            .shape
-            .clone()
-            .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript));
-        if let Some(shape) = shape_opt {
-            if let Some(narrowed) =
-                narrow_discriminated_union(&shape, &field_name, &value, type_index)
-            {
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
-                return results;
-            }
+    let shape_opt = ctx
+        .get_variable_type(&var_name)
+        .and_then(|existing| {
+            existing
+                .shape
+                .clone()
+                .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript))
+        })
+        .or_else(|| declared_shape_here(ctx, params, &var_name));
+    if let Some(shape) = shape_opt {
+        if let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
+        {
+            let type_name = type_shape_to_string(&narrowed);
+            results.push(NarrowingResult {
+                variable_name: var_name.clone(),
+                narrowed_type: TypeBinding {
+                    type_name: type_name.clone(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: Some(narrowed),
+                },
+            });
+            return results;
         }
     }
     results
@@ -192,29 +221,36 @@ fn parse_typescript_strict_equality_pattern(text: &str) -> Option<(String, Strin
     None
 }
 
-fn narrow_typescript_truthiness(text: &str, ctx: &ScopedTypeContext) -> Vec<NarrowingResult> {
+fn narrow_typescript_truthiness(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let mut results = Vec::new();
     if let Some(var_name) = parse_typescript_truthiness_pattern(text) {
-        if let Some(existing) = ctx.get_variable_type(&var_name) {
-            let shape_opt = existing
-                .shape
-                .clone()
-                .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript));
-            if let Some(shape) = shape_opt {
-                if let Some(narrowed) = narrow_truthiness(&shape, true, Language::TypeScript) {
-                    let type_name = type_shape_to_string(&narrowed);
-                    results.push(NarrowingResult {
-                        variable_name: var_name.clone(),
-                        narrowed_type: TypeBinding {
-                            type_name: type_name.clone(),
-                            type_entity_id: None,
-                            span: Span::default(),
-                            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                            shape: Some(narrowed),
-                        },
-                    });
-                    return results;
-                }
+        let shape_opt = ctx
+            .get_variable_type(&var_name)
+            .and_then(|existing| {
+                existing
+                    .shape
+                    .clone()
+                    .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript))
+            })
+            .or_else(|| declared_shape_here(ctx, params, &var_name));
+        if let Some(shape) = shape_opt {
+            if let Some(narrowed) = narrow_truthiness(&shape, true, Language::TypeScript) {
+                let type_name = type_shape_to_string(&narrowed);
+                results.push(NarrowingResult {
+                    variable_name: var_name.clone(),
+                    narrowed_type: TypeBinding {
+                        type_name: type_name.clone(),
+                        type_entity_id: None,
+                        span: Span::default(),
+                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                        shape: Some(narrowed),
+                    },
+                });
+                return results;
             }
         }
         results.push(NarrowingResult {
@@ -228,26 +264,29 @@ fn narrow_typescript_truthiness(text: &str, ctx: &ScopedTypeContext) -> Vec<Narr
             },
         });
     } else if let Some(var_name) = parse_typescript_negated_truthiness_pattern(text) {
-        if let Some(existing) = ctx.get_variable_type(&var_name) {
-            let shape_opt = existing
-                .shape
-                .clone()
-                .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript));
-            if let Some(shape) = shape_opt {
-                if let Some(narrowed) = narrow_truthiness(&shape, false, Language::TypeScript) {
-                    let type_name = type_shape_to_string(&narrowed);
-                    results.push(NarrowingResult {
-                        variable_name: var_name.clone(),
-                        narrowed_type: TypeBinding {
-                            type_name: type_name.clone(),
-                            type_entity_id: None,
-                            span: Span::default(),
-                            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                            shape: Some(narrowed),
-                        },
-                    });
-                    return results;
-                }
+        let shape_opt = ctx
+            .get_variable_type(&var_name)
+            .and_then(|existing| {
+                existing
+                    .shape
+                    .clone()
+                    .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript))
+            })
+            .or_else(|| declared_shape_here(ctx, params, &var_name));
+        if let Some(shape) = shape_opt {
+            if let Some(narrowed) = narrow_truthiness(&shape, false, Language::TypeScript) {
+                let type_name = type_shape_to_string(&narrowed);
+                results.push(NarrowingResult {
+                    variable_name: var_name.clone(),
+                    narrowed_type: TypeBinding {
+                        type_name: type_name.clone(),
+                        type_entity_id: None,
+                        span: Span::default(),
+                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                        shape: Some(narrowed),
+                    },
+                });
+                return results;
             }
         }
         results.push(NarrowingResult {
@@ -315,7 +354,11 @@ fn parse_typescript_in_pattern(text: &str) -> Option<(String, String)> {
     Some((key, right.to_string()))
 }
 
-fn narrow_typescript_equality_loose(text: &str) -> Vec<NarrowingResult> {
+fn narrow_typescript_equality_loose(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let mut results = Vec::new();
     if let Some((var_name, value)) = parse_typescript_loose_equality_null_pattern(text) {
         results.push(NarrowingResult {
@@ -328,6 +371,14 @@ fn narrow_typescript_equality_loose(text: &str) -> Vec<NarrowingResult> {
                 shape: parse_type_shape(&value, Language::TypeScript),
             },
         });
+    }
+    // `x != null`: bind the declared union minus null.
+    if let Some((var_name, _)) = parse_typescript_loose_inequality_null_pattern(text) {
+        if let Some(declared) = declared_shape_here(ctx, params, &var_name) {
+            if let Some(narrowed) = subtract_union_members(&declared, &["null".to_string()]) {
+                results.push(narrowing_result(var_name, narrowed));
+            }
+        }
     }
     if let Some((var_name, value)) = parse_typescript_strict_equality_undefined_pattern(text) {
         results.push(NarrowingResult {
@@ -380,6 +431,35 @@ fn parse_typescript_loose_equality_null_pattern(text: &str) -> Option<(String, S
     None
 }
 
+/// Parse `x != null` (loose or strict): returns the variable name.
+/// The caller subtracts `null` from the declared union.
+fn parse_typescript_loose_inequality_null_pattern(text: &str) -> Option<(String, String)> {
+    let raw = strip_typescript_condition_prefix(text)?;
+    let mut cleaned = raw.trim().to_string();
+    cleaned = strip_outer_parens(cleaned.trim()).trim().to_string();
+    if cleaned.contains("instanceof") || cleaned.contains("typeof") {
+        return None;
+    }
+    for op in &["!==", "!="] {
+        if let Some(pos) = cleaned.find(op) {
+            // `!==` contains `!=`; skipping the strict form here would
+            // mis-split, so require the exact operator at this position.
+            if *op == "!=" && cleaned[pos..].starts_with("!==") {
+                continue;
+            }
+            let left = cleaned[..pos].trim();
+            let right = cleaned[pos + op.len()..].trim();
+            if left.contains('.') {
+                continue;
+            }
+            if is_valid_ident(left) && right == "null" {
+                return Some((left.to_string(), "null".to_string()));
+            }
+        }
+    }
+    None
+}
+
 fn parse_typescript_strict_equality_undefined_pattern(text: &str) -> Option<(String, String)> {
     let raw = strip_typescript_condition_prefix(text)?;
     let mut cleaned = raw.trim().to_string();
@@ -397,8 +477,14 @@ fn parse_typescript_strict_equality_undefined_pattern(text: &str) -> Option<(Str
     None
 }
 
-/// Parse `typeof x === "string"` or `"string" === typeof x`.
-fn narrow_typescript_typeof(text: &str) -> Option<NarrowingResult> {
+/// Parse `typeof x === "string"` or `"string" === typeof x`, plus the
+/// negated `typeof x !== "..."` which binds the declared union minus the
+/// excluded primitive.
+fn narrow_typescript_typeof(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
     let text = strip_typescript_condition_prefix(text)?;
 
     if let Some(result) = parse_typeof_pattern(text) {
@@ -409,6 +495,41 @@ fn narrow_typescript_typeof(text: &str) -> Option<NarrowingResult> {
         return Some(result);
     }
 
+    // Negated form: `typeof x !== "string"` / `"string" !== typeof x`.
+    let (var_name, excluded) = parse_typeof_negated_pattern(text)?;
+    let declared = declared_shape_here(ctx, params, &var_name)?;
+    let narrowed = subtract_union_members(&declared, &[excluded])?;
+    Some(narrowing_result(var_name, narrowed))
+}
+
+/// Parse `typeof x !== "T"` or `"T" !== typeof x` into `(variable, T)`.
+fn parse_typeof_negated_pattern(text: &str) -> Option<(String, String)> {
+    let text = text.trim();
+    let (left, op, right) = split_comparison(text)?;
+    if op != "!==" && op != "!=" {
+        return None;
+    }
+    // `typeof x` on either side, string literal on the other.
+    if let Some(var) = left
+        .trim()
+        .strip_prefix("typeof")
+        .map(str::trim)
+        .filter(|v| is_valid_ident(v))
+    {
+        if let Some(lit) = parse_string_literal(right.trim()) {
+            return Some((var.to_string(), lit));
+        }
+    }
+    if let Some(var) = right
+        .trim()
+        .strip_prefix("typeof")
+        .map(str::trim)
+        .filter(|v| is_valid_ident(v))
+    {
+        if let Some(lit) = parse_string_literal(left.trim()) {
+            return Some((var.to_string(), lit));
+        }
+    }
     None
 }
 
@@ -500,10 +621,27 @@ fn narrow_typescript_instanceof(text: &str) -> Option<NarrowingResult> {
     })
 }
 
-/// Parse `x === null`.
-fn narrow_typescript_strict_equal_null(text: &str) -> Option<NarrowingResult> {
+/// Parse `x === null` and the negated `x !== null` (declared union
+/// minus null).
+fn narrow_typescript_strict_equal_null(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
     let text = strip_typescript_condition_prefix(text)?;
     let text = text.trim();
+
+    // Negated form first: `!==` contains `==` but not `===`.
+    if let Some(pos) = text.find("!==") {
+        let var_name = text[..pos].trim();
+        let rhs = text[pos + 3..].trim();
+        if rhs == "null" && is_valid_ident(var_name) {
+            let declared = declared_shape_here(ctx, params, var_name)?;
+            let narrowed = subtract_union_members(&declared, &["null".to_string()])?;
+            return Some(narrowing_result(var_name.to_string(), narrowed));
+        }
+        return None;
+    }
 
     let parts: Vec<&str> = text.splitn(2, "===").collect();
     if parts.len() != 2 {
@@ -576,7 +714,7 @@ mod tests {
     #[test]
     fn test_typescript_typeof_string() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (typeof x === \"string\")", &ctx, None);
+        let results = narrow_typescript_if("if (typeof x === \"string\")", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "string");
@@ -585,7 +723,7 @@ mod tests {
     #[test]
     fn test_typescript_typeof_number() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (typeof x === \"number\")", &ctx, None);
+        let results = narrow_typescript_if("if (typeof x === \"number\")", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].narrowed_type.type_name, "number");
     }
@@ -593,7 +731,7 @@ mod tests {
     #[test]
     fn test_typescript_typeof_reversed() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (\"string\" === typeof x)", &ctx, None);
+        let results = narrow_typescript_if("if (\"string\" === typeof x)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "string");
@@ -602,7 +740,7 @@ mod tests {
     #[test]
     fn test_typescript_instanceof() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (x instanceof MyClass)", &ctx, None);
+        let results = narrow_typescript_if("if (x instanceof MyClass)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "MyClass");
@@ -611,7 +749,7 @@ mod tests {
     #[test]
     fn test_typescript_strict_equal_null() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (x === null)", &ctx, None);
+        let results = narrow_typescript_if("if (x === null)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "null");
@@ -621,7 +759,7 @@ mod tests {
     fn test_typescript_discriminated_union() {
         // Deterministic: dummy_ctx has no TypeMemberIndex, heuristic removed -> empty
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (x.kind === \"circle\")", &ctx, None);
+        let results = narrow_typescript_if("if (x.kind === \"circle\")", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 
@@ -639,14 +777,14 @@ mod tests {
                 shape: parse_type_shape("Circle | Square", Language::TypeScript),
             },
         );
-        let results = narrow_typescript_if("if (x.kind === \"circle\")", &ctx, None);
+        let results = narrow_typescript_if("if (x.kind === \"circle\")", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_typescript_truthiness() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (x)", &ctx, None);
+        let results = narrow_typescript_if("if (x)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
     }
@@ -654,7 +792,7 @@ mod tests {
     #[test]
     fn test_typescript_negated_truthiness() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (!x)", &ctx, None);
+        let results = narrow_typescript_if("if (!x)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
     }
@@ -662,7 +800,7 @@ mod tests {
     #[test]
     fn test_typescript_in_operator() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (\"prop\" in x)", &ctx, None);
+        let results = narrow_typescript_if("if (\"prop\" in x)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "HasKey<prop>");
@@ -671,7 +809,7 @@ mod tests {
     #[test]
     fn test_typescript_loose_equality_null() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (x == null)", &ctx, None);
+        let results = narrow_typescript_if("if (x == null)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "null | undefined");
@@ -680,7 +818,7 @@ mod tests {
     #[test]
     fn test_typescript_strict_equality_undefined() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (x === undefined)", &ctx, None);
+        let results = narrow_typescript_if("if (x === undefined)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "undefined");
@@ -691,7 +829,7 @@ mod tests {
     #[test]
     fn test_typescript_typeof_in_while() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("while (typeof x === \"string\")", &ctx, None);
+        let results = narrow_typescript_if("while (typeof x === \"string\")", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "string");
@@ -700,7 +838,7 @@ mod tests {
     #[test]
     fn test_typescript_typeof_in_else_if() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("else if (typeof x === \"boolean\")", &ctx, None);
+        let results = narrow_typescript_if("else if (typeof x === \"boolean\")", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "boolean");
@@ -709,7 +847,7 @@ mod tests {
     #[test]
     fn test_typescript_typeof_in_return() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("return typeof x === \"number\"", &ctx, None);
+        let results = narrow_typescript_if("return typeof x === \"number\"", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "number");
@@ -718,7 +856,7 @@ mod tests {
     #[test]
     fn test_typescript_instanceof_in_while() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("while (x instanceof Array)", &ctx, None);
+        let results = narrow_typescript_if("while (x instanceof Array)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "Array");
@@ -727,7 +865,7 @@ mod tests {
     #[test]
     fn test_typescript_strict_equal_null_in_else_if() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("else if (x === null)", &ctx, None);
+        let results = narrow_typescript_if("else if (x === null)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "null");
@@ -747,7 +885,7 @@ mod tests {
                 shape: parse_type_shape("Success | Error | Pending", Language::TypeScript),
             },
         );
-        let results = narrow_typescript_if("if (result.kind === \"success\")", &ctx, None);
+        let results = narrow_typescript_if("if (result.kind === \"success\")", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 
@@ -765,7 +903,7 @@ mod tests {
                 shape: parse_type_shape("Success | Error", Language::TypeScript),
             },
         );
-        let results = narrow_typescript_if("if (result.kind === \"unknown\")", &ctx, None);
+        let results = narrow_typescript_if("if (result.kind === \"unknown\")", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 
@@ -782,7 +920,7 @@ mod tests {
                 shape: parse_type_shape("string | null | undefined", Language::TypeScript),
             },
         );
-        let results = narrow_typescript_if("if (value)", &ctx, None);
+        let results = narrow_typescript_if("if (value)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "value");
         assert_eq!(results[0].narrowed_type.type_name, "string");
@@ -801,7 +939,7 @@ mod tests {
                 shape: parse_type_shape("string | null | undefined", Language::TypeScript),
             },
         );
-        let results = narrow_typescript_if("if (!value)", &ctx, None);
+        let results = narrow_typescript_if("if (!value)", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "value");
     }
@@ -809,14 +947,14 @@ mod tests {
     #[test]
     fn test_typescript_in_operator_nested_object() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (\"key\" in obj.nested)", &ctx, None);
+        let results = narrow_typescript_if("if (\"key\" in obj.nested)", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_typescript_loose_equality_null_nested() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (obj.value == null)", &ctx, None);
+        let results = narrow_typescript_if("if (obj.value == null)", &ctx, None, &[]);
         assert!(results.is_empty());
     }
 
@@ -842,7 +980,7 @@ mod tests {
     #[test]
     fn test_typescript_multiple_typeof_checks() {
         let ctx = dummy_ctx();
-        let results = narrow_typescript_if("if (typeof x === \"string\")", &ctx, None);
+        let results = narrow_typescript_if("if (typeof x === \"string\")", &ctx, None, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "string");
@@ -938,5 +1076,45 @@ mod tests {
     fn test_typescript_negated_truthiness_pattern_not_ident() {
         let result = parse_typescript_negated_truthiness_pattern("if (!x.y)");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_typescript_not_equal_null_narrows() {
+        // Negated null checks narrow to the remaining member.
+        let ctx = dummy_ctx();
+        let params = [("value".to_string(), Some("string | null".to_string()))];
+        let results = narrow_typescript_if("if (value !== null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
+    }
+
+    #[test]
+    fn test_typescript_not_equal_null_without_declared_type_skipped() {
+        let ctx = dummy_ctx();
+        let results = narrow_typescript_if("if (value !== null)", &ctx, None, &[]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_typescript_typeof_not_equal_complement() {
+        // Negated typeof checks narrow to the remaining member.
+        let ctx = dummy_ctx();
+        let params = [("value".to_string(), Some("string | number".to_string()))];
+        let results = narrow_typescript_if("if (typeof value !== \"string\")", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "number");
+    }
+
+    #[test]
+    fn test_typescript_negated_truthiness_declared() {
+        // Negated truthiness narrows against the declared union.
+        let ctx = dummy_ctx();
+        let params = [("value".to_string(), Some("string | undefined".to_string()))];
+        let results = narrow_typescript_if("if (!value)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "undefined");
     }
 }
