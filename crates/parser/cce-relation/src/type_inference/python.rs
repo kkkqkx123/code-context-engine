@@ -39,8 +39,9 @@ impl LanguageTypeInferer for PythonTypeInferer {
             }
         }
 
-        // Python-specific: extract constructor call types from metadata
-        extract_constructor_call_types(entities, ctx);
+        // Python-specific: `name: T = None` means the variable may hold
+        // `None`, so surface the annotation as `Optional[T]`.
+        wrap_none_default_in_optional(entities, ctx);
     }
 
     fn infer_control_flow(
@@ -81,7 +82,11 @@ impl LanguageTypeInferer for PythonTypeInferer {
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_python_match(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     _ => continue,
@@ -649,22 +654,43 @@ fn truncate_at_header_colon(text: &str) -> &str {
     text
 }
 
-/// Extract constructor call types from entity metadata.
-fn extract_constructor_call_types(entities: &[Entity], ctx: &mut ScopedTypeContext) {
+/// Wrap `name: T = None` annotations as `Optional[T]`.
+///
+/// A `None` initializer alongside an explicit annotation marks the
+/// variable nullable; without the wrapper the binding reports only `T`
+/// (or only the `None` literal when the annotation capture missed).
+fn wrap_none_default_in_optional(entities: &[Entity], ctx: &mut ScopedTypeContext) {
     for entity in entities {
         if entity.kind != EntityKind::Variable {
             continue;
         }
-        if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-            let binding = TypeBinding {
-                type_name: constructor_type.clone(),
-                type_entity_id: None,
-                span: entity.span,
-                origin: Some(super::types::InferenceOrigin::ConstructorCall),
-                shape: None,
-            };
-            ctx.add_variable_type(entity.name.clone(), binding);
+        let Some(annotation) = entity.metadata.get("type_annotation") else {
+            continue;
+        };
+        let annotation = annotation.trim();
+        if annotation.is_empty()
+            || annotation.starts_with("Optional[")
+            || annotation.starts_with("Option[")
+            || annotation.contains("None")
+        {
+            continue;
         }
+        let is_none_default = entity
+            .metadata
+            .get("literal_type")
+            .is_some_and(|lit| lit.trim() == "null" || lit.trim() == "None");
+        if !is_none_default {
+            continue;
+        }
+        let wrapped = format!("Optional[{}]", annotation);
+        let binding = TypeBinding {
+            shape: parse_type_shape(&wrapped, Language::Python),
+            type_name: wrapped,
+            type_entity_id: None,
+            span: entity.span,
+            origin: Some(super::types::InferenceOrigin::TypeAnnotation),
+        };
+        ctx.add_variable_type(entity.name.clone(), binding);
     }
 }
 
@@ -871,5 +897,46 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "None");
+    }
+
+    #[test]
+    fn test_python_none_default_wraps_optional() {
+        use cce_types::entity::{EntityId, EntityKind};
+
+        let mut ctx = ScopedTypeContext::new(Language::Python);
+        let entities = vec![
+            Entity::new(
+                EntityId(10),
+                EntityKind::Variable,
+                "name".to_string(),
+                Span::default(),
+            )
+            .with_metadata("type_annotation", "str")
+            .with_metadata("literal_type", "null"),
+        ];
+
+        PythonTypeInferer.infer_declarations(&entities, &mut ctx);
+        let vt = ctx.get_variable_type("name").unwrap();
+        assert_eq!(vt.type_name, "Optional[str]");
+    }
+
+    #[test]
+    fn test_python_plain_annotation_without_none_default_untouched() {
+        use cce_types::entity::{EntityId, EntityKind};
+
+        let mut ctx = ScopedTypeContext::new(Language::Python);
+        let entities = vec![
+            Entity::new(
+                EntityId(11),
+                EntityKind::Variable,
+                "count".to_string(),
+                Span::default(),
+            )
+            .with_metadata("type_annotation", "int"),
+        ];
+
+        PythonTypeInferer.infer_declarations(&entities, &mut ctx);
+        let vt = ctx.get_variable_type("count").unwrap();
+        assert_eq!(vt.type_name, "int");
     }
 }

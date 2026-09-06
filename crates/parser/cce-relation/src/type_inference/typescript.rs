@@ -38,9 +38,6 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
                 _ => {}
             }
         }
-
-        // TypeScript-specific: extract constructor call types from metadata
-        extract_constructor_call_types(entities, ctx);
     }
 
     fn infer_control_flow(
@@ -88,7 +85,11 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
                             inference_ctx.type_index(),
                             &entity.parameters,
                         ) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     _ => continue,
@@ -884,25 +885,6 @@ fn strip_typescript_condition_prefix(text: &str) -> Option<&str> {
     None
 }
 
-/// Extract constructor call types from entity metadata.
-fn extract_constructor_call_types(entities: &[Entity], ctx: &mut ScopedTypeContext) {
-    for entity in entities {
-        if entity.kind != EntityKind::Variable {
-            continue;
-        }
-        if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-            let binding = TypeBinding {
-                type_name: constructor_type.clone(),
-                type_entity_id: None,
-                span: entity.span,
-                origin: Some(super::types::InferenceOrigin::ConstructorCall),
-                shape: None,
-            };
-            ctx.add_variable_type(entity.name.clone(), binding);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1420,5 +1402,55 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "value");
         assert_eq!(results[0].narrowed_type.type_name, "undefined");
+    }
+
+    #[test]
+    fn test_typescript_constructor_call_shape_resolved() {
+        let mut ctx = ScopedTypeContext::new(Language::TypeScript);
+        let entities = vec![
+            Entity::new(
+                EntityId(11),
+                EntityKind::Variable,
+                "state".to_string(),
+                Span::default(),
+            )
+            .with_metadata("constructor_type", "PublicClass"),
+        ];
+
+        TypeScriptTypeInferer.infer_declarations(&entities, &mut ctx);
+        let vt = ctx.get_variable_type("state").unwrap();
+        assert_eq!(vt.type_name, "PublicClass");
+        assert!(vt.shape.is_some());
+    }
+
+    #[test]
+    fn test_anchored_narrowing_falls_back_to_entity_span() {
+        use cce_types::{Position, Span};
+
+        use super::super::types::BranchPolarity;
+
+        let mut ctx = ScopedTypeContext::new(Language::TypeScript);
+        let fallback = Span {
+            start_byte: 10,
+            end_byte: 60,
+            start_position: Position { row: 1, column: 0 },
+            end_position: Position { row: 3, column: 1 },
+        };
+        ctx.add_narrowed_type_anchored(
+            "x".to_string(),
+            TypeBinding {
+                type_name: "string".to_string(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(InferenceOrigin::ControlFlowNarrowing),
+                shape: None,
+            },
+            fallback,
+        );
+        let narrowed = ctx
+            .get_narrowed_in_branch("x", BranchPolarity::Then)
+            .expect("narrowed binding stored");
+        assert!(narrowed.span.is_available());
+        assert_eq!(narrowed.span, fallback);
     }
 }

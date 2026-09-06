@@ -7,10 +7,11 @@
 //! - Property type declarations
 
 use cce_types::entity::{Entity, EntityKind};
+use cce_types::language::Language;
 
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
-use super::types::{ScopedTypeContext, TypeBinding};
+use super::types::{ScopedTypeContext, TypeBinding, parse_type_shape};
 
 /// PHP type inference implementation.
 pub struct PhpTypeInferer;
@@ -28,32 +29,24 @@ impl LanguageTypeInferer for PhpTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::FunctionReturn),
-                            shape: None,
+                            shape: parse_type_shape(return_type, Language::Php),
                         };
                         ctx.add_return_type(entity.id, binding);
                     }
                 }
                 EntityKind::Variable => {
                     extract_variable_type(entity, ctx);
-
-                    if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-                        let binding = TypeBinding {
-                            type_name: constructor_type.clone(),
-                            type_entity_id: None,
-                            span: entity.span,
-                            origin: Some(super::types::InferenceOrigin::ConstructorCall),
-                            shape: None,
-                        };
-                        ctx.add_variable_type(entity.name.clone(), binding);
-                    }
-
+                    // Constructor calls (`new ClassName()`) are handled by the shared
+                    // `extract_variable_type`, which binds `constructor_type` with a
+                    // resolved shape only when no concrete annotation is present.
+                    // No duplicate handling here so explicit annotations keep priority.
                     if let Some(phpdoc_type) = entity.metadata.get("phpdoc_var_type") {
                         let binding = TypeBinding {
                             type_name: phpdoc_type.clone(),
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                            shape: None,
+                            shape: parse_type_shape(phpdoc_type, Language::Php),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }

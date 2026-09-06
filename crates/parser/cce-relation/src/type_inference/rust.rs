@@ -245,7 +245,11 @@ impl LanguageTypeInferer for RustTypeInferer {
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_rust_match(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     _ => continue,

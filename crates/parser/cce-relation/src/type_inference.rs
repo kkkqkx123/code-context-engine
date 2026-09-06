@@ -581,8 +581,7 @@ impl TypeInferenceEngine {
                                 Some(element) => shape = element,
                                 None => continue,
                             }
-                        }
-                        // Object destructuring against a named interface or
+                        } // Object destructuring against a named interface or
                         // class declared in the same file binds by member
                         // name (`const { name } = user` with `user: User`).
                         // Parts without a matching member stay unbound rather
@@ -612,6 +611,16 @@ impl TypeInferenceEngine {
                             ctx.add_destructuring_binding(part, &shape, Some(i));
                         }
                         continue;
+                    }
+                    // Constructor fallback: `const { x, y } = new Point()`
+                    // carries `constructor_type` rather than a resolvable
+                    // source, so bind parts by member name when the
+                    // constructed type is declared in the same file.
+                    if let Some(init_type) = entity.metadata.get("constructor_type") {
+                        if let Some(members) = Self::named_type_members(file, init_type.trim()) {
+                            Self::bind_member_names(ctx, file, entity, &members, &parts);
+                            continue;
+                        }
                     }
                     let generic = TypeShape::Generic {
                         base: "Tuple".to_string(),
@@ -892,35 +901,6 @@ impl TypeInferenceEngine {
             }
         }
         ctx
-    }
-
-    /// Extract constructor call types from entity metadata.
-    ///
-    /// When a variable is assigned via a constructor call (e.g., `x = MyClass()`),
-    /// the parser stores `"constructor_type"` in the variable entity's metadata.
-    /// This method processes those entries and adds them to the type inference context.
-    pub fn extract_constructor_call_types(
-        file: &cce_types::ParsedFile,
-        ctx: &mut ScopedTypeContext,
-    ) {
-        for entity in &file.entities {
-            if entity.kind != EntityKind::Variable {
-                continue;
-            }
-            if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-                let binding = TypeBinding {
-                    type_name: constructor_type.clone(),
-                    type_entity_id: None,
-                    span: entity.span,
-                    origin: Some(InferenceOrigin::ConstructorCall),
-                    shape: crate::type_inference::types::parse_type_shape(
-                        constructor_type,
-                        file.language,
-                    ),
-                };
-                ctx.add_variable_type(entity.name.clone(), binding);
-            }
-        }
     }
 }
 

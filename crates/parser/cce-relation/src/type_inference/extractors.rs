@@ -9,6 +9,34 @@ use super::types::{InferenceOrigin, ScopedTypeContext, TypeBinding, parse_type_s
 
 use super::generics::{GenericTypeArg, parse_generic_type, split_call_target};
 
+/// Strip a leading colon from a captured type annotation.
+///
+/// Tree-sitter `type_annotation` nodes include the colon prefix
+/// (`: string`); bindings must store the bare type name.
+fn clean_annotation(ty: &str) -> &str {
+    ty.trim().trim_start_matches(':').trim()
+}
+
+/// Whether a captured annotation is an inference keyword rather than a
+/// concrete type (`var`, `auto`, `val`, `let`, `decltype(...)`).
+///
+/// Callers skip such annotations so inference falls back to the
+/// initializer (`constructor_type` / `literal_type` / `call_target`).
+fn is_inferred_type_keyword(ty: &str) -> bool {
+    let mut normalized = ty.trim();
+    normalized = normalized
+        .strip_prefix("const ")
+        .unwrap_or(normalized)
+        .trim();
+    normalized = normalized
+        .trim_end_matches(['&', '*', ' '].as_slice())
+        .trim();
+    if normalized.starts_with("decltype") {
+        return true;
+    }
+    matches!(normalized, "var" | "auto" | "val" | "let")
+}
+
 /// Extract type information from a function entity's struct fields.
 ///
 /// Reads return type from `entity.return_type` and parameter types
@@ -57,16 +85,19 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
 /// 4. `call_target` — function call like `x = f()` (Medium, via FunctionReturn)
 pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
     if let Some(type_name) = entity.metadata.get("type_annotation") {
-        let binding = TypeBinding {
-            type_name: type_name.clone(),
-            type_entity_id: None,
-            span: entity.span,
-            origin: Some(InferenceOrigin::TypeAnnotation),
-            shape: parse_type_shape(type_name, ctx.language()),
-        };
-        ctx.add_variable_type(entity.name.clone(), binding);
-        try_bind_generic(ctx, type_name);
-        return;
+        let cleaned = clean_annotation(type_name);
+        if !cleaned.is_empty() && !is_inferred_type_keyword(cleaned) {
+            let binding = TypeBinding {
+                type_name: cleaned.to_string(),
+                type_entity_id: None,
+                span: entity.span,
+                origin: Some(InferenceOrigin::TypeAnnotation),
+                shape: parse_type_shape(cleaned, ctx.language()),
+            };
+            ctx.add_variable_type(entity.name.clone(), binding);
+            try_bind_generic(ctx, cleaned);
+            return;
+        }
     }
 
     if let Some(init_type) = entity.metadata.get("constructor_type") {
@@ -121,15 +152,18 @@ pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
 /// 3. `literal_type` — literal initializer like `x = 42` (Medium)
 pub fn extract_field_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
     if let Some(type_name) = entity.metadata.get("type_annotation") {
-        let binding = TypeBinding {
-            type_name: type_name.clone(),
-            type_entity_id: None,
-            span: entity.span,
-            origin: Some(InferenceOrigin::TypeAnnotation),
-            shape: parse_type_shape(type_name, ctx.language()),
-        };
-        ctx.add_variable_type(entity.name.clone(), binding);
-        return;
+        let cleaned = clean_annotation(type_name);
+        if !cleaned.is_empty() && !is_inferred_type_keyword(cleaned) {
+            let binding = TypeBinding {
+                type_name: cleaned.to_string(),
+                type_entity_id: None,
+                span: entity.span,
+                origin: Some(InferenceOrigin::TypeAnnotation),
+                shape: parse_type_shape(cleaned, ctx.language()),
+            };
+            ctx.add_variable_type(entity.name.clone(), binding);
+            return;
+        }
     }
 
     if let Some(init_type) = entity.metadata.get("constructor_type") {
@@ -497,5 +531,83 @@ mod tests {
         let binding = ctx.get_variable_type("items").unwrap();
         assert_eq!(binding.type_name, "List<String>");
         assert_eq!(ctx.get_type_param_for_owner("List", "T"), Some("String"));
+    }
+
+    // ==================== annotation cleanup + keyword fallback ====================
+
+    #[test]
+    fn test_extract_variable_type_strips_colon_prefix() {
+        let entity = make_variable_entity(1, "name", vec![("type_annotation", ": string")]);
+        let mut ctx = ScopedTypeContext::new(Language::TypeScript);
+        extract_variable_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("name").unwrap();
+        assert_eq!(binding.type_name, "string");
+    }
+
+    #[test]
+    fn test_extract_field_type_strips_colon_prefix() {
+        let entity = make_variable_entity(1, "name", vec![("type_annotation", ": string")]);
+        let mut ctx = ScopedTypeContext::new(Language::TypeScript);
+        extract_field_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("name").unwrap();
+        assert_eq!(binding.type_name, "string");
+    }
+
+    #[test]
+    fn test_extract_variable_type_var_falls_back_to_constructor() {
+        let entity = make_variable_entity(
+            1,
+            "scores",
+            vec![
+                ("type_annotation", "var"),
+                ("constructor_type", "ArrayList<String>"),
+            ],
+        );
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        extract_variable_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("scores").unwrap();
+        assert_eq!(binding.type_name, "ArrayList<String>");
+        assert_eq!(binding.origin, Some(InferenceOrigin::ConstructorCall));
+    }
+
+    #[test]
+    fn test_extract_variable_type_auto_falls_back_to_literal() {
+        let entity = make_variable_entity(
+            1,
+            "count",
+            vec![("type_annotation", "auto"), ("literal_type", "number")],
+        );
+        let mut ctx = ScopedTypeContext::new(Language::Cpp);
+        extract_variable_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("count").unwrap();
+        assert_eq!(binding.type_name, "number");
+        assert_eq!(binding.origin, Some(InferenceOrigin::LiteralType));
+    }
+
+    #[test]
+    fn test_extract_variable_type_decltype_falls_back_to_call_target() {
+        let mut ctx = ScopedTypeContext::new(Language::Cpp);
+        let func = make_entity(9, "make_value", Some("int"), vec![]);
+        extract_function_types(&func, &mut ctx);
+        let entity = make_variable_entity(
+            1,
+            "other",
+            vec![
+                ("type_annotation", "decltype(count)"),
+                ("call_target", "make_value()"),
+            ],
+        );
+        extract_variable_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("other").unwrap();
+        assert_eq!(binding.type_name, "int");
+        assert_eq!(binding.origin, Some(InferenceOrigin::FunctionReturn));
+    }
+
+    #[test]
+    fn test_extract_variable_type_bare_keyword_yields_no_binding() {
+        let entity = make_variable_entity(1, "x", vec![("type_annotation", "var")]);
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        extract_variable_type(&entity, &mut ctx);
+        assert!(ctx.get_variable_type("x").is_none());
     }
 }

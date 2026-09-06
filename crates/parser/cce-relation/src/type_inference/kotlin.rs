@@ -44,21 +44,14 @@ impl LanguageTypeInferer for KotlinTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                            shape: None,
+                            shape: parse_type_shape(var_type, Language::Kotlin),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
-
-                    if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-                        let binding = TypeBinding {
-                            type_name: constructor_type.clone(),
-                            type_entity_id: None,
-                            span: entity.span,
-                            origin: Some(super::types::InferenceOrigin::ConstructorCall),
-                            shape: None,
-                        };
-                        ctx.add_variable_type(entity.name.clone(), binding);
-                    }
+                    // Constructor calls (`ClassName()`) are handled by the shared
+                    // `extract_variable_type`, which binds `constructor_type` with
+                    // a resolved shape only when no concrete annotation is present.
+                    // No duplicate handling here so explicit annotations keep priority.
                 }
                 EntityKind::Field | EntityKind::Property => {
                     extract_field_type(entity, ctx);
@@ -106,7 +99,11 @@ impl LanguageTypeInferer for KotlinTypeInferer {
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_kotlin_when(&fact.text, ctx, &entity.parameters) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     _ => continue,

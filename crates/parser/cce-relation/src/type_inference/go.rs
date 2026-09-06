@@ -13,7 +13,7 @@ use super::extractors::{extract_field_type, extract_function_types, extract_vari
 use super::traits::LanguageTypeInferer;
 use super::types::{
     ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
-    type_shape_to_string,
+    parse_type_shape, type_shape_to_string,
 };
 
 /// Go type inference implementation.
@@ -41,7 +41,7 @@ impl LanguageTypeInferer for GoTypeInferer {
                                     type_entity_id: None,
                                     span: entity.span,
                                     origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                                    shape: None,
+                                    shape: parse_type_shape(receiver_type, Language::Go),
                                 };
                                 ctx.add_variable_type(receiver_var, binding);
                             }
@@ -57,7 +57,7 @@ impl LanguageTypeInferer for GoTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::GenericInference),
-                            shape: None,
+                            shape: parse_type_shape(inferred_type, Language::Go),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
@@ -104,7 +104,11 @@ impl LanguageTypeInferer for GoTypeInferer {
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_go_type_switch(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     _ => continue,

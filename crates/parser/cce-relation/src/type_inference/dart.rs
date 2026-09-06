@@ -42,22 +42,15 @@ impl LanguageTypeInferer for DartTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                            shape: None,
+                            shape: parse_type_shape(var_type, Language::Dart),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
 
-                    if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-                        let binding = TypeBinding {
-                            type_name: constructor_type.clone(),
-                            type_entity_id: None,
-                            span: entity.span,
-                            origin: Some(super::types::InferenceOrigin::ConstructorCall),
-                            shape: None,
-                        };
-                        ctx.add_variable_type(entity.name.clone(), binding);
-                    }
-
+                    // Constructor calls (`ClassName()`) are handled by the shared
+                    // `extract_variable_type`, which binds `constructor_type`
+                    // only when no concrete annotation is present. No duplicate
+                    // handling here so explicit annotations keep priority.
                     // Dart-specific: explicit type declaration
                     if let Some(explicit_type) = entity.metadata.get("explicit_type") {
                         let binding = TypeBinding {
@@ -65,7 +58,7 @@ impl LanguageTypeInferer for DartTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                            shape: None,
+                            shape: parse_type_shape(explicit_type, Language::Dart),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
@@ -76,6 +69,8 @@ impl LanguageTypeInferer for DartTypeInferer {
                 _ => {}
             }
         }
+
+        normalize_literal_types(entities, ctx);
     }
 
     fn infer_control_flow(
@@ -116,13 +111,61 @@ impl LanguageTypeInferer for DartTypeInferer {
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_dart_switch(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     _ => continue,
                 }
             }
         }
+    }
+}
+
+/// Map parser-generic literal names to Dart declaration spellings.
+///
+/// The shared literal extractor reports lowercase `string` / `number` /
+/// `boolean` / `null` / `array` / `object`; Dart spells these `String` /
+/// `num` / `bool` / `Null` / `List` / `Map`. Without normalization the
+/// same type appears in both forms across origins.
+fn normalize_dart_literal_type(raw: &str) -> Option<&'static str> {
+    match raw.trim() {
+        "string" => Some("String"),
+        "number" => Some("num"),
+        "boolean" => Some("bool"),
+        "null" => Some("Null"),
+        "array" => Some("List"),
+        "object" => Some("Map"),
+        _ => None,
+    }
+}
+
+/// Rebind literal-origin variables to declaration spellings.
+fn normalize_literal_types(entities: &[Entity], ctx: &mut ScopedTypeContext) {
+    for entity in entities {
+        if !matches!(
+            entity.kind,
+            EntityKind::Variable | EntityKind::Field | EntityKind::Property
+        ) {
+            continue;
+        }
+        let Some(lit) = entity.metadata.get("literal_type") else {
+            continue;
+        };
+        let Some(normalized) = normalize_dart_literal_type(lit) else {
+            continue;
+        };
+        let binding = TypeBinding {
+            type_name: normalized.to_string(),
+            type_entity_id: None,
+            span: entity.span,
+            origin: Some(super::types::InferenceOrigin::LiteralType),
+            shape: parse_type_shape(normalized, Language::Dart),
+        };
+        ctx.add_variable_type(entity.name.clone(), binding);
     }
 }
 
@@ -763,5 +806,43 @@ mod tests {
             "switch (x) { case 1: a(); case \"s\": b(); case null: c(); default: d(); }",
         );
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_dart_literal_normalized_to_declaration_spelling() {
+        let mut ctx = ScopedTypeContext::new(Language::Dart);
+        let entities = vec![
+            Entity::new(
+                EntityId(10),
+                EntityKind::Variable,
+                "name".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("literal_type", "string"),
+        ];
+
+        DartTypeInferer.infer_declarations(&entities, &mut ctx);
+        let vt = ctx.get_variable_type("name").unwrap();
+        assert_eq!(vt.type_name, "String");
+        assert!(vt.shape.is_some());
+    }
+
+    #[test]
+    fn test_dart_constructor_shape_resolved() {
+        let mut ctx = ScopedTypeContext::new(Language::Dart);
+        let entities = vec![
+            Entity::new(
+                EntityId(11),
+                EntityKind::Variable,
+                "user".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("constructor_type", "User"),
+        ];
+
+        DartTypeInferer.infer_declarations(&entities, &mut ctx);
+        let vt = ctx.get_variable_type("user").unwrap();
+        assert_eq!(vt.type_name, "User");
+        assert!(vt.shape.is_some());
     }
 }

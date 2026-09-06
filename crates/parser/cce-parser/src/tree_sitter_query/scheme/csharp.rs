@@ -68,6 +68,7 @@ pub fn entity_query() -> &'static str {
 ; Method definition (including async, static, generic)
 (method_declaration
   name: (identifier) @entity.method.name
+  returns: (_)? @entity.method.return_type
   parameters: (parameter_list) @entity.method.params
   body: (_) @entity.method.body
 ) @entity.method
@@ -83,7 +84,9 @@ pub fn entity_query() -> &'static str {
 ) @entity.destructor
 
 ; Operator overload
-(operator_declaration) @entity.method.operator
+(operator_declaration
+  type: (_) @entity.method.operator.return_type
+) @entity.method.operator
 
 ; ============================================
 ; 3. Properties and Events

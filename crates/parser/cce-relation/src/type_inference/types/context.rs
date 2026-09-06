@@ -294,6 +294,23 @@ impl ScopedTypeContext {
         self.add_narrowed_type_in_branch(name, binding, BranchPolarity::Then);
     }
 
+    /// Record a narrowed binding, falling back to the enclosing entity span
+    /// when the narrowing carries no position of its own.
+    ///
+    /// Switch/match arms and catch clauses synthesize bindings without
+    /// source positions; without a fallback the export renders `n/a`.
+    pub fn add_narrowed_type_anchored(
+        &mut self,
+        name: String,
+        mut binding: TypeBinding,
+        fallback: cce_types::Span,
+    ) {
+        if !binding.span.is_available() {
+            binding.span = fallback;
+        }
+        self.add_narrowed_type(name, binding);
+    }
+
     /// Record a narrowed type binding attributed to one branch side.
     ///
     /// Then-branch bindings feed the default lookup; else-branch bindings
@@ -562,12 +579,20 @@ impl ScopedTypeContext {
     /// Positional mapping applies to any generic container with enough type
     /// arguments, not just tuple-named shapes. Positions without a matching
     /// argument bind to `unknown` so unrelated parts never inherit a guess.
+    /// Reference wrappers (`&T`, `&mut T`) unwrap to their inner shape;
+    /// named struct types without positional information still bind
+    /// `unknown` since member resolution needs declaration context the
+    /// context does not carry.
     pub fn add_destructuring_binding(
         &mut self,
         target: &str,
         source_type: &TypeShape,
         index: Option<usize>,
     ) {
+        let source_type = match source_type {
+            TypeShape::Reference { inner, .. } => inner.as_ref(),
+            other => other,
+        };
         let resolved_type = match source_type {
             TypeShape::Generic { args, .. } => index
                 .and_then(|i| args.get(i).cloned())
@@ -636,6 +661,7 @@ fn nested_positional_element(source_type: &TypeShape, index: usize) -> Option<Ty
     match source_type {
         TypeShape::Generic { args, .. } => args.get(index).cloned(),
         TypeShape::Array(element) => Some((**element).clone()),
+        TypeShape::Reference { inner, .. } => nested_positional_element(inner, index),
         _ => None,
     }
 }

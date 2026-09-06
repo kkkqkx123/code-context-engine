@@ -51,18 +51,11 @@ impl LanguageTypeInferer for CppTypeInferer {
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
 
-                    // Constructor call: `Type x = Type(args);` or `Type x(args);`
-                    if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-                        let binding = TypeBinding {
-                            type_name: constructor_type.clone(),
-                            type_entity_id: None,
-                            span: entity.span,
-                            origin: Some(InferenceOrigin::ConstructorCall),
-                            shape: parse_type_shape(constructor_type, Language::Cpp),
-                        };
-                        ctx.add_variable_type(entity.name.clone(), binding);
-                    }
-
+                    // Constructor calls (`Type x = Type(args);`) are handled by
+                    // the shared `extract_variable_type`, which binds
+                    // `constructor_type` only when no concrete annotation is
+                    // present. No duplicate handling here so explicit
+                    // annotations keep priority.
                     // Explicit type declaration: `Type x = ...;`
                     if let Some(explicit_type) = entity.metadata.get("explicit_type") {
                         let binding = TypeBinding {

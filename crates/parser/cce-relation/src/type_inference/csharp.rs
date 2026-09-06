@@ -41,29 +41,23 @@ impl LanguageTypeInferer for CSharpTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                            shape: None,
+                            shape: parse_type_shape(var_type, Language::CSharp),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
 
-                    if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-                        let binding = TypeBinding {
-                            type_name: constructor_type.clone(),
-                            type_entity_id: None,
-                            span: entity.span,
-                            origin: Some(super::types::InferenceOrigin::ConstructorCall),
-                            shape: None,
-                        };
-                        ctx.add_variable_type(entity.name.clone(), binding);
-                    }
-
+                    // Constructor calls (`var x = new T()`, `T x = new T()`)
+                    // are handled by the shared `extract_variable_type`, which
+                    // binds `constructor_type` with a resolved shape only when
+                    // no concrete annotation is present. No duplicate handling
+                    // here so explicit annotations keep priority.
                     if let Some(inferred) = entity.metadata.get("inferred_type") {
                         let binding = TypeBinding {
                             type_name: inferred.clone(),
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::GenericInference),
-                            shape: None,
+                            shape: parse_type_shape(inferred, Language::CSharp),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
@@ -74,7 +68,7 @@ impl LanguageTypeInferer for CSharpTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                            shape: None,
+                            shape: parse_type_shape(explicit, Language::CSharp),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
@@ -125,16 +119,25 @@ impl LanguageTypeInferer for CSharpTypeInferer {
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_csharp_switch(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     ControlFlowFactKind::Try => {
                         for result in narrow_csharp_catch(&fact.text) {
-                            ctx.add_variable_type(
-                                result.variable_name.clone(),
-                                result.narrowed_type.clone(),
+                            let mut variable_binding = result.narrowed_type.clone();
+                            if !variable_binding.span.is_available() {
+                                variable_binding.span = entity.span;
+                            }
+                            ctx.add_variable_type(result.variable_name.clone(), variable_binding);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
                             );
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
                     _ => continue,

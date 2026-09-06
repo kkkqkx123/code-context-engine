@@ -13,7 +13,7 @@ use super::extractors::{extract_field_type, extract_function_types, extract_vari
 use super::traits::LanguageTypeInferer;
 use super::types::{
     ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
-    subtract_union_members, type_shape_to_string,
+    parse_type_shape, subtract_union_members, type_shape_to_string,
 };
 
 /// Java type inference implementation.
@@ -52,21 +52,15 @@ impl LanguageTypeInferer for JavaTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: Some(super::types::InferenceOrigin::TypeAnnotation),
-                            shape: None,
+                            shape: parse_type_shape(var_type, Language::Java),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
-
-                    if let Some(constructor_type) = entity.metadata.get("constructor_type") {
-                        let binding = TypeBinding {
-                            type_name: constructor_type.clone(),
-                            type_entity_id: None,
-                            span: entity.span,
-                            origin: Some(super::types::InferenceOrigin::ConstructorCall),
-                            shape: None,
-                        };
-                        ctx.add_variable_type(entity.name.clone(), binding);
-                    }
+                    // Constructor calls (`new Constructor<T>()`) are handled by
+                    // the shared `extract_variable_type`, which binds
+                    // `constructor_type` with a resolved shape only when no
+                    // concrete annotation is present. No duplicate handling
+                    // here so explicit annotations keep priority.
                 }
                 EntityKind::Field | EntityKind::Property => {
                     extract_field_type(entity, ctx);
@@ -77,7 +71,7 @@ impl LanguageTypeInferer for JavaTypeInferer {
                             type_entity_id: None,
                             span: entity.span,
                             origin: None,
-                            shape: None,
+                            shape: parse_type_shape(field_types, Language::Java),
                         };
                         ctx.add_variable_type(entity.name.clone(), binding);
                     }
@@ -121,17 +115,26 @@ impl LanguageTypeInferer for JavaTypeInferer {
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_java_switch(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     ControlFlowFactKind::Try => {
                         for result in narrow_java_catch(&fact.text) {
-                            ctx.add_variable_type(
-                                result.variable_name.clone(),
-                                result.narrowed_type.clone(),
-                            );
+                            let mut variable_binding = result.narrowed_type.clone();
+                            if !variable_binding.span.is_available() {
+                                variable_binding.span = entity.span;
+                            }
+                            ctx.add_variable_type(result.variable_name.clone(), variable_binding);
                             // Also add as narrowed for scope sensitivity
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
                         }
                     }
                     _ => continue,

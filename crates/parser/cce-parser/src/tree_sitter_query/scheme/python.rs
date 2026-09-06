@@ -356,6 +356,7 @@ pub fn entity_query() -> &'static str {
   (assignment
     left: (identifier) @entity.variable.typed.name
     type: (type) @entity.variable.typed.type
+    right: (_)? @entity.variable.typed.value
   )
 ) @entity.variable.typed
 
