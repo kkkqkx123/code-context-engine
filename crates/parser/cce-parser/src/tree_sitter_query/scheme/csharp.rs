@@ -66,9 +66,12 @@ pub fn entity_query() -> &'static str {
 ; ============================================
 
 ; Method definition (including async, static, generic)
+; Note: tree-sitter-c-sharp only honors the `returns:` field constraint when
+; it precedes `name:` in the pattern; placing it after `name:` silently drops
+; the capture (or raises a Structure error without the `?` quantifier).
 (method_declaration
-  name: (identifier) @entity.method.name
   returns: (_)? @entity.method.return_type
+  name: (identifier) @entity.method.name
   parameters: (parameter_list) @entity.method.params
   body: (_) @entity.method.body
 ) @entity.method
@@ -148,20 +151,26 @@ pub fn entity_query() -> &'static str {
 ; 7. Variables and Fields
 ; ============================================
 
-; Field declaration
+; Field declaration (the declared type lands in `.type` and the initializer
+; in `.value` so the metadata layer can record `type_annotation` /
+; `constructor_type` / `literal_type` / `call_target`)
 (field_declaration
   (variable_declaration
+    type: (_) @entity.field.type
     (variable_declarator
       (identifier) @entity.field.name
+      (_)? @entity.field.value
     )
   )
 ) @entity.field
 
-; Local variable declaration
+; Local variable declaration (same `.type` / `.value` convention as fields)
 (local_declaration_statement
   (variable_declaration
+    type: (_) @entity.variable.type
     (variable_declarator
       (identifier) @entity.variable.name
+      (_)? @entity.variable.value
     )
   )
 ) @entity.variable

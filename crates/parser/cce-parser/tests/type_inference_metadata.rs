@@ -194,6 +194,71 @@ fn ruby_yard_return_binds_method() {
 }
 
 #[test]
+fn ruby_implicit_constructor_return_binds_method() {
+    let entities = parse("app.rb", "def load_user(name)\n  User.new(name, 30)\nend");
+    let load_user = find(&entities, EntityKind::Method, "load_user");
+    assert_eq!(load_user.return_type.as_deref(), Some("User"));
+}
+
+#[test]
+fn ruby_non_constructor_tail_leaves_no_return() {
+    let entities = parse(
+        "app.rb",
+        "class User\n  def greet\n    \"Hello!\"\n  end\nend",
+    );
+    let greet = find(&entities, EntityKind::Method, "greet");
+    assert_eq!(greet.return_type.as_deref(), None);
+}
+
+#[test]
+fn rust_mut_self_receiver_reports_self_type() {
+    let entities = parse(
+        "app.rs",
+        "struct Counter {\n  count: i32,\n}\nimpl Counter {\n  fn increment(&mut self) {\n    self.count += 1;\n  }\n}",
+    );
+    let increment = find(&entities, EntityKind::Function, "increment");
+    assert!(
+        increment
+            .parameters
+            .contains(&("self".to_string(), Some("&mut Self".to_string()))),
+        "receiver should parse as (&mut Self), got {:?}",
+        increment.parameters
+    );
+}
+
+#[test]
+fn javascript_return_expression_is_not_a_type() {
+    let entities = parse(
+        "app.js",
+        "function sum(a, b) {\n  return calc(a) + calc(b);\n}\nfunction one() {\n  return 1;\n}",
+    );
+    let sum = find(&entities, EntityKind::Function, "sum");
+    assert_eq!(sum.return_type.as_deref(), None);
+    let one = find(&entities, EntityKind::Function, "one");
+    assert_eq!(one.return_type.as_deref(), Some("number"));
+}
+
+#[test]
+fn javascript_new_expression_return_binds_class() {
+    let entities = parse(
+        "app.js",
+        "function loadUser(name) {\n  return new User(name, 30);\n}",
+    );
+    let load_user = find(&entities, EntityKind::Function, "loadUser");
+    assert_eq!(load_user.return_type.as_deref(), Some("User"));
+}
+
+#[test]
+fn cpp_method_definition_binds_return_type() {
+    let entities = parse(
+        "app.cpp",
+        "class Overloads {\npublic:\n  int combine(int a, int b) {\n    return a + b;\n  }\n};",
+    );
+    let combine = find(&entities, EntityKind::Method, "combine");
+    assert_eq!(combine.return_type.as_deref(), Some("int"));
+}
+
+#[test]
 fn cpp_method_has_no_receiver_type() {
     let entities = parse(
         "app.cpp",
@@ -224,6 +289,94 @@ fn typescript_return_has_no_colon_prefix() {
     );
     let func = find(&entities, EntityKind::Function, "handleResult");
     assert_eq!(func.return_type.as_deref(), Some("string"));
+}
+
+#[test]
+fn java_bare_constructor_recovers_class_type_params() {
+    let entities = parse(
+        "app.java",
+        "class Container<T> {\n  T value;\n  Container() {}\n}\nclass Demo {\n  void run() {\n    var c = new Container();\n  }\n}",
+    );
+    let c = find(&entities, EntityKind::Variable, "c");
+    assert_eq!(
+        c.metadata.get("constructor_type").map(String::as_str),
+        Some("Container<T>")
+    );
+}
+
+#[test]
+fn java_explicit_constructor_args_are_composed() {
+    let entities = parse(
+        "app.java",
+        "class Container<T> {\n  Container(T v) {}\n}\nclass Demo {\n  void run() {\n    Object c = new Container<String>(\"v\");\n  }\n}",
+    );
+    let c = find(&entities, EntityKind::Variable, "c");
+    assert_eq!(
+        c.metadata.get("constructor_type").map(String::as_str),
+        Some("Container<String>")
+    );
+    assert_eq!(
+        c.metadata.get("constructor_type_args").map(String::as_str),
+        Some("String")
+    );
+}
+
+#[test]
+fn dart_explicit_constructor_args_are_composed() {
+    let entities = parse(
+        "app.dart",
+        "class Container<T> {\n  T value;\n  Container(this.value);\n}\nvoid main() {\n  var user = Container<String>('value');\n}",
+    );
+    let user = find(&entities, EntityKind::Variable, "user");
+    assert_eq!(
+        user.metadata.get("constructor_type").map(String::as_str),
+        Some("Container<String>")
+    );
+}
+
+#[test]
+fn scala_bracket_type_params_recover_bare_constructor() {
+    let entities = parse(
+        "app.scala",
+        "case class Pair[A, B](first: A, second: B)\nobject Demo {\n  def main(): Unit = {\n    val p = Pair(1, \"one\")\n  }\n}",
+    );
+    let p = find(&entities, EntityKind::Variable, "p");
+    assert_eq!(
+        p.metadata.get("constructor_type").map(String::as_str),
+        Some("Pair<A, B>")
+    );
+}
+
+#[test]
+fn csharp_method_binds_return_type() {
+    let entities = parse(
+        "app.cs",
+        "public class Math {\n  public int Combine(int a, int b) {\n    return a + b;\n  }\n}",
+    );
+    let combine = find(&entities, EntityKind::Method, "Combine");
+    assert_eq!(combine.return_type.as_deref(), Some("int"));
+}
+
+#[test]
+fn csharp_variable_binds_annotation_and_initializer() {
+    let entities = parse(
+        "app.cs",
+        "public class C {\n  public int M() {\n    int y = 2;\n    var z = compute();\n    return y;\n  }\n}",
+    );
+    let y = find(&entities, EntityKind::Variable, "y");
+    assert_eq!(
+        y.metadata.get("type_annotation").map(String::as_str),
+        Some("int")
+    );
+    assert_eq!(
+        y.metadata.get("literal_type").map(String::as_str),
+        Some("number")
+    );
+    let z = find(&entities, EntityKind::Variable, "z");
+    assert_eq!(
+        z.metadata.get("call_target").map(String::as_str),
+        Some("compute")
+    );
 }
 
 #[test]

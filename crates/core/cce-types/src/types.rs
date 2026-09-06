@@ -8,6 +8,7 @@ pub mod file_meta;
 pub mod grouper;
 pub mod import;
 pub mod language;
+pub mod literal;
 pub mod llm;
 pub mod module_path;
 pub mod operation_kind;
@@ -19,6 +20,8 @@ pub mod stdlib_category;
 pub mod test_info;
 
 pub use language::{ContentRoute, FileType, Language, LanguageInfo};
+
+pub use literal::{LiteralKind, classify_numeric_literal, literal_type_name};
 
 pub const INDEX_FORMAT_VERSION: u32 = 2;
 

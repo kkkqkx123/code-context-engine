@@ -13,6 +13,7 @@
 //! type bindings and never guesses. When inference fails, no binding is produced
 //! so the resolver falls back to name-based resolution.
 
+pub mod bash;
 pub mod c;
 pub mod control_flow;
 pub mod cpp;
@@ -24,6 +25,7 @@ pub mod generics;
 pub mod go;
 pub mod java;
 pub mod kotlin;
+pub mod lua;
 pub mod overload;
 pub mod php;
 pub mod python;
@@ -88,6 +90,8 @@ enum Inferer {
     Ruby(ruby::RubyTypeInferer),
     Php(php::PhpTypeInferer),
     Dart(dart::DartTypeInferer),
+    Bash(bash::BashTypeInferer),
+    Lua(lua::LuaTypeInferer),
 }
 
 impl LanguageTypeInferer for Inferer {
@@ -110,6 +114,8 @@ impl LanguageTypeInferer for Inferer {
             Self::Ruby(i) => i.infer_declarations(entities, ctx),
             Self::Php(i) => i.infer_declarations(entities, ctx),
             Self::Dart(i) => i.infer_declarations(entities, ctx),
+            Self::Bash(i) => i.infer_declarations(entities, ctx),
+            Self::Lua(i) => i.infer_declarations(entities, ctx),
         }
     }
 
@@ -134,6 +140,8 @@ impl LanguageTypeInferer for Inferer {
             Self::Ruby(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
             Self::Php(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
             Self::Dart(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
+            Self::Bash(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
+            Self::Lua(i) => i.infer_control_flow(entities, control_flow, ctx, inference_ctx),
         }
     }
 
@@ -156,6 +164,8 @@ impl LanguageTypeInferer for Inferer {
             Self::Ruby(i) => i.collect_declarations(entities, ctx),
             Self::Php(i) => i.collect_declarations(entities, ctx),
             Self::Dart(i) => i.collect_declarations(entities, ctx),
+            Self::Bash(i) => i.collect_declarations(entities, ctx),
+            Self::Lua(i) => i.collect_declarations(entities, ctx),
         }
     }
 
@@ -178,6 +188,8 @@ impl LanguageTypeInferer for Inferer {
             Self::Ruby(i) => i.resolve_references(entities, ctx),
             Self::Php(i) => i.resolve_references(entities, ctx),
             Self::Dart(i) => i.resolve_references(entities, ctx),
+            Self::Bash(i) => i.resolve_references(entities, ctx),
+            Self::Lua(i) => i.resolve_references(entities, ctx),
         }
     }
 }
@@ -200,6 +212,8 @@ impl TypeInferenceEngine {
             Language::Ruby => Some(Inferer::Ruby(ruby::RubyTypeInferer)),
             Language::Php => Some(Inferer::Php(php::PhpTypeInferer)),
             Language::Dart => Some(Inferer::Dart(dart::DartTypeInferer)),
+            Language::Bash => Some(Inferer::Bash(bash::BashTypeInferer)),
+            Language::Lua => Some(Inferer::Lua(lua::LuaTypeInferer)),
             _ => None,
         }
     }
@@ -511,6 +525,21 @@ impl TypeInferenceEngine {
         }
         if Self::looks_like_type_name(&name) {
             return Some(shape);
+        }
+        // Array-literal destructuring sources
+        // (`const [first, second] = ["a", "b"]`): the literal carries no
+        // type name, so resolve its element shape through the
+        // call-argument literal path. Only array results with a known
+        // element bind; anything else keeps the conservative `None`
+        // fallback. Gated to JavaScript/TypeScript, whose element
+        // vocabulary (`string`, `number`, `boolean`) matches
+        // `infer_arg_shape`.
+        if matches!(file.language, Language::JavaScript | Language::TypeScript)
+            && let Some(TypeShape::Array(element)) =
+                crate::type_inference::cross_file::infer_arg_shape(ctx, file.language, source)
+            && !matches!(&*element, TypeShape::Named(name) if name == "unknown")
+        {
+            return Some(TypeShape::Array(element));
         }
         None
     }

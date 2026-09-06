@@ -5,7 +5,7 @@
 //! Fallback type inference is delegated to the `type_inference` submodule.
 
 use cce_types::language::Language;
-use cce_types::{Entity, EntityKind};
+use cce_types::{Entity, EntityKind, LiteralKind, classify_numeric_literal, literal_type_name};
 
 use crate::parser::extractor::capture as capture_module;
 use crate::parser::extractor::utils;
@@ -153,7 +153,7 @@ pub(crate) fn extract_metadata(
         if let Some(value) =
             capture_text_over_field_siblings(mat, tree, source, |name| name.ends_with(".value"))
         {
-            extract_initializer_metadata(entity, &value);
+            extract_initializer_metadata(entity, &value, language);
         }
     }
 
@@ -165,6 +165,22 @@ pub(crate) fn extract_metadata(
     {
         extend_dart_signature_span(mat, entity, tree);
         extend_dart_return_type(mat, entity, source, tree);
+    }
+
+    // Ruby methods return the value of their last expression when no
+    // explicit `return` type exists (Ruby has no return-type syntax, so
+    // `entity.return_type` is always empty here). When that trailing
+    // expression constructs an object (`User.new(...)`, `@user = User.new`),
+    // record the class as the return type so cross-file propagation can
+    // resolve callers like `user = load_user(...)`. Explicit YARD types
+    // still win: the doc post-pass runs later and the inferer applies
+    // `yard_return_type` after the annotation-derived binding.
+    if *language == Language::Ruby
+        && matches!(entity.kind, EntityKind::Function | EntityKind::Method)
+        && entity.return_type.is_none()
+        && let Some(implicit) = implicit_ruby_return_type(mat)
+    {
+        entity.return_type = Some(implicit);
     }
 }
 
@@ -228,7 +244,68 @@ fn parse_phpdoc_return(doc: &str) -> Option<String> {
     None
 }
 
-/// Parse a PHPDoc `@var` tag from a variable docblock.
+/// Infer a Ruby method's return type from its trailing expression.
+///
+/// Ruby returns the value of the last evaluated expression, so a method
+/// whose body ends with a constructor expression (`User.new(...)`,
+/// optionally assigned or explicitly `return`ed) returns an instance of
+/// that class. Only this strict constructor shape is accepted; anything
+/// else yields `None` so unrelated methods keep no return type instead of
+/// a wrong one.
+fn implicit_ruby_return_type(mat: &QueryMatch) -> Option<String> {
+    let body = utils::find_capture_by_name(&mat.captures, |name| name.ends_with(".body"))?;
+    let last = body
+        .text
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty() && !line.starts_with('#'))?;
+    let expr = last.strip_prefix("return ").unwrap_or(last).trim();
+    let expr = expr.strip_suffix(';').unwrap_or(expr).trim();
+    // Reject comparisons and boolean operators before splitting off a
+    // possible assignment, so `==`, `!=`, `=~`, `<=`, `>=`, `=>` are never
+    // misread as `lhs = User.new`.
+    if ["==", "!=", "=~", "<=", ">=", "=>", "||", "&&"]
+        .iter()
+        .any(|op| expr.contains(op))
+    {
+        return None;
+    }
+    let rhs = match expr.split_once('=') {
+        Some((lhs, rhs)) => {
+            let lhs = lhs.trim();
+            let assignable = lhs.starts_with('@')
+                || lhs
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c == '_' || c.is_ascii_lowercase());
+            if !assignable || lhs.contains([' ', '\t', '(', '[', '.']) {
+                return None;
+            }
+            rhs.trim()
+        }
+        None => expr,
+    };
+    if rhs.contains('=') {
+        return None;
+    }
+    let (receiver, rest) = rhs.split_once(".new")?;
+    let rest = rest.trim_start();
+    if !(rest.is_empty() || rest.starts_with('(')) {
+        return None;
+    }
+    if receiver.contains(char::is_whitespace) {
+        return None;
+    }
+    let constant_path = !receiver.is_empty()
+        && receiver
+            .split("::")
+            .all(|seg| seg.chars().next().is_some_and(|c| c.is_ascii_uppercase()));
+    if !constant_path || !is_valid_type_name(receiver) {
+        return None;
+    }
+    Some(receiver.to_string())
+}
+
 fn parse_phpdoc_var(doc: &str) -> Option<String> {
     for line in doc.lines() {
         let text = line.trim().trim_start_matches('*').trim();
@@ -355,6 +432,213 @@ fn extend_dart_return_type(
     }
 }
 
+/// Recover generic arguments for bare constructor calls from the class
+/// declaration in the same file.
+///
+/// Runs as a post pass over all entities: match-level extraction strips
+/// type arguments (`new Container()` and `new Container<String>()` both
+/// record `constructor_type = Container`), so a bare call loses its
+/// generics. When the variable has no explicit annotation, the call
+/// carries no explicit type arguments, and a class with the same name
+/// declares type parameters (`class Container<T>`), rewrite the metadata
+/// to `Container<T>`. Explicit arguments are composed directly
+/// (`Container` + `String` yields `Container<String>`) and never
+/// overwritten.
+///
+/// Only the `<...>` or `[...]` group immediately following the class
+/// name in its signature is accepted, so leading `template <typename T>`
+/// headers (C++) or unrelated brackets cannot leak in.
+pub(crate) fn resolve_constructor_type_params(entities: &mut [Entity]) {
+    use std::collections::HashMap;
+
+    let mut class_params: HashMap<String, Vec<String>> = HashMap::new();
+    for entity in entities.iter() {
+        if !matches!(
+            entity.kind,
+            EntityKind::Class | EntityKind::Struct | EntityKind::Interface
+        ) {
+            continue;
+        }
+        if class_params.contains_key(entity.name.as_str()) {
+            continue;
+        }
+        if let Some(params) = class_type_params(&entity.name, &entity.signature) {
+            class_params.insert(entity.name.clone(), params);
+        }
+    }
+    if class_params.is_empty() {
+        return;
+    }
+
+    for entity in entities.iter_mut() {
+        if !matches!(
+            entity.kind,
+            EntityKind::Variable | EntityKind::Field | EntityKind::Property
+        ) {
+            continue;
+        }
+        // Explicitly written type arguments are concrete: compose them
+        // onto a bare constructor type (`Container` + `String` yields
+        // `Container<String>`) instead of leaving the call
+        // unparameterized. Annotation precedence is decided downstream
+        // (`type_annotation` still wins); metadata records the call
+        // faithfully. Synthesis below only handles bare calls.
+        if let Some(args) = entity.metadata.get("constructor_type_args").cloned() {
+            let args = args.trim().to_string();
+            if !args.is_empty()
+                && let Some(ctor) = entity.metadata.get("constructor_type").cloned()
+                && !ctor.contains('<')
+            {
+                entity.set_metadata("constructor_type", format!("{ctor}<{args}>"));
+            }
+            continue;
+        }
+        // An explicit annotation wins over synthesis, except for inference
+        // keywords (`var`, `auto`, ...) which carry no concrete type.
+        let annotated = entity
+            .metadata
+            .get("type_annotation")
+            .is_some_and(|ann| !is_inferred_type_keyword(ann));
+        if annotated {
+            continue;
+        }
+        let Some(ctor) = entity.metadata.get("constructor_type").cloned() else {
+            continue;
+        };
+        if ctor.contains('<') {
+            continue;
+        }
+        let Some(params) = class_params.get(ctor.as_str()) else {
+            continue;
+        };
+        if params.is_empty() {
+            continue;
+        }
+        entity.set_metadata(
+            "constructor_type",
+            format!("{}<{}>", ctor, params.join(", ")),
+        );
+    }
+}
+
+/// Parse the type parameters declared on a class from its signature text.
+///
+/// Accepts the `<...>` group immediately following the class name
+/// (`class Container<T>`, `static class Pair<A, B>`), as well as the
+/// square-bracket form (`case class Pair[A, B]`, `type Pair[T1, T2]`),
+/// returning each parameter's bare name (`T extends Bound` yields `T`).
+/// Returns `None` when no such group exists or any parameter is not a
+/// plain identifier.
+fn class_type_params(class_name: &str, signature: &str) -> Option<Vec<String>> {
+    let name_pos = signature.find(class_name)?;
+    let after_name = &signature[name_pos + class_name.len()..];
+    let after_name = after_name.trim_start();
+    let inner = after_name
+        .strip_prefix('<')
+        .and_then(|s| match_closing_bracket(s, '<', '>'))
+        .or_else(|| {
+            after_name
+                .strip_prefix('[')
+                .and_then(|s| match_closing_bracket(s, '[', ']'))
+        })?;
+    let mut params = Vec::new();
+    for part in split_top_level(inner, ',') {
+        // Bare parameter name: first identifier token (`T`, `A`; bounds
+        // like `T extends Bound` reduce to `T`).
+        let name: String = part
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .find(|token| !token.is_empty() && !token.starts_with(|c: char| c.is_numeric()))
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() || !is_valid_type_name(&name) {
+            return None;
+        }
+        params.push(name);
+    }
+    if params.is_empty() {
+        return None;
+    }
+    Some(params)
+}
+
+/// Slice the text up to the closing bracket at nesting depth zero.
+///
+/// Returns `None` when the bracket never closes, so callers keep their
+/// previous behavior instead of guessing a truncated parameter list.
+fn match_closing_bracket(text: &str, open: char, close: char) -> Option<&str> {
+    let mut depth = 0usize;
+    for (idx, ch) in text.char_indices() {
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            if depth == 0 {
+                return text.get(..idx);
+            }
+            depth -= 1;
+        }
+    }
+    None
+}
+
+/// Whether a captured annotation is an inference keyword rather than a
+/// concrete type (`var`, `auto`, `val`, `let`, `decltype(...)`).
+fn is_inferred_type_keyword(ty: &str) -> bool {
+    let mut normalized = ty.trim();
+    normalized = normalized
+        .strip_prefix("const ")
+        .unwrap_or(normalized)
+        .trim();
+    normalized = normalized
+        .trim_end_matches(['&', '*', ' '].as_slice())
+        .trim();
+    if normalized.starts_with("decltype") {
+        return true;
+    }
+    matches!(normalized, "var" | "auto" | "val" | "let")
+}
+
+/// Split text on a separator that appears at nesting depth zero for
+/// `<>`, `()`, and `[]`.
+fn split_top_level(text: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if ch == separator && depth == 0 {
+            parts.push(text[start..idx].trim());
+            start = idx + ch.len_utf8();
+        }
+    }
+    parts.push(text[start..].trim());
+    parts
+}
+
+/// Extract explicitly written type arguments from a constructor call
+/// expression (`new Container<String>(...)` yields `String`).
+///
+/// Returns `None` for bare or diamond (`<>`) calls so callers can tell
+/// "no information" apart from "concrete arguments".
+fn extract_explicit_type_args(expr: &str) -> Option<String> {
+    let trimmed = expr.trim();
+    let head = trimmed.strip_prefix("new ").unwrap_or(trimmed);
+    let head = head.split('(').next().unwrap_or(head);
+    let left = head.find('<')?;
+    let right = head.rfind('>')?;
+    if right <= left {
+        return None;
+    }
+    let inner = head[left + 1..right].trim();
+    if inner.is_empty() {
+        return None;
+    }
+    Some(inner.to_string())
+}
+
 /// Record doc-comment-derived types for languages whose inferers consume
 /// them (Ruby YARD, PHPDoc).
 ///
@@ -468,7 +752,7 @@ fn find_type_annotation_capture(mat: &QueryMatch) -> Option<&str> {
 
 /// Record initializer-derived metadata (constructor call, generic call
 /// target, or literal type) for a declaration with the given value text.
-fn extract_initializer_metadata(entity: &mut Entity, value_text: &str) {
+fn extract_initializer_metadata(entity: &mut Entity, value_text: &str, language: &Language) {
     let trimmed = value_text.trim();
     if trimmed.is_empty() {
         return;
@@ -477,6 +761,12 @@ fn extract_initializer_metadata(entity: &mut Entity, value_text: &str) {
     // Check for constructor call: new ClassName() or ClassName()
     if let Some(type_name) = extract_constructor_type_from_expr(trimmed) {
         entity.set_metadata("constructor_type", type_name);
+        // Remember explicitly written type arguments (`new Foo<Bar>()`) so
+        // the class-type-parameter post-pass only synthesizes generics for
+        // bare calls (`new Foo()`), never overwriting concrete arguments.
+        if let Some(args) = extract_explicit_type_args(trimmed) {
+            entity.set_metadata("constructor_type_args", args);
+        }
         return;
     }
 
@@ -489,7 +779,7 @@ fn extract_initializer_metadata(entity: &mut Entity, value_text: &str) {
     }
 
     // Check for literal type
-    if let Some(lit_type) = extract_literal_type(trimmed) {
+    if let Some(lit_type) = extract_literal_type(trimmed, language) {
         entity.set_metadata("literal_type", lit_type);
     }
 }
@@ -550,7 +840,7 @@ pub(crate) fn extract_variable_assignment_metadata(
         return;
     };
 
-    extract_initializer_metadata(entity, &value);
+    extract_initializer_metadata(entity, &value, language);
 }
 
 /// Extract Go-specific variable metadata.
@@ -874,52 +1164,78 @@ fn balanced_call_args(text_from_paren: &str) -> Option<String> {
     Some(text_from_paren[1..end].to_string())
 }
 
-/// Extract the type from a literal expression.
-fn extract_literal_type(expr: &str) -> Option<String> {
+/// Extract the type from a literal expression using the target language's
+/// own vocabulary (`int` for C++, `i32` for Rust, `number` only for
+/// JavaScript/TypeScript).
+fn extract_literal_type(expr: &str, language: &Language) -> Option<String> {
     let trimmed = expr.trim();
 
-    // Numeric literal
-    if trimmed.parse::<f64>().is_ok()
-        || trimmed.ends_with("f32")
-        || trimmed.ends_with("f64")
-        || trimmed.ends_with("i32")
-        || trimmed.ends_with("i64")
-        || trimmed.ends_with("u32")
-        || trimmed.ends_with("u64")
-    {
-        return Some("number".to_string());
+    // Numeric literal (underscores, base prefixes and Rust-style suffixes
+    // included so `1_000`, `0xFF` and `10u32` still resolve).
+    if let Some(kind) = classify_numeric_literal(trimmed) {
+        return Some(literal_type_name(language, kind).to_string());
     }
 
     // String literal
     if (trimmed.starts_with('"') && trimmed.ends_with('"'))
-        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() > 3)
         || trimmed.starts_with("r\"")
         || trimmed.starts_with("r#")
     {
-        return Some("string".to_string());
+        return Some(literal_type_name(language, LiteralKind::String).to_string());
+    }
+
+    // Single-character literal (`'a'` in C-like languages).
+    if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() == 3 {
+        return Some(literal_type_name(language, LiteralKind::Char).to_string());
     }
 
     // Boolean literal
     if trimmed == "true" || trimmed == "false" {
-        return Some("boolean".to_string());
+        return Some(literal_type_name(language, LiteralKind::Boolean).to_string());
     }
 
     // None/null
     if trimmed == "None" || trimmed == "null" || trimmed == "nil" {
-        return Some("null".to_string());
+        return Some(literal_type_name(language, LiteralKind::Null).to_string());
     }
 
     // Array literal
     if trimmed.starts_with('[') && trimmed.ends_with(']') {
-        return Some("array".to_string());
+        return Some(literal_type_name(language, LiteralKind::Array).to_string());
     }
 
     // Object literal
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        return Some("object".to_string());
+        return Some(literal_type_name(language, LiteralKind::Object).to_string());
     }
 
     None
+}
+
+/// Normalize a JavaScript return-expression capture into a return type.
+///
+/// Plain JavaScript has no return-type annotations, so the query captures
+/// the returned *expression*. A literal expression still carries a usable
+/// type (`return 1` yields `number`); a construction expression yields its
+/// class (`return new User(...)` yields `User`). Anything else (calls,
+/// arithmetic, identifiers) is dropped so the inferer falls back to
+/// `unknown` instead of treating `utils.alpha() + utils.beta()` as a
+/// type name.
+pub(crate) fn normalize_js_return_expression(expr: &str) -> Option<String> {
+    if let Some(lit) = extract_literal_type(expr, &Language::JavaScript) {
+        return Some(lit);
+    }
+    let head = expr.trim().strip_prefix("new ")?;
+    let head = head.split('(').next().unwrap_or(head).trim();
+    // Generic instantiation keeps only the base name; member construction
+    // (`new ns.User()`) keeps the final segment.
+    let base = head.split('<').next().unwrap_or(head).trim();
+    let name = base.rsplit('.').next().unwrap_or(base).trim();
+    if name.is_empty() || !is_valid_type_name(name) {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 #[cfg(test)]

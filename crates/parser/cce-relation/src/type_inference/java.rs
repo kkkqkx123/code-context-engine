@@ -238,13 +238,13 @@ fn narrow_java_instanceof(
     };
 
     Some(NarrowingResult {
-        variable_name: bind_name,
+        variable_name: bind_name.clone(),
         narrowed_type: TypeBinding {
-            type_name: bind_type,
+            type_name: bind_type.clone(),
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(&bind_type, Language::Java),
         },
     })
 }
@@ -307,7 +307,7 @@ fn narrow_java_null_check(
                     type_entity_id: None,
                     span: Span::default(),
                     origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                    shape: None,
+                    shape: parse_type_shape("null", Language::Java),
                 },
             });
         }
@@ -363,7 +363,7 @@ fn narrow_java_switch(text: &str) -> Vec<NarrowingResult> {
                     type_entity_id: None,
                     span: Span::default(),
                     origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                    shape: None,
+                    shape: parse_type_shape(tokens[0], Language::Java),
                 },
             });
         }
@@ -452,7 +452,7 @@ fn parse_java_catch_param(param: &str) -> Option<NarrowingResult> {
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(type_part, Language::Java),
         },
     })
 }
@@ -649,6 +649,10 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "e");
         assert_eq!(results[0].narrowed_type.type_name, "IOException");
+        assert!(
+            results[0].narrowed_type.shape.is_some(),
+            "catch narrowing should carry a shape"
+        );
     }
 
     #[test]

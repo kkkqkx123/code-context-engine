@@ -342,6 +342,12 @@ impl EntityExtractor {
         // before comment association, so this cannot live in metadata.rs.
         metadata::extract_doc_type_metadata(&mut entities, language);
 
+        // Fourth-C pass: recover generic arguments for bare constructor
+        // calls (`new Container()`) from same-file class declarations
+        // (`class Container<T>`). Runs after all match-level metadata so
+        // `constructor_type` / `type_annotation` are already recorded.
+        metadata::resolve_constructor_type_params(&mut entities);
+
         // Fifth pass: establish impl block -> method relationships based on span
         establish_impl_method_relationships(&mut entities);
 
@@ -492,6 +498,18 @@ impl EntityExtractor {
         entity.signature = capture_module::parser::extract_signature(mat, source);
         entity.parameters = capture_module::parser::extract_parameters(mat, language);
         entity.return_type = capture_module::parser::extract_return_type(mat);
+
+        // Plain JavaScript captures the return *expression*, not a type
+        // annotation. Keep it only for literals (`return 1` → `number`);
+        // drop anything else so callers fall back to `unknown` instead of
+        // using `a() + b()` as a type name. TypeScript annotations pass
+        // through untouched.
+        if language == &Language::JavaScript {
+            entity.return_type = entity
+                .return_type
+                .as_deref()
+                .and_then(metadata::normalize_js_return_expression);
+        }
         entity.doc_comment = capture_module::parser::extract_doc_comment(mat);
         entity.attributes = capture_module::parser::extract_attributes(mat);
 

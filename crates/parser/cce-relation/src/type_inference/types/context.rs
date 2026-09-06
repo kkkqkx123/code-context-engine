@@ -38,10 +38,13 @@ pub struct ScopedTypeContext {
     frames: Vec<ScopeFrame>,
     /// Return types (not affected by scope nesting)
     return_types: HashMap<EntityId, TypeBinding>,
-    /// Name-based index for return types: function name -> return type binding.
-    /// Populated alongside `return_types` to enable `call_target` resolution
-    /// for variables assigned via `x = f()`.
-    return_types_by_name: HashMap<String, TypeBinding>,
+    /// Name-based index for return types: function name -> return type
+    /// bindings, one entry per overload. Populated alongside
+    /// `return_types` to enable `call_target` resolution for variables
+    /// assigned via `x = f()`. Multiple same-name entries are kept (in
+    /// declaration order) so overload resolution can pick by arity and
+    /// argument shapes instead of collapsing to a single binding.
+    return_types_by_name: HashMap<String, Vec<(EntityId, TypeBinding)>>,
     /// Parameter types (not affected by scope nesting)
     parameter_types: HashMap<EntityId, Vec<TypeBinding>>,
     /// Language this context was built for
@@ -259,16 +262,97 @@ impl ScopedTypeContext {
     ///
     /// Used alongside `add_return_type` to enable `call_target` resolution
     /// for variables assigned via `x = f()` where `f` is in the same file.
-    pub fn add_return_type_by_name(&mut self, name: String, binding: TypeBinding) {
-        self.return_types_by_name.insert(name, binding);
+    /// Same-name entries accumulate (one per overload, keyed by entity id)
+    /// instead of overwriting each other.
+    pub fn add_return_type_by_name(
+        &mut self,
+        name: String,
+        entity_id: EntityId,
+        binding: TypeBinding,
+    ) {
+        let slot = self.return_types_by_name.entry(name).or_default();
+        if let Some(existing) = slot.iter_mut().find(|(eid, _)| *eid == entity_id) {
+            existing.1 = binding;
+        } else {
+            slot.push((entity_id, binding));
+        }
     }
 
     /// Look up a function's return type by name.
     ///
-    /// Returns the highest-priority binding for the given function name.
-    /// Used for local `call_target` resolution in variable type inference.
+    /// Returns the most recently recorded binding for the given function
+    /// name. Used for local `call_target` resolution in variable type inference.
     pub fn get_return_type_by_name(&self, name: &str) -> Option<&TypeBinding> {
-        self.return_types_by_name.get(name)
+        self.return_types_by_name
+            .get(name)
+            .and_then(|slot| slot.last())
+            .map(|(_, binding)| binding)
+    }
+
+    /// Resolve a same-file call target to a return binding with overload
+    /// awareness.
+    ///
+    /// With a single same-name entry (or when no call-site argument shape
+    /// is known) this behaves exactly like [`get_return_type_by_name`].
+    /// With several overloads and at least one known argument shape, the
+    /// candidates are ranked by arity and structural assignability
+    /// ([`OverloadSet::resolve`]) and the winner's binding is returned.
+    /// When nothing resolves, the most recent binding is returned as a
+    /// legacy fallback so previously-bound call sites keep their output.
+    pub fn resolve_return_by_name(
+        &self,
+        name: &str,
+        arg_shapes: &[Option<TypeShape>],
+        language: Language,
+    ) -> Option<TypeBinding> {
+        use crate::type_inference::overload::{
+            OverloadCandidate, OverloadSet, compute_specificity,
+        };
+        let slot = self.return_types_by_name.get(name)?;
+        if slot.is_empty() {
+            return None;
+        }
+        let legacy = || slot.last().map(|(_, binding)| binding.clone());
+        if slot.len() == 1 || !arg_shapes.iter().any(Option::is_some) {
+            return legacy();
+        }
+        let mut set = OverloadSet::new(name.to_string(), String::new());
+        for (entity_id, binding) in slot {
+            let parameter_types: Vec<TypeShape> = self
+                .get_parameter_types(*entity_id)
+                .map(|params| {
+                    params
+                        .iter()
+                        .map(|param| {
+                            param.shape.clone().unwrap_or_else(|| {
+                                super::shape::parse_type_shape(&param.type_name, language)
+                                    .unwrap_or(TypeShape::Named(param.type_name.clone()))
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let return_type = binding.shape.clone().unwrap_or_else(|| {
+                super::shape::parse_type_shape(&binding.type_name, language)
+                    .unwrap_or(TypeShape::Named(binding.type_name.clone()))
+            });
+            let specificity = parameter_types.iter().map(compute_specificity).sum();
+            set.add_candidate(OverloadCandidate {
+                entity_id: *entity_id,
+                parameter_types,
+                return_type,
+                specificity,
+            });
+        }
+        let arg_refs: Vec<Option<&TypeShape>> =
+            arg_shapes.iter().map(|shape| shape.as_ref()).collect();
+        match set.resolve(&arg_refs) {
+            Some(winner) => slot
+                .iter()
+                .find(|(entity_id, _)| *entity_id == winner.entity_id)
+                .map(|(_, binding)| binding.clone()),
+            None => legacy(),
+        }
     }
 
     /// Record parameter type bindings for a function entity.
@@ -507,14 +591,14 @@ impl ScopedTypeContext {
             self.return_types.insert(*k, v.clone());
         }
         for (k, v) in &other.return_types_by_name {
-            self.return_types_by_name
-                .entry(k.clone())
-                .and_modify(|existing| {
-                    if binding_supersedes(v.origin, existing.origin) {
-                        *existing = v.clone();
-                    }
-                })
-                .or_insert_with(|| v.clone());
+            let slot = self.return_types_by_name.entry(k.clone()).or_default();
+            for (entity_id, binding) in v {
+                if let Some(existing) = slot.iter_mut().find(|(eid, _)| eid == entity_id) {
+                    existing.1 = binding.clone();
+                } else {
+                    slot.push((*entity_id, binding.clone()));
+                }
+            }
         }
         for (k, v) in &other.parameter_types {
             self.parameter_types.insert(*k, v.clone());
@@ -1333,6 +1417,84 @@ mod tests {
         assert_eq!(
             ctx.get_variable_type("b").unwrap().type_name,
             "Tuple<int, bool>"
+        );
+    }
+
+    fn overload_binding(type_name: &str) -> TypeBinding {
+        TypeBinding {
+            type_name: type_name.to_string(),
+            type_entity_id: None,
+            span: cce_types::Span::default(),
+            origin: None,
+            shape: Some(TypeShape::Named(type_name.to_string())),
+        }
+    }
+
+    /// Same-name return entries accumulate per overload; resolution picks
+    /// by arity and argument shapes while the legacy lookup keeps
+    /// last-wins semantics.
+    #[test]
+    fn test_return_by_name_keeps_overloads_and_resolves() {
+        let mut ctx = ScopedTypeContext::new(Language::Kotlin);
+        ctx.add_return_type(EntityId(2), overload_binding("Int"));
+        ctx.add_parameter_types(
+            EntityId(2),
+            vec![overload_binding("Int"), overload_binding("Int")],
+        );
+        ctx.add_return_type_by_name("combine".to_string(), EntityId(2), overload_binding("Int"));
+        ctx.add_return_type(EntityId(4), overload_binding("String"));
+        ctx.add_parameter_types(
+            EntityId(4),
+            vec![overload_binding("String"), overload_binding("String")],
+        );
+        ctx.add_return_type_by_name(
+            "combine".to_string(),
+            EntityId(4),
+            overload_binding("String"),
+        );
+
+        // Legacy lookup: most recently recorded wins.
+        assert_eq!(
+            ctx.get_return_type_by_name("combine").unwrap().type_name,
+            "String"
+        );
+        // Resolution by shapes.
+        let int_args = vec![
+            Some(TypeShape::Named("Int".to_string())),
+            Some(TypeShape::Named("Int".to_string())),
+        ];
+        assert_eq!(
+            ctx.resolve_return_by_name("combine", &int_args, Language::Kotlin)
+                .unwrap()
+                .type_name,
+            "Int"
+        );
+        let string_args = vec![
+            Some(TypeShape::Named("String".to_string())),
+            Some(TypeShape::Named("String".to_string())),
+        ];
+        assert_eq!(
+            ctx.resolve_return_by_name("combine", &string_args, Language::Kotlin)
+                .unwrap()
+                .type_name,
+            "String"
+        );
+        // Unknown shapes and arity mismatches keep the legacy binding.
+        assert_eq!(
+            ctx.resolve_return_by_name("combine", &[None, None], Language::Kotlin)
+                .unwrap()
+                .type_name,
+            "String"
+        );
+        assert_eq!(
+            ctx.resolve_return_by_name(
+                "combine",
+                &[Some(TypeShape::Named("Int".to_string()))],
+                Language::Kotlin
+            )
+            .unwrap()
+            .type_name,
+            "String"
         );
     }
 }

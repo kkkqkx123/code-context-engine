@@ -5,7 +5,8 @@
 
 use cce_types::entity::Entity;
 
-use super::types::{InferenceOrigin, ScopedTypeContext, TypeBinding, parse_type_shape};
+use super::cross_file::infer_arg_shape;
+use super::types::{InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, parse_type_shape};
 
 use super::generics::{GenericTypeArg, parse_generic_type, split_call_target};
 
@@ -55,7 +56,7 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
         };
         ctx.add_return_type(entity.id, binding.clone());
         // Also store by name for local call_target resolution
-        ctx.add_return_type_by_name(entity.name.clone(), binding);
+        ctx.add_return_type_by_name(entity.name.clone(), entity.id, binding);
     }
 
     let param_bindings: Vec<TypeBinding> = entity
@@ -128,10 +129,18 @@ pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
 
     // Local call_target resolution: `x = f()` where `f` is in the same file.
     // The function's return type was extracted by `extract_function_types` and
-    // stored in the context's name-based index.
+    // stored in the context's name-based index. Overloaded names resolve by
+    // call-site argument shapes (`combine(1, 2)` picks the `(Int, Int)`
+    // overload); anything else keeps the legacy most-recent binding.
     if let Some(call_target) = entity.metadata.get("call_target") {
-        let (func_name, _args) = split_call_target(call_target);
-        if let Some(return_binding) = ctx.get_return_type_by_name(&func_name) {
+        let (func_name, args) = split_call_target(call_target);
+        let language = ctx.language();
+        let arg_shapes: Vec<Option<TypeShape>> = args
+            .iter()
+            .map(|arg| infer_arg_shape(ctx, language, arg))
+            .collect();
+        if let Some(return_binding) = ctx.resolve_return_by_name(&func_name, &arg_shapes, language)
+        {
             let binding = TypeBinding {
                 type_name: return_binding.type_name.clone(),
                 type_entity_id: return_binding.type_entity_id,
@@ -189,6 +198,29 @@ pub fn extract_field_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
         };
         ctx.add_variable_type(entity.name.clone(), binding);
         try_bind_generic(ctx, lit_type);
+        return;
+    }
+
+    // Call-initialized fields/properties (`val x = f()`): same overload-aware
+    // resolution as the variable path.
+    if let Some(call_target) = entity.metadata.get("call_target") {
+        let (func_name, args) = split_call_target(call_target);
+        let language = ctx.language();
+        let arg_shapes: Vec<Option<TypeShape>> = args
+            .iter()
+            .map(|arg| infer_arg_shape(ctx, language, arg))
+            .collect();
+        if let Some(return_binding) = ctx.resolve_return_by_name(&func_name, &arg_shapes, language)
+        {
+            let binding = TypeBinding {
+                type_name: return_binding.type_name.clone(),
+                type_entity_id: return_binding.type_entity_id,
+                span: entity.span,
+                origin: Some(InferenceOrigin::FunctionReturn),
+                shape: return_binding.shape.clone(),
+            };
+            ctx.add_variable_type(entity.name.clone(), binding);
+        }
     }
 }
 
@@ -575,12 +607,12 @@ mod tests {
         let entity = make_variable_entity(
             1,
             "count",
-            vec![("type_annotation", "auto"), ("literal_type", "number")],
+            vec![("type_annotation", "auto"), ("literal_type", "int")],
         );
         let mut ctx = ScopedTypeContext::new(Language::Cpp);
         extract_variable_type(&entity, &mut ctx);
         let binding = ctx.get_variable_type("count").unwrap();
-        assert_eq!(binding.type_name, "number");
+        assert_eq!(binding.type_name, "int");
         assert_eq!(binding.origin, Some(InferenceOrigin::LiteralType));
     }
 

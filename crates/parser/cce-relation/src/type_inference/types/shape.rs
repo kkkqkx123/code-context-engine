@@ -333,7 +333,55 @@ pub fn parse_type_shape(type_name: &str, language: Language) -> Option<TypeShape
             }
         }
     }
+    // Handle Rust parenthesized tuple types `(A, B)` positionally.
+    // Destructuring (`let (num, text) = pair` with `pair: (i32, String)`)
+    // maps parts by index, so the tuple must parse to positional
+    // arguments rather than an opaque name. Gated to Rust: other
+    // languages either lack paren tuples or overload the syntax
+    // (TypeScript arrow types, grouping parens). A single wrapped type
+    // (`(T)`) and the unit type (`()`) keep the previous opaque form.
+    if language == Language::Rust
+        && let Some(inner) = trimmed.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+    {
+        let arg_strs = split_type_args(inner);
+        if arg_strs.len() > 1 {
+            let args: Vec<TypeShape> = arg_strs
+                .iter()
+                .filter_map(|a| parse_type_shape(a.trim(), language))
+                .collect();
+            if args.len() == arg_strs.len() {
+                return Some(TypeShape::Generic {
+                    base: "Tuple".to_string(),
+                    args,
+                });
+            }
+        }
+    }
+    // Python canonical names: the shared literal vocabulary (`string`,
+    // `array`, `boolean`) names no Python builtin, so bare occurrences
+    // normalize to the builtins the stdlib index and member lookup
+    // understand (`str`, `list`, `bool`). Structural forms above are
+    // unaffected; only the final bare-name fallthrough maps.
+    if language == Language::Python
+        && let Some(canonical) = python_canonical_literal_name(trimmed)
+    {
+        return Some(TypeShape::Named(canonical.to_string()));
+    }
     Some(TypeShape::Named(trimmed.to_string()))
+}
+
+/// Map the shared literal-vocabulary name to the Python builtin.
+///
+/// Returns `None` for names that are already canonical or out of scope
+/// (`number` stays untouched: it cannot resolve to `int` vs `float`
+/// without value information).
+pub fn python_canonical_literal_name(name: &str) -> Option<&'static str> {
+    match name.trim() {
+        "string" => Some("str"),
+        "array" => Some("list"),
+        "boolean" => Some("bool"),
+        _ => None,
+    }
 }
 
 /// Get all possible member names from a TypeShape (union/intersection flattening).
@@ -1137,5 +1185,38 @@ mod tests {
         bindings.insert("T".to_string(), TypeShape::Named("String".to_string()));
         let instantiated = instantiate_type_shape(&shape, &bindings);
         assert_eq!(type_shape_to_string(&instantiated), "Vec<Vec<String>>");
+    }
+
+    #[test]
+    fn test_rust_paren_tuple_parses_positionally() {
+        let shape = parse_type_shape("(i32, String)", Language::Rust).expect("shape");
+        let TypeShape::Generic { base, args } = &shape else {
+            panic!("tuple shape is generic, got {shape:?}");
+        };
+        assert_eq!(base, "Tuple");
+        assert_eq!(args.len(), 2);
+        assert_eq!(type_shape_to_string(&args[0]), "i32");
+        assert_eq!(type_shape_to_string(&args[1]), "String");
+    }
+
+    #[test]
+    fn test_rust_paren_tuple_nests_inside_generic() {
+        let shape = parse_type_shape("Option<(i32, i32)>", Language::Rust).expect("shape");
+        let TypeShape::Generic { args, .. } = &shape else {
+            panic!("outer shape is generic, got {shape:?}");
+        };
+        assert_eq!(type_shape_to_string(&args[0]), "Tuple<i32, i32>");
+    }
+
+    #[test]
+    fn test_rust_grouping_paren_stays_opaque() {
+        let shape = parse_type_shape("(String)", Language::Rust).expect("shape");
+        assert_eq!(shape, TypeShape::Named("(String)".to_string()));
+    }
+
+    #[test]
+    fn test_paren_tuple_only_applies_to_rust() {
+        let shape = parse_type_shape("(i32, String)", Language::TypeScript).expect("shape");
+        assert_eq!(shape, TypeShape::Named("(i32, String)".to_string()));
     }
 }

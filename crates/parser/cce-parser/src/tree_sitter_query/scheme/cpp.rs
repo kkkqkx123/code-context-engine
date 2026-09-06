@@ -37,7 +37,11 @@ pub fn entity_query() -> String {
 ; ============================================
 
 ; Method definition
+; Note: `type:` must precede `declarator:` — tree-sitter-cpp only honors
+; the return-type field constraint in this order (same constraint-ordering
+; quirk as tree-sitter-c-sharp `returns:`).
 (function_definition
+  type: (_) @entity.method.return_type
   declarator: (function_declarator
     declarator: (field_identifier) @entity.method.name
     parameters: (parameter_list) @entity.method.params
@@ -110,6 +114,7 @@ pub fn entity_query() -> String {
 
 ; Operator overload
 (function_definition
+  type: (_) @entity.method.operator.return_type
   declarator: (function_declarator
     declarator: (operator_name) @entity.method.operator.name
     parameters: (parameter_list) @entity.method.operator.params

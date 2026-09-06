@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use cce_types::entity::{Entity, EntityId};
-use cce_types::normalize_project_path;
+use cce_types::{LiteralKind, classify_numeric_literal, literal_type_name, normalize_project_path};
 use dashmap::DashMap;
 
 pub use super::generics::{
@@ -39,6 +39,11 @@ pub struct CrossFilePropagator {
     name_index: DashMap<String, TypeBinding>,
     /// Reverse name mapping: EntityId -> simple name (for removal).
     id_to_name: DashMap<EntityId, String>,
+    /// Overload members: simple function name -> defining entity ids (one
+    /// entry per overload, across all files). Lets call-site resolution
+    /// rank same-name functions by arity and argument shapes instead of
+    /// using the collapsed `name_index` slot.
+    name_to_ids: DashMap<String, Vec<EntityId>>,
     /// Global cache: function EntityId -> parameter type bindings.
     param_type_cache: DashMap<EntityId, Vec<TypeBinding>>,
     /// Per-file index for parameter types.
@@ -330,7 +335,15 @@ impl CrossFilePropagator {
                 })
                 .or_insert_with(|| binding_clone.clone());
 
-            self.id_to_name.insert(*entity_id, func_name);
+            self.id_to_name.insert(*entity_id, func_name.clone());
+            self.name_to_ids
+                .entry(func_name.clone())
+                .and_modify(|ids| {
+                    if !ids.contains(entity_id) {
+                        ids.push(*entity_id);
+                    }
+                })
+                .or_insert_with(|| vec![*entity_id]);
             file_entries.push((*entity_id, binding_clone));
         }
 
@@ -402,7 +415,15 @@ impl CrossFilePropagator {
         if let Some((_, entries)) = self.file_return_index.remove(&normalized) {
             for (entity_id, _) in entries {
                 self.return_type_cache.remove(&entity_id);
-                self.id_to_name.remove(&entity_id);
+                if let Some((_, name)) = self.id_to_name.remove(&entity_id) {
+                    if let Some(mut ids) = self.name_to_ids.get_mut(&name) {
+                        ids.retain(|id| *id != entity_id);
+                        if ids.is_empty() {
+                            drop(ids);
+                            self.name_to_ids.remove(&name);
+                        }
+                    }
+                }
             }
             needs_rebuild_return = true;
         }
@@ -517,6 +538,71 @@ impl CrossFilePropagator {
     /// Get return type by simple function name.
     pub fn get_return_type_by_name(&self, name: &str) -> Option<TypeBinding> {
         self.name_index.get(name).map(|v| v.clone())
+    }
+
+    /// Resolve a cross-file call target with overload awareness.
+    ///
+    /// When several same-name functions are cached (overloads, possibly
+    /// across files) and at least one call-site argument shape is known,
+    /// rank the candidates by arity and structural assignability and
+    /// return the winner's return binding. Returns `None` for a single
+    /// candidate, unknown argument shapes, or no feasible match so
+    /// callers keep their legacy lookup paths unchanged.
+    pub fn resolve_overload_by_name(
+        &self,
+        name: &str,
+        arg_exprs: &[String],
+        language: cce_types::language::Language,
+        resolve_arg: &mut dyn FnMut(&str) -> Option<TypeShape>,
+    ) -> Option<TypeBinding> {
+        use super::overload::{OverloadCandidate, OverloadSet, compute_specificity};
+        let ids = self.name_to_ids.get(name)?;
+        if ids.len() < 2 {
+            return None;
+        }
+        let actual_shapes: Vec<Option<TypeShape>> =
+            arg_exprs.iter().map(|arg| resolve_arg(arg)).collect();
+        if !actual_shapes.iter().any(Option::is_some) {
+            return None;
+        }
+        let mut set = OverloadSet::new(name.to_string(), String::new());
+        for entity_id in ids.iter() {
+            let Some(return_binding) = self.return_type_cache.get(entity_id) else {
+                continue;
+            };
+            let parameter_types: Vec<TypeShape> = self
+                .param_type_cache
+                .get(entity_id)
+                .map(|params| {
+                    params
+                        .iter()
+                        .map(|param| {
+                            param.shape.clone().unwrap_or_else(|| {
+                                parse_type_shape(&param.type_name, language)
+                                    .unwrap_or(TypeShape::Named(param.type_name.clone()))
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let return_type = return_binding.shape.clone().unwrap_or_else(|| {
+                parse_type_shape(&return_binding.type_name, language)
+                    .unwrap_or(TypeShape::Named(return_binding.type_name.clone()))
+            });
+            let specificity = parameter_types.iter().map(compute_specificity).sum();
+            set.add_candidate(OverloadCandidate {
+                entity_id: *entity_id,
+                parameter_types,
+                return_type,
+                specificity,
+            });
+        }
+        let arg_refs: Vec<Option<&TypeShape>> =
+            actual_shapes.iter().map(|shape| shape.as_ref()).collect();
+        let winner = set.resolve(&arg_refs)?;
+        self.return_type_cache
+            .get(&winner.entity_id)
+            .map(|binding| binding.clone())
     }
 
     /// Get all return types contributed by a file.
@@ -648,6 +734,7 @@ impl CrossFilePropagator {
         self.file_return_index.clear();
         self.name_index.clear();
         self.id_to_name.clear();
+        self.name_to_ids.clear();
         self.param_type_cache.clear();
         self.file_param_index.clear();
         self.param_name_index.clear();
@@ -768,11 +855,11 @@ pub fn parse_call_chain(call_target: &str) -> Vec<CallStep> {
 
 /// Infer the type shape of a call-site argument expression.
 ///
-/// Literals map to the same vocabulary the extractor records
-/// (`number`/`string`/`boolean`/`null`/`array`/`object`); identifiers
-/// resolve against already-known variable bindings in the caller's context;
-/// constructor expressions (`new Foo()`, `Foo()`) resolve to their base
-/// type. Anything else yields `None` so the caller keeps its fallback.
+/// Literals map to the target language's own vocabulary (`int` for C++,
+/// `number` only for JavaScript/TypeScript); identifiers resolve against
+/// already-known variable bindings in the caller's context; constructor
+/// expressions (`new Foo()`, `Foo()`) resolve to their base type. Anything
+/// else yields `None` so the caller keeps its fallback.
 pub fn infer_arg_shape(
     ctx: &ScopedTypeContext,
     language: cce_types::language::Language,
@@ -782,33 +869,42 @@ pub fn infer_arg_shape(
     if trimmed.is_empty() {
         return None;
     }
-    // String literal.
+    // String literal (single-quoted single chars resolve to the char type
+    // in languages that have one).
     if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2)
-        || (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2)
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() > 3)
         || trimmed.starts_with("r\"")
         || trimmed.starts_with("r#")
         || trimmed.starts_with('`')
     {
-        return Some(TypeShape::Named("string".to_string()));
+        return Some(TypeShape::Named(
+            literal_type_name(&language, LiteralKind::String).to_string(),
+        ));
+    }
+    if trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() == 3 {
+        return Some(TypeShape::Named(
+            literal_type_name(&language, LiteralKind::Char).to_string(),
+        ));
     }
     // Numeric literal (int, float and suffixed forms like `10u32`).
-    if trimmed.parse::<f64>().is_ok()
-        || trimmed
-            .trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '_')
-            .parse::<f64>()
-            .is_ok()
-    {
-        return Some(TypeShape::Named("number".to_string()));
+    if let Some(kind) = classify_numeric_literal(trimmed) {
+        return Some(TypeShape::Named(
+            literal_type_name(&language, kind).to_string(),
+        ));
     }
     // Boolean / null literals.
     if trimmed == "true" || trimmed == "false" {
-        return Some(TypeShape::Named("boolean".to_string()));
+        return Some(TypeShape::Named(
+            literal_type_name(&language, LiteralKind::Boolean).to_string(),
+        ));
     }
     if trimmed == "None" || trimmed == "null" || trimmed == "nil" {
-        return Some(TypeShape::Named("null".to_string()));
+        return Some(TypeShape::Named(
+            literal_type_name(&language, LiteralKind::Null).to_string(),
+        ));
     }
     // Array literal: element type comes from the first element so
-    // `first([1, 2])` against `first<T>(arr: T[])` binds `T = number`.
+    // `first([1, 2])` against `first<T>(arr: T[])` binds `T = int`.
     if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
         let inner = trimmed[1..trimmed.len() - 1].trim();
         if inner.is_empty() {
@@ -822,7 +918,9 @@ pub fn infer_arg_shape(
     }
     // Object literal.
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        return Some(TypeShape::Named("object".to_string()));
+        return Some(TypeShape::Named(
+            literal_type_name(&language, LiteralKind::Object).to_string(),
+        ));
     }
     // Composite literal (`Person{...}`, `[]int{...}`): the head before
     // `{` names the constructed type or, for `[]T`, the element type.
@@ -997,6 +1095,18 @@ pub fn resolve_single_call_binding(
             refine_generic_call(propagator, language, simple, &args, resolve_arg)
     {
         return Some((refined_name, None, Some(refined_shape)));
+    }
+    // Overloaded names dispatch on call-site shapes before the collapsed
+    // name slot is consulted; failures fall through to legacy lookup.
+    if !args.is_empty()
+        && let Some(winner) =
+            propagator.resolve_overload_by_name(simple, &args, language, resolve_arg)
+    {
+        return Some((
+            winner.type_name.clone(),
+            winner.type_entity_id,
+            winner.shape.clone(),
+        ));
     }
     let return_binding = propagator.get_return_type_by_name(simple)?;
     Some((
@@ -1258,6 +1368,81 @@ mod tests {
         propagator.remove_file("b.rs");
         assert_eq!(propagator.len(), 0);
         assert!(propagator.get_return_type_by_name("get_name").is_none());
+    }
+
+    fn test_binding(type_name: &str) -> TypeBinding {
+        TypeBinding {
+            type_name: type_name.to_string(),
+            type_entity_id: None,
+            span: dummy_span(),
+            origin: None,
+            shape: Some(TypeShape::Named(type_name.to_string())),
+        }
+    }
+
+    /// Cross-file overloads dispatch on call-site shapes: `combine(1, 2)`
+    /// picks the `(Int, Int)` overload even when it was inserted first and
+    /// the collapsed name slot holds another overload's return.
+    #[test]
+    fn test_resolve_single_call_binding_dispatches_overloads() {
+        let propagator = CrossFilePropagator::new();
+        let mut ctx_a = ScopedTypeContext::new(Language::Kotlin);
+        ctx_a.add_return_type(EntityId(1), test_binding("Int"));
+        ctx_a.add_parameter_types(EntityId(1), vec![test_binding("Int"), test_binding("Int")]);
+        propagator.insert_file(
+            "a.kt",
+            &ctx_a,
+            &[Entity::new(
+                EntityId(1),
+                EntityKind::Function,
+                "combine".to_string(),
+                dummy_span(),
+            )],
+        );
+        let mut ctx_b = ScopedTypeContext::new(Language::Kotlin);
+        ctx_b.add_return_type(EntityId(2), test_binding("String"));
+        ctx_b.add_parameter_types(
+            EntityId(2),
+            vec![test_binding("String"), test_binding("String")],
+        );
+        propagator.insert_file(
+            "b.kt",
+            &ctx_b,
+            &[Entity::new(
+                EntityId(2),
+                EntityKind::Function,
+                "combine".to_string(),
+                dummy_span(),
+            )],
+        );
+
+        let empty_ctx = ScopedTypeContext::new(Language::Kotlin);
+        let mut resolve_arg = |arg: &str| infer_arg_shape(&empty_ctx, Language::Kotlin, arg);
+        let (type_name, _, _) = resolve_single_call_binding(
+            &propagator,
+            Language::Kotlin,
+            "combine(1, 2)",
+            &mut resolve_arg,
+        )
+        .expect("overload should resolve");
+        assert_eq!(type_name, "Int");
+        let (type_name, _, _) = resolve_single_call_binding(
+            &propagator,
+            Language::Kotlin,
+            "combine(\"a\", \"b\")",
+            &mut resolve_arg,
+        )
+        .expect("overload should resolve");
+        assert_eq!(type_name, "String");
+        // Unknown shapes keep the legacy collapsed-slot lookup.
+        let (type_name, _, _) = resolve_single_call_binding(
+            &propagator,
+            Language::Kotlin,
+            "combine(x, y)",
+            &mut |_| None,
+        )
+        .expect("legacy lookup should apply");
+        assert_eq!(type_name, "String");
     }
 
     #[test]

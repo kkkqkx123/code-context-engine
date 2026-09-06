@@ -219,13 +219,13 @@ fn narrow_csharp_is_check(
     };
 
     Some(NarrowingResult {
-        variable_name: bind_name,
+        variable_name: bind_name.clone(),
         narrowed_type: TypeBinding {
-            type_name: bind_type,
+            type_name: bind_type.clone(),
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(&bind_type, Language::CSharp),
         },
     })
 }
@@ -320,7 +320,7 @@ fn narrow_csharp_switch(text: &str) -> Vec<NarrowingResult> {
                     type_entity_id: None,
                     span: Span::default(),
                     origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                    shape: None,
+                    shape: parse_type_shape(tokens[0], Language::CSharp),
                 },
             });
         }
@@ -474,7 +474,7 @@ fn parse_csharp_catch_param(param: &str) -> Option<NarrowingResult> {
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(type_part, Language::CSharp),
         },
     })
 }
@@ -666,6 +666,10 @@ mod tests {
         assert_eq!(
             results[0].narrowed_type.type_name,
             "InvalidOperationException"
+        );
+        assert!(
+            results[0].narrowed_type.shape.is_some(),
+            "catch narrowing should carry a shape"
         );
     }
 

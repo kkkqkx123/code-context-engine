@@ -25,6 +25,6 @@ pub use origin::{
 pub use reference::{is_mut_reference, is_reference, strip_references};
 pub use shape::{
     TypeShape, build_shape_bindings, element_type_at_depth, element_type_of_shape,
-    instantiate_type_shape, parse_type_shape, shape_is_subtype, shape_members,
-    type_shape_to_string,
+    instantiate_type_shape, parse_type_shape, python_canonical_literal_name, shape_is_subtype,
+    shape_members, type_shape_to_string,
 };

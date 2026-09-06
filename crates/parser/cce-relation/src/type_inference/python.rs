@@ -13,8 +13,8 @@ use super::extractors::{extract_field_type, extract_function_types, extract_vari
 use super::traits::LanguageTypeInferer;
 use super::types::{
     ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings, declared_shape,
-    narrow_discriminated_union, narrow_truthiness, parse_type_shape, subtract_union_members,
-    type_shape_to_string,
+    narrow_discriminated_union, narrow_truthiness, parse_type_shape, python_canonical_literal_name,
+    subtract_union_members, type_shape_to_string,
 };
 use crate::symbol_table::TypeMemberIndex;
 use cce_types::language::Language;
@@ -42,6 +42,10 @@ impl LanguageTypeInferer for PythonTypeInferer {
         // Python-specific: `name: T = None` means the variable may hold
         // `None`, so surface the annotation as `Optional[T]`.
         wrap_none_default_in_optional(entities, ctx);
+
+        // Python-specific: rename literal-vocabulary bindings (`string`,
+        // `array`, `boolean`) to the builtins (`str`, `list`, `bool`).
+        normalize_python_literal_names(entities, ctx);
     }
 
     fn infer_control_flow(
@@ -694,6 +698,46 @@ fn wrap_none_default_in_optional(entities: &[Entity], ctx: &mut ScopedTypeContex
     }
 }
 
+/// Rename literal-vocabulary variable bindings to Python builtins.
+///
+/// The shared extractor records `string`/`array`/`boolean` for literals,
+/// which are not valid Python types. Rebind literal-derived variables with
+/// no explicit annotation to `str`/`list`/`bool` so downstream consumers
+/// (stdlib index, member lookup, reports) see canonical names. Annotated
+/// variables keep the user's text untouched.
+fn normalize_python_literal_names(entities: &[Entity], ctx: &mut ScopedTypeContext) {
+    for entity in entities {
+        if entity.kind != EntityKind::Variable {
+            continue;
+        }
+        if entity
+            .metadata
+            .get("type_annotation")
+            .is_some_and(|ann| !ann.trim().is_empty())
+        {
+            continue;
+        }
+        if !entity.metadata.contains_key("literal_type") {
+            continue;
+        }
+        let Some(current) = ctx.get_variable_type(&entity.name).cloned() else {
+            continue;
+        };
+        if current.origin != Some(super::types::InferenceOrigin::LiteralType) {
+            continue;
+        }
+        let Some(canonical) = python_canonical_literal_name(&current.type_name) else {
+            continue;
+        };
+        let binding = TypeBinding {
+            type_name: canonical.to_string(),
+            shape: parse_type_shape(canonical, Language::Python),
+            ..current
+        };
+        ctx.add_variable_type(entity.name.clone(), binding);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +745,49 @@ mod tests {
 
     fn dummy_ctx() -> ScopedTypeContext {
         ScopedTypeContext::new(Language::Python)
+    }
+
+    #[test]
+    fn test_python_literal_names_normalize_to_builtins() {
+        use cce_types::entity::EntityId;
+
+        let mut ctx = dummy_ctx();
+        let entities = vec![
+            Entity::new(
+                EntityId(1),
+                EntityKind::Variable,
+                "name".to_string(),
+                Span::default(),
+            )
+            .with_metadata("literal_type", "string"),
+            Entity::new(
+                EntityId(2),
+                EntityKind::Variable,
+                "items".to_string(),
+                Span::default(),
+            )
+            .with_metadata("literal_type", "array"),
+            Entity::new(
+                EntityId(3),
+                EntityKind::Variable,
+                "flag".to_string(),
+                Span::default(),
+            )
+            .with_metadata("literal_type", "boolean"),
+            Entity::new(
+                EntityId(4),
+                EntityKind::Variable,
+                "count".to_string(),
+                Span::default(),
+            )
+            .with_metadata("literal_type", "number"),
+        ];
+        PythonTypeInferer.infer_declarations(&entities, &mut ctx);
+        assert_eq!(ctx.get_variable_type("name").unwrap().type_name, "str");
+        assert_eq!(ctx.get_variable_type("items").unwrap().type_name, "list");
+        assert_eq!(ctx.get_variable_type("flag").unwrap().type_name, "bool");
+        // `number` cannot resolve to int vs float without a value: untouched.
+        assert_eq!(ctx.get_variable_type("count").unwrap().type_name, "number");
     }
 
     #[test]

@@ -582,6 +582,9 @@ pub(crate) fn determine_dependency_relation_type(capture_name: &str) -> Relation
         // Require (JS/TS CommonJS)
         "require" => RelationType::ImportStandard,
 
+        // Source (Bash `source file` / `. file` inclusion, redirects)
+        "source" | "dot" => RelationType::ImportStandard,
+
         // Export (JS/TS)
         "export" => RelationType::ModuleDependency,
 

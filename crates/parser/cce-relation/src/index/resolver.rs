@@ -1213,60 +1213,42 @@ fn infer_literal_type_shape(text: &str, language: Language) -> Option<TypeShape>
         return None;
     }
     if trimmed == "true" || trimmed == "false" {
-        return Some(TypeShape::Named(match language {
-            Language::Java => "boolean".to_string(),
-            Language::TypeScript | Language::JavaScript | Language::Tsx | Language::Jsx => {
-                "boolean".to_string()
-            }
-            _ => "bool".to_string(),
-        }));
+        return Some(TypeShape::Named(
+            cce_types::literal_type_name(&language, cce_types::LiteralKind::Boolean).to_string(),
+        ));
     }
     if trimmed == "null" || trimmed == "nil" || trimmed == "None" {
-        return Some(TypeShape::Named("null".to_string()));
+        return Some(TypeShape::Named(
+            cce_types::literal_type_name(&language, cce_types::LiteralKind::Null).to_string(),
+        ));
     }
     if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2)
         || (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2)
         || (trimmed.starts_with('`') && trimmed.ends_with('`') && trimmed.len() >= 2)
     {
-        return Some(TypeShape::Named(match language {
-            Language::Java | Language::CSharp | Language::Scala | Language::Kotlin => {
-                "String".to_string()
-            }
-            Language::Python => "str".to_string(),
-            Language::Go => "string".to_string(),
-            Language::Rust => "String".to_string(),
-            _ => "str".to_string(),
-        }));
+        let kind = if trimmed.starts_with('\'') && trimmed.len() == 3 {
+            cce_types::LiteralKind::Char
+        } else {
+            cce_types::LiteralKind::String
+        };
+        return Some(TypeShape::Named(
+            cce_types::literal_type_name(&language, kind).to_string(),
+        ));
     }
-    if trimmed.parse::<i64>().is_ok() {
-        return Some(TypeShape::Named(match language {
-            Language::Java | Language::CSharp | Language::Go => "int".to_string(),
-            Language::Python => "int".to_string(),
-            Language::Rust => "i32".to_string(),
-            Language::TypeScript | Language::JavaScript | Language::Tsx | Language::Jsx => {
-                "number".to_string()
-            }
-            _ => "int".to_string(),
-        }));
-    }
-    if trimmed.parse::<f64>().is_ok() {
-        return Some(TypeShape::Named(match language {
-            Language::Java => "double".to_string(),
-            Language::CSharp => "double".to_string(),
-            Language::Python => "float".to_string(),
-            Language::Go => "float64".to_string(),
-            Language::Rust => "f64".to_string(),
-            Language::TypeScript | Language::JavaScript | Language::Tsx | Language::Jsx => {
-                "number".to_string()
-            }
-            _ => "float".to_string(),
-        }));
+    if let Some(kind) = cce_types::classify_numeric_literal(trimmed) {
+        return Some(TypeShape::Named(
+            cce_types::literal_type_name(&language, kind).to_string(),
+        ));
     }
     if trimmed.starts_with('[') && trimmed.ends_with(']') {
-        return Some(TypeShape::Named("array".to_string()));
+        return Some(TypeShape::Named(
+            cce_types::literal_type_name(&language, cce_types::LiteralKind::Array).to_string(),
+        ));
     }
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        return Some(TypeShape::Named("object".to_string()));
+        return Some(TypeShape::Named(
+            cce_types::literal_type_name(&language, cce_types::LiteralKind::Object).to_string(),
+        ));
     }
     None
 }

@@ -194,7 +194,11 @@ fn strip_inline_comments(text: &str) -> String {
                 }
             }
             ')' | ']' | '}' => {
-                depth -= 1;
+                // Clamp at zero: an unmatched closer (e.g. inside a
+                // default expression) must not suppress `#` handling
+                // for the rest of the text. (`saturating_sub` alone is
+                // not enough: it clamps at `i32::MIN`, not at zero.)
+                depth = (depth - 1).max(0);
                 if !skip_line {
                     result.push(ch);
                 }
@@ -248,7 +252,12 @@ fn parse_parameters_text(
     for (i, ch) in inner.char_indices() {
         match ch {
             '(' | '[' | '{' | '<' => depth += 1,
-            ')' | ']' | '}' | '>' => depth -= 1,
+            // Clamp at zero: an unpaired `>` (Rust `->`, `=>`, `>=`,
+            // shifts in default expressions) must not drive the depth
+            // negative and swallow the following top-level commas.
+            // (`saturating_sub` clamps at `i32::MIN`, not at zero, so an
+            // explicit `max(0)` is required.)
+            ')' | ']' | '}' | '>' => depth = (depth - 1).max(0),
             ',' if depth == 0 => {
                 let p = inner[start..i].trim();
                 if !p.is_empty() && p != "*" && p != "**" {
@@ -266,6 +275,52 @@ fn parse_parameters_text(
     params
 }
 
+/// Parse a Rust method receiver into (`self`, type).
+///
+/// Accepts `self`, `mut self`, `&self`, `&mut self` (with optional
+/// lifetime `&'a mut self`) and explicitly typed `self: Type` /
+/// `mut self: Type`. Returns `None` for ordinary parameters so the
+/// generic splitter handles them.
+fn parse_rust_receiver(text: &str) -> Option<(String, Option<String>)> {
+    // An explicit type (`self: Box<Self>`) wins; a colon here always
+    // separates name from type (receivers contain no `::` paths).
+    let (head, explicit) = match text.split_once(':') {
+        Some((head, ty)) => (head.trim(), Some(ty.trim())),
+        None => (text.trim(), None),
+    };
+    let mut rest = head;
+    let mut is_ref = false;
+    if let Some(stripped) = rest.strip_prefix('&') {
+        is_ref = true;
+        rest = stripped.trim_start();
+        // Skip an optional lifetime (`&'a self`, `&'a mut self`).
+        if let Some(lifetime) = rest.strip_prefix('\'') {
+            let end = lifetime
+                .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .unwrap_or(lifetime.len());
+            rest = lifetime[end..].trim_start();
+        }
+    }
+    let mut is_mut = false;
+    if let Some(after) = rest.strip_prefix("mut")
+        && (after.is_empty() || after.starts_with(char::is_whitespace))
+    {
+        is_mut = true;
+        rest = after.trim_start();
+    }
+    if rest != "self" {
+        return None;
+    }
+    let ty = match (explicit, is_ref, is_mut) {
+        (Some(ty), _, _) if !ty.is_empty() => ty.to_string(),
+        (Some(_), _, _) => return None,
+        (None, false, _) => "Self".to_string(),
+        (None, true, false) => "&Self".to_string(),
+        (None, true, true) => "&mut Self".to_string(),
+    };
+    Some(("self".to_string(), Some(ty)))
+}
+
 /// Parse a single parameter string like "x: int = 5" or "self" or "*args"
 fn parse_single_param(
     text: &str,
@@ -275,6 +330,15 @@ fn parse_single_param(
     if text.is_empty() {
         return (String::new(), None);
     }
+    // Rust method receivers (`&mut self`, `&'a self`, `mut self: Type`)
+    // carry the reference on the name side; without special handling the
+    // generic splitter reports (`self`, `&mut`), which the inferer then
+    // wraps in another reference (`&mut &mut`).
+    if *language == cce_types::language::Language::Rust
+        && let Some(receiver) = parse_rust_receiver(text)
+    {
+        return receiver;
+    }
     let bytes = text.as_bytes();
     let mut depth: i32 = 0;
     let mut colon_pos = None;
@@ -282,7 +346,10 @@ fn parse_single_param(
     for (i, ch) in text.char_indices() {
         match ch {
             '(' | '[' | '{' | '<' => depth += 1,
-            ')' | ']' | '}' | '>' => depth -= 1,
+            // Clamp at zero for the same reason as the parameter
+            // splitter: `->` and friends carry an unpaired `>`.
+            // (`saturating_sub` clamps at `i32::MIN`, not at zero.)
+            ')' | ']' | '}' | '>' => depth = (depth - 1).max(0),
             ':' if depth == 0 && colon_pos.is_none() => {
                 // A `::` path separator (C++ `std::vector`) is not a
                 // name/type separator. Skip either colon of a `::` pair.
@@ -737,5 +804,57 @@ mod tests {
         );
         assert_eq!(name, "items");
         assert_eq!(typ, Some("const std::vector<int>&".to_string()));
+    }
+
+    #[test]
+    fn test_parse_single_param_rust_receiver() {
+        use cce_types::language::Language::Rust;
+        let cases = [
+            ("self", "Self"),
+            ("mut self", "Self"),
+            ("&self", "&Self"),
+            ("&mut self", "&mut Self"),
+            ("&'a self", "&Self"),
+            ("&'a mut self", "&mut Self"),
+            ("self: Box<Self>", "Box<Self>"),
+        ];
+        for (text, ty) in cases {
+            let (name, parsed) = parse_single_param(text, &Rust);
+            assert_eq!(name, "self", "receiver name for {text:?}");
+            assert_eq!(parsed.as_deref(), Some(ty), "receiver type for {text:?}");
+        }
+        // Ordinary parameters are untouched.
+        let (name, typ) = parse_single_param("count: i32", &Rust);
+        assert_eq!(name, "count");
+        assert_eq!(typ.as_deref(), Some("i32"));
+    }
+
+    #[test]
+    fn test_parse_parameters_text_rust_fn_trait_return_arrow() {
+        use cce_types::language::Language::Rust;
+        // The `>` in `->` is unpaired; it must not swallow the comma that
+        // separates the two parameters.
+        let params = parse_parameters_text("(f: impl Fn(i32) -> i32, value: i32)", &Rust);
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].0, "f");
+        assert_eq!(params[0].1.as_deref(), Some("impl Fn(i32) -> i32"));
+        assert_eq!(params[1].0, "value");
+        assert_eq!(params[1].1.as_deref(), Some("i32"));
+    }
+
+    #[test]
+    fn test_parse_parameters_text_rust_nested_generics_and_shift() {
+        use cce_types::language::Language::Rust;
+        // Paired `>>` keeps working, and a `>` inside a default value
+        // expression does not break splitting either.
+        let params = parse_parameters_text("(a: HashMap<String, Vec<i32>>, b: i32)", &Rust);
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].0, "a");
+        assert_eq!(params[1].0, "b");
+
+        let params = parse_parameters_text("(x: i32 = y >> 1, y: i32)", &Rust);
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].0, "x");
+        assert_eq!(params[1].0, "y");
     }
 }
