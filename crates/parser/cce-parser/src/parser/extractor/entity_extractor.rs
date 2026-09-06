@@ -32,8 +32,9 @@ use super::annotation_handler::{
 use super::capture as capture_module;
 use super::context::ExtractionContext;
 use super::parent_child_resolver::{
-    establish_class_method_relationships, establish_impl_method_relationships,
-    establish_module_entity_relationships, establish_struct_field_relationships,
+    establish_class_method_relationships, establish_go_method_relationships,
+    establish_impl_method_relationships, establish_module_entity_relationships,
+    establish_struct_field_relationships,
 };
 use super::post_processing;
 use super::utils;
@@ -361,6 +362,17 @@ impl EntityExtractor {
         // 7.5: extract Go receiver types for method entities
         post_processing::extract_receiver_for_entities(&mut entities, language);
 
+        // 7.5b: establish Go method -> struct parent relationships using receiver metadata.
+        // Must run after receiver extraction so `receiver_type` metadata is available.
+        establish_go_method_relationships(&mut entities);
+
+        // 7.6: re-attach explicit `export` statement context (JS/TS family)
+        // so export lists reflect real export statements.
+        post_processing::mark_exported_entities(&mut entities, tree, source, language);
+
+        // 7.7: assign C++ member visibility from access sections.
+        post_processing::mark_cpp_access_sections(&mut entities, tree, source, language);
+
         // Eighth pass: fill children based on parent field
         post_processing::fill_children(&mut entities);
 
@@ -451,6 +463,12 @@ impl EntityExtractor {
         };
         entity.subtype = subtype;
 
+        // Strip Ruby symbol prefix (`:name` → `name`) for attr_reader/
+        // attr_writer/attr_accessor captures and other symbol-named entities.
+        if language == &Language::Ruby && entity.name.starts_with(':') {
+            entity.name = entity.name[1..].to_string();
+        }
+
         // Generic destructuring-source hookup: any `@....source` capture
         // records the provenance expression for pattern-bound variables
         // (`except E as e`, `case x:` against a subject, tuple unpacking
@@ -472,7 +490,7 @@ impl EntityExtractor {
 
         // Capture-level extraction
         entity.signature = capture_module::parser::extract_signature(mat, source);
-        entity.parameters = capture_module::parser::extract_parameters(mat);
+        entity.parameters = capture_module::parser::extract_parameters(mat, language);
         entity.return_type = capture_module::parser::extract_return_type(mat);
         entity.doc_comment = capture_module::parser::extract_doc_comment(mat);
         entity.attributes = capture_module::parser::extract_attributes(mat);

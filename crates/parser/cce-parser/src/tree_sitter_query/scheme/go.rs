@@ -74,11 +74,12 @@ pub fn entity_query() -> &'static str {
   body: (block) @entity.function.body
 ) @entity.function
 
-; Method declaration (receiver)
+; Method declaration (receiver). Field order follows source order:
+; `func <receiver> <name> <params> <result> <body>`.
 (method_declaration
+  receiver: (parameter_list) @entity.method.receiver
   name: (field_identifier) @entity.method.name
-  (parameter_list) @entity.method.receiver
-  (parameter_list) @entity.method.params
+  parameters: (parameter_list) @entity.method.params
   result: (_)? @entity.method.return_type
   body: (block) @entity.method.body
 ) @entity.method
@@ -444,11 +445,11 @@ pub fn dependency_query() -> &'static str {
 ; ============================================
 ; Package Dependencies
 ; ============================================
-
-; Package reference in selector
-(selector_expression
-  operand: (identifier) @dependency.package.reference.name
-) @dependency.package.reference
+; Package references are resolved from import declarations by the relation
+; resolver. A bare `selector_expression` operand (e.g. `user.Greet()`,
+; `u.Name`, `err.Error()`) is a local value or receiver, not a package, so it
+; must not emit a module edge here; otherwise every method call produces a
+; fake `file -> local` dependency.module row.
 "#
 }
 

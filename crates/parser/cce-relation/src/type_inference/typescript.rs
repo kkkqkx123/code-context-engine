@@ -7,7 +7,7 @@ use cce_types::entity::{Entity, EntityKind};
 
 use super::control_flow::shared::{
     extract_balanced_parens, is_valid_ident, parse_string_literal, split_comparison,
-    strip_outer_parens,
+    split_top_level_conjuncts, strip_outer_parens,
 };
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
@@ -56,8 +56,8 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
             };
             for fact in &entity_cf.facts {
                 match fact.kind {
-                    ControlFlowFactKind::If => {
-                        let narrowed: Vec<(String, TypeBinding)> = narrow_typescript_if(
+                    ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
+                        let mut narrowed: Vec<(String, TypeBinding)> = narrow_typescript_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
@@ -66,6 +66,13 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
                         .into_iter()
                         .map(|result| (result.variable_name, result.narrowed_type))
                         .collect();
+                        // Narrowing results carry no source position; anchor
+                        // them to the enclosing entity so spans render.
+                        for (_, binding) in narrowed.iter_mut() {
+                            if !binding.span.is_available() {
+                                binding.span = entity.span;
+                            }
+                        }
                         add_polarity_aware_narrowings(
                             ctx,
                             &entity.parameters,
@@ -113,6 +120,30 @@ struct NarrowingResult {
 /// - `x == null` → x: null | undefined
 /// - `x === undefined` → x: undefined
 fn narrow_typescript_if(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    type_index: Option<&TypeMemberIndex>,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
+    // Compound `A && B` conditions hold conjunct-wise in the then-branch.
+    // Narrow each part separately so the right side never leaks into a
+    // pseudo-type like `number" && typeof b === "number"`.
+    if let Some(cond) = strip_typescript_condition_prefix(text) {
+        let parts = split_top_level_conjuncts(cond);
+        if parts.len() > 1 {
+            let mut out = Vec::new();
+            for part in parts {
+                out.extend(narrow_single_typescript_condition(
+                    part, ctx, type_index, params,
+                ));
+            }
+            return out;
+        }
+    }
+    narrow_single_typescript_condition(text, ctx, type_index, params)
+}
+
+fn narrow_single_typescript_condition(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&TypeMemberIndex>,

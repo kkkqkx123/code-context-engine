@@ -38,6 +38,10 @@ pub struct ScopedTypeContext {
     frames: Vec<ScopeFrame>,
     /// Return types (not affected by scope nesting)
     return_types: HashMap<EntityId, TypeBinding>,
+    /// Name-based index for return types: function name -> return type binding.
+    /// Populated alongside `return_types` to enable `call_target` resolution
+    /// for variables assigned via `x = f()`.
+    return_types_by_name: HashMap<String, TypeBinding>,
     /// Parameter types (not affected by scope nesting)
     parameter_types: HashMap<EntityId, Vec<TypeBinding>>,
     /// Language this context was built for
@@ -55,6 +59,7 @@ impl Default for ScopedTypeContext {
         Self {
             frames: vec![ScopeFrame::default()],
             return_types: HashMap::new(),
+            return_types_by_name: HashMap::new(),
             parameter_types: HashMap::new(),
             language: Language::Unknown,
             type_param_bindings: vec![HashMap::new()],
@@ -248,6 +253,22 @@ impl ScopedTypeContext {
     /// Record a return type binding for a function entity.
     pub fn add_return_type(&mut self, entity_id: EntityId, binding: TypeBinding) {
         self.return_types.insert(entity_id, binding);
+    }
+
+    /// Record a return type binding indexed by function name.
+    ///
+    /// Used alongside `add_return_type` to enable `call_target` resolution
+    /// for variables assigned via `x = f()` where `f` is in the same file.
+    pub fn add_return_type_by_name(&mut self, name: String, binding: TypeBinding) {
+        self.return_types_by_name.insert(name, binding);
+    }
+
+    /// Look up a function's return type by name.
+    ///
+    /// Returns the highest-priority binding for the given function name.
+    /// Used for local `call_target` resolution in variable type inference.
+    pub fn get_return_type_by_name(&self, name: &str) -> Option<&TypeBinding> {
+        self.return_types_by_name.get(name)
     }
 
     /// Record parameter type bindings for a function entity.
@@ -464,9 +485,19 @@ impl ScopedTypeContext {
                 }
             }
         }
-        // return_types and parameter_types are merged directly
+        // return_types, return_types_by_name, and parameter_types are merged directly
         for (k, v) in &other.return_types {
             self.return_types.insert(*k, v.clone());
+        }
+        for (k, v) in &other.return_types_by_name {
+            self.return_types_by_name
+                .entry(k.clone())
+                .and_modify(|existing| {
+                    if binding_supersedes(v.origin, existing.origin) {
+                        *existing = v.clone();
+                    }
+                })
+                .or_insert_with(|| v.clone());
         }
         for (k, v) in &other.parameter_types {
             self.parameter_types.insert(*k, v.clone());

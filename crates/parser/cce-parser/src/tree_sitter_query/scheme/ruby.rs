@@ -121,8 +121,7 @@ pub fn entity_query() -> &'static str {
 
 ; attr_reader
 (call
-  method: (identifier) @entity.attr.reader
-  (#eq? @entity.attr.reader "attr_reader")
+  method: (identifier) @entity.attr.reader.method (#eq? @entity.attr.reader.method "attr_reader")
   arguments: (argument_list
     (simple_symbol) @entity.attr.reader.name
   )
@@ -130,8 +129,7 @@ pub fn entity_query() -> &'static str {
 
 ; attr_writer
 (call
-  method: (identifier) @entity.attr.writer
-  (#eq? @entity.attr.writer "attr_writer")
+  method: (identifier) @entity.attr.writer.method (#eq? @entity.attr.writer.method "attr_writer")
   arguments: (argument_list
     (simple_symbol) @entity.attr.writer.name
   )
@@ -139,8 +137,7 @@ pub fn entity_query() -> &'static str {
 
 ; attr_accessor
 (call
-  method: (identifier) @entity.attr.accessor
-  (#eq? @entity.attr.accessor "attr_accessor")
+  method: (identifier) @entity.attr.accessor.method (#eq? @entity.attr.accessor.method "attr_accessor")
   arguments: (argument_list
     (simple_symbol) @entity.attr.accessor.name
   )

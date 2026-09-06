@@ -216,6 +216,12 @@ impl OverloadCandidate {
             return_type_match: false,
             specificity: self.specificity,
         };
+        // Derive call-site generic bindings from this candidate's own
+        // formal parameters (`process<T>(x: T)` called with a `string`
+        // binds `T = string`), so generic candidates score by their
+        // substituted types instead of failing on bare parameters.
+        let generic_bindings =
+            super::generics::bind_call_site_generics(&self.parameter_types, arg_types, language);
         for (i, param_type) in self.parameter_types.iter().enumerate() {
             if let Some(arg_type) = arg_types.get(i).and_then(|a| *a) {
                 let expected_str = type_shape_to_string(param_type);
@@ -224,7 +230,7 @@ impl OverloadCandidate {
                     CompatibilityLevel::Exact => score.exact_matches += 1,
                     CompatibilityLevel::Coerce => score.coerce_matches += 1,
                     CompatibilityLevel::Incompatible => {
-                        if is_assignable(arg_type, param_type, &HashMap::new()) {
+                        if is_assignable_with_shapes(arg_type, param_type, &generic_bindings) {
                             if arg_type == param_type {
                                 score.exact_matches += 1;
                             } else {
@@ -444,6 +450,70 @@ impl OverloadSet {
         type_params: &HashMap<String, String>,
     ) -> Option<&OverloadCandidate> {
         self.resolve_with_generics(arg_types, type_params)
+    }
+
+    /// Resolve using per-candidate inferred generic bindings.
+    ///
+    /// Unlike [`OverloadSet::resolve_with_shape_generics`], which scores
+    /// every candidate against one shared binding map, this derives bindings
+    /// from each candidate's own formal parameters against the call-site
+    /// argument shapes. Generic candidates (`process<T>(x: T)`) therefore
+    /// compete fairly with concrete ones instead of being filtered out for
+    /// mentioning an unbound parameter.
+    pub fn resolve_with_inferred_generics(
+        &self,
+        arg_types: &[Option<&TypeShape>],
+        language: Language,
+    ) -> Option<&OverloadCandidate> {
+        if self.candidates.is_empty() {
+            return None;
+        }
+        let mut filtered: Vec<&OverloadCandidate> = self
+            .candidates
+            .iter()
+            .filter(|c| c.parameter_types.len() == arg_types.len())
+            .collect();
+        if filtered.is_empty() {
+            return None;
+        }
+        let mut scored: Vec<(&OverloadCandidate, u32)> = Vec::new();
+        for candidate in filtered.drain(..) {
+            let bindings = super::generics::bind_call_site_generics(
+                &candidate.parameter_types,
+                arg_types,
+                language,
+            );
+            let mut score = 0u32;
+            let mut feasible = true;
+            for (actual, expected) in arg_types.iter().zip(candidate.parameter_types.iter()) {
+                match actual {
+                    None => {
+                        score += 1;
+                    }
+                    Some(actual_shape) => {
+                        if is_assignable_with_shapes(actual_shape, expected, &bindings) {
+                            if *actual_shape == expected {
+                                score += 10;
+                            } else {
+                                score += 5;
+                            }
+                        } else {
+                            feasible = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if feasible {
+                score += candidate.specificity;
+                scored.push((candidate, score));
+            }
+        }
+        if scored.is_empty() {
+            return None;
+        }
+        scored.sort_by_key(|b| std::cmp::Reverse(b.1));
+        Some(scored[0].0)
     }
 
     pub fn resolve_with_score(

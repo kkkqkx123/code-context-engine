@@ -31,7 +31,7 @@ use cce_types::{Entity, Relation};
 use std::sync::Arc;
 use tree_sitter::Tree;
 
-use call_extractor::process_call_match;
+use call_extractor::{deduplicate_call_relations, extract_macro_inner_calls, process_call_match};
 use dependency_extractor::{deduplicate_generic_import_relations, process_dependency_match};
 use entity_index::EntityIndex;
 use relation_handlers::{extract_impl_block_relations, find_dependency_capture};
@@ -127,6 +127,27 @@ impl RelationExtractor {
                 relations.push(relation);
             }
         }
+
+        // Rust macro bodies are opaque to the call query; recover calls in
+        // formatting-macro arguments (`println!("{}", run())`).
+        if *language == Language::Rust {
+            let function_names: std::collections::HashSet<String> = entities
+                .iter()
+                .filter(|e| e.kind.is_function_like())
+                .map(|e| e.name.clone())
+                .collect();
+            relations.extend(extract_macro_inner_calls(
+                &matches,
+                &entity_index,
+                language,
+                file_id,
+                tree,
+                source,
+                &function_names,
+            ));
+        }
+
+        deduplicate_call_relations(&mut relations);
 
         Ok(relations)
     }

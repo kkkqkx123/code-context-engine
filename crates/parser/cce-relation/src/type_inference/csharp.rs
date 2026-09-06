@@ -100,8 +100,8 @@ impl LanguageTypeInferer for CSharpTypeInferer {
             };
             for fact in &entity_cf.facts {
                 match fact.kind {
-                    ControlFlowFactKind::If => {
-                        let narrowed: Vec<(String, TypeBinding)> = narrow_csharp_if(
+                    ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
+                        let mut narrowed: Vec<(String, TypeBinding)> = narrow_csharp_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
@@ -110,6 +110,11 @@ impl LanguageTypeInferer for CSharpTypeInferer {
                         .into_iter()
                         .map(|result| (result.variable_name, result.narrowed_type))
                         .collect();
+                        for (_, binding) in narrowed.iter_mut() {
+                            if !binding.span.is_available() {
+                                binding.span = entity.span;
+                            }
+                        }
                         add_polarity_aware_narrowings(
                             ctx,
                             &entity.parameters,

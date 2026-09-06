@@ -128,7 +128,10 @@ fn extract_signature_from_text(text: &str) -> String {
 }
 
 /// Extract parameters from match, returning (name, optional_type) pairs
-pub fn extract_parameters(mat: &QueryMatch) -> Vec<(String, Option<String>)> {
+pub fn extract_parameters(
+    mat: &QueryMatch,
+    language: &cce_types::language::Language,
+) -> Vec<(String, Option<String>)> {
     let mut param_captures: BTreeMap<usize, (Option<String>, Option<String>)> = BTreeMap::new();
 
     for capture in mat.captures.iter() {
@@ -145,8 +148,9 @@ pub fn extract_parameters(mat: &QueryMatch) -> Vec<(String, Option<String>)> {
         if let Some(suffix) = capture.name.split('.').next_back() {
             match suffix {
                 "params" => {
-                    for (idx, (name, typ)) in
-                        parse_parameters_text(&capture.text).into_iter().enumerate()
+                    for (idx, (name, typ)) in parse_parameters_text(&capture.text, language)
+                        .into_iter()
+                        .enumerate()
                     {
                         param_captures
                             .entry(idx)
@@ -212,7 +216,21 @@ fn strip_inline_comments(text: &str) -> String {
     result
 }
 
-fn parse_parameters_text(text: &str) -> Vec<(String, Option<String>)> {
+fn parse_parameters_text(
+    text: &str,
+    language: &cce_types::language::Language,
+) -> Vec<(String, Option<String>)> {
+    let text = text.trim();
+    // Rust closure parameters are pipe-delimited (`|x: i32|`): unwrap them so
+    // the `|` characters are not misread as part of a parameter name.
+    let text = if let Some(stripped) = text.strip_prefix('|') {
+        match stripped.find('|') {
+            Some(rel) => &stripped[..rel],
+            None => text,
+        }
+    } else {
+        text
+    };
     let text = text.trim();
     let inner = if text.starts_with('(') && text.ends_with(')') {
         &text[1..text.len() - 1]
@@ -234,7 +252,7 @@ fn parse_parameters_text(text: &str) -> Vec<(String, Option<String>)> {
             ',' if depth == 0 => {
                 let p = inner[start..i].trim();
                 if !p.is_empty() && p != "*" && p != "**" {
-                    params.push(parse_single_param(p));
+                    params.push(parse_single_param(p, language));
                 }
                 start = i + 1;
             }
@@ -243,17 +261,21 @@ fn parse_parameters_text(text: &str) -> Vec<(String, Option<String>)> {
     }
     let remaining = inner[start..].trim();
     if !remaining.is_empty() && remaining != "*" && remaining != "**" {
-        params.push(parse_single_param(remaining));
+        params.push(parse_single_param(remaining, language));
     }
     params
 }
 
 /// Parse a single parameter string like "x: int = 5" or "self" or "*args"
-fn parse_single_param(text: &str) -> (String, Option<String>) {
+fn parse_single_param(
+    text: &str,
+    language: &cce_types::language::Language,
+) -> (String, Option<String>) {
     let text = text.trim();
     if text.is_empty() {
         return (String::new(), None);
     }
+    let bytes = text.as_bytes();
     let mut depth: i32 = 0;
     let mut colon_pos = None;
     let mut eq_pos = None;
@@ -261,8 +283,29 @@ fn parse_single_param(text: &str) -> (String, Option<String>) {
         match ch {
             '(' | '[' | '{' | '<' => depth += 1,
             ')' | ']' | '}' | '>' => depth -= 1,
-            ':' if depth == 0 && colon_pos.is_none() => colon_pos = Some(i),
-            '=' if depth == 0 && eq_pos.is_none() => eq_pos = Some(i),
+            ':' if depth == 0 && colon_pos.is_none() => {
+                // A `::` path separator (C++ `std::vector`) is not a
+                // name/type separator. Skip either colon of a `::` pair.
+                let prev_is_colon = i > 0 && bytes[i - 1] == b':';
+                let next_is_colon = bytes.get(i + 1).is_some_and(|b| *b == b':');
+                if !prev_is_colon && !next_is_colon {
+                    colon_pos = Some(i);
+                }
+            }
+            '=' if depth == 0 && eq_pos.is_none() => {
+                // Skip `==`, `=>`, `>=`, `<=`, `!=` in default expressions.
+                let next = bytes.get(i + 1).copied().unwrap_or(0);
+                let prev = if i > 0 { bytes[i - 1] } else { 0 };
+                if next != b'='
+                    && next != b'>'
+                    && prev != b'='
+                    && prev != b'!'
+                    && prev != b'<'
+                    && prev != b'>'
+                {
+                    eq_pos = Some(i);
+                }
+            }
             _ => {}
         }
     }
@@ -278,6 +321,32 @@ fn parse_single_param(text: &str) -> (String, Option<String>) {
                 Some(epos) => text[..epos].trim(),
                 None => text,
             };
+            // Go declares `name type` (`name string`, `age int`), the reverse
+            // of C-style `Type name`. The grammar guarantees name-first, so
+            // the first token is the name and the remainder is the type.
+            if *language == cce_types::language::Language::Go {
+                let mut parts = before_eq.split_whitespace();
+                if let Some(first) = parts.next() {
+                    let rest: Vec<&str> = parts.collect();
+                    if rest.is_empty() {
+                        return (first.to_string(), None);
+                    }
+                    let name = first
+                        .trim_start_matches("this.")
+                        .trim_start_matches("super.")
+                        .trim_start_matches("...")
+                        .to_string();
+                    let typ = rest.join(" ").trim().to_string();
+                    if name.is_empty() {
+                        return (before_eq.to_string(), None);
+                    }
+                    if typ.is_empty() {
+                        return (name, None);
+                    }
+                    return (name, Some(typ));
+                }
+                return (before_eq.to_string(), None);
+            }
             let mut parts: Vec<&str> = before_eq.split_whitespace().collect();
             if parts.len() >= 2 {
                 if let Some(last) = parts.pop() {
@@ -631,7 +700,10 @@ mod tests {
 
     #[test]
     fn test_parse_parameters_text_strips_inline_comments() {
-        let params = parse_parameters_text("(x: int,  # type: ignore\ny: str)");
+        let params = parse_parameters_text(
+            "(x: int,  # type: ignore\ny: str)",
+            &cce_types::language::Language::Python,
+        );
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].0, "x");
         assert_eq!(params[1].0, "y");
@@ -641,9 +713,29 @@ mod tests {
     fn test_parse_parameters_text_type_ignore_filtered() {
         let params = parse_parameters_text(
             "(cli_group: str | None = _sentinel,  # type: ignore[assignment]\nself)",
+            &cce_types::language::Language::Python,
         );
         assert_eq!(params.len(), 2);
         assert_eq!(params[0].0, "cli_group");
         assert_eq!(params[1].0, "self");
+    }
+
+    #[test]
+    fn test_parse_parameters_go_name_first() {
+        let params =
+            parse_parameters_text("(name string, age int)", &cce_types::language::Language::Go);
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0], ("name".to_string(), Some("string".to_string())));
+        assert_eq!(params[1], ("age".to_string(), Some("int".to_string())));
+    }
+
+    #[test]
+    fn test_parse_single_param_skips_double_colon() {
+        let (name, typ) = parse_single_param(
+            "const std::vector<int>& items",
+            &cce_types::language::Language::Cpp,
+        );
+        assert_eq!(name, "items");
+        assert_eq!(typ, Some("const std::vector<int>&".to_string()));
     }
 }

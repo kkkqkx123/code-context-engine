@@ -360,6 +360,43 @@ pub fn entity_query() -> &'static str {
 ) @entity.variable.typed
 
 ; ============================================
+; Instance Attributes (self.x = ...)
+; ============================================
+
+; Annotated instance attribute: self.<name>: <type> = <value>
+(expression_statement
+  (assignment
+    left: (attribute
+      object: (identifier) @entity.field.receiver (#eq? @entity.field.receiver "self")
+      attribute: (identifier) @entity.field.name
+    )
+    type: (type) @entity.field.type
+    right: (_) @entity.field.value
+  )
+) @entity.field
+
+; Plain instance attribute: self.<name> = <value>
+(expression_statement
+  (assignment
+    left: (attribute
+      object: (identifier) @entity.field.receiver (#eq? @entity.field.receiver "self")
+      attribute: (identifier) @entity.field.name
+    )
+    right: (_) @entity.field.value
+  )
+) @entity.field
+
+; Augmented instance attribute: self.<name> += <value> (captures as field for inference)
+(expression_statement
+  (augmented_assignment
+    left: (attribute
+      object: (identifier) @entity.field.receiver (#eq? @entity.field.receiver "self")
+      attribute: (identifier) @entity.field.name
+    )
+  )
+) @entity.field
+
+; ============================================
 ; Special Statements
 ; ============================================
 

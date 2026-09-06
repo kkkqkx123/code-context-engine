@@ -15,9 +15,12 @@ use cce_types::entity::{Entity, EntityId};
 use cce_types::normalize_project_path;
 use dashmap::DashMap;
 
+pub use super::generics::{
+    shape_contains_param, split_call_args, split_call_target, substitute_call_return_type,
+};
 use super::types::{
     InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, VariableTypeBinding,
-    binding_supersedes, bindings_supersede,
+    binding_supersedes, bindings_supersede, parse_type_shape, type_shape_to_string,
 };
 
 /// Cross-file return-type propagator.
@@ -738,7 +741,7 @@ pub fn parse_call_chain(call_target: &str) -> Vec<CallStep> {
             let args = if arg_str.is_empty() {
                 vec![]
             } else {
-                arg_str.split(',').map(|s| s.trim().to_string()).collect()
+                split_call_args(arg_str)
             };
             (name, args)
         } else {
@@ -761,6 +764,246 @@ pub fn parse_call_chain(call_target: &str) -> Vec<CallStep> {
         });
     }
     result
+}
+
+/// Infer the type shape of a call-site argument expression.
+///
+/// Literals map to the same vocabulary the extractor records
+/// (`number`/`string`/`boolean`/`null`/`array`/`object`); identifiers
+/// resolve against already-known variable bindings in the caller's context;
+/// constructor expressions (`new Foo()`, `Foo()`) resolve to their base
+/// type. Anything else yields `None` so the caller keeps its fallback.
+pub fn infer_arg_shape(
+    ctx: &ScopedTypeContext,
+    language: cce_types::language::Language,
+    arg: &str,
+) -> Option<TypeShape> {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // String literal.
+    if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2)
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2)
+        || trimmed.starts_with("r\"")
+        || trimmed.starts_with("r#")
+        || trimmed.starts_with('`')
+    {
+        return Some(TypeShape::Named("string".to_string()));
+    }
+    // Numeric literal (int, float and suffixed forms like `10u32`).
+    if trimmed.parse::<f64>().is_ok()
+        || trimmed
+            .trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '_')
+            .parse::<f64>()
+            .is_ok()
+    {
+        return Some(TypeShape::Named("number".to_string()));
+    }
+    // Boolean / null literals.
+    if trimmed == "true" || trimmed == "false" {
+        return Some(TypeShape::Named("boolean".to_string()));
+    }
+    if trimmed == "None" || trimmed == "null" || trimmed == "nil" {
+        return Some(TypeShape::Named("null".to_string()));
+    }
+    // Array literal: element type comes from the first element so
+    // `first([1, 2])` against `first<T>(arr: T[])` binds `T = number`.
+    if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
+        let inner = trimmed[1..trimmed.len() - 1].trim();
+        if inner.is_empty() {
+            return Some(TypeShape::Array(Box::new(TypeShape::Named(
+                "unknown".to_string(),
+            ))));
+        }
+        let first = split_call_args(inner).into_iter().next();
+        let element_shape = first.and_then(|element| infer_arg_shape(ctx, language, &element))?;
+        return Some(TypeShape::Array(Box::new(element_shape)));
+    }
+    // Object literal.
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Some(TypeShape::Named("object".to_string()));
+    }
+    // Composite literal (`Person{...}`, `[]int{...}`): the head before
+    // `{` names the constructed type or, for `[]T`, the element type.
+    if let Some(brace_pos) = trimmed.find('{')
+        && let Some(end) = trimmed.rfind('}')
+        && brace_pos < end
+    {
+        let head = trimmed[..brace_pos].trim();
+        let looks_like_type = !head.is_empty()
+            && !head.contains(char::is_whitespace)
+            && !head.contains('(')
+            && !head.contains(')')
+            && !head.contains(',')
+            && !head.contains('"')
+            && !head.contains('\'');
+        if looks_like_type {
+            if let Some(element) = head.strip_prefix("[]")
+                && !element.contains('[')
+                && !element.contains(']')
+            {
+                let element_shape = parse_type_shape(element, language)
+                    .unwrap_or(TypeShape::Named(element.to_string()));
+                return Some(TypeShape::Array(Box::new(element_shape)));
+            }
+            if !head.contains('[') && !head.contains(']') {
+                let base = head
+                    .rsplit(['.', ':', '/'])
+                    .next()
+                    .unwrap_or(head)
+                    .split('<')
+                    .next()
+                    .unwrap_or(head)
+                    .trim();
+                if !base.is_empty() {
+                    return Some(TypeShape::Named(base.to_string()));
+                }
+            }
+        }
+    }
+    // Constructor expression: `new Foo(...)` or `Foo(...)`.
+    let constructor_base = trimmed
+        .strip_prefix("new ")
+        .unwrap_or(trimmed)
+        .split('(')
+        .next()
+        .unwrap_or(trimmed)
+        .trim();
+    if constructor_base != trimmed
+        && !constructor_base.is_empty()
+        && constructor_base
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_uppercase())
+    {
+        let base = constructor_base
+            .rsplit(['.', ':', '/'])
+            .next()
+            .unwrap_or(constructor_base);
+        let base = base.split('<').next().unwrap_or(base).trim();
+        if !base.is_empty() {
+            return Some(TypeShape::Named(base.to_string()));
+        }
+    }
+    // Identifier: resolve against the caller's known bindings.
+    if let Some(binding) = ctx.get_variable_type(trimmed) {
+        if let Some(shape) = binding.shape.clone() {
+            return Some(shape);
+        }
+        if !binding.type_name.is_empty() {
+            return parse_type_shape(&binding.type_name, language);
+        }
+    }
+    None
+}
+
+/// Refine a generic callee return type using call-site argument expressions.
+///
+/// Looks up the callee's return and formal parameter bindings in the
+/// propagator, resolves each argument expression with `resolve_arg`, and
+/// substitutes type parameters (`T` in `identity<T>(x: T): T` called as
+/// `identity(42)` yields `number`). Returns `None` when there is nothing
+/// to refine (no arguments, non-generic return, unknown formals) or when
+/// the result is not fully concrete, so callers keep the unsubstituted
+/// return type as their fallback.
+pub fn refine_generic_call(
+    propagator: &CrossFilePropagator,
+    language: cce_types::language::Language,
+    callee_name: &str,
+    arg_exprs: &[String],
+    resolve_arg: &mut dyn FnMut(&str) -> Option<TypeShape>,
+) -> Option<(String, TypeShape)> {
+    if arg_exprs.is_empty() {
+        return None;
+    }
+    let return_binding = propagator.get_return_type_by_name(callee_name)?;
+    let return_shape = return_binding
+        .shape
+        .clone()
+        .or_else(|| parse_type_shape(&return_binding.type_name, language))?;
+    if !shape_contains_param(&return_shape) {
+        return None;
+    }
+    let param_bindings = propagator.get_parameter_types_by_name(callee_name)?;
+    if param_bindings.is_empty() {
+        return None;
+    }
+    let formal_shapes: Vec<TypeShape> = param_bindings
+        .iter()
+        .map(|binding| {
+            binding
+                .shape
+                .clone()
+                .or_else(|| parse_type_shape(&binding.type_name, language))
+                .unwrap_or(TypeShape::Named("unknown".to_string()))
+        })
+        .collect();
+    let actual_shapes: Vec<Option<TypeShape>> =
+        arg_exprs.iter().map(|arg| resolve_arg(arg)).collect();
+    let actual_refs: Vec<Option<&TypeShape>> =
+        actual_shapes.iter().map(|opt| opt.as_ref()).collect();
+    let substituted =
+        substitute_call_return_type(&formal_shapes, &return_shape, &actual_refs, language)?;
+    if shape_contains_param(&substituted) {
+        return None;
+    }
+    Some((type_shape_to_string(&substituted), substituted))
+}
+
+/// Whether writing `candidate_shape` would downgrade a concrete binding.
+///
+/// A binding whose shape is fully resolved must never be overwritten by a
+/// shape that still mentions a type parameter (e.g. same-file
+/// `Pair<number, string>` must survive a later cross-file pass that only
+/// knows the unsubstituted `Pair<A, B>`). Unknown shapes on either side
+/// keep the existing priority logic.
+pub fn candidate_downgrades_existing(
+    existing: Option<&TypeBinding>,
+    candidate_shape: Option<&TypeShape>,
+) -> bool {
+    match (
+        existing.and_then(|binding| binding.shape.as_ref()),
+        candidate_shape,
+    ) {
+        (Some(existing_shape), Some(candidate)) => {
+            !shape_contains_param(existing_shape) && shape_contains_param(candidate)
+        }
+        _ => false,
+    }
+}
+
+/// Resolve the propagated type for a single `x = f(...)` call target.
+///
+/// Tries call-site generic refinement first (`y = identity(42)` yields
+/// `number`); falls back to the callee's unsubstituted return type.
+/// Returns the type name, the (optional) defining entity id, and the
+/// (optional) structured shape, or `None` when the callee is unknown.
+/// Chain targets (`a.b().c()`) are not handled here; use
+/// [`parse_call_chain`] for those.
+pub fn resolve_single_call_binding(
+    propagator: &CrossFilePropagator,
+    language: cce_types::language::Language,
+    target: &str,
+    resolve_arg: &mut dyn FnMut(&str) -> Option<TypeShape>,
+) -> Option<(String, Option<EntityId>, Option<TypeShape>)> {
+    let (name, args) = split_call_target(target);
+    let simple = name.rsplit(['.', ':', '/']).next().unwrap_or(&name).trim();
+    if simple.is_empty() {
+        return None;
+    }
+    if !args.is_empty()
+        && let Some((refined_name, refined_shape)) =
+            refine_generic_call(propagator, language, simple, &args, resolve_arg)
+    {
+        return Some((refined_name, None, Some(refined_shape)));
+    }
+    let return_binding = propagator.get_return_type_by_name(simple)?;
+    Some((
+        return_binding.type_name.clone(),
+        return_binding.type_entity_id,
+        return_binding.shape.clone(),
+    ))
 }
 
 const MAX_ITERATIONS: usize = 10;
@@ -812,6 +1055,9 @@ pub fn propagate_variable_types(
                 if let Some(target) = call_target {
                     // Handle chain calls: try iterative resolution
                     let chain = parse_call_chain(&target);
+                    // Stored targets may carry an argument list (`foo(a)`);
+                    // name lookups always use the stripped callee name.
+                    let stripped_name = || split_call_target(&target).0;
                     let simple_target = if chain.len() > MAX_CHAIN_DEPTH {
                         continue;
                     } else if chain.len() > 1 {
@@ -878,7 +1124,10 @@ pub fn propagate_variable_types(
                             };
                             let should_insert =
                                 ctx.get_variable_type(&entity.name).is_none_or(|existing| {
-                                    binding_supersedes(propagated.origin, existing.origin)
+                                    !candidate_downgrades_existing(
+                                        Some(existing),
+                                        propagated.shape.as_ref(),
+                                    ) && binding_supersedes(propagated.origin, existing.origin)
                                 });
                             if should_insert {
                                 ctx.add_variable_type(entity.name.clone(), propagated);
@@ -887,7 +1136,7 @@ pub fn propagate_variable_types(
                             continue;
                         }
                         // Fallback to simple target if chain resolution failed
-                        target
+                        stripped_name()
                             .rsplit(['.', ':', '/'])
                             .next()
                             .unwrap_or(&target)
@@ -895,7 +1144,7 @@ pub fn propagate_variable_types(
                             .to_string()
                     } else {
                         // Strip qualification: `module.func` -> `func`
-                        target
+                        stripped_name()
                             .rsplit(['.', ':', '/'])
                             .next()
                             .unwrap_or(&target)
@@ -905,18 +1154,26 @@ pub fn propagate_variable_types(
                     if simple_target.is_empty() {
                         continue;
                     }
-                    if let Some(return_binding) = propagator.get_return_type_by_name(&simple_target)
-                    {
+                    // Generic refinement first, unsubstituted return second.
+                    let language = file.language;
+                    let resolved =
+                        resolve_single_call_binding(propagator, language, &target, &mut |arg| {
+                            infer_arg_shape(ctx, language, arg)
+                        });
+                    if let Some((type_name, type_entity_id, shape)) = resolved {
                         let propagated = TypeBinding {
-                            type_name: return_binding.type_name.clone(),
-                            type_entity_id: return_binding.type_entity_id,
+                            type_name,
+                            type_entity_id,
                             span: entity.span,
                             origin: Some(InferenceOrigin::CrossFilePropagation),
-                            shape: return_binding.shape.clone(),
+                            shape,
                         };
                         let should_insert =
                             ctx.get_variable_type(&entity.name).is_none_or(|existing| {
-                                binding_supersedes(propagated.origin, existing.origin)
+                                !candidate_downgrades_existing(
+                                    Some(existing),
+                                    propagated.shape.as_ref(),
+                                ) && binding_supersedes(propagated.origin, existing.origin)
                             });
                         if should_insert {
                             ctx.add_variable_type(entity.name.clone(), propagated);
@@ -1069,6 +1326,171 @@ mod tests {
         let binding = ctx.get_variable_type("u").unwrap();
         assert_eq!(binding.type_name, "User");
         assert!(binding.origin.is_some());
+    }
+
+    fn generic_return_binding(type_name: &str, language: Language) -> TypeBinding {
+        TypeBinding {
+            type_name: type_name.to_string(),
+            type_entity_id: None,
+            span: dummy_span(),
+            origin: None,
+            shape: parse_type_shape(type_name, language),
+        }
+    }
+
+    fn generic_param_binding(type_name: &str, language: Language) -> TypeBinding {
+        TypeBinding {
+            type_name: type_name.to_string(),
+            type_entity_id: None,
+            span: dummy_span(),
+            origin: None,
+            shape: parse_type_shape(type_name, language),
+        }
+    }
+
+    #[test]
+    fn test_generic_call_refinement() {
+        let propagator = CrossFilePropagator::new();
+        let mut ctx_a = ScopedTypeContext::new(Language::TypeScript);
+        ctx_a.add_return_type(
+            EntityId(1),
+            generic_return_binding("T", Language::TypeScript),
+        );
+        ctx_a.add_parameter_types(
+            EntityId(1),
+            vec![generic_param_binding("T", Language::TypeScript)],
+        );
+        let entities_a = vec![Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "identity".to_string(),
+            dummy_span(),
+        )];
+        propagator.insert_file("a.ts", &ctx_a, &entities_a);
+
+        let mut file_b = cce_types::ParsedFile::new(Language::TypeScript, "b.ts".to_string(), "");
+        let var = Entity::new(
+            EntityId(2),
+            EntityKind::Variable,
+            "y".to_string(),
+            dummy_span(),
+        )
+        .with_metadata("call_target", "identity(42)");
+        file_b.add_entity(var);
+
+        let contexts: DashMap<String, ScopedTypeContext> = DashMap::new();
+        contexts.insert(
+            "b.ts".to_string(),
+            ScopedTypeContext::new(Language::TypeScript),
+        );
+
+        propagate_variable_types(&[&file_b], &propagator, &contexts);
+
+        let ctx = contexts.get("b.ts").unwrap();
+        let binding = ctx.get_variable_type("y").unwrap();
+        assert_eq!(binding.type_name, "number");
+    }
+
+    #[test]
+    fn test_generic_refinement_falls_back_without_args() {
+        // Bare `identity` (no argument list) keeps the unsubstituted return.
+        let propagator = CrossFilePropagator::new();
+        let mut ctx_a = ScopedTypeContext::new(Language::TypeScript);
+        ctx_a.add_return_type(
+            EntityId(1),
+            generic_return_binding("T", Language::TypeScript),
+        );
+        ctx_a.add_parameter_types(
+            EntityId(1),
+            vec![generic_param_binding("T", Language::TypeScript)],
+        );
+        let entities_a = vec![Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "identity".to_string(),
+            dummy_span(),
+        )];
+        propagator.insert_file("a.ts", &ctx_a, &entities_a);
+
+        let mut file_b = cce_types::ParsedFile::new(Language::TypeScript, "b.ts".to_string(), "");
+        let var = Entity::new(
+            EntityId(2),
+            EntityKind::Variable,
+            "y".to_string(),
+            dummy_span(),
+        )
+        .with_metadata("call_target", "identity");
+        file_b.add_entity(var);
+
+        let contexts: DashMap<String, ScopedTypeContext> = DashMap::new();
+        contexts.insert(
+            "b.ts".to_string(),
+            ScopedTypeContext::new(Language::TypeScript),
+        );
+
+        propagate_variable_types(&[&file_b], &propagator, &contexts);
+
+        let ctx = contexts.get("b.ts").unwrap();
+        let binding = ctx.get_variable_type("y").unwrap();
+        assert_eq!(binding.type_name, "T");
+    }
+
+    #[test]
+    fn test_generic_coarse_result_never_downgrades_concrete() {
+        // `y` already holds a fully substituted type from an earlier pass;
+        // an unresolvable call must not overwrite it with bare parameters.
+        let propagator = CrossFilePropagator::new();
+        let mut ctx_a = ScopedTypeContext::new(Language::TypeScript);
+        ctx_a.add_return_type(
+            EntityId(1),
+            generic_return_binding("Pair<A, B>", Language::TypeScript),
+        );
+        ctx_a.add_parameter_types(
+            EntityId(1),
+            vec![
+                generic_param_binding("A", Language::TypeScript),
+                generic_param_binding("B", Language::TypeScript),
+            ],
+        );
+        let entities_a = vec![Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "makePair".to_string(),
+            dummy_span(),
+        )];
+        propagator.insert_file("a.ts", &ctx_a, &entities_a);
+
+        let mut file_b = cce_types::ParsedFile::new(Language::TypeScript, "b.ts".to_string(), "");
+        let var = Entity::new(
+            EntityId(2),
+            EntityKind::Variable,
+            "p".to_string(),
+            dummy_span(),
+        )
+        .with_metadata("call_target", "makePair(42, z)");
+        file_b.add_entity(var);
+
+        let contexts: DashMap<String, ScopedTypeContext> = DashMap::new();
+        let mut ctx_b = ScopedTypeContext::new(Language::TypeScript);
+        ctx_b.add_variable_type(
+            "p".to_string(),
+            TypeBinding {
+                type_name: "Pair<number, string>".to_string(),
+                type_entity_id: None,
+                span: dummy_span(),
+                origin: Some(InferenceOrigin::CrossFilePropagation),
+                shape: parse_type_shape("Pair<number, string>", Language::TypeScript),
+            },
+        );
+        contexts.insert("b.ts".to_string(), ctx_b);
+
+        propagate_variable_types(&[&file_b], &propagator, &contexts);
+
+        let ctx = contexts.get("b.ts").unwrap();
+        assert_eq!(
+            ctx.get_variable_type("p").unwrap().type_name,
+            "Pair<number, string>"
+        );
     }
 
     #[test]

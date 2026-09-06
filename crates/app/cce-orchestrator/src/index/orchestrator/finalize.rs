@@ -246,6 +246,10 @@ impl IndexOrchestrator {
             ctx.errors.push(error);
             ctx.all_batches_completed = false;
         }
+        // Derive implicit hierarchy edges (Go interface method-set
+        // satisfaction) once the complete graph is resolved and before the
+        // canonical snapshot is taken.
+        builder.derive_implicit_hierarchy_edges(spool.project_symbols());
         builder.record_streamed_build(relation_build_started.elapsed(), registered_files);
 
         match builder

@@ -177,6 +177,11 @@ impl BehaviorStore {
         self.entities.get(&entity_id)
     }
 
+    /// Iterate over all behavior entries keyed by entity ID.
+    pub fn iter(&self) -> impl Iterator<Item = (EntityId, &EntityBehavior)> {
+        self.entities.iter().map(|(id, behavior)| (*id, behavior))
+    }
+
     /// Iterate over mutable behavior entries.
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut EntityBehavior> {
         self.entities.values_mut()

@@ -217,6 +217,16 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
 ///
 /// Vector of `ExportInfo` containing exported symbols
 pub fn extract_exports_from_entities(entities: &[Entity], language: &Language) -> Vec<ExportInfo> {
+    // Explicit-export languages (JS/TS family): when the extractor recorded
+    // real `export` statements (`is_exported` metadata), only those symbols
+    // are exports. A file without any `export` statement exports nothing,
+    // even though its top-level symbols remain addressable by visibility.
+    let explicit = matches!(
+        language,
+        Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx
+    ) && entities
+        .iter()
+        .any(|e| e.metadata.get("is_exported").is_some_and(|v| v == "true"));
     let mut exports = Vec::new();
 
     for entity in entities {
@@ -230,16 +240,23 @@ pub fn extract_exports_from_entities(entities: &[Entity], language: &Language) -
         // scope. First phase exports Public, Package, Module, Restricted,
         // Protected and Internal levels; Private/Super/PrivateProtected/Friend
         // remain non-exported.
-        let is_export = matches!(
-            detect_entity_visibility(entity, language),
-            Visibility::Public
-                | Visibility::Package
-                | Visibility::Module
-                | Visibility::Restricted { .. }
-                | Visibility::Protected
-                | Visibility::Internal
-                | Visibility::ProtectedInternal
-        );
+        let is_export = if explicit {
+            entity
+                .metadata
+                .get("is_exported")
+                .is_some_and(|v| v == "true")
+        } else {
+            matches!(
+                detect_entity_visibility(entity, language),
+                Visibility::Public
+                    | Visibility::Package
+                    | Visibility::Module
+                    | Visibility::Restricted { .. }
+                    | Visibility::Protected
+                    | Visibility::Internal
+                    | Visibility::ProtectedInternal
+            )
+        };
 
         if is_export {
             let export_type = if entity

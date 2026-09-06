@@ -3,6 +3,7 @@
 //! Processes parsed files and adds them to the relation index.
 
 use super::config::BuilderConfig;
+use super::macro_body_call_extractor::extract_macro_body_calls;
 use crate::dependency_graph::FileDependencyGraph;
 use crate::index::core::{ExportInfo, RelationIndex};
 use crate::index::resolver::RelationResolver;
@@ -16,8 +17,8 @@ use cce_parser_core::{AstParser, set_language_resolver};
 use cce_plugin::PluginRegistry;
 use cce_types::relation::CallContext;
 use cce_types::{
-    Entity, EntityId, FileInfo, ImportTable, ParsedFile, RelationLevel, ResolvedRelation,
-    normalize_project_path,
+    Entity, EntityId, FileInfo, ImportTable, ParsedFile, RawRelationData, RelationLevel,
+    RelationType, ResolvedRelation, normalize_project_path,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -357,6 +358,63 @@ impl<'a> FileProcessor<'a> {
             })
         }));
         all_relations.extend(resolved_raw);
+
+        // Macro body calls: `macro_rules!` definition bodies are opaque token
+        // trees, so calls inside them (e.g. `run()` in `{ run(); }`) never
+        // reach `raw_relations`. Recover them from `ParsedFile.behavior` and
+        // resolve through the same symbol table path as ordinary calls. The
+        // caller is the owning macro definition entity.
+        if !file.behavior.is_empty() {
+            let mut seen: HashSet<(EntityId, String, usize, usize)> =
+                HashSet::with_capacity(all_relations.len());
+            for rel in &all_relations {
+                seen.insert((
+                    rel.caller,
+                    rel.callee_name.clone(),
+                    rel.span.start_byte,
+                    rel.span.end_byte,
+                ));
+            }
+            for call in extract_macro_body_calls(file) {
+                if !entity_map.contains_key(&call.caller_entity_id) {
+                    continue;
+                }
+                let caller_global = remap_id(call.caller_entity_id);
+                let call_key = (
+                    caller_global,
+                    call.callee_name.clone(),
+                    call.span.start_byte,
+                    call.span.end_byte,
+                );
+                if seen.contains(&call_key) {
+                    continue;
+                }
+                let raw_data = RawRelationData {
+                    src: call.caller_entity_id,
+                    level: RelationLevel::Entity,
+                    dst_name: call.callee_name.clone(),
+                    relation_type: RelationType::DirectCall,
+                    span: call.span,
+                    stdlib_category: None,
+                };
+                if let Some(resolved) = resolver.resolve_with_scope_map(
+                    &raw_data,
+                    file,
+                    project_symbols,
+                    self.index,
+                    &entity_map,
+                ) {
+                    let resolved = remap_resolved(resolved);
+                    seen.insert((
+                        resolved.caller,
+                        resolved.callee_name.clone(),
+                        resolved.span.start_byte,
+                        resolved.span.end_byte,
+                    ));
+                    all_relations.push(resolved);
+                }
+            }
+        }
 
         let max_relations = self.config.policy.max_relations_per_file;
         if max_relations == 0 {

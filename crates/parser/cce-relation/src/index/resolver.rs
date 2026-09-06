@@ -530,7 +530,7 @@ impl RelationResolver {
                                 effective_callee_id = Some(entity_id);
                                 overload_signature = Some(signature);
                             } else if let Some(best) =
-                                overload.resolve_with_args(&arg_refs, &HashMap::new())
+                                overload.resolve_with_inferred_generics(&arg_refs, parsed.language)
                             {
                                 effective_callee_id = Some(best.entity_id);
                                 overload_signature = Some(
@@ -800,10 +800,13 @@ impl RelationResolver {
                             }
                         }
                     }
-                    let simple = target
+                    // Stored targets may carry an argument list (`foo(a)`);
+                    // receiver lookup uses the stripped callee name.
+                    let stripped = crate::type_inference::cross_file::split_call_target(target).0;
+                    let simple = stripped
                         .rsplit(['.', ':', '/'])
                         .next()
-                        .unwrap_or(target)
+                        .unwrap_or(&stripped)
                         .trim();
                     if simple.is_empty() {
                         continue;
@@ -894,7 +897,10 @@ impl RelationResolver {
                 .get("call_target")
                 .or_else(|| entity.metadata.get("constructor_type"))
             {
-                if target.rsplit(['.', ':', '/']).next().unwrap_or(target)
+                // Stored targets may carry an argument list (`foo(a)`);
+                // compare against the stripped callee name.
+                let stripped = crate::type_inference::cross_file::split_call_target(target).0;
+                if stripped.rsplit(['.', ':', '/']).next().unwrap_or(&stripped)
                     == raw_data
                         .dst_name
                         .rsplit(['.', ':', '/'])

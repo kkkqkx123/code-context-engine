@@ -6,8 +6,8 @@ use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 
 use super::control_flow::shared::{
-    extract_call_args, is_valid_ident, parse_string_literal, parse_type_arg, split_two_args,
-    strip_outer_parens,
+    extract_call_args, is_valid_ident, parse_string_literal, parse_type_arg,
+    split_top_level_word_conjuncts, split_two_args, strip_outer_parens,
 };
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
@@ -56,8 +56,8 @@ impl LanguageTypeInferer for PythonTypeInferer {
             };
             for fact in &entity_cf.facts {
                 match fact.kind {
-                    ControlFlowFactKind::If => {
-                        let narrowed: Vec<(String, TypeBinding)> = narrow_python_if(
+                    ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
+                        let mut narrowed: Vec<(String, TypeBinding)> = narrow_python_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
@@ -66,6 +66,11 @@ impl LanguageTypeInferer for PythonTypeInferer {
                         .into_iter()
                         .map(|result| (result.variable_name, result.narrowed_type))
                         .collect();
+                        for (_, binding) in narrowed.iter_mut() {
+                            if !binding.span.is_available() {
+                                binding.span = entity.span;
+                            }
+                        }
                         add_polarity_aware_narrowings(
                             ctx,
                             &entity.parameters,
@@ -107,6 +112,26 @@ struct NarrowingResult {
 /// - `"prop" in x` → x: HasKey<prop>
 /// - `x == None` → x: None
 fn narrow_python_if(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    type_index: Option<&TypeMemberIndex>,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
+    // Split `A and B` so compound guards narrow per-conjunct.
+    let parts = split_top_level_word_conjuncts(text, "and");
+    if parts.len() > 1 {
+        let mut out = Vec::new();
+        for part in parts {
+            out.extend(narrow_single_python_condition(
+                part, ctx, type_index, params,
+            ));
+        }
+        return out;
+    }
+    narrow_single_python_condition(text, ctx, type_index, params)
+}
+
+fn narrow_single_python_condition(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&TypeMemberIndex>,

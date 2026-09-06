@@ -100,12 +100,17 @@ impl LanguageTypeInferer for JavaTypeInferer {
             };
             for fact in &entity_cf.facts {
                 match fact.kind {
-                    ControlFlowFactKind::If => {
-                        let narrowed: Vec<(String, TypeBinding)> =
+                    ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
+                        let mut narrowed: Vec<(String, TypeBinding)> =
                             narrow_java_if(&fact.text, ctx, &entity.parameters)
                                 .into_iter()
                                 .map(|result| (result.variable_name, result.narrowed_type))
                                 .collect();
+                        for (_, binding) in narrowed.iter_mut() {
+                            if !binding.span.is_available() {
+                                binding.span = entity.span;
+                            }
+                        }
                         add_polarity_aware_narrowings(
                             ctx,
                             &entity.parameters,
@@ -152,6 +157,26 @@ struct NarrowingResult {
 /// - `if (x != null)` → x: declared (non-null)
 /// - `if (x == null)` → x: null
 fn narrow_java_if(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
+    // Split `A && B` so compound guards narrow per-conjunct instead of
+    // smearing the right side into a pseudo-type.
+    if let Some(cond) = strip_java_condition_prefix(text) {
+        let parts = super::control_flow::shared::split_top_level_conjuncts(cond);
+        if parts.len() > 1 {
+            let mut out = Vec::new();
+            for part in parts {
+                out.extend(narrow_single_java_condition(part, ctx, params));
+            }
+            return out;
+        }
+    }
+    narrow_single_java_condition(text, ctx, params)
+}
+
+fn narrow_single_java_condition(
     text: &str,
     ctx: &ScopedTypeContext,
     params: &[(String, Option<String>)],

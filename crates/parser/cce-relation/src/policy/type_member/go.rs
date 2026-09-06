@@ -15,23 +15,22 @@ fn extract_receiver_type(entity: &Entity) -> Option<String> {
     if let Some(rt) = entity.metadata.get("receiver_type") {
         return Some(normalize_receiver(rt));
     }
-    // fallback parse from signature: func (r *Type) Method()
-    let sig = &entity.signature;
-    if sig.is_empty() {
+    // Fallback only for Go methods (`func (recv Type) Name(...)`). Plain
+    // functions must not be misread: their first parameter is not a receiver.
+    let rest = entity
+        .signature
+        .trim_start()
+        .strip_prefix("func")?
+        .trim_start();
+    if !rest.starts_with('(') {
         return None;
     }
-    // Find first '(' and matching ')'
-    let start = sig.find('(')?;
-    let end = sig[start..].find(')')? + start;
-    let inside = sig[start + 1..end].trim();
+    let end = rest.find(')')?;
+    let inside = rest[1..end].trim();
     if inside.is_empty() {
         return None;
     }
-    // inside is like "r Type" or "r *Type" or "r pkg.Type"
     let parts: Vec<&str> = inside.split_whitespace().collect();
-    if parts.is_empty() {
-        return None;
-    }
     let type_part = if parts.len() == 1 { parts[0] } else { parts[1] };
     Some(normalize_receiver(type_part))
 }

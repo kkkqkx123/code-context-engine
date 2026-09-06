@@ -162,7 +162,10 @@ pub fn entity_query() -> &'static str {
 ; Closure expression assigned to variable
 (let_declaration
   pattern: (identifier) @entity.closure.name
-  value: (closure_expression) @entity.closure.params
+  value: (closure_expression
+    parameters: (closure_parameters) @entity.closure.params
+    return_type: (_)? @entity.closure.return_type
+  )
 ) @entity.closure
 
 ; ============================================

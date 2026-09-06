@@ -206,6 +206,58 @@ pub fn establish_class_method_relationships(entities: &mut [Entity]) {
     }
 }
 
+/// Establish parent-child relationships between Go structs and their receiver methods.
+///
+/// Go methods are top-level declarations with `func (r ReceiverType) Method()` syntax
+/// rather than being syntactically nested inside struct bodies. This function uses
+/// the `receiver_type` metadata (extracted from the signature by `receiver_extractor`)
+/// to link methods to their owning struct/type entity.
+///
+/// Matching is done by normalizing the receiver type name (stripping pointer `*` and
+/// package qualifiers) and comparing against struct/class entity names.
+pub fn establish_go_method_relationships(entities: &mut [Entity]) {
+    // Collect struct/class names and their IDs for lookup.
+    let struct_names: Vec<(String, EntityId)> = entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Struct | EntityKind::Class))
+        .map(|e| (normalize_type_name(&e.name), e.id))
+        .collect();
+
+    if struct_names.is_empty() {
+        return;
+    }
+
+    // Build a lookup map from normalized type name to entity ID.
+    let name_to_id: std::collections::HashMap<String, EntityId> =
+        struct_names.into_iter().collect();
+
+    for entity in entities.iter_mut() {
+        if !entity.kind.is_function_like() || entity.parent.is_some() {
+            continue;
+        }
+        if let Some(receiver_type) = entity.metadata.get("receiver_type") {
+            let normalized = normalize_type_name(receiver_type);
+            if let Some(&struct_id) = name_to_id.get(&normalized) {
+                entity.parent = Some(struct_id);
+                entity.depth += 1;
+            }
+        }
+    }
+}
+
+/// Normalize a Go type name for matching: strip pointer prefix and package qualifier.
+///
+/// Examples: `*User` → `User`, `pkg.User` → `User`, `User` → `User`.
+fn normalize_type_name(name: &str) -> String {
+    let name = name.trim().trim_start_matches('*');
+    // Strip package qualifier: `pkg.Type` → `Type`
+    if let Some(pos) = name.rfind('.') {
+        name[pos + 1..].to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +341,83 @@ mod tests {
         establish_class_method_relationships(&mut entities);
 
         assert_eq!(entities[2].parent, Some(EntityId(0)));
+    }
+
+    #[test]
+    fn test_establish_go_method_relationships() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Struct, "User", 0, 100),
+            make_entity(1, EntityKind::Struct, "Order", 200, 300),
+        ];
+        // Methods with receiver_type metadata (as extracted by receiver_extractor)
+        let mut method1 = make_entity(2, EntityKind::Method, "Greet", 110, 150);
+        method1.set_metadata("receiver_type", "User".to_string());
+        let mut method2 = make_entity(3, EntityKind::Method, "String", 110, 150);
+        method2.set_metadata("receiver_type", "User".to_string());
+        let mut method3 = make_entity(4, EntityKind::Method, "Total", 310, 350);
+        method3.set_metadata("receiver_type", "Order".to_string());
+        // Method without receiver_type (plain function)
+        let method4 = make_entity(5, EntityKind::Function, "helper", 400, 420);
+        entities.push(method1);
+        entities.push(method2);
+        entities.push(method3);
+        entities.push(method4);
+
+        establish_go_method_relationships(&mut entities);
+
+        assert_eq!(entities[2].parent, Some(EntityId(0))); // Greet -> User
+        assert_eq!(entities[3].parent, Some(EntityId(0))); // String -> User
+        assert_eq!(entities[4].parent, Some(EntityId(1))); // Total -> Order
+        assert_eq!(entities[5].parent, None); // helper has no receiver
+    }
+
+    #[test]
+    fn test_establish_go_method_pointer_receiver() {
+        let mut entities = vec![make_entity(0, EntityKind::Struct, "MyStruct", 0, 100)];
+        let mut method = make_entity(1, EntityKind::Method, "DoStuff", 110, 150);
+        method.set_metadata("receiver_type", "*MyStruct"); // pointer receiver
+        entities.push(method);
+
+        establish_go_method_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, Some(EntityId(0)));
+    }
+
+    #[test]
+    fn test_establish_go_method_qualified_receiver() {
+        let mut entities = vec![make_entity(0, EntityKind::Struct, "Foo", 0, 100)];
+        let mut method = make_entity(1, EntityKind::Method, "Bar", 110, 150);
+        method.set_metadata("receiver_type", "pkg.Foo"); // package-qualified
+        entities.push(method);
+
+        establish_go_method_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, Some(EntityId(0)));
+    }
+
+    #[test]
+    fn test_establish_go_method_skips_already_parented() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Struct, "User", 0, 100),
+            make_entity(1, EntityKind::InherentImpl, "impl", 0, 100),
+        ];
+        let mut method = make_entity(2, EntityKind::Method, "Greet", 10, 50);
+        method.set_metadata("receiver_type", "User");
+        method.parent = Some(EntityId(1)); // already has parent
+        entities.push(method);
+
+        establish_go_method_relationships(&mut entities);
+
+        // Should keep existing parent, not override
+        assert_eq!(entities[2].parent, Some(EntityId(1)));
+    }
+
+    #[test]
+    fn test_normalize_type_name() {
+        assert_eq!(normalize_type_name("User"), "User");
+        assert_eq!(normalize_type_name("*User"), "User");
+        assert_eq!(normalize_type_name("pkg.User"), "User");
+        assert_eq!(normalize_type_name("*pkg.User"), "User");
+        assert_eq!(normalize_type_name("  *pkg.User  "), "User");
     }
 }

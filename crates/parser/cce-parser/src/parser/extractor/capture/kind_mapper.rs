@@ -207,7 +207,11 @@ pub fn determine_entity_kind(capture_name: &str) -> Option<EntityKind> {
         (capture::CATEGORY_INPUT, _) => Some(EntityKind::Element),
         (capture::CATEGORY_SELECT, _) => Some(EntityKind::Element),
         (capture::CATEGORY_TEXTAREA, _) => Some(EntityKind::Element),
-        (capture::CATEGORY_ATTR, _) => Some(EntityKind::Attribute),
+        (capture::CATEGORY_ATTR, _) => {
+            // Ruby attr_reader/attr_writer/attr_accessor define instance
+            // variables (fields), not generic attributes.
+            Some(EntityKind::Field)
+        }
         (capture::CATEGORY_COMPANION, _) => Some(EntityKind::Class),
         (capture::CATEGORY_STRUCT_ANON, _) => Some(EntityKind::Struct),
         (capture::CATEGORY_UNION_ANON, _) => Some(EntityKind::Union),

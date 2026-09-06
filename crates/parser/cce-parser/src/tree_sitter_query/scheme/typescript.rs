@@ -158,6 +158,17 @@ fn entity_ts_function_method_patterns() -> &'static str {
   body: (_) @entity.function.body
 ) @entity.function
 
+; Overload signatures (no body): `function combine(a: number): number;`
+; The implementation pattern above requires `body`, so signatures would be
+; dropped and overload sets would collapse to the implementation. Keep each
+; signature as its own callable entity so overload resolution can select by
+; argument types.
+(function_declaration
+  name: (identifier) @entity.function.overload.name
+  parameters: (formal_parameters) @entity.function.overload.params
+  return_type: (type_annotation (_)? @entity.function.overload.return_type)?
+) @entity.function.overload
+
 ; Generator function declaration
 (generator_function_declaration
   name: (identifier) @entity.function.generator.name

@@ -36,13 +36,15 @@ pub mod types;
 pub mod typescript;
 
 pub use self::types::{
-    AUTHORITATIVE_ORIGIN_THRESHOLD, InferenceOrigin, NestedPatternPart, ScopeFrame,
-    ScopedTypeContext, TypeBinding, TypeShape, binding_supersedes, bindings_supersede,
-    origin_is_authoritative, origin_supersedes,
+    InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, binding_supersedes,
+    bindings_supersede, origin_is_authoritative,
 };
 pub use cross_file::{CrossFilePropagator, propagate_variable_types};
-pub use extractors::{extract_field_type, extract_function_types, extract_variable_type};
-pub use traits::{InferenceContext, LanguageTypeInferer};
+pub use traits::InferenceContext;
+
+// Internal imports used within this module (not re-exported)
+use self::types::NestedPatternPart;
+use traits::LanguageTypeInferer;
 
 use cce_types::entity::EntityKind;
 use cce_types::language::Language;
@@ -52,6 +54,9 @@ use cce_types::language::Language;
 /// Built during symbol table construction and queried by the relation resolver
 /// when disambiguating method calls on dynamically-typed receivers.
 pub type TypeInferenceContext = ScopedTypeContext;
+
+/// A same-file callable's formal parameters and return annotation.
+type CalleeSignature<'a> = (&'a [(String, Option<String>)], Option<&'a str>);
 
 /// Lightweight type inference engine.
 ///
@@ -355,6 +360,125 @@ impl TypeInferenceEngine {
             .and_then(|(_, ty)| ty.as_deref())
     }
 
+    /// Find a same-file callable (function, method or constructor) by name.
+    ///
+    /// Matches the stripped callee name (`obj.method` resolves against the
+    /// `method` member); the first match wins. Method receivers are not
+    /// disambiguated here — generic substitution only needs the formal
+    /// parameter and return annotations.
+    fn find_callee_signature<'a>(
+        file: &'a cce_types::ParsedFile,
+        name: &str,
+    ) -> Option<CalleeSignature<'a>> {
+        let simple = name.rsplit(['.', ':', '/']).next().unwrap_or(name).trim();
+        file.entities
+            .iter()
+            .find(|e| {
+                matches!(
+                    e.kind,
+                    EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                ) && e.name == simple
+            })
+            .map(|e| (e.parameters.as_slice(), e.return_type.as_deref()))
+    }
+
+    /// Infer the type shape of one call-site argument expression.
+    ///
+    /// Bare identifiers resolve against enclosing-function parameters first
+    /// (so `identity(x)` with `x: number` binds `T = number`), then fall
+    /// back to literals, constructor bases and known variable bindings via
+    /// the shared cross-file argument resolver.
+    fn infer_call_arg_shape(
+        file: &cce_types::ParsedFile,
+        entity: &cce_types::Entity,
+        ctx: &ScopedTypeContext,
+        arg: &str,
+    ) -> Option<TypeShape> {
+        let trimmed = arg.trim();
+        if !trimmed.is_empty()
+            && trimmed
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+            && !trimmed.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && let Some(param_ty) = Self::enclosing_param_type(file, entity, trimmed)
+            && let Some(shape) =
+                crate::type_inference::types::parse_type_shape(param_ty, file.language)
+        {
+            return Some(shape);
+        }
+        crate::type_inference::cross_file::infer_arg_shape(ctx, file.language, arg)
+    }
+
+    /// Substitute a same-file generic call return using call-site arguments.
+    ///
+    /// For `y = identity(42)` with `identity<T>(x: T): T` in the same file,
+    /// binds `T = number` from the argument and returns the substituted
+    /// `number` shape. Returns `None` when the source is not a call with
+    /// arguments, the callee is unknown, its return mentions no type
+    /// parameter, or the substitution is not fully concrete — callers keep
+    /// their existing unsubstituted fallback in all those cases.
+    fn resolve_generic_call_shape(
+        file: &cce_types::ParsedFile,
+        entity: &cce_types::Entity,
+        ctx: &ScopedTypeContext,
+        source: &str,
+    ) -> Option<TypeShape> {
+        use crate::type_inference::generics::{
+            shape_contains_param, split_call_target, substitute_call_return_type,
+        };
+        if !source.contains('(') {
+            return None;
+        }
+        let (name, args) = split_call_target(source);
+        if args.is_empty() {
+            return None;
+        }
+        let (params, ret) = Self::find_callee_signature(file, &name)?;
+        let return_text = ret?;
+        let return_shape =
+            crate::type_inference::types::parse_type_shape(return_text, file.language)?;
+        if !shape_contains_param(&return_shape) {
+            return None;
+        }
+        let formal_shapes: Vec<TypeShape> = params
+            .iter()
+            .map(|(_, ty)| {
+                ty.as_deref()
+                    .and_then(|text| {
+                        crate::type_inference::types::parse_type_shape(text, file.language)
+                    })
+                    .unwrap_or(TypeShape::Named("unknown".to_string()))
+            })
+            .collect();
+        let actual_shapes: Vec<Option<TypeShape>> = args
+            .iter()
+            .map(|arg| Self::infer_call_arg_shape(file, entity, ctx, arg))
+            .collect();
+        let actual_refs: Vec<Option<&TypeShape>> =
+            actual_shapes.iter().map(|opt| opt.as_ref()).collect();
+        let substituted = substitute_call_return_type(
+            &formal_shapes,
+            &return_shape,
+            &actual_refs,
+            file.language,
+        )?;
+        if shape_contains_param(&substituted) {
+            return None;
+        }
+        Some(substituted)
+    }
+
+    /// Strip a stored call target to its callee name for name lookups.
+    ///
+    /// Stored targets may carry an argument list (`foo(a, b)`); lookups
+    /// against return tables and variable bindings use `foo`.
+    fn strip_call_target_name(source: &str) -> String {
+        match source.find('(') {
+            Some(pos) => source[..pos].trim().to_string(),
+            None => source.to_string(),
+        }
+    }
+
     /// Resolve a destructuring-source expression to a concrete [`TypeShape`].
     ///
     /// identifier sources resolve against (in order) enclosing-function
@@ -418,15 +542,29 @@ impl TypeInferenceEngine {
                     // First resolvable candidate wins: a raw right-hand side
                     // (`make_pair()`) may not parse while `call_target`
                     // (`make_pair`) resolves through same-file returns.
+                    // Generic calls try call-site substitution first
+                    // (`p = makePair(42, "x")` binds `Pair<number, string>`).
                     let mut resolved = None;
                     for key in ["source_type", "call_target"] {
                         if let Some(candidate) = entity.metadata.get(key) {
+                            if key == "call_target"
+                                && let Some(shape) =
+                                    Self::resolve_generic_call_shape(file, entity, ctx, candidate)
+                            {
+                                resolved = Some(shape);
+                                break;
+                            }
+                            let lookup = if key == "call_target" {
+                                Self::strip_call_target_name(candidate)
+                            } else {
+                                candidate.clone()
+                            };
                             if let Some(shape) = Self::resolve_source_shape(
                                 file,
                                 &returns_by_name,
                                 entity,
                                 ctx,
-                                candidate,
+                                &lookup,
                             ) {
                                 resolved = Some(shape);
                                 break;
@@ -497,13 +635,30 @@ impl TypeInferenceEngine {
                         let Some(source_str) = entity.metadata.get(key) else {
                             continue;
                         };
-                        let Some(shape) = Self::resolve_source_shape(
-                            file,
-                            &returns_by_name,
-                            entity,
-                            ctx,
-                            source_str,
-                        ) else {
+                        // Generic calls try call-site substitution first.
+                        let shape = if key == "call_target" {
+                            Self::resolve_generic_call_shape(file, entity, ctx, source_str).or_else(
+                                || {
+                                    let lookup = Self::strip_call_target_name(source_str);
+                                    Self::resolve_source_shape(
+                                        file,
+                                        &returns_by_name,
+                                        entity,
+                                        ctx,
+                                        &lookup,
+                                    )
+                                },
+                            )
+                        } else {
+                            Self::resolve_source_shape(
+                                file,
+                                &returns_by_name,
+                                entity,
+                                ctx,
+                                source_str,
+                            )
+                        };
+                        let Some(shape) = shape else {
                             continue;
                         };
                         let Some(element) =
@@ -541,10 +696,48 @@ impl TypeInferenceEngine {
                     };
                     let from_call =
                         key == "call_target" && !entity.metadata.contains_key("source_type");
-                    if let Some(shape) =
-                        Self::resolve_source_shape(file, &returns_by_name, entity, ctx, source_str)
-                    {
-                        if let TypeShape::Named(type_name) = &shape {
+                    // Generic calls try call-site substitution first
+                    // (`y = identity(42)` binds `number`, not `T`).
+                    let (shape, from_substitution) = if from_call {
+                        match Self::resolve_generic_call_shape(file, entity, ctx, source_str) {
+                            Some(shape) => (Some(shape), true),
+                            None => {
+                                let lookup = Self::strip_call_target_name(source_str);
+                                (
+                                    Self::resolve_source_shape(
+                                        file,
+                                        &returns_by_name,
+                                        entity,
+                                        ctx,
+                                        &lookup,
+                                    ),
+                                    false,
+                                )
+                            }
+                        }
+                    } else {
+                        (
+                            Self::resolve_source_shape(
+                                file,
+                                &returns_by_name,
+                                entity,
+                                ctx,
+                                source_str,
+                            ),
+                            false,
+                        )
+                    };
+                    if let Some(shape) = shape {
+                        // Bare type names bind as before. Fully substituted
+                        // generic results (`Pair<number, string>`) bind too;
+                        // every other compound shape stays unbound rather
+                        // than guessed.
+                        let bindable = matches!(&shape, TypeShape::Named(_))
+                            || (from_substitution
+                                && !crate::type_inference::generics::shape_contains_param(&shape));
+                        if bindable {
+                            let type_name =
+                                crate::type_inference::types::type_shape_to_string(&shape);
                             let origin = if from_call {
                                 InferenceOrigin::FunctionReturn
                             } else {
@@ -1370,5 +1563,73 @@ mod tests {
         assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "str");
         assert_eq!(ctx.get_variable_type("b").unwrap().type_name, "int");
         assert_eq!(ctx.get_variable_type("c").unwrap().type_name, "bool");
+    }
+
+    #[test]
+    fn test_generic_call_substitution_end_to_end() {
+        use cce_types::entity::{Entity, EntityKind};
+        use cce_types::{Language, ParsedFile};
+
+        let source = "function identity<T>(x: T): T { return x; }\nconst y = identity(42);\nconst w = wrapInArray(\"a\");";
+        let mut file = ParsedFile::new(Language::TypeScript, "demo.ts".to_string(), source);
+        let mut identity = Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "identity".to_string(),
+            Span {
+                start_byte: 0,
+                end_byte: 10,
+                ..Span::default()
+            },
+        );
+        identity.parameters = vec![("x".to_string(), Some("T".to_string()))];
+        identity.return_type = Some("T".to_string());
+        file.entities.push(identity);
+        let mut wrap = Entity::new(
+            EntityId(2),
+            EntityKind::Function,
+            "wrapInArray".to_string(),
+            Span {
+                start_byte: 0,
+                end_byte: 10,
+                ..Span::default()
+            },
+        );
+        wrap.parameters = vec![("item".to_string(), Some("T".to_string()))];
+        wrap.return_type = Some("Array<T>".to_string());
+        file.entities.push(wrap);
+        let mut y = Entity::new(
+            EntityId(3),
+            EntityKind::Variable,
+            "y".to_string(),
+            Span {
+                start_byte: 45,
+                end_byte: 46,
+                ..Span::default()
+            },
+        );
+        y.metadata
+            .insert("call_target".to_string(), "identity(42)".to_string());
+        file.entities.push(y);
+        let mut w = Entity::new(
+            EntityId(4),
+            EntityKind::Variable,
+            "w".to_string(),
+            Span {
+                start_byte: 60,
+                end_byte: 61,
+                ..Span::default()
+            },
+        );
+        w.metadata
+            .insert("call_target".to_string(), "wrapInArray(\"a\")".to_string());
+        file.entities.push(w);
+
+        let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
+        assert_eq!(ctx.get_variable_type("y").unwrap().type_name, "number");
+        assert_eq!(
+            ctx.get_variable_type("w").unwrap().type_name,
+            "Array<string>"
+        );
     }
 }

@@ -789,6 +789,11 @@ fn extract_constructor_type_from_expr(expr: &str) -> Option<String> {
 ///
 /// Returns the function name portion before `(` with generic arguments
 /// stripped, so `wrapInList(10)` and `make<int>(1)` resolve uniformly.
+/// The balanced argument list is preserved (`foo(a, b)`) so call-site
+/// generic substitution can recover argument expressions downstream;
+/// over-long argument lists fall back to the bare name to bound metadata
+/// size. Consumers that need only the callee must strip the argument list
+/// (everything from the first `(`) before name lookups.
 fn extract_call_target_from_expr(expr: &str) -> Option<String> {
     let trimmed = expr.trim();
     // Skip literals and already handled constructors (uppercase check already gated)
@@ -804,11 +809,69 @@ fn extract_call_target_from_expr(expr: &str) -> Option<String> {
         return None;
     }
     // Allow qualified names with `.`, `::`, `/`
-    if is_valid_type_name(func_name) {
+    if !is_valid_type_name(func_name) {
         // Avoid capturing literals like `42(` which would be invalid.
-        return Some(func_name.to_string());
+        return None;
     }
-    None
+    // Preserve the balanced argument list for call-site analysis.
+    const MAX_CALL_TARGET_ARGS: usize = 8;
+    const MAX_CALL_TARGET_ARGLEN: usize = 200;
+    if let Some(args) = balanced_call_args(&trimmed[paren_pos..]) {
+        let arg_count = args.matches(',').count() + 1;
+        if !args.trim().is_empty()
+            && arg_count <= MAX_CALL_TARGET_ARGS
+            && args.len() <= MAX_CALL_TARGET_ARGLEN
+        {
+            return Some(format!("{}({})", func_name, args.trim()));
+        }
+    }
+    Some(func_name.to_string())
+}
+
+/// Extract the balanced argument list (without outer parentheses) from text
+/// starting at `(`.
+///
+/// Tracks string quotes and nested bracket pairs so commas and closing
+/// brackets inside arguments do not end the scan early. Returns `None`
+/// when the parentheses never balance.
+fn balanced_call_args(text_from_paren: &str) -> Option<String> {
+    if !text_from_paren.starts_with('(') {
+        return None;
+    }
+    let mut stack: Vec<char> = Vec::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut end = None;
+    for (idx, ch) in text_from_paren.char_indices() {
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' | '`' => quote = Some(ch),
+            '(' => stack.push(')'),
+            '[' => stack.push(']'),
+            '{' => stack.push('}'),
+            ')' | ']' | '}' => {
+                if stack.pop() != Some(ch) {
+                    return None;
+                }
+                if stack.is_empty() {
+                    end = Some(idx);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
+    Some(text_from_paren[1..end].to_string())
 }
 
 /// Extract the type from a literal expression.
@@ -857,4 +920,54 @@ fn extract_literal_type(expr: &str) -> Option<String> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_call_target_preserves_args() {
+        assert_eq!(
+            extract_call_target_from_expr("makePair(42, \"answer\")"),
+            Some("makePair(42, \"answer\")".to_string())
+        );
+        assert_eq!(
+            extract_call_target_from_expr("foo()"),
+            Some("foo".to_string())
+        );
+        assert_eq!(
+            extract_call_target_from_expr("module.func(a, b)"),
+            Some("module.func(a, b)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_call_target_nested_and_quoted() {
+        assert_eq!(
+            extract_call_target_from_expr("wrap(g(1, 2), [x, y])"),
+            Some("wrap(g(1, 2), [x, y])".to_string())
+        );
+        assert_eq!(
+            extract_call_target_from_expr("f(\"a)b\", 'c')"),
+            Some("f(\"a)b\", 'c')".to_string())
+        );
+    }
+
+    #[test]
+    fn test_call_target_fallbacks() {
+        // Unbalanced input keeps the bare name.
+        assert_eq!(
+            extract_call_target_from_expr("foo(a"),
+            Some("foo".to_string())
+        );
+        // Keywords and literals still rejected.
+        assert_eq!(extract_call_target_from_expr("if (x)"), None);
+        assert_eq!(extract_call_target_from_expr("42(x)"), None);
+        // Generic turbofish stripped from the name.
+        assert_eq!(
+            extract_call_target_from_expr("make<int>(1)"),
+            Some("make(1)".to_string())
+        );
+    }
 }

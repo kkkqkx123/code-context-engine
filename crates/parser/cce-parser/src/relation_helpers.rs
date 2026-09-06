@@ -147,15 +147,32 @@ pub enum ExportType {
 }
 
 pub fn extract_exports_from_entities(entities: &[Entity], language: &Language) -> Vec<ExportInfo> {
+    // Explicit-export languages (JS/TS family): when the extractor recorded
+    // real `export` statements (`is_exported` metadata), only those symbols
+    // are exports. A file without any `export` statement exports nothing,
+    // even though its top-level symbols remain addressable by visibility.
+    let explicit = matches!(
+        language,
+        Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx
+    ) && entities
+        .iter()
+        .any(|e| e.metadata.get("is_exported").is_some_and(|v| v == "true"));
     let mut exports = Vec::new();
     for entity in entities {
         if entity.depth > 0 || entity.parent.is_some() {
             continue;
         }
-        let is_export = !matches!(
-            detect_entity_visibility(entity, language),
-            Visibility::Private
-        );
+        let is_export = if explicit {
+            entity
+                .metadata
+                .get("is_exported")
+                .is_some_and(|v| v == "true")
+        } else {
+            !matches!(
+                detect_entity_visibility(entity, language),
+                Visibility::Private
+            )
+        };
         if is_export {
             let export_type = if entity
                 .metadata

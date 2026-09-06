@@ -3,6 +3,7 @@ pub mod cpp;
 pub mod csharp;
 pub mod dart;
 pub mod go;
+pub mod hierarchy;
 pub mod java;
 pub mod javascript;
 pub mod python;
@@ -16,6 +17,28 @@ use crate::symbol::{ScopeContext, Visibility};
 
 /// Dispatch visibility signal parsing to the language-specific table.
 pub fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visibility> {
+    // Kotlin modifiers differ from Java: `open` is orthogonal to visibility
+    // (an `open class` is still public) while `internal` is Kotlin-specific.
+    if *language == Language::Kotlin {
+        let trimmed = signal.to_lowercase();
+        match trimmed.trim() {
+            "public" | "pub" | "export" | "exported" | "open" => {
+                return Some(Visibility::Public);
+            }
+            "protected" => return Some(Visibility::Protected),
+            "private" | "pub(self)" | "self" => return Some(Visibility::Private),
+            "internal" | "package" | "crate" | "pub(crate)" => {
+                return Some(Visibility::Internal);
+            }
+            "protected internal" => return Some(Visibility::ProtectedInternal),
+            "private protected" => return Some(Visibility::PrivateProtected),
+            _ => {}
+        }
+    }
+    // Shell `local` declares a function-local variable, never a public symbol.
+    if matches!(language, Language::Bash) && signal.trim().eq_ignore_ascii_case("local") {
+        return Some(Visibility::Private);
+    }
     match language {
         Language::Rust => rust::visibility_from_signal(signal),
         Language::Go => go::visibility_from_signal(signal),
@@ -89,6 +112,10 @@ pub fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visib
 
 /// Dispatch naming-convention visibility to the language-specific handler.
 pub fn visibility_from_name(name: &str, language: &Language) -> Option<Visibility> {
+    // Ruby's `initialize` is always private, regardless of position.
+    if *language == Language::Ruby && name == "initialize" {
+        return Some(Visibility::Private);
+    }
     match language {
         Language::Go => go::visibility_from_name(name),
         Language::Python => python::visibility_from_name(name),
@@ -142,17 +169,28 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
         }
     }
 
+    // Ruby's `initialize` is naming-private; check before modifiers so an
+    // absent modifier does not fall through to the public default.
+    if *language == Language::Ruby && entity.name == "initialize" {
+        return Visibility::Private;
+    }
+
     match language {
         Language::Rust => rust::default_visibility(),
         Language::Go => go::default_visibility(&entity.name),
         Language::Python => python::default_visibility(&entity.name),
         Language::Dart => dart::default_visibility(&entity.name),
-        Language::Java | Language::Kotlin | Language::Scala => java::default_visibility(),
+        // Kotlin defaults to public; Java/Scala stay package-private.
+        Language::Kotlin => Visibility::Public,
+        Language::Java | Language::Scala => java::default_visibility(),
         Language::CSharp => csharp::default_visibility(),
         Language::Cpp => cpp::default_visibility(),
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             javascript::default_visibility()
         }
+        // Shell/Lua have no visibility system; keep symbols file-scoped
+        // instead of advertising them as public exports.
+        Language::Bash | Language::Lua => Visibility::Module,
         _ => Visibility::Public,
     }
 }

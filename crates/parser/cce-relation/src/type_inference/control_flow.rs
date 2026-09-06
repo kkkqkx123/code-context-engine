@@ -138,6 +138,125 @@ pub mod shared {
         chars.all(|c| c.is_alphanumeric() || c == '_')
     }
 
+    /// Split a condition on top-level `&&` conjunctions.
+    ///
+    /// Each conjunct of `A && B` holds in the then-branch, so narrowing can
+    /// process them independently. Without this,
+    /// `typeof a === "number" && typeof b === "number"` parses the right
+    /// side as the pseudo-type `number" && typeof b === "number"`.
+    /// `||` is deliberately not split: no single disjunct holds alone.
+    /// Splitting respects nesting (`()[]{}<>`) and string literals.
+    pub fn split_top_level_conjuncts(text: &str) -> Vec<&str> {
+        let mut parts = Vec::new();
+        let bytes = text.as_bytes();
+        let mut depth = 0i32;
+        let mut quote: Option<u8> = None;
+        let mut start = 0usize;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if let Some(q) = quote {
+                if b == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if b == q {
+                    quote = None;
+                }
+                i += 1;
+                continue;
+            }
+            match b {
+                b'"' | b'\'' | b'`' => {
+                    quote = Some(b);
+                    i += 1;
+                }
+                b'(' | b'[' | b'{' | b'<' => {
+                    depth += 1;
+                    i += 1;
+                }
+                b')' | b']' | b'}' | b'>' => {
+                    depth -= 1;
+                    i += 1;
+                }
+                b'&' if depth == 0 && bytes.get(i + 1) == Some(&b'&') => {
+                    parts.push(text[start..i].trim());
+                    i += 2;
+                    start = i;
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+        parts.push(text[start..].trim());
+        parts.retain(|p| !p.is_empty());
+        parts
+    }
+
+    /// Split a condition on top-level word conjunctions (`and`).
+    ///
+    /// Same contract as [`split_top_level_conjuncts`] for Python-style
+    /// `A and B` guards.
+    pub fn split_top_level_word_conjuncts<'a>(text: &'a str, word: &str) -> Vec<&'a str> {
+        let mut parts = Vec::new();
+        let bytes = text.as_bytes();
+        let w = word.as_bytes();
+        let mut depth = 0i32;
+        let mut quote: Option<u8> = None;
+        let mut start = 0usize;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if let Some(q) = quote {
+                if b == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if b == q {
+                    quote = None;
+                }
+                i += 1;
+                continue;
+            }
+            match b {
+                b'"' | b'\'' | b'`' => {
+                    quote = Some(b);
+                    i += 1;
+                }
+                b'(' | b'[' | b'{' | b'<' => {
+                    depth += 1;
+                    i += 1;
+                }
+                b')' | b']' | b'}' | b'>' => {
+                    depth -= 1;
+                    i += 1;
+                }
+                _ if depth == 0 && text[i..].starts_with(word) => {
+                    let before = i.checked_sub(1).map(|p| bytes[p]);
+                    let after = bytes.get(i + w.len()).copied();
+                    let boundary_before =
+                        before.is_none_or(|c| !(c.is_ascii_alphanumeric() || c == b'_'));
+                    let boundary_after =
+                        after.is_none_or(|c| !(c.is_ascii_alphanumeric() || c == b'_'));
+                    if boundary_before && boundary_after {
+                        parts.push(text[start..i].trim());
+                        i += w.len();
+                        start = i;
+                        continue;
+                    }
+                    i += 1;
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+        parts.push(text[start..].trim());
+        parts.retain(|p| !p.is_empty());
+        parts
+    }
+
     /// Whether an `if` fact carries an `else` continuation.
     ///
     /// Delegates to the shared fact-text scan so recorded ranges and
@@ -341,6 +460,26 @@ mod tests {
     #[test]
     fn test_is_valid_ident_underscore_only() {
         assert!(is_valid_ident("_"));
+    }
+
+    #[test]
+    fn test_split_top_level_conjuncts() {
+        assert_eq!(
+            split_top_level_conjuncts("typeof a === \"number\" && typeof b === \"number\""),
+            vec!["typeof a === \"number\"", "typeof b === \"number\""]
+        );
+        assert_eq!(split_top_level_conjuncts("x != null"), vec!["x != null"]);
+        // `||` is not split; nested `&&` stays intact.
+        assert_eq!(split_top_level_conjuncts("a || b"), vec!["a || b"]);
+        assert_eq!(
+            split_top_level_conjuncts("f(a && b) && c"),
+            vec!["f(a && b)", "c"]
+        );
+        // `&&` inside strings is not a separator.
+        assert_eq!(
+            split_top_level_conjuncts("x === \"a && b\" && y"),
+            vec!["x === \"a && b\"", "y"]
+        );
     }
 
     #[test]

@@ -96,6 +96,8 @@ pub fn entity_query() -> &'static str {
 ; Constructor definition
 (constructor_declaration
   name: (identifier) @entity.constructor.name
+  parameters: (formal_parameters) @entity.constructor.params
+  body: (block)? @entity.constructor.body
 ) @entity.constructor
 
 ; ============================================
@@ -122,10 +124,15 @@ pub fn entity_query() -> &'static str {
   )
 ) @entity.field
 
-; Local variable declaration
+; Local variable declaration (including `var` inference: the declared type
+; text lands in `.type` and the initializer in `.value` so the metadata
+; layer can record `type_annotation` / `constructor_type` / `literal_type`
+; / `call_target`).
 (local_variable_declaration
+  type: (_) @entity.variable.type
   declarator: (variable_declarator
     name: (identifier) @entity.variable.name
+    value: (_)? @entity.variable.value
   )
 ) @entity.variable
 

@@ -77,12 +77,17 @@ impl LanguageTypeInferer for ScalaTypeInferer {
             };
             for fact in &entity_cf.facts {
                 match fact.kind {
-                    ControlFlowFactKind::If => {
-                        let narrowed: Vec<(String, TypeBinding)> =
+                    ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
+                        let mut narrowed: Vec<(String, TypeBinding)> =
                             narrow_scala_if(&fact.text, ctx, &entity.parameters)
                                 .into_iter()
                                 .map(|result| (result.variable_name, result.narrowed_type))
                                 .collect();
+                        for (_, binding) in narrowed.iter_mut() {
+                            if !binding.span.is_available() {
+                                binding.span = entity.span;
+                            }
+                        }
                         add_polarity_aware_narrowings(
                             ctx,
                             &entity.parameters,

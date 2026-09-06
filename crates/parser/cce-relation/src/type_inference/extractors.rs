@@ -7,12 +7,14 @@ use cce_types::entity::Entity;
 
 use super::types::{InferenceOrigin, ScopedTypeContext, TypeBinding, parse_type_shape};
 
-use super::generics::{GenericTypeArg, parse_generic_type};
+use super::generics::{GenericTypeArg, parse_generic_type, split_call_target};
 
 /// Extract type information from a function entity's struct fields.
 ///
 /// Reads return type from `entity.return_type` and parameter types
 /// from `entity.parameters` (filtering entries with type annotations).
+/// Also stores the return type indexed by function name to enable
+/// `call_target` resolution for variables assigned via `x = f()`.
 pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
     if let Some(ref return_type) = entity.return_type {
         let shape = parse_type_shape(return_type, ctx.language());
@@ -23,7 +25,9 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
             origin: Some(InferenceOrigin::TypeAnnotation),
             shape,
         };
-        ctx.add_return_type(entity.id, binding);
+        ctx.add_return_type(entity.id, binding.clone());
+        // Also store by name for local call_target resolution
+        ctx.add_return_type_by_name(entity.name.clone(), binding);
     }
 
     let param_bindings: Vec<TypeBinding> = entity
@@ -50,6 +54,7 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
 /// 1. `type_annotation` — explicit type annotation (High)
 /// 2. `constructor_type` — constructor call like `x = MyClass()` (Medium)
 /// 3. `literal_type` — literal assignment like `x = 42` (Medium)
+/// 4. `call_target` — function call like `x = f()` (Medium, via FunctionReturn)
 pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
     if let Some(type_name) = entity.metadata.get("type_annotation") {
         let binding = TypeBinding {
@@ -87,6 +92,24 @@ pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
         };
         ctx.add_variable_type(entity.name.clone(), binding);
         try_bind_generic(ctx, lit_type);
+        return;
+    }
+
+    // Local call_target resolution: `x = f()` where `f` is in the same file.
+    // The function's return type was extracted by `extract_function_types` and
+    // stored in the context's name-based index.
+    if let Some(call_target) = entity.metadata.get("call_target") {
+        let (func_name, _args) = split_call_target(call_target);
+        if let Some(return_binding) = ctx.get_return_type_by_name(&func_name) {
+            let binding = TypeBinding {
+                type_name: return_binding.type_name.clone(),
+                type_entity_id: return_binding.type_entity_id,
+                span: entity.span,
+                origin: Some(InferenceOrigin::FunctionReturn),
+                shape: return_binding.shape.clone(),
+            };
+            ctx.add_variable_type(entity.name.clone(), binding);
+        }
     }
 }
 

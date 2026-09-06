@@ -136,6 +136,12 @@ pub fn entity_query() -> &'static str {
   (_)? @entity.property.value
 ) @entity.property
 
+; Primary constructor val/var parameter (Kotlin: `class Foo(val x: Int, var y: String)`)
+(class_parameter
+  (identifier) @entity.property.name
+  (type)? @entity.property.type
+) @entity.property
+
 ; Property getter
 (getter
   (function_body)? @entity.method.getter.body

@@ -9,6 +9,7 @@
 mod batch_processor;
 mod config;
 mod file_processor;
+mod macro_body_call_extractor;
 mod plugin_symbol_replay;
 mod symbol_table;
 
@@ -722,6 +723,81 @@ impl IndexBuilder {
             self.index.add_resolved_relation(relation);
         }
         self
+    }
+
+    /// Derive implicit hierarchy edges and add them to the index.
+    ///
+    /// Runs after all files have been registered and their relations
+    /// resolved: compares Go method sets in the project-global type index
+    /// (see [`crate::policy::hierarchy::derive_go_implements`]) and
+    /// materializes one `Implementation` edge per satisfied interface, so
+    /// hierarchy queries (`get_implementing_classes`,
+    /// `get_implemented_interfaces`) work for Go's implicit implementation.
+    ///
+    /// Parsed-file-local entity ids from the type index are remapped into
+    /// the index-global space; edges whose endpoints cannot be remapped are
+    /// skipped. Re-running is idempotent: edges already present are not
+    /// duplicated.
+    pub fn derive_implicit_hierarchy_edges(&self, symbols: &ProjectSymbolTable) {
+        use crate::index::HierarchyQueryOps;
+        use cce_types::RelationType;
+        use cce_types::relation::CallContext;
+
+        let global = symbols.global_type_index();
+        let edges = crate::policy::hierarchy::derive_go_implements(&global);
+        drop(global);
+        if edges.is_empty() {
+            return;
+        }
+        let mut inserted = 0usize;
+        for edge in edges {
+            let struct_global = self
+                .index
+                .entity_id_remap_for(&cce_types::normalize_project_path(&edge.struct_file))
+                .as_ref()
+                .and_then(|remap| remap.get(&edge.struct_id))
+                .copied();
+            let iface_global = self
+                .index
+                .entity_id_remap_for(&cce_types::normalize_project_path(&edge.iface_file))
+                .as_ref()
+                .and_then(|remap| remap.get(&edge.iface_id))
+                .copied();
+            let (Some(struct_global), Some(iface_global)) = (struct_global, iface_global) else {
+                continue;
+            };
+            if self
+                .index
+                .get_implemented_interfaces(struct_global)
+                .contains(&iface_global)
+            {
+                continue;
+            }
+            let span = self
+                .index
+                .get_function_by_entity_id(struct_global)
+                .map(|entity| entity.span)
+                .unwrap_or_default();
+            self.index.add_resolved_relation(ResolvedRelation {
+                caller: struct_global,
+                callee_id: Some(iface_global),
+                callee_name: edge.iface_name.clone(),
+                relation_type: RelationType::Implementation,
+                span,
+                is_external: false,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: CallContext::Direct,
+                overload_signature: None,
+            });
+            inserted += 1;
+        }
+        tracing::debug!(
+            derived_go_implements = inserted,
+            "Derived implicit Go interface-satisfaction edges"
+        );
     }
 }
 

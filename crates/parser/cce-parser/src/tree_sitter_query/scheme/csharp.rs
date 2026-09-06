@@ -341,26 +341,29 @@ pub fn dependency_query() -> &'static str {
 ; 3. Type References
 ; ============================================
 
-; Class base types (inheritance or implementation, ambiguous)
+; Class base types (`class Circle : Shape`): inheritance. A class base list
+; may mix one base class with interfaces, but the first entry is the base
+; class; the resolver records inheritance and implementations resolve via
+; the symbol table.
 (class_declaration
   (base_list
-    (type) @dependency.type.name
+    (_) @dependency.extend.name
   )
-) @dependency.type
+) @dependency.extend
 
-; Struct base types (all are interface implementations)
+; Struct base types (all are interface implementations: `struct S : I`)
 (struct_declaration
   (base_list
-    (type) @dependency.type.name
+    (_) @dependency.implement.name
   )
-) @dependency.type
+) @dependency.implement
 
-; Record base types
+; Record base types (records support inheritance like classes)
 (record_declaration
   (base_list
-    (type) @dependency.type.name
+    (_) @dependency.extend.name
   )
-) @dependency.type
+) @dependency.extend
 
 ; Interface base types (all are extends)
 (interface_declaration

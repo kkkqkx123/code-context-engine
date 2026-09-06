@@ -14,7 +14,9 @@ use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 use cce_types::language::Language;
 
-use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip_outer_parens};
+use super::control_flow::shared::{
+    extract_balanced_parens, is_valid_ident, split_top_level_conjuncts, strip_outer_parens,
+};
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
@@ -79,8 +81,8 @@ impl LanguageTypeInferer for KotlinTypeInferer {
             };
             for fact in &entity_cf.facts {
                 match fact.kind {
-                    ControlFlowFactKind::If => {
-                        let narrowed: Vec<(String, TypeBinding)> = narrow_kotlin_if(
+                    ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
+                        let mut narrowed: Vec<(String, TypeBinding)> = narrow_kotlin_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
@@ -89,6 +91,11 @@ impl LanguageTypeInferer for KotlinTypeInferer {
                         .into_iter()
                         .map(|result| (result.variable_name, result.narrowed_type))
                         .collect();
+                        for (_, binding) in narrowed.iter_mut() {
+                            if !binding.span.is_available() {
+                                binding.span = entity.span;
+                            }
+                        }
                         add_polarity_aware_narrowings(
                             ctx,
                             &entity.parameters,
@@ -126,6 +133,27 @@ struct NarrowingResult {
 /// - `x is Type && x.prop` → x: Type (via is check)
 /// - `if (x.field == "value")` → x: narrowed union (discriminated union)
 fn narrow_kotlin_if(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    type_index: Option<&crate::symbol_table::TypeMemberIndex>,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
+    if let Some(cond) = strip_kotlin_condition_prefix(text) {
+        let parts = split_top_level_conjuncts(cond);
+        if parts.len() > 1 {
+            let mut out = Vec::new();
+            for part in parts {
+                out.extend(narrow_single_kotlin_condition(
+                    part, ctx, type_index, params,
+                ));
+            }
+            return out;
+        }
+    }
+    narrow_single_kotlin_condition(text, ctx, type_index, params)
+}
+
+fn narrow_single_kotlin_condition(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&crate::symbol_table::TypeMemberIndex>,

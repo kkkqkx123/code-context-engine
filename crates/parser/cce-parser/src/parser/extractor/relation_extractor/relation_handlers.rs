@@ -638,6 +638,10 @@ pub(crate) fn determine_dependency_relation_type(capture_name: &str) -> Relation
         // Embedding (Go embedded fields - from dependency_query)
         "embedding" => RelationType::Embedding,
 
+        // Go interface embedding (`interface F { Stringer; ... }`): the
+        // outer interface inherits the embedded interface's method set.
+        "interface_embedding" => RelationType::TraitInheritance,
+
         // Type parameter bounds
         "type_parameter" => RelationType::TraitBound,
 

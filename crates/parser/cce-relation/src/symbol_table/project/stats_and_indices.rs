@@ -453,27 +453,28 @@ impl ProjectSymbolTable {
                 .or_else(|| entity.metadata.get("constructor_type"))
                 .cloned();
             if let Some(target) = call_target {
-                let simple = target
-                    .rsplit(['.', ':', '/'])
-                    .next()
-                    .unwrap_or(&target)
-                    .trim()
-                    .to_string();
-                if simple.is_empty() {
-                    continue;
-                }
-                if let Some(return_binding) =
-                    self.cross_file_propagator.get_return_type_by_name(&simple)
-                {
+                let language = file.language;
+                let resolved = crate::type_inference::cross_file::resolve_single_call_binding(
+                    &self.cross_file_propagator,
+                    language,
+                    &target,
+                    &mut |arg| {
+                        crate::type_inference::cross_file::infer_arg_shape(ctx, language, arg)
+                    },
+                );
+                if let Some((type_name, type_entity_id, shape)) = resolved {
                     let propagated = crate::type_inference::TypeBinding {
-                        type_name: return_binding.type_name.clone(),
-                        type_entity_id: return_binding.type_entity_id,
+                        type_name,
+                        type_entity_id,
                         span: entity.span,
                         origin: Some(InferenceOrigin::CrossFilePropagation),
-                        shape: return_binding.shape.clone(),
+                        shape,
                     };
                     let should_insert = ctx.get_variable_type(&entity.name).is_none_or(|e| {
-                        crate::type_inference::binding_supersedes(propagated.origin, e.origin)
+                        !crate::type_inference::cross_file::candidate_downgrades_existing(
+                            Some(e),
+                            propagated.shape.as_ref(),
+                        ) && crate::type_inference::binding_supersedes(propagated.origin, e.origin)
                     });
                     if should_insert {
                         ctx.add_variable_type(entity.name.clone(), propagated);
@@ -538,27 +539,31 @@ impl ProjectSymbolTable {
                     .or_else(|| entity.metadata.get("constructor_type"))
                     .cloned();
                 if let Some(target) = call_target {
-                    let simple = target
-                        .rsplit(['.', ':', '/'])
-                        .next()
-                        .unwrap_or(&target)
-                        .trim()
-                        .to_string();
-                    if simple.is_empty() {
-                        continue;
-                    }
-                    if let Some(return_binding) =
-                        self.cross_file_propagator.get_return_type_by_name(&simple)
-                    {
+                    let language = file.language;
+                    let resolved = crate::type_inference::cross_file::resolve_single_call_binding(
+                        &self.cross_file_propagator,
+                        language,
+                        &target,
+                        &mut |arg| {
+                            crate::type_inference::cross_file::infer_arg_shape(ctx, language, arg)
+                        },
+                    );
+                    if let Some((type_name, type_entity_id, shape)) = resolved {
                         let propagated = crate::type_inference::TypeBinding {
-                            type_name: return_binding.type_name.clone(),
-                            type_entity_id: return_binding.type_entity_id,
+                            type_name,
+                            type_entity_id,
                             span: entity.span,
                             origin: Some(InferenceOrigin::CrossFilePropagation),
-                            shape: return_binding.shape.clone(),
+                            shape,
                         };
                         let should_insert = ctx.get_variable_type(&entity.name).is_none_or(|e| {
-                            crate::type_inference::binding_supersedes(propagated.origin, e.origin)
+                            !crate::type_inference::cross_file::candidate_downgrades_existing(
+                                Some(e),
+                                propagated.shape.as_ref(),
+                            ) && crate::type_inference::binding_supersedes(
+                                propagated.origin,
+                                e.origin,
+                            )
                         });
                         if should_insert {
                             ctx.add_variable_type(entity.name.clone(), propagated);

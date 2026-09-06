@@ -243,6 +243,23 @@ pub fn parse_type_shape(type_name: &str, language: Language) -> Option<TypeShape
             return Some(TypeShape::Intersection(parts));
         }
     }
+    // Handle Go-style leading slice/array prefix `[]T` or `[N]T` before
+    // bracket-generic parsing (which requires a non-empty base name).
+    if trimmed.starts_with('[') {
+        if let Some(end) = trimmed.find(']') {
+            let inner_marker = trimmed[1..end].trim();
+            let is_go_prefix = inner_marker.is_empty()
+                || (inner_marker.len() <= 12 && inner_marker.chars().all(|c| c.is_ascii_digit()));
+            if is_go_prefix {
+                let elem = trimmed[end + 1..].trim();
+                if !elem.is_empty() {
+                    if let Some(inner) = parse_type_shape(elem, language) {
+                        return Some(TypeShape::Array(Box::new(inner)));
+                    }
+                }
+            }
+        }
+    }
     // Handle array suffix `[]`
     if let Some(elem) = trimmed.strip_suffix("[]") {
         if let Some(inner) = parse_type_shape(elem.trim(), language) {
@@ -461,6 +478,25 @@ mod tests {
         assert_eq!(
             shape,
             TypeShape::Array(Box::new(TypeShape::Named("string".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_parse_type_shape_go_slice() {
+        let shape = parse_type_shape("[]T", Language::Go).unwrap();
+        assert_eq!(
+            shape,
+            TypeShape::Array(Box::new(TypeShape::Param("T".to_string())))
+        );
+        let shape = parse_type_shape("[]int", Language::Go).unwrap();
+        assert_eq!(
+            shape,
+            TypeShape::Array(Box::new(TypeShape::Named("int".to_string())))
+        );
+        let shape = parse_type_shape("[3]byte", Language::Go).unwrap();
+        assert_eq!(
+            shape,
+            TypeShape::Array(Box::new(TypeShape::Named("byte".to_string())))
         );
     }
 
