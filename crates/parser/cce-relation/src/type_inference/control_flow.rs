@@ -137,6 +137,23 @@ pub mod shared {
         }
         chars.all(|c| c.is_alphanumeric() || c == '_')
     }
+
+    /// Whether an `if` fact carries an `else` continuation.
+    ///
+    /// Delegates to the shared fact-text scan so recorded ranges and
+    /// text-level detection never disagree.
+    pub fn has_else_branch(text: &str) -> bool {
+        cce_types::has_outer_else_branch(text)
+    }
+
+    /// Byte offset of the outer `else` keyword within the fact text.
+    ///
+    /// Delegates to the shared fact-text scan so recorded ranges and
+    /// text-level detection never disagree. Returns `None` when no outer
+    /// `else` continuation exists.
+    pub fn find_else_offset(text: &str) -> Option<usize> {
+        cce_types::find_outer_else_offset(text)
+    }
 }
 
 #[cfg(test)]
@@ -350,5 +367,52 @@ mod tests {
         let (a, b) = split_two_args("List<int>, String").unwrap();
         assert_eq!(a.trim(), "List<int>");
         assert_eq!(b.trim(), "String");
+    }
+
+    #[test]
+    fn test_has_else_branch_with_block() {
+        assert!(has_else_branch(
+            "if (x instanceof String) { use(x); } else { other(x); }"
+        ));
+    }
+
+    #[test]
+    fn test_has_else_branch_braceless() {
+        assert!(has_else_branch(
+            "if (x != null) return x; else return null;"
+        ));
+    }
+
+    #[test]
+    fn test_has_else_branch_without_else() {
+        assert!(!has_else_branch("if (x instanceof String) { use(x); }"));
+    }
+
+    #[test]
+    fn test_has_else_branch_nested_else_does_not_count() {
+        assert!(!has_else_branch("if (a) { if (b) { x(); } else { y(); } }"));
+    }
+
+    #[test]
+    fn test_has_else_branch_string_literal_does_not_count() {
+        assert!(!has_else_branch("if (a) { log(\"else\"); }"));
+    }
+
+    #[test]
+    fn test_has_else_branch_else_if_chain_counts() {
+        assert!(has_else_branch("if (a) { x(); } else if (b) { y(); }"));
+    }
+
+    #[test]
+    fn test_find_else_offset_points_at_else_keyword() {
+        let text = "if (x instanceof String) { use(x); } else { other(x); }";
+        let offset = find_else_offset(text).expect("else offset exists");
+        assert_eq!(&text[offset..offset + 4], "else");
+        assert!(has_else_branch(text));
+    }
+
+    #[test]
+    fn test_find_else_offset_without_else_is_none() {
+        assert!(find_else_offset("if (x instanceof String) { use(x); }").is_none());
     }
 }

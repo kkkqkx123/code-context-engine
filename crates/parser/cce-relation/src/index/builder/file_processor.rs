@@ -353,6 +353,7 @@ impl<'a> FileProcessor<'a> {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             })
         }));
         all_relations.extend(resolved_raw);

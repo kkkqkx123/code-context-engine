@@ -261,6 +261,7 @@ mod tests {
             stdlib_category: None,
             owner_type: None,
             call_context: CallContext::default(),
+            overload_signature: None,
         }
     }
 

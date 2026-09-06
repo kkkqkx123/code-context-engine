@@ -94,6 +94,7 @@ fn create_resolved_relation(
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     }
 }
 
@@ -739,8 +740,8 @@ mod type_inference_tests {
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "MyClass");
         assert!(
-            cce_relation::type_inference::origin_priority(binding.origin) <= 4
-                && cce_relation::type_inference::origin_priority(binding.origin) > 0
+            cce_relation::type_inference::types::origin_priority(binding.origin) <= 4
+                && cce_relation::type_inference::types::origin_priority(binding.origin) > 0
         );
     }
 
@@ -757,8 +758,8 @@ mod type_inference_tests {
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "number");
         assert!(
-            cce_relation::type_inference::origin_priority(binding.origin) <= 4
-                && cce_relation::type_inference::origin_priority(binding.origin) > 0
+            cce_relation::type_inference::types::origin_priority(binding.origin) <= 4
+                && cce_relation::type_inference::types::origin_priority(binding.origin) > 0
         );
     }
 
@@ -774,7 +775,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "int");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]
@@ -797,7 +798,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_return_type(EntityId(1)).unwrap();
         assert_eq!(binding.type_name, "String");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]
@@ -845,7 +846,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_variable_type("name").unwrap();
         assert_eq!(binding.type_name, "string");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]
@@ -861,8 +862,8 @@ mod type_inference_tests {
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "int");
         assert!(
-            cce_relation::type_inference::origin_priority(binding.origin) <= 4
-                && cce_relation::type_inference::origin_priority(binding.origin) > 0
+            cce_relation::type_inference::types::origin_priority(binding.origin) <= 4
+                && cce_relation::type_inference::types::origin_priority(binding.origin) > 0
         );
     }
 
@@ -884,7 +885,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_variable_type("name").unwrap();
         assert_eq!(binding.type_name, "String");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]
@@ -899,7 +900,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "int");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]
@@ -914,7 +915,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "int");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]
@@ -941,7 +942,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_variable_type("Self").unwrap();
         assert_eq!(binding.type_name, "MyStruct");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]
@@ -965,7 +966,7 @@ mod type_inference_tests {
         let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
         let binding = ctx.get_variable_type("s").unwrap();
         assert_eq!(binding.type_name, "*MyStruct");
-        assert!(cce_relation::type_inference::origin_priority(binding.origin) >= 5);
+        assert!(cce_relation::type_inference::types::origin_priority(binding.origin) >= 5);
     }
 
     #[test]

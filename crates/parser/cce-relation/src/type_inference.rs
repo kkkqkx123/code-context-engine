@@ -35,8 +35,11 @@ pub mod type_shape;
 pub mod types;
 pub mod typescript;
 
-pub use self::types::origin_priority;
-pub use self::types::{InferenceOrigin, ScopeFrame, ScopedTypeContext, TypeBinding, TypeShape};
+pub use self::types::{
+    AUTHORITATIVE_ORIGIN_THRESHOLD, InferenceOrigin, NestedPatternPart, ScopeFrame,
+    ScopedTypeContext, TypeBinding, TypeShape, binding_supersedes, bindings_supersede,
+    origin_is_authoritative, origin_supersedes,
+};
 pub use cross_file::{CrossFilePropagator, propagate_variable_types};
 pub use extractors::{extract_field_type, extract_function_types, extract_variable_type};
 pub use traits::{InferenceContext, LanguageTypeInferer};
@@ -285,6 +288,49 @@ impl TypeInferenceEngine {
         Some(members)
     }
 
+    /// Bind top-level destructured names through same-file member types.
+    fn bind_member_names(
+        ctx: &mut ScopedTypeContext,
+        file: &cce_types::ParsedFile,
+        entity: &cce_types::Entity,
+        members: &std::collections::HashMap<String, String>,
+        names: &[String],
+    ) {
+        for part in names {
+            if let Some(member_ty) = members.get(part) {
+                ctx.add_variable_type(
+                    part.clone(),
+                    TypeBinding {
+                        type_name: member_ty.clone(),
+                        type_entity_id: None,
+                        span: entity.span,
+                        origin: Some(InferenceOrigin::DestructuringAssignment),
+                        shape: crate::type_inference::types::parse_type_shape(
+                            member_ty,
+                            file.language,
+                        ),
+                    },
+                );
+            }
+        }
+    }
+
+    /// Recover the nested destructuring pattern of a multi-binding entity.
+    ///
+    /// Slices the statement source by the entity span, keeps the assignment
+    /// left-hand side, and parses grouping. Returns `None` when any step
+    /// fails so the caller keeps the existing flat mapping.
+    fn nested_pattern_parts(
+        file: &cce_types::ParsedFile,
+        entity: &cce_types::Entity,
+    ) -> Option<Vec<NestedPatternPart>> {
+        let text = file
+            .source
+            .get(entity.span.start_byte..entity.span.end_byte)?;
+        let lhs = split_assignment_lhs(text)?;
+        parse_nested_pattern_list(lhs)
+    }
+
     /// Look up a parameter type in the closest enclosing function scope.
     ///
     /// Uses span containment (smallest enclosing function) rather than the
@@ -393,7 +439,7 @@ impl TypeInferenceEngine {
                         // whole collection). Parts stay unbound when the
                         // element type cannot be determined.
                         if matches!(entity.subtype.as_deref(), Some("case") | Some("loop")) {
-                            match crate::type_inference::types::element_type_of_shape(&shape) {
+                            match crate::type_inference::types::element_type_at_depth(&shape, 1) {
                                 Some(element) => shape = element,
                                 None => continue,
                             }
@@ -405,26 +451,20 @@ impl TypeInferenceEngine {
                         // than guessed; tuple shapes keep positional mapping.
                         if let TypeShape::Named(type_name) = &shape {
                             if let Some(members) = Self::named_type_members(file, type_name) {
-                                for part in &parts {
-                                    if let Some(member_ty) = members.get(part) {
-                                        ctx.add_variable_type(
-                                            part.clone(),
-                                            TypeBinding {
-                                                type_name: member_ty.clone(),
-                                                type_entity_id: None,
-                                                span: entity.span,
-                                                origin: Some(
-                                                    InferenceOrigin::DestructuringAssignment,
-                                                ),
-                                                shape:
-                                                    crate::type_inference::types::parse_type_shape(
-                                                        member_ty,
-                                                        file.language,
-                                                    ),
-                                            },
-                                        );
-                                    }
-                                }
+                                Self::bind_member_names(ctx, file, entity, &members, &parts);
+                                continue;
+                            }
+                        }
+                        // Nested tuple patterns (`a, (b, c) = t`) map by
+                        // shape position through each grouping level.
+                        // Statements that do not parse as nested patterns
+                        // keep the existing flat mapping.
+                        if let Some(nested) = Self::nested_pattern_parts(file, entity) {
+                            if nested
+                                .iter()
+                                .any(|part| matches!(part, NestedPatternPart::Group(_)))
+                            {
+                                ctx.add_nested_destructuring_binding(&nested, &shape);
                                 continue;
                             }
                         }
@@ -467,16 +507,17 @@ impl TypeInferenceEngine {
                             continue;
                         };
                         let Some(element) =
-                            crate::type_inference::types::element_type_of_shape(&shape)
+                            crate::type_inference::types::element_type_at_depth(&shape, 1)
                         else {
                             continue;
                         };
                         let type_name =
                             crate::type_inference::types::type_shape_to_string(&element);
                         let keep = ctx.get_variable_type(&entity.name).is_none_or(|existing| {
-                            crate::type_inference::types::origin_priority(Some(
+                            crate::type_inference::types::origin_supersedes(
                                 InferenceOrigin::DestructuringAssignment,
-                            )) >= crate::type_inference::types::origin_priority(existing.origin)
+                                existing.origin,
+                            )
                         });
                         if keep {
                             ctx.add_variable_type(
@@ -512,10 +553,10 @@ impl TypeInferenceEngine {
                             // Never clobber a higher-priority binding (e.g. an
                             // explicit annotation recorded during declarations).
                             let keep = ctx.get_variable_type(&entity.name).is_none_or(|existing| {
-                                crate::type_inference::types::origin_priority(Some(origin))
-                                    >= crate::type_inference::types::origin_priority(
-                                        existing.origin,
-                                    )
+                                crate::type_inference::types::origin_supersedes(
+                                    origin,
+                                    existing.origin,
+                                )
                             });
                             if keep {
                                 ctx.add_variable_type(
@@ -690,6 +731,224 @@ impl TypeInferenceEngine {
     }
 }
 
+/// Left-hand side of the first top-level assignment in a statement.
+///
+/// Skips `==`, `!=`, `=>`, `<=` and `>=`, ignores nesting and quoted
+/// regions, and strips declaration keywords plus a trailing top-level
+/// type annotation. Returns `None` when no plain assignment is found.
+fn split_assignment_lhs(statement: &str) -> Option<&str> {
+    let bytes = statement.as_bytes();
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => {
+                i = skip_pattern_quoted(bytes, i);
+                continue;
+            }
+            b'(' => paren += 1,
+            b')' => paren = paren.saturating_sub(1),
+            b'[' => bracket += 1,
+            b']' => bracket = bracket.saturating_sub(1),
+            b'{' => brace += 1,
+            b'}' => brace = brace.saturating_sub(1),
+            b'=' if paren == 0 && bracket == 0 && brace == 0 => {
+                let prev = if i > 0 { bytes[i - 1] } else { 0 };
+                let next = bytes.get(i + 1).copied().unwrap_or(0);
+                if prev == b'=' || prev == b'!' || prev == b'<' || prev == b'>' {
+                    i += 1;
+                    continue;
+                }
+                if next == b'=' || next == b'>' {
+                    i += 1;
+                    continue;
+                }
+                return Some(strip_pattern_affixes(statement[..i].trim()));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Strip declaration keywords and a trailing top-level type annotation.
+fn strip_pattern_affixes(lhs: &str) -> &str {
+    let mut rest = lhs.trim();
+    for prefix in ["let mut ", "let ", "val ", "var ", "const "] {
+        if let Some(stripped) = rest.strip_prefix(prefix) {
+            rest = stripped.trim();
+            break;
+        }
+    }
+    let bytes = rest.as_bytes();
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => {
+                i = skip_pattern_quoted(bytes, i);
+                continue;
+            }
+            b'(' => paren += 1,
+            b')' => paren = paren.saturating_sub(1),
+            b'[' => bracket += 1,
+            b']' => bracket = bracket.saturating_sub(1),
+            b'{' => brace += 1,
+            b'}' => brace = brace.saturating_sub(1),
+            b':' if paren == 0 && bracket == 0 && brace == 0 => {
+                let prev = if i > 0 { bytes[i - 1] } else { 0 };
+                let next = bytes.get(i + 1).copied().unwrap_or(0);
+                if prev != b':' && next != b':' {
+                    return rest[..i].trim();
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    rest
+}
+
+/// Parse a comma-separated destructuring pattern with grouping.
+fn parse_nested_pattern_list(text: &str) -> Option<Vec<NestedPatternPart>> {
+    let mut parts = Vec::new();
+    for item in split_top_level_commas(text)? {
+        parts.push(parse_nested_pattern_part(item.trim())?);
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // A lone outer group belongs to the pattern itself (`let (a, b) = t`),
+    // so unwrap it instead of treating it as one nested element.
+    while parts.len() == 1 {
+        let inner = match parts.first() {
+            Some(NestedPatternPart::Group(inner)) => inner.clone(),
+            _ => break,
+        };
+        parts = inner;
+    }
+    Some(parts)
+}
+
+/// Parse one destructuring element: placeholder, group or plain name.
+fn parse_nested_pattern_part(text: &str) -> Option<NestedPatternPart> {
+    let text = text.trim();
+    if text == "_" {
+        return Some(NestedPatternPart::Wildcard);
+    }
+    let mut rest = text;
+    for prefix in ["mut ", "ref "] {
+        if let Some(stripped) = rest.strip_prefix(prefix) {
+            rest = stripped.trim();
+            break;
+        }
+    }
+    if rest.starts_with('(') && rest.ends_with(')') && is_fully_wrapped(rest) {
+        return parse_nested_pattern_list(&rest[1..rest.len() - 1]).map(NestedPatternPart::Group);
+    }
+    if is_pattern_ident(rest) {
+        return Some(NestedPatternPart::Name(rest.to_string()));
+    }
+    None
+}
+
+/// Whether the outer parentheses wrap the whole text.
+fn is_fully_wrapped(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    for (i, byte) in bytes.iter().enumerate() {
+        match byte {
+            b'(' => depth += 1,
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && i != bytes.len() - 1 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
+/// Split on depth-zero commas; `None` on unbalanced nesting or quotes.
+fn split_top_level_commas(text: &str) -> Option<Vec<&str>> {
+    let bytes = text.as_bytes();
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut brace = 0usize;
+    let mut start = 0usize;
+    let mut items = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => {
+                i = skip_pattern_quoted(bytes, i);
+                continue;
+            }
+            b'(' => paren += 1,
+            b')' => {
+                if paren == 0 {
+                    return None;
+                }
+                paren -= 1;
+            }
+            b'[' => bracket += 1,
+            b']' => {
+                if bracket == 0 {
+                    return None;
+                }
+                bracket -= 1;
+            }
+            b'{' => brace += 1,
+            b'}' => {
+                if brace == 0 {
+                    return None;
+                }
+                brace -= 1;
+            }
+            b',' if paren == 0 && bracket == 0 && brace == 0 => {
+                items.push(text[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if paren != 0 || bracket != 0 || brace != 0 {
+        return None;
+    }
+    items.push(text[start..].trim());
+    Some(items)
+}
+
+/// Advance past a quoted region starting at the quote character.
+fn skip_pattern_quoted(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut j = start + 1;
+    while j < bytes.len() {
+        if bytes[j] == b'\\' {
+            j += 2;
+            continue;
+        }
+        if bytes[j] == quote {
+            return j + 1;
+        }
+        j += 1;
+    }
+    j
+}
+
+/// Plain identifier check for recovered pattern names.
+fn is_pattern_ident(text: &str) -> bool {
+    crate::type_inference::control_flow::shared::is_valid_ident(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,7 +1116,9 @@ mod tests {
         );
 
         ctx1.merge_from(&ctx2);
-        assert_eq!(ctx1.get_variable_type("x").unwrap().type_name, "int");
+        // Equal-priority bindings replace: the incoming binding wins ties so
+        // repeated merges converge instead of pinning the first value seen.
+        assert_eq!(ctx1.get_variable_type("x").unwrap().type_name, "str");
         assert_eq!(ctx1.get_variable_type("y").unwrap().type_name, "float");
     }
 
@@ -893,20 +1154,19 @@ mod tests {
 
     #[test]
     fn test_confidence_ordering() {
-        assert!(
-            crate::type_inference::types::origin_priority(Some(
-                crate::type_inference::types::InferenceOrigin::TypeAnnotation
-            )) > crate::type_inference::types::origin_priority(Some(
-                crate::type_inference::types::InferenceOrigin::LiteralType
-            ))
-        );
-        assert!(
-            crate::type_inference::types::origin_priority(Some(
-                crate::type_inference::types::InferenceOrigin::ControlFlowNarrowing
-            )) > crate::type_inference::types::origin_priority(Some(
-                crate::type_inference::types::InferenceOrigin::ConstructorCall
-            ))
-        );
+        use crate::type_inference::types::InferenceOrigin;
+        assert!(crate::type_inference::types::origin_supersedes(
+            InferenceOrigin::TypeAnnotation,
+            Some(InferenceOrigin::LiteralType),
+        ));
+        assert!(crate::type_inference::types::origin_supersedes(
+            InferenceOrigin::ControlFlowNarrowing,
+            Some(InferenceOrigin::ConstructorCall),
+        ));
+        assert!(!crate::type_inference::types::binding_supersedes(
+            Some(InferenceOrigin::LiteralType),
+            Some(InferenceOrigin::TypeAnnotation),
+        ));
     }
 
     #[test]
@@ -1021,5 +1281,94 @@ mod tests {
 
         assert_eq!(ctx.get_variable_type("x").unwrap().type_name, "bool");
         assert_eq!(ctx.get_variable_type("y").unwrap().type_name, "str");
+    }
+
+    #[test]
+    fn test_parse_nested_pattern_list_flat_and_grouped() {
+        let parts = parse_nested_pattern_list("a, (b, c)").expect("nested pattern");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], NestedPatternPart::Name("a".to_string()));
+        assert_eq!(
+            parts[1],
+            NestedPatternPart::Group(vec![
+                NestedPatternPart::Name("b".to_string()),
+                NestedPatternPart::Name("c".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parse_nested_pattern_list_unwraps_lone_group() {
+        let parts = parse_nested_pattern_list("(a, (b, c))").expect("unwrapped pattern");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], NestedPatternPart::Name("a".to_string()));
+        assert!(matches!(parts[1], NestedPatternPart::Group(_)));
+    }
+
+    #[test]
+    fn test_parse_nested_pattern_list_rejects_broken_input() {
+        assert!(parse_nested_pattern_list("a, (b, c").is_none());
+        assert!(parse_nested_pattern_list("a, foo(1)").is_none());
+        assert!(parse_nested_pattern_list("").is_none());
+        assert_eq!(
+            parse_nested_pattern_list("_, b").expect("wildcard pattern"),
+            vec![
+                NestedPatternPart::Wildcard,
+                NestedPatternPart::Name("b".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_split_assignment_lhs_skips_comparisons() {
+        assert_eq!(
+            split_assignment_lhs("a, (b, c) = make()").unwrap(),
+            "a, (b, c)"
+        );
+        assert_eq!(
+            split_assignment_lhs("let (a, (b, c)): Pair = make();").unwrap(),
+            "(a, (b, c))"
+        );
+        assert!(split_assignment_lhs("a == b").is_none());
+    }
+
+    #[test]
+    fn test_nested_destructuring_end_to_end() {
+        use cce_types::entity::{Entity, EntityKind};
+        use cce_types::{Language, ParsedFile};
+
+        let source = "a, (b, c) = make()";
+        let mut file = ParsedFile::new(Language::Python, "demo.py".to_string(), source);
+        let mut maker = Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "make".to_string(),
+            Span {
+                start_byte: 0,
+                end_byte: source.len(),
+                ..Span::default()
+            },
+        );
+        maker.return_type = Some("Tuple[str, Tuple[int, bool]]".to_string());
+        file.entities.push(maker);
+        let mut multi = Entity::new(
+            EntityId(2),
+            EntityKind::Variable,
+            "a, b, c".to_string(),
+            Span {
+                start_byte: 0,
+                end_byte: source.len(),
+                ..Span::default()
+            },
+        );
+        multi
+            .metadata
+            .insert("call_target".to_string(), "make".to_string());
+        file.entities.push(multi);
+
+        let ctx = TypeInferenceEngine::infer_types(&file, &InferenceContext::new());
+        assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "str");
+        assert_eq!(ctx.get_variable_type("b").unwrap().type_name, "int");
+        assert_eq!(ctx.get_variable_type("c").unwrap().type_name, "bool");
     }
 }

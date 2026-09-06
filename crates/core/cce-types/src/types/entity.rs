@@ -32,7 +32,10 @@ mod id;
 mod kind;
 pub mod meta_keys;
 pub use behavior::{BehaviorFact, BehaviorFactKind, BehaviorStore, EntityBehavior};
-pub use control_flow::{ControlFlowFact, ControlFlowFactKind, ControlFlowStore, EntityControlFlow};
+pub use control_flow::{
+    ControlFlowFact, ControlFlowFactKind, ControlFlowStore, EntityControlFlow,
+    find_outer_else_offset, has_outer_else_branch,
+};
 pub use embedded_block::{
     BlockRelation, BlockRelationType, BlockType, EmbeddedBlock, EmbeddedBlockSnapshot,
 };

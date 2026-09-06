@@ -55,6 +55,7 @@ pub(super) fn internal_edge(
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     }
 }
 
@@ -74,6 +75,7 @@ pub(super) fn external_edge(caller: EntityId, callee_name: &str) -> ResolvedRela
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     }
 }
 
@@ -95,6 +97,7 @@ pub(super) fn unresolved_edge(
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     }
 }
 

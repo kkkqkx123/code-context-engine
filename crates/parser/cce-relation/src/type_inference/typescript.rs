@@ -12,8 +12,9 @@ use super::control_flow::shared::{
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, TypeShape, declared_shape, narrow_discriminated_union,
-    narrow_truthiness, parse_type_shape, subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings, declared_shape,
+    narrow_discriminated_union, narrow_truthiness, parse_type_shape, subtract_union_members,
+    type_shape_to_string,
 };
 use crate::symbol_table::TypeMemberIndex;
 use cce_types::language::Language;
@@ -56,7 +57,25 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_typescript_if(
+                        let narrowed: Vec<(String, TypeBinding)> = narrow_typescript_if(
+                            &fact.text,
+                            ctx,
+                            inference_ctx.type_index(),
+                            &entity.parameters,
+                        )
+                        .into_iter()
+                        .map(|result| (result.variable_name, result.narrowed_type))
+                        .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::TypeScript,
+                            fact,
+                            &narrowed,
+                        );
+                    }
+                    ControlFlowFactKind::Match => {
+                        for result in narrow_typescript_switch(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
@@ -193,6 +212,116 @@ fn narrow_typescript_discriminated_union(
         }
     }
     results
+}
+
+/// Narrow types from a TypeScript `switch` statement.
+///
+/// A `typeof` scrutinee binds each string-literal arm to its literal type,
+/// mirroring the `typeof` equality narrowing. A plain field scrutinee
+/// narrows through the discriminated-union index, mirroring the
+/// strict-equality narrowing. Literal, numeric and default labels stay
+/// conservative, as do scrutinees that are neither `typeof` applications
+/// nor plain field selections.
+fn narrow_typescript_switch(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    type_index: Option<&TypeMemberIndex>,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
+    let Some(scrutinee) = extract_typescript_switch_scrutinee(text) else {
+        return vec![];
+    };
+    let mut results = vec![];
+    let mut search_start = 0;
+    while let Some(case_pos) = text[search_start..].find("case ") {
+        let abs_case = search_start + case_pos;
+        // Case labels start a statement: the previous non-whitespace char
+        // must open the switch body or terminate the prior arm, keeping
+        // string literals such as `log("case x:")` from binding.
+        let prev = text[..abs_case].chars().rev().find(|c| !c.is_whitespace());
+        if !matches!(prev, None | Some('{') | Some('}') | Some(';')) {
+            search_start = abs_case + 5;
+            continue;
+        }
+        let after_case = &text[abs_case + 5..];
+        let label_end = after_case.find(':').unwrap_or(after_case.len());
+        let label = after_case[..label_end].trim();
+        if let Some(literal) = parse_string_literal(label) {
+            match &scrutinee {
+                TypeScriptSwitchScrutinee::TypeOf(var_name) => {
+                    results.push(NarrowingResult {
+                        variable_name: var_name.clone(),
+                        narrowed_type: TypeBinding {
+                            type_name: literal,
+                            type_entity_id: None,
+                            span: Span::default(),
+                            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                            shape: None,
+                        },
+                    });
+                }
+                TypeScriptSwitchScrutinee::Field {
+                    var_name,
+                    field_name,
+                } => {
+                    let shape_opt = ctx
+                        .get_variable_type(var_name)
+                        .and_then(|existing| {
+                            existing.shape.clone().or_else(|| {
+                                parse_type_shape(&existing.type_name, Language::TypeScript)
+                            })
+                        })
+                        .or_else(|| declared_shape_here(ctx, params, var_name));
+                    if let Some(shape) = shape_opt {
+                        if let Some(narrowed) =
+                            narrow_discriminated_union(&shape, field_name, &literal, type_index)
+                        {
+                            results.push(narrowing_result(var_name.clone(), narrowed));
+                        }
+                    }
+                }
+            }
+        }
+        search_start = abs_case + 5;
+    }
+    results
+}
+
+/// Switch scrutinee forms eligible for narrowing.
+enum TypeScriptSwitchScrutinee {
+    /// `switch (typeof x)` narrows `x` per case literal.
+    TypeOf(String),
+    /// `switch (x.field)` narrows `x` through the discriminated union.
+    Field {
+        var_name: String,
+        field_name: String,
+    },
+}
+
+/// Extract the scrutinee of a `switch` statement.
+fn extract_typescript_switch_scrutinee(text: &str) -> Option<TypeScriptSwitchScrutinee> {
+    let switch_pos = text.find("switch")?;
+    let after = text[switch_pos + "switch".len()..].trim_start();
+    let scrutinee = extract_balanced_parens(after)?.trim().to_string();
+    if let Some(rest) = scrutinee.strip_prefix("typeof") {
+        let var_name = rest.trim().to_string();
+        if is_valid_ident(&var_name) {
+            return Some(TypeScriptSwitchScrutinee::TypeOf(var_name));
+        }
+        return None;
+    }
+    if scrutinee.contains("instanceof") || scrutinee.contains("typeof") {
+        return None;
+    }
+    let (var_name, field_name) = scrutinee.split_once('.')?;
+    let (var_name, field_name) = (var_name.trim(), field_name.trim());
+    if !is_valid_ident(var_name) || !is_valid_ident(field_name) || field_name.contains('.') {
+        return None;
+    }
+    Some(TypeScriptSwitchScrutinee::Field {
+        var_name: var_name.to_string(),
+        field_name: field_name.to_string(),
+    })
 }
 
 fn parse_typescript_strict_equality_pattern(text: &str) -> Option<(String, String, String)> {
@@ -450,10 +579,22 @@ fn parse_typescript_loose_inequality_null_pattern(text: &str) -> Option<(String,
             let left = cleaned[..pos].trim();
             let right = cleaned[pos + op.len()..].trim();
             if left.contains('.') {
+                // Safe-call receivers narrow their base; other dotted
+                // expressions stay conservative.
+                if right == "null" {
+                    if let Some(receiver) = typescript_null_asserted_receiver(left) {
+                        return Some((receiver.to_string(), "null".to_string()));
+                    }
+                }
                 continue;
             }
             if is_valid_ident(left) && right == "null" {
                 return Some((left.to_string(), "null".to_string()));
+            }
+            if right == "null" {
+                if let Some(receiver) = typescript_null_asserted_receiver(left) {
+                    return Some((receiver.to_string(), "null".to_string()));
+                }
             }
         }
     }
@@ -621,6 +762,29 @@ fn narrow_typescript_instanceof(text: &str) -> Option<NarrowingResult> {
     })
 }
 
+/// Receiver of a safe-call chain or non-null assertion (`x?.foo`, `x!`).
+///
+/// Returns the base identifier when the text carries an assertion marker,
+/// or `None` for plain identifiers and non-identifier expressions, so
+/// existing plain-identifier behavior stays untouched.
+fn typescript_null_asserted_receiver(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if !trimmed.contains("?.") && !trimmed.ends_with('!') {
+        return None;
+    }
+    let base = trimmed
+        .split("?.")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('!')
+        .trim();
+    if base.is_empty() || !is_valid_ident(base) {
+        return None;
+    }
+    Some(base)
+}
+
 /// Parse `x === null` and the negated `x !== null` (declared union
 /// minus null).
 fn narrow_typescript_strict_equal_null(
@@ -635,10 +799,18 @@ fn narrow_typescript_strict_equal_null(
     if let Some(pos) = text.find("!==") {
         let var_name = text[..pos].trim();
         let rhs = text[pos + 3..].trim();
-        if rhs == "null" && is_valid_ident(var_name) {
-            let declared = declared_shape_here(ctx, params, var_name)?;
-            let narrowed = subtract_union_members(&declared, &["null".to_string()])?;
-            return Some(narrowing_result(var_name.to_string(), narrowed));
+        if rhs == "null" {
+            if is_valid_ident(var_name) {
+                let declared = declared_shape_here(ctx, params, var_name)?;
+                let narrowed = subtract_union_members(&declared, &["null".to_string()])?;
+                return Some(narrowing_result(var_name.to_string(), narrowed));
+            }
+            // Safe-call receivers and non-null assertions narrow their base.
+            if let Some(receiver) = typescript_null_asserted_receiver(var_name) {
+                let declared = declared_shape_here(ctx, params, receiver)?;
+                let narrowed = subtract_union_members(&declared, &["null".to_string()])?;
+                return Some(narrowing_result(receiver.to_string(), narrowed));
+            }
         }
         return None;
     }
@@ -712,6 +884,69 @@ mod tests {
     }
 
     #[test]
+    fn test_typescript_switch_typeof_binds_each_literal() {
+        let ctx = dummy_ctx();
+        let results = narrow_typescript_switch(
+            "switch (typeof x) { case \"string\": use(x); case \"number\": use(x); default: use(x); }",
+            &ctx,
+            None,
+            &[],
+        );
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
+        assert_eq!(results[1].narrowed_type.type_name, "number");
+    }
+
+    #[test]
+    fn test_typescript_switch_typeof_skips_non_literal_labels() {
+        let ctx = dummy_ctx();
+        let results = narrow_typescript_switch(
+            "switch (typeof x) { case 1: use(x); case null: use(x); default: use(x); }",
+            &ctx,
+            None,
+            &[],
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_typescript_switch_field_without_index_stays_empty() {
+        let ctx = dummy_ctx();
+        let results = narrow_typescript_switch(
+            "switch (x.kind) { case \"circle\": use(x); default: use(x); }",
+            &ctx,
+            None,
+            &[],
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_typescript_switch_non_narrowable_scrutinee_stays_empty() {
+        let ctx = dummy_ctx();
+        let results = narrow_typescript_switch(
+            "switch (x + 1) { case \"a\": use(x); default: use(x); }",
+            &ctx,
+            None,
+            &[],
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_typescript_switch_string_literal_does_not_bind() {
+        let ctx = dummy_ctx();
+        let results = narrow_typescript_switch(
+            "switch (typeof x) { log(\"case y:\"); default: use(x); }",
+            &ctx,
+            None,
+            &[],
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
     fn test_typescript_typeof_string() {
         let ctx = dummy_ctx();
         let results = narrow_typescript_if("if (typeof x === \"string\")", &ctx, None, &[]);
@@ -744,6 +979,44 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "MyClass");
+    }
+
+    #[test]
+    fn test_typescript_safe_call_strict_not_equal_narrows_receiver() {
+        let ctx = dummy_ctx();
+        let params = [("x".to_string(), Some("string | null".to_string()))];
+        let results = narrow_typescript_if("if (x?.length !== null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
+    }
+
+    #[test]
+    fn test_typescript_assertion_strict_not_equal_narrows_receiver() {
+        let ctx = dummy_ctx();
+        let params = [("x".to_string(), Some("string | null".to_string()))];
+        let results = narrow_typescript_if("if (x! !== null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
+    }
+
+    #[test]
+    fn test_typescript_safe_call_strict_equal_null_stays_empty() {
+        let ctx = dummy_ctx();
+        let params = [("x".to_string(), Some("string | null".to_string()))];
+        let results = narrow_typescript_if("if (x?.length === null)", &ctx, None, &params);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_typescript_safe_call_loose_not_equal_narrows_receiver() {
+        let ctx = dummy_ctx();
+        let params = [("x".to_string(), Some("string | null".to_string()))];
+        let results = narrow_typescript_if("if (x?.length != null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "string");
     }
 
     #[test]

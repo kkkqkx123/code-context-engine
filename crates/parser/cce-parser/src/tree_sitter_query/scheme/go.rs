@@ -137,6 +137,19 @@ pub fn entity_query() -> &'static str {
   ) @entity.constant
 )
 
+; Range loop variables
+; e.g., `for i, v := range items` binds `i` and `v` to the index and
+; element types. Each name fans out as a sibling entity sharing the
+; iterated collection as provenance.
+(for_statement
+  (range_clause
+    left: (expression_list
+      (identifier) @entity.variable.loop.name
+    )
+    right: (_) @entity.variable.loop.source
+  )
+) @entity.variable.loop
+
 ; ============================================
 ; 4. Entity Components
 ; ============================================

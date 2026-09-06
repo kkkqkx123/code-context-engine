@@ -18,8 +18,8 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, declared_shape, narrow_discriminated_union, parse_type_shape,
-    subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
+    narrow_discriminated_union, parse_type_shape, subtract_union_members, type_shape_to_string,
 };
 
 /// Dart type inference implementation.
@@ -92,12 +92,25 @@ impl LanguageTypeInferer for DartTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_dart_if(
+                        let narrowed: Vec<(String, TypeBinding)> = narrow_dart_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
                             &entity.parameters,
-                        ) {
+                        )
+                        .into_iter()
+                        .map(|result| (result.variable_name, result.narrowed_type))
+                        .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::Dart,
+                            fact,
+                            &narrowed,
+                        );
+                    }
+                    ControlFlowFactKind::Match => {
+                        for result in narrow_dart_switch(&fact.text) {
                             ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
@@ -227,6 +240,29 @@ fn narrow_dart_negated_is(
 }
 
 /// Parse Dart null checks: `x != null` → x: declared, `x == null` → x: null.
+/// Receiver of a safe-call chain or null assertion (`x?.foo`, `x!`).
+///
+/// Returns the base identifier when the text carries an assertion marker,
+/// or `None` for plain identifiers and non-identifier expressions, so
+/// existing plain-identifier behavior stays untouched.
+fn dart_null_asserted_receiver(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if !trimmed.contains("?.") && !trimmed.ends_with('!') {
+        return None;
+    }
+    let base = trimmed
+        .split("?.")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('!')
+        .trim();
+    if base.is_empty() || !is_valid_ident(base) {
+        return None;
+    }
+    Some(base)
+}
+
 fn narrow_dart_null_check(
     text: &str,
     ctx: &ScopedTypeContext,
@@ -239,14 +275,19 @@ fn narrow_dart_null_check(
         if parts.len() != 2 {
             continue;
         }
-        let var_name = parts[0].trim();
+        let raw_name = parts[0].trim();
         let rhs = parts[1].trim();
-        if rhs != "null" || var_name.is_empty() || !is_valid_ident(var_name) {
+        if rhs != "null" || raw_name.is_empty() {
             continue;
         }
         if !negated {
+            // Equality binds null only for plain identifiers: an asserted
+            // form never proves the receiver itself is null.
+            if !is_valid_ident(raw_name) {
+                continue;
+            }
             return Some(NarrowingResult {
-                variable_name: var_name.to_string(),
+                variable_name: raw_name.to_string(),
                 narrowed_type: TypeBinding {
                     type_name: "null".to_string(),
                     type_entity_id: None,
@@ -256,6 +297,15 @@ fn narrow_dart_null_check(
                 },
             });
         }
+        // Inequality narrows the declared union; safe-call receivers and
+        // null assertions narrow their base identifier.
+        let var_name = if is_valid_ident(raw_name) {
+            raw_name
+        } else if let Some(receiver) = dart_null_asserted_receiver(raw_name) {
+            receiver
+        } else {
+            continue;
+        };
         let declared = declared_shape(ctx, params, Language::Dart, var_name)?;
         let narrowed =
             subtract_union_members(&declared, &["null".to_string()]).unwrap_or(declared.clone());
@@ -271,6 +321,47 @@ fn narrow_dart_null_check(
         });
     }
     None
+}
+
+/// Narrow types from Dart switch case arms.
+///
+/// `case String s:` / `case int n when ...:` binds the arm designation.
+/// Literal, null and multi-token (guard-heavy) labels stay conservative.
+fn narrow_dart_switch(text: &str) -> Vec<NarrowingResult> {
+    let mut results = vec![];
+    let mut search_start = 0;
+    while let Some(case_pos) = text[search_start..].find("case ") {
+        let abs_case = search_start + case_pos;
+        // Case labels start a statement: the previous non-whitespace char
+        // must open the switch body or terminate the prior arm. This keeps
+        // string literals such as `log("case int i:")` from binding.
+        let prev = text[..abs_case].chars().rev().find(|c| !c.is_whitespace());
+        if !matches!(prev, None | Some('{') | Some('}') | Some(';')) {
+            search_start = abs_case + 5;
+            continue;
+        }
+        let after_case = &text[abs_case + 5..];
+        let label_end = after_case.find(':').unwrap_or(after_case.len());
+        let mut label = after_case[..label_end].trim();
+        if let Some(when_pos) = label.find(" when ") {
+            label = label[..when_pos].trim();
+        }
+        let tokens: Vec<&str> = label.split_whitespace().collect();
+        if tokens.len() == 2 && is_valid_ident(tokens[0]) && is_valid_ident(tokens[1]) {
+            results.push(NarrowingResult {
+                variable_name: tokens[1].to_string(),
+                narrowed_type: TypeBinding {
+                    type_name: tokens[0].to_string(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: None,
+                },
+            });
+        }
+        search_start = abs_case + 5;
+    }
+    results
 }
 
 /// Strip Dart condition prefixes.
@@ -552,6 +643,34 @@ mod tests {
     }
 
     #[test]
+    fn test_dart_safe_call_narrows_receiver() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("user".to_string(), Some("String?".to_string()))];
+        let results = narrow_dart_if("if (user?.length != null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "user");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_dart_assertion_narrows_receiver() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("user".to_string(), Some("String?".to_string()))];
+        let results = narrow_dart_if("if (user! != null)", &ctx, None, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "user");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_dart_safe_call_equal_null_stays_empty() {
+        let ctx = ScopedTypeContext::new(Language::Dart);
+        let params = [("user".to_string(), Some("String?".to_string()))];
+        let results = narrow_dart_if("if (user?.length == null)", &ctx, None, &params);
+        assert!(results.is_empty());
+    }
+
+    #[test]
     fn test_dart_equal_null_binds_null() {
         let ctx = ScopedTypeContext::new(Language::Dart);
         let results = narrow_dart_if("if (value == null)", &ctx, None, &[]);
@@ -609,5 +728,35 @@ mod tests {
         assert_eq!(var, "shape");
         assert_eq!(field, "kind");
         assert_eq!(value, "circle");
+    }
+
+    #[test]
+    fn test_dart_switch_pattern_arm() {
+        let results = narrow_dart_switch(
+            "switch (obj) { case String s: print(s); case int n: print(n); default: print(x); }",
+        );
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].variable_name, "s");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+        assert_eq!(results[1].variable_name, "n");
+        assert_eq!(results[1].narrowed_type.type_name, "int");
+    }
+
+    #[test]
+    fn test_dart_switch_guard_arm() {
+        let results = narrow_dart_switch(
+            "switch (obj) { case int n when n > 0: print(n); default: print(x); }",
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "n");
+        assert_eq!(results[0].narrowed_type.type_name, "int");
+    }
+
+    #[test]
+    fn test_dart_switch_literal_and_string_skipped() {
+        let results = narrow_dart_switch(
+            "switch (x) { case 1: a(); case \"s\": b(); case null: c(); default: d(); }",
+        );
+        assert!(results.is_empty());
     }
 }

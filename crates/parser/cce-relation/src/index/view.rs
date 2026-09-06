@@ -299,6 +299,7 @@ pub(super) fn fingerprint_in_files_from_maps(
                 relation_type: relation.relation_type,
                 span: relation.span,
                 stdlib_category: relation.stdlib_category,
+                overload_signature: relation.overload_signature.clone(),
             });
         }
     }
@@ -337,6 +338,7 @@ pub(super) fn fingerprint_in_files_from_maps(
                 relation_type: relation.relation_type,
                 span: relation.span,
                 stdlib_category: relation.stdlib_category,
+                overload_signature: relation.overload_signature.clone(),
             });
         }
     }

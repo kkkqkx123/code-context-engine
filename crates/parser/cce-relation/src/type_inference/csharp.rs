@@ -18,8 +18,8 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, declared_shape, narrow_discriminated_union, parse_type_shape,
-    subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
+    narrow_discriminated_union, parse_type_shape, subtract_union_members, type_shape_to_string,
 };
 
 /// C# type inference implementation.
@@ -101,14 +101,22 @@ impl LanguageTypeInferer for CSharpTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_csharp_if(
+                        let narrowed: Vec<(String, TypeBinding)> = narrow_csharp_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
                             &entity.parameters,
-                        ) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
-                        }
+                        )
+                        .into_iter()
+                        .map(|result| (result.variable_name, result.narrowed_type))
+                        .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::CSharp,
+                            fact,
+                            &narrowed,
+                        );
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_csharp_switch(&fact.text) {

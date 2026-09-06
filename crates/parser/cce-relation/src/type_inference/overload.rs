@@ -333,11 +333,59 @@ impl OverloadSet {
         Some(scored[0].0)
     }
 
+    /// Resolve and annotate the winning signature.
+    ///
+    /// Returns the resolved entity id together with a rendered signature
+    /// (`name(params) -> return`) so callers can record which overload a
+    /// call site dispatched to without re-deriving it.
+    pub fn resolve_with_signature(
+        &self,
+        arg_types: &[Option<&TypeShape>],
+    ) -> Option<(EntityId, String)> {
+        let candidate = self.resolve(arg_types)?;
+        let signature = format_overload_signature(&self.name, candidate);
+        Some((candidate.entity_id, signature))
+    }
+
+    /// Score-based resolution that also annotates the winning signature.
+    ///
+    /// Preferred dispatch entry when call-site argument types and language
+    /// scoring are available: the winner is chosen by compatibility scoring
+    /// and returned with its rendered signature for persistence.
+    pub fn resolve_with_score_signature(
+        &self,
+        arg_types: &[Option<&TypeShape>],
+        expected_return: Option<&str>,
+        language: Language,
+    ) -> Option<(EntityId, String)> {
+        let candidate = self.resolve_with_score(arg_types, expected_return, language)?;
+        let signature = format_overload_signature(&self.name, candidate);
+        Some((candidate.entity_id, signature))
+    }
+
     /// Resolve with explicit generic type param bindings.
     pub fn resolve_with_generics(
         &self,
         arg_types: &[Option<&TypeShape>],
         type_params: &HashMap<String, String>,
+    ) -> Option<&OverloadCandidate> {
+        let shape_bindings: HashMap<String, TypeShape> = type_params
+            .iter()
+            .map(|(param, bound)| (param.clone(), TypeShape::Named(bound.clone())))
+            .collect();
+        self.resolve_with_shape_generics(arg_types, &shape_bindings)
+    }
+
+    /// Resolve with structured generic bindings.
+    ///
+    /// This is the preferred entry point for generic-aware resolution:
+    /// bindings carry parsed shapes so substitution and assignability stay
+    /// structural instead of string-based. The string-keyed overload above
+    /// delegates here after lifting its bounds to named shapes.
+    pub fn resolve_with_shape_generics(
+        &self,
+        arg_types: &[Option<&TypeShape>],
+        type_params: &HashMap<String, TypeShape>,
     ) -> Option<&OverloadCandidate> {
         if self.candidates.is_empty() {
             return None;
@@ -360,7 +408,7 @@ impl OverloadSet {
                         score += 1;
                     }
                     Some(actual_shape) => {
-                        if is_assignable(actual_shape, expected, type_params) {
+                        if is_assignable_with_shapes(actual_shape, expected, type_params) {
                             if *actual_shape == expected {
                                 score += 10;
                             } else {
@@ -528,23 +576,36 @@ pub fn is_assignable(
     expected: &TypeShape,
     type_params: &HashMap<String, String>,
 ) -> bool {
+    let shape_bindings: HashMap<String, TypeShape> = type_params
+        .iter()
+        .map(|(param, bound)| (param.clone(), TypeShape::Named(bound.clone())))
+        .collect();
+    is_assignable_with_shapes(actual, expected, &shape_bindings)
+}
+
+/// Check if `actual` is assignable to `expected` with structured bindings.
+///
+/// This is the single structural implementation behind generic-aware
+/// assignability: type parameters resolve against parsed shapes, unbound
+/// parameters stay unassignable, and union handling recurses structurally.
+pub fn is_assignable_with_shapes(
+    actual: &TypeShape,
+    expected: &TypeShape,
+    type_params: &HashMap<String, TypeShape>,
+) -> bool {
     if actual == expected {
         return true;
     }
-    // Handle TypeShape::Param: check against type_params bindings
+    // Handle TypeShape::Param: check against shape bindings
     if let TypeShape::Param(param_name) = expected {
         if let Some(bound) = type_params.get(param_name) {
-            if let TypeShape::Named(act_name) = actual {
-                return act_name == bound;
-            }
+            return actual == bound;
         }
     }
     // Handle generic params in Named form (legacy): if expected is a type param name
     if let TypeShape::Named(exp_name) = expected {
         if let Some(bound) = type_params.get(exp_name) {
-            if let TypeShape::Named(act_name) = actual {
-                return act_name == bound;
-            }
+            return actual == bound;
         }
     }
     // Handle TypeShape::Param on actual side: a param matches if it's the same param
@@ -562,22 +623,35 @@ pub fn is_assignable(
         }),
         (TypeShape::Union(actual_members), TypeShape::Named(_)) => actual_members
             .iter()
-            .any(|m| is_assignable(m, expected, type_params)),
+            .any(|m| is_assignable_with_shapes(m, expected, type_params)),
         (TypeShape::Param(p), TypeShape::Union(members)) => {
             if let Some(bound) = type_params.get(p) {
-                members.iter().any(|m| {
-                    if let TypeShape::Named(n) = m {
-                        n == bound
-                    } else {
-                        false
-                    }
-                })
+                members.iter().any(|m| m == bound)
             } else {
                 false
             }
         }
         _ => false,
     }
+}
+
+/// Render an overload candidate as an annotated signature.
+///
+/// Produces `name(param, ...) -> Return` so resolution call sites can
+/// record the dispatched signature alongside the resolved entity.
+pub fn format_overload_signature(name: &str, candidate: &OverloadCandidate) -> String {
+    let params = candidate
+        .parameter_types
+        .iter()
+        .map(type_shape_to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{}({}) -> {}",
+        name,
+        params,
+        type_shape_to_string(&candidate.return_type)
+    )
 }
 
 /// Compute specificity score for a parameter type (higher = more specific).
@@ -800,5 +874,102 @@ mod tests {
         params.insert("T".to_string(), "string".to_string());
         let resolved = set.resolve_with_args(&[Some(&arg)], &params);
         assert!(resolved.is_some());
+    }
+
+    #[test]
+    fn test_format_overload_signature() {
+        let candidate = OverloadCandidate {
+            entity_id: EntityId(1),
+            parameter_types: vec![named("string"), named("number")],
+            return_type: named("boolean"),
+            specificity: 10,
+        };
+        assert_eq!(
+            format_overload_signature("parse", &candidate),
+            "parse(string, number) -> boolean"
+        );
+    }
+
+    #[test]
+    fn test_resolve_with_signature_annotates_winner() {
+        let mut set = OverloadSet::new("parse".to_string(), "Parser".to_string());
+        set.add_candidate(OverloadCandidate {
+            entity_id: EntityId(1),
+            parameter_types: vec![named("string")],
+            return_type: named("number"),
+            specificity: 10,
+        });
+        set.add_candidate(OverloadCandidate {
+            entity_id: EntityId(2),
+            parameter_types: vec![named("number")],
+            return_type: named("string"),
+            specificity: 10,
+        });
+        let arg = named("string");
+        let (entity_id, signature) = set
+            .resolve_with_signature(&[Some(&arg)])
+            .expect("resolution succeeds");
+        assert_eq!(entity_id, EntityId(1));
+        assert_eq!(signature, "parse(string) -> number");
+    }
+
+    #[test]
+    fn test_resolve_with_signature_empty_set_is_none() {
+        let set = OverloadSet::new("parse".to_string(), "Parser".to_string());
+        let arg = named("string");
+        assert!(set.resolve_with_signature(&[Some(&arg)]).is_none());
+    }
+
+    #[test]
+    fn test_is_assignable_with_shapes_structural_bound() {
+        let actual = TypeShape::Generic {
+            base: "Vec".to_string(),
+            args: vec![named("string")],
+        };
+        let expected = TypeShape::Param("T".to_string());
+        let mut bindings = HashMap::new();
+        bindings.insert("T".to_string(), actual.clone());
+        assert!(is_assignable_with_shapes(&actual, &expected, &bindings));
+        assert!(!is_assignable_with_shapes(
+            &named("int"),
+            &expected,
+            &bindings
+        ));
+    }
+
+    #[test]
+    fn test_resolve_with_shape_generics_prefers_bound_candidate() {
+        let mut set = OverloadSet::new("parse".to_string(), "Parser".to_string());
+        set.add_candidate(OverloadCandidate {
+            entity_id: EntityId(1),
+            parameter_types: vec![TypeShape::Param("T".to_string())],
+            return_type: TypeShape::Param("T".to_string()),
+            specificity: 5,
+        });
+        set.add_candidate(OverloadCandidate {
+            entity_id: EntityId(2),
+            parameter_types: vec![named("number")],
+            return_type: named("string"),
+            specificity: 10,
+        });
+        let arg = named("string");
+        let mut bindings = HashMap::new();
+        bindings.insert("T".to_string(), named("string"));
+        let resolved = set.resolve_with_shape_generics(&[Some(&arg)], &bindings);
+        assert!(resolved.is_some());
+        assert_eq!(resolved.expect("candidate").entity_id, EntityId(1));
+    }
+
+    #[test]
+    fn test_shape_bindings_drive_instantiation() {
+        use crate::type_inference::types::{
+            build_shape_bindings, instantiate_type_shape, parse_type_shape, type_shape_to_string,
+        };
+        use cce_types::language::Language;
+        let declared = parse_type_shape("Pair[T, String]", Language::Java).expect("declared shape");
+        let actual = named("Integer");
+        let bindings = build_shape_bindings(&["T".to_string()], &[actual]);
+        let instantiated = instantiate_type_shape(&declared, &bindings);
+        assert_eq!(type_shape_to_string(&instantiated), "Pair<Integer, String>");
     }
 }

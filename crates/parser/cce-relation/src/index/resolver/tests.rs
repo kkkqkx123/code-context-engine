@@ -418,3 +418,56 @@ fn test_build_metrics_ratio_and_avg_lookups_range() {
     let ratio = metrics.relation_unresolved_ratio.get();
     assert!(ratio > 0.0 && ratio <= 1.0, "ratio in (0,1], got {ratio}");
 }
+
+#[test]
+fn test_else_branch_arg_shape_prefers_complement_in_else_range() {
+    use crate::type_inference::{InferenceOrigin, ScopedTypeContext, TypeBinding};
+    use cce_types::{ControlFlowFact, ControlFlowFactKind, ControlFlowStore};
+
+    let mut parsed = ParsedFile::new(Language::Java, "demo.java".to_string(), "");
+    let mut func = create_test_function_entity(1, "demo");
+    func.span = Span {
+        start_byte: 0,
+        end_byte: 100,
+        ..Span::default()
+    };
+    parsed.entities.push(func);
+    let fact = ControlFlowFact::new(
+        ControlFlowFactKind::If,
+        "if (x instanceof String) { use(x); } else { other(x); }",
+        0,
+        100,
+    )
+    .with_else_range(60, 100);
+    let mut store = ControlFlowStore::default();
+    store.push_fact(EntityId(1), fact);
+    parsed.control_flow = store;
+
+    let mut ctx = ScopedTypeContext::new(Language::Java);
+    ctx.add_narrowed_type(
+        "x".to_string(),
+        TypeBinding {
+            type_name: "String".to_string(),
+            origin: Some(InferenceOrigin::ControlFlowNarrowing),
+            ..Default::default()
+        },
+    );
+    ctx.add_narrowed_type_in_branch(
+        "x".to_string(),
+        TypeBinding {
+            type_name: "Integer".to_string(),
+            origin: Some(InferenceOrigin::ControlFlowNarrowing),
+            ..Default::default()
+        },
+        BranchPolarity::Else,
+    );
+
+    let shape =
+        RelationResolver::infer_else_branch_arg_shape(&parsed, &ctx, "x", 80).expect("else shape");
+    assert_eq!(
+        crate::type_inference::types::type_shape_to_string(&shape),
+        "Integer"
+    );
+    assert!(RelationResolver::infer_else_branch_arg_shape(&parsed, &ctx, "x", 10).is_none());
+    assert!(RelationResolver::infer_else_branch_arg_shape(&parsed, &ctx, "missing", 80).is_none());
+}

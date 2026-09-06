@@ -97,6 +97,7 @@ fn create_resolved_relation(
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     }
 }
 
@@ -361,6 +362,7 @@ fn test_relation_query_by_type() {
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     });
 
     // Query by type
@@ -1025,6 +1027,7 @@ fn test_frontend_component_queries() {
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     });
 
     // EventCallback: Parent binds to handleClick
@@ -1040,6 +1043,7 @@ fn test_frontend_component_queries() {
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     });
 
     // ParameterBinding: Parent passes props to Child
@@ -1055,6 +1059,7 @@ fn test_frontend_component_queries() {
         stdlib_category: None,
         owner_type: None,
         call_context: CallContext::Direct,
+        overload_signature: None,
     });
 
     // Query child elements

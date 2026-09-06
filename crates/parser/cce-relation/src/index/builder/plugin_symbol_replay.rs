@@ -230,6 +230,7 @@ impl IndexBuilder {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             };
             self.index.add_resolved_relation(resolved);
             injected += 1;

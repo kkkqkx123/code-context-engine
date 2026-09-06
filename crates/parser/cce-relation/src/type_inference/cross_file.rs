@@ -17,7 +17,7 @@ use dashmap::DashMap;
 
 use super::types::{
     InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, VariableTypeBinding,
-    origin_priority,
+    binding_supersedes, bindings_supersede,
 };
 
 /// Cross-file return-type propagator.
@@ -321,7 +321,7 @@ impl CrossFilePropagator {
             self.name_index
                 .entry(func_name.clone())
                 .and_modify(|existing| {
-                    if origin_priority(binding.origin) > origin_priority(existing.origin) {
+                    if binding_supersedes(binding.origin, existing.origin) {
                         *existing = binding_clone.clone();
                     }
                 })
@@ -349,17 +349,7 @@ impl CrossFilePropagator {
             self.param_name_index
                 .entry(func_name.clone())
                 .and_modify(|existing| {
-                    let new_max = bindings_clone
-                        .iter()
-                        .map(|b| origin_priority(b.origin))
-                        .max()
-                        .unwrap_or(0);
-                    let existing_max = existing
-                        .iter()
-                        .map(|b| origin_priority(b.origin))
-                        .max()
-                        .unwrap_or(0);
-                    if new_max > existing_max {
+                    if bindings_supersede(&bindings_clone, existing) {
                         *existing = bindings_clone.clone();
                     }
                 })
@@ -388,7 +378,7 @@ impl CrossFilePropagator {
                 self.field_name_index
                     .entry(entity.name.clone())
                     .and_modify(|existing| {
-                        if origin_priority(binding.origin) > origin_priority(existing.origin) {
+                        if binding_supersedes(binding.origin, existing.origin) {
                             *existing = binding_clone.clone();
                         }
                     })
@@ -421,9 +411,7 @@ impl CrossFilePropagator {
                         self.name_index
                             .entry(name)
                             .and_modify(|existing: &mut TypeBinding| {
-                                if origin_priority(binding.origin)
-                                    > origin_priority(existing.origin)
-                                {
+                                if binding_supersedes(binding.origin, existing.origin) {
                                     *existing = binding.clone();
                                 }
                             })
@@ -449,17 +437,7 @@ impl CrossFilePropagator {
                         self.param_name_index
                             .entry(name)
                             .and_modify(|existing: &mut Vec<TypeBinding>| {
-                                let new_max = bindings
-                                    .iter()
-                                    .map(|b| origin_priority(b.origin))
-                                    .max()
-                                    .unwrap_or(0);
-                                let existing_max = existing
-                                    .iter()
-                                    .map(|b| origin_priority(b.origin))
-                                    .max()
-                                    .unwrap_or(0);
-                                if new_max > existing_max {
+                                if bindings_supersede(bindings, existing) {
                                     *existing = bindings.clone();
                                 }
                             })
@@ -485,9 +463,7 @@ impl CrossFilePropagator {
                         self.field_name_index
                             .entry(name)
                             .and_modify(|existing: &mut TypeBinding| {
-                                if origin_priority(binding.origin)
-                                    > origin_priority(existing.origin)
-                                {
+                                if binding_supersedes(binding.origin, existing.origin) {
                                     *existing = binding.clone();
                                 }
                             })
@@ -512,9 +488,7 @@ impl CrossFilePropagator {
                     self.variable_name_index
                         .entry(var_name.clone())
                         .and_modify(|existing: &mut VariableTypeBinding| {
-                            if origin_priority(binding.primary.origin)
-                                > origin_priority(existing.primary.origin)
-                            {
+                            if binding_supersedes(binding.primary.origin, existing.primary.origin) {
                                 *existing = binding.clone();
                             }
                         })
@@ -597,9 +571,7 @@ impl CrossFilePropagator {
         self.variable_name_index
             .entry(var_name.to_string())
             .and_modify(|existing| {
-                if origin_priority(binding.primary.origin)
-                    > origin_priority(existing.primary.origin)
-                {
+                if binding_supersedes(binding.primary.origin, existing.primary.origin) {
                     *existing = binding.clone();
                 }
             })
@@ -657,9 +629,7 @@ impl CrossFilePropagator {
                     self.variable_name_index
                         .entry(var_name.clone())
                         .and_modify(|existing: &mut VariableTypeBinding| {
-                            if origin_priority(binding.primary.origin)
-                                > origin_priority(existing.primary.origin)
-                            {
+                            if binding_supersedes(binding.primary.origin, existing.primary.origin) {
                                 *existing = binding.clone();
                             }
                         })
@@ -827,7 +797,7 @@ pub fn propagate_variable_types(
                     continue;
                 }
                 if let Some(existing) = ctx.get_variable_type(&entity.name) {
-                    if origin_priority(existing.origin) >= 7 {
+                    if super::types::origin_is_authoritative(existing.origin) {
                         continue;
                     }
                 }
@@ -908,8 +878,7 @@ pub fn propagate_variable_types(
                             };
                             let should_insert =
                                 ctx.get_variable_type(&entity.name).is_none_or(|existing| {
-                                    origin_priority(propagated.origin)
-                                        > origin_priority(existing.origin)
+                                    binding_supersedes(propagated.origin, existing.origin)
                                 });
                             if should_insert {
                                 ctx.add_variable_type(entity.name.clone(), propagated);
@@ -947,8 +916,7 @@ pub fn propagate_variable_types(
                         };
                         let should_insert =
                             ctx.get_variable_type(&entity.name).is_none_or(|existing| {
-                                origin_priority(propagated.origin)
-                                    > origin_priority(existing.origin)
+                                binding_supersedes(propagated.origin, existing.origin)
                             });
                         if should_insert {
                             ctx.add_variable_type(entity.name.clone(), propagated);
@@ -1101,6 +1069,58 @@ mod tests {
         let binding = ctx.get_variable_type("u").unwrap();
         assert_eq!(binding.type_name, "User");
         assert!(binding.origin.is_some());
+    }
+
+    #[test]
+    fn test_propagation_preserves_authoritative_binding() {
+        let propagator = CrossFilePropagator::new();
+        let mut ctx_a = ScopedTypeContext::new(Language::Python);
+        ctx_a.add_return_type(
+            EntityId(1),
+            TypeBinding {
+                type_name: "User".to_string(),
+                type_entity_id: None,
+                span: dummy_span(),
+                origin: None,
+                shape: None,
+            },
+        );
+        let entities_a = vec![Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "create_user".to_string(),
+            dummy_span(),
+        )];
+        propagator.insert_file("a.py", &ctx_a, &entities_a);
+
+        let mut file_b = cce_types::ParsedFile::new(Language::Python, "b.py".to_string(), "");
+        let var = Entity::new(
+            EntityId(2),
+            EntityKind::Variable,
+            "u".to_string(),
+            dummy_span(),
+        )
+        .with_metadata("call_target", "create_user");
+        file_b.add_entity(var);
+
+        let contexts: DashMap<String, ScopedTypeContext> = DashMap::new();
+        let mut ctx_b = ScopedTypeContext::new(Language::Python);
+        ctx_b.add_variable_type(
+            "u".to_string(),
+            TypeBinding {
+                type_name: "Admin".to_string(),
+                type_entity_id: None,
+                span: dummy_span(),
+                origin: Some(InferenceOrigin::TypeAnnotation),
+                shape: None,
+            },
+        );
+        contexts.insert("b.py".to_string(), ctx_b);
+
+        propagate_variable_types(&[&file_b], &propagator, &contexts);
+
+        let ctx = contexts.get("b.py").unwrap();
+        assert_eq!(ctx.get_variable_type("u").unwrap().type_name, "Admin");
     }
 
     #[test]

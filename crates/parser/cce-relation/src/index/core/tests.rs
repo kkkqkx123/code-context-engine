@@ -99,6 +99,7 @@ fn test_add_resolved_relation() {
         stdlib_category: None,
         owner_type: None,
         call_context: cce_types::relation::CallContext::Direct,
+        overload_signature: None,
     };
     index.add_resolved_relation(relation);
 
@@ -226,6 +227,7 @@ fn test_clear() {
         stdlib_category: None,
         owner_type: None,
         call_context: cce_types::relation::CallContext::Direct,
+        overload_signature: None,
     };
     index.add_resolved_relation(relation);
 

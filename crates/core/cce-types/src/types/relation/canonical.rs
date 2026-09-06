@@ -301,6 +301,12 @@ pub struct CanonicalRelation {
     pub relation_type: RelationType,
     pub span: Span,
     pub stdlib_category: Option<StdlibCategory>,
+    /// Dispatched overload signature carried through snapshot round-trips.
+    ///
+    /// Optional so snapshots written before overload annotation keep
+    /// loading; absent signatures simply mean single-candidate edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overload_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -632,6 +638,47 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn overload_signature_survives_canonical_round_trip() {
+        let relation = CanonicalRelation {
+            caller: StableSymbolKey::new("./src/lib.rs", "run", EntityKind::Function, "run()"),
+            target: CanonicalRelationTarget::Unresolved {
+                reason: UnresolvedReason::SymbolNotFound,
+            },
+            raw_target: "parse".to_string(),
+            relation_type: RelationType::DirectCall,
+            span: Span::default(),
+            stdlib_category: None,
+            overload_signature: Some("parse(String) -> Integer".to_string()),
+        };
+        let json = serde_json::to_string(&relation).expect("serialize");
+        assert!(json.contains("parse(String) -> Integer"));
+        let parsed: CanonicalRelation = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            parsed.overload_signature,
+            Some("parse(String) -> Integer".to_string())
+        );
+    }
+
+    #[test]
+    fn canonical_relation_without_signature_loads_as_none() {
+        let relation = CanonicalRelation {
+            caller: StableSymbolKey::new("./src/lib.rs", "run", EntityKind::Function, "run()"),
+            target: CanonicalRelationTarget::Unresolved {
+                reason: UnresolvedReason::SymbolNotFound,
+            },
+            raw_target: "other".to_string(),
+            relation_type: RelationType::DirectCall,
+            span: Span::default(),
+            stdlib_category: None,
+            overload_signature: None,
+        };
+        let json = serde_json::to_string(&relation).expect("serialize");
+        assert!(!json.contains("overload_signature"));
+        let parsed: CanonicalRelation = serde_json::from_str(&json).expect("legacy shape loads");
+        assert_eq!(parsed.overload_signature, None);
+    }
+
     /// The component-level fingerprint must be byte-identical to the
     /// snapshot-level fingerprint of the same content.
     #[test]
@@ -673,6 +720,7 @@ mod tests {
             relation_type: RelationType::DirectCall,
             span: Span::default(),
             stdlib_category: None,
+            overload_signature: None,
         });
         snapshot.dependencies.push(CanonicalDependency {
             source_file: "./src/lib.rs".to_string(),

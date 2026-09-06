@@ -9,13 +9,17 @@
 
 use cce_types::ControlFlowFactKind;
 use cce_types::ControlFlowStore;
+use cce_types::Language;
 use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 
 use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip_outer_parens};
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
-use super::types::{ScopedTypeContext, TypeBinding};
+use super::types::{
+    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings, declared_shape,
+    parse_type_shape, subtract_union_members, type_shape_to_string,
+};
 
 /// Scala type inference implementation.
 pub struct ScalaTypeInferer;
@@ -74,12 +78,21 @@ impl LanguageTypeInferer for ScalaTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_scala_if(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
-                        }
+                        let narrowed: Vec<(String, TypeBinding)> =
+                            narrow_scala_if(&fact.text, ctx, &entity.parameters)
+                                .into_iter()
+                                .map(|result| (result.variable_name, result.narrowed_type))
+                                .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::Scala,
+                            fact,
+                            &narrowed,
+                        );
                     }
                     ControlFlowFactKind::Match => {
-                        for result in narrow_scala_match(&fact.text) {
+                        for result in narrow_scala_match(&fact.text, ctx, &entity.parameters) {
                             ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
                         }
                     }
@@ -101,24 +114,73 @@ struct NarrowingResult {
 ///
 /// Patterns:
 /// - `if (x.isInstanceOf[Type])` → x: Type
-/// - `if (x.isInstanceOf[Type] == false)` → conservative skip
-fn narrow_scala_if(text: &str) -> Vec<NarrowingResult> {
+/// - `if (!(x.isInstanceOf[Type]))` → x: declared-minus-Type (union only)
+/// - `if (x.isInstanceOf[Type] == false)` → x: declared-minus-Type (union only)
+/// - `if (x != null)` → x: declared (non-null)
+/// - `if (x == null)` → x: null
+fn narrow_scala_if(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let text = text.trim();
     let mut results = vec![];
 
-    if let Some(result) = narrow_scala_isinstanceof(text) {
+    if let Some(result) = narrow_scala_isinstanceof(text, ctx, params) {
+        results.push(result);
+    }
+
+    if let Some(result) = narrow_scala_null_check(text, ctx, params) {
         results.push(result);
     }
 
     results
 }
 
-/// Parse `if (x.isInstanceOf[Type])`.
-fn narrow_scala_isinstanceof(text: &str) -> Option<NarrowingResult> {
+/// Parse `if (x.isInstanceOf[Type])`, dispatching negated forms to the
+/// complement path.
+fn narrow_scala_isinstanceof(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
     let text = strip_scala_condition_prefix(text)?;
     let text = text.trim();
 
-    // Find `.isInstanceOf[` in the text
+    // Negated prefix: `!(x.isInstanceOf[T])` narrows the complement.
+    if let Some(rest) = text.strip_prefix('!') {
+        let rest = rest.trim();
+        let inner = extract_balanced_parens(rest).unwrap_or_else(|| strip_outer_parens(rest));
+        return narrow_scala_negated_isinstanceof(inner, ctx, params);
+    }
+
+    // Negated suffix: `x.isInstanceOf[T] == false` narrows the complement.
+    // Handled before the positive path so the trailing `== false` can
+    // never fall through into a positive binding.
+    if let Some((lhs, rhs)) = text.split_once("==") {
+        if rhs.trim() == "false" {
+            return narrow_scala_negated_isinstanceof(lhs.trim(), ctx, params);
+        }
+        return None;
+    }
+
+    let (var_name, type_name) = split_scala_isinstanceof(text)?;
+
+    Some(NarrowingResult {
+        variable_name: var_name,
+        narrowed_type: TypeBinding {
+            type_name,
+            type_entity_id: None,
+            span: Span::default(),
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: None,
+        },
+    })
+}
+
+/// Split `x.isInstanceOf[Type]` into the scrutinee and the tested type.
+fn split_scala_isinstanceof(text: &str) -> Option<(String, String)> {
+    let text = text.trim();
     let marker = ".isInstanceOf[";
     let marker_pos = text.find(marker)?;
     let var_name = text[..marker_pos].trim();
@@ -127,7 +189,6 @@ fn narrow_scala_isinstanceof(text: &str) -> Option<NarrowingResult> {
         return None;
     }
 
-    // Extract the type between `[` and `]`
     let bracket_start = marker_pos + marker.len();
     let bracket_end = text.rfind(']')?;
     if bracket_end <= bracket_start {
@@ -139,35 +200,124 @@ fn narrow_scala_isinstanceof(text: &str) -> Option<NarrowingResult> {
         return None;
     }
 
+    Some((var_name.to_string(), type_name.to_string()))
+}
+
+/// Parse `!(x.isInstanceOf[Type])` → x: declared-minus-Type.
+///
+/// Only fires when the declared shape is a union (or nullable wrapper)
+/// that the exclusion can actually shrink; otherwise stays conservative.
+fn narrow_scala_negated_isinstanceof(
+    inner: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
+    let (var_name, excluded) = split_scala_isinstanceof(inner.trim())?;
+    let declared = declared_shape(ctx, params, Language::Scala, &var_name)?;
+    let narrowed = subtract_union_members(&declared, &[excluded])?;
     Some(NarrowingResult {
-        variable_name: var_name.to_string(),
+        variable_name: var_name,
         narrowed_type: TypeBinding {
-            type_name: type_name.to_string(),
+            type_name: type_shape_to_string(&narrowed),
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: Some(narrowed),
         },
     })
 }
 
+/// Parse Scala null checks: `x != null` → x: declared, `x == null` → x: null.
+fn narrow_scala_null_check(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Option<NarrowingResult> {
+    let text = strip_scala_condition_prefix(text)?;
+    let text = text.trim();
+    for (op, negated) in [("!=", true), ("==", false)] {
+        let parts: Vec<&str> = text.splitn(2, op).collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let var_name = parts[0].trim();
+        let rhs = parts[1].trim();
+        if rhs != "null" || var_name.is_empty() || !is_valid_ident(var_name) {
+            continue;
+        }
+        if !negated {
+            return Some(NarrowingResult {
+                variable_name: var_name.to_string(),
+                narrowed_type: TypeBinding {
+                    type_name: "null".to_string(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: None,
+                },
+            });
+        }
+        let declared = declared_shape(ctx, params, Language::Scala, var_name)?;
+        let narrowed =
+            subtract_union_members(&declared, &["null".to_string()]).unwrap_or(declared.clone());
+        return Some(NarrowingResult {
+            variable_name: var_name.to_string(),
+            narrowed_type: TypeBinding {
+                type_name: type_shape_to_string(&narrowed),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(narrowed),
+            },
+        });
+    }
+    None
+}
+
 /// Narrow types from a Scala `match` expression.
 ///
-/// Pattern: `case x: Type =>` → x: Type
-fn narrow_scala_match(text: &str) -> Vec<NarrowingResult> {
+/// Patterns:
+/// - `case x: Type =>` → x: Type
+/// - `case Some(v) =>` → scrutinee: `Some[T]`, v: T (from `Option[T]`)
+/// - `case None =>` → scrutinee: None
+fn narrow_scala_match(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let text = text.trim();
     let mut results = vec![];
 
     if let Some(brace_start) = text.find('{') {
+        let scrutinee = extract_scala_match_scrutinee(&text[..brace_start]);
         let body = &text[brace_start + 1..];
-        narrow_scala_match_arms(body, &mut results);
+        narrow_scala_match_arms(body, scrutinee.as_deref(), ctx, params, &mut results);
     }
 
     results
 }
 
+/// Extract the scrutinee of `x match`: the identifier before `match`.
+fn extract_scala_match_scrutinee(header: &str) -> Option<String> {
+    let header = header.trim();
+    let match_pos = header.rfind("match")?;
+    let candidate = header[..match_pos].trim();
+    let name = candidate.split_whitespace().last().unwrap_or(candidate);
+    let name = name.trim_matches(|c| c == '(' || c == ')').trim();
+    if name.is_empty() || !is_valid_ident(name) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
 /// Extract variable bindings from Scala match arms.
-fn narrow_scala_match_arms(arms_text: &str, results: &mut Vec<NarrowingResult>) {
+fn narrow_scala_match_arms(
+    arms_text: &str,
+    scrutinee: Option<&str>,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+    results: &mut Vec<NarrowingResult>,
+) {
     let mut remaining = arms_text;
     while let Some(case_pos) = remaining.find("case") {
         let after_case = &remaining[case_pos..];
@@ -177,9 +327,127 @@ fn narrow_scala_match_arms(arms_text: &str, results: &mut Vec<NarrowingResult>) 
             if let Some(result) = parse_scala_match_arm_pattern(arm_text) {
                 results.push(result);
             }
+            for result in parse_scala_option_arm_pattern(arm_text, scrutinee, ctx, params) {
+                results.push(result);
+            }
             remaining = after_case[arrow_pos + 2..].trim_start();
         } else {
             break;
+        }
+    }
+}
+
+/// Parse `case Some(v)` / `case None` arms against the scrutinee.
+///
+/// `Some(v)` binds the scrutinee to `Some[T]` and `v` to the option's
+/// inner type resolved from the scrutinee declaration; `None` binds the
+/// scrutinee to `None`. Arms without a resolvable option declaration
+/// stay unbound.
+fn parse_scala_option_arm_pattern(
+    arm_text: &str,
+    scrutinee: Option<&str>,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
+    let scrutinee = match scrutinee {
+        Some(name) => name,
+        None => return vec![],
+    };
+    let pattern = match arm_text.trim().strip_prefix("case") {
+        Some(rest) => rest.trim(),
+        None => return vec![],
+    };
+    if pattern == "None" {
+        return vec![NarrowingResult {
+            variable_name: scrutinee.to_string(),
+            narrowed_type: TypeBinding {
+                type_name: "None".to_string(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(TypeShape::Named("None".to_string())),
+            },
+        }];
+    }
+    let inner_name = match pattern.strip_prefix("Some").map(str::trim) {
+        Some(rest) => {
+            let rest = rest.strip_prefix('(').unwrap_or(rest);
+            let rest = rest.strip_suffix(')').unwrap_or(rest);
+            rest.trim()
+        }
+        None => return vec![],
+    };
+    if inner_name.is_empty() || !is_valid_ident(inner_name) {
+        return vec![];
+    }
+    let declared = match declared_shape(ctx, params, Language::Scala, scrutinee) {
+        Some(shape) => shape,
+        None => return vec![],
+    };
+    let inner = match scala_option_inner_type(&declared) {
+        Some(inner) => inner,
+        None => return vec![],
+    };
+    let inner_name_string = type_shape_to_string(&inner);
+    let some_shape = TypeShape::Generic {
+        base: "Some".to_string(),
+        args: vec![inner.clone()],
+    };
+    vec![
+        NarrowingResult {
+            variable_name: scrutinee.to_string(),
+            narrowed_type: TypeBinding {
+                type_name: type_shape_to_string(&some_shape),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(some_shape),
+            },
+        },
+        NarrowingResult {
+            variable_name: inner_name.to_string(),
+            narrowed_type: TypeBinding {
+                type_name: inner_name_string,
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: Some(inner),
+            },
+        },
+    ]
+}
+
+/// Resolve the inner type of an option-like declaration.
+///
+/// Accepts `Option[T]` / `Some[T]` generics and nullable `T | None`
+/// unions; anything else stays conservative.
+fn scala_option_inner_type(declared: &TypeShape) -> Option<TypeShape> {
+    match declared {
+        TypeShape::Generic { base, args }
+            if (base == "Option" || base == "Some") && !args.is_empty() =>
+        {
+            args.first().cloned()
+        }
+        TypeShape::Union(members) => {
+            let non_none: Vec<TypeShape> = members
+                .iter()
+                .filter(|m| !matches!(m, TypeShape::Named(n) if n == "None" || n == "NoneType"))
+                .cloned()
+                .collect();
+            match non_none.len() {
+                1 => non_none.into_iter().next(),
+                _ => None,
+            }
+        }
+        _ => {
+            let rendered = type_shape_to_string(declared);
+            parse_type_shape(&rendered, Language::Scala).and_then(|reparsed| {
+                if &reparsed == declared {
+                    None
+                } else {
+                    scala_option_inner_type(&reparsed)
+                }
+            })
         }
     }
 }
@@ -297,7 +565,8 @@ mod tests {
 
     #[test]
     fn test_scala_isinstanceof() {
-        let results = narrow_scala_if("if (x.isInstanceOf[String])");
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let results = narrow_scala_if("if (x.isInstanceOf[String])", &ctx, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "String");
@@ -305,8 +574,67 @@ mod tests {
     }
 
     #[test]
+    fn test_scala_negated_isinstanceof_complement() {
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let params = [("x".to_string(), Some("String | Integer".to_string()))];
+        let results = narrow_scala_if("if (!(x.isInstanceOf[String]))", &ctx, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "Integer");
+    }
+
+    #[test]
+    fn test_scala_negated_isinstanceof_plain_type_skipped() {
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let params = [("obj".to_string(), Some("Any".to_string()))];
+        let results = narrow_scala_if("if (!obj.isInstanceOf[String])", &ctx, &params);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scala_isinstanceof_false_suffix_complement() {
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let params = [("x".to_string(), Some("String | Integer".to_string()))];
+        let results = narrow_scala_if("if (x.isInstanceOf[String] == false)", &ctx, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "Integer");
+    }
+
+    #[test]
+    fn test_scala_isinstanceof_false_suffix_never_positive() {
+        // The `== false` suffix must not fall through into a positive
+        // binding when no union shape supports the complement.
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let params = [("obj".to_string(), Some("Any".to_string()))];
+        let results = narrow_scala_if("if (obj.isInstanceOf[String] == false)", &ctx, &params);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_scala_not_null_narrows_declared() {
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let params = [("value".to_string(), Some("String".to_string()))];
+        let results = narrow_scala_if("if (value != null)", &ctx, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_scala_equal_null_binds_null() {
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let results = narrow_scala_if("if (value == null)", &ctx, &[]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "value");
+        assert_eq!(results[0].narrowed_type.type_name, "null");
+    }
+
+    #[test]
     fn test_scala_match_typed_pattern() {
-        let results = narrow_scala_match("x match { case s: String => s, case _ => \"\" }");
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let results =
+            narrow_scala_match("x match { case s: String => s, case _ => \"\" }", &ctx, &[]);
         assert!(!results.is_empty());
         assert_eq!(results[0].variable_name, "s");
         assert_eq!(results[0].narrowed_type.type_name, "String");
@@ -314,18 +642,69 @@ mod tests {
 
     #[test]
     fn test_scala_match_wildcard_skipped() {
-        let results = narrow_scala_match("x match { case _ => 0 }");
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let results = narrow_scala_match("x match { case _ => 0 }", &ctx, &[]);
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_scala_match_multi_arm() {
-        let results =
-            narrow_scala_match("x match { case s: String => s.length, case n: Int => n }");
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let results = narrow_scala_match(
+            "x match { case s: String => s.length, case n: Int => n }",
+            &ctx,
+            &[],
+        );
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].variable_name, "s");
         assert_eq!(results[0].narrowed_type.type_name, "String");
         assert_eq!(results[1].variable_name, "n");
         assert_eq!(results[1].narrowed_type.type_name, "Int");
+    }
+
+    #[test]
+    fn test_scala_match_some_arm_binds_inner() {
+        let mut ctx = ScopedTypeContext::new(Language::Scala);
+        ctx.add_variable_type(
+            "opt".to_string(),
+            TypeBinding {
+                type_name: "Option[String]".to_string(),
+                type_entity_id: None,
+                span: dummy_span(),
+                origin: None,
+                shape: parse_type_shape("Option[String]", Language::Scala),
+            },
+        );
+        let results = narrow_scala_match(
+            "opt match { case Some(v) => v, case None => \"\" }",
+            &ctx,
+            &[],
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.variable_name == "v" && r.narrowed_type.type_name == "String"),
+            "Some arm should bind v: String, got {results:?}"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.variable_name == "opt" && r.narrowed_type.type_name == "Some<String>"),
+            "Some arm should bind scrutinee to Some<String>, got {results:?}"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.variable_name == "opt" && r.narrowed_type.type_name == "None"),
+            "None arm should bind scrutinee to None, got {results:?}"
+        );
+    }
+
+    #[test]
+    fn test_scala_match_some_arm_without_option_stays_empty() {
+        let ctx = ScopedTypeContext::new(Language::Scala);
+        let params = [("opt".to_string(), Some("String".to_string()))];
+        let results = narrow_scala_match("opt match { case Some(v) => v }", &ctx, &params);
+        assert!(results.is_empty());
     }
 }

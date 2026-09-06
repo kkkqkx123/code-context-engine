@@ -90,6 +90,26 @@ pub fn entity_query() -> &'static str {
   value: (_)? @entity.variable.value
 ) @entity.variable
 
+; Tuple destructuring (immutable)
+; e.g., `val (first, second) = pair`
+; Folded into one comma-separated entity so inference maps elements by
+; position; the right-hand side feeds the destructuring source hookup.
+(val_definition
+  pattern: (tuple_pattern
+    (identifier) @entity.variable.multiple.name
+  )
+  value: (_) @entity.variable.multiple.value
+) @entity.variable.multiple
+
+; Tuple destructuring (mutable)
+; e.g., `var (first, second) = pair`
+(var_definition
+  pattern: (tuple_pattern
+    (identifier) @entity.variable.multiple.name
+  )
+  value: (_) @entity.variable.multiple.value
+) @entity.variable.multiple
+
 ; ============================================
 ; 4. Package and Imports
 ; ============================================

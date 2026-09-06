@@ -797,6 +797,7 @@ mod tests {
             stdlib_category: None,
             owner_type: None,
             call_context: CallContext::Direct,
+            overload_signature: None,
         });
         let index = builder.build();
         assert_eq!(index.call_count(), 1);
@@ -1073,6 +1074,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             })
             .add_file(FileInfo {
                 id: "file_1".to_string(),

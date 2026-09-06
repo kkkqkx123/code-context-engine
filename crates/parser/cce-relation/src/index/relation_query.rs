@@ -494,6 +494,7 @@ mod tests {
             stdlib_category: None,
             owner_type: None,
             call_context: cce_types::relation::CallContext::Direct,
+            overload_signature: None,
         });
 
         // Test derived classes

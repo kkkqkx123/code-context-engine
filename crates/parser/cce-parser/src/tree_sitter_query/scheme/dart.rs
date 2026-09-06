@@ -151,6 +151,116 @@ pub fn entity_query() -> &'static str {
 ; 6. Parameters
 ; ============================================
 
+
+; ============================================
+; 6.5 Record Destructuring (Dart 3)
+; ============================================
+
+; Record pattern variable declaration
+; e.g., `var (first, second) = record`
+; Folded into one comma-separated entity so inference maps elements by
+; position; the right-hand side feeds the destructuring source hookup.
+; Bare pattern names surface as `constant_pattern` in this grammar, while
+; explicitly typed names surface as `variable_pattern`; both bind fresh
+; variables in a declaring position.
+(local_variable_declaration
+  (pattern_variable_declaration
+    (record_pattern
+      (constant_pattern
+        (identifier) @entity.variable.multiple.name
+      )
+    )
+    (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+(local_variable_declaration
+  (pattern_variable_declaration
+    (record_pattern
+      (variable_pattern
+        name: (identifier) @entity.variable.multiple.name
+      )
+    )
+    (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+; List pattern variable declaration
+; e.g., `var [first, second] = items`
+(local_variable_declaration
+  (pattern_variable_declaration
+    (list_pattern
+      (constant_pattern
+        (identifier) @entity.variable.multiple.name
+      )
+    )
+    (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+(local_variable_declaration
+  (pattern_variable_declaration
+    (list_pattern
+      (variable_pattern
+        name: (identifier) @entity.variable.multiple.name
+      )
+    )
+    (_) @entity.variable.multiple.value
+  )
+) @entity.variable.multiple
+
+; ============================================
+; 7. Loop Variables
+; ============================================
+
+; For-in loop variable
+; e.g., `for (var item in items)` or `for (item in items)` binds `item`
+; to the collection element type.
+(for_statement
+  name: (identifier) @entity.variable.loop.name
+  value: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+; Pattern for-in loop variables (Dart 3)
+; e.g., `for (var (first, second) in records)` binds each component by
+; position; the loop binder fans names out as sibling entities sharing
+; the iterated collection as provenance.
+(for_statement
+  (record_pattern
+    (constant_pattern
+      (identifier) @entity.variable.loop.name
+    )
+  )
+  value: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+(for_statement
+  (record_pattern
+    (variable_pattern
+      name: (identifier) @entity.variable.loop.name
+    )
+  )
+  value: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+(for_statement
+  (list_pattern
+    (constant_pattern
+      (identifier) @entity.variable.loop.name
+    )
+  )
+  value: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+(for_statement
+  (list_pattern
+    (variable_pattern
+      name: (identifier) @entity.variable.loop.name
+    )
+  )
+  value: (_) @entity.variable.loop.source
+) @entity.variable.loop
+
 "#
 }
 

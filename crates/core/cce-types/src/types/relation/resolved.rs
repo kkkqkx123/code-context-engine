@@ -112,6 +112,14 @@ pub struct ResolvedRelation {
     /// different call patterns (direct, instance method, static method, constructor).
     #[serde(default)]
     pub call_context: CallContext,
+
+    /// Dispatched overload signature for the call site.
+    ///
+    /// Populated when overload disambiguation selects among multiple
+    /// candidates (`name(params) -> return`); `None` keeps single-candidate
+    /// and unresolved behavior unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overload_signature: Option<String>,
 }
 
 impl ResolvedRelation {

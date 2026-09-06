@@ -10,8 +10,10 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident};
 use super::extractors::{extract_field_type, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, parse_type_shape, strip_references,
+    InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings,
+    parse_type_shape, strip_references,
 };
+use cce_types::language::Language;
 
 /// Rust type inference implementation.
 pub struct RustTypeInferer;
@@ -224,9 +226,17 @@ impl LanguageTypeInferer for RustTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_rust_if(&fact.text) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
-                        }
+                        let narrowed: Vec<(String, TypeBinding)> = narrow_rust_if(&fact.text)
+                            .into_iter()
+                            .map(|result| (result.variable_name, result.narrowed_type))
+                            .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::Rust,
+                            fact,
+                            &narrowed,
+                        );
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_rust_match(&fact.text) {

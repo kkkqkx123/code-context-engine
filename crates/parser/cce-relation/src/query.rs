@@ -1084,6 +1084,7 @@ mod tests {
             stdlib_category: None,
             owner_type: None,
             call_context: CallContext::Direct,
+            overload_signature: None,
         });
         index.add_resolved_relation(ResolvedRelation {
             caller: EntityId(1),
@@ -1097,6 +1098,7 @@ mod tests {
             stdlib_category: None,
             owner_type: None,
             call_context: CallContext::Direct,
+            overload_signature: None,
         });
 
         index

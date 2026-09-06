@@ -12,8 +12,9 @@ use super::control_flow::shared::{
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, TypeShape, declared_shape, narrow_discriminated_union,
-    narrow_truthiness, parse_type_shape, subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings, declared_shape,
+    narrow_discriminated_union, narrow_truthiness, parse_type_shape, subtract_union_members,
+    type_shape_to_string,
 };
 use crate::symbol_table::TypeMemberIndex;
 use cce_types::language::Language;
@@ -56,14 +57,22 @@ impl LanguageTypeInferer for PythonTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_python_if(
+                        let narrowed: Vec<(String, TypeBinding)> = narrow_python_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
                             &entity.parameters,
-                        ) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
-                        }
+                        )
+                        .into_iter()
+                        .map(|result| (result.variable_name, result.narrowed_type))
+                        .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::Python,
+                            fact,
+                            &narrowed,
+                        );
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_python_match(&fact.text) {

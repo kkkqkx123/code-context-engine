@@ -443,7 +443,7 @@ impl ProjectSymbolTable {
                 continue;
             }
             if let Some(existing) = ctx.get_variable_type(&entity.name) {
-                if crate::type_inference::origin_priority(existing.origin) >= 7 {
+                if crate::type_inference::origin_is_authoritative(existing.origin) {
                     continue;
                 }
             }
@@ -473,8 +473,7 @@ impl ProjectSymbolTable {
                         shape: return_binding.shape.clone(),
                     };
                     let should_insert = ctx.get_variable_type(&entity.name).is_none_or(|e| {
-                        crate::type_inference::origin_priority(propagated.origin)
-                            > crate::type_inference::origin_priority(e.origin)
+                        crate::type_inference::binding_supersedes(propagated.origin, e.origin)
                     });
                     if should_insert {
                         ctx.add_variable_type(entity.name.clone(), propagated);
@@ -529,7 +528,7 @@ impl ProjectSymbolTable {
                     continue;
                 }
                 if let Some(existing) = ctx.get_variable_type(&entity.name) {
-                    if crate::type_inference::origin_priority(existing.origin) >= 7 {
+                    if crate::type_inference::origin_is_authoritative(existing.origin) {
                         continue;
                     }
                 }
@@ -559,8 +558,7 @@ impl ProjectSymbolTable {
                             shape: return_binding.shape.clone(),
                         };
                         let should_insert = ctx.get_variable_type(&entity.name).is_none_or(|e| {
-                            crate::type_inference::origin_priority(propagated.origin)
-                                > crate::type_inference::origin_priority(e.origin)
+                            crate::type_inference::binding_supersedes(propagated.origin, e.origin)
                         });
                         if should_insert {
                             ctx.add_variable_type(entity.name.clone(), propagated);

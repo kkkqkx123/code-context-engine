@@ -163,6 +163,32 @@ pub fn entity_query() -> &'static str {
   )
 ) @entity.variable.multiple
 
+; For-in loop variable
+; e.g., `for (item in items)` binds `item` to the collection element type.
+; The anchor pins the provenance to the expression directly after the
+; declaration, so the loop body never leaks in as a second source. The
+; loop binder fans additional names out as sibling entities sharing the
+; same provenance.
+(for_statement
+  (variable_declaration
+    (identifier) @entity.variable.loop.name
+  )
+  .
+  (_) @entity.variable.loop.source
+) @entity.variable.loop
+
+; For-in loop with destructuring
+; e.g., `for ((key, value) in entries)` binds each component by position.
+(for_statement
+  (multi_variable_declaration
+    (variable_declaration
+      (identifier) @entity.variable.loop.name
+    )
+  )
+  .
+  (_) @entity.variable.loop.source
+) @entity.variable.loop
+
 ; ============================================
 ; 5. Package and Imports
 ; ============================================

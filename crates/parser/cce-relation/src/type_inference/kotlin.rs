@@ -18,8 +18,8 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, declared_shape, narrow_discriminated_union, parse_type_shape,
-    subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
+    narrow_discriminated_union, parse_type_shape, subtract_union_members, type_shape_to_string,
 };
 
 /// Kotlin type inference implementation.
@@ -80,14 +80,22 @@ impl LanguageTypeInferer for KotlinTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_kotlin_if(
+                        let narrowed: Vec<(String, TypeBinding)> = narrow_kotlin_if(
                             &fact.text,
                             ctx,
                             inference_ctx.type_index(),
                             &entity.parameters,
-                        ) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
-                        }
+                        )
+                        .into_iter()
+                        .map(|result| (result.variable_name, result.narrowed_type))
+                        .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::Kotlin,
+                            fact,
+                            &narrowed,
+                        );
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_kotlin_when(&fact.text, ctx, &entity.parameters) {
@@ -717,7 +725,7 @@ mod tests {
         let results = narrow_kotlin_if("if (value != null)", &ctx, None, &params);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "value");
-        assert_eq!(results[0].narrowed_type.type_name, "String?");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
     }
 
     #[test]

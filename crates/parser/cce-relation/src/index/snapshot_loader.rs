@@ -340,6 +340,7 @@ impl RelationSnapshotLoader {
                         stdlib_category: canonical.stdlib_category,
                         owner_type: None,
                         call_context: CallContext::Direct,
+                        overload_signature: canonical.overload_signature.clone(),
                     },
                 );
                 continue;
@@ -357,6 +358,7 @@ impl RelationSnapshotLoader {
                 stdlib_category: canonical.stdlib_category,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             });
         }
 
@@ -714,6 +716,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             import_diffs: Vec::new(),
             export_diffs: Vec::new(),
@@ -819,6 +822,7 @@ mod tests {
             relation_type: RelationType::DirectCall,
             span: Span::default(),
             stdlib_category: None,
+            overload_signature: None,
         });
         snapshot.normalize();
         snapshot

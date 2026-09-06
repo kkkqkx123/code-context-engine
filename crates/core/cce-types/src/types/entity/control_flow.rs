@@ -101,6 +101,16 @@ pub struct ControlFlowFact {
     pub start_byte: usize,
     /// End byte offset in the source file.
     pub end_byte: usize,
+    /// Byte range of the `else` continuation when the fact carries one.
+    ///
+    /// The range lies inside `[start_byte, end_byte]` and marks where the
+    /// negated branch starts. `None` means the fact has no recorded `else`
+    /// side, in which case consumers fall back to the fact text.
+    #[serde(default)]
+    pub else_start_byte: Option<usize>,
+    /// End of the `else` continuation byte range.
+    #[serde(default)]
+    pub else_end_byte: Option<usize>,
 }
 
 impl ControlFlowFact {
@@ -118,8 +128,144 @@ impl ControlFlowFact {
             text,
             start_byte,
             end_byte,
+            else_start_byte: None,
+            else_end_byte: None,
         }
     }
+
+    /// Attach the byte range of the `else` continuation.
+    pub fn with_else_range(mut self, else_start_byte: usize, else_end_byte: usize) -> Self {
+        self.else_start_byte = Some(else_start_byte);
+        self.else_end_byte = Some(else_end_byte);
+        self
+    }
+
+    /// Whether the fact records an `else` continuation range.
+    pub fn has_else_range(&self) -> bool {
+        self.else_start_byte.is_some_and(|start| {
+            self.else_end_byte
+                .is_some_and(|end| self.start_byte <= start && start < end && end <= self.end_byte)
+        })
+    }
+
+    /// Whether a source byte offset falls inside the `else` continuation.
+    pub fn contains_byte_in_else(&self, byte: usize) -> bool {
+        match (self.else_start_byte, self.else_end_byte) {
+            (Some(start), Some(end)) => start <= byte && byte < end,
+            _ => false,
+        }
+    }
+}
+
+/// Byte offset of the outer `else` keyword within an `if` fact text.
+///
+/// Only the `else` belonging to the outer conditional counts: occurrences
+/// nested inside the then-block or inside string literals are ignored. The
+/// scan skips quoted regions and only accepts `else` at the top brace depth
+/// once the then-branch has produced a block close or a statement
+/// terminator. Returns `None` when no outer `else` continuation exists.
+pub fn find_outer_else_offset(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    // Locate the condition end: balanced parens after the leading `if`.
+    let mut i = 0;
+    while i < bytes.len() && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'(' {
+        let mut depth = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                b'"' | b'\'' | b'`' => {
+                    i = skip_quoted_region(bytes, i);
+                    continue;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    let mut depth = 0usize;
+    let mut then_closed = false;
+    let mut j = i;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'"' | b'\'' | b'`' => {
+                j = skip_quoted_region(bytes, j);
+                continue;
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    then_closed = true;
+                }
+            }
+            b';' => {
+                if depth == 0 {
+                    then_closed = true;
+                }
+            }
+            _ => {
+                if depth == 0 && then_closed && is_branch_keyword_at(bytes, j, "else") {
+                    return Some(j);
+                }
+            }
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Whether an `if` fact text carries an outer `else` continuation.
+pub fn has_outer_else_branch(text: &str) -> bool {
+    find_outer_else_offset(text).is_some()
+}
+
+fn skip_quoted_region(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut j = start + 1;
+    while j < bytes.len() {
+        if bytes[j] == b'\\' {
+            j += 2;
+            continue;
+        }
+        if bytes[j] == quote {
+            return j + 1;
+        }
+        j += 1;
+    }
+    j
+}
+
+fn is_branch_keyword_at(bytes: &[u8], pos: usize, keyword: &str) -> bool {
+    let word = keyword.as_bytes();
+    if pos + word.len() > bytes.len() {
+        return false;
+    }
+    if &bytes[pos..pos + word.len()] != word {
+        return false;
+    }
+    let before_ok = pos == 0 || {
+        let c = bytes[pos - 1];
+        !(c.is_ascii_alphanumeric() || c == b'_')
+    };
+    let after = pos + word.len();
+    let after_ok = after >= bytes.len() || {
+        let c = bytes[after];
+        !(c.is_ascii_alphanumeric() || c == b'_')
+    };
+    before_ok && after_ok
 }
 
 /// Control-flow facts collected for a single entity.

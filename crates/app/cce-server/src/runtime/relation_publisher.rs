@@ -738,6 +738,7 @@ mod tests {
             relation_type: RelationType::DirectCall,
             span: Span::default(),
             stdlib_category: None,
+            overload_signature: None,
         });
         snapshot
     }
@@ -954,6 +955,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             added_relations: vec![cce_types::ResolvedRelation {
                 caller: cce_types::EntityId(1),
@@ -967,6 +969,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             import_diffs: Vec::new(),
             export_diffs: Vec::new(),
@@ -1159,6 +1162,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             added_relations: vec![cce_types::ResolvedRelation {
                 caller: cce_types::EntityId(1),
@@ -1172,6 +1176,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             import_diffs: Vec::new(),
             export_diffs: Vec::new(),
@@ -1300,6 +1305,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             added_relations: vec![cce_types::ResolvedRelation {
                 caller: cce_types::EntityId(1),
@@ -1313,6 +1319,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             import_diffs: Vec::new(),
             export_diffs: Vec::new(),
@@ -1405,6 +1412,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             added_relations: vec![cce_types::ResolvedRelation {
                 caller: cce_types::EntityId(1),
@@ -1418,6 +1426,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             import_diffs: Vec::new(),
             export_diffs: Vec::new(),
@@ -1530,6 +1539,7 @@ mod tests {
                 stdlib_category: None,
                 owner_type: None,
                 call_context: CallContext::Direct,
+                overload_signature: None,
             }],
             import_diffs: Vec::new(),
             export_diffs: Vec::new(),

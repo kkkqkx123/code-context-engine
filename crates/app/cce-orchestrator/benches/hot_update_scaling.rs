@@ -124,6 +124,7 @@ fn build_index(file_count: usize, changed: Option<usize>) -> RelationIndex {
                     stdlib_category: None,
                     owner_type: None,
                     call_context: CallContext::Direct,
+                    overload_signature: None,
                 });
             }
         }

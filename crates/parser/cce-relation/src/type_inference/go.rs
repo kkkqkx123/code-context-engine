@@ -11,7 +11,10 @@ use cce_types::entity::{Entity, EntityKind};
 use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip_outer_parens};
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
-use super::types::{ScopedTypeContext, TypeBinding, declared_shape, type_shape_to_string};
+use super::types::{
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
+    type_shape_to_string,
+};
 
 /// Go type inference implementation.
 ///
@@ -81,9 +84,18 @@ impl LanguageTypeInferer for GoTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_go_if(&fact.text, ctx, &entity.parameters) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
-                        }
+                        let narrowed: Vec<(String, TypeBinding)> =
+                            narrow_go_if(&fact.text, ctx, &entity.parameters)
+                                .into_iter()
+                                .map(|result| (result.variable_name, result.narrowed_type))
+                                .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::Go,
+                            fact,
+                            &narrowed,
+                        );
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_go_type_switch(&fact.text) {

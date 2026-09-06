@@ -141,12 +141,33 @@ impl ControlFlowExtractor {
             return;
         }
 
+        // Record the outer `else` continuation range when the fact text
+        // carries one, so branch-aware consumers can test byte containment
+        // without re-scanning source text.
+        let fact = if fact_kind == ControlFlowFactKind::If {
+            attach_else_range(fact)
+        } else {
+            fact
+        };
+
         control_flow.push_fact(entity_id, fact);
     }
 }
 
 fn is_control_entity(entity: &Entity) -> bool {
     entity.kind.is_function_like()
+}
+
+/// Attach the outer `else` continuation byte range to an `if` fact.
+///
+/// The range covers the fact text from the `else` keyword to the fact end.
+fn attach_else_range(fact: ControlFlowFact) -> ControlFlowFact {
+    let Some(offset) = cce_types::find_outer_else_offset(&fact.text) else {
+        return fact;
+    };
+    let start = fact.start_byte.saturating_add(offset);
+    let end = fact.end_byte;
+    fact.with_else_range(start, end)
 }
 
 /// Sorted entity index for locating the function-like entity that owns a control-flow node.
@@ -294,5 +315,27 @@ fn demo(input: Option<i32>) -> Result<i32, ()> {
                 .all(|fact| !fact.text.contains("inline comment")),
             "control-flow facts should not keep inline comments"
         );
+    }
+
+    #[test]
+    fn test_attach_else_range_records_outer_else() {
+        let fact = ControlFlowFact::new(
+            ControlFlowFactKind::If,
+            "if (a) { x(); } else { y(); }",
+            10,
+            40,
+        );
+        let fact = attach_else_range(fact);
+        assert!(fact.has_else_range());
+        let else_start = fact.else_start_byte.expect("else start recorded");
+        assert!(fact.contains_byte_in_else(else_start));
+        assert!(!fact.contains_byte_in_else(10));
+    }
+
+    #[test]
+    fn test_attach_else_range_without_else_stays_empty() {
+        let fact = ControlFlowFact::new(ControlFlowFactKind::If, "if (a) { x(); }", 10, 26);
+        let fact = attach_else_range(fact);
+        assert!(!fact.has_else_range());
     }
 }

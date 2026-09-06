@@ -13,11 +13,13 @@ use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
 use crate::symbol_table::ResolutionContext;
 use crate::symbol_table::project::OverloadContext;
-use crate::type_inference::types::{TypeShape, parse_type_shape};
+use crate::type_inference::types::{BranchPolarity, TypeShape, parse_type_shape};
 use cce_metrics::domain::pipeline::RelationMetrics;
 use cce_types::entity::{Entity, EntityId};
 use cce_types::relation::{CallContext, ExternalCallType};
-use cce_types::{ParsedFile, RawRelationData, ResolvedRelation, language::Language};
+use cce_types::{
+    ControlFlowFactKind, ParsedFile, RawRelationData, ResolvedRelation, language::Language,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -498,6 +500,7 @@ impl RelationResolver {
             .unwrap_or_else(|| raw_data.dst_name.clone());
 
         let mut effective_callee_id = callee_id;
+        let mut overload_signature: Option<String> = None;
         // Determine owner_type and call_context using TypeMemberIndex
         let (owner_type, call_context) = if let Some(callee_id) = effective_callee_id {
             // Try to find the owner type from TypeMemberIndex
@@ -517,18 +520,33 @@ impl RelationResolver {
                                 arg_types.iter().map(|opt| opt.as_ref()).collect();
                             let expected_return =
                                 self.infer_expected_return_type(raw_data, parsed, symbol_table);
-                            if let Some(best) = overload.resolve_with_score(
-                                &arg_refs,
-                                expected_return.as_deref(),
-                                parsed.language,
-                            ) {
-                                effective_callee_id = Some(best.entity_id);
+                            if let Some((entity_id, signature)) = overload
+                                .resolve_with_score_signature(
+                                    &arg_refs,
+                                    expected_return.as_deref(),
+                                    parsed.language,
+                                )
+                            {
+                                effective_callee_id = Some(entity_id);
+                                overload_signature = Some(signature);
                             } else if let Some(best) =
                                 overload.resolve_with_args(&arg_refs, &HashMap::new())
                             {
                                 effective_callee_id = Some(best.entity_id);
+                                overload_signature = Some(
+                                    crate::type_inference::overload::format_overload_signature(
+                                        &callee_name,
+                                        best,
+                                    ),
+                                );
                             } else if let Some(best) = overload.resolve(&[]) {
                                 effective_callee_id = Some(best.entity_id);
+                                overload_signature = Some(
+                                    crate::type_inference::overload::format_overload_signature(
+                                        &callee_name,
+                                        best,
+                                    ),
+                                );
                             }
                         }
                     }
@@ -659,6 +677,7 @@ impl RelationResolver {
             stdlib_category: raw_data.stdlib_category,
             owner_type,
             call_context,
+            overload_signature,
         })
     }
 
@@ -941,8 +960,43 @@ impl RelationResolver {
         };
         arg_texts
             .iter()
-            .map(|arg| self.infer_arg_type(arg, parsed, symbol_table))
+            .map(|arg| self.infer_arg_type(arg, parsed, symbol_table, raw_data.span.start_byte))
             .collect()
+    }
+
+    /// Infer the shape of an identifier argument from a recorded else-branch
+    /// binding when the call site falls inside the negation side.
+    ///
+    /// Returns `None` when the call site is outside every recorded else
+    /// range or the variable carries no else binding, letting the caller
+    /// fall back to the default (then-biased) lookup.
+    fn infer_else_branch_arg_shape(
+        parsed: &ParsedFile,
+        ctx: &crate::type_inference::TypeInferenceContext,
+        name: &str,
+        call_site: usize,
+    ) -> Option<TypeShape> {
+        let owner = parsed
+            .entities
+            .iter()
+            .filter(|entity| {
+                entity.kind.is_function_like()
+                    && entity.span.start_byte <= call_site
+                    && call_site < entity.span.end_byte
+            })
+            .min_by_key(|entity| entity.span.end_byte - entity.span.start_byte)?;
+        let facts = parsed.control_flow.get(owner.id)?;
+        let in_else = facts.facts.iter().any(|fact| {
+            fact.kind == ControlFlowFactKind::If && fact.contains_byte_in_else(call_site)
+        });
+        if !in_else {
+            return None;
+        }
+        let binding = ctx.get_narrowed_in_branch(name, BranchPolarity::Else)?;
+        if let Some(shape) = binding.shape.clone() {
+            return Some(shape);
+        }
+        parse_type_shape(&binding.type_name, parsed.language)
     }
 
     fn infer_arg_type(
@@ -950,6 +1004,7 @@ impl RelationResolver {
         arg: &str,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
+        call_site: usize,
     ) -> Option<TypeShape> {
         let trimmed = arg.trim();
         if trimmed.is_empty() {
@@ -960,6 +1015,13 @@ impl RelationResolver {
         }
         if is_identifier(trimmed) {
             if let Some(ctx) = symbol_table.get_type_inference_context(&parsed.path) {
+                // Calls inside a recorded else range observe the complement
+                // binding; every miss falls through to the default lookup.
+                if let Some(shape) =
+                    Self::infer_else_branch_arg_shape(parsed, &ctx, trimmed, call_site)
+                {
+                    return Some(shape);
+                }
                 if let Some(binding) = ctx.get_variable_type(trimmed) {
                     if let Some(shape) = binding.shape.clone() {
                         return Some(shape);

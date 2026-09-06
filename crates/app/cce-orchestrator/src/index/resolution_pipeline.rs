@@ -225,6 +225,7 @@ mod tests {
             relation_type: cce_types::RelationType::DirectCall,
             span: cce_types::Span::default(),
             stdlib_category: None,
+            overload_signature: None,
         });
         assert!(validate_snapshot(&snapshot).is_err());
     }

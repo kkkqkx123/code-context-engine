@@ -259,6 +259,7 @@ impl RelationUpdateProcessor {
                         stdlib_category: None,
                         owner_type: None,
                         call_context: CallContext::Direct,
+                        overload_signature: None,
                     };
                     index.add_file_relation(path, rel);
                 }

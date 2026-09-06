@@ -12,7 +12,8 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, declared_shape, subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
+    subtract_union_members, type_shape_to_string,
 };
 
 /// Java type inference implementation.
@@ -100,9 +101,18 @@ impl LanguageTypeInferer for JavaTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If => {
-                        for result in narrow_java_if(&fact.text, ctx, &entity.parameters) {
-                            ctx.add_narrowed_type(result.variable_name, result.narrowed_type);
-                        }
+                        let narrowed: Vec<(String, TypeBinding)> =
+                            narrow_java_if(&fact.text, ctx, &entity.parameters)
+                                .into_iter()
+                                .map(|result| (result.variable_name, result.narrowed_type))
+                                .collect();
+                        add_polarity_aware_narrowings(
+                            ctx,
+                            &entity.parameters,
+                            Language::Java,
+                            fact,
+                            &narrowed,
+                        );
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_java_switch(&fact.text) {

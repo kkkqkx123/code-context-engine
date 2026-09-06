@@ -177,6 +177,9 @@ fn read_relations(
             relation_type: from_json(&row.get::<_, String>(4).map_err(query_error)?)?,
             span: from_json(&row.get::<_, String>(5).map_err(query_error)?)?,
             stdlib_category: optional_from_json(row.get(8).map_err(query_error)?)?,
+            // The SQLite schema carries no overload column; rows read back
+            // as single-candidate edges and re-resolution re-annotates them.
+            overload_signature: None,
         });
     }
     Ok(())
