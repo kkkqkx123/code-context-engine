@@ -100,6 +100,7 @@ impl LanguageTypeInferer for GoTypeInferer {
                             Language::Go,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
@@ -310,10 +311,21 @@ fn narrow_go_err_not_nil(
     }
 
     let name_suggests_error = var_name.starts_with("err") || var_name.starts_with("Err");
-    let declared_is_error = declared_shape(ctx, params, Language::Go, var_name)
-        .map(|shape| type_shape_to_string(&shape).contains("error"))
+    let declared = declared_shape(ctx, params, Language::Go, var_name);
+    let declared_is_error = declared
+        .as_ref()
+        .map(|shape| type_shape_to_string(shape).contains("error"))
         .unwrap_or(false);
     if !(name_suggests_error || declared_is_error) {
+        return None;
+    }
+    // A `!= nil` check on an already-`error` declaration teaches nothing;
+    // emitting it would render an identity row.
+    if declared
+        .as_ref()
+        .map(|shape| type_shape_to_string(shape).trim() == "error")
+        .unwrap_or(false)
+    {
         return None;
     }
 
@@ -504,14 +516,13 @@ mod tests {
 
     #[test]
     fn test_go_declared_error_not_nil() {
-        // A declared `error` shape keeps the binding even without an
-        // err-like name.
+        // A `!= nil` check on an already-`error` declaration teaches
+        // nothing; the vacuous narrowing stays unbound instead of
+        // rendering an identity row.
         let ctx = ScopedTypeContext::new(Language::Go);
         let params = [("e".to_string(), Some("error".to_string()))];
         let results = narrow_go_if("if e != nil { return e }", &ctx, &params);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].variable_name, "e");
-        assert_eq!(results[0].narrowed_type.type_name, "error");
+        assert!(results.is_empty());
     }
 
     #[test]

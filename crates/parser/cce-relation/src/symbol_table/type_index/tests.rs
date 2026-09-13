@@ -561,3 +561,148 @@ fn snapshot_preserves_lookup() {
     assert_eq!(by_simple.len(), 1);
     assert_eq!(by_simple[0].entity_id, EntityId(1));
 }
+
+fn make_field(name: &str, id: u64, file: &str) -> MemberEntry {
+    MemberEntry {
+        entity_id: EntityId(id),
+        name: name.to_string(),
+        kind: EntityKind::Field,
+        visibility: Visibility::Public,
+        is_static: false,
+        is_associated: false,
+        span: dummy_span(),
+        file_path: file.to_string(),
+        module_path: None,
+        package: String::new(),
+    }
+}
+
+fn insert_class(
+    idx: &mut TypeMemberIndex,
+    qualified: &str,
+    simple: &str,
+    file: &str,
+    id: u64,
+    supertypes: &[&str],
+    fields: &[(&str, u64)],
+) {
+    let key = make_key(qualified, simple, file);
+    let mut entry = TypeEntry::new(
+        EntityId(id),
+        key.clone(),
+        EntityKind::Class,
+        Language::CSharp,
+        Visibility::Public,
+    );
+    entry.supertypes = supertypes.iter().map(|s| s.to_string()).collect();
+    idx.insert_type(key.clone(), entry);
+    for (field_name, field_id) in fields {
+        idx.insert_member(&key, make_field(field_name, *field_id, file));
+    }
+}
+
+fn shape_hierarchy() -> TypeMemberIndex {
+    let mut idx = TypeMemberIndex::new();
+    insert_class(
+        &mut idx,
+        "app.Shape",
+        "Shape",
+        "app.cs",
+        1,
+        &[],
+        &[("Kind", 11)],
+    );
+    insert_class(
+        &mut idx,
+        "app.Circle",
+        "Circle",
+        "app.cs",
+        2,
+        &["Shape"],
+        &[("Kind", 21), ("Radius", 22)],
+    );
+    insert_class(
+        &mut idx,
+        "app.Rectangle",
+        "Rectangle",
+        "app.cs",
+        3,
+        &["Shape"],
+        &[("Kind", 31)],
+    );
+    insert_class(
+        &mut idx,
+        "app.MiniCircle",
+        "MiniCircle",
+        "app.cs",
+        4,
+        &["Circle"],
+        &[],
+    );
+    idx
+}
+
+#[test]
+fn subclasses_of_direct_and_transitive() {
+    let idx = shape_hierarchy();
+    let subs = idx.subclasses_of("Shape", "app.Shape");
+    let names: Vec<&str> = subs.iter().map(|e| e.key.simple.as_str()).collect();
+    assert_eq!(names, vec!["Circle", "MiniCircle", "Rectangle"]);
+}
+
+#[test]
+fn subclasses_of_ignores_placeholders() {
+    let mut idx = shape_hierarchy();
+    let ghost_key = make_key("app.Ghost", "Ghost", "app.cs");
+    idx.upsert_type_placeholder(ghost_key, Language::CSharp);
+    let subs = idx.subclasses_of("Shape", "app.Shape");
+    assert_eq!(subs.len(), 3);
+}
+
+#[test]
+fn visible_field_names_includes_inherited() {
+    let idx = shape_hierarchy();
+    let mini = idx
+        .get_type("app.MiniCircle")
+        .expect("MiniCircle must be indexed");
+    let visible = idx.visible_field_names(mini);
+    assert!(visible.contains("Kind"));
+    assert!(visible.contains("Radius"));
+    assert!(!visible.contains("Width"));
+}
+
+#[test]
+fn hierarchy_walk_terminates_on_cycles() {
+    let mut idx = TypeMemberIndex::new();
+    insert_class(&mut idx, "p.A", "A", "p.cs", 1, &["B"], &[]);
+    insert_class(&mut idx, "p.B", "B", "p.cs", 2, &["A"], &[]);
+    let a = idx.get_type("p.A").expect("A must be indexed");
+    assert!(idx.visible_field_names(a).is_empty());
+    let subs = idx.subclasses_of("A", "p.A");
+    assert_eq!(subs.len(), 1);
+    assert_eq!(subs[0].key.simple, "B");
+}
+
+#[test]
+fn set_supertypes_by_entity() {
+    let mut idx = TypeMemberIndex::new();
+    insert_class(&mut idx, "p.Foo", "Foo", "p.cs", 7, &[], &[]);
+    idx.set_supertypes_by_entity(EntityId(7), vec!["Bar".to_string()]);
+    let foo = idx.get_type("p.Foo").expect("Foo must be indexed");
+    assert_eq!(foo.supertypes, vec!["Bar".to_string()]);
+    // Unknown entity id is a no-op, never a panic.
+    idx.set_supertypes_by_entity(EntityId(999), vec!["Baz".to_string()]);
+}
+
+#[test]
+fn snapshot_preserves_supertypes() {
+    let idx = shape_hierarchy();
+    let restored = TypeMemberIndex::from_snapshot(idx.to_snapshot());
+    let circle = restored
+        .get_type("app.Circle")
+        .expect("Circle must survive snapshot round-trip");
+    assert_eq!(circle.supertypes, vec!["Shape".to_string()]);
+    let subs = restored.subclasses_of("Shape", "app.Shape");
+    let names: Vec<&str> = subs.iter().map(|e| e.key.simple.as_str()).collect();
+    assert_eq!(names, vec!["Circle", "MiniCircle", "Rectangle"]);
+}

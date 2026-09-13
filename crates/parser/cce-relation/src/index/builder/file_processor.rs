@@ -309,20 +309,17 @@ impl<'a> FileProcessor<'a> {
             if local_call_spans.contains(&call_key) {
                 continue;
             }
-            #[cfg(debug_assertions)]
-            {
-                for local_call in &local_calls {
-                    if local_call.caller == raw_data.src
-                        && Self::spans_overlap(&local_call.span, &raw_data.span)
-                        && local_call.span != raw_data.span
-                    {
-                        tracing::warn!(
-                            caller = ?raw_data.src,
-                            local_span = ?local_call.span,
-                            raw_span = ?raw_data.span,
-                            "Span mismatch: local_call and raw_relation overlap with different spans"
-                        );
-                    }
+            for local_call in &local_calls {
+                if local_call.caller == raw_data.src
+                    && Self::spans_overlap(&local_call.span, &raw_data.span)
+                    && !Self::spans_close(&local_call.span, &raw_data.span)
+                {
+                    tracing::warn!(
+                        caller = ?raw_data.src,
+                        local_span = ?local_call.span,
+                        raw_span = ?raw_data.span,
+                        "Span mismatch: local_call and raw_relation overlap with different spans"
+                    );
                 }
             }
             if let Some(resolved) = resolver.resolve_with_scope_map(
@@ -529,6 +526,17 @@ impl<'a> FileProcessor<'a> {
 
     fn spans_overlap(a: &cce_types::Span, b: &cce_types::Span) -> bool {
         a.start_byte <= b.end_byte && b.start_byte <= a.end_byte
+    }
+
+    /// Check if two spans are close enough to be considered the same call site.
+    /// Allows up to 3 bytes of difference in start/end offsets to tolerate
+    /// minor whitespace or annotation differences between raw_relation and
+    /// local_call representations (e.g. Kotlin where-clause indentation).
+    fn spans_close(a: &cce_types::Span, b: &cce_types::Span) -> bool {
+        const TOLERANCE: usize = 3;
+        let start_diff = a.start_byte.abs_diff(b.start_byte);
+        let end_diff = a.end_byte.abs_diff(b.end_byte);
+        start_diff <= TOLERANCE && end_diff <= TOLERANCE
     }
 
     fn relation_priority(rel: &ResolvedRelation) -> u32 {

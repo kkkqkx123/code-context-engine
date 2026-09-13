@@ -12,9 +12,9 @@ use super::control_flow::shared::{
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings, declared_shape,
-    narrow_discriminated_union, narrow_truthiness, parse_type_shape, subtract_union_members,
-    type_shape_to_string,
+    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings,
+    covers_declared_members, declared_shape, narrow_discriminated_union, narrow_truthiness,
+    parse_type_shape, subtract_union_members, type_shape_to_string,
 };
 use crate::symbol_table::TypeMemberIndex;
 use cce_types::language::Language;
@@ -38,6 +38,8 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
                 _ => {}
             }
         }
+
+        normalize_literal_types(entities, ctx);
     }
 
     fn infer_control_flow(
@@ -76,6 +78,7 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
                             Language::TypeScript,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
@@ -96,6 +99,69 @@ impl LanguageTypeInferer for TypeScriptTypeInferer {
                 }
             }
         }
+    }
+}
+
+/// Map parser-generic literal names to TypeScript declaration spellings.
+///
+/// The shared literal extractor reports lowercase `array` for array
+/// literals; TypeScript spells the type `Array`. The remaining literal
+/// vocabulary (`string`, `number`, `boolean`, `null`, `object`) already
+/// matches TypeScript spelling, so only `array` needs remapping. Without
+/// this the same type appears in both forms across origins.
+fn normalize_typescript_literal_type(raw: &str) -> Option<&'static str> {
+    match raw.trim() {
+        "array" => Some("Array"),
+        _ => None,
+    }
+}
+
+/// Rebind literal-origin variables to declaration spellings.
+///
+/// Only touches unannotated variables whose current binding came from a
+/// literal; annotated variables keep the user's text untouched so a
+/// precise annotation is never downgraded to the bare literal name.
+fn normalize_literal_types(entities: &[Entity], ctx: &mut ScopedTypeContext) {
+    for entity in entities {
+        if !matches!(
+            entity.kind,
+            EntityKind::Variable | EntityKind::Field | EntityKind::Property
+        ) {
+            continue;
+        }
+        // Composite destructuring names are owned by the destructuring
+        // pass; rebinding the joined name would resurrect the leak that
+        // the shared extractor skips.
+        if entity.name.contains(',') {
+            continue;
+        }
+        if entity
+            .metadata
+            .get("type_annotation")
+            .is_some_and(|ann| !ann.trim().is_empty())
+        {
+            continue;
+        }
+        let Some(lit) = entity.metadata.get("literal_type") else {
+            continue;
+        };
+        let Some(normalized) = normalize_typescript_literal_type(lit) else {
+            continue;
+        };
+        let Some(current) = ctx.get_variable_type(&entity.name).cloned() else {
+            continue;
+        };
+        if current.origin != Some(super::types::InferenceOrigin::LiteralType) {
+            continue;
+        }
+        let binding = TypeBinding {
+            type_name: normalized.to_string(),
+            type_entity_id: None,
+            span: entity.span,
+            origin: Some(super::types::InferenceOrigin::LiteralType),
+            shape: parse_type_shape(normalized, Language::TypeScript),
+        };
+        ctx.add_variable_type(entity.name.clone(), binding);
     }
 }
 
@@ -229,6 +295,13 @@ fn narrow_typescript_discriminated_union(
     if let Some(shape) = shape_opt {
         if let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
         {
+            // Identity narrowings prove nothing; drop them instead of
+            // rendering a row equal to the declared type.
+            if covers_declared_members(&shape, &narrowed)
+                || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
+            {
+                return results;
+            }
             let type_name = type_shape_to_string(&narrowed);
             results.push(NarrowingResult {
                 variable_name: var_name.clone(),
@@ -284,11 +357,11 @@ fn narrow_typescript_switch(
                     results.push(NarrowingResult {
                         variable_name: var_name.clone(),
                         narrowed_type: TypeBinding {
-                            type_name: literal,
+                            type_name: literal.clone(),
                             type_entity_id: None,
                             span: Span::default(),
                             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                            shape: None,
+                            shape: parse_type_shape(&literal, Language::TypeScript),
                         },
                     });
                 }
@@ -308,6 +381,11 @@ fn narrow_typescript_switch(
                         if let Some(narrowed) =
                             narrow_discriminated_union(&shape, field_name, &literal, type_index)
                         {
+                            if covers_declared_members(&shape, &narrowed)
+                                || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
+                            {
+                                continue;
+                            }
                             results.push(narrowing_result(var_name.clone(), narrowed));
                         }
                     }
@@ -389,15 +467,9 @@ fn narrow_typescript_truthiness(
 ) -> Vec<NarrowingResult> {
     let mut results = Vec::new();
     if let Some(var_name) = parse_typescript_truthiness_pattern(text) {
-        let shape_opt = ctx
-            .get_variable_type(&var_name)
-            .and_then(|existing| {
-                existing
-                    .shape
-                    .clone()
-                    .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript))
-            })
-            .or_else(|| declared_shape_here(ctx, params, &var_name));
+        // Parameter annotations win over variable bindings (which may
+        // leak across sibling scopes); declared_shape encodes that order.
+        let shape_opt = declared_shape_here(ctx, params, &var_name);
         if let Some(shape) = shape_opt {
             if let Some(narrowed) = narrow_truthiness(&shape, true, Language::TypeScript) {
                 let type_name = type_shape_to_string(&narrowed);
@@ -414,26 +486,10 @@ fn narrow_typescript_truthiness(
                 return results;
             }
         }
-        results.push(NarrowingResult {
-            variable_name: var_name,
-            narrowed_type: TypeBinding {
-                type_name: "truthy".to_string(),
-                type_entity_id: None,
-                span: Span::default(),
-                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                shape: None,
-            },
-        });
+        // Unknown type: stay conservative and emit nothing rather than a
+        // placeholder pseudo-type.
     } else if let Some(var_name) = parse_typescript_negated_truthiness_pattern(text) {
-        let shape_opt = ctx
-            .get_variable_type(&var_name)
-            .and_then(|existing| {
-                existing
-                    .shape
-                    .clone()
-                    .or_else(|| parse_type_shape(&existing.type_name, Language::TypeScript))
-            })
-            .or_else(|| declared_shape_here(ctx, params, &var_name));
+        let shape_opt = declared_shape_here(ctx, params, &var_name);
         if let Some(shape) = shape_opt {
             if let Some(narrowed) = narrow_truthiness(&shape, false, Language::TypeScript) {
                 let type_name = type_shape_to_string(&narrowed);
@@ -450,16 +506,8 @@ fn narrow_typescript_truthiness(
                 return results;
             }
         }
-        results.push(NarrowingResult {
-            variable_name: var_name,
-            narrowed_type: TypeBinding {
-                type_name: "falsy".to_string(),
-                type_entity_id: None,
-                span: Span::default(),
-                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                shape: None,
-            },
-        });
+        // Unknown type: stay conservative and emit nothing rather than a
+        // placeholder pseudo-type.
     }
     results
 }
@@ -489,14 +537,15 @@ fn narrow_typescript_in_operator(text: &str) -> Vec<NarrowingResult> {
     let Some((key, var_name)) = parse_typescript_in_pattern(text) else {
         return vec![];
     };
+    let type_name = format!("HasKey<{}>", key);
     vec![NarrowingResult {
         variable_name: var_name,
         narrowed_type: TypeBinding {
-            type_name: format!("HasKey<{}>", key),
+            type_name: type_name.clone(),
             type_entity_id: None,
             span: Span::default(),
-            origin: None,
-            shape: None,
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: parse_type_shape(&type_name, Language::TypeScript),
         },
     }]
 }
@@ -727,11 +776,11 @@ fn parse_typeof_pattern(text: &str) -> Option<NarrowingResult> {
     Some(NarrowingResult {
         variable_name: var_name,
         narrowed_type: TypeBinding {
-            type_name,
+            type_name: type_name.clone(),
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(&type_name, Language::TypeScript),
         },
     })
 }
@@ -756,11 +805,11 @@ fn parse_typeof_pattern_reversed(text: &str) -> Option<NarrowingResult> {
     Some(NarrowingResult {
         variable_name: var_name,
         narrowed_type: TypeBinding {
-            type_name: type_literal,
+            type_name: type_literal.clone(),
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(&type_literal, Language::TypeScript),
         },
     })
 }
@@ -785,11 +834,11 @@ fn narrow_typescript_instanceof(text: &str) -> Option<NarrowingResult> {
     Some(NarrowingResult {
         variable_name: var_name,
         narrowed_type: TypeBinding {
-            type_name,
+            type_name: type_name.clone(),
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(&type_name, Language::TypeScript),
         },
     })
 }
@@ -894,6 +943,73 @@ mod tests {
 
     fn dummy_ctx() -> ScopedTypeContext {
         ScopedTypeContext::new(Language::TypeScript)
+    }
+
+    #[test]
+    fn test_typescript_array_literal_normalizes_to_declaration_spelling() {
+        let mut ctx = dummy_ctx();
+        ctx.add_variable_type(
+            "items".to_string(),
+            TypeBinding {
+                type_name: "array".to_string(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(InferenceOrigin::LiteralType),
+                shape: parse_type_shape("array", Language::TypeScript),
+            },
+        );
+        let entity = Entity {
+            id: EntityId(1),
+            name: "items".to_string(),
+            kind: EntityKind::Variable,
+            return_type: None,
+            parameters: Vec::new(),
+            metadata: [("literal_type".to_string(), "array".to_string())]
+                .into_iter()
+                .collect(),
+            span: Span::default(),
+            ..Default::default()
+        };
+        normalize_literal_types(std::slice::from_ref(&entity), &mut ctx);
+        assert_eq!(ctx.get_variable_type("items").unwrap().type_name, "Array");
+    }
+
+    #[test]
+    fn test_typescript_normalize_keeps_explicit_annotation() {
+        let mut ctx = dummy_ctx();
+        ctx.add_variable_type(
+            "items".to_string(),
+            TypeBinding {
+                type_name: "Array<[string, number]>".to_string(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(InferenceOrigin::TypeAnnotation),
+                shape: parse_type_shape("Array<[string, number]>", Language::TypeScript),
+            },
+        );
+        let entity = Entity {
+            id: EntityId(1),
+            name: "items".to_string(),
+            kind: EntityKind::Variable,
+            return_type: None,
+            parameters: Vec::new(),
+            metadata: [
+                ("literal_type".to_string(), "array".to_string()),
+                (
+                    "type_annotation".to_string(),
+                    "Array<[string, number]>".to_string(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            span: Span::default(),
+            ..Default::default()
+        };
+        normalize_literal_types(std::slice::from_ref(&entity), &mut ctx);
+        assert_eq!(
+            ctx.get_variable_type("items").unwrap().type_name,
+            "Array<[string, number]>"
+        );
     }
 
     #[test]
@@ -1071,16 +1187,16 @@ mod tests {
     fn test_typescript_truthiness() {
         let ctx = dummy_ctx();
         let results = narrow_typescript_if("if (x)", &ctx, None, &[]);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].variable_name, "x");
+        // Unknown type: no placeholder pseudo-type is emitted.
+        assert!(results.is_empty());
     }
 
     #[test]
     fn test_typescript_negated_truthiness() {
         let ctx = dummy_ctx();
         let results = narrow_typescript_if("if (!x)", &ctx, None, &[]);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].variable_name, "x");
+        // Unknown type: no placeholder pseudo-type is emitted.
+        assert!(results.is_empty());
     }
 
     #[test]
@@ -1090,6 +1206,11 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "HasKey<prop>");
+        assert_eq!(
+            results[0].narrowed_type.origin,
+            Some(InferenceOrigin::ControlFlowNarrowing)
+        );
+        assert!(results[0].narrowed_type.shape.is_some());
     }
 
     #[test]

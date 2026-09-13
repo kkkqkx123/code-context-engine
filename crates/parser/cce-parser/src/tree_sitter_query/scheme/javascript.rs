@@ -12,7 +12,7 @@
 /// Get shared entity query patterns for JavaScript/TypeScript
 ///
 /// Returns patterns that are identical between JS and TS:
-/// - Methods (definition, constructor, getter, setter)
+/// - Methods (definition, constructor; accessors extract as methods)
 /// - Functions (declaration, generator, arrow, expression)
 /// - Variables (const, let, var)
 /// - Decorators
@@ -50,19 +50,11 @@ pub fn entity_function_method_patterns() -> &'static str {
   (#eq? @entity.constructor.name "constructor")
 ) @entity.constructor
 
-; Getter method
-(method_definition
-  name: (property_identifier) @entity.method.getter.name
-  parameters: (formal_parameters)
-  body: (statement_block
-    (return_statement (_) @entity.method.getter.return_type)?
-  )
-) @entity.method.getter
-
-; Setter method
-(method_definition
-  name: (property_identifier) @entity.method.setter.name
-) @entity.method.setter
+; NOTE: no dedicated getter/setter patterns. The grammar drops the
+; `get`/`set` keywords (`get foo()` parses as plain `method_definition`),
+; so a name-only pattern would match every method and its return-less
+; entity could win same-span dedup over the `@entity.method` match.
+; Accessors are extracted as ordinary methods instead.
 
 ; ============================================
 ; Functions

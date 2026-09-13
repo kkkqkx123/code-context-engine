@@ -1,7 +1,7 @@
 //! Relation classification types
 //!
 //! This module provides stable, globally-used classification systems:
-//! - RelationType: Categorizes semantic relationships (35 types across 4 domains)
+//! - RelationType: Categorizes semantic relationships (38 types across 5 domains)
 //! - RelationLevel: Distinguishes file-level vs entity-level relations
 //! - ExternalCallType: Classifies external references
 
@@ -166,11 +166,12 @@ impl ExternalCallType {
 
 /// Relation type
 ///
-/// Categorized into four domains matching spec.md:
+/// Categorized into five domains matching spec.md:
 /// - Call: Function/method invocations
 /// - Dependency: Import/include/use relations
 /// - Structural: Inheritance/implementation/contains
 /// - Reference: Type/field references
+/// - Template/Markup: Element containment, template/parameter/event bindings
 #[derive(
     Debug,
     Clone,

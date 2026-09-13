@@ -8,6 +8,8 @@ use std::collections::HashMap;
 
 use cce_types::language::Language;
 
+pub use super::call_utils::{split_call_args, split_call_target};
+
 use super::types::{TypeShape, instantiate_type_shape, parse_type_shape};
 
 /// Parsed generic type with base name and type arguments.
@@ -253,104 +255,49 @@ pub fn shape_contains_param(shape: &TypeShape) -> bool {
     }
 }
 
-/// Split a comma-separated argument list while respecting nesting.
+/// Resolve a Scala collection-factory call to its element-instantiated type.
 ///
-/// Tracks `()`, `[]`, `{}` and `<>` depth plus string quotes so call-site
-/// argument expressions such as `f(a, g(1, 2), [x, y])` split into exactly
-/// three items. Unbalanced input yields a single item (the whole string).
-pub fn split_call_args(args_text: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut depth_paren = 0usize;
-    let mut depth_bracket = 0usize;
-    let mut depth_brace = 0usize;
-    let mut depth_angle = 0usize;
-    let mut quote: Option<char> = None;
-    let mut escaped = false;
-    let mut current = String::new();
-    for ch in args_text.chars() {
-        if let Some(q) = quote {
-            current.push(ch);
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == q {
-                quote = None;
-            }
-            continue;
+/// `List(User(...), ...)` has no function entry, so call-target resolution
+/// misses and the bare constructor reading would degrade to `List`. When
+/// every call-site element resolves to the same concrete shape, returns the
+/// instantiated name (`List[User]`) with its shape. Mixed, unknown, or
+/// parameterized elements yield `None` so callers keep their fallback.
+pub fn resolve_collection_factory_shape(
+    language: Language,
+    source: &str,
+    mut resolve_arg: impl FnMut(&str) -> Option<TypeShape>,
+) -> Option<(String, TypeShape)> {
+    if language != Language::Scala {
+        return None;
+    }
+    let (func_name, args) = split_call_target(source);
+    if args.is_empty() {
+        return None;
+    }
+    let base = crate::type_inference::call_utils::simple_callee_name(&func_name);
+    let base = base.split(['[', '<']).next().unwrap_or(base).trim();
+    if !matches!(base, "List" | "Seq" | "Vector" | "Set" | "Array") {
+        return None;
+    }
+    let mut element: Option<TypeShape> = None;
+    for arg in &args {
+        let shape = resolve_arg(arg)?;
+        if shape_contains_param(&shape) {
+            return None;
         }
-        match ch {
-            '\'' | '"' => {
-                quote = Some(ch);
-                current.push(ch);
-            }
-            '(' => {
-                depth_paren += 1;
-                current.push(ch);
-            }
-            ')' => {
-                depth_paren = depth_paren.saturating_sub(1);
-                current.push(ch);
-            }
-            '[' => {
-                depth_bracket += 1;
-                current.push(ch);
-            }
-            ']' => {
-                depth_bracket = depth_bracket.saturating_sub(1);
-                current.push(ch);
-            }
-            '{' => {
-                depth_brace += 1;
-                current.push(ch);
-            }
-            '}' => {
-                depth_brace = depth_brace.saturating_sub(1);
-                current.push(ch);
-            }
-            '<' => {
-                depth_angle += 1;
-                current.push(ch);
-            }
-            '>' => {
-                depth_angle = depth_angle.saturating_sub(1);
-                current.push(ch);
-            }
-            ',' if depth_paren == 0
-                && depth_bracket == 0
-                && depth_brace == 0
-                && depth_angle == 0 =>
-            {
-                args.push(current.trim().to_string());
-                current.clear();
-            }
-            _ => current.push(ch),
+        if matches!(&shape, TypeShape::Named(name) if name == "unknown") {
+            return None;
+        }
+        match &element {
+            None => element = Some(shape),
+            Some(first) if *first == shape => {}
+            _ => return None,
         }
     }
-    if !current.trim().is_empty() || !args.is_empty() {
-        args.push(current.trim().to_string());
-    }
-    args
-}
-
-/// Split a stored call target into its callee name and argument expressions.
-///
-/// Stored targets look like `foo`, `module.func(a, b)` or `obj.m(x)`.
-/// Returns the full callee path (qualification is stripped by callers) and
-/// the raw argument texts (possibly empty). Malformed input yields the whole
-/// string as the name with no arguments.
-pub fn split_call_target(target: &str) -> (String, Vec<String>) {
-    let trimmed = target.trim();
-    let Some(paren_pos) = trimmed.find('(') else {
-        return (trimmed.to_string(), Vec::new());
-    };
-    let name = trimmed[..paren_pos].trim().to_string();
-    let rest = &trimmed[paren_pos + 1..];
-    let Some(close_pos) = rest.rfind(')') else {
-        return (trimmed.to_string(), Vec::new());
-    };
-    let args = split_call_args(rest[..close_pos].trim());
-    (name, args)
+    let element = element?;
+    let type_name = format!("{base}[{}]", element.to_type_string());
+    let shape = parse_type_shape(&type_name, language)?;
+    Some((type_name, shape))
 }
 
 /// Unify one formal parameter shape against a call-site actual shape.
@@ -837,43 +784,6 @@ mod tests {
         let gt = parse_generic_type("  List<  String  >  ").unwrap();
         assert_eq!(gt.base, "List");
         assert_eq!(gt.args[0], GenericTypeArg::Concrete("String".to_string()));
-    }
-
-    // ==================== split_call_args ====================
-
-    #[test]
-    fn test_split_call_args_simple() {
-        assert_eq!(split_call_args(""), Vec::<String>::new());
-        assert_eq!(split_call_args("42"), vec!["42".to_string()]);
-        assert_eq!(
-            split_call_args("42, \"answer\", x"),
-            vec!["42".to_string(), "\"answer\"".to_string(), "x".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_split_call_args_nested() {
-        assert_eq!(
-            split_call_args("a, g(1, 2), [x, y]"),
-            vec!["a".to_string(), "g(1, 2)".to_string(), "[x, y]".to_string()]
-        );
-        assert_eq!(
-            split_call_args("f(\"a,b\"), {k: 1}"),
-            vec!["f(\"a,b\")".to_string(), "{k: 1}".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_split_call_target() {
-        let (name, args) = split_call_target("makePair");
-        assert_eq!(name, "makePair");
-        assert!(args.is_empty());
-        let (name, args) = split_call_target("makePair(42, \"answer\")");
-        assert_eq!(name, "makePair");
-        assert_eq!(args, vec!["42".to_string(), "\"answer\"".to_string()]);
-        let (name, args) = split_call_target("obj.method(x)");
-        assert_eq!(name, "obj.method");
-        assert_eq!(args, vec!["x".to_string()]);
     }
 
     // ==================== bind_call_site_generics ====================

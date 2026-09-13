@@ -11,8 +11,23 @@ use super::extractors::{extract_field_type, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
     InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings,
-    parse_type_shape, strip_references,
+    declared_shape, parse_type_shape, strip_references, type_shape_to_string,
 };
+
+/// Display name for a Rust type binding.
+///
+/// Reference types keep their borrow spelling (`&str`, `&mut Vec<T>`)
+/// so the inferred name agrees with the structured shape instead of
+/// degrading to the bare inner type. Lifetimes normalize away
+/// (`&'a str` renders as `&str`, matching the shape parser).
+fn rust_binding_name(original: &str, shape: &Option<TypeShape>) -> String {
+    match shape {
+        Some(TypeShape::Reference { .. }) => {
+            type_shape_to_string(shape.as_ref().expect("matched reference shape"))
+        }
+        _ => original.to_string(),
+    }
+}
 use cce_types::language::Language;
 
 /// Rust type inference implementation.
@@ -45,11 +60,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                         } else {
                             parse_type_shape(return_type, ctx.language())
                         };
-                        let type_name = if is_ref {
-                            base.clone()
-                        } else {
-                            return_type.clone()
-                        };
+                        let type_name = rust_binding_name(return_type, &shape);
                         let binding = TypeBinding {
                             type_name,
                             type_entity_id: None,
@@ -72,7 +83,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                             } else {
                                 parse_type_shape(ty, ctx.language())
                             };
-                            let type_name = if is_ref { base.clone() } else { ty.clone() };
+                            let type_name = rust_binding_name(ty, &shape);
                             let binding = TypeBinding {
                                 type_name: type_name.clone(),
                                 type_entity_id: None,
@@ -81,9 +92,10 @@ impl LanguageTypeInferer for RustTypeInferer {
                                 shape: shape.clone(),
                             };
                             param_bindings.push(binding);
-                            // Also bind variable for use in function body (with stripped type)
+                            // Also bind variable for use in function body,
+                            // keeping the borrow spelling for fidelity.
                             let var_binding = TypeBinding {
-                                type_name: base.clone(),
+                                type_name,
                                 type_entity_id: None,
                                 span: entity.span,
                                 origin: Some(InferenceOrigin::TypeAnnotation),
@@ -108,11 +120,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                             } else {
                                 parse_type_shape(self_type, ctx.language())
                             };
-                            let type_name = if is_ref {
-                                base.clone()
-                            } else {
-                                self_type.clone()
-                            };
+                            let type_name = rust_binding_name(self_type, &shape);
                             let binding = TypeBinding {
                                 type_name,
                                 type_entity_id: None,
@@ -125,7 +133,8 @@ impl LanguageTypeInferer for RustTypeInferer {
                     }
                 }
                 EntityKind::Variable => {
-                    // Handle variable types with reference stripping
+                    // Handle variable types, keeping borrow spellings so the
+                    // inferred name agrees with the reference shape.
                     let mut handled = false;
                     if let Some(type_name) = entity.metadata.get("type_annotation") {
                         let (base, is_mut, is_ref) = strip_references(type_name);
@@ -137,11 +146,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                         } else {
                             parse_type_shape(type_name, ctx.language())
                         };
-                        let final_name = if is_ref {
-                            base.clone()
-                        } else {
-                            type_name.clone()
-                        };
+                        let final_name = rust_binding_name(type_name, &shape);
                         let binding = TypeBinding {
                             type_name: final_name,
                             type_entity_id: None,
@@ -161,11 +166,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                         } else {
                             parse_type_shape(init_type, ctx.language())
                         };
-                        let final_name = if is_ref {
-                            base.clone()
-                        } else {
-                            init_type.clone()
-                        };
+                        let final_name = rust_binding_name(init_type, &shape);
                         let binding = TypeBinding {
                             type_name: final_name,
                             type_entity_id: None,
@@ -185,11 +186,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                         } else {
                             parse_type_shape(lit_type, ctx.language())
                         };
-                        let final_name = if is_ref {
-                            base.clone()
-                        } else {
-                            lit_type.clone()
-                        };
+                        let final_name = rust_binding_name(lit_type, &shape);
                         let binding = TypeBinding {
                             type_name: final_name,
                             type_entity_id: None,
@@ -226,10 +223,11 @@ impl LanguageTypeInferer for RustTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
-                        let mut narrowed: Vec<(String, TypeBinding)> = narrow_rust_if(&fact.text)
-                            .into_iter()
-                            .map(|result| (result.variable_name, result.narrowed_type))
-                            .collect();
+                        let mut narrowed: Vec<(String, TypeBinding)> =
+                            narrow_rust_if(&fact.text, ctx, &entity.parameters)
+                                .into_iter()
+                                .map(|result| (result.variable_name, result.narrowed_type))
+                                .collect();
                         for (_, binding) in narrowed.iter_mut() {
                             if !binding.span.is_available() {
                                 binding.span = entity.span;
@@ -241,10 +239,11 @@ impl LanguageTypeInferer for RustTypeInferer {
                             Language::Rust,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
-                        for result in narrow_rust_match(&fact.text) {
+                        for result in narrow_rust_match(&fact.text, ctx, &entity.parameters) {
                             ctx.add_narrowed_type_anchored(
                                 result.variable_name,
                                 result.narrowed_type,
@@ -269,16 +268,30 @@ struct NarrowingResult {
 /// Narrow types from a Rust `if` condition.
 ///
 /// Patterns:
-/// - `if let Some(val) = expr` → val: T (inner type of Option)
-/// - `if let Ok(val) = expr` → val: T (Ok variant of Result)
-/// - `if let Err(e) = expr` → e: E (Err variant of Result)
-fn narrow_rust_if(text: &str) -> Vec<NarrowingResult> {
+/// - `if let Some(val) = expr` → val: T (payload of the scrutinee's
+///   `Option<T>` declaration)
+/// - `if let Ok(val) = expr` → val: T (payload of `Result<T, E>`)
+/// - `if let Err(e) = expr` → e: E (payload of `Result<T, E>`)
+///
+/// Without a resolvable scrutinee declaration the known enum wrappers
+/// (`Some`/`Ok`/`Err`) stay unbound instead of leaking the variant name
+/// as the payload type. Custom constructors keep their name since the
+/// binder genuinely holds that type.
+fn narrow_rust_if(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let text = text.trim();
-    narrow_rust_if_let(text)
+    narrow_rust_if_let(text, ctx, params)
 }
 
 /// Parse `if let Pattern(var) = expr` and extract the bound variable.
-fn narrow_rust_if_let(text: &str) -> Vec<NarrowingResult> {
+fn narrow_rust_if_let(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let Some(text) = strip_rust_if_prefix(text) else {
         return vec![];
     };
@@ -288,63 +301,188 @@ fn narrow_rust_if_let(text: &str) -> Vec<NarrowingResult> {
         return vec![];
     };
     let rest = rest.trim();
-
-    parse_rust_let_pattern(rest)
-}
-
-/// Parse a Rust let-pattern like `Some(val)`, `Ok(val)`, `Err(e)`.
-fn parse_rust_let_pattern(text: &str) -> Vec<NarrowingResult> {
-    let Some(paren_start) = text.find('(') else {
+    let Some((pattern_text, scrutinee)) = split_rust_let_binding(rest) else {
         return vec![];
     };
-    let constructor = text[..paren_start].trim();
-
-    let Some(content) = extract_balanced_parens(&text[paren_start..]) else {
+    let Some((constructors, binder)) = parse_rust_pattern_chain(pattern_text) else {
         return vec![];
     };
-    let var_name = content.trim().to_string();
-
-    if var_name.is_empty() || !is_valid_ident(&var_name) {
-        return vec![];
-    }
-
-    let type_name = match constructor {
-        "Some" => "Option::Some".to_string(),
-        "Ok" => "Result::Ok".to_string(),
-        "Err" => "Result::Err".to_string(),
-        other => other.to_string(),
+    let scrutinee_name = scrutinee
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches('&')
+        .trim();
+    let payload = declared_shape(ctx, params, Language::Rust, scrutinee_name)
+        .and_then(|shape| rust_pattern_payload(&shape, &constructors));
+    let Some(payload) = payload else {
+        // Known enum wrappers without a resolvable declaration stay
+        // conservative: the binder holds the payload, not the variant.
+        if matches!(
+            constructors.last().map(String::as_str),
+            Some("Some" | "Ok" | "Err")
+        ) {
+            return vec![];
+        }
+        let type_name = constructors.last().cloned().unwrap_or_default();
+        if type_name.is_empty() {
+            return vec![];
+        }
+        return vec![NarrowingResult {
+            variable_name: binder,
+            narrowed_type: TypeBinding {
+                type_name,
+                type_entity_id: None,
+                span: Span::default(),
+                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                shape: None,
+            },
+        }];
     };
-
+    let type_name = type_shape_to_string(&payload);
     vec![NarrowingResult {
-        variable_name: var_name,
+        variable_name: binder,
         narrowed_type: TypeBinding {
             type_name,
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: Some(payload),
         },
     }]
 }
 
+/// Split `Pattern = expr` on the top-level `=` of a let binding.
+fn split_rust_let_binding(text: &str) -> Option<(&str, &str)> {
+    let mut depth = 0;
+    for (i, ch) in text.char_indices() {
+        match ch {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            '=' if depth == 0 => {
+                // Skip `==`, `=>`, `>=`, `<=`, `!=`.
+                let bytes = text.as_bytes();
+                let prev = if i > 0 { bytes[i - 1] } else { b' ' };
+                let next = bytes.get(i + 1).copied().unwrap_or(b' ');
+                if matches!(prev, b'=' | b'!' | b'>' | b'<') || matches!(next, b'=' | b'>') {
+                    continue;
+                }
+                return Some((text[..i].trim(), text[i + 1..].trim()));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse a Rust pattern into its constructor path and bound variable.
+///
+/// `Some(Ok(val))` → (`["Some", "Ok"]`, `val`); `ref`/`mut`/`&` markers on
+/// the binder are stripped (`Some(ref name)` binds `name`).
+fn parse_rust_pattern_chain(text: &str) -> Option<(Vec<String>, String)> {
+    let mut constructors = Vec::new();
+    let mut rest = text.trim();
+    loop {
+        rest = rest.trim();
+        let Some(paren) = rest.find('(') else {
+            break;
+        };
+        let head = rest[..paren].trim();
+        // Reject bindings with result expressions before the pattern.
+        if head.is_empty() || head.contains(|c: char| c.is_whitespace() || c == ',' || c == ';') {
+            return None;
+        }
+        let constructor = head.rsplit("::").next().unwrap_or(head).trim().to_string();
+        if constructor.is_empty() || !is_valid_ident(&constructor) {
+            return None;
+        }
+        let Some(inner) = extract_balanced_parens(&rest[paren..]) else {
+            return None;
+        };
+        constructors.push(constructor);
+        rest = inner;
+    }
+    if constructors.is_empty() {
+        return None;
+    }
+    let mut binder = rest.trim();
+    while let Some(stripped) = binder
+        .strip_prefix("ref ")
+        .or_else(|| binder.strip_prefix("mut "))
+    {
+        binder = stripped.trim();
+    }
+    binder = binder.trim_start_matches('&').trim();
+    if binder.is_empty() || !is_valid_ident(binder) {
+        return None;
+    }
+    Some((constructors, binder.to_string()))
+}
+
+/// Resolve the payload type at the end of a constructor path.
+///
+/// `Some` unwraps `Option<T>`; `Ok`/`Err` select from `Result<T, E>`.
+/// Anything else (unknown declaration, mismatched constructor) yields
+/// `None` so callers keep the constructor name instead of guessing.
+fn rust_pattern_payload(shape: &TypeShape, constructors: &[String]) -> Option<TypeShape> {
+    let mut current = shape.clone();
+    for constructor in constructors {
+        let args = match &current {
+            TypeShape::Generic { base, args } => {
+                if (base == "Option" || base == "Optional")
+                    && constructor == "Some"
+                    && args.len() == 1
+                {
+                    args[0].clone()
+                } else if base == "Result" && args.len() == 2 {
+                    match constructor.as_str() {
+                        "Ok" => args[0].clone(),
+                        "Err" => args[1].clone(),
+                        _ => return None,
+                    }
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        };
+        current = args;
+    }
+    Some(current)
+}
+
 /// Narrow types from a Rust `match` arm pattern.
-fn narrow_rust_match(text: &str) -> Vec<NarrowingResult> {
+fn narrow_rust_match(
+    text: &str,
+    ctx: &ScopedTypeContext,
+    params: &[(String, Option<String>)],
+) -> Vec<NarrowingResult> {
     let text = text.trim();
 
-    if let Some(brace_start) = text.find('{') {
-        let body = &text[brace_start + 1..];
-        narrow_rust_match_arms(body)
+    let rest = text.strip_prefix("match").unwrap_or(text);
+    if let Some(brace_start) = rest.find('{') {
+        let scrutinee = rest[..brace_start]
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_start_matches('&')
+            .trim();
+        let declared = declared_shape(ctx, params, Language::Rust, scrutinee);
+        let body = &rest[brace_start + 1..];
+        narrow_rust_match_arms(body, declared.as_ref())
     } else {
         vec![]
     }
 }
 
 /// Extract variable bindings from match arm patterns.
-fn narrow_rust_match_arms(arms_text: &str) -> Vec<NarrowingResult> {
+fn narrow_rust_match_arms(arms_text: &str, declared: Option<&TypeShape>) -> Vec<NarrowingResult> {
     let mut results = vec![];
     for arm in arms_text.split("=>") {
         let arm = arm.trim();
-        if let Some(result) = parse_rust_match_arm_pattern(arm) {
+        if let Some(result) = parse_rust_match_arm_pattern(arm, declared) {
             results.push(result);
         }
     }
@@ -352,14 +490,37 @@ fn narrow_rust_match_arms(arms_text: &str) -> Vec<NarrowingResult> {
 }
 
 /// Parse a single match arm pattern to extract variable bindings.
-fn parse_rust_match_arm_pattern(text: &str) -> Option<NarrowingResult> {
+///
+/// Nested patterns (`Some(Ok(val))`) resolve through the scrutinee
+/// declaration; known enum wrappers (`Some`/`Ok`/`Err`) without one stay
+/// unbound instead of leaking the variant name. Anything else stays
+/// unbound: without the scrutinee declaration there is no payload shape
+/// to resolve, so no binding is emitted.
+fn parse_rust_match_arm_pattern(
+    text: &str,
+    declared: Option<&TypeShape>,
+) -> Option<NarrowingResult> {
     let text = text.trim();
 
     for constructor in &["Some", "Ok", "Err"] {
         if let Some(pos) = text.find(&format!("{constructor}(")) {
             let pattern_text = &text[pos..];
-            let results = parse_rust_let_pattern(pattern_text);
-            return results.into_iter().next();
+            let (constructors, binder) = parse_rust_pattern_chain(pattern_text)?;
+            let payload = declared.and_then(|shape| rust_pattern_payload(shape, &constructors))?;
+            let type_name = type_shape_to_string(&payload);
+            if type_name.is_empty() {
+                return None;
+            }
+            return Some(NarrowingResult {
+                variable_name: binder,
+                narrowed_type: TypeBinding {
+                    type_name,
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: Some(payload),
+                },
+            });
         }
     }
     None
@@ -375,43 +536,91 @@ fn strip_rust_if_prefix(text: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_rust_if_let_some() {
-        let results = narrow_rust_if("if let Some(val) = input {");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].variable_name, "val");
-        assert_eq!(results[0].narrowed_type.type_name, "Option::Some");
+    fn rust_ctx_with(
+        params: Vec<(&str, &str)>,
+    ) -> (ScopedTypeContext, Vec<(String, Option<String>)>) {
+        let ctx = ScopedTypeContext::new(Language::Rust);
+        let owned = params
+            .into_iter()
+            .map(|(name, ty)| (name.to_string(), Some(ty.to_string())))
+            .collect();
+        (ctx, owned)
     }
 
     #[test]
-    fn test_rust_if_let_ok() {
-        let results = narrow_rust_if("if let Ok(val) = result {");
+    fn test_rust_if_let_some_payload() {
+        let (ctx, params) = rust_ctx_with(vec![("input", "Option<String>")]);
+        let results = narrow_rust_if("if let Some(val) = input {", &ctx, &params);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "val");
-        assert_eq!(results[0].narrowed_type.type_name, "Result::Ok");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
     }
 
     #[test]
-    fn test_rust_if_let_err() {
-        let results = narrow_rust_if("if let Err(e) = result {");
+    fn test_rust_if_let_some_unknown_stays_unbound() {
+        let (ctx, params) = rust_ctx_with(vec![]);
+        let results = narrow_rust_if("if let Some(val) = input {", &ctx, &params);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_rust_if_let_ok_payload() {
+        let (ctx, params) = rust_ctx_with(vec![("result", "Result<i32, String>")]);
+        let results = narrow_rust_if("if let Ok(val) = result {", &ctx, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "val");
+        assert_eq!(results[0].narrowed_type.type_name, "i32");
+    }
+
+    #[test]
+    fn test_rust_if_let_err_payload() {
+        let (ctx, params) = rust_ctx_with(vec![("result", "Result<i32, String>")]);
+        let results = narrow_rust_if("if let Err(e) = result {", &ctx, &params);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "e");
-        assert_eq!(results[0].narrowed_type.type_name, "Result::Err");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_rust_if_let_ref_binder() {
+        let (ctx, params) = rust_ctx_with(vec![("x", "Option<String>")]);
+        let results = narrow_rust_if("if let Some(ref name) = x {", &ctx, &params);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].variable_name, "name");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
     }
 
     #[test]
     fn test_rust_if_let_custom_type() {
-        let results = narrow_rust_if("if let Wrapper(inner) = data {");
+        let (ctx, params) = rust_ctx_with(vec![]);
+        let results = narrow_rust_if("if let Wrapper(inner) = data {", &ctx, &params);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "inner");
         assert_eq!(results[0].narrowed_type.type_name, "Wrapper");
     }
 
     #[test]
-    fn test_rust_match_some_arm() {
-        let results = narrow_rust_match("match opt { Some(val) => val, None => 0 }");
+    fn test_rust_match_some_arm_payload() {
+        let (ctx, params) = rust_ctx_with(vec![("opt", "Option<String>")]);
+        let results = narrow_rust_match("match opt { Some(val) => val, None => 0 }", &ctx, &params);
         assert!(!results.is_empty());
         assert_eq!(results[0].variable_name, "val");
+        assert_eq!(results[0].narrowed_type.type_name, "String");
+    }
+
+    #[test]
+    fn test_rust_match_nested_payload() {
+        let (ctx, params) = rust_ctx_with(vec![("opt", "Option<Result<i32, String>>")]);
+        let results = narrow_rust_match(
+            "match opt { Some(Ok(val)) => val, Some(Err(e)) => e, None => 0 }",
+            &ctx,
+            &params,
+        );
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].variable_name, "val");
+        assert_eq!(results[0].narrowed_type.type_name, "i32");
+        assert_eq!(results[1].variable_name, "e");
+        assert_eq!(results[1].narrowed_type.type_name, "String");
     }
 
     #[test]
@@ -455,13 +664,13 @@ mod tests {
         entity.parameters = vec![("s".to_string(), Some("&str".to_string()))];
         entity.return_type = Some("&str".to_string());
         RustTypeInferer.infer_declarations(&[entity], &mut ctx);
-        // Param should be stripped to inner type `str`
+        // Borrow spellings are preserved in the inferred name.
         let binding = ctx.get_variable_type("s").expect("param s");
-        assert_eq!(binding.type_name, "str");
+        assert_eq!(binding.type_name, "&str");
         assert!(matches!(binding.shape, Some(TypeShape::Reference { .. })));
-        // Return type stripped as well
+        // Return type keeps the borrow as well
         let ret = ctx.get_return_type(EntityId(1)).expect("return");
-        assert_eq!(ret.type_name, "str");
+        assert_eq!(ret.type_name, "&str");
     }
 
     #[test]
@@ -476,7 +685,7 @@ mod tests {
         entity.parameters = vec![("v".to_string(), Some("&mut Vec<T>".to_string()))];
         RustTypeInferer.infer_declarations(&[entity], &mut ctx);
         let binding = ctx.get_variable_type("v").expect("param v");
-        assert_eq!(binding.type_name, "Vec<T>");
+        assert_eq!(binding.type_name, "&mut Vec<T>");
         if let Some(TypeShape::Reference { mutable, .. }) = &binding.shape {
             assert!(*mutable);
         } else {

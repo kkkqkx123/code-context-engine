@@ -44,13 +44,13 @@ fn dart_generic_constructor_call_binds_base_type() {
     let user = find(&entities, EntityKind::Variable, "user");
     assert_eq!(
         user.metadata.get("constructor_type").map(String::as_str),
-        Some("Container"),
-        "generic instantiation should normalize to the base type"
+        Some("Container<String>"),
+        "explicit type arguments are preserved on the constructor type"
     );
     let count = find(&entities, EntityKind::Variable, "count");
     assert_eq!(
         count.metadata.get("literal_type").map(String::as_str),
-        Some("number")
+        Some("int")
     );
     let explicit = find(&entities, EntityKind::Variable, "explicit");
     assert_eq!(
@@ -277,7 +277,7 @@ fn cpp_init_declarator_binds_literal() {
     let x = find(&entities, EntityKind::Variable, "x");
     assert_eq!(
         x.metadata.get("literal_type").map(String::as_str),
-        Some("number")
+        Some("int")
     );
 }
 
@@ -370,7 +370,7 @@ fn csharp_variable_binds_annotation_and_initializer() {
     );
     assert_eq!(
         y.metadata.get("literal_type").map(String::as_str),
-        Some("number")
+        Some("int")
     );
     let z = find(&entities, EntityKind::Variable, "z");
     assert_eq!(
@@ -386,5 +386,72 @@ fn c_init_declarator_binds_type_and_literal() {
     assert_eq!(
         x.metadata.get("type_annotation").map(String::as_str),
         Some("int")
+    );
+}
+
+#[test]
+fn java_multi_arg_generic_constructor_keeps_arguments() {
+    let entities = parse(
+        "VarInference.java",
+        "import java.util.ArrayList;\nimport java.util.HashMap;\npublic class VarInference {\n    public static void main(String[] args) {\n        var names = new ArrayList<String>();\n        var scores = new HashMap<String, Integer>();\n    }\n}",
+    );
+    let names = find(&entities, EntityKind::Variable, "names");
+    assert_eq!(
+        names.metadata.get("constructor_type").map(String::as_str),
+        Some("ArrayList<String>")
+    );
+    let scores = find(&entities, EntityKind::Variable, "scores");
+    assert_eq!(
+        scores.metadata.get("constructor_type").map(String::as_str),
+        Some("HashMap<String, Integer>")
+    );
+}
+
+#[test]
+fn java_binary_plus_records_operands() {
+    let entities = parse(
+        "Calc.java",
+        "public class Calc {\n    public static void main(String[] args) {\n        var first = \"a\";\n        var doubled = first + first;\n    }\n}",
+    );
+    let doubled = find(&entities, EntityKind::Variable, "doubled");
+    assert_eq!(
+        doubled.metadata.get("binary_plus").map(String::as_str),
+        Some("first + first")
+    );
+}
+
+#[test]
+fn python_quoted_forward_ref_return_is_captured() {
+    let entities = parse(
+        "models.py",
+        "class Container:\n    def duplicate(self) -> \"Container\":\n        return Container()\n",
+    );
+    let duplicate = entities
+        .iter()
+        .find(|e| e.name == "duplicate")
+        .expect("duplicate method");
+    assert_eq!(duplicate.return_type.as_deref(), Some("\"Container\""));
+}
+
+#[test]
+fn typescript_overload_signatures_yield_entities() {
+    let entities = parse(
+        "overloads.ts",
+        "export function combine(a: number, b: number): number;\nexport function combine(a: number | string, b: number | string): number | string {\n  return 1;\n}\n",
+    );
+    let combines: Vec<_> = entities
+        .iter()
+        .filter(|e| e.kind == EntityKind::Function && e.name == "combine")
+        .collect();
+    assert_eq!(combines.len(), 2);
+    assert!(
+        combines
+            .iter()
+            .any(|e| e.return_type.as_deref() == Some("number"))
+    );
+    assert!(
+        combines
+            .iter()
+            .any(|e| e.return_type.as_deref() == Some("number | string"))
     );
 }

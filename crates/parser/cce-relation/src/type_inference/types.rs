@@ -14,9 +14,9 @@ pub mod shape;
 pub use binding::{NestedPatternPart, Pattern, TypeBinding, TypeConfidence, VariableTypeBinding};
 pub use context::{ScopeFrame, ScopedTypeContext};
 pub use narrowing::{
-    BranchPolarity, add_polarity_aware_narrowings, declared_shape, else_branch_complement,
-    fact_has_else_branch, is_falsy_type, narrow_discriminated_union, narrow_truthiness,
-    subtract_union_members,
+    BranchPolarity, add_polarity_aware_narrowings, covers_declared_members, declared_shape,
+    else_branch_complement, fact_has_else_branch, is_falsy_type, narrow_discriminated_union,
+    narrow_truthiness, subtract_nullable_suffix, subtract_union_members,
 };
 pub use origin::{
     AUTHORITATIVE_ORIGIN_THRESHOLD, InferenceOrigin, binding_supersedes, bindings_supersede,

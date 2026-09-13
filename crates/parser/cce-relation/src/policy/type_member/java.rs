@@ -219,4 +219,35 @@ mod tests {
                 || idx.get_type("com.example.Foo.Inner").is_some()
         );
     }
+
+    #[test]
+    fn java_build_index_records_supertypes() {
+        let circle = Entity::new(
+            EntityId(1),
+            EntityKind::Class,
+            "Circle".to_string(),
+            cce_types::Span::default(),
+        )
+        .with_metadata("base_classes", "Shape");
+        let mut kind = Entity::new(
+            EntityId(2),
+            EntityKind::Property,
+            "Kind".to_string(),
+            cce_types::Span::default(),
+        );
+        kind.parent = Some(EntityId(1));
+        let entities = vec![circle, kind];
+        let mut idx = TypeMemberIndex::new();
+        crate::policy::type_member::build_type_index_for_file(
+            &entities,
+            "",
+            "shapes.cs",
+            "",
+            Language::CSharp,
+            &mut idx,
+        );
+        let circle = idx.get_type("Circle").expect("Circle must be indexed");
+        assert_eq!(circle.supertypes, vec!["Shape".to_string()]);
+        assert!(circle.fields.contains_key("Kind"));
+    }
 }

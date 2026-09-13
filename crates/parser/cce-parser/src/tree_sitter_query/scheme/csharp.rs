@@ -31,9 +31,14 @@ pub fn entity_query() -> &'static str {
 ; 1. Types
 ; ============================================
 
-; Class definition (including generic, static, abstract, partial, nested)
+; Class definition (including generic, static, abstract, partial, nested).
+; Base list entries feed `@entity.class.base` so `base_classes` metadata is
+; recorded for hierarchy-aware narrowing (mirrors the dependency captures).
 (class_declaration
   name: (identifier) @entity.class.name
+  (base_list
+    (_) @entity.class.base
+  )?
 ) @entity.class
 
 ; Interface definition

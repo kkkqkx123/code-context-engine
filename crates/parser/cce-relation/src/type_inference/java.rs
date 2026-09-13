@@ -9,12 +9,62 @@ use cce_types::Span;
 use cce_types::entity::{Entity, EntityKind};
 
 use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip_outer_parens};
+use super::cross_file::infer_arg_shape;
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
+    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings, declared_shape,
     parse_type_shape, subtract_union_members, type_shape_to_string,
 };
+
+/// Infer the result type of a simple `lhs + rhs` initializer recorded as
+/// `binary_plus` metadata.
+///
+/// String concatenation (`String + any`) yields `String`; identical
+/// numeric operands keep their type. Anything else yields `None` so the
+/// caller stays conservative.
+fn infer_java_plus_type(ctx: &ScopedTypeContext, expr: &str) -> Option<(String, TypeShape)> {
+    let mut parts = expr.split('+');
+    let lhs = parts.next()?.trim();
+    let rhs = parts.next()?.trim();
+    if parts.next().is_some() || lhs.is_empty() || rhs.is_empty() {
+        return None;
+    }
+    let left = infer_arg_shape(ctx, Language::Java, lhs)?;
+    let right = infer_arg_shape(ctx, Language::Java, rhs)?;
+    let left_name = type_shape_to_string(&left);
+    let right_name = type_shape_to_string(&right);
+    if left_name == "String" || right_name == "String" {
+        let shape = TypeShape::Named("String".to_string());
+        return Some(("String".to_string(), shape));
+    }
+    if left_name == right_name && is_java_numeric_type(&left_name) {
+        return Some((left_name, left));
+    }
+    None
+}
+
+/// Whether a type name is a Java numeric type eligible for `+` promotion
+/// passthrough (identical operands only; mixed promotion stays unbound).
+fn is_java_numeric_type(name: &str) -> bool {
+    matches!(
+        name,
+        "byte"
+            | "short"
+            | "int"
+            | "long"
+            | "float"
+            | "double"
+            | "char"
+            | "Byte"
+            | "Short"
+            | "Integer"
+            | "Long"
+            | "Float"
+            | "Double"
+            | "Character"
+    )
+}
 
 /// Java type inference implementation.
 ///
@@ -46,7 +96,32 @@ impl LanguageTypeInferer for JavaTypeInferer {
                 EntityKind::Variable => {
                     extract_variable_type(entity, ctx);
 
-                    if let Some(var_type) = entity.metadata.get("var_type") {
+                    // Simple `a + b` initializers (`var doubled = first +
+                    // first`): string concatenation wins per JLS 15.18.1,
+                    // otherwise identical numeric operands keep their type.
+                    if ctx.get_variable_type(&entity.name).is_none()
+                        && let Some(plus) = entity.metadata.get("binary_plus")
+                        && let Some((type_name, shape)) = infer_java_plus_type(ctx, plus)
+                    {
+                        ctx.add_variable_type(
+                            entity.name.clone(),
+                            TypeBinding {
+                                type_name,
+                                type_entity_id: None,
+                                span: entity.span,
+                                origin: Some(super::types::InferenceOrigin::FunctionReturn),
+                                shape: Some(shape),
+                            },
+                        );
+                    }
+
+                    // `var_type` only fills gaps: the shared extractor
+                    // already bound annotations, call targets,
+                    // constructors and literals, which outrank the raw
+                    // parser reading.
+                    if ctx.get_variable_type(&entity.name).is_none()
+                        && let Some(var_type) = entity.metadata.get("var_type")
+                    {
                         let binding = TypeBinding {
                             type_name: var_type.clone(),
                             type_entity_id: None,
@@ -111,6 +186,7 @@ impl LanguageTypeInferer for JavaTypeInferer {
                             Language::Java,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
@@ -204,7 +280,9 @@ fn narrow_java_instanceof(
     ctx: &ScopedTypeContext,
     params: &[(String, Option<String>)],
 ) -> Option<NarrowingResult> {
-    let text = strip_java_condition_prefix(text)?;
+    // Conjuncts split from `A && B` carry no `if` prefix; narrow the raw
+    // text instead of bailing on the missing prefix.
+    let text = strip_java_condition_prefix(text).unwrap_or(text);
     let text = text.trim();
 
     // Negated instanceof checks narrow the complement instead.
@@ -287,7 +365,9 @@ fn narrow_java_null_check(
     ctx: &ScopedTypeContext,
     params: &[(String, Option<String>)],
 ) -> Option<NarrowingResult> {
-    let text = strip_java_condition_prefix(text)?;
+    // Conjuncts split from `A && B` carry no `if` prefix; narrow the raw
+    // text instead of bailing on the missing prefix.
+    let text = strip_java_condition_prefix(text).unwrap_or(text);
     let text = text.trim();
     for (op, negated) in [("!=", true), ("==", false)] {
         let parts: Vec<&str> = text.splitn(2, op).collect();
@@ -377,6 +457,15 @@ fn strip_java_condition_prefix(text: &str) -> Option<&str> {
     let text = text.trim();
     for prefix in &["if", "while", "else if", "return", "assert"] {
         if let Some(rest) = text.strip_prefix(prefix) {
+            // Require a word boundary so identifiers like `iftar` or
+            // `whileLoop` never masquerade as keywords.
+            if rest
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+            {
+                continue;
+            }
             let rest = rest.trim();
             // Fact text carries the branch body (`if (c) { ... }`), so take
             // the balanced paren group instead of requiring a clean suffix.
@@ -483,7 +572,9 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let return_type = ctx.get_return_type(EntityId(1)).unwrap();
+        let return_type = ctx
+            .get_return_type(EntityId(1))
+            .expect("return type must be bound");
         assert_eq!(return_type.type_name, "String");
     }
 
@@ -502,7 +593,9 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let var_type = ctx.get_variable_type("list").unwrap();
+        let var_type = ctx
+            .get_variable_type("list")
+            .expect("variable 'list' must be bound");
         assert_eq!(var_type.type_name, "ArrayList<String>");
         assert!(var_type.origin.is_some());
     }
@@ -522,9 +615,33 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let var_type = ctx.get_variable_type("map").unwrap();
+        let var_type = ctx
+            .get_variable_type("map")
+            .expect("variable 'map' must be bound");
         assert_eq!(var_type.type_name, "HashMap<String, Integer>");
         assert!(var_type.origin.is_some());
+    }
+
+    #[test]
+    fn test_java_var_type_does_not_clobber_constructor() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entities = vec![
+            Entity::new(
+                EntityId(30),
+                EntityKind::Variable,
+                "map".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("constructor_type", "HashMap<String, Integer>")
+            .with_metadata("var_type", "HashMap"),
+        ];
+
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+
+        let binding = ctx
+            .get_variable_type("map")
+            .expect("constructor-bound variable must exist");
+        assert_eq!(binding.type_name, "HashMap<String, Integer>");
     }
 
     #[test]
@@ -542,7 +659,9 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let field_type = ctx.get_variable_type("userName").unwrap();
+        let field_type = ctx
+            .get_variable_type("userName")
+            .expect("variable 'userName' must be bound");
         assert_eq!(field_type.type_name, "String");
         assert!(field_type.origin.is_some());
     }
@@ -563,7 +682,9 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let return_type = ctx.get_return_type(EntityId(5)).unwrap();
+        let return_type = ctx
+            .get_return_type(EntityId(5))
+            .expect("return type must be bound");
         assert_eq!(return_type.type_name, "T");
     }
 
@@ -782,7 +903,9 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let return_type = ctx.get_return_type(EntityId(10)).unwrap();
+        let return_type = ctx
+            .get_return_type(EntityId(10))
+            .expect("return type must be bound");
         assert_eq!(return_type.type_name, "Pair<T, U>");
     }
 
@@ -801,7 +924,9 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let var_type = ctx.get_variable_type("matrix").unwrap();
+        let var_type = ctx
+            .get_variable_type("matrix")
+            .expect("variable 'matrix' must be bound");
         assert_eq!(var_type.type_name, "ArrayList<ArrayList<Integer>>");
     }
 
@@ -834,10 +959,22 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        assert_eq!(ctx.get_variable_type("name").unwrap().type_name, "String");
-        assert_eq!(ctx.get_variable_type("count").unwrap().type_name, "int");
         assert_eq!(
-            ctx.get_variable_type("items").unwrap().type_name,
+            ctx.get_variable_type("name")
+                .expect("variable 'name' must be bound")
+                .type_name,
+            "String"
+        );
+        assert_eq!(
+            ctx.get_variable_type("count")
+                .expect("variable 'count' must be bound")
+                .type_name,
+            "int"
+        );
+        assert_eq!(
+            ctx.get_variable_type("items")
+                .expect("variable 'items' must be bound")
+                .type_name,
             "HashMap<String, List<String>>"
         );
     }
@@ -860,10 +997,81 @@ mod tests {
 
         JavaTypeInferer.infer_declarations(&entities, &mut ctx);
 
-        let field_type = ctx.get_variable_type("cache").unwrap();
+        let field_type = ctx
+            .get_variable_type("cache")
+            .expect("variable 'cache' must be bound");
         assert_eq!(
             field_type.type_name,
             "ConcurrentHashMap<String, AtomicReference<T>>"
+        );
+    }
+}
+
+#[cfg(test)]
+mod binary_plus_tests {
+    use super::*;
+    use cce_types::Span;
+    use cce_types::entity::EntityId;
+    use cce_types::language::Language;
+
+    fn bind(ctx: &mut ScopedTypeContext, name: &str, ty: &str) {
+        ctx.add_variable_type(
+            name.to_string(),
+            TypeBinding {
+                type_name: ty.to_string(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: None,
+                shape: parse_type_shape(ty, Language::Java),
+            },
+        );
+    }
+
+    #[test]
+    fn test_plus_string_concat_wins() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        bind(&mut ctx, "first", "String");
+        let (name, _) = infer_java_plus_type(&ctx, "first + first").expect("plus binds");
+        assert_eq!(name, "String");
+    }
+
+    #[test]
+    fn test_plus_identical_numerics_keep_type() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        bind(&mut ctx, "a", "int");
+        bind(&mut ctx, "b", "int");
+        let (name, _) = infer_java_plus_type(&ctx, "a + b").expect("plus binds");
+        assert_eq!(name, "int");
+    }
+
+    #[test]
+    fn test_plus_mixed_or_unknown_abstains() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        bind(&mut ctx, "a", "int");
+        bind(&mut ctx, "b", "long");
+        assert!(infer_java_plus_type(&ctx, "a + b").is_none());
+        assert!(infer_java_plus_type(&ctx, "a + missing").is_none());
+    }
+
+    #[test]
+    fn test_plus_end_to_end_through_declarations() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        bind(&mut ctx, "first", "String");
+        let entities = vec![
+            Entity::new(
+                EntityId(7),
+                EntityKind::Variable,
+                "doubled".to_string(),
+                Span::default(),
+            )
+            .with_metadata("binary_plus", "first + first"),
+        ];
+        JavaTypeInferer.infer_declarations(&entities, &mut ctx);
+        assert_eq!(
+            ctx.get_variable_type("doubled")
+                .expect("variable 'doubled' must be bound")
+                .type_name,
+            "String"
         );
     }
 }

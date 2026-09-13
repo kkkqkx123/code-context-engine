@@ -12,9 +12,9 @@ use super::control_flow::shared::{
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings, declared_shape,
-    narrow_discriminated_union, narrow_truthiness, parse_type_shape, python_canonical_literal_name,
-    subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings,
+    covers_declared_members, declared_shape, narrow_discriminated_union, narrow_truthiness,
+    parse_type_shape, python_canonical_literal_name, subtract_union_members, type_shape_to_string,
 };
 use crate::symbol_table::TypeMemberIndex;
 use cce_types::language::Language;
@@ -82,6 +82,7 @@ impl LanguageTypeInferer for PythonTypeInferer {
                             Language::Python,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
@@ -238,6 +239,21 @@ fn narrow_python_isinstance(
 
     let type_name = parse_type_arg(type_arg)?;
 
+    // A check against the declared type itself (`isinstance(x, (A, B))` on
+    // `Union[A, B]`) proves nothing; emitting it would render an identity
+    // row indistinguishable from real narrowing. Member sets compare
+    // across union spellings (`Union[A, B]` vs `A | B`).
+    if let Some(declared) = declared_shape(ctx, params, Language::Python, &var_name) {
+        if type_shape_to_string(&declared) == type_name {
+            return None;
+        }
+        if let Some(narrowed_shape) = parse_type_shape(&type_name, Language::Python) {
+            if covers_declared_members(&declared, &narrowed_shape) {
+                return None;
+            }
+        }
+    }
+
     Some(NarrowingResult {
         variable_name: var_name,
         narrowed_type: TypeBinding {
@@ -312,6 +328,13 @@ fn narrow_python_discriminated_union(
             if let Some(narrowed) =
                 narrow_discriminated_union(&shape, &field_name, &value, type_index)
             {
+                // A narrowing covering the declared members proves nothing;
+                // emitting it would render an identity row.
+                if covers_declared_members(&shape, &narrowed)
+                    || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
+                {
+                    return results;
+                }
                 let type_name = type_shape_to_string(&narrowed);
                 results.push(NarrowingResult {
                     variable_name: var_name.clone(),
@@ -362,16 +385,9 @@ fn narrow_python_truthiness(
 ) -> Vec<NarrowingResult> {
     let mut results = Vec::new();
     if let Some(var_name) = parse_python_truthiness_pattern(text) {
-        // Try shape-aware narrowing (known bindings, else declared type)
-        let shape_opt = ctx
-            .get_variable_type(&var_name)
-            .and_then(|existing| {
-                existing
-                    .shape
-                    .clone()
-                    .or_else(|| parse_type_shape(&existing.type_name, Language::Python))
-            })
-            .or_else(|| declared_shape(ctx, params, Language::Python, &var_name));
+        // Parameter annotations win over variable bindings (which may
+        // leak across sibling scopes); declared_shape encodes that order.
+        let shape_opt = declared_shape(ctx, params, Language::Python, &var_name);
         if let Some(shape) = shape_opt {
             if let Some(narrowed) = narrow_truthiness(&shape, true, Language::Python) {
                 let type_name = type_shape_to_string(&narrowed);
@@ -388,27 +404,10 @@ fn narrow_python_truthiness(
                 return results;
             }
         }
-        // Fallback placeholder
-        results.push(NarrowingResult {
-            variable_name: var_name,
-            narrowed_type: TypeBinding {
-                type_name: "truthy".to_string(),
-                type_entity_id: None,
-                span: Span::default(),
-                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                shape: None,
-            },
-        });
+        // Unknown type: stay conservative and emit nothing rather than a
+        // placeholder pseudo-type.
     } else if let Some(var_name) = parse_python_negated_truthiness_pattern(text) {
-        let shape_opt = ctx
-            .get_variable_type(&var_name)
-            .and_then(|existing| {
-                existing
-                    .shape
-                    .clone()
-                    .or_else(|| parse_type_shape(&existing.type_name, Language::Python))
-            })
-            .or_else(|| declared_shape(ctx, params, Language::Python, &var_name));
+        let shape_opt = declared_shape(ctx, params, Language::Python, &var_name);
         if let Some(shape) = shape_opt {
             if let Some(narrowed) = narrow_truthiness(&shape, false, Language::Python) {
                 let type_name = type_shape_to_string(&narrowed);
@@ -425,16 +424,8 @@ fn narrow_python_truthiness(
                 return results;
             }
         }
-        results.push(NarrowingResult {
-            variable_name: var_name,
-            narrowed_type: TypeBinding {
-                type_name: "falsy".to_string(),
-                type_entity_id: None,
-                span: Span::default(),
-                origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                shape: None,
-            },
-        });
+        // Unknown type: stay conservative and emit nothing rather than a
+        // placeholder pseudo-type.
     }
     results
 }
@@ -464,14 +455,15 @@ fn narrow_python_in_operator(text: &str) -> Vec<NarrowingResult> {
     let Some((key, var_name)) = parse_python_in_pattern(text) else {
         return vec![];
     };
+    let type_name = format!("HasKey<{}>", key);
     vec![NarrowingResult {
         variable_name: var_name,
         narrowed_type: TypeBinding {
-            type_name: format!("HasKey<{}>", key),
+            type_name: type_name.clone(),
             type_entity_id: None,
             span: Span::default(),
-            origin: None,
-            shape: None,
+            origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+            shape: parse_type_shape(&type_name, Language::Python),
         },
     }]
 }
@@ -665,7 +657,10 @@ fn truncate_at_header_colon(text: &str) -> &str {
 /// (or only the `None` literal when the annotation capture missed).
 fn wrap_none_default_in_optional(entities: &[Entity], ctx: &mut ScopedTypeContext) {
     for entity in entities {
-        if entity.kind != EntityKind::Variable {
+        if !matches!(
+            entity.kind,
+            EntityKind::Variable | EntityKind::Field | EntityKind::Property
+        ) {
             continue;
         }
         let Some(annotation) = entity.metadata.get("type_annotation") else {
@@ -708,6 +703,11 @@ fn wrap_none_default_in_optional(entities: &[Entity], ctx: &mut ScopedTypeContex
 fn normalize_python_literal_names(entities: &[Entity], ctx: &mut ScopedTypeContext) {
     for entity in entities {
         if entity.kind != EntityKind::Variable {
+            continue;
+        }
+        // Composite destructuring names are owned by the destructuring
+        // pass; the joined name must never gain a binding here.
+        if entity.name.contains(',') {
             continue;
         }
         if entity
@@ -935,16 +935,37 @@ mod tests {
     fn test_python_truthiness() {
         let ctx = dummy_ctx();
         let results = narrow_python_if("if x:", &ctx, None, &[]);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].variable_name, "x");
+        // Unknown type: no placeholder pseudo-type is emitted.
+        assert!(results.is_empty());
     }
 
     #[test]
     fn test_python_negated_truthiness() {
         let ctx = dummy_ctx();
         let results = narrow_python_if("if not x:", &ctx, None, &[]);
+        // Unknown type: no placeholder pseudo-type is emitted.
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_python_negated_truthiness_prefers_param_over_leaked_binding() {
+        // A `str` binding leaked from a sibling scope must not shadow the
+        // enclosing function's `Optional[str]` parameter declaration.
+        let mut ctx = dummy_ctx();
+        ctx.add_variable_type(
+            "value".to_string(),
+            TypeBinding {
+                type_name: "str".to_string(),
+                type_entity_id: None,
+                span: Span::default(),
+                origin: None,
+                shape: parse_type_shape("str", Language::Python),
+            },
+        );
+        let params = vec![("value".to_string(), Some("Optional[str]".to_string()))];
+        let results = narrow_python_if("if not value:", &ctx, None, &params);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].variable_name, "x");
+        assert_eq!(results[0].narrowed_type.type_name, "None");
     }
 
     #[test]
@@ -975,6 +996,11 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].variable_name, "x");
         assert_eq!(results[0].narrowed_type.type_name, "HasKey<prop>");
+        assert_eq!(
+            results[0].narrowed_type.origin,
+            Some(crate::type_inference::InferenceOrigin::ControlFlowNarrowing)
+        );
+        assert!(results[0].narrowed_type.shape.is_some());
     }
 
     #[test]

@@ -34,7 +34,12 @@ impl LanguageTypeInferer for ScalaTypeInferer {
                 EntityKind::Variable => {
                     extract_variable_type(entity, ctx);
 
-                    if let Some(var_type) = entity.metadata.get("var_type") {
+                    // `var_type` only fills gaps: the shared extractor
+                    // already bound annotations, call targets and
+                    // constructors, which outrank the raw parser reading.
+                    if ctx.get_variable_type(&entity.name).is_none()
+                        && let Some(var_type) = entity.metadata.get("var_type")
+                    {
                         let binding = TypeBinding {
                             type_name: var_type.clone(),
                             type_entity_id: None,
@@ -71,6 +76,14 @@ impl LanguageTypeInferer for ScalaTypeInferer {
             for fact in &entity_cf.facts {
                 match fact.kind {
                     ControlFlowFactKind::If | ControlFlowFactKind::Loop => {
+                        // For-comprehension generators (`x <- collection`) are
+                        // a specialised form of loop fact.  Extract generator
+                        // bindings and bind each variable to the collection's
+                        // element type before falling through to the narrowing
+                        // pass.
+                        if fact.text.contains("<-") {
+                            bind_for_comprehension_generators(&fact.text, ctx, entity.span);
+                        }
                         let mut narrowed: Vec<(String, TypeBinding)> =
                             narrow_scala_if(&fact.text, ctx, &entity.parameters)
                                 .into_iter()
@@ -87,6 +100,7 @@ impl LanguageTypeInferer for ScalaTypeInferer {
                             Language::Scala,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
@@ -103,6 +117,279 @@ impl LanguageTypeInferer for ScalaTypeInferer {
             }
         }
     }
+}
+
+/// Bind generator-introduced variables from a for-comprehension.
+///
+/// For-comprehension facts contain `<-` operators linking variables to
+/// their source collections.  This function extracts each generator
+/// binding (`var <- collection`) and binds the variable to the
+/// collection's element type by looking up the collection in the current
+/// scope.
+///
+/// Handles chained generators: `for { user <- users; n <- List(1,2,3) }`.
+fn bind_for_comprehension_generators(
+    fact_text: &str,
+    ctx: &mut ScopedTypeContext,
+    span: cce_types::Span,
+) {
+    // Strip `for {` ... `}` wrapper if present.
+    let inner = fact_text
+        .trim()
+        .strip_prefix("for")
+        .and_then(|rest| rest.trim().strip_prefix('{'))
+        .unwrap_or(fact_text.trim())
+        .trim_end_matches('}')
+        .trim();
+
+    // Strip `yield ...` suffix.
+    let inner = inner.split("yield").next().unwrap_or(inner).trim();
+
+    // The tree-sitter fact text is all on one line.  Generators and
+    // guards are space-separated.  Walk through the tokens to find
+    // `var <- collection` pairs, handling:
+    //  - Guard clauses: `if condition` (skip)
+    //  - Constructor args: `List(1, 2, 3)` (collect until matching paren)
+    //  - Trailing `}`: strip
+    let tokens = tokenize_for_comprehension(inner);
+    let mut i = 0;
+    while i < tokens.len() {
+        let token = &tokens[i];
+        // Skip guard clauses.
+        if token == "if" || token == "if(" {
+            i += 1;
+            while i < tokens.len() && tokens[i] != "<-" {
+                i += 1;
+            }
+            continue;
+        }
+        // Look for `var <- collection`.
+        if token == "<-" && i > 0 {
+            let var_name = tokens[i - 1].trim();
+            if !var_name.is_empty() && is_scala_valid_ident(var_name) {
+                i += 1;
+                if i < tokens.len() {
+                    let mut collection_expr = tokens[i].clone();
+                    // Handle constructor calls with args: `List(1, 2, 3)`
+                    if collection_expr.contains('(') && !collection_expr.ends_with(')') {
+                        let mut depth = collection_expr.chars().filter(|&c| c == '(').count()
+                            - collection_expr.chars().filter(|&c| c == ')').count();
+                        while i + 1 < tokens.len() && depth > 0 {
+                            i += 1;
+                            depth += tokens[i].chars().filter(|&c| c == '(').count()
+                                - tokens[i].chars().filter(|&c| c == ')').count();
+                            collection_expr.push(' ');
+                            collection_expr.push_str(&tokens[i]);
+                        }
+                    }
+                    let collection_expr = collection_expr.trim_end_matches('}').trim();
+                    if !collection_expr.is_empty() && ctx.get_variable_type(var_name).is_none() {
+                        if let Some(element_type) =
+                            resolve_collection_element_type(collection_expr, ctx)
+                        {
+                            ctx.add_variable_type(
+                                var_name.to_string(),
+                                TypeBinding {
+                                    type_name: type_shape_to_string(&element_type),
+                                    type_entity_id: None,
+                                    span,
+                                    origin: Some(super::types::InferenceOrigin::GenericInference),
+                                    shape: Some(element_type),
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Tokenize a for-comprehension inner text, respecting parentheses.
+fn tokenize_for_comprehension(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32;
+    for ch in text.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ' ' | '\t' | '\n' | '\r' if depth == 0 => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Resolve the element type of a collection expression.
+///
+/// Tries the following strategies in order:
+/// 1. Direct variable lookup (`users` → check its type)
+/// 2. Constructor call (`List(1, 2, 3)` → infer element from args)
+/// 3. Collection factory call (`List(User(...))` → infer from first arg)
+fn resolve_collection_element_type(expr: &str, ctx: &ScopedTypeContext) -> Option<TypeShape> {
+    let expr = expr.trim();
+    // Simple variable name — look up its type and extract element.
+    if is_scala_valid_ident(expr) {
+        if let Some(binding) = ctx.get_variable_type(expr) {
+            return extract_generic_element(&binding.type_name, &binding.shape);
+        }
+    }
+    // Constructor call or collection factory: `List(...)`, `User(...)`.
+    if let Some(args_start) = expr.find('(') {
+        let func_name = expr[..args_start].trim();
+        let func_name = func_name.rsplit('.').next().unwrap_or(func_name).trim();
+        let args_str = &expr[args_start + 1..].trim_end_matches(')');
+
+        // Try to find a same-file function with return type containing element info.
+        if let Some(return_binding) = ctx.resolve_return_by_name(func_name, &[], Language::Scala) {
+            return extract_generic_element(&return_binding.type_name, &return_binding.shape);
+        }
+
+        // Collection factory: `List(1, 2, 3)`, `Seq(User(...))`, etc.
+        if looks_like_collection_factory(func_name) {
+            // Parse arguments (respecting nested parens).
+            let args = parse_paren_delimited_args(args_str);
+            if let Some(first_arg) = args.first() {
+                let first_arg = first_arg.trim();
+                // Constructor call: `User(...)` → element is `User`.
+                if let Some(pascal) = first_arg.strip_suffix("()") {
+                    let class_name = pascal.trim().rsplit('.').next().unwrap_or(pascal.trim());
+                    if looks_like_scala_class_name(class_name) {
+                        return Some(TypeShape::Named(class_name.to_string()));
+                    }
+                }
+                // Literal: infer type from literal value.
+                if let Some(lit_type) = infer_scala_literal_type(first_arg) {
+                    return Some(lit_type);
+                }
+            }
+        }
+
+        // Non-factory constructor: infer element from first arg.
+        let first_arg = args_str.split(',').next()?.trim();
+        if let Some(pascal) = first_arg.strip_suffix("()") {
+            let class_name = pascal.trim().rsplit('.').next().unwrap_or(pascal.trim());
+            if looks_like_scala_class_name(class_name) {
+                return Some(TypeShape::Named(class_name.to_string()));
+            }
+        }
+    }
+    None
+}
+
+/// Check if a name is a known Scala collection factory.
+fn looks_like_collection_factory(name: &str) -> bool {
+    matches!(
+        name,
+        "List" | "Seq" | "Vector" | "Set" | "Array" | "Map" | "IndexedSeq" | "LazyList"
+    )
+}
+
+/// Parse comma-separated arguments inside parentheses, respecting nesting.
+fn parse_paren_delimited_args(args_str: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32;
+    for ch in args_str.chars() {
+        match ch {
+            '(' | '[' | '{' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' | ']' | '}' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
+/// Infer a Scala type shape from a literal value.
+fn infer_scala_literal_type(lit: &str) -> Option<TypeShape> {
+    let lit = lit.trim();
+    if lit == "true" || lit == "false" {
+        return Some(TypeShape::Named("Boolean".to_string()));
+    }
+    if lit == "null" || lit == "None" {
+        return Some(TypeShape::Named("Null".to_string()));
+    }
+    // Numeric literals.
+    if lit.parse::<i64>().is_ok() || lit.ends_with('L') || lit.ends_with('l') {
+        return Some(TypeShape::Named("Int".to_string()));
+    }
+    if lit.parse::<f64>().is_ok() {
+        return Some(TypeShape::Named("Double".to_string()));
+    }
+    // String literals.
+    if (lit.starts_with('"') && lit.ends_with('"'))
+        || (lit.starts_with('\'') && lit.ends_with('\'') && lit.len() > 2)
+    {
+        return Some(TypeShape::Named("String".to_string()));
+    }
+    None
+}
+
+/// Extract the element type from a generic container type.
+///
+/// `List[User]` → `Some(Named("User"))`, `List[(Int, String)]` → `Some(Generic { ... })`.
+fn extract_generic_element(type_name: &str, shape: &Option<TypeShape>) -> Option<TypeShape> {
+    if let Some(shape) = shape {
+        match shape {
+            TypeShape::Generic { args, .. } if !args.is_empty() => return args.first().cloned(),
+            _ => {}
+        }
+    }
+    // Parse from string: `List[User]` → element `User`.
+    let bracket_start = type_name.find('[')?;
+    let bracket_end = type_name.rfind(']')?;
+    if bracket_end <= bracket_start {
+        return None;
+    }
+    let inner = &type_name[bracket_start + 1..bracket_end];
+    parse_type_shape(inner, Language::Scala)
+}
+
+/// Check if a name looks like a Scala class/constructor name.
+fn looks_like_scala_class_name(name: &str) -> bool {
+    !name.is_empty() && name.bytes().next().is_some_and(|b| b.is_ascii_uppercase())
+}
+
+fn is_scala_valid_ident(s: &str) -> bool {
+    let s = s.trim();
+    !s.is_empty()
+        && s.bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_lowercase() || b == b'_')
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 /// Result of a single narrowing operation.
@@ -171,11 +458,11 @@ fn narrow_scala_isinstanceof(
     Some(NarrowingResult {
         variable_name: var_name,
         narrowed_type: TypeBinding {
-            type_name,
+            type_name: type_name.clone(),
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(&type_name, Language::Scala),
         },
     })
 }
@@ -476,7 +763,7 @@ fn parse_scala_match_arm_pattern(text: &str) -> Option<NarrowingResult> {
                     type_entity_id: None,
                     span: Span::default(),
                     origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                    shape: None,
+                    shape: parse_type_shape(type_name, Language::Scala),
                 },
             });
         }
@@ -523,7 +810,9 @@ mod tests {
         ];
 
         ScalaTypeInferer.infer_declarations(&entities, &mut ctx);
-        let rt = ctx.get_return_type(EntityId(1)).unwrap();
+        let rt = ctx
+            .get_return_type(EntityId(1))
+            .expect("return type must be bound");
         assert_eq!(rt.type_name, "String");
     }
 
@@ -541,7 +830,9 @@ mod tests {
         ];
 
         ScalaTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("name").unwrap();
+        let vt = ctx
+            .get_variable_type("name")
+            .expect("variable 'name' must be bound");
         assert_eq!(vt.type_name, "String");
         assert!(vt.origin.is_some());
     }
@@ -560,9 +851,36 @@ mod tests {
         ];
 
         ScalaTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("list").unwrap();
+        let vt = ctx
+            .get_variable_type("list")
+            .expect("variable 'list' must be bound");
         assert_eq!(vt.type_name, "List[Int]");
         assert!(vt.origin.is_some());
+    }
+
+    #[test]
+    fn test_scala_collection_factory_element_inference() {
+        let mut ctx = ScopedTypeContext::new(Language::Scala);
+        let entities = vec![
+            Entity::new(
+                EntityId(4),
+                EntityKind::Variable,
+                "users".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("call_target", "List(User(\"ada\", 36), User(\"bob\", 12))")
+            .with_metadata("constructor_type", "List"),
+        ];
+
+        ScalaTypeInferer.infer_declarations(&entities, &mut ctx);
+        let vt = ctx
+            .get_variable_type("users")
+            .expect("variable 'users' must be bound");
+        assert_eq!(vt.type_name, "List[User]");
+        assert_eq!(
+            vt.origin,
+            Some(crate::type_inference::InferenceOrigin::ConstructorCall)
+        );
     }
 
     #[test]

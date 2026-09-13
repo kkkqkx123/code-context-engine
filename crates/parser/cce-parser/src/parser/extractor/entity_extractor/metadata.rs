@@ -9,9 +9,10 @@ use cce_types::{Entity, EntityKind, LiteralKind, classify_numeric_literal, liter
 
 use crate::parser::extractor::capture as capture_module;
 use crate::parser::extractor::utils;
+use crate::parser::extractor::utils::find_capture_by_name;
 use crate::tree_sitter_query::executor::QueryMatch;
 
-use super::type_inference::is_valid_type_name;
+use super::type_inference::{is_valid_call_target_name, is_valid_type_name};
 
 /// Node kinds that delimit value contexts during AST type lookup.
 ///
@@ -29,6 +30,39 @@ fn is_value_boundary_kind(kind: &str) -> bool {
         || kind.contains("argument")
         || kind.ends_with("_expression")
         || kind.ends_with("_literal")
+}
+
+/// Whether a value text is a bare identifier (`radius`, not `a.b`, `f(x)`
+/// or a literal) that can name an enclosing parameter or variable.
+fn is_bare_identifier(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+        && text
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
+}
+
+/// Node kinds that delimit declaration scopes during AST type lookup.
+///
+/// A field or property name must never inherit a type from an enclosing
+/// function, method, or type definition: `self.radius` inside
+/// `def __init__(...) -> None` is not `None`, and a member inside a class
+/// body is not the class's own type arguments. Stopping at these nodes
+/// keeps the walk-up in `extract_type_from_ast_for_entity` within the
+/// declaration that actually owns the name.
+fn is_scope_boundary_kind(kind: &str) -> bool {
+    kind.contains("function")
+        || kind.contains("method")
+        || kind == "class_definition"
+        || kind == "class_declaration"
+        || kind == "class_body"
+        || kind == "constructor"
+        || kind == "lambda"
+        || kind == "arrow_function"
+        || kind == "function_expression"
 }
 
 /// Extract type annotation from AST node for an entity.
@@ -54,16 +88,22 @@ fn extract_type_from_ast_for_entity(
         .descendant_for_byte_range(name_capture.start_byte, name_capture.end_byte)?;
 
     // Walk up to find the declaration node that has a type field,
-    // stopping at value-context boundaries (see `is_value_boundary_kind`).
+    // stopping at value-context boundaries (see `is_value_boundary_kind`)
+    // and at enclosing function/method/class scopes: a member must never
+    // inherit the enclosing callable's return type (e.g. `self.radius`
+    // inside `def __init__(...) -> None` is not `None`).
     let mut current = Some(node);
     while let Some(n) = current {
+        // Scope and value boundaries are checked before reading the node's
+        // own type fields so an enclosing callable's return type is never
+        // mistaken for the member's annotation.
+        if is_value_boundary_kind(n.kind()) || is_scope_boundary_kind(n.kind()) {
+            return None;
+        }
         if let Some(type_text) =
             cce_parser_core::ast_accessor::extract_type_annotation(n, source.as_bytes())
         {
             return Some(type_text);
-        }
-        if is_value_boundary_kind(n.kind()) {
-            return None;
         }
         current = n.parent();
     }
@@ -154,6 +194,12 @@ pub(crate) fn extract_metadata(
             capture_text_over_field_siblings(mat, tree, source, |name| name.ends_with(".value"))
         {
             extract_initializer_metadata(entity, &value, language);
+            // Bare-identifier initializers (`self.radius = radius`): remember
+            // the source name so inference can bind the enclosing
+            // constructor parameter's type (`radius: float`).
+            if !entity.metadata.contains_key("source_type") && is_bare_identifier(value.trim()) {
+                entity.set_metadata("source_type", value.trim().to_string());
+            }
         }
     }
 
@@ -181,6 +227,22 @@ pub(crate) fn extract_metadata(
         && let Some(implicit) = implicit_ruby_return_type(mat)
     {
         entity.return_type = Some(implicit);
+    }
+
+    // Python and Lua: extract the last return expression as `return_body`
+    // metadata so the type-inference engine can derive a return type when
+    // no explicit annotation exists.  The expression is normalised to a
+    // type-like name (literals → built-in types, `new X(...)` → `X`);
+    // compound expressions (arithmetic, calls) are stored as-is for the
+    // inferer to evaluate.
+    if matches!(*language, Language::Python | Language::Lua)
+        && matches!(entity.kind, EntityKind::Function | EntityKind::Method)
+        && entity.return_type.is_none()
+        && let Some(body) = find_capture_by_name(&mat.captures, |name| name.ends_with(".body"))
+    {
+        if let Some(return_expr) = extract_last_return_expression(&body.text, *language) {
+            entity.set_metadata("return_body", return_expr);
+        }
     }
 }
 
@@ -242,6 +304,93 @@ fn parse_phpdoc_return(doc: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract the last return expression from a function body text.
+///
+/// Walks the body text backwards to find the last `return` statement and
+/// returns the expression after it.  For Python the expression is normalised
+/// (literals → built-in type names); for Lua the raw expression is returned
+/// since Lua has no type annotations.
+fn extract_last_return_expression(body: &str, language: Language) -> Option<String> {
+    let last_return_line = body
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| line.starts_with("return "))?;
+    let expr = last_return_line.strip_prefix("return ")?.trim();
+    let expr = expr.trim_end_matches(';').trim();
+    if expr.is_empty() {
+        return None;
+    }
+    match language {
+        Language::Python => normalize_python_return_expression(expr),
+        Language::Lua => normalize_lua_return_expression(expr),
+        _ => Some(expr.to_string()),
+    }
+}
+
+/// Normalise a Python return expression to a type-like name.
+///
+/// Literals map to built-in types (`"hello"` → `str`, `42` → `int`),
+/// constructor calls map to the class (`User(...)` → `User`).
+/// Compound expressions (arithmetic, calls, f-strings) are returned as-is
+/// so the inferer can evaluate them with full context.
+fn normalize_python_return_expression(expr: &str) -> Option<String> {
+    if let Some(lit) = extract_literal_type(expr, &Language::Python) {
+        return Some(lit);
+    }
+    // Constructor call: `User(...)` or `module.User(...)`.
+    if let Some(name) = expr.strip_suffix("()") {
+        let base = name.trim();
+        let base = base.rsplit('.').next().unwrap_or(base).trim();
+        if !base.is_empty() && is_valid_type_name(base) {
+            return Some(base.to_string());
+        }
+    }
+    // Assignment form: `x = expr` → normalise the RHS.
+    if let Some((_lhs, rhs)) = expr.split_once('=') {
+        let rhs = rhs.trim();
+        if let Some(lit) = extract_literal_type(rhs, &Language::Python) {
+            return Some(lit);
+        }
+    }
+    // String concatenation: `"[" .. app_name .. "] " .. msg` → `str`.
+    if expr.contains(".. ") || expr.contains(" + ") {
+        // Mixed string concatenation — conservatively return `str` only when
+        // all operands look like strings or string variables.
+        let all_stringy = expr.split(".. ").all(|part| {
+            let part = part.trim().trim_end_matches(" + ").trim();
+            part.starts_with('"') || part.starts_with('\'') || is_valid_ident(part)
+        });
+        if all_stringy {
+            return Some("str".to_string());
+        }
+    }
+    Some(expr.to_string())
+}
+
+/// Normalise a Lua return expression to a type-like name.
+///
+/// Lua has no type annotations; string concatenation returns `string`
+/// and all other expressions are returned as-is so the type-inference
+/// engine can evaluate them with full context (literal bindings, call
+/// targets, etc.).
+fn normalize_lua_return_expression(expr: &str) -> Option<String> {
+    // Lua string concatenation (`..`) always produces a string.
+    if expr.contains(".. ") || expr.contains("..") {
+        return Some("string".to_string());
+    }
+    Some(expr.to_string())
+}
+
+fn is_valid_ident(s: &str) -> bool {
+    let s = s.trim();
+    !s.is_empty()
+        && s.bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 /// Infer a Ruby method's return type from its trailing expression.
@@ -767,6 +916,17 @@ fn extract_initializer_metadata(entity: &mut Entity, value_text: &str, language:
         if let Some(args) = extract_explicit_type_args(trimmed) {
             entity.set_metadata("constructor_type_args", args);
         }
+        // A bare `Name(...)` call may be a PascalCase method rather than a
+        // constructor (C#/Java/Kotlin/Scala methods are capitalized). Keep
+        // the call target with its argument list alongside so inference can
+        // try same-file function-return resolution (with overload awareness)
+        // before falling back to the constructor reading. Explicit `new`
+        // expressions and qualified `X.new` forms stay constructor-only.
+        let is_plain_call = !trimmed.starts_with("new ")
+            && !trimmed.trim_end_matches(')').trim_end().ends_with(".new");
+        if is_plain_call && let Some(call_target) = extract_call_target_from_expr(trimmed) {
+            entity.set_metadata("call_target", call_target);
+        }
         return;
     }
 
@@ -778,10 +938,97 @@ fn extract_initializer_metadata(entity: &mut Entity, value_text: &str, language:
         return;
     }
 
+    // Simple binary `+` (`first + first`): record the operands so the
+    // language inferer can apply string-concatenation / numeric rules.
+    // Java-only: `+` semantics differ per language.
+    if *language == Language::Java
+        && let Some((lhs, rhs)) = extract_binary_plus_operands(trimmed)
+    {
+        entity.set_metadata("binary_plus", format!("{lhs} + {rhs}"));
+        return;
+    }
+
     // Check for literal type
     if let Some(lit_type) = extract_literal_type(trimmed, language) {
         entity.set_metadata("literal_type", lit_type);
     }
+}
+
+/// Extract operands of a simple `lhs + rhs` expression.
+///
+/// Only plain two-operand additions qualify: exactly one top-level `+`
+/// (no `++`/`+=`), with both sides free of nesting, quotes and other
+/// operators so downstream shape resolution stays deterministic.
+fn extract_binary_plus_operands(expr: &str) -> Option<(String, String)> {
+    let bytes = expr.as_bytes();
+    let mut depth = 0usize;
+    let mut quote: Option<u8> = None;
+    let mut plus_pos: Option<usize> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' | b'"' => {
+                quote = Some(b);
+                i += 1;
+            }
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'+' => {
+                if depth == 0 {
+                    if bytes.get(i + 1) == Some(&b'+') || bytes.get(i + 1) == Some(&b'=') {
+                        return None;
+                    }
+                    if plus_pos.is_some() {
+                        return None;
+                    }
+                    plus_pos = Some(i);
+                }
+                i += 1;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    if quote.is_some() || depth != 0 {
+        return None;
+    }
+    let pos = plus_pos?;
+    if pos == 0 || pos + 1 >= bytes.len() {
+        return None;
+    }
+    if bytes.get(pos.saturating_sub(1)) == Some(&b'=') {
+        return None;
+    }
+    let lhs = expr[..pos].trim();
+    let rhs = expr[pos + 1..].trim();
+    if !is_simple_plus_operand(lhs) || !is_simple_plus_operand(rhs) {
+        return None;
+    }
+    Some((lhs.to_string(), rhs.to_string()))
+}
+
+/// Whether a `+` operand is a plain identifier (possibly qualified) or
+/// numeric literal: no nesting, quotes, whitespace or further operators.
+fn is_simple_plus_operand(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.'))
 }
 /// Extract metadata for variable assignments to support type inference.
 ///
@@ -1023,6 +1270,73 @@ fn truncate_generic_args(name: &str) -> &str {
     }
 }
 
+/// Split a constructor base like `ArrayList<String, Integer>` into its bare
+/// name and explicit generic arguments, preserving them for inference.
+///
+/// Returns `None` when there are no brackets, the brackets are unbalanced
+/// or empty (`ArrayList<>` degrades to the bare name), or the text contains
+/// characters outside the type-argument vocabulary. Whitespace inside the
+/// argument list is preserved; downstream shape parsing trims per argument.
+fn split_explicit_generic_args(base: &str) -> Option<(&str, &str)> {
+    let start = base.find('<')?;
+    // Match the bracket opened at `start` against nesting depth so nested
+    // generics (`HashMap<String, List<Integer>>`) stay intact.
+    let bytes = base.as_bytes();
+    let mut depth = 0usize;
+    let mut end = None;
+    for (i, b) in bytes.iter().enumerate().skip(start) {
+        match b {
+            b'<' => depth += 1,
+            b'>' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
+    // Trailing text after the closing bracket (e.g. array suffixes) keeps
+    // the conservative bare-name reading.
+    if !base[end + 1..].trim().is_empty() {
+        return None;
+    }
+    let name = base[..start].trim_end();
+    let args = base[start + 1..end].trim();
+    // Whitespace is allowed inside the argument list (`HashMap<String,
+    // Integer>`) but never in the bare class name.
+    if name.is_empty() || args.is_empty() || !is_valid_type_name(name) {
+        return None;
+    }
+    if name.contains(char::is_whitespace) {
+        return None;
+    }
+    if !args.chars().all(|c| {
+        c.is_alphanumeric()
+            || matches!(
+                c,
+                '_' | '.' | ':' | ',' | ' ' | '<' | '>' | '[' | ']' | '?' | '*' | '&'
+            )
+    }) {
+        return None;
+    }
+    Some((name, args))
+}
+
+/// Reattach explicit generic arguments to a bare constructor name.
+///
+/// `ArrayList` + `new ArrayList<String>()` yields `ArrayList<String>` so
+/// `var names`-style inference keeps the element type. Returns the bare
+/// name unchanged when no usable argument list is present.
+fn with_explicit_generic_args(bare: &str, base: &str) -> String {
+    match split_explicit_generic_args(base) {
+        Some((name, args)) if name == bare => format!("{bare}<{args}>"),
+        _ => bare.to_string(),
+    }
+}
+
 /// Extract the type name from a constructor call expression.
 ///
 /// Handles patterns like:
@@ -1037,25 +1351,37 @@ fn truncate_generic_args(name: &str) -> &str {
 fn extract_constructor_type_from_expr(expr: &str) -> Option<String> {
     let trimmed = expr.trim();
 
-    // new ClassName(...) / new ClassName<T>(...)
+    // new ClassName(...) / new ClassName<T>(...) (explicit type arguments
+    // are preserved so `new ArrayList<String>()` infers `ArrayList<String>`).
     if let Some(rest) = trimmed.strip_prefix("new ") {
-        let base = rest.split('(').next().unwrap_or(rest);
-        let type_name = truncate_generic_args(base).trim();
-        if is_valid_type_name(type_name) {
-            return Some(type_name.to_string());
+        let base = rest.split('(').next().unwrap_or(rest).trim();
+        // Multi-argument generics (`HashMap<String, Integer>`) carry
+        // spaces the plain truncation rejects; parse them first.
+        if let Some((name, args)) = split_explicit_generic_args(base) {
+            return Some(format!("{name}<{args}>"));
+        }
+        let bare = truncate_generic_args(base).trim();
+        if is_valid_type_name(bare) {
+            return Some(with_explicit_generic_args(bare, base));
         }
     }
 
     // ClassName(...) - function call that looks like a constructor
     if let Some(paren_pos) = trimmed.find('(') {
-        let func_name = truncate_generic_args(trimmed[..paren_pos].trim()).trim();
+        let base = trimmed[..paren_pos].trim();
+        if let Some((name, args)) = split_explicit_generic_args(base) {
+            if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                return Some(format!("{name}<{args}>"));
+            }
+        }
+        let func_name = truncate_generic_args(base).trim();
         // Ruby-style `ClassName.new(...)` normalizes to the class name.
         let func_name = func_name.strip_suffix(".new").unwrap_or(func_name);
         // Constructor calls typically start with uppercase
         if is_valid_type_name(func_name)
             && func_name.chars().next().is_some_and(|c| c.is_uppercase())
         {
-            return Some(func_name.to_string());
+            return Some(with_explicit_generic_args(func_name, base));
         }
     }
 
@@ -1098,8 +1424,11 @@ fn extract_call_target_from_expr(expr: &str) -> Option<String> {
     if KEYWORDS.contains(&func_name) {
         return None;
     }
-    // Allow qualified names with `.`, `::`, `/`
-    if !is_valid_type_name(func_name) {
+    // Allow qualified names with `.`, `::`, `/` plus receiver-qualified
+    // calls (`$this->m()`, `$svc->m()`, `ptr->m()`, `user?.m()`). The
+    // strict type-name check stays on the constructor path; call targets
+    // only need a plausible trailing identifier.
+    if !is_valid_call_target_name(func_name) {
         // Avoid capturing literals like `42(` which would be invalid.
         return None;
     }
@@ -1285,5 +1614,31 @@ mod tests {
             extract_call_target_from_expr("make<int>(1)"),
             Some("make(1)".to_string())
         );
+    }
+
+    #[test]
+    fn test_call_target_receiver_qualified() {
+        // PHP `$this->m()` / `$svc->m()` keep the receiver path; the
+        // inference layer strips to the trailing identifier.
+        assert_eq!(
+            extract_call_target_from_expr("$this->combineInts(1, 2)"),
+            Some("$this->combineInts(1, 2)".to_string())
+        );
+        assert_eq!(
+            extract_call_target_from_expr("$svc->loadUser(\"a\")"),
+            Some("$svc->loadUser(\"a\")".to_string())
+        );
+        // C++ member access and Kotlin safe-call pass validation too.
+        assert_eq!(
+            extract_call_target_from_expr("ptr->method(arg)"),
+            Some("ptr->method(arg)".to_string())
+        );
+        assert_eq!(
+            extract_call_target_from_expr("user?.getName()"),
+            Some("user?.getName".to_string())
+        );
+        // Operator noise still rejected.
+        assert_eq!(extract_call_target_from_expr("a + b(c)"), None);
+        assert_eq!(extract_call_target_from_expr("a->"), None);
     }
 }

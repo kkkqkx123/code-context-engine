@@ -20,8 +20,9 @@ use super::control_flow::shared::{
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
-    narrow_discriminated_union, parse_type_shape, subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, covers_declared_members,
+    declared_shape, narrow_discriminated_union, parse_type_shape, subtract_nullable_suffix,
+    subtract_union_members, type_shape_to_string,
 };
 
 /// Kotlin type inference implementation.
@@ -37,8 +38,13 @@ impl LanguageTypeInferer for KotlinTypeInferer {
                 EntityKind::Variable => {
                     extract_variable_type(entity, ctx);
 
-                    // Kotlin-specific: `var_type` for val/var inferred types
-                    if let Some(var_type) = entity.metadata.get("var_type") {
+                    // Kotlin-specific: `var_type` for val/var inferred types.
+                    // Only fills gaps: the shared extractor already bound
+                    // annotations, call targets and constructors, which
+                    // outrank the raw parser reading.
+                    if ctx.get_variable_type(&entity.name).is_none()
+                        && let Some(var_type) = entity.metadata.get("var_type")
+                    {
                         let binding = TypeBinding {
                             type_name: var_type.clone(),
                             type_entity_id: None,
@@ -95,6 +101,7 @@ impl LanguageTypeInferer for KotlinTypeInferer {
                             Language::Kotlin,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
@@ -212,7 +219,7 @@ fn narrow_kotlin_is_check(
             type_entity_id: None,
             span: Span::default(),
             origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-            shape: None,
+            shape: parse_type_shape(type_name, Language::Kotlin),
         },
     })
 }
@@ -238,7 +245,10 @@ fn narrow_kotlin_not_is(
     }
     let excluded = excluded.split_whitespace().next().unwrap_or(excluded);
     let declared = declared_shape(ctx, params, Language::Kotlin, var_name)?;
-    let narrowed = subtract_union_members(&declared, &[excluded.to_string()])?;
+    // `T?`-suffixed declarations shrink against the language null member
+    // (`value !is String` on `String?` leaves `null`).
+    let narrowed = subtract_nullable_suffix(&declared, excluded, Language::Kotlin)
+        .or_else(|| subtract_union_members(&declared, &[excluded.to_string()]))?;
     Some(NarrowingResult {
         variable_name: var_name.to_string(),
         narrowed_type: TypeBinding {
@@ -383,6 +393,11 @@ fn narrow_kotlin_discriminated_union(
             if let Some(narrowed) =
                 narrow_discriminated_union(&shape, &field_name, &value, type_index)
             {
+                if covers_declared_members(&shape, &narrowed)
+                    || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
+                {
+                    return results;
+                }
                 let type_name = type_shape_to_string(&narrowed);
                 results.push(NarrowingResult {
                     variable_name: var_name.clone(),
@@ -528,8 +543,13 @@ fn narrow_kotlin_when_arms(
         } else if is_valid_ident(var_part) {
             var_part.to_string()
         } else {
-            // var_part may be empty after trimming or be `is` artifact; fallback to subject
-            if let Some(s) = subject {
+            // Arms on one line (`... -> expr value is Type -> ...`) smear
+            // the previous result expression into `var_part`; the last
+            // whitespace-separated token is the actual receiver.
+            let candidate = var_part.split_whitespace().last().unwrap_or("");
+            if is_valid_ident(candidate) {
+                candidate.to_string()
+            } else if let Some(s) = subject {
                 if var_part.is_empty() || var_part == "is" {
                     s.to_string()
                 } else {
@@ -552,7 +572,7 @@ fn narrow_kotlin_when_arms(
                 type_entity_id: None,
                 span: Span::default(),
                 origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                shape: None,
+                shape: parse_type_shape(type_part, Language::Kotlin),
             },
         });
         search_start = abs_is + 4;
@@ -634,7 +654,7 @@ fn narrow_kotlin_when_arms(
                                 type_entity_id: None,
                                 span: Span::default(),
                                 origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                                shape: None,
+                                shape: parse_type_shape(type_name, Language::Kotlin),
                             },
                         });
                     }
@@ -669,7 +689,9 @@ mod tests {
         ];
 
         KotlinTypeInferer.infer_declarations(&entities, &mut ctx);
-        let rt = ctx.get_return_type(EntityId(1)).unwrap();
+        let rt = ctx
+            .get_return_type(EntityId(1))
+            .expect("return type must be bound");
         assert_eq!(rt.type_name, "String");
     }
 
@@ -687,7 +709,9 @@ mod tests {
         ];
 
         KotlinTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("name").unwrap();
+        let vt = ctx
+            .get_variable_type("name")
+            .expect("variable 'name' must be bound");
         assert_eq!(vt.type_name, "String");
         assert!(vt.origin.is_some());
     }
@@ -706,7 +730,9 @@ mod tests {
         ];
 
         KotlinTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("user").unwrap();
+        let vt = ctx
+            .get_variable_type("user")
+            .expect("variable 'user' must be bound");
         assert_eq!(vt.type_name, "User");
         assert!(vt.origin.is_some());
     }
@@ -870,7 +896,7 @@ mod tests {
     fn test_kotlin_parse_equality_pattern() {
         let result = parse_kotlin_equality_pattern("if (x.type == \"value\")");
         assert!(result.is_some());
-        let (var, field, value) = result.unwrap();
+        let (var, field, value) = result.expect("test pattern must parse");
         assert_eq!(var, "x");
         assert_eq!(field, "type");
         assert_eq!(value, "value");
@@ -880,7 +906,7 @@ mod tests {
     fn test_kotlin_parse_equality_pattern_single_quotes() {
         let result = parse_kotlin_equality_pattern("if (shape.kind == 'circle')");
         assert!(result.is_some());
-        let (var, field, value) = result.unwrap();
+        let (var, field, value) = result.expect("test pattern must parse");
         assert_eq!(var, "shape");
         assert_eq!(field, "kind");
         assert_eq!(value, "circle");

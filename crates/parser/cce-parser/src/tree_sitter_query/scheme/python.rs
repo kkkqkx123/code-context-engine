@@ -88,7 +88,7 @@ pub fn entity_query() -> &'static str {
 (function_definition
   name: (identifier) @entity.function.name
   parameters: (parameters) @entity.function.params
-  return_type: (type)? @entity.function.return_type
+  return_type: [(type) (string)]? @entity.function.return_type
   body: (block) @entity.function.body
 ) @entity.function
 
@@ -97,7 +97,7 @@ pub fn entity_query() -> &'static str {
   (function_definition
     name: (identifier) @entity.function.name
     parameters: (parameters) @entity.function.params
-    return_type: (type)? @entity.function.return_type
+    return_type: [(type) (string)]? @entity.function.return_type
     body: (block) @entity.function.body
   )
 ) @entity.function
@@ -106,7 +106,7 @@ pub fn entity_query() -> &'static str {
 (function_definition
   name: (identifier) @entity.function.async.name
   parameters: (parameters) @entity.function.async.params
-  return_type: (type)? @entity.function.return_type
+  return_type: [(type) (string)]? @entity.function.return_type
   body: (block) @entity.function.async.body
 ) @entity.function.async
 
@@ -122,6 +122,7 @@ pub fn entity_query() -> &'static str {
     (function_definition
       name: (identifier) @entity.method.name
       parameters: (parameters) @entity.method.params
+      return_type: [(type) (string)]? @entity.method.return_type
       body: (block) @entity.method.body
     ) @entity.method
   )
@@ -135,6 +136,7 @@ pub fn entity_query() -> &'static str {
       (function_definition
         name: (identifier) @entity.method.name
         parameters: (parameters) @entity.method.params
+        return_type: [(type) (string)]? @entity.method.return_type
         body: (block) @entity.method.body
       )
     ) @entity.method
@@ -148,7 +150,8 @@ pub fn entity_query() -> &'static str {
       name: (identifier) @entity.method.class.name
       parameters: (parameters
         (identifier) @entity.method.class.cls_param
-      )
+      ) @entity.method.params
+      return_type: [(type) (string)]? @entity.method.class.return_type
     ) @entity.method.class
   )
 )
@@ -160,7 +163,8 @@ pub fn entity_query() -> &'static str {
       name: (identifier) @entity.method.instance.name
       parameters: (parameters
         (identifier) @entity.method.instance.self_param
-      )
+      ) @entity.method.params
+      return_type: [(type) (string)]? @entity.method.instance.return_type
     ) @entity.method.instance
   )
 )

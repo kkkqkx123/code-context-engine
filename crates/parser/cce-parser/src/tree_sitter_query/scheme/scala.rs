@@ -67,6 +67,11 @@ pub fn entity_query() -> &'static str {
 ; Function definition (def)
 (function_definition
   name: (identifier) @entity.function.name
+  ; Generic definitions carry two `parameters`-field children
+  ; (`type_parameters` plus the real list), and a quantified field
+  ; pattern then matches neither. Consume the type parameters
+  ; uncaptured so the whole-text capture binds the real list.
+  (type_parameters)?
   parameters: (parameters)? @entity.function.params
   return_type: (_)? @entity.function.return_type
   body: (_)? @entity.function.body

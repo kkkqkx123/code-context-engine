@@ -297,8 +297,10 @@ impl ScopedTypeContext {
     /// With several overloads and at least one known argument shape, the
     /// candidates are ranked by arity and structural assignability
     /// ([`OverloadSet::resolve`]) and the winner's binding is returned.
-    /// When nothing resolves, the most recent binding is returned as a
-    /// legacy fallback so previously-bound call sites keep their output.
+    /// When several overloads are known but nothing resolves, a union of
+    /// the overload return types is returned instead of blindly picking
+    /// the most recent overload, so ambiguous call sites stay honest
+    /// rather than reporting one overload's type as fact.
     pub fn resolve_return_by_name(
         &self,
         name: &str,
@@ -351,7 +353,46 @@ impl ScopedTypeContext {
                 .iter()
                 .find(|(entity_id, _)| *entity_id == winner.entity_id)
                 .map(|(_, binding)| binding.clone()),
-            None => legacy(),
+            None => Some(Self::union_return_binding(slot)),
+        }
+    }
+
+    /// Build a union binding over every overload return type in a slot.
+    ///
+    /// Used when overload resolution cannot pick a single winner: the
+    /// caller keeps the full candidate set (`A | B`) instead of one
+    /// arbitrary overload. Duplicate return spellings collapse so
+    /// `String | String` renders as `String`.
+    fn union_return_binding(slot: &[(EntityId, TypeBinding)]) -> TypeBinding {
+        let mut names: Vec<String> = Vec::new();
+        let mut shapes: Vec<TypeShape> = Vec::new();
+        let mut span = cce_types::Span::default();
+        for (index, (_, binding)) in slot.iter().enumerate() {
+            if !names.contains(&binding.type_name) {
+                names.push(binding.type_name.clone());
+            }
+            let shape = binding
+                .shape
+                .clone()
+                .unwrap_or_else(|| TypeShape::Named(binding.type_name.clone()));
+            if !shapes.contains(&shape) {
+                shapes.push(shape);
+            }
+            if index == 0 {
+                span = binding.span;
+            }
+        }
+        let shape = match shapes.len() {
+            0 => None,
+            1 => shapes.into_iter().next(),
+            _ => Some(TypeShape::Union(shapes)),
+        };
+        TypeBinding {
+            type_name: names.join(" | "),
+            type_entity_id: None,
+            span,
+            origin: Some(InferenceOrigin::OverloadResolution),
+            shape,
         }
     }
 
@@ -399,7 +440,10 @@ impl ScopedTypeContext {
     ///
     /// Then-branch bindings feed the default lookup; else-branch bindings
     /// are only visible through the polarity-aware accessor so the two
-    /// sides never contaminate each other.
+    /// sides never contaminate each other. Byte-identical duplicates (same
+    /// variable, type, origin and span, e.g. two guard statements in one
+    /// function sharing the entity-span fallback) are skipped so repeated
+    /// facts and merged passes never render as duplicated rows.
     pub fn add_narrowed_type_in_branch(
         &mut self,
         name: String,
@@ -407,9 +451,18 @@ impl ScopedTypeContext {
         polarity: BranchPolarity,
     ) {
         let frame = self.frames.last_mut().expect("Scope stack is never empty");
-        match polarity {
-            BranchPolarity::Then => frame.narrowed.entry(name).or_default().push(binding),
-            BranchPolarity::Else => frame.narrowed_else.entry(name).or_default().push(binding),
+        let list = match polarity {
+            BranchPolarity::Then => frame.narrowed.entry(name).or_default(),
+            BranchPolarity::Else => frame.narrowed_else.entry(name).or_default(),
+        };
+        let duplicate = list.iter().any(|existing| {
+            existing.type_name == binding.type_name
+                && existing.origin == binding.origin
+                && existing.span.start_byte == binding.span.start_byte
+                && existing.span.end_byte == binding.span.end_byte
+        });
+        if !duplicate {
+            list.push(binding);
         }
     }
 
@@ -607,7 +660,12 @@ impl ScopedTypeContext {
 
     /// Add pattern match binding
     /// Handles: `let (a, b) = tuple()` or `let {x, y} = point`
-    pub fn add_pattern_match_binding(&mut self, pattern: &Pattern, source_type: &TypeShape) {
+    pub fn add_pattern_match_binding(
+        &mut self,
+        pattern: &Pattern,
+        source_type: &TypeShape,
+        span: cce_types::Span,
+    ) {
         match pattern {
             Pattern::Tuple(elements) => {
                 if let TypeShape::Generic { args, .. } = source_type {
@@ -618,7 +676,7 @@ impl ScopedTypeContext {
                                 TypeBinding {
                                     type_name: type_shape_to_string(arg_type),
                                     type_entity_id: None,
-                                    span: cce_types::Span::default(),
+                                    span,
                                     origin: Some(InferenceOrigin::PatternMatching),
                                     shape: Some(arg_type.clone()),
                                 },
@@ -634,7 +692,7 @@ impl ScopedTypeContext {
                         TypeBinding {
                             type_name: "unknown".to_string(),
                             type_entity_id: None,
-                            span: cce_types::Span::default(),
+                            span,
                             origin: Some(InferenceOrigin::PatternMatching),
                             shape: None,
                         },
@@ -647,7 +705,7 @@ impl ScopedTypeContext {
                     TypeBinding {
                         type_name: type_shape_to_string(source_type),
                         type_entity_id: None,
-                        span: cce_types::Span::default(),
+                        span,
                         origin: Some(InferenceOrigin::PatternMatching),
                         shape: Some(source_type.clone()),
                     },
@@ -672,6 +730,7 @@ impl ScopedTypeContext {
         target: &str,
         source_type: &TypeShape,
         index: Option<usize>,
+        span: cce_types::Span,
     ) {
         let source_type = match source_type {
             TypeShape::Reference { inner, .. } => inner.as_ref(),
@@ -690,7 +749,7 @@ impl ScopedTypeContext {
             TypeBinding {
                 type_name: type_shape_to_string(&resolved_type),
                 type_entity_id: None,
-                span: cce_types::Span::default(),
+                span,
                 origin: Some(InferenceOrigin::DestructuringAssignment),
                 shape: Some(resolved_type),
             },
@@ -707,6 +766,7 @@ impl ScopedTypeContext {
         &mut self,
         parts: &[NestedPatternPart],
         source_type: &TypeShape,
+        span: cce_types::Span,
     ) {
         for (index, part) in parts.iter().enumerate() {
             match part {
@@ -717,17 +777,17 @@ impl ScopedTypeContext {
                             TypeBinding {
                                 type_name: type_shape_to_string(&element),
                                 type_entity_id: None,
-                                span: cce_types::Span::default(),
+                                span,
                                 origin: Some(InferenceOrigin::PatternMatching),
                                 shape: Some(element),
                             },
                         );
                     }
-                    self.add_destructuring_binding(name, source_type, Some(index));
+                    self.add_destructuring_binding(name, source_type, Some(index), span);
                 }
                 NestedPatternPart::Group(inner) => {
                     if let Some(element) = nested_positional_element(source_type, index) {
-                        self.add_nested_destructuring_binding(inner, &element);
+                        self.add_nested_destructuring_binding(inner, &element, span);
                     }
                 }
                 NestedPatternPart::Wildcard => {}
@@ -1000,7 +1060,7 @@ mod tests {
         let mut ctx = ScopedTypeContext::new(Language::Rust);
         let pattern = Pattern::Identifier("x".to_string());
         let source_type = TypeShape::Named("String".to_string());
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("x").unwrap().type_name, "String");
     }
 
@@ -1015,7 +1075,7 @@ mod tests {
                 TypeShape::Named("String".to_string()),
             ],
         };
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "int");
         assert_eq!(ctx.get_variable_type("b").unwrap().type_name, "String");
     }
@@ -1025,7 +1085,7 @@ mod tests {
         let mut ctx = ScopedTypeContext::new(Language::Rust);
         let pattern = Pattern::Struct(vec!["x".to_string(), "y".to_string()]);
         let source_type = TypeShape::Named("Point".to_string());
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("x").unwrap().type_name, "unknown");
         assert_eq!(ctx.get_variable_type("y").unwrap().type_name, "unknown");
     }
@@ -1035,7 +1095,7 @@ mod tests {
         let mut ctx = ScopedTypeContext::new(Language::Rust);
         let pattern = Pattern::Wildcard;
         let source_type = TypeShape::Named("Point".to_string());
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
     }
 
     #[test]
@@ -1048,9 +1108,9 @@ mod tests {
                 TypeShape::Named("String".to_string()),
             ],
         };
-        ctx.add_destructuring_binding("a", &source_type, Some(0));
+        ctx.add_destructuring_binding("a", &source_type, Some(0), cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "int");
-        ctx.add_destructuring_binding("b", &source_type, Some(1));
+        ctx.add_destructuring_binding("b", &source_type, Some(1), cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("b").unwrap().type_name, "String");
     }
 
@@ -1058,7 +1118,7 @@ mod tests {
     fn test_scoped_type_context_add_destructuring_binding_array() {
         let mut ctx = ScopedTypeContext::new(Language::Python);
         let source_type = TypeShape::Array(Box::new(TypeShape::Named("int".to_string())));
-        ctx.add_destructuring_binding("elem", &source_type, None);
+        ctx.add_destructuring_binding("elem", &source_type, None, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("elem").unwrap().type_name, "int");
     }
 
@@ -1089,7 +1149,7 @@ mod tests {
                 TypeShape::Named("String".to_string()),
             ],
         };
-        ctx.add_pattern_match_binding(&inner_tuple, &source_type);
+        ctx.add_pattern_match_binding(&inner_tuple, &source_type, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("x").unwrap().type_name, "i32");
         assert_eq!(ctx.get_variable_type("y").unwrap().type_name, "String");
     }
@@ -1103,7 +1163,7 @@ mod tests {
             "email".to_string(),
         ]);
         let source_type = TypeShape::Named("User".to_string());
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("name").unwrap().type_name, "unknown");
         assert_eq!(ctx.get_variable_type("age").unwrap().type_name, "unknown");
         assert_eq!(ctx.get_variable_type("email").unwrap().type_name, "unknown");
@@ -1121,7 +1181,7 @@ mod tests {
                 TypeShape::Named("bool".to_string()),
             ],
         };
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "int");
         assert_eq!(ctx.get_variable_type("b").unwrap().type_name, "String");
         assert_eq!(ctx.get_variable_type("c").unwrap().type_name, "bool");
@@ -1138,7 +1198,7 @@ mod tests {
                 TypeShape::Named("String".to_string()),
             ],
         };
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "i32");
         assert!(ctx.get_variable_type("b").is_none());
     }
@@ -1151,7 +1211,7 @@ mod tests {
             base: "List".to_string(),
             args: vec![TypeShape::Named("String".to_string())],
         };
-        ctx.add_pattern_match_binding(&pattern, &source_type);
+        ctx.add_pattern_match_binding(&pattern, &source_type, cce_types::Span::default());
         let binding = ctx.get_variable_type("items").unwrap();
         assert_eq!(binding.type_name, "List<String>");
         assert_eq!(
@@ -1172,7 +1232,7 @@ mod tests {
             base: "tuple".to_string(),
             args: vec![TypeShape::Named("int".to_string())],
         };
-        ctx.add_destructuring_binding("a", &source_type, Some(5));
+        ctx.add_destructuring_binding("a", &source_type, Some(5), cce_types::Span::default());
         let binding = ctx.get_variable_type("a").unwrap();
         assert_eq!(binding.type_name, "unknown");
     }
@@ -1181,7 +1241,7 @@ mod tests {
     fn test_destructuring_binding_array_element() {
         let mut ctx = ScopedTypeContext::new(Language::Python);
         let source_type = TypeShape::Array(Box::new(TypeShape::Named("String".to_string())));
-        ctx.add_destructuring_binding("elem", &source_type, None);
+        ctx.add_destructuring_binding("elem", &source_type, None, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("elem").unwrap().type_name, "String");
         assert_eq!(
             ctx.get_variable_type("elem").unwrap().shape,
@@ -1193,7 +1253,7 @@ mod tests {
     fn test_destructuring_binding_non_destructured_type() {
         let mut ctx = ScopedTypeContext::new(Language::Python);
         let source_type = TypeShape::Named("String".to_string());
-        ctx.add_destructuring_binding("x", &source_type, Some(0));
+        ctx.add_destructuring_binding("x", &source_type, Some(0), cce_types::Span::default());
         let binding = ctx.get_variable_type("x").unwrap();
         assert_eq!(binding.type_name, "unknown");
         assert_eq!(
@@ -1213,7 +1273,7 @@ mod tests {
                 TypeShape::Named("String".to_string()),
             ],
         };
-        ctx.add_destructuring_binding("x", &source_type, Some(2));
+        ctx.add_destructuring_binding("x", &source_type, Some(2), cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("x").unwrap().type_name, "String");
     }
 
@@ -1290,7 +1350,7 @@ mod tests {
                 TypeShape::Named("int".to_string()),
             ],
         };
-        ctx.add_destructuring_binding("second", &source, Some(1));
+        ctx.add_destructuring_binding("second", &source, Some(1), cce_types::Span::default());
         let binding = ctx
             .get_variable_type("second")
             .expect("destructured binding exists");
@@ -1304,7 +1364,7 @@ mod tests {
             base: "Pair".to_string(),
             args: vec![TypeShape::Named("String".to_string())],
         };
-        ctx.add_destructuring_binding("second", &source, Some(1));
+        ctx.add_destructuring_binding("second", &source, Some(1), cce_types::Span::default());
         let binding = ctx
             .get_variable_type("second")
             .expect("destructured binding exists");
@@ -1384,7 +1444,7 @@ mod tests {
                 NestedPatternPart::Name("c".to_string()),
             ]),
         ];
-        ctx.add_nested_destructuring_binding(&parts, &nested_shape());
+        ctx.add_nested_destructuring_binding(&parts, &nested_shape(), cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "String");
         assert_eq!(ctx.get_variable_type("b").unwrap().type_name, "int");
         assert_eq!(ctx.get_variable_type("c").unwrap().type_name, "bool");
@@ -1401,7 +1461,7 @@ mod tests {
             base: "Tuple".to_string(),
             args: vec![TypeShape::Named("String".to_string())],
         };
-        ctx.add_nested_destructuring_binding(&parts, &source);
+        ctx.add_nested_destructuring_binding(&parts, &source, cce_types::Span::default());
         assert_eq!(ctx.get_variable_type("a").unwrap().type_name, "String");
         assert!(ctx.get_variable_type("b").is_none());
     }
@@ -1413,7 +1473,7 @@ mod tests {
             NestedPatternPart::Wildcard,
             NestedPatternPart::Name("b".to_string()),
         ];
-        ctx.add_nested_destructuring_binding(&parts, &nested_shape());
+        ctx.add_nested_destructuring_binding(&parts, &nested_shape(), cce_types::Span::default());
         assert_eq!(
             ctx.get_variable_type("b").unwrap().type_name,
             "Tuple<int, bool>"
@@ -1479,22 +1539,23 @@ mod tests {
                 .type_name,
             "String"
         );
-        // Unknown shapes and arity mismatches keep the legacy binding.
+        // Unknown shapes keep the legacy binding.
         assert_eq!(
             ctx.resolve_return_by_name("combine", &[None, None], Language::Kotlin)
                 .unwrap()
                 .type_name,
             "String"
         );
-        assert_eq!(
-            ctx.resolve_return_by_name(
+        // Arity mismatches with known args yield the overload union
+        // instead of one arbitrary overload.
+        let ambiguous = ctx
+            .resolve_return_by_name(
                 "combine",
                 &[Some(TypeShape::Named("Int".to_string()))],
-                Language::Kotlin
+                Language::Kotlin,
             )
-            .unwrap()
-            .type_name,
-            "String"
-        );
+            .unwrap();
+        assert_eq!(ambiguous.type_name, "Int | String");
+        assert_eq!(ambiguous.origin, Some(InferenceOrigin::OverloadResolution));
     }
 }

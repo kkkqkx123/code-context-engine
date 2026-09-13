@@ -4,18 +4,59 @@
 //! `TypeBinding` entries. They are called by per-language inferers.
 
 use cce_types::entity::Entity;
+use cce_types::language::Language;
 
-use super::cross_file::infer_arg_shape;
-use super::types::{InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, parse_type_shape};
+use super::cross_file::{collection_element_access, infer_arg_shape};
+use super::types::{
+    InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, parse_type_shape,
+    type_shape_to_string,
+};
 
-use super::generics::{GenericTypeArg, parse_generic_type, split_call_target};
+use super::call_utils::{simple_callee_name, split_call_target, split_receiver_method};
+use super::generics::{
+    GenericTypeArg, parse_generic_type, resolve_collection_factory_shape, shape_contains_param,
+    substitute_call_return_type,
+};
 
 /// Strip a leading colon from a captured type annotation.
 ///
 /// Tree-sitter `type_annotation` nodes include the colon prefix
-/// (`: string`); bindings must store the bare type name.
+/// (`: string`); quoted forward references (`"Container"`) shed their
+/// quotes since a type name never legitimately carries them. Bindings
+/// must store the bare type name.
 fn clean_annotation(ty: &str) -> &str {
-    ty.trim().trim_start_matches(':').trim()
+    let normalized = ty.trim().trim_start_matches(':').trim();
+    let bytes = normalized.as_bytes();
+    if bytes.len() >= 2 {
+        let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
+        if first == last && (first == b'"' || first == b'\'') {
+            return normalized[1..normalized.len() - 1].trim();
+        }
+    }
+    normalized
+}
+
+/// Normalize Go slice-prefix spellings to the structured shape spelling.
+///
+/// Go writes slices prefix (`[]T`) while [`TypeShape::Array`] renders
+/// suffix (`T[]`). Without normalization the inferred name (`[]T`) and
+/// its shape (`T[]`) disagree in reports. Only the bare `[]` prefix is
+/// rewritten (`[][]T` -> `T[][]`); maps, arrays with lengths and other
+/// spellings pass through untouched.
+fn normalize_go_slice_spelling(cleaned: &str, language: Language) -> String {
+    if language != Language::Go {
+        return cleaned.to_string();
+    }
+    let mut rest = cleaned.trim();
+    let mut depth = 0usize;
+    while let Some(stripped) = rest.strip_prefix("[]") {
+        rest = stripped.trim();
+        depth += 1;
+    }
+    if depth == 0 || rest.is_empty() || rest.contains(char::is_whitespace) {
+        return cleaned.to_string();
+    }
+    format!("{rest}{}", "[]".repeat(depth))
 }
 
 /// Whether a captured annotation is an inference keyword rather than a
@@ -44,31 +85,76 @@ fn is_inferred_type_keyword(ty: &str) -> bool {
 /// from `entity.parameters` (filtering entries with type annotations).
 /// Also stores the return type indexed by function name to enable
 /// `call_target` resolution for variables assigned via `x = f()`.
+///
+/// When no explicit return type annotation is present, the extractor
+/// checks for `return_body` metadata (set by the parser for languages
+/// without return-type syntax) and uses it to derive a return type.
 pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
     if let Some(ref return_type) = entity.return_type {
-        let shape = parse_type_shape(return_type, ctx.language());
-        let binding = TypeBinding {
-            type_name: return_type.clone(),
-            type_entity_id: None,
-            span: entity.span,
-            origin: Some(InferenceOrigin::TypeAnnotation),
-            shape,
-        };
-        ctx.add_return_type(entity.id, binding.clone());
-        // Also store by name for local call_target resolution
-        ctx.add_return_type_by_name(entity.name.clone(), entity.id, binding);
+        let cleaned = clean_annotation(return_type);
+        if !cleaned.is_empty() {
+            let normalized = normalize_go_slice_spelling(cleaned, ctx.language());
+            let shape = parse_type_shape(&normalized, ctx.language());
+            let binding = TypeBinding {
+                type_name: normalized,
+                type_entity_id: None,
+                span: entity.span,
+                origin: Some(InferenceOrigin::TypeAnnotation),
+                shape,
+            };
+            ctx.add_return_type(entity.id, binding.clone());
+            // Also store by name for local call_target resolution
+            ctx.add_return_type_by_name(entity.name.clone(), entity.id, binding);
+            // Explicit annotation wins; skip return_body processing.
+            let param_bindings: Vec<TypeBinding> = entity
+                .parameters
+                .iter()
+                .filter_map(|(_name, ty)| {
+                    ty.as_ref().map(|type_name| {
+                        let cleaned = clean_annotation(type_name);
+                        let normalized = normalize_go_slice_spelling(cleaned, ctx.language());
+                        TypeBinding {
+                            type_name: normalized.clone(),
+                            type_entity_id: None,
+                            span: entity.span,
+                            origin: Some(InferenceOrigin::TypeAnnotation),
+                            shape: parse_type_shape(&normalized, ctx.language()),
+                        }
+                    })
+                })
+                .collect();
+            if !param_bindings.is_empty() {
+                ctx.add_parameter_types(entity.id, param_bindings);
+            }
+            return;
+        }
+    }
+
+    // No explicit return annotation — try return_body metadata.
+    if let Some(return_body) = entity.metadata.get("return_body") {
+        let body = return_body.trim();
+        if !body.is_empty() {
+            if let Some(binding) = infer_return_from_body(body, entity, ctx) {
+                ctx.add_return_type(entity.id, binding.clone());
+                ctx.add_return_type_by_name(entity.name.clone(), entity.id, binding);
+            }
+        }
     }
 
     let param_bindings: Vec<TypeBinding> = entity
         .parameters
         .iter()
         .filter_map(|(_name, ty)| {
-            ty.as_ref().map(|type_name| TypeBinding {
-                type_name: type_name.clone(),
-                type_entity_id: None,
-                span: entity.span,
-                origin: Some(InferenceOrigin::TypeAnnotation),
-                shape: parse_type_shape(type_name, ctx.language()),
+            ty.as_ref().map(|type_name| {
+                let cleaned = clean_annotation(type_name);
+                let normalized = normalize_go_slice_spelling(cleaned, ctx.language());
+                TypeBinding {
+                    type_name: normalized.clone(),
+                    type_entity_id: None,
+                    span: entity.span,
+                    origin: Some(InferenceOrigin::TypeAnnotation),
+                    shape: parse_type_shape(&normalized, ctx.language()),
+                }
             })
         })
         .collect();
@@ -77,31 +163,198 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
     }
 }
 
+/// Try same-file `call_target` resolution: `x = f()` where `f` is defined
+/// in the same file.
+///
+/// Returns `true` when a binding was recorded. A bare `Name(...)` call may
+/// also carry `constructor_type` metadata (PascalCase methods in
+/// C#/Java/Kotlin/Scala look like constructors to the extractor); the
+/// function-return reading outranks the constructor reading
+/// (`FunctionReturn` priority 6 over `ConstructorCall` priority 2), so this
+/// runs before the constructor branch and a miss falls through to it.
+fn try_resolve_call_target(entity: &Entity, ctx: &mut ScopedTypeContext) -> bool {
+    let Some(call_target) = entity.metadata.get("call_target") else {
+        return false;
+    };
+    let (func_name, args) = split_call_target(call_target);
+    let language = ctx.language();
+    let arg_shapes: Vec<Option<TypeShape>> = args
+        .iter()
+        .map(|arg| infer_arg_shape(ctx, language, arg))
+        .collect();
+    // Receiver-qualified targets (`obj.m`, `$this->m`, `A::m`) resolve
+    // against the trailing name; the receiver is only consulted for
+    // collection element access below.
+    let simple_name = simple_callee_name(&func_name).to_string();
+    let Some(return_binding) = ctx.resolve_return_by_name(&simple_name, &arg_shapes, language)
+    else {
+        // Member calls on a known receiver (`names.get(0)`,
+        // `$this->combineInts(1)`) resolve element access against the
+        // receiver binding before giving up, so same-file collection
+        // reads bind without propagation.
+        if let Some((receiver, method)) = split_receiver_method(&func_name)
+            && let Some(receiver_binding) = ctx.get_variable_type(receiver.trim())
+            && let Some(element) =
+                collection_element_access(language, &receiver_binding.type_name, method.trim())
+        {
+            let type_name = type_shape_to_string(&element);
+            ctx.add_variable_type(
+                entity.name.clone(),
+                TypeBinding {
+                    type_name,
+                    type_entity_id: None,
+                    span: entity.span,
+                    origin: Some(InferenceOrigin::FunctionReturn),
+                    shape: Some(element),
+                },
+            );
+            return true;
+        }
+        return false;
+    };
+    let binding = TypeBinding {
+        type_name: return_binding.type_name.clone(),
+        type_entity_id: return_binding.type_entity_id,
+        span: entity.span,
+        origin: Some(InferenceOrigin::FunctionReturn),
+        shape: return_binding.shape.clone(),
+    };
+    ctx.add_variable_type(entity.name.clone(), binding);
+    true
+}
+
+/// Try Scala collection-factory resolution: `xs = List(User(...), ...)`
+/// where every element infers the same concrete type.
+///
+/// Collection factories (`List`, `Seq`, `Vector`, `Set`, `Array`) have no
+/// same-file function entry, so the call-target path misses and the bare
+/// constructor reading would degrade to `List`. When all call-site
+/// elements agree, bind `List[User]` (shape `List<User>`) instead. Mixed
+/// or unknown elements stay conservative and fall through.
+fn try_resolve_scala_collection_constructor(entity: &Entity, ctx: &mut ScopedTypeContext) -> bool {
+    if ctx.language() != Language::Scala {
+        return false;
+    }
+    let Some(call_target) = entity.metadata.get("call_target") else {
+        return false;
+    };
+    let language = ctx.language();
+    let Some((type_name, shape)) = resolve_collection_factory_shape(language, call_target, |arg| {
+        infer_arg_shape(ctx, language, arg)
+    }) else {
+        return false;
+    };
+    let binding = TypeBinding {
+        type_name: type_name.clone(),
+        type_entity_id: None,
+        span: entity.span,
+        origin: Some(InferenceOrigin::ConstructorCall),
+        shape: Some(shape),
+    };
+    ctx.add_variable_type(entity.name.clone(), binding);
+    try_bind_generic(ctx, &type_name);
+    true
+}
+
+/// Instantiate a still-generic constructor type from call-site arguments.
+///
+/// `p = Pair(1, "one")` with `constructor_type = Pair<A, B>` yields
+/// `Pair<Int, String>`; explicitly parameterized types (`ArrayList<String>`)
+/// and partially resolved arguments keep the recorded reading.
+fn instantiate_constructor_call(
+    entity: &Entity,
+    ctx: &ScopedTypeContext,
+) -> Option<(String, TypeShape)> {
+    let init_type = entity.metadata.get("constructor_type")?;
+    let language = ctx.language();
+    let ctor_shape = parse_type_shape(init_type, language)?;
+    if !shape_contains_param(&ctor_shape) {
+        return None;
+    }
+    let call_target = entity.metadata.get("call_target")?;
+    let (_, args) = split_call_target(call_target);
+    if args.is_empty() {
+        return None;
+    }
+    let formal: Vec<TypeShape> = match &ctor_shape {
+        TypeShape::Generic { args, .. } => args.clone(),
+        _ => return None,
+    };
+    let actual: Vec<Option<TypeShape>> = args
+        .iter()
+        .map(|arg| infer_arg_shape(ctx, language, arg))
+        .collect();
+    let actual_refs: Vec<Option<&TypeShape>> = actual.iter().map(|s| s.as_ref()).collect();
+    let substituted = substitute_call_return_type(&formal, &ctor_shape, &actual_refs, language)?;
+    if shape_contains_param(&substituted) {
+        return None;
+    }
+    Some((type_shape_to_string(&substituted), substituted))
+}
+
 /// Extract type information from a variable entity's metadata.
 ///
 /// Checks metadata keys populated by the parser in priority order:
 /// 1. `type_annotation` — explicit type annotation (High)
-/// 2. `constructor_type` — constructor call like `x = MyClass()` (Medium)
-/// 3. `literal_type` — literal assignment like `x = 42` (Medium)
-/// 4. `call_target` — function call like `x = f()` (Medium, via FunctionReturn)
+/// 2. `call_target` — function call like `x = f()` (via FunctionReturn;
+///    outranks the constructor reading when both are present)
+/// 3. `constructor_type` — constructor call like `x = MyClass()`
+/// 4. `literal_type` — literal assignment like `x = 42`
 pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
+    // Composite destructuring names (`a, b = ...`) are owned by the
+    // destructuring pass, which binds each part individually. Binding the
+    // joined name here would leak a pseudo-variable into snapshots.
+    if entity.name.contains(',') {
+        return;
+    }
     if let Some(type_name) = entity.metadata.get("type_annotation") {
         let cleaned = clean_annotation(type_name);
         if !cleaned.is_empty() && !is_inferred_type_keyword(cleaned) {
+            let normalized = normalize_go_slice_spelling(cleaned, ctx.language());
             let binding = TypeBinding {
-                type_name: cleaned.to_string(),
+                type_name: normalized.clone(),
                 type_entity_id: None,
                 span: entity.span,
                 origin: Some(InferenceOrigin::TypeAnnotation),
-                shape: parse_type_shape(cleaned, ctx.language()),
+                shape: parse_type_shape(&normalized, ctx.language()),
             };
             ctx.add_variable_type(entity.name.clone(), binding);
-            try_bind_generic(ctx, cleaned);
+            try_bind_generic(ctx, &normalized);
             return;
         }
     }
 
+    // Same-file call resolution first: overloaded names resolve by
+    // call-site argument shapes (`combine(1, 2)` picks the `(Int, Int)`
+    // overload); a miss falls through to the constructor reading.
+    if try_resolve_call_target(entity, ctx) {
+        return;
+    }
+
+    // Scala collection factories (`List(User(...), ...)`): infer the
+    // element type from uniform call-site elements before the bare
+    // constructor reading applies.
+    if try_resolve_scala_collection_constructor(entity, ctx) {
+        return;
+    }
+
     if let Some(init_type) = entity.metadata.get("constructor_type") {
+        // Call-site instantiation first (`Pair(1, "one")` on `Pair<A, B>`
+        // yields `Pair<Int, String>`); otherwise the recorded reading.
+        if let Some((type_name, shape)) = instantiate_constructor_call(entity, ctx) {
+            ctx.add_variable_type(
+                entity.name.clone(),
+                TypeBinding {
+                    type_name: type_name.clone(),
+                    type_entity_id: None,
+                    span: entity.span,
+                    origin: Some(InferenceOrigin::ConstructorCall),
+                    shape: Some(shape),
+                },
+            );
+            try_bind_generic(ctx, &type_name);
+            return;
+        }
         let binding = TypeBinding {
             type_name: init_type.clone(),
             type_entity_id: None,
@@ -124,32 +377,6 @@ pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
         };
         ctx.add_variable_type(entity.name.clone(), binding);
         try_bind_generic(ctx, lit_type);
-        return;
-    }
-
-    // Local call_target resolution: `x = f()` where `f` is in the same file.
-    // The function's return type was extracted by `extract_function_types` and
-    // stored in the context's name-based index. Overloaded names resolve by
-    // call-site argument shapes (`combine(1, 2)` picks the `(Int, Int)`
-    // overload); anything else keeps the legacy most-recent binding.
-    if let Some(call_target) = entity.metadata.get("call_target") {
-        let (func_name, args) = split_call_target(call_target);
-        let language = ctx.language();
-        let arg_shapes: Vec<Option<TypeShape>> = args
-            .iter()
-            .map(|arg| infer_arg_shape(ctx, language, arg))
-            .collect();
-        if let Some(return_binding) = ctx.resolve_return_by_name(&func_name, &arg_shapes, language)
-        {
-            let binding = TypeBinding {
-                type_name: return_binding.type_name.clone(),
-                type_entity_id: return_binding.type_entity_id,
-                span: entity.span,
-                origin: Some(InferenceOrigin::FunctionReturn),
-                shape: return_binding.shape.clone(),
-            };
-            ctx.add_variable_type(entity.name.clone(), binding);
-        }
     }
 }
 
@@ -157,22 +384,41 @@ pub fn extract_variable_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
 ///
 /// Checks metadata keys in priority order:
 /// 1. `type_annotation` — explicit type annotation (High)
-/// 2. `constructor_type` — initializer like `x = MyClass()` (Medium)
-/// 3. `literal_type` — literal initializer like `x = 42` (Medium)
+/// 2. `call_target` — call initializer like `val x = f()` (via
+///    FunctionReturn; outranks the constructor reading when both present)
+/// 3. `constructor_type` — initializer like `x = MyClass()`
+/// 4. `literal_type` — literal initializer like `x = 42`
 pub fn extract_field_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
+    // Same composite-name rule as the variable path: the destructuring
+    // pass owns comma-joined names and binds each part individually.
+    if entity.name.contains(',') {
+        return;
+    }
     if let Some(type_name) = entity.metadata.get("type_annotation") {
         let cleaned = clean_annotation(type_name);
         if !cleaned.is_empty() && !is_inferred_type_keyword(cleaned) {
+            let normalized = normalize_go_slice_spelling(cleaned, ctx.language());
             let binding = TypeBinding {
-                type_name: cleaned.to_string(),
+                type_name: normalized.clone(),
                 type_entity_id: None,
                 span: entity.span,
                 origin: Some(InferenceOrigin::TypeAnnotation),
-                shape: parse_type_shape(cleaned, ctx.language()),
+                shape: parse_type_shape(&normalized, ctx.language()),
             };
             ctx.add_variable_type(entity.name.clone(), binding);
             return;
         }
+    }
+
+    // Call-initialized fields/properties (`val x = f()`): same overload-aware
+    // resolution as the variable path, tried before the constructor reading.
+    if try_resolve_call_target(entity, ctx) {
+        return;
+    }
+
+    // Scala collection factories share the variable-path element inference.
+    if try_resolve_scala_collection_constructor(entity, ctx) {
+        return;
     }
 
     if let Some(init_type) = entity.metadata.get("constructor_type") {
@@ -198,29 +444,128 @@ pub fn extract_field_type(entity: &Entity, ctx: &mut ScopedTypeContext) {
         };
         ctx.add_variable_type(entity.name.clone(), binding);
         try_bind_generic(ctx, lit_type);
-        return;
+    }
+}
+
+/// Infer a return type from the `return_body` metadata text.
+///
+/// The body text is produced by the parser-side normaliser and may be:
+/// - A built-in type name from a literal (`str`, `int`, `number`, etc.)
+/// - A class name from a constructor call (`User`)
+/// - A raw expression the inferer should evaluate (concatenation, call)
+///
+/// Returns `None` only for truly unrecognisable expressions so the
+/// function stays without a return type (conservative no-guess).
+fn infer_return_from_body(
+    body: &str,
+    entity: &Entity,
+    ctx: &ScopedTypeContext,
+) -> Option<TypeBinding> {
+    let language = ctx.language();
+
+    // Built-in literal type names (`str`, `int`, `number`, `string`, etc.)
+    // are already normalised by the parser — treat them as concrete types.
+    if looks_like_builtin_type(body, language) {
+        let shape = parse_type_shape(body, language);
+        return Some(TypeBinding {
+            type_name: body.to_string(),
+            type_entity_id: None,
+            span: entity.span,
+            origin: Some(InferenceOrigin::GenericInference),
+            shape,
+        });
     }
 
-    // Call-initialized fields/properties (`val x = f()`): same overload-aware
-    // resolution as the variable path.
-    if let Some(call_target) = entity.metadata.get("call_target") {
-        let (func_name, args) = split_call_target(call_target);
-        let language = ctx.language();
-        let arg_shapes: Vec<Option<TypeShape>> = args
-            .iter()
-            .map(|arg| infer_arg_shape(ctx, language, arg))
-            .collect();
-        if let Some(return_binding) = ctx.resolve_return_by_name(&func_name, &arg_shapes, language)
-        {
-            let binding = TypeBinding {
+    // Class-like name (PascalCase or already a known type).
+    if looks_like_type_name(body) {
+        let shape = parse_type_shape(body, language);
+        return Some(TypeBinding {
+            type_name: body.to_string(),
+            type_entity_id: None,
+            span: entity.span,
+            origin: Some(InferenceOrigin::GenericInference),
+            shape,
+        });
+    }
+
+    // Call expression — resolve through same-file return types.
+    if let Some(call_target) = body.strip_suffix("()") {
+        let func_name = call_target
+            .trim()
+            .rsplit('.')
+            .next()
+            .unwrap_or(call_target.trim());
+        if let Some(return_binding) = ctx.resolve_return_by_name(func_name, &[], language) {
+            return Some(TypeBinding {
                 type_name: return_binding.type_name.clone(),
                 type_entity_id: return_binding.type_entity_id,
                 span: entity.span,
                 origin: Some(InferenceOrigin::FunctionReturn),
                 shape: return_binding.shape.clone(),
-            };
-            ctx.add_variable_type(entity.name.clone(), binding);
+            });
         }
+    }
+
+    // String concatenation: all-string operands → `str`.
+    if is_string_concatenation(body, language) {
+        let shape = parse_type_shape("str", language);
+        return Some(TypeBinding {
+            type_name: "str".to_string(),
+            type_entity_id: None,
+            span: entity.span,
+            origin: Some(InferenceOrigin::GenericInference),
+            shape,
+        });
+    }
+
+    None
+}
+
+/// Check if a body text looks like a built-in type name for the given language.
+fn looks_like_builtin_type(name: &str, language: cce_types::language::Language) -> bool {
+    let name = name.trim();
+    match language {
+        cce_types::language::Language::Python => {
+            matches!(
+                name,
+                "str"
+                    | "int"
+                    | "float"
+                    | "bool"
+                    | "list"
+                    | "dict"
+                    | "tuple"
+                    | "set"
+                    | "None"
+                    | "bytes"
+                    | "complex"
+                    | "range"
+            )
+        }
+        cce_types::language::Language::Lua => {
+            matches!(
+                name,
+                "string" | "number" | "boolean" | "nil" | "table" | "function"
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Check if a name looks like a type name (PascalCase).
+fn looks_like_type_name(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty()
+        && name.bytes().next().is_some_and(|b| b.is_ascii_uppercase())
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Check if a body text is a string concatenation expression.
+fn is_string_concatenation(body: &str, language: cce_types::language::Language) -> bool {
+    match language {
+        cce_types::language::Language::Python => body.contains(".. ") || body.contains(" + "),
+        cce_types::language::Language::Lua => body.contains(".."),
+        _ => false,
     }
 }
 
@@ -377,6 +722,15 @@ mod tests {
         assert!(rt.shape.is_some());
     }
 
+    #[test]
+    fn test_extract_function_types_strips_quoted_forward_ref() {
+        let entity = make_entity(1, "duplicate", Some("\"Container\""), vec![]);
+        let mut ctx = ScopedTypeContext::new(Language::Python);
+        extract_function_types(&entity, &mut ctx);
+        let rt = ctx.get_return_type(cce_types::EntityId(1)).unwrap();
+        assert_eq!(rt.type_name, "Container");
+    }
+
     // ==================== extract_variable_type tests ====================
 
     #[test]
@@ -422,6 +776,52 @@ mod tests {
     fn test_extract_variable_type_no_metadata() {
         let entity = make_variable_entity(1, "x", vec![]);
         let mut ctx = ScopedTypeContext::new(Language::Python);
+        extract_variable_type(&entity, &mut ctx);
+        assert!(ctx.get_variable_type("x").is_none());
+    }
+
+    #[test]
+    fn test_extract_variable_type_skips_composite_destructuring_name() {
+        let entity = make_variable_entity(1, "first, second", vec![("literal_type", "array")]);
+        let mut ctx = ScopedTypeContext::new(Language::TypeScript);
+        extract_variable_type(&entity, &mut ctx);
+        assert!(ctx.get_variable_type("first, second").is_none());
+    }
+
+    #[test]
+    fn test_extract_variable_type_member_get_binds_element() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        ctx.add_variable_type(
+            "names".to_string(),
+            TypeBinding {
+                type_name: "ArrayList<String>".to_string(),
+                type_entity_id: None,
+                span: cce_types::Span::default(),
+                origin: Some(InferenceOrigin::ConstructorCall),
+                shape: parse_type_shape("ArrayList<String>", Language::Java),
+            },
+        );
+        let entity = make_variable_entity(1, "first", vec![("call_target", "names.get(0)")]);
+        extract_variable_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("first").unwrap();
+        assert_eq!(binding.type_name, "String");
+        assert_eq!(binding.origin, Some(InferenceOrigin::FunctionReturn));
+    }
+
+    #[test]
+    fn test_extract_variable_type_unknown_member_stays_empty() {
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        ctx.add_variable_type(
+            "names".to_string(),
+            TypeBinding {
+                type_name: "ArrayList<String>".to_string(),
+                type_entity_id: None,
+                span: cce_types::Span::default(),
+                origin: Some(InferenceOrigin::ConstructorCall),
+                shape: parse_type_shape("ArrayList<String>", Language::Java),
+            },
+        );
+        let entity = make_variable_entity(1, "x", vec![("call_target", "names.frobnicate(0)")]);
         extract_variable_type(&entity, &mut ctx);
         assert!(ctx.get_variable_type("x").is_none());
     }
@@ -641,5 +1041,65 @@ mod tests {
         let mut ctx = ScopedTypeContext::new(Language::Java);
         extract_variable_type(&entity, &mut ctx);
         assert!(ctx.get_variable_type("x").is_none());
+    }
+
+    #[test]
+    fn test_constructor_call_site_instantiation() {
+        // `p = Pair(1, "one")` on `Pair<A, B>` yields `Pair<Int, String>`.
+        let mut ctx = ScopedTypeContext::new(Language::Scala);
+        let entity = make_variable_entity(
+            1,
+            "p",
+            vec![
+                ("constructor_type", "Pair<A, B>"),
+                ("call_target", "Pair(1, \"one\")"),
+            ],
+        );
+        extract_variable_type(&entity, &mut ctx);
+        let binding = ctx.get_variable_type("p").unwrap();
+        assert_eq!(binding.type_name, "Pair<Int, String>");
+        assert_eq!(binding.origin, Some(InferenceOrigin::ConstructorCall));
+    }
+
+    #[test]
+    fn test_constructor_explicit_args_keep_reading() {
+        // Explicitly parameterized constructors are not re-substituted.
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        let entity =
+            make_variable_entity(1, "names", vec![("constructor_type", "ArrayList<String>")]);
+        extract_variable_type(&entity, &mut ctx);
+        assert_eq!(
+            ctx.get_variable_type("names").unwrap().type_name,
+            "ArrayList<String>"
+        );
+    }
+
+    #[test]
+    fn test_go_slice_prefix_normalizes_to_shape_spelling() {
+        let entity = make_entity(1, "wrapInSlice", Some("[]T"), vec![]);
+        let mut ctx = ScopedTypeContext::new(Language::Go);
+        extract_function_types(&entity, &mut ctx);
+        let rt = ctx.get_return_type(cce_types::EntityId(1)).unwrap();
+        assert_eq!(rt.type_name, "T[]");
+        assert_eq!(
+            rt.shape.as_ref().map(type_shape_to_string),
+            Some("T[]".to_string())
+        );
+    }
+
+    #[test]
+    fn test_constructor_unknown_args_keep_reading() {
+        // Unresolvable arguments keep the recorded generic reading.
+        let mut ctx = ScopedTypeContext::new(Language::Scala);
+        let entity = make_variable_entity(
+            1,
+            "p",
+            vec![
+                ("constructor_type", "Pair<A, B>"),
+                ("call_target", "Pair(x, y)"),
+            ],
+        );
+        extract_variable_type(&entity, &mut ctx);
+        assert_eq!(ctx.get_variable_type("p").unwrap().type_name, "Pair<A, B>");
     }
 }

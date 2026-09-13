@@ -406,6 +406,11 @@ pub const CATEGORY_TYPEDEF_FUNCTION_POINTER: &str = "typedef_function_pointer";
 /// Object declaration entity category (Kotlin/Scala singleton objects)
 pub const CATEGORY_OBJECT: &str = "object";
 
+/// Selector expression entity category (Go selector expressions)
+/// Used for `pkg.Member` and `obj.Member` patterns; these are references
+/// rather than entity definitions, so the kind mapper returns `None`.
+pub const CATEGORY_SELECTOR: &str = "selector";
+
 // =============================================================================
 // Test Entity Categories (for future tree-sitter query direct capture)
 // =============================================================================

@@ -49,6 +49,36 @@ pub fn build_type_index_for_file(
             generic_build(entities, module_path, file_path, package, language, index)
         }
     }
+    // Central supertype pass (all languages): record `base_classes` entity
+    // metadata on the matching entries so hierarchy-aware narrowing can
+    // resolve subclasses. Runs after the language backends so per-file and
+    // global indexes agree without per-backend duplication.
+    apply_supertypes(entities, index);
+}
+
+/// Copy `base_classes` metadata onto type index entries.
+///
+/// Matches by owning entity id; entries without metadata are untouched.
+fn apply_supertypes(entities: &[Entity], index: &mut TypeMemberIndex) {
+    use cce_types::entity::meta_keys::BASE_CLASSES;
+    for entity in entities {
+        if !common::is_type_definition_kind(entity.kind) {
+            continue;
+        }
+        let Some(bases) = entity.metadata.get(BASE_CLASSES) else {
+            continue;
+        };
+        let supertypes: Vec<String> = bases
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        if supertypes.is_empty() {
+            continue;
+        }
+        index.set_supertypes_by_entity(entity.id, supertypes);
+    }
 }
 
 fn generic_build(

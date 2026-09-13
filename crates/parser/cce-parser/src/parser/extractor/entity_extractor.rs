@@ -667,6 +667,48 @@ pub fn format_user(user: &str) -> String {
     }
 
     #[test]
+    fn test_extract_csharp_class_base_metadata() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = r#"
+public abstract class Shape
+{
+    public abstract string Kind { get; }
+}
+
+public class Circle : Shape
+{
+    public override string Kind => "Circle";
+}
+"#;
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::CSharp)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::CSharp)
+            .expect("Failed to extract");
+
+        let circle = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Class && e.name == "Circle")
+            .expect("Circle class must be extracted");
+        assert_eq!(
+            circle.metadata.get("base_classes").map(String::as_str),
+            Some("Shape"),
+            "Circle must record its Shape base; all classes: {:?}",
+            entities
+                .iter()
+                .filter(|e| e.kind == EntityKind::Class)
+                .map(|e| (&e.name, e.metadata.get("base_classes")))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_extract_fnv_typealias() {
         let mut ast_parser = AstParser::new();
         let extractor = EntityExtractor::new();

@@ -18,8 +18,9 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
-    narrow_discriminated_union, parse_type_shape, subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, covers_declared_members,
+    declared_shape, narrow_discriminated_union, parse_type_shape, subtract_nullable_suffix,
+    subtract_union_members, type_shape_to_string,
 };
 
 /// Dart type inference implementation.
@@ -35,8 +36,14 @@ impl LanguageTypeInferer for DartTypeInferer {
                 EntityKind::Variable => {
                     extract_variable_type(entity, ctx);
 
-                    // Dart-specific: `var_type` for var/final/const inferred types
-                    if let Some(var_type) = entity.metadata.get("var_type") {
+                    // Dart-specific: `var_type` for var/final/const inferred types.
+                    // Only fills gaps: the shared extractor already bound
+                    // annotations, call targets, constructors and literals,
+                    // which outrank the raw parser reading. `explicit_type`
+                    // below keeps winning as the declared annotation.
+                    if ctx.get_variable_type(&entity.name).is_none()
+                        && let Some(var_type) = entity.metadata.get("var_type")
+                    {
                         let binding = TypeBinding {
                             type_name: var_type.clone(),
                             type_entity_id: None,
@@ -107,6 +114,7 @@ impl LanguageTypeInferer for DartTypeInferer {
                             Language::Dart,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
@@ -144,6 +152,10 @@ fn normalize_dart_literal_type(raw: &str) -> Option<&'static str> {
 }
 
 /// Rebind literal-origin variables to declaration spellings.
+///
+/// Only touches unannotated variables whose current binding came from a
+/// literal; annotated variables keep the user's text untouched so a
+/// precise annotation is never downgraded to the bare literal name.
 fn normalize_literal_types(entities: &[Entity], ctx: &mut ScopedTypeContext) {
     for entity in entities {
         if !matches!(
@@ -152,12 +164,30 @@ fn normalize_literal_types(entities: &[Entity], ctx: &mut ScopedTypeContext) {
         ) {
             continue;
         }
+        // Composite destructuring names are owned by the destructuring
+        // pass; the joined name must never gain a binding here.
+        if entity.name.contains(',') {
+            continue;
+        }
+        if entity
+            .metadata
+            .get("type_annotation")
+            .is_some_and(|ann| !ann.trim().is_empty())
+        {
+            continue;
+        }
         let Some(lit) = entity.metadata.get("literal_type") else {
             continue;
         };
         let Some(normalized) = normalize_dart_literal_type(lit) else {
             continue;
         };
+        let Some(current) = ctx.get_variable_type(&entity.name).cloned() else {
+            continue;
+        };
+        if current.origin != Some(super::types::InferenceOrigin::LiteralType) {
+            continue;
+        }
         let binding = TypeBinding {
             type_name: normalized.to_string(),
             type_entity_id: None,
@@ -267,8 +297,12 @@ fn narrow_dart_negated_is(
         return None;
     }
     let declared = declared_shape(ctx, params, Language::Dart, var_name)?;
-    let narrowed =
-        subtract_union_members(&declared, &[excluded.to_string()]).unwrap_or(declared.clone());
+    // `T?`-suffixed declarations shrink against the language null member
+    // (`value is! String` on `String?` leaves `Null`); plain unions use
+    // member subtraction, falling back to the declared type.
+    let narrowed = subtract_nullable_suffix(&declared, excluded, Language::Dart)
+        .or_else(|| subtract_union_members(&declared, &[excluded.to_string()]))
+        .unwrap_or(declared.clone());
     if excluded != "Null"
         && excluded != "null"
         && type_shape_to_string(&narrowed) == type_shape_to_string(&declared)
@@ -450,6 +484,11 @@ fn narrow_dart_discriminated_union(
             if let Some(narrowed) =
                 narrow_discriminated_union(&shape, &field_name, &value, type_index)
             {
+                if covers_declared_members(&shape, &narrowed)
+                    || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
+                {
+                    return results;
+                }
                 let type_name = type_shape_to_string(&narrowed);
                 results.push(NarrowingResult {
                     variable_name: var_name.clone(),
@@ -530,7 +569,9 @@ mod tests {
         ];
 
         DartTypeInferer.infer_declarations(&entities, &mut ctx);
-        let rt = ctx.get_return_type(EntityId(1)).unwrap();
+        let rt = ctx
+            .get_return_type(EntityId(1))
+            .expect("return type must be bound");
         assert_eq!(rt.type_name, "String");
     }
 
@@ -548,7 +589,9 @@ mod tests {
         ];
 
         DartTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("name").unwrap();
+        let vt = ctx
+            .get_variable_type("name")
+            .expect("variable 'name' must be bound");
         assert_eq!(vt.type_name, "String");
         assert!(vt.origin.is_some());
     }
@@ -567,7 +610,9 @@ mod tests {
         ];
 
         DartTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("user").unwrap();
+        let vt = ctx
+            .get_variable_type("user")
+            .expect("variable 'user' must be bound");
         assert_eq!(vt.type_name, "User");
         assert!(vt.origin.is_some());
     }
@@ -586,7 +631,9 @@ mod tests {
         ];
 
         DartTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("count").unwrap();
+        let vt = ctx
+            .get_variable_type("count")
+            .expect("variable 'count' must be bound");
         assert_eq!(vt.type_name, "int");
         assert!(vt.origin.is_some());
     }
@@ -741,7 +788,9 @@ mod tests {
         ];
 
         DartTypeInferer.infer_declarations(&entities, &mut ctx);
-        let ft = ctx.get_variable_type("name").unwrap();
+        let ft = ctx
+            .get_variable_type("name")
+            .expect("variable 'name' must be bound");
         assert_eq!(ft.type_name, "String");
         assert!(ft.origin.is_some());
     }
@@ -762,7 +811,7 @@ mod tests {
     fn test_dart_parse_equality_pattern() {
         let result = parse_dart_equality_pattern("if (x.type == \"value\")");
         assert!(result.is_some());
-        let (var, field, value) = result.unwrap();
+        let (var, field, value) = result.expect("test pattern must parse");
         assert_eq!(var, "x");
         assert_eq!(field, "type");
         assert_eq!(value, "value");
@@ -772,7 +821,7 @@ mod tests {
     fn test_dart_parse_equality_pattern_single_quotes() {
         let result = parse_dart_equality_pattern("if (shape.kind == 'circle')");
         assert!(result.is_some());
-        let (var, field, value) = result.unwrap();
+        let (var, field, value) = result.expect("test pattern must parse");
         assert_eq!(var, "shape");
         assert_eq!(field, "kind");
         assert_eq!(value, "circle");
@@ -822,7 +871,9 @@ mod tests {
         ];
 
         DartTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("name").unwrap();
+        let vt = ctx
+            .get_variable_type("name")
+            .expect("variable 'name' must be bound");
         assert_eq!(vt.type_name, "String");
         assert!(vt.shape.is_some());
     }
@@ -841,7 +892,9 @@ mod tests {
         ];
 
         DartTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("user").unwrap();
+        let vt = ctx
+            .get_variable_type("user")
+            .expect("variable 'user' must be bound");
         assert_eq!(vt.type_name, "User");
         assert!(vt.shape.is_some());
     }

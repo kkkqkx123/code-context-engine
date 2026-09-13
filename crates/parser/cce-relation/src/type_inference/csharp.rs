@@ -18,8 +18,9 @@ use super::control_flow::shared::{extract_balanced_parens, is_valid_ident, strip
 use super::extractors::{extract_field_type, extract_function_types, extract_variable_type};
 use super::traits::LanguageTypeInferer;
 use super::types::{
-    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, declared_shape,
-    narrow_discriminated_union, parse_type_shape, subtract_union_members, type_shape_to_string,
+    ScopedTypeContext, TypeBinding, add_polarity_aware_narrowings, covers_declared_members,
+    declared_shape, narrow_discriminated_union, parse_type_shape, subtract_nullable_suffix,
+    subtract_union_members, type_shape_to_string,
 };
 
 /// C# type inference implementation.
@@ -35,7 +36,14 @@ impl LanguageTypeInferer for CSharpTypeInferer {
                 EntityKind::Variable => {
                     extract_variable_type(entity, ctx);
 
-                    if let Some(var_type) = entity.metadata.get("var_type") {
+                    // `var_type` only fills gaps: the shared extractor
+                    // already bound annotations, call targets,
+                    // constructors and literals, which outrank the raw
+                    // parser reading. `inferred_type`/`explicit_type`
+                    // below keep their existing priority order.
+                    if ctx.get_variable_type(&entity.name).is_none()
+                        && let Some(var_type) = entity.metadata.get("var_type")
+                    {
                         let binding = TypeBinding {
                             type_name: var_type.clone(),
                             type_entity_id: None,
@@ -115,10 +123,23 @@ impl LanguageTypeInferer for CSharpTypeInferer {
                             Language::CSharp,
                             fact,
                             &narrowed,
+                            entity.span,
                         );
                     }
                     ControlFlowFactKind::Match => {
                         for result in narrow_csharp_switch(&fact.text) {
+                            ctx.add_narrowed_type_anchored(
+                                result.variable_name,
+                                result.narrowed_type,
+                                entity.span,
+                            );
+                        }
+                    }
+                    ControlFlowFactKind::Return => {
+                        // Switch expressions (`expr switch { Type v => ... }`)
+                        // surface inside return facts; arm designations bind
+                        // to their pattern types.
+                        for result in narrow_csharp_switch_expression(&fact.text) {
                             ctx.add_narrowed_type_anchored(
                                 result.variable_name,
                                 result.narrowed_type,
@@ -175,7 +196,7 @@ fn narrow_csharp_if(
         return results;
     }
 
-    for result in narrow_csharp_discriminated_union(text, ctx, type_index) {
+    for result in narrow_csharp_discriminated_union(text, ctx, type_index, params) {
         results.push(result);
     }
 
@@ -254,8 +275,11 @@ fn narrow_csharp_is_not(
     // `x is not Type name` excludes the type, not the designation.
     let excluded = excluded.split_whitespace().next().unwrap_or(excluded);
     let declared = declared_shape(ctx, params, Language::CSharp, var_name)?;
-    let narrowed =
-        subtract_union_members(&declared, &[excluded.to_string()]).unwrap_or(declared.clone());
+    // `T?`-suffixed declarations shrink against the language null member;
+    // plain unions use member subtraction, falling back to the declared type.
+    let narrowed = subtract_nullable_suffix(&declared, excluded, Language::CSharp)
+        .or_else(|| subtract_union_members(&declared, &[excluded.to_string()]))
+        .unwrap_or(declared.clone());
     // A bare `is not null` on a non-union declared type keeps the declared
     // type (null excluded); other non-union complements stay conservative.
     if excluded != "null" && type_shape_to_string(&narrowed) == type_shape_to_string(&declared) {
@@ -329,44 +353,112 @@ fn narrow_csharp_switch(text: &str) -> Vec<NarrowingResult> {
     results
 }
 
+/// Narrow types from a C# switch expression.
+///
+/// `shape switch { Circle c => ..., Rectangle r => ..., _ => ... }` binds
+/// each arm designation to its type. Statement-switch arms (`case T v:`)
+/// are covered by [`narrow_csharp_switch`]; switch expressions surface
+/// inside return (and other expression) facts. Discard (`_`), literal and
+/// multi-token (recursive/guard-heavy) patterns stay conservative.
+fn narrow_csharp_switch_expression(text: &str) -> Vec<NarrowingResult> {
+    let Some(switch_pos) = text.find("switch") else {
+        return vec![];
+    };
+    // Expression form only: `switch` directly followed by `{`.
+    if !text[switch_pos + "switch".len()..]
+        .trim_start()
+        .starts_with('{')
+    {
+        return vec![];
+    }
+    let mut results = vec![];
+    let mut search_start = 0;
+    while let Some(arrow) = text[search_start..].find("=>") {
+        let abs_arrow = search_start + arrow;
+        // Arm starts after the previous `{`, `,` or `}` at any depth:
+        // result expressions never contain a bare `=>` in the fixtures'
+        // shape, and multi-token tails fail the two-ident check below.
+        let arm_start = text[..abs_arrow]
+            .rfind(|c| ['{', ',', '}'].contains(&c))
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        let pattern = text[arm_start..abs_arrow].trim();
+        let tokens: Vec<&str> = pattern.split_whitespace().collect();
+        if tokens.len() == 2
+            && tokens[0] != "_"
+            && tokens[1] != "_"
+            && is_valid_ident(tokens[0])
+            && is_valid_ident(tokens[1])
+        {
+            results.push(NarrowingResult {
+                variable_name: tokens[1].to_string(),
+                narrowed_type: TypeBinding {
+                    type_name: tokens[0].to_string(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: parse_type_shape(tokens[0], Language::CSharp),
+                },
+            });
+        }
+        search_start = abs_arrow + 2;
+    }
+    results
+}
 /// C# discriminated union narrowing: `x.field == "value"` → x: narrowed union.
 ///
 /// C# 9+ record types and discriminated unions use field-based discrimination
 /// patterns similar to TypeScript and Python. This function handles equality
 /// checks like:
 /// - `if (shape.Kind == "Circle")` → shape: Circle
-/// - `if (result.Status == "Success")` → result: Success
+///
+/// The compared literal value refines the index-gated candidates: when it
+/// names one of the field-bearing subclasses only that subclass is returned.
+/// Without a value match the result keeps the base plus the subclasses
+/// carrying the field. The base is kept on that path since abstractness is
+/// not tracked. Identity results (covering the declared members) are
+/// dropped instead of rendering vacuous rows.
 fn narrow_csharp_discriminated_union(
     text: &str,
     ctx: &ScopedTypeContext,
     type_index: Option<&crate::symbol_table::TypeMemberIndex>,
+    params: &[(String, Option<String>)],
 ) -> Vec<NarrowingResult> {
     let Some((var_name, field_name, value)) = parse_csharp_equality_pattern(text) else {
         return vec![];
     };
     let mut results = Vec::new();
-    if let Some(existing) = ctx.get_variable_type(&var_name) {
-        if let Some(shape) = existing
-            .shape
-            .clone()
-            .or_else(|| parse_type_shape(&existing.type_name, Language::CSharp))
+    // Parameters are not variable bindings: fall back to the declared
+    // parameter shape (mirrors the TypeScript caller).
+    let shape_opt = ctx
+        .get_variable_type(&var_name)
+        .and_then(|existing| {
+            existing
+                .shape
+                .clone()
+                .or_else(|| parse_type_shape(&existing.type_name, Language::CSharp))
+        })
+        .or_else(|| declared_shape(ctx, params, Language::CSharp, &var_name));
+    if let Some(shape) = shape_opt {
+        if let Some(narrowed) = narrow_discriminated_union(&shape, &field_name, &value, type_index)
         {
-            if let Some(narrowed) =
-                narrow_discriminated_union(&shape, &field_name, &value, type_index)
+            if covers_declared_members(&shape, &narrowed)
+                || type_shape_to_string(&shape) == type_shape_to_string(&narrowed)
             {
-                let type_name = type_shape_to_string(&narrowed);
-                results.push(NarrowingResult {
-                    variable_name: var_name.clone(),
-                    narrowed_type: TypeBinding {
-                        type_name: type_name.clone(),
-                        type_entity_id: None,
-                        span: Span::default(),
-                        origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
-                        shape: Some(narrowed),
-                    },
-                });
                 return results;
             }
+            let type_name = type_shape_to_string(&narrowed);
+            results.push(NarrowingResult {
+                variable_name: var_name.clone(),
+                narrowed_type: TypeBinding {
+                    type_name: type_name.clone(),
+                    type_entity_id: None,
+                    span: Span::default(),
+                    origin: Some(super::types::InferenceOrigin::ControlFlowNarrowing),
+                    shape: Some(narrowed),
+                },
+            });
+            return results;
         }
     }
     results
@@ -505,7 +597,9 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let rt = ctx.get_return_type(EntityId(1)).unwrap();
+        let rt = ctx
+            .get_return_type(EntityId(1))
+            .expect("return type must be bound");
         assert_eq!(rt.type_name, "string");
     }
 
@@ -523,7 +617,9 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("list").unwrap();
+        let vt = ctx
+            .get_variable_type("list")
+            .expect("variable 'list' must be bound");
         assert_eq!(vt.type_name, "List<string>");
     }
 
@@ -541,9 +637,32 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("x").unwrap();
+        let vt = ctx
+            .get_variable_type("x")
+            .expect("variable 'x' must be bound");
         assert_eq!(vt.type_name, "int");
         assert!(vt.origin.is_some());
+    }
+
+    #[test]
+    fn test_csharp_var_type_does_not_clobber_constructor() {
+        let mut ctx = ScopedTypeContext::new(Language::CSharp);
+        let entities = vec![
+            Entity::new(
+                EntityId(30),
+                EntityKind::Variable,
+                "lookup".to_string(),
+                dummy_span(),
+            )
+            .with_metadata("constructor_type", "Dictionary<string, int>")
+            .with_metadata("var_type", "Dictionary"),
+        ];
+
+        CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
+        let vt = ctx
+            .get_variable_type("lookup")
+            .expect("constructor-bound variable must exist");
+        assert_eq!(vt.type_name, "Dictionary<string, int>");
     }
 
     #[test]
@@ -560,7 +679,9 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let ft = ctx.get_variable_type("Count").unwrap();
+        let ft = ctx
+            .get_variable_type("Count")
+            .expect("variable 'Count' must be bound");
         assert_eq!(ft.type_name, "int");
         assert!(ft.origin.is_some());
     }
@@ -579,7 +700,9 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let pt = ctx.get_variable_type("Name").unwrap();
+        let pt = ctx
+            .get_variable_type("Name")
+            .expect("variable 'Name' must be bound");
         assert_eq!(pt.type_name, "string");
     }
 
@@ -707,7 +830,7 @@ mod tests {
     fn test_csharp_parse_equality_pattern() {
         let result = parse_csharp_equality_pattern("if (x.Type == \"value\")");
         assert!(result.is_some());
-        let (var, field, value) = result.unwrap();
+        let (var, field, value) = result.expect("test pattern must parse");
         assert_eq!(var, "x");
         assert_eq!(field, "Type");
         assert_eq!(value, "value");
@@ -717,7 +840,7 @@ mod tests {
     fn test_csharp_parse_equality_pattern_single_quotes() {
         let result = parse_csharp_equality_pattern("if (shape.Kind == 'Circle')");
         assert!(result.is_some());
-        let (var, field, value) = result.unwrap();
+        let (var, field, value) = result.expect("test pattern must parse");
         assert_eq!(var, "shape");
         assert_eq!(field, "Kind");
         assert_eq!(value, "Circle");
@@ -842,7 +965,9 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("lookup").unwrap();
+        let vt = ctx
+            .get_variable_type("lookup")
+            .expect("variable 'lookup' must be bound");
         assert_eq!(vt.type_name, "Dictionary<string, List<int>>");
         assert_eq!(vt.origin, Some(InferenceOrigin::GenericInference));
     }
@@ -861,7 +986,9 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("items").unwrap();
+        let vt = ctx
+            .get_variable_type("items")
+            .expect("variable 'items' must be bound");
         assert_eq!(vt.type_name, "IEnumerable<string>");
         assert_eq!(vt.origin, Some(InferenceOrigin::TypeAnnotation));
     }
@@ -880,7 +1007,9 @@ mod tests {
         ];
 
         CSharpTypeInferer.infer_declarations(&entities, &mut ctx);
-        let vt = ctx.get_variable_type("nested").unwrap();
+        let vt = ctx
+            .get_variable_type("nested")
+            .expect("variable 'nested' must be bound");
         assert_eq!(vt.type_name, "List<Dictionary<string, int>>");
     }
 
@@ -888,7 +1017,7 @@ mod tests {
     fn test_csharp_parse_equality_pattern_with_spaces() {
         let result = parse_csharp_equality_pattern("if (  x.Type  ==  \"value\"  )");
         assert!(result.is_some());
-        let (var, field, value) = result.unwrap();
+        let (var, field, value) = result.expect("test pattern must parse");
         assert_eq!(var, "x");
         assert_eq!(field, "Type");
         assert_eq!(value, "value");

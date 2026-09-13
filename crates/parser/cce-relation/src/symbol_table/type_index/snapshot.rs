@@ -22,6 +22,7 @@ pub struct TypeSummary {
     pub visibility: Visibility,
     pub is_placeholder: bool,
     pub file_path_idx: u32,
+    pub supertype_indices: Vec<u32>,
     pub member_count: u32,
     pub field_count: u32,
     pub constructor_count: u32,
@@ -79,6 +80,7 @@ impl TypeMemberIndex {
                 visibility: entry.visibility.clone(),
                 is_placeholder: entry.is_placeholder,
                 file_path_idx: pool.intern(&key.file_path),
+                supertype_indices: entry.supertypes.iter().map(|s| pool.intern(s)).collect(),
                 member_count: entry.members.len() as u32,
                 field_count: entry.fields.len() as u32,
                 constructor_count: entry.constructors.len() as u32,
@@ -190,6 +192,11 @@ impl TypeMemberIndex {
                 ts.visibility.clone(),
             );
             entry.is_placeholder = ts.is_placeholder;
+            entry.supertypes = ts
+                .supertype_indices
+                .iter()
+                .map(|idx| get_str(*idx).to_string())
+                .collect();
             types.insert(key, entry);
         }
 

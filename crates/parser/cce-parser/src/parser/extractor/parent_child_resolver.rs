@@ -108,8 +108,17 @@ pub fn establish_module_entity_relationships(
 ///
 /// This function:
 /// 1. Collects all container entities (Struct, Class, Enum, Trait, Interface)
-/// 2. For each field entity, finds the smallest container that fully contains it
-/// 3. Sets the field's parent to the container's ID
+/// 2. For each field-like entity, finds the smallest container that fully contains it
+/// 3. Sets the entity's parent to the container's ID
+///
+/// Field-like kinds are `Field`, `Property` and `EnumVariant`. `Property`
+/// covers member declarations that schemes report separately from fields
+/// (C# properties, TypeScript class/interface properties, ...); every scheme
+/// only emits them at type-member positions, never inside function bodies,
+/// so span containment cannot misparent them. Class-scoped `Variable`
+/// entities (e.g. Python class attributes) are deliberately excluded: they
+/// are indistinguishable from function-local variables by span alone and
+/// would be misclaimed by enclosing classes.
 pub fn establish_struct_field_relationships(entities: &mut [Entity]) {
     let containers: Vec<(EntityId, std::ops::Range<usize>)> = entities
         .iter()
@@ -131,8 +140,10 @@ pub fn establish_struct_field_relationships(entities: &mut [Entity]) {
     }
 
     for entity in entities.iter_mut() {
-        if matches!(entity.kind, EntityKind::Field | EntityKind::EnumVariant)
-            && entity.parent.is_none()
+        if matches!(
+            entity.kind,
+            EntityKind::Field | EntityKind::Property | EntityKind::EnumVariant
+        ) && entity.parent.is_none()
         {
             let entity_range = entity.span.start_byte..entity.span.end_byte;
 

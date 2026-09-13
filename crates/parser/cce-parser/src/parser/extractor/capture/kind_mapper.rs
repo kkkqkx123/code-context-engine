@@ -229,6 +229,9 @@ pub fn determine_entity_kind(capture_name: &str) -> Option<EntityKind> {
         (capture::CATEGORY_TABLE, _) => Some(EntityKind::Module),
         (capture::CATEGORY_ALIAS, _) => Some(EntityKind::Function),
 
+        // Selector expressions (Go) — references, not entity definitions
+        (capture::CATEGORY_SELECTOR, _) => None,
+
         // ===== Test entity categories =====
         // These are reserved for future tree-sitter query direct capture.
         // Currently, test entities are inferred via annotation detection in

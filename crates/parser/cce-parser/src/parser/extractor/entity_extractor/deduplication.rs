@@ -185,20 +185,30 @@ fn select_best_entity(group: &[Entity]) -> usize {
     let mut best = 0;
     let mut best_score = priority(&group[0].kind);
     let mut best_typed = variable_carries_type_info(&group[0]);
+    let mut best_returned = group[0].return_type.is_some();
     for (i, entity) in group.iter().enumerate().skip(1) {
         let score = priority(&entity.kind);
         let typed = variable_carries_type_info(entity);
+        let returned = entity.return_type.is_some();
         // Same-span duplicates arise when a generic declaration pattern
         // overlaps a provenance-carrying pattern (loop/case/destructuring);
         // the provenance carrier wins so the entity stays visible to
-        // inference instead of collapsing into a bare local.
+        // inference instead of collapsing into a bare local. A callable
+        // that kept its return annotation outranks a return-less twin
+        // (e.g. an overlapping accessor pattern), so annotated signatures
+        // survive regardless of match order.
         if score > best_score
             || (score == best_score && typed && !best_typed)
-            || (score == best_score && typed == best_typed && entity.doc_comment.is_some())
+            || (score == best_score && typed == best_typed && returned && !best_returned)
+            || (score == best_score
+                && typed == best_typed
+                && returned == best_returned
+                && entity.doc_comment.is_some())
         {
             best = i;
             best_score = score;
             best_typed = typed;
+            best_returned = returned;
         }
     }
     best

@@ -13,6 +13,11 @@ pub mod string_pool;
 pub use snapshot::{MemberSummary, TypeMemberSnapshot, TypeSummary};
 pub use string_pool::StringPoolBuilder;
 
+/// Maximum superclass-chain steps followed by hierarchy helpers.
+///
+/// Bounds work on cyclic or degenerate hierarchies.
+pub const MAX_HIERARCHY_DEPTH: usize = 32;
+
 /// Stable key identifying a type definition.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TypeKey {
@@ -43,6 +48,12 @@ pub struct TypeEntry {
     pub fields: HashMap<String, MemberEntry>,
     pub constructors: Vec<MemberEntry>,
     pub is_placeholder: bool,
+    /// Direct supertype names (`extends`/`implements` bases) as written in
+    /// source (the `base_classes` entity metadata). Drives hierarchy-aware
+    /// narrowing; empty when the parser recorded no bases. Defaults on
+    /// deserialize so snapshots written before this field stay readable.
+    #[serde(default)]
+    pub supertypes: Vec<String>,
 }
 
 impl TypeEntry {
@@ -63,6 +74,7 @@ impl TypeEntry {
             fields: HashMap::new(),
             constructors: Vec::new(),
             is_placeholder: false,
+            supertypes: Vec::new(),
         }
     }
 
@@ -77,6 +89,7 @@ impl TypeEntry {
             fields: HashMap::new(),
             constructors: Vec::new(),
             is_placeholder: true,
+            supertypes: Vec::new(),
         }
     }
 }
@@ -225,6 +238,105 @@ impl TypeMemberIndex {
             }
         }
         out
+    }
+
+    /// Resolve a type name to its entry.
+    ///
+    /// Prefers qualified matches, then non-placeholder simple matches, then
+    /// any simple match. Returns `None` when the name is unknown.
+    pub fn resolve_type(&self, name: &str) -> Option<&TypeEntry> {
+        if let Some(entry) = self.get_type(name) {
+            return Some(entry);
+        }
+        let mut fallback = None;
+        for entry in self.get_type_by_simple(name) {
+            if !entry.is_placeholder {
+                return Some(entry);
+            }
+            fallback = Some(entry);
+        }
+        fallback
+    }
+
+    /// Record direct supertypes for the entry owned by `entity_id`.
+    ///
+    /// No-op when no entry carries that id. Placeholder entries are never
+    /// updated so foreign references cannot pollute hierarchy walks.
+    pub fn set_supertypes_by_entity(&mut self, entity_id: EntityId, supertypes: Vec<String>) {
+        for entry in self.types.values_mut() {
+            if !entry.is_placeholder && entry.entity_id == entity_id {
+                entry.supertypes = supertypes;
+                return;
+            }
+        }
+    }
+
+    /// Direct and transitive subclasses of the given base names.
+    ///
+    /// An entry qualifies when any of its `supertypes` equals the base
+    /// simple or qualified name. Placeholders never qualify (they carry no
+    /// members). Sorted by qualified name so narrowing output is
+    /// deterministic.
+    pub fn subclasses_of(&self, base_simple: &str, base_qualified: &str) -> Vec<&TypeEntry> {
+        let mut matched: Vec<&TypeEntry> = Vec::new();
+        let mut seen: HashSet<TypeKey> = HashSet::new();
+        let mut queue: Vec<(String, String)> =
+            vec![(base_simple.to_string(), base_qualified.to_string())];
+        while let Some((simple, qualified)) = queue.pop() {
+            for entry in self.all_types() {
+                if entry.is_placeholder || seen.contains(&entry.key) {
+                    continue;
+                }
+                // Degenerate self-inheritance (`class X : X`) must not
+                // report the base as its own subclass.
+                if entry.key.simple == base_simple && entry.key.qualified == base_qualified {
+                    seen.insert(entry.key.clone());
+                    continue;
+                }
+                if entry
+                    .supertypes
+                    .iter()
+                    .any(|s| s == &simple || s == &qualified)
+                {
+                    seen.insert(entry.key.clone());
+                    queue.push((entry.key.simple.clone(), entry.key.qualified.clone()));
+                    matched.push(entry);
+                }
+            }
+        }
+        matched.sort_by(|a, b| a.key.qualified.cmp(&b.key.qualified));
+        matched
+    }
+
+    /// Field names visible on an entry, including inherited ones.
+    ///
+    /// Walks `supertypes` with a visited set and depth cap so cyclic
+    /// hierarchies terminate. Unresolvable supertype names are skipped:
+    /// only recorded fields are reported, never guessed ones.
+    pub fn visible_field_names(&self, entry: &TypeEntry) -> HashSet<String> {
+        let mut names: HashSet<String> = entry.fields.keys().cloned().collect();
+        let mut seen: HashSet<TypeKey> = HashSet::from([entry.key.clone()]);
+        let mut frontier: Vec<String> = entry.supertypes.clone();
+        let mut depth = 0;
+        while !frontier.is_empty() && depth < MAX_HIERARCHY_DEPTH {
+            depth += 1;
+            let mut next = Vec::new();
+            for name in frontier.drain(..) {
+                let parents = match self.get_type(&name) {
+                    Some(entry) => vec![entry],
+                    None => self.get_type_by_simple(&name),
+                };
+                for parent in parents {
+                    if !seen.insert(parent.key.clone()) {
+                        continue;
+                    }
+                    names.extend(parent.fields.keys().cloned());
+                    next.extend(parent.supertypes.iter().cloned());
+                }
+            }
+            frontier = next;
+        }
+        names
     }
 
     pub fn get_members(&self, qualified: &str, name: &str) -> Option<&[MemberEntry]> {

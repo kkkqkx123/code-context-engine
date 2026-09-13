@@ -228,6 +228,37 @@ impl StableSymbolKey {
         }
     }
 
+    /// Create a symbol key with span-based fallback for empty signatures.
+    ///
+    /// When `signature` is empty, the entity's byte span is included in the
+    /// discriminator hash to avoid collisions between different overloads or
+    /// destructuring patterns that share the same scoped name and kind.
+    pub fn new_with_span(
+        file_path: &str,
+        scoped_name: &str,
+        kind: EntityKind,
+        signature: &str,
+        span_start: usize,
+        span_end: usize,
+    ) -> Self {
+        let normalized_signature = signature.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut signature_hasher = Sha256::new();
+        if normalized_signature.is_empty() {
+            signature_hasher.update(b"__span__");
+            signature_hasher.update(span_start.to_le_bytes().as_ref());
+            signature_hasher.update(span_end.to_le_bytes().as_ref());
+        } else {
+            signature_hasher.update(normalized_signature.as_bytes());
+        }
+        signature_hasher.update(kind.to_string().as_bytes());
+        Self {
+            file_path: normalize_project_path(file_path),
+            scoped_name: scoped_name.to_string(),
+            kind,
+            overload_discriminator: format!("{:x}", signature_hasher.finalize()),
+        }
+    }
+
     pub fn sort_key(&self) -> String {
         format!(
             "{}\u{0}{}\u{0}{}\u{0}{}",

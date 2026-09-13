@@ -135,16 +135,12 @@ fn entity_ts_function_method_patterns() -> &'static str {
   (#eq? @entity.constructor.name "constructor")
 ) @entity.constructor
 
-; Getter method
-(method_definition
-  name: (property_identifier) @entity.method.getter.name
-  return_type: (type_annotation (_)? @entity.method.getter.return_type)?
-) @entity.method.getter
-
-; Setter method
-(method_definition
-  name: (property_identifier) @entity.method.setter.name
-) @entity.method.setter
+; NOTE: no dedicated getter/setter patterns. tree-sitter-typescript
+; parses `get foo()` / `set foo(v)` as plain `method_definition` with
+; the accessor keywords dropped, so a name-only pattern would match
+; every method and its return-less entity could win same-span dedup
+; over the annotated `@entity.method` match. Accessors are extracted
+; as ordinary methods instead.
 
 ; ============================================
 ; Functions (with return_type capture)
@@ -159,11 +155,11 @@ fn entity_ts_function_method_patterns() -> &'static str {
 ) @entity.function
 
 ; Overload signatures (no body): `function combine(a: number): number;`
-; The implementation pattern above requires `body`, so signatures would be
-; dropped and overload sets would collapse to the implementation. Keep each
+; tree-sitter-typescript parses these as `function_signature` nodes rather
+; than `function_declaration`, so they need their own pattern. Keep each
 ; signature as its own callable entity so overload resolution can select by
 ; argument types.
-(function_declaration
+(function_signature
   name: (identifier) @entity.function.overload.name
   parameters: (formal_parameters) @entity.function.overload.params
   return_type: (type_annotation (_)? @entity.function.overload.return_type)?
