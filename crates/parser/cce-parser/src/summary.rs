@@ -56,8 +56,7 @@ pub use strategy::{
 
 // Re-export from categorization for convenience
 pub use strategy::categorization::{
-    has_any_documentation, is_config_file, is_core_module, is_definition_only_file,
-    is_documentation, is_entity_public, is_test_file, is_utility_file,
+    is_config_file, is_core_module, is_documentation, is_entity_public, is_test_file,
 };
 
 // Re-export generator types
