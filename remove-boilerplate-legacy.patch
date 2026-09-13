@@ -1,0 +1,361 @@
+diff --git a/crates/parser/cce-parser/src/grouper/recognizers/patterns.rs b/crates/parser/cce-parser/src/grouper/recognizers/patterns.rs
+deleted file mode 100644
+index aa879be..0000000
+--- a/crates/parser/cce-parser/src/grouper/recognizers/patterns.rs
++++ /dev/null
+@@ -1,43 +0,0 @@
+-//! Pattern detectors for design patterns and code constructs
+-//!
+-//! This module provides detectors for common design patterns and code constructs:
+-//! - Design patterns: Builder, Factory, Singleton, Strategy, Observer, Adapter, Decorator, Composite
+-//! - Architecture patterns: Service, Repository, DTO, ORM Entity, Validator
+-//! - Boilerplate patterns: Config, Event Handler, GUI Callback, Template Method
+-//!
+-//! Note: Getter/Setter detection has been moved to `processors::method_utils` as it is
+-//! a preprocessing utility rather than a design pattern detector.
+-//!
+-//! # Architecture
+-//!
+-//! The module is organized into:
+-//! - `detectors`: All pattern detection implementations
+-//! - `types`: Shared type definitions
+-//! - `utils`: Common utilities
+-//!
+-//! # Language-Specific Detection
+-//!
+-//! Each detector handles language-specific patterns internally:
+-//! - Builder detector supports Kotlin DSL and Lombok (Java) patterns
+-//! - Factory detector supports Kotlin companion object factories
+-//! - Other detectors may have language-specific heuristics
+-
+-// Pattern detectors
+-pub mod detectors;
+-
+-// Type definitions
+-pub mod types;
+-
+-// Utilities
+-pub mod utils;
+-
+-// Re-export commonly used types from detectors
+-pub use detectors::{
+-    AdapterDetector, AdapterPatternInfo, AdapterType, BuilderDetector, BuilderPatternInfo,
+-    CompositeDetector, CompositePatternInfo, ConfigDetector, DecoratorDetector,
+-    DecoratorPatternInfo, DtoDetector, EventHandlerDetector, FactoryDetector, FactoryMethod,
+-    FactoryMethodType, FactoryPatternInfo, GuiCallbackDetector, ObserverDetector,
+-    ObserverPatternInfo, OrmEntityDetector, RepositoryDetector, ServiceDetector, SingletonDetector,
+-    SingletonPatternInfo, SingletonType, StrategyDetector, StrategyPatternInfo,
+-    TemplateMethodDetector, TemplateMethodPatternInfo, ValidatorDetector,
+-};
+diff --git a/crates/parser/cce-parser/src/summary.rs b/crates/parser/cce-parser/src/summary.rs
+index 55dedde..f6970df 100644
+--- a/crates/parser/cce-parser/src/summary.rs
++++ b/crates/parser/cce-parser/src/summary.rs
+@@ -56,8 +56,7 @@ pub use strategy::{
+ 
+ // Re-export from categorization for convenience
+ pub use strategy::categorization::{
+-    has_any_documentation, is_config_file, is_core_module, is_definition_only_file,
+-    is_documentation, is_entity_public, is_test_file, is_utility_file,
++    is_config_file, is_core_module, is_documentation, is_entity_public, is_test_file,
+ };
+ 
+ // Re-export generator types
+diff --git a/crates/parser/cce-parser/src/summary/strategy/categorization.rs b/crates/parser/cce-parser/src/summary/strategy/categorization.rs
+index 9c993bd..b7ee32b 100644
+--- a/crates/parser/cce-parser/src/summary/strategy/categorization.rs
++++ b/crates/parser/cce-parser/src/summary/strategy/categorization.rs
+@@ -78,63 +78,7 @@ pub fn is_entity_public(entity: &Entity) -> bool {
+         || sig_lower.starts_with("export default ")
+ }
+ 
+-/// Check if file has any documentation
+-///
+-/// Simple check if at least one public entity has doc comments
+-pub fn has_any_documentation(parsed_file: &ParsedFile) -> bool {
+-    parsed_file
+-        .entities
+-        .iter()
+-        .any(|e| is_entity_public(e) && e.doc_comment.is_some())
+-}
+-
+-/// Check if file is a utility file (mostly pure functions, only std imports)
+-pub fn is_utility_file(parsed_file: &ParsedFile) -> bool {
+-    // Must have entities
+-    if parsed_file.entities.is_empty() {
+-        return false;
+-    }
+-
+-    // Parse AST to check imports
+-    use crate::parser::ast_parser::AstParser;
+-    let mut parser = AstParser::new();
+-    let tree = parser
+-        .parse_with_tree(&parsed_file.source, &parsed_file.language)
+-        .ok()
+-        .map(|(t, _)| t);
+-    let import_count = if let Some(ref tree) = tree {
+-        crate::relation_helpers::extract_imports(
+-            tree,
+-            &parsed_file.source,
+-            &parsed_file.language,
+-            None,
+-        )
+-        .map(|t| t.import_count())
+-        .unwrap_or(0)
+-    } else {
+-        0
+-    };
+-
+-    // Check for minimal or no imports (suggests utility functions)
+-    let has_minimal_imports = import_count <= 1;
+-
+-    // Mostly functions
+-    let all_functions = parsed_file
+-        .entities
+-        .iter()
+-        .all(|e| e.kind.is_function_like());
+-
+-    has_minimal_imports && all_functions
+-}
+ 
+-/// Check if file contains only type definitions (no functions)
+-pub fn is_definition_only_file(parsed_file: &ParsedFile) -> bool {
+-    !parsed_file.entities.is_empty()
+-        && parsed_file
+-            .entities
+-            .iter()
+-            .all(|e| e.kind.is_type_definition())
+-}
+ 
+ #[cfg(test)]
+ mod tests {
+@@ -371,65 +315,4 @@ mod tests {
+         assert!(!is_entity_public(&entity));
+     }
+ 
+-    #[test]
+-    fn test_is_utility_file() {
+-        let mut file = ParsedFile::new(Language::Rust, "src/utils.rs".to_string(), "");
+-
+-        // Add only functions
+-        for i in 0..5 {
+-            let entity = Entity {
+-                id: EntityId(i),
+-                kind: EntityKind::Function,
+-                name: format!("helper{}", i),
+-                signature: format!("fn helper{ }()", i),
+-                parameters: Vec::new(),
+-                return_type: None,
+-                span: cce_types::Span::default(),
+-                depth: 0,
+-                parent: None,
+-                children: Vec::new(),
+-                doc_comment: None,
+-                modifiers: Vec::new(),
+-                attributes: std::collections::HashMap::new(),
+-                metadata: std::collections::HashMap::new(),
+-                is_stdlib: false,
+-                subtype: None,
+-                stdlib_category: None,
+-            };
+-            file.add_entity(entity);
+-        }
+-
+-        assert!(is_utility_file(&file));
+-    }
+-
+-    #[test]
+-    fn test_is_definition_only_file() {
+-        let mut file = ParsedFile::new(Language::Rust, "src/types.rs".to_string(), "");
+-
+-        // Add only type definitions
+-        for i in 0..3 {
+-            let entity = Entity {
+-                id: EntityId(i),
+-                kind: EntityKind::Enum,
+-                name: format!("Enum{}", i),
+-                signature: format!("enum Enum{}", i),
+-                parameters: Vec::new(),
+-                return_type: None,
+-                span: cce_types::Span::default(),
+-                depth: 0,
+-                parent: None,
+-                children: Vec::new(),
+-                doc_comment: None,
+-                modifiers: Vec::new(),
+-                attributes: std::collections::HashMap::new(),
+-                metadata: std::collections::HashMap::new(),
+-                is_stdlib: false,
+-                subtype: None,
+-                stdlib_category: None,
+-            };
+-            file.add_entity(entity);
+-        }
+-
+-        assert!(is_definition_only_file(&file));
+-    }
+ }
+diff --git a/crates/parser/cce-parser/src/summary/strategy/decision.rs b/crates/parser/cce-parser/src/summary/strategy/decision.rs
+index baf0bfc..87c01ea 100644
+--- a/crates/parser/cce-parser/src/summary/strategy/decision.rs
++++ b/crates/parser/cce-parser/src/summary/strategy/decision.rs
+@@ -1,7 +1,7 @@
+ //! Importance decision module
+ //!
+ //! Simplified decision logic for determining file importance and generation strategy.
+-//! Based on ParsedFile and entity group types, focusing on design patterns and file characteristics.
++//! Based on ParsedFile and entity group types, focusing on file characteristics and boilerplate ratio.
+ 
+ use crate::grouper::{GroupType, ProcessingResult};
+ use crate::summary::strategy::categorization::FileCategory;
+@@ -55,15 +55,15 @@ impl<'a> DecisionContext<'a> {
+ 
+ /// Importance decision engine
+ ///
+-/// Simplified decision logic based on file characteristics and design patterns.
++/// Simplified decision logic based on file characteristics and boilerplate ratio.
+ pub struct ImportanceDecision;
+ 
+ impl ImportanceDecision {
+-    /// Determine importance level based on file characteristics and design patterns
++    /// Determine importance level based on file characteristics
+     ///
+     /// Simplified logic focusing on:
+     /// 1. File category (test, config, core module, etc.)
+-    /// 2. Design patterns (boilerplate patterns have lower importance)
++    /// 2. Boilerplate ratio (getter/setter classes, tiny utilities → lower importance)
+     /// 3. Entity count and complexity
+     pub fn determine_importance(
+         parsed_file: &ParsedFile,
+@@ -96,11 +96,9 @@ impl ImportanceDecision {
+             return ImportanceLevel::High;
+         }
+ 
+-        // Step 3: Analyze design patterns
+-        let pattern_analysis = Self::analyze_design_patterns(processing_result);
+-
+-        // If most groups are boilerplate patterns, lower importance
+-        if pattern_analysis.boilerplate_ratio > 0.7 {
++        // Step 3: If most groups are boilerplate (getter/setter classes or
++        // tiny standalone utility functions), lower importance.
++        if Self::boilerplate_ratio(processing_result) > 0.7 {
+             return ImportanceLevel::Low;
+         }
+ 
+@@ -146,38 +144,29 @@ impl ImportanceDecision {
+         ImportanceLevel::Medium
+     }
+ 
+-    /// Analyze design patterns in the file
++    /// Compute the fraction of groups that are boilerplate.
+     ///
+-    /// Returns information about boilerplate vs significant patterns
+-    fn analyze_design_patterns(processing_result: &ProcessingResult) -> PatternAnalysis {
+-        let total_groups = processing_result.groups.len();
+-
+-        if total_groups == 0 {
+-            return PatternAnalysis::default();
+-        }
+-
+-        let mut boilerplate_count = 0;
+-
+-        for group in &processing_result.groups {
+-            // Check if group has a boilerplate design pattern
+-            let pattern_info = &group.pattern_info;
+-            // Getter/setter groups are mostly boilerplate code
+-            if pattern_info.is_getter_setter() {
+-                boilerplate_count += 1;
+-            }
+-
+-            // Standalone simple functions are likely utilities
+-            if group.group_type == GroupType::Standalone {
+-                // Check if it's a simple function (no children, short span)
+-                if group.members.is_empty() && group.span.len() < 200 {
+-                    boilerplate_count += 1;
+-                }
+-            }
++    /// A group counts as boilerplate when it is a getter/setter class, or a
++    /// tiny standalone function with no members and short source span.
++    /// Returns 0.0 when there are no groups.
++    fn boilerplate_ratio(processing_result: &ProcessingResult) -> f32 {
++        let total = processing_result.groups.len();
++        if total == 0 {
++            return 0.0;
+         }
+ 
+-        let boilerplate_ratio = boilerplate_count as f32 / total_groups as f32;
++        let boilerplate = processing_result
++            .groups
++            .iter()
++            .filter(|g| {
++                g.pattern_info.is_getter_setter()
++                    || (g.group_type == GroupType::Standalone
++                        && g.members.is_empty()
++                        && g.span.len() < 200)
++            })
++            .count();
+ 
+-        PatternAnalysis { boilerplate_ratio }
++        boilerplate as f32 / total as f32
+     }
+ 
+     /// Calculate documentation quality for all entities
+@@ -226,7 +215,7 @@ impl ImportanceDecision {
+ 
+     /// Determine generation decision based on file characteristics
+     ///
+-    /// Simplified logic focusing on design patterns and documentation.
++    /// Simplified logic focusing on boilerplate ratio and documentation quality.
+     pub fn determine_generation_strategy(
+         parsed_file: &ParsedFile,
+         processing_result: &ProcessingResult,
+@@ -251,11 +240,9 @@ impl ImportanceDecision {
+                     return GenerationDecision::RuleOnly;
+                 }
+ 
+-                // Analyze design patterns
+-                let pattern_analysis = Self::analyze_design_patterns(processing_result);
+-
+-                // High boilerplate ratio - use rule-based (patterns are well-described by rules)
+-                if pattern_analysis.boilerplate_ratio > 0.6 {
++                // High boilerplate ratio → use rule-based (such groups are
++                // well-described by deterministic rules).
++                if Self::boilerplate_ratio(processing_result) > 0.6 {
+                     return GenerationDecision::RuleOnly;
+                 }
+ 
+@@ -291,13 +278,6 @@ impl ImportanceDecision {
+     }
+ }
+ 
+-/// Pattern analysis result
+-#[derive(Debug, Clone, Default)]
+-struct PatternAnalysis {
+-    /// Ratio of boilerplate patterns
+-    boilerplate_ratio: f32,
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -389,20 +369,6 @@ mod tests {
+         assert_eq!(importance, ImportanceLevel::High);
+     }
+ 
+-    #[test]
+-    fn test_analyze_design_patterns_empty() {
+-        let processing_result = ProcessingResult {
+-            groups: Vec::new(),
+-            entity_meta: std::collections::HashMap::new(),
+-            behavior: Default::default(),
+-            control_flow: Default::default(),
+-            stats: ProcessingStats::default(),
+-        };
+-
+-        let analysis = ImportanceDecision::analyze_design_patterns(&processing_result);
+-        assert_eq!(analysis.boilerplate_ratio, 0.0);
+-    }
+-
+     #[test]
+     fn test_documentation_quality_coverage_calculation() {
+         // Test that documentation_ratio is calculated correctly based on total public entities

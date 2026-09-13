@@ -1,7 +1,7 @@
 //! Importance decision module
 //!
 //! Simplified decision logic for determining file importance and generation strategy.
-//! Based on ParsedFile and entity group types, focusing on design patterns and file characteristics.
+//! Based on ParsedFile and entity group types, focusing on file characteristics and boilerplate ratio.
 
 use crate::grouper::{GroupType, ProcessingResult};
 use crate::summary::strategy::categorization::FileCategory;
@@ -55,15 +55,15 @@ impl<'a> DecisionContext<'a> {
 
 /// Importance decision engine
 ///
-/// Simplified decision logic based on file characteristics and design patterns.
+/// Simplified decision logic based on file characteristics and boilerplate ratio.
 pub struct ImportanceDecision;
 
 impl ImportanceDecision {
-    /// Determine importance level based on file characteristics and design patterns
+    /// Determine importance level based on file characteristics
     ///
     /// Simplified logic focusing on:
     /// 1. File category (test, config, core module, etc.)
-    /// 2. Design patterns (boilerplate patterns have lower importance)
+    /// 2. Boilerplate ratio (getter/setter classes, tiny utilities → lower importance)
     /// 3. Entity count and complexity
     pub fn determine_importance(
         parsed_file: &ParsedFile,
@@ -96,11 +96,9 @@ impl ImportanceDecision {
             return ImportanceLevel::High;
         }
 
-        // Step 3: Analyze design patterns
-        let pattern_analysis = Self::analyze_design_patterns(processing_result);
-
-        // If most groups are boilerplate patterns, lower importance
-        if pattern_analysis.boilerplate_ratio > 0.7 {
+        // Step 3: If most groups are boilerplate (getter/setter classes or
+        // tiny standalone utility functions), lower importance.
+        if Self::boilerplate_ratio(processing_result) > 0.7 {
             return ImportanceLevel::Low;
         }
 
@@ -146,38 +144,29 @@ impl ImportanceDecision {
         ImportanceLevel::Medium
     }
 
-    /// Analyze design patterns in the file
+    /// Compute the fraction of groups that are boilerplate.
     ///
-    /// Returns information about boilerplate vs significant patterns
-    fn analyze_design_patterns(processing_result: &ProcessingResult) -> PatternAnalysis {
-        let total_groups = processing_result.groups.len();
-
-        if total_groups == 0 {
-            return PatternAnalysis::default();
+    /// A group counts as boilerplate when it is a getter/setter class, or a
+    /// tiny standalone function with no members and short source span.
+    /// Returns 0.0 when there are no groups.
+    fn boilerplate_ratio(processing_result: &ProcessingResult) -> f32 {
+        let total = processing_result.groups.len();
+        if total == 0 {
+            return 0.0;
         }
 
-        let mut boilerplate_count = 0;
+        let boilerplate = processing_result
+            .groups
+            .iter()
+            .filter(|g| {
+                g.pattern_info.is_getter_setter()
+                    || (g.group_type == GroupType::Standalone
+                        && g.members.is_empty()
+                        && g.span.len() < 200)
+            })
+            .count();
 
-        for group in &processing_result.groups {
-            // Check if group has a boilerplate design pattern
-            let pattern_info = &group.pattern_info;
-            // Getter/setter groups are mostly boilerplate code
-            if pattern_info.is_getter_setter() {
-                boilerplate_count += 1;
-            }
-
-            // Standalone simple functions are likely utilities
-            if group.group_type == GroupType::Standalone {
-                // Check if it's a simple function (no children, short span)
-                if group.members.is_empty() && group.span.len() < 200 {
-                    boilerplate_count += 1;
-                }
-            }
-        }
-
-        let boilerplate_ratio = boilerplate_count as f32 / total_groups as f32;
-
-        PatternAnalysis { boilerplate_ratio }
+        boilerplate as f32 / total as f32
     }
 
     /// Calculate documentation quality for all entities
@@ -226,7 +215,7 @@ impl ImportanceDecision {
 
     /// Determine generation decision based on file characteristics
     ///
-    /// Simplified logic focusing on design patterns and documentation.
+    /// Simplified logic focusing on boilerplate ratio and documentation quality.
     pub fn determine_generation_strategy(
         parsed_file: &ParsedFile,
         processing_result: &ProcessingResult,
@@ -251,11 +240,9 @@ impl ImportanceDecision {
                     return GenerationDecision::RuleOnly;
                 }
 
-                // Analyze design patterns
-                let pattern_analysis = Self::analyze_design_patterns(processing_result);
-
-                // High boilerplate ratio - use rule-based (patterns are well-described by rules)
-                if pattern_analysis.boilerplate_ratio > 0.6 {
+                // High boilerplate ratio → use rule-based (such groups are
+                // well-described by deterministic rules).
+                if Self::boilerplate_ratio(processing_result) > 0.6 {
                     return GenerationDecision::RuleOnly;
                 }
 
@@ -289,13 +276,6 @@ impl ImportanceDecision {
             GenerationDecision::ModelEnhanced
         )
     }
-}
-
-/// Pattern analysis result
-#[derive(Debug, Clone, Default)]
-struct PatternAnalysis {
-    /// Ratio of boilerplate patterns
-    boilerplate_ratio: f32,
 }
 
 #[cfg(test)]
@@ -387,20 +367,6 @@ mod tests {
 
         let importance = ImportanceDecision::determine_importance(&parsed_file, &processing_result);
         assert_eq!(importance, ImportanceLevel::High);
-    }
-
-    #[test]
-    fn test_analyze_design_patterns_empty() {
-        let processing_result = ProcessingResult {
-            groups: Vec::new(),
-            entity_meta: std::collections::HashMap::new(),
-            behavior: Default::default(),
-            control_flow: Default::default(),
-            stats: ProcessingStats::default(),
-        };
-
-        let analysis = ImportanceDecision::analyze_design_patterns(&processing_result);
-        assert_eq!(analysis.boilerplate_ratio, 0.0);
     }
 
     #[test]

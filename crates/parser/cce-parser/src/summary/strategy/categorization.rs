@@ -78,63 +78,7 @@ pub fn is_entity_public(entity: &Entity) -> bool {
         || sig_lower.starts_with("export default ")
 }
 
-/// Check if file has any documentation
-///
-/// Simple check if at least one public entity has doc comments
-pub fn has_any_documentation(parsed_file: &ParsedFile) -> bool {
-    parsed_file
-        .entities
-        .iter()
-        .any(|e| is_entity_public(e) && e.doc_comment.is_some())
-}
 
-/// Check if file is a utility file (mostly pure functions, only std imports)
-pub fn is_utility_file(parsed_file: &ParsedFile) -> bool {
-    // Must have entities
-    if parsed_file.entities.is_empty() {
-        return false;
-    }
-
-    // Parse AST to check imports
-    use crate::parser::ast_parser::AstParser;
-    let mut parser = AstParser::new();
-    let tree = parser
-        .parse_with_tree(&parsed_file.source, &parsed_file.language)
-        .ok()
-        .map(|(t, _)| t);
-    let import_count = if let Some(ref tree) = tree {
-        crate::relation_helpers::extract_imports(
-            tree,
-            &parsed_file.source,
-            &parsed_file.language,
-            None,
-        )
-        .map(|t| t.import_count())
-        .unwrap_or(0)
-    } else {
-        0
-    };
-
-    // Check for minimal or no imports (suggests utility functions)
-    let has_minimal_imports = import_count <= 1;
-
-    // Mostly functions
-    let all_functions = parsed_file
-        .entities
-        .iter()
-        .all(|e| e.kind.is_function_like());
-
-    has_minimal_imports && all_functions
-}
-
-/// Check if file contains only type definitions (no functions)
-pub fn is_definition_only_file(parsed_file: &ParsedFile) -> bool {
-    !parsed_file.entities.is_empty()
-        && parsed_file
-            .entities
-            .iter()
-            .all(|e| e.kind.is_type_definition())
-}
 
 #[cfg(test)]
 mod tests {
@@ -371,65 +315,4 @@ mod tests {
         assert!(!is_entity_public(&entity));
     }
 
-    #[test]
-    fn test_is_utility_file() {
-        let mut file = ParsedFile::new(Language::Rust, "src/utils.rs".to_string(), "");
-
-        // Add only functions
-        for i in 0..5 {
-            let entity = Entity {
-                id: EntityId(i),
-                kind: EntityKind::Function,
-                name: format!("helper{}", i),
-                signature: format!("fn helper{ }()", i),
-                parameters: Vec::new(),
-                return_type: None,
-                span: cce_types::Span::default(),
-                depth: 0,
-                parent: None,
-                children: Vec::new(),
-                doc_comment: None,
-                modifiers: Vec::new(),
-                attributes: std::collections::HashMap::new(),
-                metadata: std::collections::HashMap::new(),
-                is_stdlib: false,
-                subtype: None,
-                stdlib_category: None,
-            };
-            file.add_entity(entity);
-        }
-
-        assert!(is_utility_file(&file));
-    }
-
-    #[test]
-    fn test_is_definition_only_file() {
-        let mut file = ParsedFile::new(Language::Rust, "src/types.rs".to_string(), "");
-
-        // Add only type definitions
-        for i in 0..3 {
-            let entity = Entity {
-                id: EntityId(i),
-                kind: EntityKind::Enum,
-                name: format!("Enum{}", i),
-                signature: format!("enum Enum{}", i),
-                parameters: Vec::new(),
-                return_type: None,
-                span: cce_types::Span::default(),
-                depth: 0,
-                parent: None,
-                children: Vec::new(),
-                doc_comment: None,
-                modifiers: Vec::new(),
-                attributes: std::collections::HashMap::new(),
-                metadata: std::collections::HashMap::new(),
-                is_stdlib: false,
-                subtype: None,
-                stdlib_category: None,
-            };
-            file.add_entity(entity);
-        }
-
-        assert!(is_definition_only_file(&file));
-    }
 }
