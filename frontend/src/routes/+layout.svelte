@@ -1,28 +1,121 @@
 <script lang="ts">
 	import '../app.css';
+	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/state';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
 	import { isOnline } from '$lib/stores/network';
+	import { healthState, healthActions } from '$lib/stores/health';
+	import { metricsState, metricsActions } from '$lib/stores/metrics';
+	import { projects, loadProjects } from '$lib/stores/index';
+	import { currentProjectId } from '$lib/stores/project';
+
+	interface NavItem {
+		href: string;
+		label: string;
+	}
+	interface NavGroup {
+		title: string;
+		items: NavItem[];
+	}
+
+	const navGroups: NavGroup[] = [
+		{ title: 'Overview', items: [{ href: '/', label: 'Dashboard' }] },
+		{
+			title: 'Data',
+			items: [
+				{ href: '/projects', label: 'Projects' },
+				{ href: '/index', label: 'Index' },
+				{ href: '/watch', label: 'Watch' },
+			],
+		},
+		{
+			title: 'Search',
+			items: [
+				{ href: '/search', label: 'Search' },
+				{ href: '/entities', label: 'Entities' },
+				{ href: '/summary', label: 'Summary' },
+			],
+		},
+		{
+			title: 'System',
+			items: [
+				{ href: '/storage', label: 'Storage' },
+				{ href: '/tools', label: 'Tools' },
+				{ href: '/config', label: 'Config' },
+			],
+		},
+	];
+
+	function resolveCrumb(pathname: string): { group: string; label: string } {
+		for (const group of navGroups) {
+			for (const item of group.items) {
+				if (item.href === pathname) {
+					return { group: group.title, label: item.label };
+				}
+			}
+		}
+		for (const group of navGroups) {
+			for (const item of group.items) {
+				if (item.href !== '/' && pathname.startsWith(item.href)) {
+					return { group: group.title, label: item.label };
+				}
+			}
+		}
+		return { group: 'CCE', label: 'Untitled' };
+	}
 
 	let { children }: { children: any } = $props();
 
 	let currentPage = $derived(page.url.pathname);
-	let mobileMenuOpen = $state(false);
+	let crumb = $derived(resolveCrumb(currentPage));
+	let entityName = $derived(
+		currentPage.startsWith('/entities/') && page.params.id
+			? `Entity ${page.params.id}`
+			: crumb.label
+	);
 
-	function toggleMobileMenu() {
-		mobileMenuOpen = !mobileMenuOpen;
-		// Prevent body scroll when menu is open
+	let mobileOpen = $state(false);
+	let clock = $state('');
+	let clockTimer: ReturnType<typeof setInterval> | null = null;
+
+	let serverOk = $derived($metricsState.lastUpdated != null && !$metricsState.error);
+
+	function toggleMobile() {
+		mobileOpen = !mobileOpen;
 		if (typeof document !== 'undefined') {
-			document.body.style.overflow = mobileMenuOpen ? 'hidden' : '';
+			document.body.style.overflow = mobileOpen ? 'hidden' : '';
 		}
 	}
 
-	function closeMobileMenu() {
-		mobileMenuOpen = false;
+	function closeMobile() {
+		mobileOpen = false;
 		if (typeof document !== 'undefined') {
 			document.body.style.overflow = '';
 		}
 	}
+
+	function onProjectChange(event: Event) {
+		const target = event.currentTarget as HTMLSelectElement;
+		currentProjectId.set(Number(target.value));
+	}
+
+	onMount(() => {
+		loadProjects();
+		healthActions.startAutoRefresh(15000);
+		metricsActions.startAutoRefresh(30000);
+		clock = new Date().toLocaleTimeString();
+		clockTimer = setInterval(() => {
+			clock = new Date().toLocaleTimeString();
+		}, 1000);
+	});
+
+	onDestroy(() => {
+		healthActions.stopAutoRefresh();
+		metricsActions.stopAutoRefresh();
+		if (clockTimer) {
+			clearInterval(clockTimer);
+		}
+	});
 </script>
 
 <svelte:head>
@@ -30,200 +123,356 @@
 	<meta name="description" content="Web interface for Code Context Engine" />
 </svelte:head>
 
-<div class="app">
-	<header class="header">
-		<div class="container">
-			<div class="header-inner">
-				<div class="logo">
-					CCE<span>Frontend</span>
-				</div>
-				
-				<!-- Mobile Menu Toggle -->
-				<button 
-					class="mobile-menu-toggle" 
-					onclick={toggleMobileMenu}
-					aria-label="Toggle navigation menu"
-					aria-expanded={mobileMenuOpen}
-				>
-					<span class="hamburger-icon"></span>
-				</button>
-				
-				<nav class="nav" class:open={mobileMenuOpen} aria-label="Main navigation">
-					<a href="/" class="nav-link" class:active={currentPage === '/'} onclick={closeMobileMenu}>Dashboard</a>
-					<a href="/index" class="nav-link" class:active={currentPage.startsWith('/index')} onclick={closeMobileMenu}>Index</a>
-					<a href="/search" class="nav-link" class:active={currentPage.startsWith('/search')} onclick={closeMobileMenu}>Search</a>
-					<a href="/entities" class="nav-link" class:active={currentPage.startsWith('/entities')} onclick={closeMobileMenu}>Entities</a>
-					<a href="/storage" class="nav-link" class:active={currentPage.startsWith('/storage')} onclick={closeMobileMenu}>Storage</a>
-					<a href="/watch" class="nav-link" class:active={currentPage.startsWith('/watch')} onclick={closeMobileMenu}>Watch</a>
-					<a href="/tools" class="nav-link" class:active={currentPage.startsWith('/tools')} onclick={closeMobileMenu}>Tools</a>
-				</nav>
-				
-				<!-- Mobile Menu Overlay -->
-				{#if mobileMenuOpen}
-					<div 
-						class="mobile-overlay" 
-						onclick={closeMobileMenu}
-						onkeydown={(e) => {
-							if (e.key === 'Escape') closeMobileMenu();
-						}}
-						role="button"
-						tabindex="0"
-						aria-label="Close menu"
-					></div>
-				{/if}
-				
-				<div class="header-meta">
-					{#if !isOnline}
-						<span class="offline-indicator" title="You are offline">⚠ Offline</span>
-					{/if}
-					v0.1.0
-				</div>
-			</div>
-		</div>
-	</header>
+<div class="app" class:nav-open={mobileOpen}>
+	<aside class="sidebar">
+		<a href="/" class="brand" onclick={closeMobile}>CCE<span>Console</span></a>
 
-	<main class="main">
-		<a href="#main-content" class="skip-link">Skip to main content</a>
-		<div id="main-content">
-			{@render children?.()}
+		<div class="status-block">
+			<div class="status-row">
+				<span class="status-dot" class:ok={serverOk} class:bad={!serverOk}></span>
+				<span class="status-text">{serverOk ? 'Server Online' : 'Server Offline'}</span>
+			</div>
+			<label class="project-label" for="project-select">Current Project</label>
+			<select
+				id="project-select"
+				class="project-select"
+				onchange={onProjectChange}
+			>
+				{#if $projects.length === 0}
+					<option value={$currentProjectId} selected>{`#${$currentProjectId}`}</option>
+				{:else}
+					{#each $projects as project (project.id)}
+						<option value={Number(project.id)} selected={Number(project.id) === $currentProjectId}>
+							{project.name || `#${project.id}`}
+						</option>
+					{/each}
+				{/if}
+			</select>
 		</div>
-	</main>
+
+		<nav class="nav" aria-label="Main navigation">
+			{#each navGroups as group}
+				<div class="nav-group">
+					<div class="nav-title">{group.title}</div>
+					{#each group.items as item}
+						<a
+							href={item.href}
+							class="nav-item"
+							class:active={item.href === '/' ? currentPage === '/' : currentPage.startsWith(item.href)}
+							onclick={closeMobile}
+						>
+							{item.label}
+						</a>
+					{/each}
+				</div>
+			{/each}
+		</nav>
+
+		<div class="sidebar-footer">
+			<span class="version">v0.1.0</span>
+			{#if !isOnline}
+				<span class="offline">⚠ Offline</span>
+			{/if}
+		</div>
+	</aside>
+
+	{#if mobileOpen}
+		<div
+			class="overlay"
+			onclick={closeMobile}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') closeMobile();
+			}}
+			role="button"
+			tabindex="0"
+			aria-label="Close menu"
+		></div>
+	{/if}
+
+	<div class="main">
+		<header class="topbar">
+			<button
+				class="menu-toggle"
+				onclick={toggleMobile}
+				aria-label="Toggle navigation menu"
+				aria-expanded={mobileOpen}
+			>
+				<span class="hamburger"></span>
+			</button>
+
+			<nav class="breadcrumb" aria-label="Breadcrumb">
+				<span class="crumb-group">{crumb.group}</span>
+				<span class="crumb-sep">/</span>
+				<span class="crumb-page">{entityName}</span>
+			</nav>
+
+			<div class="topbar-right">
+				<div class="health-dots" title="Storage component health">
+					{#if $metricsState.storageStatus}
+						{@const s = $metricsState.storageStatus}
+						<span class="hdot" class:ok={s.vector_storage.connected} title="Vector DB"></span>
+						<span class="hdot" class:ok={s.bm25_storage.connected} title="BM25"></span>
+						<span class="hdot" class:ok={s.relation_storage.connected} title="Relations"></span>
+						<span class="hdot" class:ok={s.cache_storage.connected} title="Cache"></span>
+					{:else}
+						<span class="hdot idle"></span>
+						<span class="hdot idle"></span>
+						<span class="hdot idle"></span>
+						<span class="hdot idle"></span>
+					{/if}
+				</div>
+				<span class="clock">{clock}</span>
+			</div>
+		</header>
+
+		<main class="content">
+			<a href="#main-content" class="skip-link">Skip to main content</a>
+			<div id="main-content">
+				{@render children?.()}
+			</div>
+		</main>
+	</div>
 
 	<ToastContainer />
-
-	<footer class="footer">
-		<div class="container">
-			<div class="footer-inner">
-				<div class="footer-left">
-					Code Context Engine Frontend
-				</div>
-				<div class="footer-links">
-					<a href="https://github.com/kkkqxk123" target="_blank" rel="noopener noreferrer">GitHub</a>
-					<a href="/config" class="nav-link">Config</a>
-				</div>
-				<div class="footer-right">
-					Built with SvelteKit
-				</div>
-			</div>
-		</div>
-	</footer>
 </div>
 
 <style>
 	.app {
 		min-height: 100vh;
 		display: flex;
+	}
+
+	/* ─── Sidebar ────────────────────────────────────────────── */
+	.sidebar {
+		width: 240px;
+		flex-shrink: 0;
+		background: var(--black);
+		color: var(--white);
+		position: sticky;
+		top: 0;
+		height: 100vh;
+		overflow-y: auto;
+		display: flex;
 		flex-direction: column;
+		gap: 1.5rem;
+		padding: 1.5rem 1.25rem;
 	}
 
-	.header {
-		padding: 2rem 0;
-		border-bottom: 1px solid var(--black);
-		background: var(--white);
-	}
-
-	.header-inner {
-		display: grid;
-		grid-template-columns: 1fr auto 1fr;
-		align-items: center;
-		gap: 2rem;
-	}
-
-	.logo {
-		font-size: 1.5rem;
+	.brand {
+		font-family: 'Space Grotesk', sans-serif;
+		font-size: 1.35rem;
 		font-weight: 700;
 		letter-spacing: -0.03em;
+		color: var(--white);
+		text-decoration: none;
 	}
 
-	.logo span {
-		color: var(--gray-400);
+	.brand span {
+		color: var(--accent);
+	}
+
+	.status-block {
+		border: 1px solid var(--gray-700);
+		padding: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.status-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.status-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--gray-500);
+	}
+
+	.status-dot.ok {
+		background: var(--success);
+		box-shadow: 0 0 0 3px rgba(27, 122, 61, 0.25);
+	}
+
+	.status-dot.bad {
+		background: var(--danger);
+		box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.25);
+	}
+
+	.status-text {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-300);
+	}
+
+	.project-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-500);
+	}
+
+	.project-select {
+		width: 100%;
+		padding: 0.5rem 0.5rem;
+		background: var(--gray-900);
+		color: var(--white);
+		border: 1px solid var(--gray-700);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.8rem;
+	}
+
+	.project-select:focus {
+		outline: none;
+		border-color: var(--accent);
 	}
 
 	.nav {
 		display: flex;
-		gap: 2rem;
-		justify-content: center;
-	}
-
-	.nav-link {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		color: var(--black);
-		text-decoration: none;
-		position: relative;
-		padding-bottom: 0.25rem;
-	}
-
-	.nav-link::after {
-		content: '';
-		position: absolute;
-		bottom: 0;
-		left: 0;
-		width: 100%;
-		height: 1px;
-		background: var(--black);
-		transform: scaleX(0);
-		transition: transform 0.3s;
-	}
-
-	.nav-link:hover::after,
-	.nav-link.active::after {
-		transform: scaleX(1);
-	}
-
-	.header-meta {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-		text-align: right;
-		color: var(--gray-600);
-	}
-
-	.main {
+		flex-direction: column;
+		gap: 1.25rem;
 		flex: 1;
 	}
 
-	.footer {
-		padding: 2rem 0;
-		border-top: 1px solid var(--black);
-		background: var(--white);
-	}
-
-	.footer-inner {
-		display: grid;
-		grid-template-columns: 1fr auto 1fr;
-		align-items: center;
-		gap: 2rem;
-	}
-
-	.footer-left {
-		font-size: 0.85rem;
-		color: var(--gray-600);
-	}
-
-	.footer-links {
+	.nav-group {
 		display: flex;
-		gap: 2rem;
-		justify-content: center;
+		flex-direction: column;
+		gap: 0.15rem;
 	}
 
-	.footer-links a {
+	.nav-title {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.15em;
+		color: var(--gray-500);
+		padding: 0 0.5rem 0.5rem;
+	}
+
+	.nav-item {
+		display: block;
+		padding: 0.5rem 0.75rem;
+		color: var(--gray-300);
+		text-decoration: none;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.8rem;
+		border-left: 2px solid transparent;
+		transition: all 0.2s;
+	}
+
+	.nav-item:hover {
+		color: var(--white);
+		background: var(--gray-900);
+	}
+
+	.nav-item.active {
+		color: var(--white);
+		border-left-color: var(--accent);
+		background: var(--gray-900);
+	}
+
+	.sidebar-footer {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding-top: 1rem;
+		border-top: 1px solid var(--gray-800);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		color: var(--gray-500);
+	}
+
+	.sidebar-footer .offline {
+		color: var(--danger);
+	}
+
+	/* ─── Main ────────────────────────────────────────────────── */
+	.main {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.topbar {
+		position: sticky;
+		top: 0;
+		z-index: 5;
+		height: 58px;
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 0 1.5rem;
+		background: var(--white);
+		border-bottom: 1px solid var(--black);
+	}
+
+	.breadcrumb {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		font-family: 'Space Mono', monospace;
 		font-size: 0.75rem;
 		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.crumb-group {
+		color: var(--gray-500);
+	}
+
+	.crumb-sep {
+		color: var(--gray-300);
+	}
+
+	.crumb-page {
 		color: var(--black);
-		text-decoration: none;
+		font-weight: 700;
 	}
 
-	.footer-links a:hover {
-		color: var(--accent);
+	.topbar-right {
+		margin-left: auto;
+		display: flex;
+		align-items: center;
+		gap: 1rem;
 	}
 
-	.footer-right {
+	.health-dots {
+		display: flex;
+		gap: 0.35rem;
+	}
+
+	.hdot {
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		background: var(--danger);
+	}
+
+	.hdot.ok {
+		background: var(--success);
+	}
+
+	.hdot.idle {
+		background: var(--gray-300);
+	}
+
+	.clock {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.7rem;
 		color: var(--gray-600);
-		text-align: right;
+	}
+
+	.content {
+		flex: 1;
+		padding: 2rem clamp(1rem, 3vw, 2.5rem);
+		overflow-x: hidden;
 	}
 
 	.skip-link {
@@ -244,170 +493,65 @@
 		top: 0;
 	}
 
-	.offline-indicator {
-		color: var(--danger);
-		font-weight: 600;
-		margin-right: 0.5rem;
+	/* ─── Mobile drawer ──────────────────────────────────────── */
+	.menu-toggle {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		background: none;
+		border: 1px solid var(--black);
+		cursor: pointer;
 	}
 
-	@media (max-width: 1024px) {
-		.header-inner {
-			grid-template-columns: 1fr;
-			gap: 1rem;
-		}
-
-		.nav {
-			order: -1;
-		}
-
-		.header-meta {
-			text-align: center;
-		}
-
-		.footer-inner {
-			grid-template-columns: 1fr;
-			text-align: center;
-		}
-
-		.footer-right {
-			text-align: center;
-		}
+	.hamburger {
+		position: relative;
+		width: 20px;
+		height: 2px;
+		background: var(--black);
 	}
 
-	@media (max-width: 768px) {
-		.header-inner {
-			grid-template-columns: auto 1fr auto;
-			gap: 1rem;
-		}
+	.hamburger::before,
+	.hamburger::after {
+		content: '';
+		position: absolute;
+		width: 20px;
+		height: 2px;
+		background: var(--black);
+	}
 
-		.logo {
-			font-size: 1.25rem;
-		}
+	.hamburger::before {
+		top: -6px;
+	}
 
-		/* Hide desktop nav */
-		.nav {
+	.hamburger::after {
+		top: 6px;
+	}
+
+	.overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 40;
+	}
+
+	@media (max-width: 900px) {
+		.sidebar {
 			position: fixed;
-			top: 0;
 			left: -100%;
-			width: 80%;
-			max-width: 300px;
-			height: 100vh;
-			background: var(--white);
-			flex-direction: column;
-			gap: 0;
-			padding: 5rem 2rem 2rem;
+			top: 0;
+			z-index: 50;
 			transition: left 0.3s ease;
-			z-index: 999;
-			box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+			box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
 		}
 
-		.nav.open {
+		.app.nav-open .sidebar {
 			left: 0;
 		}
 
-		.nav-link {
-			padding: 1rem 0;
-			border-bottom: 1px solid var(--gray-200);
-			font-size: 1rem;
-			min-height: 44px;
+		.menu-toggle {
 			display: flex;
-			align-items: center;
-		}
-
-		.nav-link::after {
-			display: none;
-		}
-
-		.header-meta {
-			display: none;
-		}
-
-		/* Mobile menu toggle button */
-		.mobile-menu-toggle {
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			width: 44px;
-			height: 44px;
-			background: none;
-			border: 1px solid var(--black);
-			cursor: pointer;
-			transition: background 0.3s;
-			min-width: 44px;
-			min-height: 44px;
-		}
-
-		.mobile-menu-toggle:hover {
-			background: var(--gray-100);
-		}
-
-		.hamburger-icon {
-			position: relative;
-			width: 24px;
-			height: 2px;
-			background: var(--black);
-			transition: all 0.3s;
-		}
-
-		.hamburger-icon::before,
-		.hamburger-icon::after {
-			content: '';
-			position: absolute;
-			width: 24px;
-			height: 2px;
-			background: var(--black);
-			transition: all 0.3s;
-		}
-
-		.hamburger-icon::before {
-			top: -8px;
-		}
-
-		.hamburger-icon::after {
-			top: 8px;
-		}
-
-		/* Hamburger animation when open */
-		.mobile-menu-toggle[aria-expanded="true"] .hamburger-icon {
-			background: transparent;
-		}
-
-		.mobile-menu-toggle[aria-expanded="true"] .hamburger-icon::before {
-			transform: rotate(45deg);
-			top: 0;
-		}
-
-		.mobile-menu-toggle[aria-expanded="true"] .hamburger-icon::after {
-			transform: rotate(-45deg);
-			top: 0;
-		}
-
-		.footer-inner {
-			grid-template-columns: 1fr;
-			text-align: center;
-			gap: 1rem;
-		}
-
-		.footer-right {
-			text-align: center;
-		}
-		
-		/* Mobile overlay */
-		.mobile-overlay {
-			position: fixed;
-			top: 0;
-			left: 0;
-			right: 0;
-			bottom: 0;
-			background: rgba(0, 0, 0, 0.5);
-			z-index: 998;
-			animation: fadeIn 0.3s ease;
-		}
-	}
-
-	@media (min-width: 769px) {
-		.mobile-menu-toggle {
-			display: none;
 		}
 	}
 </style>

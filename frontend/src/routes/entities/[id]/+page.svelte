@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { entityState, entityActions } from '$lib/stores/entities';
@@ -78,7 +79,7 @@
 	<title>Entity Details - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
 		{#if $entityState.isLoading}
 			<div class="loading-state">
@@ -89,8 +90,7 @@
 				<p>{$entityState.error}</p>
 			</div>
 		{:else if $entityState.currentEntity}
-			<h1>Entity Details</h1>
-			<p class="page-description">Viewing entity: {$entityState.currentEntity.name}</p>
+			<PageHeader title="Entity Details" subtitle="Viewing entity: {$entityState.currentEntity.name}" />
 
 			<!-- Tab Navigation -->
 			<div class="tab-navigation">
@@ -213,7 +213,7 @@
 			</div>
 		{/if}
 	</div>
-</section>
+</div>
 
 <style>
 	h1 {

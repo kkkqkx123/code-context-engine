@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -52,10 +53,9 @@
 	<title>File Watcher - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>File Watcher</h1>
-		<p class="page-description">Monitor file system changes for automatic incremental indexing</p>
+		<PageHeader title="File Watcher" subtitle="Monitor file system changes for automatic incremental indexing" />
 
 		{#if $watchState.error}
 			<div class="error-banner">
@@ -163,7 +163,7 @@
 			{/if}
 		</Card>
 	</div>
-</section>
+</div>
 
 <style>
 	h1 {

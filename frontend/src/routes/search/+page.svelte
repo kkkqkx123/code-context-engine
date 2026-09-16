@@ -1,4 +1,6 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import { onMount } from 'svelte';
 	import { searchState, searchActions } from '$lib/stores/search';
 	import SearchInput from '$lib/components/search/SearchInput.svelte';
@@ -54,10 +56,9 @@
 	<title>Search - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Code Search</h1>
-		<p class="page-description">Semantic and keyword-based code search across indexed projects</p>
+		<PageHeader title="Code Search" subtitle="Semantic and keyword-based code search across indexed projects" />
 
 		<SearchInput onSearch={handleSearch} />
 
@@ -84,8 +85,9 @@
 				<p>Searching...</p>
 			</div>
 		{:else if $searchState.results.length > 0}
-			<div class="results-header">
-				<h2>Results ({ $searchState.results.length } total, showing { displayedTotal })</h2>
+		<Toolbar>
+			<h2 class="results-title">Results ({ $searchState.results.length } total, showing { displayedTotal })</h2>
+			{#snippet actions()}
 				<div class="sort-controls">
 					<label class="sort-label" for="sort-select">Sort by:</label>
 					<select id="sort-select">
@@ -94,7 +96,8 @@
 						<option value="entity_type">Entity Type</option>
 					</select>
 				</div>
-			</div>
+			{/snippet}
+		</Toolbar>
 
 			<div class="results-list">
 				{#each paginatedResults as result (result.entity_ids.join(','))}
@@ -130,7 +133,7 @@
 			</div>
 		{/if}
 	</div>
-</section>
+</div>
 
 <style>
 	h1 {
@@ -198,7 +201,7 @@
 		border-bottom: 1px solid var(--gray-200);
 	}
 
-	.results-header h2 {
+	.results-title {
 		font-size: 1.25rem;
 		font-weight: 700;
 		letter-spacing: -0.03em;

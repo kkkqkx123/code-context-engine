@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -69,10 +70,9 @@
 	<title>Summary Generator - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Summary Generator</h1>
-		<p class="page-description">Generate natural language summaries of code files</p>
+		<PageHeader title="Summary Generator" subtitle="Generate natural language summaries of code files" />
 
 		{#if error}
 			<div class="error-banner">
@@ -269,7 +269,7 @@
 			</Card>
 		{/if}
 	</div>
-</section>
+</div>
 
 <style>
 	h1 {

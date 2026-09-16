@@ -444,3 +444,104 @@ pre code {
 	outline: 2px solid var(--accent);
 	outline-offset: 2px;
 }
+
+/* ─── Console Layout Helpers ───────────────────────────────────
+   Tool-density building blocks for the sidebar + form-content shell.
+   Replaces the marketing-page .section / .container spacing. */
+
+.page {
+	min-width: 0;
+}
+
+/* KPI row on overview-style pages */
+.kpi-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 1rem;
+	margin-bottom: 2rem;
+}
+
+.kpi-card {
+	border: 1px solid var(--black);
+	padding: 1.25rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.kpi-label {
+	font-family: 'Space Mono', monospace;
+	font-size: 0.65rem;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--gray-600);
+}
+
+.kpi-value {
+	font-family: 'Space Grotesk', sans-serif;
+	font-size: 2rem;
+	font-weight: 700;
+	line-height: 1;
+	letter-spacing: -0.03em;
+}
+
+.kpi-meta {
+	font-family: 'Space Mono', monospace;
+	font-size: 0.7rem;
+	color: var(--gray-500);
+}
+
+/* Scrollable table container for list/table views */
+.table-wrap {
+	width: 100%;
+	overflow-x: auto;
+	border: 1px solid var(--gray-200);
+}
+
+.table-wrap .table {
+	margin: 0;
+}
+
+/* Two-column label + input form grid */
+.form-grid-2 {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1.25rem 1.5rem;
+}
+
+@media (max-width: 768px) {
+	.form-grid-2 {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Quick-action tile row (overview shortcuts) */
+.quick-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 1rem;
+}
+
+.quick-tile {
+	display: block;
+	padding: 1.25rem;
+	border: 1px solid var(--black);
+	text-decoration: none;
+	color: inherit;
+	transition: background 0.2s;
+}
+
+.quick-tile:hover {
+	background: var(--gray-100);
+}
+
+.quick-tile h3 {
+	font-size: 1.1rem;
+	margin-bottom: 0.4rem;
+}
+
+.quick-tile p {
+	font-size: 0.85rem;
+	color: var(--gray-600);
+	line-height: 1.5;
+}

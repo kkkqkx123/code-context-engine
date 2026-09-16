@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -58,10 +59,9 @@
 	<title>Configuration - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Configuration</h1>
-		<p class="page-description">Manage application settings and environment variables</p>
+		<PageHeader title="Configuration" subtitle="Manage application settings and environment variables" />
 
 		{#if error}
 			<div class="error-banner">
@@ -212,7 +212,7 @@
 			</Card>
 		{/if}
 	</div>
-</section>
+</div>
 
 <style>
 	h1 {

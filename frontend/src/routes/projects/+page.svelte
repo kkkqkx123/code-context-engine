@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -148,10 +149,8 @@
 	<title>Projects - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
-	<div class="container">
-		<h1>Projects</h1>
-		<p class="page-description">Create, manage, and index your code projects</p>
+<div class="page">
+	<PageHeader title="Projects" subtitle="Create, manage, and index your code projects" />
 
 		{#if error}
 			<div class="error-banner">
@@ -280,7 +279,6 @@
 			</div>
 		</div>
 	</div>
-</section>
 
 <style>
 	h1 {

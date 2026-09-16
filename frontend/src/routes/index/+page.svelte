@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 
 	// Lazy load components - only ProjectList loads initially
@@ -32,10 +33,9 @@
 	<title>Index Management - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Index Management</h1>
-		<p class="page-description">Manage projects and control code indexing operations</p>
+		<PageHeader title="Index Management" subtitle="Manage projects and control code indexing operations" />
 
 		<div class="content-grid">
 			{#if projectListLoaded && ProjectList}
@@ -59,7 +59,7 @@
 			{/if}
 		</div>
 	</div>
-</section>
+</div>
 
 <style>
 	h1 {
