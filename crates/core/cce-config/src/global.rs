@@ -29,9 +29,9 @@ pub use sqlite::{SqliteConfig, SqliteSyncMode};
 use serde::{Deserialize, Serialize};
 
 use crate::modules::{
-    AstToNlConfig, EmbedderConfig, ExportModuleConfig, GlobalCacheConfig, NestProcessorConfig,
-    OrchestratorConfig, ProviderConfig, RelationConfig, RerankConfig, ScannerConfig,
-    SearchModuleConfig, SummaryConfig, SymbolResolutionConfig,
+    AstToNlConfig, EmbedderConfig, ExportModuleConfig, GlobalCacheConfig, McpConfig,
+    NestProcessorConfig, OrchestratorConfig, ProviderConfig, RelationConfig, RerankConfig,
+    ScannerConfig, SearchModuleConfig, SummaryConfig, SymbolResolutionConfig,
 };
 use crate::modules::{Bm25Config, QdrantConfig};
 use crate::modules::{ChatModelConfig, EmbeddingModelConfig, RerankModelConfig};
@@ -109,6 +109,9 @@ pub struct AppConfig {
     /// Unified cache configuration
     #[serde(default)]
     pub cache: GlobalCacheConfig,
+    /// MCP server configuration (optional, disabled by default)
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 /// LLM configuration section

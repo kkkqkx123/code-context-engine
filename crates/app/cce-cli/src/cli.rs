@@ -100,6 +100,36 @@ pub enum Commands {
 
     /// Server status and health check
     Status,
+
+    /// Run the MCP (Model Context Protocol) server locally
+    #[command(subcommand)]
+    Mcp(McpCommands),
+}
+
+/// MCP server commands
+#[derive(Subcommand)]
+pub enum McpCommands {
+    /// Serve MCP over stdio (for local MCP clients)
+    Stdio {
+        /// Optional config file path (defaults to config.toml or $CCE_CONFIG)
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+
+    /// Serve MCP over the streamable HTTP transport
+    Http {
+        /// Optional config file path (defaults to config.toml or $CCE_CONFIG)
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Override the bind host (defaults to the [mcp.http] config)
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Override the bind port (defaults to the [mcp.http] config)
+        #[arg(long)]
+        port: Option<u16>,
+    },
 }
 
 /// Index commands
@@ -834,6 +864,7 @@ impl Cli {
             Commands::Status => {
                 commands::status::execute(&self.server, self.verbose, self.format.clone()).await
             }
+            Commands::Mcp(cmd) => commands::mcp::execute(cmd).await,
         }
     }
 

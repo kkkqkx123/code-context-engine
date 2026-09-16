@@ -28,6 +28,8 @@ members = [
     "crates/app/cce-plugin-runtime",
     "crates/app/cce-orchestrator",
     "crates/app/cce-server",
+    "crates/app/cce-server-shared",
+    "crates/app/cce-mcp",
     "crates/app/cce-e2e-tests",
     "crates/app/cce-cli",
     "crates/app/cce-plugin-sdk",
@@ -177,6 +179,13 @@ cce-storage-bm25 = { path = "crates/infra/cce-storage-bm25" }
 cce-storage-qdrant = { path = "crates/infra/cce-storage-qdrant" }
 cce-storage-sqlite = { path = "crates/infra/cce-storage-sqlite" }
 cce-metrics-infra = { path = "crates/infra/cce-metrics-infra" }
+
+# MCP SDK (official modelcontextprotocol/rust-sdk).
+rmcp = "3.4"
+
+# Internal app-layer crates
+cce-server-shared = { path = "crates/app/cce-server-shared" }
+cce-mcp = { path = "crates/app/cce-mcp" }
 
 [patch.crates-io]
 # Vendored fork: redirect the whole tantivy family to the local submodule so

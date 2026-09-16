@@ -1,0 +1,37 @@
+[package]
+name = "cce-mcp"
+version.workspace = true
+edition.workspace = true
+# rmcp requires rust 1.88; the rest of the workspace stays on 1.86.
+rust-version = "1.88"
+description = "MCP (Model Context Protocol) server for the Code Context Engine"
+
+[[bin]]
+name = "cce-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal"] }
+tokio-util = "0.7"
+axum = { workspace = true }
+schemars = "1.0"
+cce-config = { path = "../../core/cce-config" }
+cce-types = { path = "../../core/cce-types" }
+cce-server-shared = { path = "../cce-server-shared" }
+cce-orchestrator = { path = "../cce-orchestrator" }
+cce-relation = { path = "../../parser/cce-relation" }
+cce-storage-sqlite = { path = "../../infra/cce-storage-sqlite" }
+
+rmcp = { workspace = true, features = [
+    "server",
+    "macros",
+    "transport-io",
+    "transport-streamable-http-server",
+    "schemars",
+] }

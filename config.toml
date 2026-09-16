@@ -656,3 +656,29 @@ enabled = true
 
 # Path to the plugin registry file (relative to project root)
 registry_file = "plugins/plugins.json"
+
+# =============================================================================
+# MCP Configuration
+# =============================================================================
+# Controls the optional Model Context Protocol server (cce-mcp).
+# Disabled by default; enable explicitly to expose engine capabilities as MCP
+# tools to clients such as IDE plugins, MCP Inspector or agent frameworks.
+
+[mcp]
+# Whether to enable the MCP server (default: false)
+enabled = false
+# Transport: "stdio" (local clients) or "streamable_http" (independent port)
+transport = "stdio"
+
+# HTTP transport settings (only used when transport = "streamable_http")
+[mcp.http]
+# Bind host; defaults to loopback so the endpoint is not exposed externally
+host = "127.0.0.1"
+# Bind port; independent of the HTTP server port
+port = 9100
+# Allowed Host authorities for DNS-rebinding protection (empty = transport default)
+allowed_hosts = []
+
+# Optional allow-list of tool names to expose (unset = expose all tools).
+# Use this to disable write-capable tools without a code change.
+# enabled_tools = ["search", "keyword_search", "list_projects", "health"]

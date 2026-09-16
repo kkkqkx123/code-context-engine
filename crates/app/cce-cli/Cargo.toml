@@ -22,6 +22,9 @@ dirs = { workspace = true }
 toml = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 cce-api = { path = "../cce-api" }
+cce-config = { path = "../../core/cce-config" }
+cce-mcp = { path = "../cce-mcp" }
+tokio-util = "0.7"
 
 clap = { version = "4.6", features = ["derive", "env", "color", "suggestions"] }
 colored = "3.1"

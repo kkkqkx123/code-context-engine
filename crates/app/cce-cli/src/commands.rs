@@ -6,6 +6,7 @@ pub mod config;
 pub mod entity;
 pub mod health;
 pub mod index;
+pub mod mcp;
 pub mod metrics;
 pub mod project;
 pub mod qdrant;
