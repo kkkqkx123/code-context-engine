@@ -4,7 +4,7 @@
 //! This module aggregates metrics from various subsystems (Project Registry, Query Cache, etc.).
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use cce_metrics_infra::AggregatedMetric;
+use cce_metrics::AggregatedMetric;
 use chrono::DateTime;
 use serde::Deserialize;
 
@@ -34,7 +34,7 @@ pub async fn handle_get_metrics(
     let registry = state.engine.metrics_registry();
 
     // Export to Prometheus format using ExporterManager
-    let exporter_manager = cce_metrics_infra::ExporterManager::new();
+    let exporter_manager = cce_metrics::ExporterManager::new();
 
     match exporter_manager.export("prometheus", registry).await {
         Ok(prometheus_text) => (

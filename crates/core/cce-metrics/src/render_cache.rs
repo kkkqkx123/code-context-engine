@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use cce_metrics::MetricsRegistry;
+use crate::MetricsRegistry;
 
 use crate::exporter::format_prometheus_snapshot;
 
@@ -80,7 +80,7 @@ impl RenderCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_metrics::MetricsRegistry;
+    use crate::MetricsRegistry;
 
     #[tokio::test]
     async fn test_render_cache_serves_both_formats() {

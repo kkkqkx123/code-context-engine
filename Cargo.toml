@@ -22,7 +22,6 @@ members = [
     "crates/infra/cce-storage-qdrant",
     "crates/infra/cce-storage-sqlite",
     "crates/infra/cce-scanner",
-    "crates/infra/cce-metrics-infra",
     # app
     "crates/app/cce-api",
     "crates/app/cce-plugin-runtime",
@@ -178,7 +177,6 @@ cce-storage-common = { path = "crates/infra/cce-storage-common" }
 cce-storage-bm25 = { path = "crates/infra/cce-storage-bm25" }
 cce-storage-qdrant = { path = "crates/infra/cce-storage-qdrant" }
 cce-storage-sqlite = { path = "crates/infra/cce-storage-sqlite" }
-cce-metrics-infra = { path = "crates/infra/cce-metrics-infra" }
 
 # MCP SDK (official modelcontextprotocol/rust-sdk).
 rmcp = "3.4"

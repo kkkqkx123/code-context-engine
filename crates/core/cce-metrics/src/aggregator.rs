@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::time::{self, Duration};
 use tracing::{debug, error, info, warn};
 
-use cce_metrics::{BackgroundTaskMetrics, MetricKey, MetricsRegistry, MetricsSystemMetrics};
-use cce_storage_common::{AggregatedMetric, SqliteStore};
+use crate::{BackgroundTaskMetrics, MetricKey, MetricsRegistry, MetricsSystemMetrics};
+use crate::store::{AggregatedMetric, SqliteStore};
 
 /// Configuration for the aggregation engine
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub struct AggregationConfig {
     pub default_interval_secs: u64,
     /// Per-metric aggregation overrides keyed by metric name.
     pub metric_overrides:
-        std::collections::HashMap<String, cce_metrics::config::MetricAggregationOverride>,
+        std::collections::HashMap<String, crate::config::MetricAggregationOverride>,
 }
 
 impl Default for AggregationConfig {
@@ -48,21 +48,6 @@ impl Default for AggregationConfig {
 }
 
 impl AggregationConfig {
-    /// Build from the global metrics configuration section.
-    pub fn from_global(config: &cce_config::global::MetricsAggregationConfig) -> Self {
-        Self {
-            interval_secs: config.interval_secs,
-            enabled: config.enabled,
-            retention_seconds: config.retention_seconds,
-            cleanup_interval_secs: config.cleanup_interval_secs,
-            aggregate_counters: config.aggregate_counters,
-            aggregate_gauges: config.aggregate_gauges,
-            batch_size: config.batch_size.max(1),
-            default_interval_secs: config.default_interval_secs,
-            metric_overrides: config.metric_overrides.clone(),
-        }
-    }
-
     /// Effective default interval for metrics without an override.
     pub fn effective_default_interval_secs(&self) -> u64 {
         if self.default_interval_secs > 0 {
@@ -806,20 +791,6 @@ mod tests {
         assert_eq!(config.batch_size, 25);
     }
 
-    #[test]
-    fn test_aggregation_config_from_global() {
-        let global = cce_config::global::MetricsAggregationConfig {
-            batch_size: 50,
-            aggregate_counters: false,
-            ..Default::default()
-        };
-        let config = AggregationConfig::from_global(&global);
-        assert_eq!(config.batch_size, 50);
-        assert!(!config.aggregate_counters);
-        assert!(config.aggregate_gauges);
-        assert_eq!(config.interval_secs, 300);
-    }
-
     fn override_config() -> AggregationConfig {
         let mut config = AggregationConfig {
             interval_secs: 300,
@@ -828,7 +799,7 @@ mod tests {
         };
         config.metric_overrides.insert(
             "fast_metric".to_string(),
-            cce_metrics::config::MetricAggregationOverride {
+            crate::config::MetricAggregationOverride {
                 interval_secs: Some(60),
                 retention_seconds: None,
                 enabled: None,
@@ -836,7 +807,7 @@ mod tests {
         );
         config.metric_overrides.insert(
             "disabled_metric".to_string(),
-            cce_metrics::config::MetricAggregationOverride {
+            crate::config::MetricAggregationOverride {
                 interval_secs: None,
                 retention_seconds: None,
                 enabled: Some(false),

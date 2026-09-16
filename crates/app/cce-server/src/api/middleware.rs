@@ -7,7 +7,7 @@
 //! consistent metric naming across the system.
 
 use axum::{extract::Request, middleware::Next, response::Response};
-use cce_metrics_infra::HttpMetrics;
+use cce_metrics::HttpMetrics;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_metrics_middleware_creation() {
-        let registry = cce_metrics_infra::MetricsRegistry::new();
+        let registry = cce_metrics::MetricsRegistry::new();
         let metrics = HttpMetrics::new(&registry);
         let _middleware = MetricsMiddleware::new(metrics);
     }

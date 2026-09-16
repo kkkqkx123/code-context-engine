@@ -483,7 +483,7 @@ pub async fn handle_aggregated_search(
         capabilities,
         project_id,
     )
-    .with_metrics(cce_metrics_infra::QueryMetrics::new(
+    .with_metrics(cce_metrics::QueryMetrics::new(
         state.engine.metrics_registry(),
         project_id,
     ));

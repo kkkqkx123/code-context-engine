@@ -4,7 +4,7 @@ use std::time::Duration;
 use super::EngineError;
 use super::project_cache::ProjectCache;
 use cce_llm::Embedder;
-use cce_metrics_infra::{
+use cce_metrics::{
     MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache,
 };
 use cce_storage_bm25::Bm25Client;
@@ -117,12 +117,12 @@ impl super::CodeContextEngine {
     }
 
     /// Get a reference to the runtime metrics collector (if available)
-    pub fn runtime_metrics(&self) -> Option<&Arc<cce_metrics_infra::RuntimeMetrics>> {
+    pub fn runtime_metrics(&self) -> Option<&Arc<cce_metrics::RuntimeMetrics>> {
         self.runtime_metrics.as_ref()
     }
 
     /// Get a reference to the system metrics collector (if available)
-    pub fn system_metrics(&self) -> Option<&Arc<cce_metrics_infra::SystemMetrics>> {
+    pub fn system_metrics(&self) -> Option<&Arc<cce_metrics::SystemMetrics>> {
         self.system_metrics.as_ref()
     }
 

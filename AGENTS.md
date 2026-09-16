@@ -43,7 +43,7 @@ Crates: cce-types, cce-config, cce-utils, cce-metrics, cce-text, cce-plugin, cce
 Crates: cce-parser, cce-parser-core, cce-relation
 
 ### infra — Infrastructure services and storage backends
-Crates: cce-circuit-breaker, cce-llm-client, cce-storage-common, cce-storage-bm25, cce-storage-qdrant, cce-storage-sqlite, cce-scanner, cce-metrics-infra
+Crates: cce-circuit-breaker, cce-llm-client, cce-storage-common, cce-storage-bm25, cce-storage-qdrant, cce-storage-sqlite, cce-scanner
 
 ### app — Application layer, orchestration, server, CLI, and plugin runtime
 Crates: cce-api, cce-plugin-runtime, cce-orchestrator, cce-server, cce-cli, plugin-sdk

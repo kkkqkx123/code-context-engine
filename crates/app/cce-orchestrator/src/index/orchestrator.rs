@@ -44,7 +44,7 @@ use cce_metrics::{
     RelationMetrics, SummaryMetrics,
 };
 use cce_metrics::{ScannerMetrics, SearchMetrics};
-use cce_metrics_infra::ProgressTracker;
+use cce_metrics::ProgressTracker;
 use cce_parser::summary::{
     FileSummary, ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator,
 };

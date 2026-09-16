@@ -166,7 +166,7 @@ pub async fn handle_config_reload(
                 &processor_config,
                 engine.get_plugin_registry(project_id).await,
                 None,
-                Some(cce_metrics_infra::HotUpdateStorageMetrics::new(
+                Some(cce_metrics::HotUpdateStorageMetrics::new(
                     state.engine.metrics_registry(),
                     project_id,
                 )),

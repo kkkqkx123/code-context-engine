@@ -10,7 +10,7 @@ use tokio::sync::{Mutex, RwLock};
 use crate::engine::CodeContextEngine;
 use crate::engine::ProjectCache;
 use cce_llm::Embedder;
-use cce_metrics_infra::ProgressTracker;
+use cce_metrics::ProgressTracker;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
 use cce_orchestrator::query::RelationSearcher;
 use cce_orchestrator::{AstDiagnosis, CompressionRetrieval, KeywordSearchTool};

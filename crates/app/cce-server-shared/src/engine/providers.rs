@@ -5,7 +5,7 @@ use super::EngineError;
 use super::builders::{build_chat_handle, build_rerank_handler, build_summary_generator};
 use cce_config::project_registry::{ProjectEntry, ProjectScope};
 use cce_metrics::RelationMetrics;
-use cce_metrics_infra::{PluginMetrics, SearchMetrics, WatchMetrics};
+use cce_metrics::{PluginMetrics, SearchMetrics, WatchMetrics};
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
@@ -110,7 +110,7 @@ impl super::CodeContextEngine {
                 &processor_config,
                 self.load_plugin_registry(project_id, &project_entry).await,
                 Some(RelationMetrics::new(&self.metrics_registry, project_id)),
-                Some(cce_metrics_infra::HotUpdateStorageMetrics::new(
+                Some(cce_metrics::HotUpdateStorageMetrics::new(
                     &self.metrics_registry,
                     project_id,
                 )),
@@ -129,7 +129,7 @@ impl super::CodeContextEngine {
             .with_storage_coordinator(storage_coordinator)
             .with_processors(processors.into_iter().map(Arc::from).collect())
             .with_operation_coordinator(operation_coordinator)
-            .with_metrics(cce_metrics_infra::HotUpdateMetrics::new(
+            .with_metrics(cce_metrics::HotUpdateMetrics::new(
                 &self.metrics_registry,
                 project_id,
             ))

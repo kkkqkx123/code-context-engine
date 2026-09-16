@@ -21,7 +21,6 @@ cce-storage-common = { path = "../../infra/cce-storage-common" }
 cce-scanner = { path = "../../infra/cce-scanner" }
 cce-llm-client = { path = "../../infra/cce-llm-client" }
 cce-circuit-breaker = { path = "../../infra/cce-circuit-breaker" }
-cce-metrics-infra = { path = "../../infra/cce-metrics-infra" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

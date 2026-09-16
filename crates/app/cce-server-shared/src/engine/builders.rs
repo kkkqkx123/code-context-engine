@@ -9,7 +9,7 @@ use cce_llm_client::services::rerank::{
     GenerativeRerankRequestHandler, ProductionRerankHandler,
 };
 use cce_llm_client::{ChatClientHandle, build_chat_client};
-use cce_metrics_infra::{LlmRetryMetrics, MetricsRegistry};
+use cce_metrics::{LlmRetryMetrics, MetricsRegistry};
 use cce_parser::summary::{ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator};
 
 /// Build the generative rerank handler for a project when `[rerank] enabled`
@@ -148,7 +148,7 @@ pub(crate) fn build_rerank_handler(
     .map_err(EngineError::Llm)?;
 
     let rerank_metrics =
-        cce_metrics_infra::RerankMetrics::new(metrics_registry, &config.rerank.model);
+        cce_metrics::RerankMetrics::new(metrics_registry, &config.rerank.model);
 
     // Select the provider implementation by the model's configured mode.
     let handler = match rerank_model_config.mode {

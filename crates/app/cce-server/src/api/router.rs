@@ -10,7 +10,7 @@ use axum::{
 use super::handlers;
 use super::middleware::metrics_middleware;
 use super::state::AppState;
-use cce_metrics_infra::HttpMetrics;
+use cce_metrics::HttpMetrics;
 
 /// Create API router with all routes
 pub fn create_router(state: AppState) -> Router {

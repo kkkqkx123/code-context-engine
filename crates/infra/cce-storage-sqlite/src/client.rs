@@ -465,7 +465,7 @@ impl std::fmt::Debug for SqliteClient {
     }
 }
 
-impl cce_storage_common::SqliteStore for SqliteClient {
+impl cce_metrics::SqliteStore for SqliteClient {
     type Error = StorageError;
 
     fn execute_write(
@@ -516,8 +516,8 @@ impl cce_storage_common::SqliteStore for SqliteClient {
         params: &[&dyn rusqlite::ToSql],
         f: &mut dyn FnMut(
             &rusqlite::Row<'_>,
-        ) -> rusqlite::Result<cce_storage_common::AggregatedMetric>,
-    ) -> Result<Vec<cce_storage_common::AggregatedMetric>, StorageError> {
+        ) -> rusqlite::Result<cce_metrics::AggregatedMetric>,
+    ) -> Result<Vec<cce_metrics::AggregatedMetric>, StorageError> {
         let conn = self.read_connection()?;
         let mut stmt = conn
             .prepare(sql)
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn test_execute_write_batch_inserts_atomically() {
-        use cce_storage_common::SqliteStore;
+        use cce_metrics::SqliteStore;
 
         let client = SqliteClient::in_memory().expect("Failed to create client");
         const SQL: &str = "INSERT INTO metrics_aggregated

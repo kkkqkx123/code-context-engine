@@ -2,8 +2,8 @@
 //!
 //! Provides Prometheus exposition format and JSON serialization.
 
-use cce_metrics::serialization::MetricData;
-use cce_metrics::{
+use crate::serialization::MetricData;
+use crate::{
     HistogramStats, MetricValue, MetricsRegistry, MetricsSnapshot, MetricsSystemMetrics,
     metric_description,
 };
@@ -43,7 +43,7 @@ pub fn export_with_metrics(
     let output = match format {
         ExportFormat::Prometheus => format_prometheus(registry),
         ExportFormat::Json => {
-            let snapshot = cce_metrics::serialization::MetricsSnapshot::from_registry(registry);
+            let snapshot = crate::serialization::MetricsSnapshot::from_registry(registry);
             serde_json::to_string_pretty(&snapshot)
                 .unwrap_or_else(|e| format!("{{\"error\": \"serialization failed: {}\"}}", e))
         }
@@ -252,7 +252,7 @@ impl ExporterManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_metrics::MetricsRegistry;
+    use crate::MetricsRegistry;
 
     #[test]
     fn test_export_json() {
@@ -434,7 +434,7 @@ mod tests {
     fn test_metric_help_covers_all_domain_metrics() {
         use std::sync::Arc;
 
-        use cce_metrics::{
+        use crate::{
             Bm25Metrics, EmbeddingErrorType, EmbeddingMetrics, FileProcessingMetrics,
             HotUpdateMetrics, HotUpdateStorageMetrics, HttpMetrics, ParserMetrics, PipelineStage,
             PipelineStageMetrics, PluginMetrics, QdrantMetrics, QueryMetrics, QueueMetrics,

@@ -1,12 +1,23 @@
 //! Metrics primitives for the code context engine
 
+pub mod aggregator;
 pub mod buckets;
 pub mod config;
 pub mod descriptions;
 pub mod domain;
+pub mod exporter;
 pub mod labels;
+pub mod progress;
+pub mod render_cache;
 pub mod serialization;
+pub mod store;
 pub mod types;
+
+pub use aggregator::{AggregationConfig, MetricsAggregator};
+pub use exporter::{ExportError, ExportFormat, ExporterManager};
+pub use progress::{ProgressSnapshot, ProgressTracker};
+pub use render_cache::{CachedRender, RenderCache};
+pub use store::{AggregatedMetric, SqliteStore};
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

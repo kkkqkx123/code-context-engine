@@ -13,7 +13,7 @@ use crate::runtime::RelationRuntime;
 use cce_config::{AppConfig, Settings};
 use cce_llm::Embedder;
 use cce_llm_client::OpenAICompatibleProvider;
-use cce_metrics_infra::{
+use cce_metrics::{
     AggregationConfig, LlmRetryMetrics, MetricsAggregator, MetricsRegistry, ProgressTracker,
     RenderCache,
 };
@@ -102,10 +102,10 @@ pub struct CodeContextEngine {
     metrics_aggregator: Option<Arc<MetricsAggregator<SqliteClient>>>,
 
     /// Tokio runtime metrics collector
-    runtime_metrics: Option<Arc<cce_metrics_infra::RuntimeMetrics>>,
+    runtime_metrics: Option<Arc<cce_metrics::RuntimeMetrics>>,
 
     /// System resource metrics collector (CPU, memory, disk)
-    system_metrics: Option<Arc<cce_metrics_infra::SystemMetrics>>,
+    system_metrics: Option<Arc<cce_metrics::SystemMetrics>>,
 
     /// Per-project retry queues for failed queries
     retry_queue: ProjectCache<RetryQueue>,
@@ -155,7 +155,7 @@ impl CodeContextEngine {
             metrics_registry.start_cleanup_task();
         }
         let metrics_system_metrics =
-            cce_metrics_infra::MetricsSystemMetrics::new(&metrics_registry);
+            cce_metrics::MetricsSystemMetrics::new(&metrics_registry);
 
         // Create SQLite client
         let sqlite_config = config.database.sqlite.clone();
@@ -212,17 +212,28 @@ impl CodeContextEngine {
 
         // Attach embedding metrics (always enabled when metrics registry exists)
         let embedding_metrics =
-            cce_metrics_infra::EmbeddingMetrics::new(&metrics_registry, embedder.model_name());
+            cce_metrics::EmbeddingMetrics::new(&metrics_registry, embedder.model_name());
         embedder = embedder.with_metrics(embedding_metrics);
 
         let embedder = Arc::new(embedder);
 
         // Create metrics aggregator (optional, can be disabled via config)
         let metrics_aggregator = if config.metrics.aggregation.enabled {
-            let agg_config = AggregationConfig::from_global(&config.metrics.aggregation);
+            let global = &config.metrics.aggregation;
+            let agg_config = AggregationConfig {
+                interval_secs: global.interval_secs,
+                enabled: global.enabled,
+                retention_seconds: global.retention_seconds,
+                cleanup_interval_secs: global.cleanup_interval_secs,
+                aggregate_counters: global.aggregate_counters,
+                aggregate_gauges: global.aggregate_gauges,
+                batch_size: global.batch_size.max(1),
+                default_interval_secs: global.default_interval_secs,
+                metric_overrides: global.metric_overrides.clone(),
+            };
             let aggregator =
                 MetricsAggregator::new(sqlite_client.clone(), metrics_registry.clone(), agg_config)
-                    .with_background_metrics(cce_metrics_infra::BackgroundTaskMetrics::new(
+                    .with_background_metrics(cce_metrics::BackgroundTaskMetrics::new(
                         &metrics_registry,
                     ))
                     .with_system_metrics(metrics_system_metrics.clone());
@@ -232,10 +243,10 @@ impl CodeContextEngine {
         };
 
         // Create runtime metrics collector
-        let runtime_metrics = Arc::new(cce_metrics_infra::RuntimeMetrics::new(&metrics_registry));
+        let runtime_metrics = Arc::new(cce_metrics::RuntimeMetrics::new(&metrics_registry));
 
         // Create system metrics collector
-        let system_metrics = Arc::new(cce_metrics_infra::SystemMetrics::new(&metrics_registry));
+        let system_metrics = Arc::new(cce_metrics::SystemMetrics::new(&metrics_registry));
 
         // Note: IndexOrchestrator and Searcher are now created per-project on demand
         // They will be cached in orchestrator_cache and searcher_cache respectively
