@@ -111,11 +111,11 @@
 									{entity.description || entity.nl_description}
 								</p>
 							{/if}
-							{#if entity.location}
+							{#if entity.start_line != null}
 								<div class="entity-location">
 									<span class="location-label">Location:</span>
 									<span class="location-value">
-										Line {entity.location.start_line || '?'} - {entity.location.end_line || '?'}
+										Line {entity.start_line} - {entity.end_line}
 									</span>
 								</div>
 							{/if}

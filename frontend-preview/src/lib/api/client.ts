@@ -155,6 +155,9 @@ export class ApiClient {
 class MockAwareApiClient {
 	private realClient: ApiClient;
 
+	/** Base URL, exposed for callers that build raw URLs (e.g. Prometheus text endpoint) */
+	private baseUrl: string = BASE_URL;
+
 	constructor() {
 		this.realClient = new ApiClient();
 	}

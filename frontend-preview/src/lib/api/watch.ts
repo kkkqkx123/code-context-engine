@@ -18,6 +18,11 @@ export interface WatchStatus {
 	started_at?: string;
 }
 
+export interface WatchStatusResponse {
+	success: boolean;
+	status: WatchStatus;
+}
+
 export const watchApi = {
 	// Start watching directory
 	startWatch: (projectId: number, data: WatchStartRequest) =>
@@ -29,5 +34,5 @@ export const watchApi = {
 
 	// Get watch status
 	getStatus: (projectId: number) =>
-		apiClient.get<WatchStatus>(`/api/project/${projectId}/watch/status`),
+		apiClient.get<WatchStatusResponse>(`/api/project/${projectId}/watch/status`),
 };

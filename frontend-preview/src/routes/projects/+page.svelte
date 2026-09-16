@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -23,7 +24,6 @@
 
 	// Detail view
 	let detailProject = $state<Project | null>(null);
-	let configUpdateResult = $state<string | null>(null);
 
 	onMount(() => {
 		loadProjects();
@@ -138,21 +138,6 @@
 		}
 	}
 
-	async function handleUpdateConfig(project: Project) {
-		loading = true;
-		error = null;
-		configUpdateResult = null;
-
-		try {
-			const resp = await projectApi.updateProjectConfig(project.id, {});
-			configUpdateResult = resp.success ? 'Configuration updated successfully' : 'Failed to update configuration';
-		} catch (e: any) {
-			error = e.message || 'Failed to update config';
-		} finally {
-			loading = false;
-		}
-	}
-
 	function selectProject(project: Project) {
 		selectedProject.set(project);
 		detailProject = project;
@@ -164,10 +149,8 @@
 	<title>Projects - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
-	<div class="container">
-		<h1>Projects</h1>
-		<p class="page-description">Create, manage, and index your code projects</p>
+<div class="page">
+	<PageHeader title="Projects" subtitle="Create, manage, and index your code projects" />
 
 		{#if error}
 			<div class="error-banner">
@@ -279,9 +262,6 @@
 							<Button variant="secondary" onclick={() => handleReload(detailProject!)} disabled={loading}>
 								Reload Config
 							</Button>
-							<Button variant="secondary" onclick={() => handleUpdateConfig(detailProject!)} disabled={loading}>
-								Update Config
-							</Button>
 							<Button variant="secondary" onclick={() => openEditForm(detailProject!)} disabled={loading}>
 								Edit
 							</Button>
@@ -289,12 +269,6 @@
 								Delete
 							</Button>
 						</div>
-
-						{#if configUpdateResult}
-							<div class="result-banner">
-								{configUpdateResult}
-							</div>
-						{/if}
 					</Card>
 
 				{:else}
@@ -305,19 +279,8 @@
 			</div>
 		</div>
 	</div>
-</section>
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 2rem;
-	}
-
 	.error-banner {
 		background: var(--danger);
 		color: var(--white);
@@ -498,15 +461,6 @@
 		flex-wrap: wrap;
 		gap: 0.75rem;
 		margin-bottom: 1rem;
-	}
-
-	.result-banner {
-		margin-top: 1rem;
-		padding: 0.75rem 1rem;
-		background: var(--success-bg, #e6f7e6);
-		border: 1px solid var(--success, #00a854);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
 	}
 
 	.placeholder-text {

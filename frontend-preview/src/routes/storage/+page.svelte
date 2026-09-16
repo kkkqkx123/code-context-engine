@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -73,10 +74,9 @@
 	<title>Storage - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Storage Management</h1>
-		<p class="page-description">Monitor storage health and manage index data</p>
+		<PageHeader title="Storage Management" subtitle="Monitor storage health and manage index data" />
 
 		{#if $storageState.error}
 			<div class="error-banner">
@@ -222,7 +222,7 @@
 			</div>
 		</Card>
 	</div>
-</section>
+</div>
 
 <!-- Confirmation Dialog -->
 {#if showConfirmDialog}
@@ -267,16 +267,6 @@
 {/if}
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 3rem;
-	}
-
 	.error-banner {
 		background: var(--danger);
 		color: var(--white);

@@ -8,32 +8,6 @@
 		showFilters = !showFilters;
 	}
 
-	function handleExtensionChange(event: Event) {
-		const target = event.target as HTMLInputElement;
-		const ext = target.value;
-		if (target.checked) {
-			searchActions.updateFilter('file_extensions', [...$searchState.filters.file_extensions, ext]);
-		} else {
-			searchActions.updateFilter(
-				'file_extensions',
-				$searchState.filters.file_extensions.filter(e => e !== ext)
-			);
-		}
-	}
-
-	function handleLanguageChange(event: Event) {
-		const target = event.target as HTMLInputElement;
-		const lang = target.value;
-		if (target.checked) {
-			searchActions.updateFilter('languages', [...$searchState.filters.languages, lang]);
-		} else {
-			searchActions.updateFilter(
-				'languages',
-				$searchState.filters.languages.filter(l => l !== lang)
-			);
-		}
-	}
-
 	function handleMinScoreChange(event: Event) {
 		const target = event.target as HTMLInputElement;
 		searchActions.updateFilter('min_score', parseFloat(target.value));
@@ -64,40 +38,6 @@
 						>
 							{type.toUpperCase()}
 						</button>
-					{/each}
-				</div>
-			</div>
-
-			<div class="filter-section">
-				<span class="section-label" id="file-extensions-label">File Extensions</span>
-				<div class="checkbox-grid" role="group" aria-labelledby="file-extensions-label">
-					{#each ['.ts', '.js', '.rs', '.py', '.java', '.go', '.cpp', '.cs'] as ext}
-						<label class="checkbox-label">
-							<input
-								type="checkbox"
-								value={ext}
-								checked={$searchState.filters.file_extensions.includes(ext)}
-								onchange={handleExtensionChange}
-							/>
-							{ext}
-						</label>
-					{/each}
-				</div>
-			</div>
-
-			<div class="filter-section">
-				<span class="section-label" id="languages-label">Languages</span>
-				<div class="checkbox-grid" role="group" aria-labelledby="languages-label">
-					{#each ['typescript', 'javascript', 'rust', 'python', 'java', 'go', 'c++', 'c#'] as lang}
-						<label class="checkbox-label">
-							<input
-								type="checkbox"
-								value={lang}
-								checked={$searchState.filters.languages.includes(lang)}
-								onchange={handleLanguageChange}
-							/>
-							{lang}
-						</label>
 					{/each}
 				</div>
 			</div>
@@ -180,7 +120,7 @@
 
 	.query-type-tabs {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(3, 1fr);
 		gap: 0.5rem;
 	}
 
@@ -203,20 +143,6 @@
 		background: var(--black);
 		color: var(--white);
 		border-color: var(--black);
-	}
-
-	.checkbox-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-		gap: 0.5rem;
-	}
-
-	.checkbox-label {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.85rem;
-		cursor: pointer;
 	}
 
 	input[type='text'] {

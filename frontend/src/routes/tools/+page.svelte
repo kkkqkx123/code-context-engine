@@ -122,16 +122,6 @@
 </div>
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 2rem;
-	}
-
 	/* Tab Navigation */
 	.tab-nav {
 		display: flex;

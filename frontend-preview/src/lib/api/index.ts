@@ -42,6 +42,10 @@ export interface ParseResult {
 
 export interface ClearIndexRequest {
   project_id: number;
+  vectors?: boolean;
+  bm25?: boolean;
+  relations?: boolean;
+  cache?: boolean;
 }
 
 export interface IndexStatsResponse {
@@ -53,6 +57,52 @@ export interface IndexStatsResponse {
     total_bm25_documents: number;
     total_files: number;
   };
+  elapsed_ms: number;
+}
+
+export interface IndexResponse {
+  success: boolean;
+  files_scanned: number;
+  files_indexed: number;
+  failed_files: number;
+  total_entities: number;
+  total_relations: number;
+  total_vectors: number;
+  elapsed_ms: number;
+  message: string;
+  errors?: string[];
+}
+
+export interface DeleteFileResponse {
+  success: boolean;
+  message: string;
+  file_path: string;
+  vectors_deleted: number;
+  bm25_documents_deleted: number;
+  relations_deleted: number;
+  elapsed_ms: number;
+}
+
+export interface DeleteEntityResponse {
+  success: boolean;
+  message: string;
+  entity_id: number;
+  vectors_deleted: number;
+  bm25_documents_deleted: number;
+  relations_deleted: number;
+  elapsed_ms: number;
+}
+
+export interface BatchDeleteRequest {
+  file_paths: string[];
+  entity_ids: number[];
+}
+
+export interface BatchDeleteResponse {
+  success: boolean;
+  files_deleted: number;
+  entities_deleted: number;
+  errors: string[];
   elapsed_ms: number;
 }
 
@@ -77,6 +127,25 @@ export const indexApi = {
     apiClient.delete("/api/index", {
       body: JSON.stringify({ project_id: projectId } as ClearIndexRequest),
     }),
+
+  // Delete file from all backends
+  deleteFile: (filePath: string, projectId: number) =>
+    apiClient.delete<DeleteFileResponse>(
+      `/api/index/file/${encodeURIComponent(filePath)}?project_id=${projectId}`,
+    ),
+
+  // Delete entity from all backends
+  deleteEntity: (entityId: number, projectId: number) =>
+    apiClient.delete<DeleteEntityResponse>(
+      `/api/index/entity/${entityId}?project_id=${projectId}`,
+    ),
+
+  // Batch delete files and entities
+  batchDelete: (projectId: number, data: BatchDeleteRequest) =>
+    apiClient.delete<BatchDeleteResponse>(
+      `/api/index/batch?project_id=${projectId}`,
+      { body: JSON.stringify(data) },
+    ),
 };
 
 export const projectApi = {
@@ -134,5 +203,5 @@ export const projectApi = {
 
   // Update project configuration
   updateProjectConfig: (id: string, config: Record<string, unknown>) =>
-    apiClient.put<{ success: boolean }>(`/api/project/${id}/config`, config),
+    apiClient.put<{ success: boolean }>(`/api/project/${id}/config`, { config }),
 };

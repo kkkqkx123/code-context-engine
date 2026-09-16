@@ -281,16 +281,6 @@
 	</div>
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 2rem;
-	}
-
 	.error-banner {
 		background: var(--danger);
 		color: var(--white);
@@ -471,15 +461,6 @@
 		flex-wrap: wrap;
 		gap: 0.75rem;
 		margin-bottom: 1rem;
-	}
-
-	.result-banner {
-		margin-top: 1rem;
-		padding: 0.75rem 1rem;
-		background: var(--success-bg, #e6f7e6);
-		border: 1px solid var(--success, #00a854);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
 	}
 
 	.placeholder-text {

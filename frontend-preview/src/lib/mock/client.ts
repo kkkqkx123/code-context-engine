@@ -105,6 +105,9 @@ export const mockClient = {
 		if (endpoint.match(/\/api\/project\/\w+$/)) return { success: true } as T;
 		if (endpoint === '/api/index') return { success: true } as T;
 		if (endpoint === '/api/retry-queue') return { cleared: 0, message: 'Queue already empty' } as T;
+		if (endpoint.match(/\/api\/index\/file\//)) return { success: true, message: 'File deleted (mock)', file_path: '', vectors_deleted: 0, bm25_documents_deleted: 0, relations_deleted: 0, elapsed_ms: 5 } as T;
+		if (endpoint.match(/\/api\/index\/entity\//)) return { success: true, message: 'Entity deleted (mock)', entity_id: 0, vectors_deleted: 0, bm25_documents_deleted: 0, relations_deleted: 0, elapsed_ms: 5 } as T;
+		if (endpoint.match(/\/api\/index\/batch/)) return { success: true, files_deleted: 0, entities_deleted: 0, errors: [], elapsed_ms: 5 } as T;
 		if (endpoint.match(/\/api\/metrics\/cleanup/)) return { success: true, deleted_count: 0 } as T;
 
 		console.warn(`[Mock] Unhandled DELETE endpoint: ${endpoint}`);

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 
 	// Tab state
@@ -53,10 +54,9 @@
 	<title>Tools - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Developer Tools</h1>
-		<p class="page-description">Code analysis utilities and helpers</p>
+		<PageHeader title="Developer Tools" subtitle="Code analysis utilities and helpers" />
 
 		<!-- Tab Navigation -->
 		<div class="tab-nav">
@@ -119,19 +119,9 @@
 			</Card>
 		{/if}
 	</div>
-</section>
+</div>
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 2rem;
-	}
-
 	/* Tab Navigation */
 	.tab-nav {
 		display: flex;

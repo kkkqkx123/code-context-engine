@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 </script>
 
@@ -6,10 +7,9 @@
 	<title>Entities - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Entity Explorer</h1>
-		<p class="page-description">Browse and explore code entities, relationships, and call chains</p>
+		<PageHeader title="Entity Explorer" subtitle="Browse and explore code entities, relationships, and call chains" />
 
 		<Card title="Quick Navigation" subtitle="Search for entities to explore">
 			<p>Use the search interface to find specific entities, or navigate directly if you know the entity ID.</p>
@@ -37,19 +37,9 @@
 			</div>
 		</Card>
 	</div>
-</section>
+</div>
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 3rem;
-	}
-
 	.nav-button {
 		padding: 0.75rem 1.5rem;
 		background: var(--black);

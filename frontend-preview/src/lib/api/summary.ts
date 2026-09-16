@@ -11,6 +11,9 @@ export interface SummaryRequest {
 	extensions?: string[];
 	exclude_dirs?: string[];
 	respect_gitignore?: boolean;
+	ignore_patterns?: string[];
+	recursive?: boolean;
+	max_files?: number;
 }
 
 export interface FileSummaryItem {
@@ -21,7 +24,11 @@ export interface FileSummaryItem {
 	imports: string[];
 	exports: string[];
 	entity_count: number;
-	loc: number;
+	line_count: number;
+	tags: string[];
+	importance_level: string;
+	success: boolean;
+	error?: string;
 }
 
 export interface SummaryResponse {

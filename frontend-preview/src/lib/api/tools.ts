@@ -17,6 +17,8 @@ export interface CompressResponse {
 	file_hash: string;
 	from_cache: boolean;
 	semantic_text: string;
+	entities?: unknown[];
+	groups?: unknown[];
 }
 
 export interface CompressApiResponse {
@@ -27,6 +29,8 @@ export interface CompressApiResponse {
 	file_hash?: string;
 	from_cache?: boolean;
 	semantic_text?: string;
+	entities?: unknown[];
+	groups?: unknown[];
 }
 
 export interface BatchCompressRequest {
@@ -48,27 +52,38 @@ export interface DiagnoseRequest {
 	include_ast?: boolean;
 }
 
-export interface DiagnoseIssue {
-	severity: 'error' | 'warning' | 'info';
+export interface DiagnosticPosition {
+	row: number;
+	column: number;
+}
+
+export interface DiagnosticSpan {
+	start: DiagnosticPosition;
+	end: DiagnosticPosition;
+}
+
+export interface Diagnostic {
+	kind: string;
+	position: DiagnosticPosition;
+	span?: DiagnosticSpan;
 	message: string;
-	suggestion?: string;
-	line?: number;
-	column?: number;
+	precision: 'High' | 'Medium' | 'Low';
 }
 
 export interface DiagnoseResponse {
-	success: boolean;
-	result?: {
-		issues: DiagnoseIssue[];
-	};
-	error?: string;
+	language: string;
+	is_valid: boolean;
+	ast?: unknown;
+	diagnostics: Diagnostic[];
 }
 
 export interface SymbolInfo {
 	name: string;
-	type: string;
-	line_start: number;
-	line_end: number;
+	kind: string;
+	line: number;
+	end_line: number;
+	detail?: string;
+	children?: SymbolInfo[];
 }
 
 export interface GetSymsRequest {
@@ -112,15 +127,18 @@ export interface GotoDefRequest {
 
 export interface KeywordSearchRequest {
 	query: string;
-	project_id?: number;
-	top_n?: number;
+	project_id: number;
+	top_n: number;
+	epoch?: string;
 }
 
 export interface KeywordSearchItem {
 	chunk_id: string;
 	file_path: string;
+	title: string;
 	score: number;
-	snippet: string;
+	start_line: number;
+	end_line: number;
 	highlighted_snippet: string;
 }
 

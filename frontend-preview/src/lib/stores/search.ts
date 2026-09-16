@@ -3,8 +3,9 @@
  * Manages search queries and results
  */
 
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { searchApi, type SearchRequest, type SearchResultItem, type QueryType } from '../api/search';
+import { currentProjectId } from './project';
 
 export interface SearchState {
 	query: string;
@@ -14,10 +15,7 @@ export interface SearchState {
 	total: number;
 	isSearching: boolean;
 	filters: {
-		file_extensions: string[];
 		directory_prefix: string;
-		entity_types: string[];
-		languages: string[];
 		min_score: number;
 	};
 	pagination: {
@@ -28,16 +26,13 @@ export interface SearchState {
 
 export const searchState = writable<SearchState>({
 	query: '',
-	projectId: 1,
+	projectId: get(currentProjectId),
 	queryType: 'hybrid',
 	results: [],
 	total: 0,
 	isSearching: false,
 	filters: {
-		file_extensions: [],
 		directory_prefix: '',
-		entity_types: [],
-		languages: [],
 		min_score: 0,
 	},
 	pagination: {
@@ -75,16 +70,14 @@ export const searchActions = {
 		searchState.update(s => ({ ...s, isSearching: true }));
 
 		try {
+			const projectId = get(currentProjectId);
 			const request: SearchRequest = {
-				project_id: state!.projectId,
+				project_id: projectId,
 				query: state!.query,
 				query_type: state!.queryType,
 				limit: state!.pagination.limit,
 				min_score: state!.filters.min_score || undefined,
-				file_extensions: state!.filters.file_extensions.length > 0 ? state!.filters.file_extensions : undefined,
 				directory_prefix: state!.filters.directory_prefix || undefined,
-				entity_types: state!.filters.entity_types.length > 0 ? state!.filters.entity_types : undefined,
-				languages: state!.filters.languages.length > 0 ? state!.filters.languages : undefined,
 			};
 
 			const response = await searchApi.search(request);

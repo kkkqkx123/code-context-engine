@@ -83,11 +83,11 @@ export const watchActions = {
 			let pid: number;
 			currentProjectId.subscribe(v => pid = v)();
 
-			const status = await watchApi.getStatus(pid!);
+			const response = await watchApi.getStatus(pid!);
 			watchState.update(state => ({
 				...state,
-				status,
-				isWatching: status.active,
+				status: response.status,
+				isWatching: response.status.active,
 			}));
 		} catch (error) {
 			console.error('Failed to load watch status:', error);

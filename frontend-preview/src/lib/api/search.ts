@@ -5,7 +5,7 @@
 
 import { apiClient } from './client';
 
-export type QueryType = 'vector' | 'bm25' | 'hybrid' | 'summary';
+export type QueryType = 'vector' | 'bm25' | 'hybrid' | 'summary' | 'hierarchical' | 'semantic_with_relations';
 
 export interface SearchRequest {
 	project_id?: number;
@@ -15,14 +15,15 @@ export interface SearchRequest {
 	limit?: number;
 	min_score?: number;
 	directory_prefix?: string;
-	file_extensions?: string[];
-	entity_types?: string[];
-	languages?: string[];
 	exclude_patterns?: string[];
 	include_patterns?: string[];
 	exclude_content_types?: string[];
+	include_categories?: string[];
+	exclude_categories?: string[];
 	call_chain_depth?: number;
 	include_call_chain?: boolean;
+	enable_rerank?: boolean;
+	rerank_max_candidates?: number;
 }
 
 // Aggregated Search Types
@@ -39,12 +40,13 @@ export interface AggregatedSearchRequest {
 	limit?: number;
 	min_score?: number;
 	directory_prefix?: string;
-	file_extensions?: string[];
-	entity_types?: string[];
-	languages?: string[];
 	exclude_content_types?: string[];
 	exclude_patterns?: string[];
 	include_patterns?: string[];
+	include_categories?: string[];
+	exclude_categories?: string[];
+	enable_rerank?: boolean;
+	rerank_max_candidates?: number;
 }
 
 export interface CallChainNode {
@@ -85,6 +87,20 @@ export interface AggregatedSearchResponse {
 	sources_used: string[];
 }
 
+export interface EntitySearchResultItem {
+	id: number;
+	name: string;
+	kind: string;
+	file_id: number;
+	signature?: string;
+	span_start_row?: number;
+	span_end_row?: number;
+	depth?: number;
+	parent_id?: number;
+	project_id: number;
+	rank: number;
+}
+
 export const searchApi = {
 	search: (request: SearchRequest) =>
 		apiClient.post<SearchResponse>('/api/search', request),
@@ -93,5 +109,5 @@ export const searchApi = {
 		apiClient.post<AggregatedSearchResponse>('/api/search/aggregated', request),
 
 	entitySearch: (request: { query: string; project_id?: number; project_path?: string; limit?: number; kind_filter?: string }) =>
-		apiClient.post<{ success: boolean; total: number; items: { id: string; name: string; kind: string; file_id: string; signature?: string; span_start_row?: number; span_end_row?: number; depth?: number; parent_id?: string; project_id?: number; rank: number }[]; elapsed_ms: number }>('/api/entities/search', request),
+		apiClient.post<{ success: boolean; total: number; items: EntitySearchResultItem[]; elapsed_ms: number }>('/api/entities/search', request),
 };

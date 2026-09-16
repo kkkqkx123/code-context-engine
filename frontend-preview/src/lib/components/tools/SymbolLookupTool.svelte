@@ -3,6 +3,8 @@
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi } from '$lib/api/tools';
+	import { currentProjectId } from '$lib/stores/project';
+	import type { SymbolInfo } from '$lib/api/tools';
 
 	interface Props {
 		filePath?: string;
@@ -23,7 +25,10 @@
 		result = null;
 
 		try {
-			result = await toolsApi.getSymbols({ project_id: 1, paths: [filePath] });
+			let projectId: number;
+			currentProjectId.subscribe(v => projectId = v)();
+
+			result = await toolsApi.getSymbols({ project_id: projectId!, paths: [filePath] });
 		} catch (err: any) {
 			error = err.message;
 		} finally {
@@ -79,16 +84,16 @@
 			<div class="symbols-table">
 				<div class="table-header">
 					<div class="col-name">Name</div>
-					<div class="col-type">Type</div>
+					<div class="col-kind">Kind</div>
 					<div class="col-location">Location</div>
 				</div>
 				{#each symbols as sym}
 					<div class="table-row">
 						<div class="col-name" data-label="Name">{sym.name}</div>
-						<div class="col-type" data-label="Type">
-							<Badge label={sym.type} variant="default" />
+						<div class="col-kind" data-label="Kind">
+							<Badge label={sym.kind} variant="default" />
 						</div>
-						<div class="col-location" data-label="Location">Lines {sym.line_start}-{sym.line_end}</div>
+						<div class="col-location" data-label="Location">Lines {sym.line}-{sym.end_line}</div>
 					</div>
 				{/each}
 			</div>
@@ -220,7 +225,7 @@
 		color: var(--black);
 	}
 
-	.col-type {
+	.col-kind {
 		text-align: center;
 	}
 
@@ -278,7 +283,7 @@
 		}
 
 		.col-name,
-		.col-type,
+		.col-kind,
 		.col-location {
 			text-align: left;
 		}

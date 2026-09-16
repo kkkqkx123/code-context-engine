@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -69,10 +70,9 @@
 	<title>Summary Generator - Code Context Engine</title>
 </svelte:head>
 
-<section class="section">
+<div class="page">
 	<div class="container">
-		<h1>Summary Generator</h1>
-		<p class="page-description">Generate natural language summaries of code files</p>
+		<PageHeader title="Summary Generator" subtitle="Generate natural language summaries of code files" />
 
 		{#if error}
 			<div class="error-banner">
@@ -218,35 +218,48 @@
 								<summary class="summary-header">
 									<span class="summary-file">{item.file_path}</span>
 									<Badge label={item.language} variant="info" />
+									{#if !item.success}
+										<Badge label="Failed" variant="danger" />
+									{/if}
 								</summary>
 								<div class="summary-body">
-									<p class="summary-text">{item.summary}</p>
-									<div class="summary-meta">
-										<span>{item.entity_count} entities</span>
-										<span>{item.loc} lines</span>
-									</div>
-									{#if item.main_entities.length > 0}
-										<div class="summary-entities">
-											<h4>Entities</h4>
-											<ul>
-												{#each item.main_entities as entity}
-													<li>{entity}</li>
-												{/each}
-											</ul>
+									{#if !item.success && item.error}
+										<div class="error-message">
+											<strong>Error:</strong> {item.error}
 										</div>
-									{/if}
-									{#if item.imports.length > 0}
-										<div class="summary-entities">
-											<h4>Imports</h4>
-											<ul>
-												{#each item.imports.slice(0, 20) as imp}
-													<li>{imp}</li>
-												{/each}
-												{#if item.imports.length > 20}
-													<li class="more">... and {item.imports.length - 20} more</li>
-												{/if}
-											</ul>
+									{:else}
+										<p class="summary-text">{item.summary}</p>
+										<div class="summary-meta">
+											<span>{item.entity_count} entities</span>
+											<span>{item.line_count} lines</span>
+											{#if item.tags.length > 0}
+												<span>Tags: {item.tags.join(', ')}</span>
+											{/if}
+											<span>Importance: {item.importance_level}</span>
 										</div>
+										{#if item.main_entities.length > 0}
+											<div class="summary-entities">
+												<h4>Entities</h4>
+												<ul>
+													{#each item.main_entities as entity}
+														<li>{entity}</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+										{#if item.imports.length > 0}
+											<div class="summary-entities">
+												<h4>Imports</h4>
+												<ul>
+													{#each item.imports.slice(0, 20) as imp}
+														<li>{imp}</li>
+													{/each}
+													{#if item.imports.length > 20}
+														<li class="more">... and {item.imports.length - 20} more</li>
+													{/if}
+												</ul>
+											</div>
+										{/if}
 									{/if}
 								</div>
 							</details>
@@ -256,19 +269,9 @@
 			</Card>
 		{/if}
 	</div>
-</section>
+</div>
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 2rem;
-	}
-
 	.error-banner {
 		background: var(--danger);
 		color: var(--white);
@@ -479,6 +482,15 @@
 	.summary-body {
 		padding: 1rem;
 		border-top: 1px solid var(--gray-200);
+	}
+
+	.summary-body .error-message {
+		padding: 0.75rem;
+		background: var(--danger-bg, #fff2f0);
+		border: 1px solid var(--danger, #ff4d4f);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.8rem;
+		color: var(--danger-text, #cf1322);
 	}
 
 	.summary-text {

@@ -30,6 +30,7 @@ cd scripts && ./sync-frontend-preview.sh
 
 | 源文件 | 目标文件 | 说明 |
 |--------|----------|------|
+| `frontend/static/**/*` | `frontend-preview/static/**/*` | 所有静态资源（favicon、图片等） |
 | `frontend/src/app.html` | `frontend-preview/src/app.html` | HTML 模板 |
 | `frontend/src/app.css` | `frontend-preview/src/app.css` | 全局样式和设计系统 |
 | `frontend/src/lib/components/**/*` | `frontend-preview/src/lib/components/**/*` | 所有组件（ui、index、search、entities、tools） |

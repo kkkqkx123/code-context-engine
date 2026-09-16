@@ -25,6 +25,11 @@ if [ ! -d "$PREVIEW_DIR" ]; then
     exit 1
 fi
 
+# Sync static assets (favicon, images, etc.)
+echo "Syncing static assets..."
+mkdir -p "$PREVIEW_DIR/static"
+cp -r "$FRONTEND_DIR/static/." "$PREVIEW_DIR/static/"
+
 # Sync global styles and HTML template
 echo "Syncing global styles and HTML template..."
 cp "$FRONTEND_DIR/src/app.html" "$PREVIEW_DIR/src/"
@@ -66,6 +71,7 @@ rm "$PREVIEW_DIR/package.json.tmp"
 echo "=== Sync complete ==="
 echo ""
 echo "Files synced:"
+echo "  - static/**/* (all static assets, e.g. favicon.png)"
 echo "  - src/app.html, src/app.css"
 echo "  - src/lib/components/**/* (all components)"
 echo "  - src/lib/stores/*.ts (all stores)"

@@ -136,16 +136,6 @@
 </div>
 
 <style>
-	h1 {
-		margin-bottom: 0.5rem;
-	}
-
-	.page-description {
-		font-size: 1.1rem;
-		color: var(--gray-600);
-		margin-bottom: 3rem;
-	}
-
 	.filter-toggle {
 		margin-bottom: 1.5rem;
 	}
@@ -189,16 +179,6 @@
 		font-family: 'Space Mono', monospace;
 		text-transform: uppercase;
 		letter-spacing: 0.1em;
-	}
-
-	.results-header {
-		display: grid;
-		grid-template-columns: 1fr auto;
-		gap: 2rem;
-		align-items: center;
-		margin-bottom: 2rem;
-		padding-bottom: 1rem;
-		border-bottom: 1px solid var(--gray-200);
 	}
 
 	.results-title {

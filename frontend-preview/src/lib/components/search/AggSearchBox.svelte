@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { searchApi, type SubQuery } from '$lib/api/search';
+	import { currentProjectId } from '$lib/stores/project';
+	import { get } from 'svelte/store';
 
 	interface Props {
 		placeholder?: string;
@@ -54,7 +56,7 @@
 			}
 
 			const response = await searchApi.aggregatedSearch({
-				project_id: 1, // TODO: Get from context or config
+				project_id: get(currentProjectId),
 				sub_queries: subQueries,
 				limit
 			});

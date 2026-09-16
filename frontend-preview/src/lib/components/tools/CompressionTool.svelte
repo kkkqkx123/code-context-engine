@@ -1,12 +1,11 @@
 <script lang="ts">
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import CodeBlock from '$lib/components/ui/CodeBlock.svelte';
 	import { toolsApi } from '$lib/api/tools';
+	import type { CompressApiResponse } from '$lib/api/tools';
 
 	let filePath = $state('');
-	let language = $state('typescript');
-	let result: any = $state(null);
+	let result: CompressApiResponse | null = $state(null);
 	let loading = $state(false);
 	let error: string | null = $state(null);
 
@@ -47,17 +46,6 @@
 						class="file-path-input"
 					/>
 				</div>
-				<div class="input-header">
-					<label class="field-label" for="compress-language">Language (optional)</label>
-					<select id="compress-language" bind:value={language} class="select-input">
-						<option value="typescript">TypeScript</option>
-						<option value="javascript">JavaScript</option>
-						<option value="rust">Rust</option>
-						<option value="python">Python</option>
-						<option value="go">Go</option>
-						<option value="java">Java</option>
-					</select>
-				</div>
 				<div class="tool-actions">
 					<Button
 						onclick={handleCompress}
@@ -72,21 +60,24 @@
 		{#snippet right()}
 			<div class="tool-output">
 				{#if result}
-					<div class="compression-stats">
-						<div class="stat-item">
-							<span class="stat-label">Original Tokens:</span>
-							<span class="stat-value">{result.original_tokens}</span>
+					<div class="compression-info">
+						<div class="info-row">
+							<span class="info-label">Language:</span>
+							<span class="info-value">{result.language}</span>
 						</div>
-						<div class="stat-item">
-							<span class="stat-label">Compressed Tokens:</span>
-							<span class="stat-value">{result.compressed_tokens}</span>
+						<div class="info-row">
+							<span class="info-label">File Hash:</span>
+							<span class="info-value hash">{result.file_hash}</span>
 						</div>
-						<div class="stat-item highlight">
-							<span class="stat-label">Reduction:</span>
-							<span class="stat-value">{result.reduction_percentage.toFixed(1)}%</span>
+						<div class="info-row">
+							<span class="info-label">From Cache:</span>
+							<span class="info-value">{result.from_cache ? 'Yes' : 'No'}</span>
 						</div>
 					</div>
-					<CodeBlock code={result.compressed_code} language={language} />
+					<div class="semantic-text">
+						<h3>Semantic Text</h3>
+						<div class="text-content">{result.semantic_text}</div>
+					</div>
 				{:else}
 					<div class="empty-output">Results will appear here...</div>
 				{/if}
@@ -132,21 +123,6 @@
 		margin-bottom: 0.5rem;
 	}
 
-	.select-input {
-		width: 100%;
-		padding: 0.75rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.9rem;
-		background: var(--white);
-		cursor: pointer;
-	}
-
-	.select-input:focus {
-		outline: none;
-		border-color: var(--accent);
-	}
-
 	.file-path-input {
 		width: 100%;
 		padding: 0.75rem;
@@ -177,44 +153,67 @@
 		font-style: italic;
 	}
 
-	.compression-stats {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 1rem;
+	.compression-info {
+		padding: 1rem;
+		border: 1px solid var(--gray-200);
 		margin-bottom: 1.5rem;
 	}
 
-	.stat-item {
-		padding: 1rem;
-		border: 1px solid var(--gray-200);
-		text-align: center;
+	.info-row {
+		display: flex;
+		justify-content: space-between;
+		padding: 0.5rem 0;
+		border-bottom: 1px solid var(--gray-100);
 	}
 
-	.stat-item.highlight {
-		border-color: var(--accent);
-		background: var(--accent-bg);
+	.info-row:last-child {
+		border-bottom: none;
 	}
 
-	.stat-label {
-		display: block;
+	.info-label {
 		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
+		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.1em;
 		color: var(--gray-600);
-		margin-bottom: 0.5rem;
 	}
 
-	.stat-value {
-		font-family: 'Space Grotesk', sans-serif;
-		font-size: 1.5rem;
-		font-weight: 700;
+	.info-value {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.85rem;
 		color: var(--black);
 	}
 
-	@media (max-width: 1024px) {
-		.compression-stats {
-			grid-template-columns: 1fr;
-		}
+	.info-value.hash {
+		font-size: 0.7rem;
+		word-break: break-all;
+	}
+
+	.semantic-text {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.semantic-text h3 {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+		margin-bottom: 1rem;
+	}
+
+	.text-content {
+		flex: 1;
+		padding: 1rem;
+		background: var(--gray-50);
+		border: 1px solid var(--gray-200);
+		font-family: 'Space Grotesk', sans-serif;
+		font-size: 0.95rem;
+		line-height: 1.6;
+		color: var(--gray-800);
+		white-space: pre-wrap;
+		overflow-y: auto;
 	}
 </style>

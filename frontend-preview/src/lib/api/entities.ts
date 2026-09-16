@@ -26,6 +26,7 @@ export interface FunctionInfo {
 export interface FunctionDetailResponse {
 	success: boolean;
 	function: FunctionInfo;
+	relation_info?: Record<string, unknown>;
 }
 
 export interface FunctionCallsResponse {
@@ -35,6 +36,7 @@ export interface FunctionCallsResponse {
 	function_name: string;
 	callees: CallChainNode[];
 	total_callees: number;
+	relation_info?: Record<string, unknown>;
 }
 
 export interface FunctionCallersResponse {
@@ -44,6 +46,7 @@ export interface FunctionCallersResponse {
 	function_name: string;
 	callers: CallChainNode[];
 	total_callers: number;
+	relation_info?: Record<string, unknown>;
 }
 
 export interface CallChainResponse {
@@ -53,6 +56,7 @@ export interface CallChainResponse {
 	function_name: string;
 	direction: string;
 	call_chain: CallChainNode[];
+	relation_info?: Record<string, unknown>;
 }
 
 export interface CallPathResponse {
@@ -63,6 +67,7 @@ export interface CallPathResponse {
 	path_found: boolean;
 	path: CallChainNode[];
 	path_length: number;
+	relation_info?: Record<string, unknown>;
 }
 
 export interface ClassRelation {
@@ -79,6 +84,7 @@ export interface ClassInheritanceResponse {
 	class_name: string;
 	base_classes: ClassRelation[];
 	derived_classes: ClassRelation[];
+	relation_info?: Record<string, unknown>;
 }
 
 export interface InterfaceRelation {
@@ -94,6 +100,7 @@ export interface ClassImplementationsResponse {
 	class_name: string;
 	implemented_interfaces: InterfaceRelation[];
 	implementing_classes: ClassRelation[];
+	relation_info?: Record<string, unknown>;
 }
 
 export const entityApi = {
