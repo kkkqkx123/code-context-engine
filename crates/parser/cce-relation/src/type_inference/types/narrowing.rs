@@ -513,7 +513,7 @@ pub fn guard_fallthrough_bindings(
 /// variables with no then-side result.
 fn negated_guard_positive(text: &str, language: Language) -> Vec<(String, TypeBinding)> {
     let mut out = Vec::new();
-    let mut push = |var: &str, ty: &str, out: &mut Vec<(String, TypeBinding)>| {
+    let push = |var: &str, ty: &str, out: &mut Vec<(String, TypeBinding)>| {
         let var = var.trim();
         let ty = ty.trim().trim_end_matches([')', '{', ';', ',']).trim();
         if var.is_empty() || !is_valid_ident(var) || ty.is_empty() {

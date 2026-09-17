@@ -732,7 +732,7 @@ pub fn dependency_query() -> &'static str {
 ; ============================================
 
 ; TypeVar definition: T = TypeVar('T', bound=Base)
-; Captures the constraint information for generic type parameters
+; Captured as constraint information for generic type parameters
 (expression_statement
   (assignment
     left: (identifier) @dependency.type_constraint.param
@@ -742,24 +742,6 @@ pub fn dependency_query() -> &'static str {
     )
   )
 ) @dependency.type_constraint
-
-; Enum Variant Dependencies
-; In Python enums, variants can reference other types:
-; class Status(Enum):
-;   ACTIVE = 1
-;   PENDING = 2
-; Captured as variant assignments within enum class body
-(class_definition
-  superclasses: (argument_list (identifier) @dependency.enum.base)
-  body: (block
-    (expression_statement
-      (assignment
-        left: (identifier) @dependency.enum.variant.name
-        right: (_) @dependency.enum.variant.value
-      )
-    )
-  )
-) @dependency.enum
 
 "#
 }
