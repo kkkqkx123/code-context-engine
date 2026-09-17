@@ -222,16 +222,16 @@ impl CohereRerankProvider {
     }
 
     /// Build the Cohere-compatible rerank request body.
+    ///
+    /// SiliconFlow's `/rerank` endpoint requires `documents` to be plain
+    /// strings; object entries are rejected with `Input should be a valid
+    /// string`. Response items carry only an `index`, so candidate identity
+    /// is recovered positionally and no per-document id is sent.
     fn build_request_body(&self, request: &RerankRequest) -> serde_json::Value {
-        let documents: Vec<serde_json::Value> = request
+        let documents: Vec<String> = request
             .candidates
             .iter()
-            .map(|candidate| {
-                serde_json::json!({
-                    "id": candidate.id,
-                    "text": truncate_content(&candidate.content, 500),
-                })
-            })
+            .map(|candidate| truncate_content(&candidate.content, 500))
             .collect();
 
         serde_json::json!({
@@ -458,8 +458,9 @@ mod tests {
         assert_eq!(body["top_n"], 2);
         let documents = body["documents"].as_array().expect("documents array");
         assert_eq!(documents.len(), 2);
-        assert_eq!(documents[0]["id"], "c1");
-        assert!(documents[0]["text"].as_str().unwrap().contains("fn main()"));
+        assert!(documents.iter().all(|doc| doc.is_string()));
+        assert!(documents[0].as_str().unwrap().contains("fn main()"));
+        assert!(documents[1].as_str().unwrap().contains("pub fn start()"));
     }
 
     #[test]

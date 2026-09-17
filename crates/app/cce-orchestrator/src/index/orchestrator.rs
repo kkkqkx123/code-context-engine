@@ -39,12 +39,12 @@ use cce_config::modules::summary::SummaryGenerationStrategy as SummaryStrategy;
 use cce_config::{AstToNlConfig, BatchConfig, NestProcessorConfig, RelationConfig, SummaryConfig};
 use cce_llm::ChatConfig;
 use cce_llm_client::HttpLlmClient;
+use cce_metrics::ProgressTracker;
 use cce_metrics::{
     FileProcessingMetrics, MetricsRegistry, ParserMetrics, PipelineStage, PipelineStageMetrics,
     RelationMetrics, SummaryMetrics,
 };
 use cce_metrics::{ScannerMetrics, SearchMetrics};
-use cce_metrics::ProgressTracker;
 use cce_parser::summary::{
     FileSummary, ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator,
 };

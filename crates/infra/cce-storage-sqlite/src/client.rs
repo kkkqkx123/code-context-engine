@@ -514,9 +514,7 @@ impl cce_metrics::SqliteStore for SqliteClient {
         &self,
         sql: &str,
         params: &[&dyn rusqlite::ToSql],
-        f: &mut dyn FnMut(
-            &rusqlite::Row<'_>,
-        ) -> rusqlite::Result<cce_metrics::AggregatedMetric>,
+        f: &mut dyn FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<cce_metrics::AggregatedMetric>,
     ) -> Result<Vec<cce_metrics::AggregatedMetric>, StorageError> {
         let conn = self.read_connection()?;
         let mut stmt = conn

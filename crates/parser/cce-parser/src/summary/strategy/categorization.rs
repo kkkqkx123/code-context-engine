@@ -78,8 +78,6 @@ pub fn is_entity_public(entity: &Entity) -> bool {
         || sig_lower.starts_with("export default ")
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +312,4 @@ mod tests {
         };
         assert!(!is_entity_public(&entity));
     }
-
 }

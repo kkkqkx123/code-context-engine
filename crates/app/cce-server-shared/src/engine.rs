@@ -154,8 +154,7 @@ impl CodeContextEngine {
         if config.metrics.memory.eviction_enabled {
             metrics_registry.start_cleanup_task();
         }
-        let metrics_system_metrics =
-            cce_metrics::MetricsSystemMetrics::new(&metrics_registry);
+        let metrics_system_metrics = cce_metrics::MetricsSystemMetrics::new(&metrics_registry);
 
         // Create SQLite client
         let sqlite_config = config.database.sqlite.clone();

@@ -147,8 +147,7 @@ pub(crate) fn build_rerank_handler(
     )
     .map_err(EngineError::Llm)?;
 
-    let rerank_metrics =
-        cce_metrics::RerankMetrics::new(metrics_registry, &config.rerank.model);
+    let rerank_metrics = cce_metrics::RerankMetrics::new(metrics_registry, &config.rerank.model);
 
     // Select the provider implementation by the model's configured mode.
     let handler = match rerank_model_config.mode {

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::time::{self, Duration};
 use tracing::{debug, error, info, warn};
 
-use crate::{BackgroundTaskMetrics, MetricKey, MetricsRegistry, MetricsSystemMetrics};
 use crate::store::{AggregatedMetric, SqliteStore};
+use crate::{BackgroundTaskMetrics, MetricKey, MetricsRegistry, MetricsSystemMetrics};
 
 /// Configuration for the aggregation engine
 #[derive(Debug, Clone)]
