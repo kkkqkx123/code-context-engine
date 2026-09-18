@@ -523,6 +523,8 @@ store_vectors = true
 store_bm25 = true
 # Store file summaries
 store_summaries = true
+# Embed summary vectors into Qdrant (false = export-only: text is kept, vectors skipped)
+embed_summaries = true
 # Build relation index
 build_relations = true
 

@@ -501,6 +501,14 @@ pub struct IndexerConfig {
     /// Store file summaries
     #[serde(default = "default_true")]
     pub store_summaries: bool,
+    /// Embed file summary vectors into Qdrant.
+    ///
+    /// When `false` (e.g. export-only mode), summary text is still generated
+    /// and persisted to SQLite and BM25 for NL document export, but the
+    /// summary vector embedding step is skipped so the vector store is not
+    /// populated with summary points.
+    #[serde(default = "default_true")]
+    pub embed_summaries: bool,
     /// Build relation index during full indexing.
     ///
     /// This flag controls whether the relation index is built during
@@ -566,6 +574,7 @@ impl Default for IndexerConfig {
             store_vectors: false,
             store_bm25: false,
             store_summaries: true,
+            embed_summaries: true,
             build_relations: true,
         }
     }

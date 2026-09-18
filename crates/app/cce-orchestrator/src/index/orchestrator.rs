@@ -442,6 +442,11 @@ impl IndexOrchestrator {
             "Started project index epoch"
         );
 
+        // Apply per-run summary embedding policy to the storage coordinator.
+        // Export-only runs (embed_summaries=false) keep generating summary text
+        // but skip writing summary vectors to Qdrant.
+        self.storage.set_embed_summaries(options.embed_summaries);
+
         // ===== CHECKPOINT RECOVERY (before creating new operation) =====
         // Check if we can resume from a previous checkpoint FIRST,
         // before creating a new operation/checkpoint.

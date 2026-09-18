@@ -246,6 +246,7 @@ impl super::CodeContextEngine {
         options.store_vectors = indexer_config.store_vectors;
         options.store_bm25 = indexer_config.store_bm25;
         options.store_summaries = indexer_config.store_summaries;
+        options.embed_summaries = indexer_config.embed_summaries;
         options.build_relations =
             indexer_config.build_relations && project_config.relation.index.enabled;
 

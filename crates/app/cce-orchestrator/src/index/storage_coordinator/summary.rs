@@ -37,8 +37,11 @@ impl<'a> SummaryStorage<'a> {
             return Ok(0);
         }
 
-        // Store to Qdrant vectors
-        self.store_vectors(summaries).await?;
+        // Store to Qdrant vectors (skipped when summary embedding is disabled,
+        // e.g. export-only mode).
+        if self.coordinator.embed_summaries() {
+            self.store_vectors(summaries).await?;
+        }
 
         // Store to SQLite metadata
         self.store_metadata(summaries).await?;
