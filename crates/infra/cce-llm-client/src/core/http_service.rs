@@ -105,6 +105,7 @@ impl HttpRequestService {
                 if let Some(metrics) = &self.retry_metrics {
                     metrics.record_circuit_rejection();
                 }
+                error!("Circuit breaker is open; LLM request rejected");
                 Err(LlmError::api("Circuit breaker is open"))
             }
         }
@@ -192,8 +193,10 @@ impl HttpRequestService {
         body: &T,
     ) -> Result<R, LlmError> {
         let response_text = self.send_post_request_raw(endpoint, body).await?;
-        serde_json::from_str(&response_text)
-            .map_err(|e| LlmError::invalid_response(format!("Failed to parse response: {}", e)))
+        serde_json::from_str(&response_text).map_err(|e| {
+            warn!(error = %e, "Failed to parse LLM response");
+            LlmError::invalid_response(format!("Failed to parse response: {}", e))
+        })
     }
 
     /// Send POST request with JSON body (single attempt, returns raw text)
@@ -231,7 +234,7 @@ impl HttpRequestService {
         );
 
         let response = req.send().await.map_err(|e| {
-            error!(error = %e, "Request failed to send");
+            warn!(error = %e, "Request failed to send");
             LlmError::http(format!("Request failed: {}", e))
         })?;
 
@@ -247,6 +250,7 @@ impl HttpRequestService {
 
         if status == 429 {
             let retry_after_ms = parse_retry_after_ms(response.headers());
+            warn!(retry_after_ms, "LLM rate limit exceeded");
             self.rate_limiter.on_rate_limit(retry_after_ms).await;
             return Err(LlmError::rate_limit_exceeded(retry_after_ms));
         }
@@ -254,7 +258,7 @@ impl HttpRequestService {
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             let body_preview: String = body.chars().take(1000).collect();
-            error!(status = %status, response_length = body.len(), "LLM API error");
+            warn!(status = %status, response_length = body.len(), "LLM API error");
 
             return Err(match status.as_u16() {
                 401 => LlmError::auth(format!("Authentication failed: {body_preview}")),
@@ -267,7 +271,7 @@ impl HttpRequestService {
         self.rate_limiter.on_success().await;
 
         let response_body = response.text().await.map_err(|e| {
-            error!(error = %e, "Failed to read response body");
+            warn!(error = %e, "Failed to read response body");
             LlmError::http(format!("Failed to read response: {}", e))
         })?;
 

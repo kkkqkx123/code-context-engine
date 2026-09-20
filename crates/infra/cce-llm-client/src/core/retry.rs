@@ -5,7 +5,7 @@
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use cce_llm::LlmRetryErrorClass;
 
@@ -118,6 +118,11 @@ impl RetryPolicy {
                         if let Some(metrics) = metrics {
                             metrics.record_failure(error_class.as_str());
                         }
+                        error!(
+                            error = %err,
+                            error_class = error_class.as_str(),
+                            "LLM request failed without retry"
+                        );
                         return Err(err);
                     }
 
@@ -125,6 +130,13 @@ impl RetryPolicy {
                         if let Some(metrics) = metrics {
                             metrics.record_exhausted(error_class.as_str());
                         }
+                        error!(
+                            error = %err,
+                            error_class = error_class.as_str(),
+                            attempts = attempt + 1,
+                            max_retries = self.retry_budget(&err),
+                            "LLM request failed after retries exhausted"
+                        );
                         return Err(err);
                     }
 
@@ -147,6 +159,7 @@ impl RetryPolicy {
             }
         }
 
+        error!("LLM request failed after retries exhausted");
         Err(LlmError::api("Max retries exceeded"))
     }
 
@@ -168,10 +181,20 @@ impl RetryPolicy {
                     error_handler(&err, attempt);
 
                     if !self.should_retry(&err) {
+                        error!(
+                            error = %err,
+                            "LLM request failed without retry"
+                        );
                         return Err(err);
                     }
 
                     if attempt >= self.retry_budget(&err) {
+                        error!(
+                            error = %err,
+                            attempts = attempt + 1,
+                            max_retries = self.retry_budget(&err),
+                            "LLM request failed after retries exhausted"
+                        );
                         return Err(err);
                     }
 
@@ -181,6 +204,7 @@ impl RetryPolicy {
             }
         }
 
+        error!("LLM request failed after retries exhausted");
         Err(LlmError::api("Max retries exceeded"))
     }
 

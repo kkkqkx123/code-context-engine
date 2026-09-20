@@ -126,8 +126,7 @@ pub async fn handle_config_reload(
             let mut processor_config = ProcessorConfig::new();
             processor_config.enable_export = project_config.export.enabled;
             processor_config.enable_summary = project_config.orchestrator.indexer.store_summaries;
-            processor_config.embed_summaries =
-                project_config.orchestrator.indexer.embed_summaries;
+            processor_config.embed_summaries = project_config.orchestrator.indexer.embed_summaries;
             processor_config.export_config = if project_config.export.enabled {
                 Some(cce_orchestrator::ExportConfig::from_module_config(
                     &project_config.export,
