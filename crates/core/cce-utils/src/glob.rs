@@ -129,48 +129,56 @@ fn tokenize(pattern: &str) -> Result<Vec<Token>, String> {
 }
 
 fn match_tokens(tokens: &[Token], path: &str, ti: usize, pi: usize) -> bool {
+    // `pi` is a byte index into `path`. Every recursive call must stay on a
+    // UTF-8 char boundary; slicing `path[pi..]` panics otherwise (CJK paths).
+    let rest = match path.get(pi..) {
+        Some(rest) => rest,
+        None => return false,
+    };
+
     if ti == tokens.len() {
-        return pi == path.len();
+        return rest.is_empty();
     }
 
     match &tokens[ti] {
         Token::Literal(lit) => {
-            if path[pi..].starts_with(lit.as_str()) {
+            if rest.starts_with(lit.as_str()) {
                 match_tokens(tokens, path, ti + 1, pi + lit.len())
             } else {
                 false
             }
         }
         Token::Wildcard => {
-            // * matches anything except /
-            for i in pi..path.len() {
-                if path.as_bytes()[i] == b'/' {
+            // * matches any sequence of characters except '/'
+            if match_tokens(tokens, path, ti + 1, pi) {
+                return true;
+            }
+            for (off, c) in rest.char_indices() {
+                if c == '/' {
                     break;
                 }
-                if match_tokens(tokens, path, ti + 1, i + 1) {
-                    return true;
-                }
-            }
-            // Also match empty string
-            match_tokens(tokens, path, ti + 1, pi)
-        }
-        Token::Recursive => {
-            // ** matches everything including /
-            // Try matching the rest of the tokens at every position
-            for i in pi..=path.len() {
-                if match_tokens(tokens, path, ti + 1, i) {
+                if match_tokens(tokens, path, ti + 1, pi + off + c.len_utf8()) {
                     return true;
                 }
             }
             false
         }
-        Token::SingleChar => {
-            if pi < path.len() && path.as_bytes()[pi] != b'/' {
-                match_tokens(tokens, path, ti + 1, pi + 1)
-            } else {
-                false
+        Token::Recursive => {
+            // ** matches everything including '/'
+            if match_tokens(tokens, path, ti + 1, pi) {
+                return true;
             }
+            for (off, c) in rest.char_indices() {
+                if match_tokens(tokens, path, ti + 1, pi + off + c.len_utf8()) {
+                    return true;
+                }
+            }
+            false
         }
+        Token::SingleChar => match rest.chars().next() {
+            Some(c) if c != '/' => match_tokens(tokens, path, ti + 1, pi + c.len_utf8()),
+            _ => false,
+        },
     }
 }
 
@@ -198,5 +206,35 @@ mod tests {
         let g = Glob::new("src/main.rs").unwrap();
         assert!(g.is_match(Path::new("src/main.rs")));
         assert!(!g.is_match(Path::new("src/lib.rs")));
+    }
+
+    #[test]
+    fn test_cjk_filename_wildcard() {
+        let g = Glob::new("*.md").expect("glob");
+        assert!(g.is_match(Path::new("大纲.md")));
+        assert!(g.is_match(Path::new("docs/中文文档.md")));
+        assert!(!g.is_match(Path::new("大纲.txt")));
+    }
+
+    #[test]
+    fn test_cjk_path_components() {
+        let g = Glob::new("**/*.rs").expect("glob");
+        assert!(g.is_match(Path::new("src/测试/模块.rs")));
+        assert!(g.is_match(Path::new("大纲.rs")));
+    }
+
+    #[test]
+    fn test_cjk_single_char_wildcard() {
+        let g = Glob::new("?纲.md").expect("glob");
+        assert!(g.is_match(Path::new("大纲.md")));
+        assert!(!g.is_match(Path::new("xx纲.md")));
+        assert!(!g.is_match(Path::new("纲.md")));
+    }
+
+    #[test]
+    fn test_cjk_literal_and_prefix() {
+        let g = Glob::new("docs/中文/*.md").expect("glob");
+        assert!(g.is_match(Path::new("docs/中文/大纲.md")));
+        assert!(!g.is_match(Path::new("docs/英文/大纲.md")));
     }
 }
