@@ -10,8 +10,7 @@ use super::concatenator::StructureConcatenator;
 use super::error::Result;
 use super::extractor::SemanticUnitExtractor;
 use super::types::{
-    AssembledResult, AssemblyMetadata, CallChainAssembly, ExpandedUnit, SPSRGraphConfig,
-    SearchResultInput,
+    AssembledResult, AssemblyMetadata, ExpandedUnit, SPSRGraphConfig, SearchResultInput,
 };
 
 /// SPSR-Graph assembler
@@ -67,22 +66,12 @@ impl SPSRGraphAssembler {
 
         // 3. Build metadata
         let metadata = AssemblyMetadata {
-            expanded: false,
+            expanded: true,
             expanded_nodes: 0,
             file_count: involved_files.len(),
-            strategy: self.config.expansion_strategy,
-            max_depth: 0,
             original_length: input.content.len(),
             assembled_length: assembled_content.len(),
             truncated: assembled_content.len() >= self.config.get_max_length(),
-        };
-
-        // 4. Build call chain assembly
-        let call_chain = CallChainAssembly {
-            forward_expansion: Vec::new(),
-            backward_expansion: Vec::new(),
-            max_depth: 0,
-            total_nodes: 0,
         };
 
         Ok(AssembledResult {
@@ -94,7 +83,6 @@ impl SPSRGraphAssembler {
             score: input.score,
             start_line: input.start_line,
             end_line: input.end_line,
-            call_chain,
             assembled_content,
             involved_files,
             metadata,

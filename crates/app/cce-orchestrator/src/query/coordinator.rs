@@ -436,10 +436,6 @@ impl QueryCoordinator {
     /// Supports all search strategies based on SearchSources:
     /// - VectorOnly: Pure vector semantic search (BM25 for consensus boost only)
     /// - HybridFusion: Dense + BM25 hybrid search with application-level fusion
-    /// - WithAssembly: Search with SPSR-Graph assembly
-    ///
-    /// Assembly is now handled as a strategy within the Searcher,
-    /// so no special handling is needed here.
     ///
     /// # Fault Tolerance
     ///

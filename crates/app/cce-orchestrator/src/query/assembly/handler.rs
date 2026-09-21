@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::query::assembly::{
-    AssembledResult, ExpansionStrategy, SPSRGraphAssembler, SearchResultInput,
+    AssembledResult, SPSRGraphAssembler, SearchResultInput,
 };
 use crate::query::error::{QueryError, Result};
 use crate::query::types::SearchResult;
@@ -30,8 +30,6 @@ impl AssemblyHandler {
     pub async fn assemble_results(
         &self,
         results: Vec<SearchResult>,
-        _depth: usize,
-        _expansion_strategy: ExpansionStrategy,
     ) -> Result<Vec<SearchResult>> {
         let mut assembled_items = Vec::new();
 
@@ -67,13 +65,6 @@ impl AssemblyHandler {
         assembled: AssembledResult,
         original: SearchResult,
     ) -> SearchResult {
-        // Use assembled content if available, otherwise use original
-        let content = if assembled.metadata.expanded {
-            assembled.assembled_content
-        } else {
-            assembled.original_content
-        };
-
         SearchResult {
             id: assembled.id,
             entity_ids: original.entity_ids,
@@ -87,32 +78,13 @@ impl AssemblyHandler {
             bm25_score: original.bm25_score,
             sources: original.sources,
             snippet: original.snippet,
-            content,
+            content: assembled.assembled_content,
             start_line: assembled.start_line,
             end_line: assembled.end_line,
             is_boosted: original.is_boosted,
             boost_reason: original.boost_reason,
             category: None,
-            metadata: {
-                let mut metadata = original.metadata;
-                metadata.insert(
-                    "assembly_expanded".to_string(),
-                    assembled.metadata.expanded.to_string(),
-                );
-                metadata.insert(
-                    "assembly_nodes".to_string(),
-                    assembled.metadata.expanded_nodes.to_string(),
-                );
-                metadata.insert(
-                    "assembly_files".to_string(),
-                    assembled.metadata.file_count.to_string(),
-                );
-                metadata.insert(
-                    "assembly_strategy".to_string(),
-                    format!("{:?}", assembled.metadata.strategy),
-                );
-                metadata
-            },
+            metadata: original.metadata,
             pattern_info: original.pattern_info.clone(),
         }
     }

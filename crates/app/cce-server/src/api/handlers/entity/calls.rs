@@ -132,11 +132,19 @@ pub async fn handle_function_calls(
         }
     };
 
-    let Some(entity_id) = snapshot.index.get_entity_id_by_stable_symbol_id(&id) else {
-        return CallsApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Unknown stable symbol ID".to_string(),
-        ));
+    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
+        Some(eid) => eid,
+        None => {
+            // Try parsing as numeric ID for backwards compatibility
+            if let Ok(numeric_id) = id.parse::<u64>() {
+                cce_types::EntityId(numeric_id)
+            } else {
+                return CallsApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Unknown stable symbol ID".to_string(),
+                ));
+            }
+        }
     };
 
     // Use cached RelationSearcher (LRU) instead of per-request CallChainQuery
@@ -268,11 +276,19 @@ pub async fn handle_function_callers(
         }
     };
 
-    let Some(entity_id) = snapshot.index.get_entity_id_by_stable_symbol_id(&id) else {
-        return CallsApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Unknown stable symbol ID".to_string(),
-        ));
+    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
+        Some(eid) => eid,
+        None => {
+            // Try parsing as numeric ID for backwards compatibility
+            if let Ok(numeric_id) = id.parse::<u64>() {
+                cce_types::EntityId(numeric_id)
+            } else {
+                return CallsApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Unknown stable symbol ID".to_string(),
+                ));
+            }
+        }
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,

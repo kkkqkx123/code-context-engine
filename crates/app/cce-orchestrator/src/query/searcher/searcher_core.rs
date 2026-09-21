@@ -119,7 +119,6 @@ impl Searcher {
     ///    - Bm25Recall: Pure BM25 keyword recall (independent path)
     ///    - HybridRecall: Vector + BM25 parallel recall with weighted normalization fusion
     /// - DenseRecall: Pure dense vector recall
-    /// - WithAssembly: Search with SPSR-Graph assembly
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
         let project_id = self.scope.project_id();
         if project_id != options.project_id {
@@ -143,32 +142,7 @@ impl Searcher {
             let strategy = options.execution_strategy();
 
             // Execute search flow (retrieval + fusion + ranking)
-            let mut results = self.execute_search_flow(&options, &strategy).await?;
-
-            // Apply assembly after search flow if enabled
-            if let ExecutionStrategy::WithAssembly {
-                depth,
-                strategy: expansion_strategy,
-                ..
-            } = &strategy
-            {
-                if let Some(ref handler) = self.assembly_handler {
-                    tracing::trace!(
-                        depth = depth,
-                        strategy = ?expansion_strategy,
-                        "Applying SPSR-Graph assembly"
-                    );
-                    let assembly_start = std::time::Instant::now();
-                    results = handler
-                        .assemble_results(results, *depth, *expansion_strategy)
-                        .await?;
-                    let assembly_elapsed = assembly_start.elapsed();
-                    tracing::trace!(
-                        elapsed_ms = assembly_elapsed.as_millis(),
-                        "SPSR-Graph assembly completed"
-                    );
-                }
-            }
+            let results = self.execute_search_flow(&options, &strategy).await?;
 
             let elapsed_ms = start.elapsed().as_millis() as u64;
             tracing::trace!(
@@ -512,9 +486,6 @@ impl Searcher {
         // ============================================================================
         let recall_algo = match strategy {
             ExecutionStrategy::DenseRecall => RecallAlgorithm::Dense,
-            ExecutionStrategy::WithAssembly { base, .. } => {
-                return Box::pin(self.execute_search_flow(options, base)).await;
-            }
             ExecutionStrategy::Bm25Recall | ExecutionStrategy::HybridRecall { .. } => {
                 unreachable!("Bm25Recall and HybridRecall are handled above")
             }

@@ -4,7 +4,7 @@
 //! Uses unit-level boundaries (from AST parsing) rather than text pattern matching.
 
 use super::aggregator::{AggregatedSegment, SegmentAggregator};
-use super::types::{ExpandedUnit, FileInfo, RelationType, SPSRGraphConfig, UnitPriority};
+use super::types::{ExpandedUnit, FileInfo, SPSRGraphConfig};
 use cce_utils::file::read_file_to_utf8_async;
 
 /// Structure-aware concatenator
@@ -37,32 +37,13 @@ impl StructureConcatenator {
     pub async fn concatenate(
         &self,
         primary: &ExpandedUnit,
-        forward: &[ExpandedUnit],
-        backward: &[ExpandedUnit],
+        _forward: &[ExpandedUnit],
+        _backward: &[ExpandedUnit],
     ) -> (String, Vec<FileInfo>) {
-        // Collect all units with their priorities
-        let mut all_units_with_priority: Vec<(ExpandedUnit, UnitPriority)> = Vec::new();
-        all_units_with_priority.push((primary.clone(), UnitPriority::Primary));
-
-        for unit in forward {
-            all_units_with_priority.push((unit.clone(), unit.priority()));
-        }
-        for unit in backward {
-            all_units_with_priority.push((unit.clone(), unit.priority()));
-        }
-
-        // Sort by priority (lowest enum value = highest priority)
-        all_units_with_priority.sort_by_key(|(_, priority)| *priority as u8);
-
-        // Extract sorted units
-        let units_only: Vec<ExpandedUnit> = all_units_with_priority
-            .iter()
-            .map(|(u, _)| u.clone())
-            .collect();
-
-        // Aggregate segments once
+        // Aggregate segments from the primary unit
+        let units = vec![primary.clone()];
         let aggregator = SegmentAggregator::new(self.config.clone());
-        let mut segments = aggregator.aggregate(units_only);
+        let mut segments = aggregator.aggregate(units);
 
         // Integrate file coverage check
         if self.config.enable_file_coverage_threshold {
@@ -138,15 +119,6 @@ impl StructureConcatenator {
                 .or_insert_with(|| FileInfo::new(segment.file_path.clone()));
         }
 
-        // Add segment marker
-        if self.config.include_relation_markers {
-            let marker = self.format_segment_marker(segment);
-            if !marker.is_empty() {
-                result.push_str(&marker);
-                result.push('\n');
-            }
-        }
-
         // Add the code
         result.push_str(&segment.code);
         result.push('\n');
@@ -172,14 +144,6 @@ impl StructureConcatenator {
         if self.config.include_file_markers && *current_file != Some(segment.file_path.clone()) {
             let marker = self.format_file_marker(&segment.file_path);
             token_count += TokenEstimator::estimate(&marker) + 1; // Marker + newline
-        }
-
-        // Calculate actual relation marker size
-        if self.config.include_relation_markers {
-            let marker = self.format_segment_marker(segment);
-            if !marker.is_empty() {
-                token_count += TokenEstimator::estimate(&marker) + 1; // Marker + newline
-            }
         }
 
         token_count
@@ -252,75 +216,6 @@ impl StructureConcatenator {
     /// Format a file marker
     fn format_file_marker(&self, file_path: &str) -> String {
         format!("// ===== File: {} =====", file_path)
-    }
-
-    /// Format a segment marker
-    fn format_segment_marker(&self, segment: &AggregatedSegment) -> String {
-        if segment.is_whole_file {
-            return format!(
-                "// [Whole File] {} ({} lines)",
-                segment.file_path, segment.end_line
-            );
-        }
-
-        if segment.source_units.len() == 1 {
-            // Single unit: use original relation marker
-            self.format_relation_marker(&segment.source_units[0])
-        } else {
-            // Merged segment: show summary
-            let names: Vec<&str> = segment
-                .source_units
-                .iter()
-                .map(|u| u.name.as_str())
-                .collect();
-            let names_str = names.join(" & ");
-            format!(
-                "// [Merged] {} (lines {}-{})",
-                names_str, segment.start_line, segment.end_line
-            )
-        }
-    }
-
-    /// Format a relation marker
-    fn format_relation_marker(&self, unit: &ExpandedUnit) -> String {
-        match unit.relation {
-            RelationType::Primary => {
-                format!(
-                    "// [Primary] {} ({}:{}-{})",
-                    unit.name, unit.file_path, unit.start_line, unit.end_line
-                )
-            }
-            RelationType::Caller => {
-                format!(
-                    "// [Caller] {} ({}:{}-{})",
-                    unit.name, unit.file_path, unit.start_line, unit.end_line
-                )
-            }
-            RelationType::Callee => {
-                format!(
-                    "// [Callee] {} ({}:{}-{})",
-                    unit.name, unit.file_path, unit.start_line, unit.end_line
-                )
-            }
-            RelationType::Sibling => {
-                format!(
-                    "// [Sibling] {} ({}:{}-{})",
-                    unit.name, unit.file_path, unit.start_line, unit.end_line
-                )
-            }
-            RelationType::BaseClass => {
-                format!(
-                    "// [BaseClass] {} ({}:{}-{})",
-                    unit.name, unit.file_path, unit.start_line, unit.end_line
-                )
-            }
-            RelationType::DerivedClass => {
-                format!(
-                    "// [DerivedClass] {} ({}:{}-{})",
-                    unit.name, unit.file_path, unit.start_line, unit.end_line
-                )
-            }
-        }
     }
 
     /// Simple concatenation without markers
@@ -420,25 +315,6 @@ mod tests {
         assert_eq!(marker, "// ===== File: src/main.rs =====");
     }
 
-    #[test]
-    fn test_format_relation_marker() {
-        let config = SPSRGraphConfig::default();
-        let concat = StructureConcatenator::new(config);
-
-        let unit = ExpandedUnit::new(
-            "fn foo() {}".to_string(),
-            "src/a.rs".to_string(),
-            1,
-            1,
-            "foo".to_string(),
-        )
-        .with_relation(RelationType::Callee);
-
-        let marker = concat.format_relation_marker(&unit);
-        assert!(marker.contains("[Callee]"));
-        assert!(marker.contains("foo"));
-    }
-
     #[tokio::test]
     async fn test_concatenate_respects_unit_boundaries() {
         let config = SPSRGraphConfig {
@@ -478,20 +354,9 @@ mod tests {
             1,
             1,
             "main".to_string(),
-        )
-        .with_relation(RelationType::Primary);
+        );
 
-        let callee = ExpandedUnit::new(
-            "fn helper() {}".to_string(),
-            "src/helper.rs".to_string(),
-            1,
-            1,
-            "helper".to_string(),
-        )
-        .with_relation(RelationType::Callee)
-        .with_depth(1);
-
-        let (result, _) = concat.concatenate(&primary, &[callee], &[]).await;
+        let (result, _) = concat.concatenate(&primary, &[], &[]).await;
 
         // Primary should always be included
         assert!(result.contains("main"));

@@ -94,14 +94,8 @@ impl SubGraph {
     }
 }
 
-/// Render a relation type with its stable display string.
-pub fn relation_label(relation_type: &RelationType) -> String {
-    relation_type.to_string()
-}
-
 /// Render an entity kind with its serialized name.
-pub fn kind_label(entity_id: EntityId, kind: &cce_types::EntityKind) -> String {
-    let _ = entity_id;
+pub fn kind_label(kind: &cce_types::EntityKind) -> String {
     serde_json::to_value(kind)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))

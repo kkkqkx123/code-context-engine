@@ -349,36 +349,6 @@ impl ScoreFusionStrategy {
 }
 
 // ============================================================================
-// Expansion strategy for SPSR-Graph
-// ============================================================================
-
-/// Expansion strategy for call chain traversal during SPSR-Graph assembly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ExpansionStrategy {
-    /// No expansion
-    None,
-    /// Forward only (get callees)
-    #[default]
-    ForwardOnly,
-    /// Backward only (get callers)
-    BackwardOnly,
-    /// Bidirectional expansion
-    Bidirectional,
-}
-
-impl std::fmt::Display for ExpansionStrategy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::None => write!(f, "none"),
-            Self::ForwardOnly => write!(f, "forward_only"),
-            Self::BackwardOnly => write!(f, "backward_only"),
-            Self::Bidirectional => write!(f, "bidirectional"),
-        }
-    }
-}
-
-// ============================================================================
 // Deduplication strategy for SPSR-Graph
 // ============================================================================
 
@@ -408,18 +378,10 @@ pub enum DedupStrategy {
 pub struct SPSRGraphConfig {
     /// Enable SPSR-Graph assembly
     pub enable_assembly: bool,
-    /// Expansion strategy
-    pub expansion_strategy: ExpansionStrategy,
-    /// Maximum expansion depth
-    pub max_expansion_depth: usize,
-    /// Maximum expanded nodes per result
-    pub max_expanded_nodes: usize,
     /// Maximum assembled content in tokens (using TokenEstimator)
     pub max_assembled_length: usize,
     /// Include file boundary markers
     pub include_file_markers: bool,
-    /// Include relation markers
-    pub include_relation_markers: bool,
     /// Deduplication strategy
     pub dedup_strategy: DedupStrategy,
     /// Number of top results to assemble
@@ -438,12 +400,8 @@ impl Default for SPSRGraphConfig {
     fn default() -> Self {
         Self {
             enable_assembly: false,
-            expansion_strategy: ExpansionStrategy::ForwardOnly,
-            max_expansion_depth: 2,
-            max_expanded_nodes: 5,
             max_assembled_length: 2500,
             include_file_markers: true,
-            include_relation_markers: true,
             dedup_strategy: DedupStrategy::ByEntityId,
             assembly_top_n: 3,
             enable_segment_merge: true,
@@ -467,24 +425,6 @@ impl SPSRGraphConfig {
     /// Enable or disable SPSR-Graph assembly (builder pattern).
     pub fn enable(mut self, enabled: bool) -> Self {
         self.enable_assembly = enabled;
-        self
-    }
-
-    /// Set the expansion strategy (builder pattern).
-    pub fn with_expansion_strategy(mut self, strategy: ExpansionStrategy) -> Self {
-        self.expansion_strategy = strategy;
-        self
-    }
-
-    /// Set the maximum expansion depth (builder pattern).
-    pub fn with_max_depth(mut self, depth: usize) -> Self {
-        self.max_expansion_depth = depth;
-        self
-    }
-
-    /// Set the maximum expanded nodes per result (builder pattern).
-    pub fn with_max_nodes(mut self, nodes: usize) -> Self {
-        self.max_expanded_nodes = nodes;
         self
     }
 
@@ -515,18 +455,6 @@ impl Validate for SPSRGraphConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
-        if self.max_expansion_depth == 0 {
-            errors.push(ConfigValidationError::invalid_field(
-                "max_expansion_depth",
-                "must be greater than 0",
-            ));
-        }
-        if self.max_expanded_nodes == 0 {
-            errors.push(ConfigValidationError::invalid_field(
-                "max_expanded_nodes",
-                "must be greater than 0",
-            ));
-        }
         if self.max_assembled_length == 0 {
             errors.push(ConfigValidationError::invalid_field(
                 "max_assembled_length",
@@ -551,24 +479,19 @@ impl Validate for SPSRGraphConfig {
 }
 
 impl SPSRGraphConfig {
-    /// Create a conservative SPSR-Graph configuration with shallow expansion.
+    /// Create a conservative SPSR-Graph configuration with shallow assembly.
     pub fn conservative() -> Self {
         Self {
             enable_assembly: true,
-            max_expansion_depth: 1,
-            max_expanded_nodes: 3,
             max_assembled_length: 1500,
             ..Self::default()
         }
     }
 
-    /// Create an aggressive SPSR-Graph configuration with deep expansion.
+    /// Create an aggressive SPSR-Graph configuration with deep assembly.
     pub fn aggressive() -> Self {
         Self {
             enable_assembly: true,
-            expansion_strategy: ExpansionStrategy::Bidirectional,
-            max_expansion_depth: 3,
-            max_expanded_nodes: 10,
             max_assembled_length: 5000,
             ..Self::default()
         }

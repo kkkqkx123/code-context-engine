@@ -413,22 +413,6 @@ impl QueryConfigBuilder {
         self
     }
 
-    /// Enable SPSR-Graph assembly
-    pub fn with_assembly(mut self, depth: usize) -> Self {
-        self.config.spsr_graph.enable_assembly = true;
-        self.config.spsr_graph.max_expansion_depth = depth;
-        self
-    }
-
-    /// Set assembly expansion strategy
-    pub fn assembly_strategy(
-        mut self,
-        strategy: crate::query::assembly::ExpansionStrategy,
-    ) -> Self {
-        self.config.spsr_graph.expansion_strategy = strategy;
-        self
-    }
-
     /// Enable summary pre-filter
     pub fn with_summary_pre_filter(mut self) -> Self {
         self.config.summary.enable_pre_filter = true;
@@ -570,10 +554,9 @@ impl QueryConfigBuilder {
             .build(query)
     }
 
-    /// Code exploration preset: with assembly for context-rich results
+    /// Code exploration preset: comprehensive results with assembly
     pub fn explore_code(project_id: i64, query: impl Into<String>) -> QueryOptions {
         QueryConfigBuilder::new(project_id)
-            .with_assembly(2)
             .result_limit(10)
             .build(query)
     }
@@ -670,16 +653,6 @@ mod tests {
         assert!(options.sources.bm25);
         assert_eq!(options.config.result.limit, 15);
         assert_eq!(options.config.vector.top_k, 100);
-    }
-
-    #[test]
-    fn test_query_config_builder_with_assembly() {
-        let options = QueryConfigBuilder::new(1)
-            .with_assembly(2)
-            .build("explore code");
-
-        assert!(options.config.spsr_graph.enable_assembly);
-        assert_eq!(options.config.spsr_graph.max_expansion_depth, 2);
     }
 
     #[test]

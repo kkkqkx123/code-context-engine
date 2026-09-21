@@ -248,7 +248,7 @@ impl<'a> SubGraphBuilder<'a> {
                 let file = self.index.get_file_path_by_entity(id).unwrap_or_default();
                 (
                     entity.name.clone(),
-                    kind_label(id, &entity.kind),
+                    kind_label(&entity.kind),
                     file,
                     location_of(&entity.span),
                 )
@@ -274,7 +274,7 @@ impl<'a> SubGraphBuilder<'a> {
         if self.seen.insert(node_id.clone()) {
             let (kind, location) = match self.entity_metadata(node.function_id) {
                 Some(entity) => (
-                    kind_label(node.function_id, &entity.kind),
+                    kind_label(&entity.kind),
                     location_of(&entity.span),
                 ),
                 None => ("unknown".to_string(), String::new()),

@@ -157,11 +157,19 @@ pub async fn handle_call_chain(
     }
     let max_depth = params.max_depth.min(relation_config.max_call_depth);
 
-    let Some(entity_id) = snapshot.index.get_entity_id_by_stable_symbol_id(&id) else {
-        return RelationApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Unknown stable symbol ID".to_string(),
-        ));
+    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
+        Some(eid) => eid,
+        None => {
+            // Try parsing as numeric ID for backwards compatibility
+            if let Ok(numeric_id) = id.parse::<u64>() {
+                cce_types::EntityId(numeric_id)
+            } else {
+                return RelationApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Unknown stable symbol ID".to_string(),
+                ));
+            }
+        }
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
@@ -241,23 +249,37 @@ pub async fn handle_call_path(
     }
 
     let max_depth = params.max_depth.min(relation_config.max_call_depth);
-    let Some(start_id) = snapshot
+    let start_id = match snapshot
         .index
         .get_entity_id_by_stable_symbol_id(&params.start_id)
-    else {
-        return RelationApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Unknown start stable symbol ID".to_string(),
-        ));
+    {
+        Some(eid) => eid,
+        None => {
+            if let Ok(numeric_id) = params.start_id.parse::<u64>() {
+                cce_types::EntityId(numeric_id)
+            } else {
+                return RelationApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Unknown start stable symbol ID".to_string(),
+                ));
+            }
+        }
     };
-    let Some(end_id) = snapshot
+    let end_id = match snapshot
         .index
         .get_entity_id_by_stable_symbol_id(&params.end_id)
-    else {
-        return RelationApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Unknown end stable symbol ID".to_string(),
-        ));
+    {
+        Some(eid) => eid,
+        None => {
+            if let Ok(numeric_id) = params.end_id.parse::<u64>() {
+                cce_types::EntityId(numeric_id)
+            } else {
+                return RelationApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Unknown end stable symbol ID".to_string(),
+                ));
+            }
+        }
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
@@ -326,11 +348,19 @@ pub async fn handle_class_inheritance(
         Err(e) => return e,
     };
 
-    let Some(entity_id) = snapshot.index.get_entity_id_by_stable_symbol_id(&id) else {
-        return RelationApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Unknown stable symbol ID".to_string(),
-        ));
+    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
+        Some(eid) => eid,
+        None => {
+            // Try parsing as numeric ID for backwards compatibility
+            if let Ok(numeric_id) = id.parse::<u64>() {
+                cce_types::EntityId(numeric_id)
+            } else {
+                return RelationApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Unknown stable symbol ID".to_string(),
+                ));
+            }
+        }
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
@@ -420,11 +450,19 @@ pub async fn handle_class_implementations(
         Err(e) => return e,
     };
 
-    let Some(entity_id) = snapshot.index.get_entity_id_by_stable_symbol_id(&id) else {
-        return RelationApiResponse::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Unknown stable symbol ID".to_string(),
-        ));
+    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
+        Some(eid) => eid,
+        None => {
+            // Try parsing as numeric ID for backwards compatibility
+            if let Ok(numeric_id) = id.parse::<u64>() {
+                cce_types::EntityId(numeric_id)
+            } else {
+                return RelationApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Unknown stable symbol ID".to_string(),
+                ));
+            }
+        }
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,

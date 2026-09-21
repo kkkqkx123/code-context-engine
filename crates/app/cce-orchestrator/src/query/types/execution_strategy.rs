@@ -1,7 +1,6 @@
 //! Execution strategy types
 
 use super::query_options::{QueryIntent, QueryOptions, SearchSources};
-use crate::query::assembly::ExpansionStrategy;
 use crate::query::types::search_config::QueryIntentWeightsExt;
 
 /// Internal execution strategy (not exposed to users)
@@ -21,14 +20,6 @@ pub enum ExecutionStrategy {
     DenseRecall,
     /// Summary-only vector recall (file-level, search summary vectors only)
     SummaryRecall,
-    /// Search with SPSR-Graph assembly
-    WithAssembly {
-        /// Base strategy for the search
-        base: Box<ExecutionStrategy>,
-        /// Assembly configuration
-        depth: usize,
-        strategy: ExpansionStrategy,
-    },
 }
 
 impl ExecutionStrategy {
@@ -58,7 +49,7 @@ impl ExecutionStrategy {
         }
     }
 
-    /// Determine execution strategy with assembly support and query intent resolution.
+    /// Determine execution strategy with query intent resolution.
     ///
     /// When `config.bm25.enable_intent_based_weights` is enabled, this method
     /// resolves the effective `QueryIntent` (via explicit override, defaults to `Hybrid`)
@@ -82,18 +73,7 @@ impl ExecutionStrategy {
         adjusted_config.bm25.vector_weight = resolved_v_weight;
         adjusted_config.bm25.bm25_weight = resolved_b_weight;
 
-        let base_strategy = Self::from_sources(&options.sources, &adjusted_config);
-
-        // Check if assembly is enabled
-        if options.config.spsr_graph.enable_assembly {
-            ExecutionStrategy::WithAssembly {
-                base: Box::new(base_strategy),
-                depth: options.config.spsr_graph.max_expansion_depth,
-                strategy: options.config.spsr_graph.expansion_strategy,
-            }
-        } else {
-            base_strategy
-        }
+        Self::from_sources(&options.sources, &adjusted_config)
     }
 
     /// Return a concise label for metrics tracking (not for display).
@@ -106,7 +86,6 @@ impl ExecutionStrategy {
             ExecutionStrategy::HybridRecall { .. } => "hybrid_recall",
             ExecutionStrategy::DenseRecall => "dense_recall",
             ExecutionStrategy::SummaryRecall => "summary_recall",
-            ExecutionStrategy::WithAssembly { .. } => "with_assembly",
         }
     }
 }
@@ -123,17 +102,6 @@ impl std::fmt::Display for ExecutionStrategy {
             }
             ExecutionStrategy::DenseRecall => write!(f, "dense_recall"),
             ExecutionStrategy::SummaryRecall => write!(f, "summary_recall"),
-            ExecutionStrategy::WithAssembly {
-                base,
-                depth,
-                strategy,
-            } => {
-                write!(
-                    f,
-                    "with_assembly(depth={}, strategy={}, base={})",
-                    depth, strategy, base
-                )
-            }
         }
     }
 }
@@ -188,19 +156,6 @@ mod tests {
             .with_sources(SearchSources::none().with_bm25());
         let strategy = options.execution_strategy();
         assert_eq!(strategy, ExecutionStrategy::Bm25Recall);
-    }
-
-    #[test]
-    fn test_execution_strategy_with_assembly() {
-        use super::super::query_options::QueryConfigBuilder;
-
-        let options = QueryConfigBuilder::new(1)
-            .with_assembly(3)
-            .assembly_strategy(ExpansionStrategy::Bidirectional)
-            .build("test");
-
-        let strategy = options.execution_strategy();
-        matches!(strategy, ExecutionStrategy::WithAssembly { depth, strategy: ExpansionStrategy::Bidirectional, .. } if depth == 3);
     }
 
     // ========================================================================

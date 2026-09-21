@@ -56,7 +56,6 @@ pub use error::{AssemblyError, Result};
 pub use extractor::SemanticUnitExtractor;
 pub use handler::AssemblyHandler;
 pub use types::{
-    AssembledResult, AssemblyMetadata, CallChainAssembly, DedupStrategy, ExpandedUnit,
-    ExpansionStrategy, FileInfo, RelationType, SPSRGraphConfig, SearchResultInput,
-    SemanticUnitType, TruncationStrategy, UnitDeduplicator, UnitPriority,
+    AssembledResult, AssemblyMetadata, DedupStrategy, ExpandedUnit, FileInfo, SPSRGraphConfig,
+    SearchResultInput, SemanticUnitType, TruncationStrategy, UnitDeduplicator,
 };

@@ -32,9 +32,6 @@ pub struct SearchResultInput {
     pub score: f32,
 }
 
-/// Expansion strategy for call chain traversal
-pub use cce_config::modules::search::ExpansionStrategy;
-
 /// Deduplication strategy
 pub use cce_config::modules::search::DedupStrategy;
 
@@ -52,45 +49,6 @@ pub enum TruncationStrategy {
     PriorityBased,
     /// Dynamically reduce expansion depth based on budget
     Progressive,
-}
-
-/// Unit priority for smart truncation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum UnitPriority {
-    /// Primary result - highest priority
-    Primary = 0,
-    /// Callers - high priority
-    Caller = 1,
-    /// Callees - medium priority
-    Callee = 2,
-    /// Sibling units - low priority
-    Sibling = 3,
-    /// Deep expansions - lowest priority
-    DeepExpansion = 4,
-}
-
-impl UnitPriority {
-    /// Get priority from relation type and depth
-    pub fn from_relation_and_depth(relation: RelationType, depth: usize) -> Self {
-        match relation {
-            RelationType::Primary => Self::Primary,
-            RelationType::Caller => Self::Caller,
-            RelationType::Callee => {
-                if depth <= 1 {
-                    Self::Callee
-                } else {
-                    Self::DeepExpansion
-                }
-            }
-            RelationType::Sibling => Self::Sibling,
-            RelationType::BaseClass | RelationType::DerivedClass => Self::Callee,
-        }
-    }
-
-    /// Check if this priority is lower than another
-    pub fn is_lower_than(&self, other: &Self) -> bool {
-        *self as u8 > *other as u8
-    }
 }
 
 /// SPSR-Graph assembly configuration
@@ -133,37 +91,6 @@ impl std::fmt::Display for SemanticUnitType {
     }
 }
 
-/// Relation type between units
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RelationType {
-    /// Primary result
-    Primary,
-    /// Caller (calls the primary)
-    Caller,
-    /// Callee (called by the primary)
-    Callee,
-    /// Sibling (same scope)
-    Sibling,
-    /// Base class
-    BaseClass,
-    /// Derived class
-    DerivedClass,
-}
-
-impl std::fmt::Display for RelationType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Primary => write!(f, "primary"),
-            Self::Caller => write!(f, "caller"),
-            Self::Callee => write!(f, "callee"),
-            Self::Sibling => write!(f, "sibling"),
-            Self::BaseClass => write!(f, "base_class"),
-            Self::DerivedClass => write!(f, "derived_class"),
-        }
-    }
-}
-
 /// Expanded semantic unit
 #[derive(Debug, Clone)]
 pub struct ExpandedUnit {
@@ -181,10 +108,6 @@ pub struct ExpandedUnit {
     pub name: String,
     /// Semantic unit type
     pub unit_type: SemanticUnitType,
-    /// Relation to primary result
-    pub relation: RelationType,
-    /// Depth from primary result
-    pub depth: usize,
 }
 
 impl ExpandedUnit {
@@ -204,8 +127,6 @@ impl ExpandedUnit {
             end_line,
             name,
             unit_type: SemanticUnitType::Unknown,
-            relation: RelationType::Primary,
-            depth: 0,
         }
     }
 
@@ -221,18 +142,6 @@ impl ExpandedUnit {
         self
     }
 
-    /// Set relation type
-    pub fn with_relation(mut self, relation: RelationType) -> Self {
-        self.relation = relation;
-        self
-    }
-
-    /// Set depth
-    pub fn with_depth(mut self, depth: usize) -> Self {
-        self.depth = depth;
-        self
-    }
-
     /// Get content hash for deduplication
     pub fn content_hash(&self) -> u64 {
         use std::collections::hash_map::DefaultHasher;
@@ -243,52 +152,9 @@ impl ExpandedUnit {
         hasher.finish()
     }
 
-    /// Get unit priority based on relation and depth
-    pub fn priority(&self) -> UnitPriority {
-        UnitPriority::from_relation_and_depth(self.relation, self.depth)
-    }
-
     /// Check if this unit is from the same file as another
     pub fn is_same_file(&self, other: &ExpandedUnit) -> bool {
         self.file_path == other.file_path
-    }
-}
-
-/// Call chain assembly
-#[derive(Debug, Clone, Default)]
-pub struct CallChainAssembly {
-    /// Forward expansion (callees)
-    pub forward_expansion: Vec<ExpandedUnit>,
-    /// Backward expansion (callers)
-    pub backward_expansion: Vec<ExpandedUnit>,
-    /// Maximum depth reached
-    pub max_depth: usize,
-    /// Total nodes expanded
-    pub total_nodes: usize,
-}
-
-impl CallChainAssembly {
-    /// Create a new empty assembly
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Check if empty
-    pub fn is_empty(&self) -> bool {
-        self.forward_expansion.is_empty() && self.backward_expansion.is_empty()
-    }
-
-    /// Get all units
-    pub fn all_units(&self) -> Vec<&ExpandedUnit> {
-        let mut units = Vec::new();
-        units.extend(self.forward_expansion.iter());
-        units.extend(self.backward_expansion.iter());
-        units
-    }
-
-    /// Get total count
-    pub fn total_count(&self) -> usize {
-        self.forward_expansion.len() + self.backward_expansion.len()
     }
 }
 
@@ -317,16 +183,12 @@ impl FileInfo {
 /// Assembly metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssemblyMetadata {
-    /// Whether expansion was performed
+    /// Whether assembly was performed
     pub expanded: bool,
     /// Number of expanded nodes
     pub expanded_nodes: usize,
     /// Number of involved files
     pub file_count: usize,
-    /// Expansion strategy used
-    pub strategy: ExpansionStrategy,
-    /// Maximum depth reached
-    pub max_depth: usize,
     /// Original content length
     pub original_length: usize,
     /// Assembled content length
@@ -341,8 +203,6 @@ impl Default for AssemblyMetadata {
             expanded: false,
             expanded_nodes: 0,
             file_count: 1,
-            strategy: ExpansionStrategy::None,
-            max_depth: 0,
             original_length: 0,
             assembled_length: 0,
             truncated: false,
@@ -369,8 +229,6 @@ pub struct AssembledResult {
     pub start_line: u32,
     /// Primary end line
     pub end_line: u32,
-    /// Call chain assembly
-    pub call_chain: CallChainAssembly,
     /// Assembled content
     pub assembled_content: String,
     /// Involved files
@@ -394,15 +252,12 @@ impl AssembledResult {
             score,
             start_line: unit.start_line,
             end_line: unit.end_line,
-            call_chain: CallChainAssembly::new(),
             assembled_content: unit.code.clone(),
             involved_files: vec![FileInfo::new(unit.file_path)],
             metadata: AssemblyMetadata {
                 expanded: false,
                 expanded_nodes: 0,
                 file_count: 1,
-                strategy: ExpansionStrategy::None,
-                max_depth: 0,
                 original_length,
                 assembled_length: original_length,
                 truncated: false,
@@ -465,40 +320,15 @@ mod tests {
     fn test_spsr_graph_config_default() {
         let config = SPSRGraphConfig::default();
         assert!(!config.enable_assembly);
-        assert_eq!(config.expansion_strategy, ExpansionStrategy::ForwardOnly);
-        assert_eq!(config.max_expansion_depth, 2);
-        assert_eq!(config.max_expanded_nodes, 5);
+        assert_eq!(config.max_assembled_length, 2500);
     }
 
     #[test]
     fn test_spsr_graph_config_builder() {
-        let config = SPSRGraphConfig::new()
-            .enable(true)
-            .with_expansion_strategy(ExpansionStrategy::Bidirectional)
-            .with_max_depth(3)
-            .with_max_nodes(10);
+        let config = SPSRGraphConfig::new().enable(true).with_max_length(3000);
 
         assert!(config.enable_assembly);
-        assert_eq!(config.expansion_strategy, ExpansionStrategy::Bidirectional);
-        assert_eq!(config.max_expansion_depth, 3);
-        assert_eq!(config.max_expanded_nodes, 10);
-    }
-
-    #[test]
-    fn test_expansion_strategy_display() {
-        assert_eq!(format!("{}", ExpansionStrategy::None), "none");
-        assert_eq!(
-            format!("{}", ExpansionStrategy::ForwardOnly),
-            "forward_only"
-        );
-        assert_eq!(
-            format!("{}", ExpansionStrategy::BackwardOnly),
-            "backward_only"
-        );
-        assert_eq!(
-            format!("{}", ExpansionStrategy::Bidirectional),
-            "bidirectional"
-        );
+        assert_eq!(config.max_assembled_length, 3000);
     }
 
     #[test]
@@ -516,24 +346,6 @@ mod tests {
         assert_eq!(unit.start_line, 1);
         assert_eq!(unit.end_line, 3);
         assert_eq!(unit.unit_type, SemanticUnitType::Unknown);
-        assert_eq!(unit.relation, RelationType::Primary);
-    }
-
-    #[test]
-    fn test_call_chain_assembly() {
-        let mut assembly = CallChainAssembly::new();
-        assert!(assembly.is_empty());
-
-        assembly.forward_expansion.push(ExpandedUnit::new(
-            "fn foo() {}".to_string(),
-            "src/a.rs".to_string(),
-            1,
-            2,
-            "foo".to_string(),
-        ));
-
-        assert!(!assembly.is_empty());
-        assert_eq!(assembly.total_count(), 1);
     }
 
     #[test]
