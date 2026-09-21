@@ -162,7 +162,11 @@ impl FunctionMemberProcessor {
 }
 
 fn is_absorbing_function_group(group: &EntityGroup) -> bool {
-    if group.header.as_ref().is_none_or(|h| !h.kind.is_function_like()) {
+    if group
+        .header
+        .as_ref()
+        .is_none_or(|h| !h.kind.is_function_like())
+    {
         return false;
     }
     matches!(
@@ -256,11 +260,8 @@ mod tests {
             EntityGroup::from_entity(prop.clone(), Language::JavaScript),
         ];
         let entities = vec![func, prop];
-        let count = FunctionMemberProcessor::new().process(
-            &mut groups,
-            &entities,
-            Language::JavaScript,
-        );
+        let count =
+            FunctionMemberProcessor::new().process(&mut groups, &entities, Language::JavaScript);
         assert_eq!(count, 1);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].group_type, GroupType::FunctionWithMembers);

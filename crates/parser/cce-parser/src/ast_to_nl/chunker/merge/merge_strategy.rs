@@ -9,7 +9,8 @@ use std::collections::HashMap;
 
 use cce_types::Span;
 
-use crate::ast_to_nl::chunker::boundary::{can_merge, cost};
+use crate::ast_to_nl::chunker::SplitReason;
+use crate::ast_to_nl::chunker::boundary::{can_merge, cost, merge_limits};
 use crate::ast_to_nl::chunker::config::ChunkingConfig;
 use crate::ast_to_nl::chunker::result::{ChunkPath, ChunkedResult};
 
@@ -26,18 +27,23 @@ pub(crate) fn combined_cost(a: &ChunkedResult, b: &ChunkedResult, path: ChunkPat
 /// Whether `prev` should absorb `next` according to merge policy.
 ///
 /// Combines three checks:
-/// 1. Self-contained exemption (Embedding-only): a chunk marked
-///    `self_contained` (own docstring/behavior) keeps its pure topic and
-///    never merges with neighbors on the Embedding path. This overrides the
-///    size threshold.
+/// 1. Self-contained exemption (Embedding-only): an entity-aligned chunk
+///    marked `self_contained` (own docstring/behavior) keeps its pure topic
+///    and never merges with neighbors on the Embedding path — but only
+///    while the self-contained side itself is still below the path's min
+///    threshold. An already-large self-contained chunk must not strand a
+///    tiny neighbor fragment (bare fields, header-only residue), and a
+///    sub-entity fragment (sentence/line/token split) never claims topic
+///    purity in the first place. Once every self-contained side is an
+///    above-min topic unit, size-based merging applies.
+///    This overrides the size threshold.
 /// 2. Test-boundary guard: a test chunk must never merge with a
 ///    non-test chunk (and vice versa). Merging would mark production
 ///    content as `Test` (or dilute a test chunk), causing the no-test
 ///    evaluation variant to drop production content. This mirrors the
 ///    group-level guard in `SmallFragmentMerger`.
-/// 3. Size threshold via `boundary::can_merge`: the leading chunk must be
-///    below the path's min threshold and the combined cost must stay within
-///    the path's merge ceiling.
+/// 3. Size threshold via `boundary::can_merge`: either side below the
+///    path's min threshold and the combined cost within the merge ceiling.
 ///
 /// This is the single merge decision shared by the intra-splitter pass and
 /// the cross-group pass; using one function prevents the two layers from
@@ -48,15 +54,38 @@ pub(crate) fn should_merge(
     path: ChunkPath,
     config: &ChunkingConfig,
 ) -> bool {
-    let self_contained_blocks =
-        path == ChunkPath::Embedding && (prev.self_contained || next.self_contained);
-    if self_contained_blocks {
-        return false;
+    if path == ChunkPath::Embedding && (prev.self_contained || next.self_contained) {
+        let (min_threshold, _) = merge_limits(path, config);
+        let protects_small_topic =
+            (prev.self_contained && is_topic_unit(prev) && cost(&prev.text, path) < min_threshold)
+                || (next.self_contained
+                    && is_topic_unit(next)
+                    && cost(&next.text, path) < min_threshold);
+        if protects_small_topic {
+            return false;
+        }
     }
     if prev.metadata.test_info.is_test() != next.metadata.test_info.is_test() {
         return false;
     }
     can_merge(&prev.text, &next.text, path, config)
+}
+
+/// Whether a chunk is an entity-aligned unit that may claim topic purity.
+///
+/// Sub-entity fragments (sentence/line/token splits of a larger member)
+/// carry their parent's descriptor by reference only — the documented
+/// entity they describe lives in another chunk. Letting such a fragment
+/// veto merges strands neighboring residues (bare fields, header-only
+/// tails) that can never merge anywhere else.
+fn is_topic_unit(chunk: &ChunkedResult) -> bool {
+    match chunk.metadata.as_code() {
+        Some(code) => matches!(
+            code.split_reason,
+            SplitReason::MemberBoundary | SplitReason::NotSplit
+        ),
+        None => true,
+    }
 }
 
 /// Sort chunks by source position (group span) for deterministic merge priority.

@@ -27,6 +27,31 @@ impl GroupTemplate for RegularGroupTemplate {
     fn generate(&self, group: &EntityGroup) -> String {
         let mut all_parts: Vec<String> = Vec::new();
 
+        // Base class names lead the text so inheritance terms survive
+        // header truncation in chunking (repeated headers are cut to a
+        // third of the chunk limit; trailing terms would be lost for
+        // large docs).
+        if let Some(bases_str) = group
+            .header
+            .as_ref()
+            .and_then(|h| h.metadata.get(meta_keys::BASE_CLASSES))
+            .or_else(|| group.metadata.get(meta_keys::BASE_CLASSES))
+        {
+            let bases: Vec<&str> = bases_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !bases.is_empty() {
+                all_parts.push(format!("extends {}", bases.join(" ")));
+                all_parts.push(format!("inherits {}", bases.join(" ")));
+                for base in bases {
+                    all_parts.push(base.to_string());
+                    all_parts.extend(helpers::extract_keywords(base));
+                }
+            }
+        }
+
         if let Some(header) = &group.header {
             // Header entity already provides name, keywords, parameters, return types, doc, modifiers
             Self::push_entity_features(&mut all_parts, header);
@@ -179,6 +204,21 @@ impl RegularGroupTemplate {
         if let Some(ref subtype) = entity.subtype {
             all_parts.push(subtype.to_lowercase());
             all_parts.extend(helpers::extract_keywords(subtype));
+        }
+
+        if let Some(bases_str) = entity.metadata.get(meta_keys::BASE_CLASSES) {
+            let bases: Vec<&str> = bases_str
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !bases.is_empty() {
+                all_parts.push(format!("extends {}", bases.join(" ")));
+                for base in bases {
+                    all_parts.push(base.to_string());
+                    all_parts.extend(helpers::extract_keywords(base));
+                }
+            }
         }
 
         // Push key attribute values (e.g., HTML/CSS class names, IDs)

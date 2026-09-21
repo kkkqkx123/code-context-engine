@@ -502,6 +502,12 @@ impl EntityExtractor {
         // Capture-level extraction
         entity.signature = capture_module::parser::extract_signature(mat, source);
         entity.parameters = capture_module::parser::extract_parameters(mat, language);
+        let param_defaults = capture_module::parser::extract_parameter_defaults(mat, language);
+        if !param_defaults.is_empty() {
+            if let Ok(encoded) = serde_json::to_string(&param_defaults) {
+                entity.set_metadata(cce_types::entity::meta_keys::PARAM_DEFAULTS, encoded);
+            }
+        }
         entity.return_type = capture_module::parser::extract_return_type(mat);
 
         // Plain JavaScript captures the return *expression*, not a type

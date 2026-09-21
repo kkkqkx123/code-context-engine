@@ -235,7 +235,11 @@ pub(crate) fn merge_two_chunks(
         prev_overlap: None,
         next_overlap: None,
         related_groups,
-        self_contained: a.self_contained || b.self_contained,
+        // Topic purity is conjunctive: the merged chunk stays self-contained
+        // only when both sides were. A pure-topic chunk that absorbs a plain
+        // residue becomes mixed content and must not keep vetoing further
+        // rescue merges down the chain.
+        self_contained: a.self_contained && b.self_contained,
         metadata: ChunkMetadata {
             content_type: a.metadata.content_type.clone(),
             file_path: a.metadata.file_path.clone(),
@@ -256,10 +260,11 @@ pub(crate) fn merge_two_chunks(
 /// Merge small chunks cross-group.
 ///
 /// Sorts chunks by source position (using group span), then merges adjacent chunks
-/// where the leading chunk is below the min threshold and the combined size fits
+/// where either side is below the min threshold and the combined size fits
 /// within the merge ceiling. The decision is delegated to
 /// `merge_strategy::should_merge`, which wraps the single shared rule
-/// `boundary::can_merge` plus the Embedding-only self-contained exemption,
+/// `boundary::can_merge` plus the Embedding-only self-contained exemption
+/// (which yields once every self-contained side is at or above min),
 /// identical to the intra-splitter pass in `splitter::TextSplitter`.
 ///
 /// Cost is path-dependent: the Embedding path measures estimated tokens
@@ -310,6 +315,7 @@ pub(crate) fn merge_small_chunks_cross_group(
         chunk.chunk_index = idx;
         chunk.total_chunks = total;
         if let Some(code) = chunk.metadata.as_code_mut() {
+            code.is_fragment = false;
             code.fragment_index = None;
             code.total_fragments = None;
         }

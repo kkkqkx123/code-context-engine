@@ -308,6 +308,7 @@ fn finalize_group_path_chunks(chunks: &mut [ChunkedResult]) {
         chunk.chunk_index = index;
         chunk.total_chunks = total;
         if let Some(code) = chunk.metadata.code_metadata.as_mut() {
+            code.is_fragment = total > 1;
             code.fragment_index = (total > 1).then_some(index);
             code.total_fragments = (total > 1).then_some(total);
         }

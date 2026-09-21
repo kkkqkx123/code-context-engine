@@ -207,20 +207,43 @@ impl TextSplitter {
                 .config
                 .exceeds_limit(&text[b.start_byte..b.end_byte], path)
             {
-                result.extend(self.split_range_at(
-                    text,
-                    group,
-                    path,
-                    nl_boundaries,
-                    b.start_byte..b.end_byte,
-                    level.subdivide(),
-                    &piece_ids,
-                ));
+                // Single-entity oversize tolerance: a method whose NL text
+                // modestly exceeds the limit stays whole instead of being
+                // subdivided into a large piece plus a tiny trailing fragment.
+                // Large oversize (e.g. 2x limit) still subdivides.
+                if level == BoundaryLevel::Entities
+                    && piece_ids.len() == 1
+                    && self.is_within_oversize_tolerance(&text[b.start_byte..b.end_byte], path)
+                {
+                    result.push(b);
+                } else {
+                    result.extend(self.split_range_at(
+                        text,
+                        group,
+                        path,
+                        nl_boundaries,
+                        b.start_byte..b.end_byte,
+                        level.subdivide(),
+                        &piece_ids,
+                    ));
+                }
             } else {
                 result.push(b);
             }
         }
         result
+    }
+
+    fn is_within_oversize_tolerance(&self, text: &str, path: ChunkPath) -> bool {
+        let limit = match path {
+            ChunkPath::Bm25 => self.config.max_bm25_words,
+            ChunkPath::Embedding => self.config.max_tokens,
+        };
+        if limit == 0 {
+            return false;
+        }
+        let cost = super::boundary::cost(text, path);
+        cost <= ((limit as f32 * 1.25) as usize)
     }
 
     /// Partition `text[range]` at `level`'s boundary source (pure strategies).
@@ -333,15 +356,11 @@ impl TextSplitter {
     ///
     /// Both merge layers (this intra-splitter pass and the cross-group
     /// pass in `merge::merge_small_chunks_cross_group`) share the same
-    /// decision rule (`boundary::can_merge`): a merge happens only when the
-    /// leading segment is still below the path's min threshold and the
-    /// combined cost stays within the path's merge ceiling. Boundaries are
-    /// preserved whenever the leading segment is already large enough —
-    /// large segments never absorb neighbors, which keeps entity boundaries
-    /// intact unless a chunk is genuinely undersized. A single left-to-right
-    /// greedy pass fully determines the result: rejection is monotonic, so
-    /// re-scans (backward passes) can never enable a previously rejected
-    /// merge.
+    /// decision rule (`boundary::can_merge`): a merge happens when either
+    /// side is still below the path's min threshold and the combined cost
+    /// stays within the path's merge ceiling. Large segments absorb
+    /// trailing small fragments, preventing tiny field-declaration chunks.
+    /// A single left-to-right greedy pass fully determines the result.
     fn merge_small_segments(
         &self,
         segments: Vec<ChunkSegment>,
@@ -847,8 +866,8 @@ mod tests {
         let splitter = TextSplitter::new(config);
 
         // [40w, 200w, 30w]: the leading 40w chunk is below min and absorbs the
-        // 200w neighbor; the trailing 30w fragment's left neighbor is now
-        // above min, so it stays separate (unified "prev below min" rule).
+        // 200w neighbor; the trailing 30w fragment is below min so it is
+        // absorbed by its large left neighbor (bidirectional merge).
         let segments = vec![
             segment(&words(40), 0, 50),
             segment(&words(200), 50, 250),
@@ -857,9 +876,8 @@ mod tests {
 
         let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
 
-        assert_eq!(merged.len(), 2);
-        assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 240);
-        assert_eq!(cost(&merged[1].text, ChunkPath::Bm25), 30);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 270);
     }
 
     #[test]
@@ -871,7 +889,8 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
 
-        // 30+30 reaches exactly the min threshold, so the chain stops there.
+        // Bidirectional merge absorbs trailing small fragments as well,
+        // so all three undersized pieces collapse into one chunk.
         let segments = vec![
             segment(&words(30), 0, 50),
             segment(&words(30), 50, 100),
@@ -880,9 +899,8 @@ mod tests {
 
         let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
 
-        assert_eq!(merged.len(), 2);
-        assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 60);
-        assert_eq!(cost(&merged[1].text, ChunkPath::Bm25), 30);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 90);
     }
 
     #[test]
@@ -919,11 +937,11 @@ mod tests {
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
-        // The leading chunk is already above min, so the trailing small
-        // fragment is left alone (unified "prev below min" rule).
+        // Bidirectional merge: the trailing small fragment is absorbed by
+        // its large left neighbor.
         let segments = vec![segment(&words(100), 0, 150), segment(&words(20), 150, 180)];
         let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
-        assert_eq!(merged.len(), 2);
+        assert_eq!(merged.len(), 1);
     }
 
     #[test]
@@ -973,15 +991,14 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
 
-        // Leading chunk (150w) is above min, so the trailing small fragment
-        // is not absorbed.
+        // Bidirectional merge: a large leading chunk absorbs the trailing
+        // small fragment when the combined cost fits the ceiling.
         let segments = vec![segment(&words(150), 0, 200), segment(&words(40), 200, 250)];
 
         let merged = splitter.merge_small_segments(segments, ChunkPath::Bm25);
 
-        assert_eq!(merged.len(), 2);
-        assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 150);
-        assert_eq!(cost(&merged[1].text, ChunkPath::Bm25), 40);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(cost(&merged[0].text, ChunkPath::Bm25), 190);
     }
 
     #[test]

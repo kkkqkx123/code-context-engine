@@ -79,21 +79,31 @@ impl IndexTextEnricher {
                 if fact.content_line_count == 0 {
                     continue;
                 }
+                // Docstring and comment facts duplicate the template's cleaned
+                // docstring output, so they are skipped here to avoid emitting
+                // raw RST (`"""`, `:attr:`, `.. versionchanged::`) twice.
+                // Template owns documentation; the sidecar owns code behavior.
+                if matches!(fact.kind, BehaviorFactKind::Comment) {
+                    continue;
+                }
+                // A docstring is captured as a plain expression-statement
+                // fact; its raw literal would reintroduce the RST markup the
+                // template already converted to natural language.
+                if is_docstring_statement(&fact.text) {
+                    continue;
+                }
                 let is_inside_cf = cf_ranges
                     .iter()
                     .any(|(s, e)| fact.start_byte >= *s && fact.end_byte <= *e);
                 if is_inside_cf {
                     continue;
                 }
-                // Comment and macro-body facts carry pre-cleaned text; other
-                // facts are extracted from source with comments stripped.
-                // Macro bodies keep their stored text because they are flat
-                // token sequences where `#` markers (e.g. `#[derive(...)]`)
-                // are significant and would be mangled by source re-extraction.
-                let text = if matches!(
-                    fact.kind,
-                    BehaviorFactKind::Comment | BehaviorFactKind::MacroBody
-                ) {
+                // Macro-body facts carry pre-cleaned text; other facts are
+                // extracted from source with comments stripped. Macro bodies
+                // keep their stored text because they are flat token sequences
+                // where `#` markers (e.g. `#[derive(...)]`) are significant
+                // and would be mangled by source re-extraction.
+                let text = if matches!(fact.kind, BehaviorFactKind::MacroBody) {
                     fact.text.clone()
                 } else {
                     extract_clean_source(source, fact.start_byte, fact.end_byte)
@@ -223,6 +233,18 @@ fn strip_macro_repetitions(text: &str) -> String {
         i += ch.len_utf8();
     }
     result
+}
+
+/// Whether a behavior fact is a docstring statement.
+///
+/// Tree-sitter represents a docstring as a plain expression statement, so
+/// the behavior query captures its raw literal. The template already emits
+/// the cleaned documentation; keeping the raw literal would duplicate the
+/// docstring and reintroduce RST markup (`"""`, `:attr:`,
+/// `.. versionchanged::`) into the sidecar text.
+fn is_docstring_statement(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("\"\"\"") || trimmed.starts_with("'''")
 }
 
 fn deindent(text: &str) -> String {
@@ -359,6 +381,47 @@ mod tests {
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
         assert!(result.contains("let x = 1;"));
+    }
+
+    #[test]
+    fn test_build_extra_text_skips_docstring_statement() {
+        let source =
+            "def f():\n    \"\"\"Raw docstring with .. versionadded:: 0.9\"\"\"\n    return 1\n";
+        let mut bf_store = BehaviorStore::default();
+        let doc_start = source.find("\"\"\"").unwrap();
+        let doc_end = source.rfind("\"\"\"").unwrap() + 3;
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataStatement,
+            &source[doc_start..doc_end],
+            doc_start,
+            doc_end,
+        ));
+        let ret_start = source.find("return 1").unwrap();
+        bf_store.entry_mut(EntityId(1)).push_fact(BehaviorFact::new(
+            BehaviorFactKind::DataStatement,
+            "return 1",
+            ret_start,
+            ret_start + "return 1".len(),
+        ));
+
+        let processing_result = ProcessingResult {
+            groups: vec![],
+            entity_meta: Default::default(),
+            behavior: bf_store,
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+
+        let enricher = IndexTextEnricher::new();
+        let result = enricher
+            .build_extra_text(EntityId(1), &processing_result, source)
+            .expect("code facts should still produce text");
+        assert!(!result.contains("\"\"\""), "raw docstring must be skipped");
+        assert!(
+            !result.contains("versionadded"),
+            "raw RST directives must be skipped"
+        );
+        assert!(result.contains("return 1"));
     }
 
     #[test]

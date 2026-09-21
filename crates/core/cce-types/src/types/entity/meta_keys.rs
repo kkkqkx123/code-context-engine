@@ -18,4 +18,6 @@ pub const TYPE_BOUNDS: &str = "type_bounds";
 
 pub const BASE_CLASSES: &str = "base_classes";
 
+pub const PARAM_DEFAULTS: &str = "param_defaults";
+
 pub const IMPL_SOURCE_INHERENT: &str = "inherent";

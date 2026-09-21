@@ -21,13 +21,34 @@ impl TemplateHelpers {
         params: &[(S1, Option<S2>)],
         return_type: Option<&str>,
     ) -> String {
+        Self::build_signature_with_defaults(params, &std::collections::HashMap::new(), return_type)
+    }
+
+    /// Build a signature string preserving parameter default values.
+    ///
+    /// Produces output like `"(host: str | None = None)"` when `defaults`
+    /// maps `host` to `None`. Parameters without a default entry fall back
+    /// to the plain `name: type` form.
+    pub fn build_signature_with_defaults<S1: AsRef<str>, S2: AsRef<str>>(
+        params: &[(S1, Option<S2>)],
+        defaults: &std::collections::HashMap<String, String>,
+        return_type: Option<&str>,
+    ) -> String {
         let param_str: Vec<String> = params
             .iter()
-            .map(|(name, ty)| match ty {
-                Some(ty) if !ty.as_ref().is_empty() => {
-                    format!("{}: {}", name.as_ref(), ty.as_ref())
+            .map(|(name, ty)| {
+                let base = match ty {
+                    Some(ty) if !ty.as_ref().is_empty() => {
+                        format!("{}: {}", name.as_ref(), ty.as_ref())
+                    }
+                    _ => name.as_ref().to_string(),
+                };
+                match defaults.get(name.as_ref()) {
+                    Some(default) if !default.is_empty() => {
+                        format!("{} = {}", base, default)
+                    }
+                    _ => base,
                 }
-                _ => name.as_ref().to_string(),
             })
             .collect();
         let params_part = format!("({})", param_str.join(", "));
@@ -35,6 +56,21 @@ impl TemplateHelpers {
             Some(ret) => format!("{} -> {}", params_part, ret),
             None => params_part,
         }
+    }
+
+    /// Decode `param_defaults` metadata into a lookup map.
+    ///
+    /// The metadata value is JSON-encoded `Vec<(name, default)>` written by
+    /// the parser extractor. Returns an empty map when absent or malformed.
+    pub fn decode_param_defaults(
+        metadata: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashMap<String, String> {
+        let Some(encoded) = metadata.get(cce_types::entity::meta_keys::PARAM_DEFAULTS) else {
+            return std::collections::HashMap::new();
+        };
+        serde_json::from_str::<Vec<(String, String)>>(encoded)
+            .map(|pairs| pairs.into_iter().collect())
+            .unwrap_or_default()
     }
 
     /// Extract keywords from an identifier

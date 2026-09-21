@@ -23,7 +23,14 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 static RST_ROLE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r":\w+:`([^`]*)`").expect("valid RST role regex"));
+    Lazy::new(|| Regex::new(r":(\w+):`([^`]*)`").expect("valid RST role regex"));
+static RST_FIELD_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r":(param|parameter|arg|argument|keyword|type)\s+([^:]+):")
+        .expect("valid RST field regex")
+});
+static RST_SIMPLE_FIELD_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r":(returns?|rtype|raises?|except)\b:?").expect("valid RST simple field regex")
+});
 
 /// Clean documentation content for export and indexing.
 ///
@@ -36,6 +43,8 @@ pub fn clean_comment_content(text: &str) -> String {
     if text.is_empty() {
         return String::new();
     }
+
+    let text = strip_docstring_delimiters(text);
 
     let mut lines = Vec::new();
     let mut in_code_block = false;
@@ -50,7 +59,17 @@ pub fn clean_comment_content(text: &str) -> String {
             continue;
         }
 
-        if in_code_block || is_rst_directive(trimmed) || is_link_definition(trimmed) {
+        if in_code_block || is_link_definition(trimmed) {
+            continue;
+        }
+
+        if is_rst_directive(trimmed) {
+            if let Some(converted) = convert_rst_directive(trimmed) {
+                lines.push(converted);
+                last_was_blank = false;
+            } else {
+                last_was_blank = true;
+            }
             continue;
         }
 
@@ -76,6 +95,147 @@ pub fn clean_comment_content(text: &str) -> String {
 
     let normalized = normalize_whitespace_preserving_newlines(&lines.join("\n"));
     resegment_paragraphs(&normalized)
+}
+
+fn strip_docstring_delimiters(text: &str) -> &str {
+    let trimmed = text.trim();
+    if (trimmed.starts_with("\"\"\"") && trimmed.ends_with("\"\"\"") && trimmed.len() >= 6)
+        || (trimmed.starts_with("'''") && trimmed.ends_with("'''") && trimmed.len() >= 6)
+    {
+        let inner = &trimmed[3..trimmed.len() - 3];
+        return inner.trim();
+    }
+    text
+}
+
+fn convert_rst_directive(line: &str) -> Option<String> {
+    let body = line.strip_prefix(".. ")?.trim();
+    let (directive, args) = match body.split_once("::") {
+        Some((d, a)) => (d.trim().to_lowercase(), a.trim().to_string()),
+        None => return None,
+    };
+    match directive.as_str() {
+        "versionchanged" => {
+            if args.is_empty() {
+                Some("Changed.".to_string())
+            } else {
+                Some(format!(
+                    "Changed in version {}.",
+                    args.trim_end_matches('.')
+                ))
+            }
+        }
+        "versionadded" => {
+            if args.is_empty() {
+                Some("Added.".to_string())
+            } else {
+                Some(format!("Added in version {}.", args.trim_end_matches('.')))
+            }
+        }
+        "versionremoved" => {
+            if args.is_empty() {
+                Some("Removed.".to_string())
+            } else {
+                Some(format!(
+                    "Removed in version {}.",
+                    args.trim_end_matches('.')
+                ))
+            }
+        }
+        "deprecated" => {
+            if args.is_empty() {
+                Some("Deprecated.".to_string())
+            } else {
+                Some(format!("Deprecated since {}.", args.trim_end_matches('.')))
+            }
+        }
+        "code-block" | "codeblock" | "sourcecode" => {
+            if args.is_empty() {
+                Some("Code example.".to_string())
+            } else {
+                Some(format!("Code example ({}).", args))
+            }
+        }
+        "admonition" => {
+            if args.is_empty() {
+                None
+            } else {
+                let title = args.trim_end_matches('.');
+                Some(format!("{}.", title))
+            }
+        }
+        "note" | "warning" | "tip" | "important" | "caution" | "hint" => {
+            if args.is_empty() {
+                None
+            } else {
+                let content = args.trim_end_matches('.');
+                let label = match directive.as_str() {
+                    "note" => "Note",
+                    "warning" => "Warning",
+                    "tip" => "Tip",
+                    "important" => "Important",
+                    "caution" => "Caution",
+                    _ => "Hint",
+                };
+                Some(format!("{}: {}.", label, content))
+            }
+        }
+        _ => {
+            if directive.starts_with("currentmodule")
+                || directive.starts_with("module")
+                || directive.starts_with("sectionauthor")
+                || directive.starts_with("codeauthor")
+            {
+                None
+            } else if !args.is_empty() && !args.contains("::") {
+                let title = args.trim_end_matches('.');
+                Some(format!("{}.", title))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn rst_role_to_text(role: &str, inner: &str) -> String {
+    let inner = inner.trim().trim_start_matches('~').trim();
+    if inner.is_empty() {
+        return String::new();
+    }
+    match role.to_lowercase().as_str() {
+        "meth" | "method" => format!("method {}", inner),
+        "func" | "function" | "fn" => format!("function {}", inner),
+        "class" | "cls" => format!("class {}", inner),
+        "attr" | "attribute" | "data" => format!("attribute {}", inner),
+        "mod" | "module" => format!("module {}", inner),
+        "doc" => format!("documentation {}", inner),
+        "file" => format!("file {}", inner),
+        "envvar" | "env" => format!("environment variable {}", inner),
+        "command" | "cmd" | "program" => format!("command {}", inner),
+        "exc" | "exception" | "error" => format!("exception {}", inner),
+        _ => inner.to_string(),
+    }
+}
+
+/// Convert an RST field-list marker with a name (`:param host:`) to natural language.
+fn rst_field_to_text(kind: &str, name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return String::new();
+    }
+    match kind.to_lowercase().as_str() {
+        "type" => format!("Type of {}:", name),
+        _ => format!("Parameter {}:", name),
+    }
+}
+
+/// Convert a bare RST field-list marker (`:return:`, `:raises:`) to natural language.
+fn rst_simple_field_to_text(kind: &str) -> String {
+    match kind.to_lowercase().as_str() {
+        "rtype" => "Return type:".to_string(),
+        "raise" | "raises" | "except" => "Raises:".to_string(),
+        _ => "Returns:".to_string(),
+    }
 }
 
 /// Re-segment paragraphs by collapsing hard line breaks within paragraphs.
@@ -183,7 +343,22 @@ fn clean_comment_content_line(line: &str) -> String {
     let (prefix, body) = split_markdown_prefix(line);
 
     let mut cleaned = body.to_string();
-    cleaned = RST_ROLE_RE.replace_all(&cleaned, "$1").to_string();
+    cleaned = RST_ROLE_RE
+        .replace_all(&cleaned, |caps: &regex::Captures| {
+            rst_role_to_text(&caps[1], &caps[2])
+        })
+        .to_string();
+    cleaned = RST_FIELD_RE
+        .replace_all(&cleaned, |caps: &regex::Captures| {
+            rst_field_to_text(&caps[1], &caps[2])
+        })
+        .to_string();
+    cleaned = RST_SIMPLE_FIELD_RE
+        .replace_all(&cleaned, |caps: &regex::Captures| {
+            rst_simple_field_to_text(&caps[1])
+        })
+        .to_string();
+    cleaned = cleaned.replace('`', "");
 
     cleaned = normalize_whitespace(&cleaned);
     if cleaned.is_empty() {
@@ -446,6 +621,18 @@ See :class:`OnceCell` and :func:`new`."#;
         assert!(!cleaned.contains(":meth:"));
         assert!(!cleaned.contains(":class:"));
         assert!(!cleaned.contains(":func:"));
+    }
+
+    #[test]
+    fn test_clean_comment_content_converts_rst_fields() {
+        let doc = ":param host: the hostname to listen on.\n:param port: the port.\n:return: the response.";
+        let cleaned = clean_comment_content(doc);
+
+        assert!(cleaned.contains("Parameter host:"));
+        assert!(cleaned.contains("Parameter port:"));
+        assert!(cleaned.contains("Returns:"));
+        assert!(!cleaned.contains(":param"));
+        assert!(!cleaned.contains(":return:"));
     }
 
     #[test]

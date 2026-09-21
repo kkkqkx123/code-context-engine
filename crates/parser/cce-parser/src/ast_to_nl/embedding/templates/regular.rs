@@ -116,6 +116,16 @@ impl RegularGroupTemplate {
             group.header.as_ref(),
         );
 
+        // Inheritance leads the description so it survives header
+        // truncation in chunking (repeated headers are cut to a third of
+        // the chunk limit; trailing lines would be lost for large docs).
+        if let Some(inheritance) = Self::inheritance_description(group) {
+            if !desc.contains(&inheritance) {
+                desc.push('\n');
+                desc.push_str(&inheritance);
+            }
+        }
+
         if let Some(doc) = group
             .header
             .as_ref()
@@ -128,6 +138,30 @@ impl RegularGroupTemplate {
         }
 
         desc
+    }
+
+    fn inheritance_description(group: &EntityGroup) -> Option<String> {
+        if !matches!(
+            group.kind,
+            EntityKind::Class
+                | EntityKind::Struct
+                | EntityKind::Trait
+                | EntityKind::Interface
+                | EntityKind::Enum
+                | EntityKind::Union
+        ) {
+            return None;
+        }
+        let bases = group
+            .header
+            .as_ref()
+            .and_then(|h| h.metadata.get(meta_keys::BASE_CLASSES))
+            .or_else(|| group.metadata.get(meta_keys::BASE_CLASSES))?;
+        let bases = bases.trim();
+        if bases.is_empty() {
+            return None;
+        }
+        Some(format!("Inherits from: {}.", bases))
     }
 
     /// Generate member description
@@ -152,6 +186,13 @@ impl RegularGroupTemplate {
             }
         }
 
+        if let Some(relation) = Self::variable_relation_description(member) {
+            if !member_desc.contains(&relation) {
+                member_desc.push('\n');
+                member_desc.push_str(&relation);
+            }
+        }
+
         // Preserve call path info in compact form for identifier-level recall
         if let Some(call_paths) = member.metadata.get(meta_keys::CALL_PATHS) {
             if !call_paths.is_empty() {
@@ -160,6 +201,57 @@ impl RegularGroupTemplate {
         }
 
         Self::append_member_group_name(member_desc, member, group)
+    }
+
+    fn variable_relation_description(member: &cce_types::entity::GroupedEntity) -> Option<String> {
+        if member.kind != EntityKind::Variable {
+            return None;
+        }
+        let is_loop = member
+            .subtype
+            .as_deref()
+            .is_some_and(|s| s.to_lowercase().contains("loop"));
+        if let Some(source) = member
+            .metadata
+            .get("source_type")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            if is_loop {
+                return Some(format!("from {} (loop iteration).", source));
+            }
+            return Some(format!("from {}.", source));
+        }
+        if let Some(call) = member
+            .metadata
+            .get("call_target")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            // `call_target` may already carry its own argument list
+            // (e.g. `len(buffer)`); only append `()` for a bare name.
+            if call.ends_with(')') {
+                return Some(format!("assigned from {}.", call));
+            }
+            return Some(format!("assigned from {}().", call));
+        }
+        if let Some(ctor) = member
+            .metadata
+            .get("constructor_type")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(format!("of type {}.", ctor));
+        }
+        if let Some(lit) = member
+            .metadata
+            .get("literal_type")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(format!("of type {}.", lit));
+        }
+        None
     }
 
     fn members_for_description<'a>(
@@ -260,6 +352,24 @@ impl RegularGroupTemplate {
 
         let mut base = format!("{} {}", kind_text, name);
 
+        if matches!(
+            kind,
+            EntityKind::Class
+                | EntityKind::Struct
+                | EntityKind::Trait
+                | EntityKind::Interface
+                | EntityKind::Enum
+                | EntityKind::Union
+        ) {
+            if let Some(bases) = entity
+                .and_then(|e| e.metadata.get(meta_keys::BASE_CLASSES))
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+            {
+                base.push_str(&format!(" extends {}", bases));
+            }
+        }
+
         // For fields, include type information from parameters
         if matches!(kind, EntityKind::Field | EntityKind::Property) {
             if let Some(entity) = entity {
@@ -270,8 +380,10 @@ impl RegularGroupTemplate {
         } else if let Some(entity) = entity {
             // Build signature from structured parameters and return type for non-field entities
             if !entity.parameters.is_empty() || entity.return_type.is_some() {
-                let sig = TemplateHelpers::build_signature_from_fields(
+                let defaults = TemplateHelpers::decode_param_defaults(&entity.metadata);
+                let sig = TemplateHelpers::build_signature_with_defaults(
                     &entity.parameters,
+                    &defaults,
                     entity.return_type.as_deref(),
                 );
                 base.push(' ');

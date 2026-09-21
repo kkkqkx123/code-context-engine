@@ -148,7 +148,7 @@ pub fn extract_parameters(
         if let Some(suffix) = capture.name.split('.').next_back() {
             match suffix {
                 "params" => {
-                    for (idx, (name, typ)) in parse_parameters_text(&capture.text, language)
+                    for (idx, (name, typ, _)) in parse_parameters_text(&capture.text, language)
                         .into_iter()
                         .enumerate()
                     {
@@ -178,6 +178,35 @@ pub fn extract_parameters(
         .into_values()
         .filter_map(|(name, type_)| name.map(|n| (n, type_)))
         .collect()
+}
+
+/// Extract parameter defaults from match, returning (name, default) pairs
+/// for parameters that declare a default value (e.g. `x: int = 5`).
+pub fn extract_parameter_defaults(
+    mat: &QueryMatch,
+    language: &cce_types::language::Language,
+) -> Vec<(String, String)> {
+    for capture in mat.captures.iter() {
+        if !utils::capture_name_contains(&capture.name, capture::SUBSTRING_PARAMETER)
+            && !utils::capture_name_contains(&capture.name, capture::SUBSTRING_PARAM)
+        {
+            continue;
+        }
+        if utils::capture_name_contains(&capture.name, capture::SUBSTRING_SELF_PARAM) {
+            continue;
+        }
+        if let Some(suffix) = capture.name.split('.').next_back() {
+            if suffix == "params" {
+                return parse_parameters_text(&capture.text, language)
+                    .into_iter()
+                    .filter_map(|(name, _, default)| {
+                        default.map(|d| (name, d)).filter(|(_, d)| !d.is_empty())
+                    })
+                    .collect();
+            }
+        }
+    }
+    Vec::new()
 }
 
 /// Parse parameter text (e.g., "(self, x: int, y: str = 'foo')") into individual (name, type) pairs
@@ -223,7 +252,7 @@ fn strip_inline_comments(text: &str) -> String {
 fn parse_parameters_text(
     text: &str,
     language: &cce_types::language::Language,
-) -> Vec<(String, Option<String>)> {
+) -> Vec<(String, Option<String>, Option<String>)> {
     let text = text.trim();
     // Rust closure parameters are pipe-delimited (`|x: i32|`): unwrap them so
     // the `|` characters are not misread as part of a parameter name.
@@ -325,19 +354,19 @@ fn parse_rust_receiver(text: &str) -> Option<(String, Option<String>)> {
 fn parse_single_param(
     text: &str,
     language: &cce_types::language::Language,
-) -> (String, Option<String>) {
+) -> (String, Option<String>, Option<String>) {
     let text = text.trim();
     if text.is_empty() {
-        return (String::new(), None);
+        return (String::new(), None, None);
     }
     // Rust method receivers (`&mut self`, `&'a self`, `mut self: Type`)
     // carry the reference on the name side; without special handling the
     // generic splitter reports (`self`, `&mut`), which the inferer then
     // wraps in another reference (`&mut &mut`).
     if *language == cce_types::language::Language::Rust
-        && let Some(receiver) = parse_rust_receiver(text)
+        && let Some((name, ty)) = parse_rust_receiver(text)
     {
-        return receiver;
+        return (name, ty, None);
     }
     let bytes = text.as_bytes();
     let mut depth: i32 = 0;
@@ -376,12 +405,20 @@ fn parse_single_param(
             _ => {}
         }
     }
+    let default_value: Option<String> = eq_pos
+        .map(|epos| text[epos + 1..].trim().to_string())
+        .filter(|s| !s.is_empty());
     match colon_pos {
         Some(cpos) => {
             let name = text[..cpos].trim().to_string();
             let type_end = eq_pos.unwrap_or(text.len());
-            let typ = text[cpos + 1..type_end].trim().to_string();
-            (name, Some(typ))
+            let typ_raw = text[cpos + 1..type_end].trim();
+            let typ = if typ_raw.is_empty() {
+                None
+            } else {
+                Some(typ_raw.to_string())
+            };
+            (name, typ, default_value)
         }
         None => {
             let before_eq = match eq_pos {
@@ -396,7 +433,7 @@ fn parse_single_param(
                 if let Some(first) = parts.next() {
                     let rest: Vec<&str> = parts.collect();
                     if rest.is_empty() {
-                        return (first.to_string(), None);
+                        return (first.to_string(), None, default_value);
                     }
                     let name = first
                         .trim_start_matches("this.")
@@ -405,14 +442,14 @@ fn parse_single_param(
                         .to_string();
                     let typ = rest.join(" ").trim().to_string();
                     if name.is_empty() {
-                        return (before_eq.to_string(), None);
+                        return (before_eq.to_string(), None, default_value);
                     }
                     if typ.is_empty() {
-                        return (name, None);
+                        return (name, None, default_value);
                     }
-                    return (name, Some(typ));
+                    return (name, Some(typ), default_value);
                 }
-                return (before_eq.to_string(), None);
+                return (before_eq.to_string(), None, default_value);
             }
             let mut parts: Vec<&str> = before_eq.split_whitespace().collect();
             if parts.len() >= 2 {
@@ -431,19 +468,19 @@ fn parse_single_param(
                         .trim()
                         .to_string();
                     if name.is_empty() {
-                        return (before_eq.to_string(), None);
+                        return (before_eq.to_string(), None, default_value);
                     }
                     if typ.is_empty() {
-                        return (name, None);
+                        return (name, None, default_value);
                     }
-                    return (name, Some(typ));
+                    return (name, Some(typ), default_value);
                 }
             }
             let name = before_eq
                 .trim_start_matches("this.")
                 .trim_start_matches("super.")
                 .to_string();
-            (name, None)
+            (name, None, default_value)
         }
     }
 }
@@ -792,13 +829,19 @@ mod tests {
         let params =
             parse_parameters_text("(name string, age int)", &cce_types::language::Language::Go);
         assert_eq!(params.len(), 2);
-        assert_eq!(params[0], ("name".to_string(), Some("string".to_string())));
-        assert_eq!(params[1], ("age".to_string(), Some("int".to_string())));
+        assert_eq!(
+            params[0],
+            ("name".to_string(), Some("string".to_string()), None)
+        );
+        assert_eq!(
+            params[1],
+            ("age".to_string(), Some("int".to_string()), None)
+        );
     }
 
     #[test]
     fn test_parse_single_param_skips_double_colon() {
-        let (name, typ) = parse_single_param(
+        let (name, typ, _) = parse_single_param(
             "const std::vector<int>& items",
             &cce_types::language::Language::Cpp,
         );
@@ -819,12 +862,12 @@ mod tests {
             ("self: Box<Self>", "Box<Self>"),
         ];
         for (text, ty) in cases {
-            let (name, parsed) = parse_single_param(text, &Rust);
+            let (name, parsed, _) = parse_single_param(text, &Rust);
             assert_eq!(name, "self", "receiver name for {text:?}");
             assert_eq!(parsed.as_deref(), Some(ty), "receiver type for {text:?}");
         }
         // Ordinary parameters are untouched.
-        let (name, typ) = parse_single_param("count: i32", &Rust);
+        let (name, typ, _) = parse_single_param("count: i32", &Rust);
         assert_eq!(name, "count");
         assert_eq!(typ.as_deref(), Some("i32"));
     }

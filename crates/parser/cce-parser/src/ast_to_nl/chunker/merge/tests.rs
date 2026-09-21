@@ -640,6 +640,115 @@ fn test_merge_small_chunks_self_contained_exemption() {
 }
 
 #[test]
+fn test_merge_small_chunks_large_self_contained_absorbs_fragment() {
+    let config = ChunkingConfig {
+        min_chunk_tokens: 150,
+        max_tokens: 512,
+        ..Default::default()
+    };
+    let group_spans = HashMap::from([
+        ("g1".to_string(), Span::new(0, 10, 0, 0, 0, 0)),
+        ("g2".to_string(), Span::new(10, 20, 0, 0, 0, 0)),
+    ]);
+
+    // Large documented chunk (~330 tokens, above min) followed by a tiny
+    // field-only residue. The exemption protects undersized self-contained
+    // chunks, not a large neighbor stranding a fragment.
+    let mut large = make_test_chunk(
+        "g1_emb_0",
+        "g1",
+        ChunkPath::Embedding,
+        &"word ".repeat(220),
+        330,
+        vec![EntityId(1)],
+        Span::new(0, 10, 0, 0, 0, 0),
+    );
+    large.self_contained = true;
+    let chunks = vec![
+        large,
+        make_test_chunk(
+            "g2_emb_0",
+            "g2",
+            ChunkPath::Embedding,
+            "field debug.",
+            3,
+            vec![EntityId(2)],
+            Span::new(10, 20, 0, 0, 0, 0),
+        ),
+    ];
+
+    let result = merge_small_chunks_cross_group(chunks, &group_spans, &config);
+
+    assert_eq!(
+        result.len(),
+        1,
+        "large self-contained chunk should absorb a tiny fragment"
+    );
+    assert!(
+        !result[0].self_contained,
+        "absorbing a plain residue dilutes topic purity"
+    );
+}
+
+#[test]
+fn test_merge_small_chunks_sentence_fragment_has_no_topic_purity() {
+    let config = ChunkingConfig {
+        min_chunk_tokens: 150,
+        max_tokens: 512,
+        ..Default::default()
+    };
+    let group_spans = HashMap::from([
+        ("g1".to_string(), Span::new(0, 10, 0, 0, 0, 0)),
+        ("g2".to_string(), Span::new(10, 20, 0, 0, 0, 0)),
+    ]);
+
+    // Undersized self-contained chunk that is a sentence-level fragment of
+    // a larger member: its descriptor lives in another chunk, so it must
+    // not veto absorbing the tiny neighbor residue.
+    let mut frag = make_test_chunk_with_code_meta(
+        "g1_emb_0",
+        "g1",
+        ChunkPath::Embedding,
+        &"word ".repeat(55),
+        82,
+        vec![EntityId(1)],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        Span::new(0, 10, 0, 0, 0, 0),
+        true,
+        Some(2),
+        Some(3),
+    );
+    frag.self_contained = true;
+    frag.metadata
+        .as_code_mut()
+        .expect("test chunk carries code metadata")
+        .split_reason = SplitReason::SentenceBoundary;
+    let chunks = vec![
+        frag,
+        make_test_chunk(
+            "g2_emb_0",
+            "g2",
+            ChunkPath::Embedding,
+            "field debug.",
+            3,
+            vec![EntityId(2)],
+            Span::new(10, 20, 0, 0, 0, 0),
+        ),
+    ];
+
+    let result = merge_small_chunks_cross_group(chunks, &group_spans, &config);
+
+    assert_eq!(
+        result.len(),
+        1,
+        "sentence fragment must not strand a tiny residue"
+    );
+}
+
+#[test]
 fn test_merge_small_chunks_self_contained_bm25_unaffected() {
     let config = ChunkingConfig {
         min_chunk_bm25_words: 80,
@@ -745,8 +854,9 @@ fn test_merge_small_chunks_partial_merge() {
     ]);
 
     // g1 and g2: ~300 chars each → ~75 tokens estimated.
-    // g1+g2 merged: ~600 chars → ~150 tokens (>= min_threshold=150, chain stops).
-    // g3: ~400 chars → ~100 tokens estimated (below min_threshold, but chain already stopped).
+    // g1+g2 merged: ~600 chars → ~150 tokens.
+    // g3: ~400 chars → ~100 tokens estimated (below min, so bidirectional
+    // merge absorbs it as well when the combined cost fits the ceiling).
     let small_text = || "hello world foo bar baz qux ".repeat(11);
     let large_text = || "hello world foo bar baz qux ".repeat(14);
 
@@ -782,9 +892,12 @@ fn test_merge_small_chunks_partial_merge() {
 
     let result = merge_small_chunks_cross_group(chunks, &group_spans, &config);
 
-    assert_eq!(result.len(), 2, "g1+g2 should merge, g3 stays independent");
+    assert_eq!(
+        result.len(),
+        1,
+        "bidirectional merge absorbs trailing small g3"
+    );
     assert_eq!(result[0].source_group_id, "g1");
-    assert_eq!(result[1].source_group_id, "g3");
 }
 
 #[test]

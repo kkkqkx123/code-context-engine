@@ -52,15 +52,20 @@ pub fn merge_limits(path: ChunkPath, config: &ChunkingConfig) -> (usize, usize) 
 ///
 /// The single merge decision shared by the intra-splitter pass
 /// (`splitter::TextSplitter`) and the cross-group pass
-/// (`merge::merge_small_chunks_cross_group`): a merge happens only when the
-/// leading chunk is still below the path's min threshold (the undersized
-/// chunk is the one being rescued) and the combined cost stays within the
-/// path's merge ceiling. Boundaries are preserved whenever the leading chunk
-/// is already large enough — large chunks never absorb neighbors.
+/// (`merge::merge_small_chunks_cross_group`): a merge happens when either
+/// side is still below the path's min threshold (the undersized chunk is
+/// the one being rescued) and the combined cost stays within the path's
+/// merge ceiling. Small trailing fragments are absorbed by their large
+/// left neighbor, and small leading fragments absorb their right neighbor.
 pub fn can_merge(prev: &str, next: &str, path: ChunkPath, config: &ChunkingConfig) -> bool {
     let (min_threshold, merge_threshold) = merge_limits(path, config);
     let prev_cost = cost(prev, path);
-    prev_cost < min_threshold && prev_cost + cost(next, path) <= merge_threshold
+    let next_cost = cost(next, path);
+    let combined = prev_cost + next_cost;
+    if combined > merge_threshold {
+        return false;
+    }
+    prev_cost < min_threshold || next_cost < min_threshold
 }
 
 /// Chunk boundary information

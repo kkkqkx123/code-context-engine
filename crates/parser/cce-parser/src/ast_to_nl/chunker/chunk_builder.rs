@@ -290,7 +290,16 @@ impl ChunkBuilder {
                 let self_contained = path == ChunkPath::Embedding
                     && first_content_entity_id(
                         content_entity_ids.iter(),
-                        header_ctx.as_ref().and_then(|c| c.header_entity_id),
+                        // The group header is context, not content: a chunk
+                        // holding only the header (or the header plus bare
+                        // fields) carries no independent topic even when the
+                        // header itself is documented. Fall back to the
+                        // group's own header id when no header context was
+                        // supplied for this segment batch.
+                        header_ctx
+                            .as_ref()
+                            .and_then(|c| c.header_entity_id)
+                            .or(group.header_id),
                     )
                     .is_some_and(|id| entity_has_own_descriptor(group, id));
 
