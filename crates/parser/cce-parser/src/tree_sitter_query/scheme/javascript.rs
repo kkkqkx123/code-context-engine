@@ -235,14 +235,39 @@ pub fn entity_non_function_patterns() -> &'static str {
 ) @entity.variable.loop
 
 ; ============================================
-; Object Properties
+; Call callbacks (middleware, routes, hash(..., fn))
 ; ============================================
+; Object literal keys are not entities: they fragment script files and leak
+; out of enclosing functions. Class fields use field_definition instead.
+; The entity span is the whole call so the handler is grouped with its callee.
 
-; Object property
-(pair
-  key: (property_identifier) @entity.property.name
-  value: (_)? @entity.property.value
-) @entity.property
+(call_expression
+  function: (identifier) @entity.function.callback.name
+  arguments: (arguments
+    (function_expression)
+  )
+) @entity.function.callback
+
+(call_expression
+  function: (member_expression) @entity.function.callback.name
+  arguments: (arguments
+    (function_expression)
+  )
+) @entity.function.callback
+
+(call_expression
+  function: (identifier) @entity.function.callback.name
+  arguments: (arguments
+    (arrow_function)
+  )
+) @entity.function.callback
+
+(call_expression
+  function: (member_expression) @entity.function.callback.name
+  arguments: (arguments
+    (arrow_function)
+  )
+) @entity.function.callback
 
 ; ============================================
 ; Decorators
@@ -281,6 +306,7 @@ pub fn entity_non_function_patterns() -> &'static str {
 /// Returns patterns unique to JavaScript:
 /// - Class declaration with identifier name
 /// - Class expression with optional name
+/// - Class instance fields (`field_definition`)
 pub fn entity_js_only() -> &'static str {
     r#"
 ; ============================================
@@ -300,6 +326,16 @@ pub fn entity_js_only() -> &'static str {
 (class
   name: (identifier)? @entity.class_expression.name
 ) @entity.class_expression
+
+; Class field (`foo = 1` / `static bar = 2` inside a class body).
+; Object-literal `pair` keys are not extracted as properties.
+(field_definition
+  property: (property_identifier) @entity.property.name
+) @entity.property
+
+(field_definition
+  property: (private_property_identifier) @entity.property.name
+) @entity.property
 "#
 }
 

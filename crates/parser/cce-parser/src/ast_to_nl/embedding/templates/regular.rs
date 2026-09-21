@@ -363,10 +363,13 @@ impl RegularGroupTemplate {
         member: &cce_types::entity::GroupedEntity,
         group: &EntityGroup,
     ) -> String {
+        if group.group_type == GroupType::MergedFragments {
+            return member_desc;
+        }
         if group.name.is_empty() || group.name == member.name {
             member_desc
         } else {
-            format!("{}\n{}.{}", member_desc, group.name, member.name)
+            format!("{}.{}\n{}", group.name, member.name, member_desc)
         }
     }
 }

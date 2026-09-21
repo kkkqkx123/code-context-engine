@@ -379,6 +379,11 @@ impl EntityExtractor {
         // 7.7: assign C++ member visibility from access sections.
         post_processing::mark_cpp_access_sections(&mut entities, tree, source, language);
 
+        // 7.8: CommonJS `var x = require('p')` — drop the Variable so the
+        // whole statement stays out of retrieval conversion. The Require
+        // entity remains for the relation index.
+        post_processing::drop_js_require_bound_variables(&mut entities, language);
+
         // Eighth pass: fill children based on parent field
         post_processing::fill_children(&mut entities);
 
