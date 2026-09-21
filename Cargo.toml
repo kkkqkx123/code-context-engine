@@ -105,6 +105,7 @@ tree-sitter-css = "0.25"
 tree-sitter-dart = "0.1"
 tree-sitter-lua = "0.5"
 tree-sitter-bash = "0.25"
+tree-sitter-embedded-template = "0.25"
 streaming-iterator = "0.1"
 
 # File system

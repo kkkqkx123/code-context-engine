@@ -10,6 +10,7 @@ pub mod cpp;
 pub mod csharp;
 pub mod css;
 pub mod dart;
+pub mod ejs;
 pub mod go;
 pub mod html;
 pub mod java;

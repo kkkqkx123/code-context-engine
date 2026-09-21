@@ -63,6 +63,8 @@ pub enum Language {
     Vue,
     /// Svelte Component
     Svelte,
+    /// EJS (Embedded JavaScript Templates)
+    Ejs,
     /// JSX (JavaScript XML)
     Jsx,
     /// TSX (TypeScript XML)
@@ -135,6 +137,7 @@ impl std::fmt::Display for Language {
             Language::Less => write!(f, "LESS"),
             Language::Vue => write!(f, "Vue"),
             Language::Svelte => write!(f, "Svelte"),
+            Language::Ejs => write!(f, "EJS"),
             Language::Jsx => write!(f, "JSX"),
             Language::Tsx => write!(f, "TSX"),
             Language::Rust => write!(f, "Rust"),
@@ -178,6 +181,7 @@ impl Language {
                 | Language::Css
                 | Language::Vue
                 | Language::Svelte
+                | Language::Ejs
                 | Language::Jsx
                 | Language::Tsx
                 | Language::Rust
@@ -203,7 +207,10 @@ impl Language {
     /// Check if this language can contain embedded code blocks
     /// (HTML can contain <script> and <style> blocks)
     pub fn has_embedded_blocks(&self) -> bool {
-        matches!(self, Language::Vue | Language::Svelte | Language::Html)
+        matches!(
+            self,
+            Language::Vue | Language::Svelte | Language::Ejs | Language::Html
+        )
     }
 
     /// Get file extensions commonly associated with this language
@@ -220,6 +227,7 @@ impl Language {
             Language::Less => &["less"],
             Language::Vue => &["vue"],
             Language::Svelte => &["svelte"],
+            Language::Ejs => &["ejs"],
             Language::Jsx => &["jsx"],
             Language::Tsx => &["tsx"],
             Language::Rust => &["rs"],
@@ -268,6 +276,7 @@ impl Language {
             "less" => Language::Less,
             "vue" => Language::Vue,
             "svelte" => Language::Svelte,
+            "ejs" | "embedded-template" => Language::Ejs,
             "jsx" => Language::Jsx,
             "tsx" => Language::Tsx,
             "rust" | "rs" => Language::Rust,
@@ -628,6 +637,7 @@ pub fn builtin_language_for_extension(ext: &str) -> Option<(Language, FileType)>
         "html" | "htm" => Some((Language::Html, FileType::Source)),
         "vue" => Some((Language::Vue, FileType::Source)),
         "svelte" => Some((Language::Svelte, FileType::Source)),
+        "ejs" => Some((Language::Ejs, FileType::Source)),
 
         // Style files
         "css" => Some((Language::Css, FileType::Source)),

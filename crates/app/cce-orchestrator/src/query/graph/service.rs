@@ -8,11 +8,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use cce_relation::RelationQueryError;
 use cce_relation::index::{
     RelationIndexView,
     snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps},
 };
-use cce_relation::RelationQueryError;
 use cce_types::{Entity, EntityId, Span};
 
 use super::model::{Confidence, GraphEdge, GraphNode, SubGraph, confidence_of, kind_label};

@@ -516,6 +516,17 @@ impl QueryLoader {
             }
             // Svelte does not support call queries directly, use embedded parsing.
 
+            // EJS language queries
+            (Language::Ejs, QueryType::Entity) => Some(scheme::ejs::entity_query().to_string()),
+            (Language::Ejs, QueryType::Embedded) => {
+                Some(scheme::ejs::embedded_block_query().to_string())
+            }
+            (Language::Ejs, QueryType::Dependency) => {
+                Some(scheme::ejs::dependency_query().to_string())
+            }
+            (Language::Ejs, QueryType::Comment) => Some(scheme::ejs::comment_query().to_string()),
+            // EJS does not support call queries directly, use embedded parsing.
+
             // TSX language queries
             (Language::Tsx, QueryType::Entity) => Some(scheme::tsx::entity_query().to_string()),
             (Language::Tsx, QueryType::Call) => Some(scheme::tsx::call_query().to_string()),

@@ -187,6 +187,7 @@ pub fn get_tree_sitter_language(lang: &Language) -> Option<TsLanguage> {
         Language::Css => tree_sitter_css::LANGUAGE.into(),
         Language::Vue => tree_sitter_vue::language(),
         Language::Svelte => tree_sitter_svelte::language(),
+        Language::Ejs => tree_sitter_embedded_template::LANGUAGE.into(),
         Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         Language::Jsx => tree_sitter_javascript::LANGUAGE.into(),
 

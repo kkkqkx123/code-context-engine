@@ -148,6 +148,7 @@ pub fn create_extractor(language: Language) -> Option<Box<dyn SymbolExtractor>> 
         // Frontend languages
         Language::Vue => None,    // Not implemented yet
         Language::Svelte => None, // Not implemented yet
+        Language::Ejs => None,    // Parsed via embedded blocks (JavaScript)
         Language::Html => None,   // Not implemented yet
         Language::Css => None,    // Not implemented yet
         Language::Scss => None,   // Not implemented yet

@@ -95,6 +95,11 @@ impl FunctionMemberProcessor {
                 {
                     continue;
                 }
+                // Plugin-injected groups have no real source span and must not
+                // be absorbed into built-in function groups.
+                if group.group_id.starts_with("plugin_") {
+                    continue;
+                }
 
                 absorbed_group_indices.insert(idx);
                 if let Some(ref inner_header) = group.header {
