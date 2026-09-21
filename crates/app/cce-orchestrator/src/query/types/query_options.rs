@@ -15,8 +15,6 @@ pub struct SearchSources {
     pub vector: bool,
     /// Enable BM25 keyword search
     pub bm25: bool,
-    /// Enable relation/call chain search
-    pub relation: bool,
     /// Enable summary-level search
     pub summary: bool,
 }
@@ -26,7 +24,6 @@ impl Default for SearchSources {
         Self {
             vector: true,
             bm25: true,
-            relation: false,
             summary: false,
         }
     }
@@ -38,7 +35,6 @@ impl SearchSources {
         Self {
             vector: false,
             bm25: false,
-            relation: false,
             summary: false,
         }
     }
@@ -55,12 +51,6 @@ impl SearchSources {
         self
     }
 
-    /// Enable relation search
-    pub fn with_relation(mut self) -> Self {
-        self.relation = true;
-        self
-    }
-
     /// Enable summary search
     pub fn with_summary(mut self) -> Self {
         self.summary = true;
@@ -69,7 +59,7 @@ impl SearchSources {
 
     /// Check if any source is enabled
     pub fn is_empty(&self) -> bool {
-        !self.vector && !self.bm25 && !self.relation && !self.summary
+        !self.vector && !self.bm25 && !self.summary
     }
 
     /// Check if any source is enabled (alias for !is_empty)
@@ -77,14 +67,9 @@ impl SearchSources {
         !self.is_empty()
     }
 
-    /// Check if only relation search is enabled
-    pub fn is_relation_only(&self) -> bool {
-        self.relation && !self.vector && !self.bm25 && !self.summary
-    }
-
     /// Check if only summary search is enabled
     pub fn is_summary_only(&self) -> bool {
-        self.summary && !self.vector && !self.bm25 && !self.relation
+        self.summary && !self.vector && !self.bm25
     }
 }
 
@@ -96,9 +81,6 @@ impl std::fmt::Display for SearchSources {
         }
         if self.bm25 {
             parts.push("bm25");
-        }
-        if self.relation {
-            parts.push("relation");
         }
         if self.summary {
             parts.push("summary");
@@ -143,7 +125,7 @@ pub enum QueryIntent {
     /// Balanced weights
     Hybrid,
     /// Entity/code symbol lookup (function name, class name, etc.)
-    /// Vector-leaning with potential relation expansion
+    /// Vector-leaning weights
     Entity,
 }
 
@@ -247,12 +229,6 @@ impl QueryOptions {
     /// Set result limit
     pub fn with_limit(mut self, limit: usize) -> Self {
         self.config.result.limit = limit;
-        self
-    }
-
-    /// Enable relation search
-    pub fn with_relations(mut self) -> Self {
-        self.sources.relation = true;
         self
     }
 
@@ -401,12 +377,6 @@ impl QueryConfigBuilder {
         self
     }
 
-    /// Enable/disable relation search
-    pub fn relation_enabled(mut self, enabled: bool) -> Self {
-        self.sources.relation = enabled;
-        self
-    }
-
     /// Enable/disable summary search
     pub fn summary_enabled(mut self, enabled: bool) -> Self {
         self.sources.summary = enabled;
@@ -447,13 +417,6 @@ impl QueryConfigBuilder {
     pub fn with_assembly(mut self, depth: usize) -> Self {
         self.config.spsr_graph.enable_assembly = true;
         self.config.spsr_graph.max_expansion_depth = depth;
-        self
-    }
-
-    /// Enable relation expansion search at specified depth
-    pub fn with_relation_expansion(mut self, depth: usize) -> Self {
-        self.sources.relation = true;
-        self.config.relation.depth = depth;
         self
     }
 
@@ -635,17 +598,15 @@ mod tests {
         let sources = SearchSources::default();
         assert!(sources.vector);
         assert!(sources.bm25);
-        assert!(!sources.relation);
         assert!(!sources.summary);
     }
 
     #[test]
     fn test_search_sources_builder() {
-        let sources = SearchSources::none().with_vector().with_relation();
+        let sources = SearchSources::none().with_vector().with_summary();
         assert!(sources.vector);
         assert!(!sources.bm25);
-        assert!(sources.relation);
-        assert!(!sources.summary);
+        assert!(sources.summary);
     }
 
     #[test]
@@ -665,14 +626,12 @@ mod tests {
         let options = QueryConfigBuilder::new(1)
             .build("test query")
             .with_sources(SearchSources::default())
-            .with_limit(20)
-            .with_relations();
+            .with_limit(20);
 
         assert_eq!(options.query, "test query");
         assert_eq!(options.project_id, 1);
         assert!(options.sources.vector);
         assert!(options.sources.bm25);
-        assert!(options.sources.relation);
         assert_eq!(options.config.result.limit, 20);
     }
 

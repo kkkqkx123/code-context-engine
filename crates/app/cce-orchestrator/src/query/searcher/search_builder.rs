@@ -14,7 +14,7 @@ use std::sync::Arc;
 use cce_config::project_registry::ProjectScope;
 
 use crate::query::assembly::{AssemblyHandler, SPSRGraphAssembler};
-use crate::query::boost::{RelationBoost, SummaryBoost};
+use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
 use cce_llm::Embedder;
@@ -38,7 +38,6 @@ pub struct SearcherBuilder {
     rerank_handler: Option<Arc<ProductionRerankHandler>>,
     plugin_rerank_plugins: Vec<std::sync::Arc<dyn cce_plugin::CodePlugin>>,
     plugin_registry: Option<Arc<cce_plugin::PluginRegistry>>,
-    relation_searcher: Option<Arc<crate::query::relation_searcher::RelationSearcher>>,
     enable_summary_boost: bool,
     scope: ProjectScope,
     search_metrics: Option<Arc<SearchMetrics>>,
@@ -61,7 +60,6 @@ impl SearcherBuilder {
             rerank_handler: None,
             plugin_rerank_plugins: Vec::new(),
             plugin_registry: None,
-            relation_searcher: None,
             enable_summary_boost: false,
             scope,
             search_metrics: None,
@@ -109,15 +107,6 @@ impl SearcherBuilder {
         self
     }
 
-    /// Enable relation boost enhancement support
-    pub fn with_relation_boost(
-        mut self,
-        relation_searcher: Arc<crate::query::relation_searcher::RelationSearcher>,
-    ) -> Self {
-        self.relation_searcher = Some(relation_searcher);
-        self
-    }
-
     /// Enable summary boost enhancement support
     pub fn with_summary_boost(mut self) -> Self {
         self.enable_summary_boost = true;
@@ -146,11 +135,6 @@ impl SearcherBuilder {
             crate::query::cached_embedder::CachedEmbedder::new(self.embedder.clone()),
         );
 
-        // Create relation boost if relation searcher is provided
-        let relation_boost = self
-            .relation_searcher
-            .map(|rs| Arc::new(RelationBoost::new(rs)));
-
         // Create summary boost if enabled
         let summary_boost = if self.enable_summary_boost {
             Some(Arc::new(SummaryBoost::new(
@@ -174,7 +158,6 @@ impl SearcherBuilder {
             score_sorter: Arc::new(ScoreSorter::new()),
             threshold_filter: Arc::new(ThresholdFilter::new()),
             glob_filter: Arc::new(GlobFilter::new()),
-            relation_boost,
             summary_boost,
             scope: self.scope,
             search_metrics: self.search_metrics,

@@ -24,8 +24,6 @@ struct SearchQueryParams<'a> {
     exclude_content_types: &'a Option<String>,
     exclude: &'a Option<String>,
     include: &'a Option<String>,
-    call_chain_depth: Option<usize>,
-    include_call_chain: bool,
     enable_rerank: Option<bool>,
     rerank_max_candidates: Option<usize>,
 }
@@ -53,8 +51,6 @@ pub async fn execute(
             exclude_content_types,
             exclude,
             include,
-            call_chain_depth,
-            include_call_chain,
             enable_rerank,
             rerank_max_candidates,
         } => {
@@ -72,8 +68,6 @@ pub async fn execute(
                 exclude_content_types,
                 exclude,
                 include,
-                call_chain_depth: *call_chain_depth,
-                include_call_chain: *include_call_chain,
                 enable_rerank: *enable_rerank,
                 rerank_max_candidates: *rerank_max_candidates,
             };
@@ -141,8 +135,6 @@ async fn search_query(
         include_patterns,
         include_categories: vec![],
         exclude_categories: vec![],
-        call_chain_depth: params.call_chain_depth,
-        include_call_chain: params.include_call_chain,
         enable_rerank: params.enable_rerank,
         rerank_max_candidates: params.rerank_max_candidates,
     };
@@ -214,20 +206,6 @@ fn print_result_item(index: usize, item: &SearchResultItem) {
     let lines: Vec<&str> = item.code_chunk.lines().take(3).collect();
     for line in lines {
         println!("   {}", line);
-    }
-
-    // Print call chain if available
-    if let Some(ref call_chain) = item.call_chain {
-        if !call_chain.is_empty() {
-            println!("   Call chain:");
-            for node in call_chain {
-                println!(
-                    "     -> {} ({})",
-                    node.function_name,
-                    truncate(&node.file_path, 40)
-                );
-            }
-        }
     }
 
     println!();

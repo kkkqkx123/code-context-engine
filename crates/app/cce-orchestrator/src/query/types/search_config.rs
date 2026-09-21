@@ -17,8 +17,8 @@ use crate::query::assembly::SPSRGraphConfig;
 pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
     Bm25FusionConfig, BoostAggregationConfig, HybridWeightConfig, PluginSearchConfig,
-    QueryIntentWeights, RelationBoostConfig, ResultFilterConfig, ScoreFusionStrategy,
-    ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
+    QueryIntentWeights, ResultFilterConfig, ScoreFusionStrategy, ScoreNormalizationConfig,
+    SummaryBoostConfig, VectorRetrievalConfig,
 };
 
 // ============================================================================
@@ -61,7 +61,6 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 /// | `vector` | Vector retrieval parameters (top_k, min_score, hnsw_ef) |
 /// | `bm25` | BM25 fusion parameters (min_score, field_weights) |
 /// | `result` | Result filtering (limit, min_score, max_per_file) |
-/// | `relation` | Relation score boost (depth, boost_factor, max_hops) |
 /// | `summary` | Summary pre-filter and boost (top_k, min_score, boost_factor) |
 /// | `rerank` | LLM reranking (enable, model, candidates, temperature) |
 /// | `score` | Score normalization (enable, strategy) |
@@ -75,8 +74,6 @@ pub struct SearchConfig {
     pub bm25: Bm25FusionConfig,
     /// Result filtering configuration
     pub result: ResultFilterConfig,
-    /// Relation-based score boost configuration
-    pub relation: RelationBoostConfig,
     /// Summary-based score boost configuration
     pub summary: SummaryBoostConfig,
     /// LLM reranking configuration
@@ -97,7 +94,6 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             vector: cfg.vector,
             bm25: cfg.bm25,
             result: cfg.result,
-            relation: cfg.relation,
             summary: cfg.summary,
             // `[search.rerank]` was removed: rerank runtime parameters come
             // exclusively from the top-level `[rerank]` section (merged per

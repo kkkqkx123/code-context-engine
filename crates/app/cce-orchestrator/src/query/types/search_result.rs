@@ -4,28 +4,6 @@ use std::collections::HashMap;
 
 use cce_types::EntityId;
 
-/// Call relation info
-#[derive(Debug, Clone)]
-pub struct CallInfo {
-    /// Function identifier
-    pub id: EntityId,
-    /// Function name
-    pub name: String,
-    /// File path
-    pub file: String,
-    /// Line number
-    pub line: Option<u32>,
-}
-
-/// Entity relations
-#[derive(Debug, Clone, Default)]
-pub struct Relations {
-    /// Functions that call this entity
-    pub callers: Vec<CallInfo>,
-    /// Functions called by this entity
-    pub callees: Vec<CallInfo>,
-}
-
 /// Unified search result item
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -69,8 +47,6 @@ pub struct SearchResult {
     pub is_boosted: bool,
     /// Boost reason (if boosted)
     pub boost_reason: Option<String>,
-    /// Call relations
-    pub relations: Option<Relations>,
     /// Additional metadata
     pub metadata: HashMap<String, String>,
     /// Serialized pattern detection information (JSON) from EntityGroup
@@ -101,7 +77,6 @@ impl Default for SearchResult {
             end_line: 0,
             is_boosted: false,
             boost_reason: None,
-            relations: None,
             metadata: HashMap::new(),
             pattern_info: None,
             category: None,

@@ -16,8 +16,8 @@ use cce_orchestrator::query::{SubQuery, types::ResultFilterConfig, types::Search
 use cce_utils::text::is_blank;
 
 use cce_api::models::{
-    AggregatedSearchRequest, CallChainNode, ErrorResponse, SearchRequest, SearchResponse,
-    SearchResultItem, error_codes,
+    AggregatedSearchRequest, ErrorResponse, SearchRequest, SearchResponse, SearchResultItem,
+    error_codes,
 };
 
 /// Unified response enum for search handler
@@ -116,16 +116,13 @@ pub async fn handle_search(
             ));
         }
     };
-    let enabled_by_default = project_entry.config.search.relation.enabled_by_default;
-
     // Parse query type to SearchSources
-    let mut search_sources = match request.query_type.to_lowercase().as_str() {
+    let search_sources = match request.query_type.to_lowercase().as_str() {
         "vector" => SearchSources::none().with_vector(),
         "bm25" => SearchSources::none().with_bm25(),
         "hybrid" => SearchSources::default(), // vector + bm25
         "hierarchical" => SearchSources::default(),
         "summary" => SearchSources::none().with_summary(),
-        "semantic_with_relations" => SearchSources::default().with_relation(),
         _ => {
             return SearchApiResponse::Error(ErrorResponse::new(
                 error_codes::INVALID_REQUEST,
@@ -133,16 +130,6 @@ pub async fn handle_search(
             ));
         }
     };
-    // When `enabled_by_default` is true, hybrid/hierarchical automatically
-    // include relation-based boosting without requiring an explicit query_type.
-    if enabled_by_default {
-        match request.query_type.to_lowercase().as_str() {
-            "hybrid" | "hierarchical" => {
-                search_sources = search_sources.with_relation();
-            }
-            _ => {}
-        }
-    }
 
     // Build query options with project_id
     let mut query_opts = cce_orchestrator::query::types::QueryConfigBuilder::new(project_id)
@@ -153,7 +140,6 @@ pub async fn handle_search(
     // Merge the project's search and rerank configuration into the query options
     // so runtime parameters come from the config layer.
     query_opts.config.rerank = project_entry.config.rerank.clone();
-    query_opts.config.relation = project_entry.config.search.relation.clone();
     query_opts.config.boost = project_entry.config.search.boost.clone();
     query_opts.config.result = project_entry.config.search.result.clone();
 
@@ -218,14 +204,6 @@ pub async fn handle_search(
             .collect();
         query_opts = query_opts.with_exclude_categories(categories);
     }
-    // Call chain configuration (optional)
-    if let Some(depth) = request.call_chain_depth {
-        query_opts.config.relation.depth = depth;
-    }
-    if request.include_call_chain {
-        query_opts = query_opts.with_relations();
-    }
-
     // Execute query using engine's search method with project_id
     let result = state.engine.search(project_id, &query_opts).await;
 
@@ -328,13 +306,11 @@ pub async fn handle_aggregated_search(
             ));
         }
     };
-    let enabled_by_default = project_entry.config.search.relation.enabled_by_default;
-
     // Build aggregated query options
     let mut sub_queries = Vec::with_capacity(request.sub_queries.len());
     for sq in &request.sub_queries {
         // Parse query type to SearchSources
-        let mut search_sources = match sq.query_type.to_lowercase().as_str() {
+        let search_sources = match sq.query_type.to_lowercase().as_str() {
             "vector" => SearchSources::none().with_vector(),
             "bm25" => SearchSources::none().with_bm25(),
             "hybrid" => SearchSources::default(),
@@ -346,10 +322,6 @@ pub async fn handle_aggregated_search(
                 ));
             }
         };
-        if enabled_by_default && sq.query_type.to_lowercase() == "hybrid" {
-            search_sources = search_sources.with_relation();
-        }
-
         sub_queries.push(SubQuery {
             text: sq.text.clone(),
             sources: search_sources,
@@ -365,7 +337,6 @@ pub async fn handle_aggregated_search(
         },
         ..Default::default()
     };
-    global_config.relation = project_entry.config.search.relation.clone();
     global_config.boost = project_entry.config.search.boost.clone();
     global_config.rerank = project_entry.config.rerank.clone();
     global_config.result = {
@@ -514,33 +485,6 @@ pub async fn handle_aggregated_search(
 
 /// Convert orchestrator result item to API result item
 fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem {
-    // Convert relations to call chain
-    let call_chain = item.relations.and_then(|relations| {
-        // Combine callers and callees into a single call chain
-        let mut chain = Vec::new();
-        for caller in relations.callers {
-            chain.push(CallChainNode {
-                function_id: format!("snapshot-local:{}", caller.id.0),
-                function_name: caller.name,
-                file_path: caller.file,
-                depth: 0, // Will be set by caller
-                relation_type: "caller".to_string(),
-                call_line: caller.line.map(|l| l as usize),
-            });
-        }
-        for callee in relations.callees {
-            chain.push(CallChainNode {
-                function_id: format!("snapshot-local:{}", callee.id.0),
-                function_name: callee.name,
-                file_path: callee.file,
-                depth: 0, // Will be set by caller
-                relation_type: "callee".to_string(),
-                call_line: callee.line.map(|l| l as usize),
-            });
-        }
-        if chain.is_empty() { None } else { Some(chain) }
-    });
-
     // Get source from sources list (first one) or default
     let source = item.sources.first().cloned().unwrap_or_default();
     // Get entity type from kind
@@ -558,7 +502,6 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
         end_line: item.end_line,
         entity_type,
         source,
-        call_chain,
         entity_ids: item.entity_ids.iter().map(|eid| eid.0).collect(),
     }
 }
@@ -585,15 +528,12 @@ mod tests {
             languages: vec![],
             include_categories: vec![],
             exclude_categories: vec![],
-            call_chain_depth: None,
-            include_call_chain: false,
             enable_rerank: None,
             rerank_max_candidates: None,
         };
 
         assert_eq!(request.query_type, ""); // will use default
         assert_eq!(request.limit, 0); // will use default
-        assert_eq!(request.call_chain_depth, None); // optional
     }
 
     #[test]

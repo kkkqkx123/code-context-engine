@@ -66,6 +66,10 @@ pub enum Commands {
     #[command(subcommand)]
     Entity(EntityCommands),
 
+    /// Graph traversal over the relation snapshot
+    #[command(subcommand)]
+    Graph(GraphCommands),
+
     /// Watch operations
     #[command(subcommand)]
     Watch(WatchCommands),
@@ -250,14 +254,6 @@ pub enum SearchCommands {
         #[arg(long)]
         include: Option<String>,
 
-        /// Call chain depth (optional, defaults to 3)
-        #[arg(long)]
-        call_chain_depth: Option<usize>,
-
-        /// Include call chain in results
-        #[arg(long)]
-        include_call_chain: bool,
-
         /// Force reranking on/off for this query (defaults to config)
         #[arg(long)]
         enable_rerank: Option<bool>,
@@ -436,6 +432,85 @@ pub enum EntityCommands {
         /// Filter by entity kind (optional)
         #[arg(long)]
         kind: Option<String>,
+    },
+}
+
+/// Graph traversal commands
+#[derive(Subcommand)]
+pub enum GraphCommands {
+    /// Ego neighborhood of one entity
+    Ego {
+        /// Stable symbol ID
+        id: String,
+
+        /// Traversal depth
+        #[arg(long, default_value = "2")]
+        depth: usize,
+
+        /// Direction: forward, backward, or both
+        #[arg(long, default_value = "both")]
+        direction: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Shortest path between two entities
+    Path {
+        /// Start stable symbol ID
+        #[arg(long)]
+        from: String,
+
+        /// End stable symbol ID
+        #[arg(long)]
+        to: String,
+
+        /// Maximum search depth
+        #[arg(long, default_value = "10")]
+        depth: usize,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Induced subgraph over explicit entities (comma-separated stable IDs)
+    Subgraph {
+        /// Comma-separated stable symbol IDs
+        ids: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Connected components over internal edges
+    Components {
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Full project graph export (node-link JSON)
+    Export {
+        /// Maximum nodes
+        #[arg(long, default_value = "2000")]
+        limit: usize,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// File change impact analysis
+    Impact {
+        /// File path
+        file: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
     },
 }
 
@@ -848,6 +923,9 @@ impl Cli {
             Commands::Entity(cmd) => {
                 commands::entity::execute(cmd, &self.server, self.verbose, self.format.clone())
                     .await
+            }
+            Commands::Graph(cmd) => {
+                commands::graph::execute(cmd, &self.server, self.verbose, self.format.clone()).await
             }
             Commands::Watch(cmd) => commands::watch::execute(cmd, &self.server, self.verbose).await,
             Commands::Storage(cmd) => {

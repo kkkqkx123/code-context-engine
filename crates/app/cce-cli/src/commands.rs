@@ -4,6 +4,7 @@ pub mod agg_search;
 pub mod batch_compress;
 pub mod config;
 pub mod entity;
+pub mod graph;
 pub mod health;
 pub mod index;
 pub mod mcp;

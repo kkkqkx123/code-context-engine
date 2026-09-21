@@ -34,7 +34,6 @@ use super::assembly::SPSRGraphAssembler;
 use super::cache::{CacheConfig, QueryCache};
 use super::capabilities::IndexCapabilities;
 use super::error::{QueryError, Result};
-use super::relation_bridge::{RelationBridge, RelationEnrichmentConfig};
 use super::relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationSearcher};
 use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
@@ -73,8 +72,6 @@ pub struct QueryCoordinator {
     cache: QueryCache,
     /// Index capabilities
     capabilities: IndexCapabilities,
-    /// Relation enrichment bridge (optional)
-    relation_bridge: Option<Arc<RelationBridge>>,
     /// SQLite database for FTS5 entity search (optional)
     sqlite: Option<Arc<SqliteClient>>,
     /// Monitoring metrics (optional)
@@ -184,7 +181,6 @@ impl QueryCoordinatorBuilder {
             relation_searcher,
             cache: QueryCache::new(self.cache_config.unwrap_or_default()),
             capabilities: self.capabilities.unwrap_or_default(),
-            relation_bridge: None,
             sqlite: self.sqlite,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
@@ -216,7 +212,6 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(CacheConfig::default()),
             capabilities: IndexCapabilities::default(),
-            relation_bridge: None,
             sqlite: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
@@ -236,7 +231,6 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(cache_config),
             capabilities: IndexCapabilities::default(),
-            relation_bridge: None,
             sqlite: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
@@ -256,7 +250,6 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(CacheConfig::default()),
             capabilities,
-            relation_bridge: None,
             sqlite: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
@@ -277,31 +270,6 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(cache_config),
             capabilities,
-            relation_bridge: None,
-            sqlite: None,
-            metrics: None,
-            retry_queue: Arc::new(RetryQueue::new()),
-            project_id,
-        }
-    }
-
-    /// Create a query coordinator with relation enrichment bridge enabled
-    ///
-    /// This enables automatic enrichment of search results with relation context.
-    pub fn with_relation_bridge(
-        searcher: Arc<Searcher>,
-        relation_searcher: Arc<RelationSearcher>,
-        relation_index: Arc<cce_relation::RelationIndex>,
-        scope: ProjectScope,
-    ) -> Self {
-        let project_id = scope.project_id();
-        let bridge = Arc::new(RelationBridge::new(scope, relation_index));
-        Self {
-            searcher,
-            relation_searcher,
-            cache: QueryCache::new(CacheConfig::default()),
-            capabilities: IndexCapabilities::default(),
-            relation_bridge: Some(bridge),
             sqlite: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
@@ -318,29 +286,6 @@ impl QueryCoordinator {
     /// Get a reference to the metrics (if enabled)
     pub fn metrics(&self) -> Option<&Arc<QueryMetrics>> {
         self.metrics.as_ref()
-    }
-
-    /// Create with relation bridge and custom configuration
-    pub fn with_relation_bridge_config(
-        searcher: Arc<Searcher>,
-        relation_searcher: Arc<RelationSearcher>,
-        relation_index: Arc<cce_relation::RelationIndex>,
-        config: RelationEnrichmentConfig,
-        scope: ProjectScope,
-    ) -> Self {
-        let project_id = scope.project_id();
-        let bridge = Arc::new(RelationBridge::with_config(scope, relation_index, config));
-        Self {
-            searcher,
-            relation_searcher,
-            cache: QueryCache::new(CacheConfig::default()),
-            capabilities: IndexCapabilities::default(),
-            relation_bridge: Some(bridge),
-            sqlite: None,
-            metrics: None,
-            retry_queue: Arc::new(RetryQueue::new()),
-            project_id,
-        }
     }
 
     /// Set SQLite database for FTS5 entity search
@@ -373,44 +318,6 @@ impl QueryCoordinator {
             "relation" | "relations" => self.capabilities.has_relations(),
             _ => false,
         }
-    }
-
-    // ========== Relation Enrichment Bridge ==========
-
-    /// Enrich chunks with relation context
-    ///
-    /// This method uses the relation bridge to map chunks to entities and then
-    /// expand their relations. Returns enriched chunks with caller/callee information.
-    ///
-    /// # Arguments
-    ///
-    /// * `chunks` - The chunks to enrich (typically from search results)
-    ///
-    /// # Returns
-    ///
-    /// Enriched chunks with relation context, or the original chunks if the bridge is not enabled.
-    pub async fn enrich_chunks_with_relations(
-        &self,
-        chunks: &[cce_parser::ast_to_nl::chunker::ChunkedResult],
-        project_id: i64,
-    ) -> Result<Vec<super::relation_bridge::EnrichedChunk>> {
-        if let Some(ref bridge) = self.relation_bridge {
-            bridge
-                .enrich_chunks(chunks, project_id)
-                .await
-                .map_err(|e| QueryError::InvalidQuery(format!("Failed to enrich chunks: {}", e)))
-        } else {
-            // If bridge is not enabled, return chunks without enrichment
-            Err(QueryError::InvalidQuery(
-                "Relation bridge is not enabled. Use with_relation_bridge() to enable it."
-                    .to_string(),
-            ))
-        }
-    }
-
-    /// Check if relation bridge is enabled
-    pub fn is_relation_bridge_enabled(&self) -> bool {
-        self.relation_bridge.is_some()
     }
 
     // ========== Entity Search (FTS5) ==========
@@ -529,7 +436,6 @@ impl QueryCoordinator {
     /// Supports all search strategies based on SearchSources:
     /// - VectorOnly: Pure vector semantic search (BM25 for consensus boost only)
     /// - HybridFusion: Dense + BM25 hybrid search with application-level fusion
-    /// - WithRelationExpansion: Search with relation expansion
     /// - WithAssembly: Search with SPSR-Graph assembly
     ///
     /// Assembly is now handled as a strategy within the Searcher,
@@ -778,11 +684,6 @@ impl QueryCoordinator {
             return Err(QueryError::index_not_available("summary"));
         }
 
-        // Check relation capability
-        if options.sources.relation && !self.capabilities.has_relations() {
-            return Err(QueryError::index_not_available("relation"));
-        }
-
         Ok(())
     }
 
@@ -978,6 +879,65 @@ impl QueryCoordinator {
         Ok(self
             .relation_searcher
             .get_all_derived_classes(class_id, max_depth))
+    }
+
+    // ========== Graph Queries ==========
+    // Graph-shaped answers over the relation snapshot. These never
+    // participate in semantic scoring; clients call them explicitly.
+
+    /// Ego neighborhood of one entity up to `depth` hops.
+    pub fn graph_ego(
+        &self,
+        entity_id: cce_types::EntityId,
+        depth: usize,
+        direction: super::graph::GraphDirection,
+    ) -> Result<super::graph::SubGraph> {
+        if !self.capabilities.has_relations() {
+            return Err(QueryError::index_not_available("relation"));
+        }
+        super::graph::GraphService::new(Arc::clone(&self.relation_searcher))
+            .ego_graph(entity_id, depth, direction)
+    }
+
+    /// Shortest path between two entities as a linear subgraph.
+    pub fn graph_path(
+        &self,
+        start_id: cce_types::EntityId,
+        end_id: cce_types::EntityId,
+        max_depth: usize,
+    ) -> Result<Option<super::graph::SubGraph>> {
+        if !self.capabilities.has_relations() {
+            return Err(QueryError::index_not_available("relation"));
+        }
+        super::graph::GraphService::new(Arc::clone(&self.relation_searcher))
+            .shortest_path(start_id, end_id, max_depth)
+    }
+
+    /// Induced subgraph over an explicit entity set.
+    pub fn graph_subgraph(
+        &self,
+        entity_ids: &[cce_types::EntityId],
+    ) -> Result<super::graph::SubGraph> {
+        if !self.capabilities.has_relations() {
+            return Err(QueryError::index_not_available("relation"));
+        }
+        super::graph::GraphService::new(Arc::clone(&self.relation_searcher)).subgraph(entity_ids)
+    }
+
+    /// Connected components over internal edges.
+    pub fn graph_components(&self) -> Result<Vec<Vec<cce_types::EntityId>>> {
+        if !self.capabilities.has_relations() {
+            return Err(QueryError::index_not_available("relation"));
+        }
+        super::graph::GraphService::new(Arc::clone(&self.relation_searcher)).connected_components()
+    }
+
+    /// Full project export capped at `limit` nodes in entity order.
+    pub fn graph_export(&self, limit: usize) -> Result<super::graph::SubGraph> {
+        if !self.capabilities.has_relations() {
+            return Err(QueryError::index_not_available("relation"));
+        }
+        super::graph::GraphService::new(Arc::clone(&self.relation_searcher)).export_full(limit)
     }
 
     /// Get file summary by file path (direct lookup, no vector search)

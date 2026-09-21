@@ -639,31 +639,6 @@ resolve_call_chains = true
 # Exclude standard library relations from the canonical graph
 filter_stdlib_calls = true
 
-# Search relation boost configuration
-[search.relation]
-# Number of top results to enhance with relation data (default: 5)
-top_n = 5
-# Query depth for relation traversal (default: 2)
-depth = 2
-# Timeout in milliseconds for relation queries (default: 500)
-timeout_ms = 500
-# Base boost factor for directly related entities, i.e. 1 hop (default: 1.15)
-boost_factor = 1.15
-# Maximum number of hops in relation graph traversal (default: 2)
-max_hops = 2
-# Whether to include callees (forward expansion) (default: true)
-include_callees = true
-# Whether to include callers (backward expansion) (default: false)
-# When enabled, low-level utility functions can receive score boosts
-# from their high-level callers, improving recall for "who uses X"
-# style queries at the cost of additional graph traversal.
-include_callers = false
-# Whether to enable relation boost by default for hybrid/hierarchical queries (default: false)
-# When true, hybrid and hierarchical query types automatically
-# include relation-based score boosting without requiring the client to
-# explicitly set query_type: "semantic_with_relations".
-enabled_by_default = false
-
 [ast_to_nl]
 # Default output mode: bm25, embedding, both
 default_mode = "bm25"

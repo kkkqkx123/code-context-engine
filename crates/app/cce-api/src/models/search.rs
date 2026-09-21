@@ -43,10 +43,6 @@ pub struct SearchRequest {
     /// Exclude specific category values (e.g., ["test", "generated"])
     #[serde(default)]
     pub exclude_categories: Vec<String>,
-    #[serde(default = "default_call_chain_depth")]
-    pub call_chain_depth: Option<usize>,
-    #[serde(default)]
-    pub include_call_chain: bool,
     /// Per-request rerank override
     #[serde(default)]
     pub enable_rerank: Option<bool>,
@@ -77,8 +73,6 @@ pub struct SearchResultItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entity_type: Option<String>,
     pub source: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub call_chain: Option<Vec<super::entity::CallChainNode>>,
     #[serde(default)]
     pub entity_ids: Vec<u64>,
 }
@@ -168,10 +162,6 @@ fn default_query_type() -> String {
 
 fn default_limit() -> usize {
     10
-}
-
-fn default_call_chain_depth() -> Option<usize> {
-    Some(3)
 }
 
 fn default_subquery_type() -> String {

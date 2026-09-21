@@ -7,13 +7,11 @@
 //! ```text
 //! core/              # Low-level, stateless implementations (direct storage access)
 //!     ├── dense.rs      # DenseRetrieval - core vector search (Qdrant)
-//!     ├── relation.rs   # RelationRetrieval - core relation queries
 //!     └── vector.rs     # FilterOptions and vector types
 //!
 //! strategies/        # High-level strategy interface (orchestration layer)
 //!     ├── bm25.rs       # Bm25Strategy - orchestrates storage Bm25Retrieval + client
 //!     ├── dense.rs      # DenseStrategy - orchestrates core + embedder
-//!     ├── relation.rs   # RelationStrategy - orchestrates core
 //!     └── strategy_enum.rs  # RecallAlgorithm enum and factory
 //!
 //! post_processing/   # Result processing and enhancement
@@ -42,7 +40,7 @@ pub mod post_processing;
 pub mod strategies;
 
 // Re-export commonly used types from core for backward compatibility
-pub use core::{DenseRetrieval, FilterOptions, RelationOptions, RelationRetrieval};
+pub use core::{DenseRetrieval, FilterOptions};
 
 pub use strategies::{RecallAlgorithm, RetrievalStrategy};
 

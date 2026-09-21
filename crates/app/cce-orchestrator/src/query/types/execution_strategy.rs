@@ -21,13 +21,6 @@ pub enum ExecutionStrategy {
     DenseRecall,
     /// Summary-only vector recall (file-level, search summary vectors only)
     SummaryRecall,
-    /// Search with relation expansion
-    WithRelationExpansion {
-        /// Base strategy for the search
-        base: Box<ExecutionStrategy>,
-        /// Depth for relation traversal
-        depth: usize,
-    },
     /// Search with SPSR-Graph assembly
     WithAssembly {
         /// Base strategy for the search
@@ -44,40 +37,21 @@ impl ExecutionStrategy {
         sources: &SearchSources,
         config: &super::search_config::SearchConfig,
     ) -> Self {
-        match (
-            sources.vector,
-            sources.bm25,
-            sources.relation,
-            sources.summary,
-        ) {
+        match (sources.vector, sources.bm25, sources.summary) {
             // BM25 alone -> pure BM25 keyword recall (no vector)
-            (false, true, false, _) => ExecutionStrategy::Bm25Recall,
+            (false, true, _) => ExecutionStrategy::Bm25Recall,
 
             // Pure vector -> DenseRecall
-            (true, false, false, _) => ExecutionStrategy::DenseRecall,
+            (true, false, _) => ExecutionStrategy::DenseRecall,
 
             // Vector + BM25 -> hybrid recall: two-path parallel + weighted fusion
-            (true, true, false, _) => ExecutionStrategy::HybridRecall {
+            (true, true, _) => ExecutionStrategy::HybridRecall {
                 vector_weight: config.bm25.vector_weight,
                 bm25_weight: config.bm25.bm25_weight,
             },
 
-            // With relation expansion
-            (v, b, true, _) => ExecutionStrategy::WithRelationExpansion {
-                base: Box::new(Self::from_sources(
-                    &SearchSources {
-                        vector: v || b,
-                        bm25: false,
-                        relation: false,
-                        summary: false,
-                    },
-                    config,
-                )),
-                depth: config.relation.depth,
-            },
-
             // Summary only -> SummaryRecall (pure summary vector search)
-            (false, false, false, true) => ExecutionStrategy::SummaryRecall,
+            (false, false, true) => ExecutionStrategy::SummaryRecall,
 
             // Default fallback -> dense recall
             _ => ExecutionStrategy::DenseRecall,
@@ -132,7 +106,6 @@ impl ExecutionStrategy {
             ExecutionStrategy::HybridRecall { .. } => "hybrid_recall",
             ExecutionStrategy::DenseRecall => "dense_recall",
             ExecutionStrategy::SummaryRecall => "summary_recall",
-            ExecutionStrategy::WithRelationExpansion { .. } => "with_relation_expansion",
             ExecutionStrategy::WithAssembly { .. } => "with_assembly",
         }
     }
@@ -150,9 +123,6 @@ impl std::fmt::Display for ExecutionStrategy {
             }
             ExecutionStrategy::DenseRecall => write!(f, "dense_recall"),
             ExecutionStrategy::SummaryRecall => write!(f, "summary_recall"),
-            ExecutionStrategy::WithRelationExpansion { base, depth } => {
-                write!(f, "with_relation(depth={}, base={})", depth, base)
-            }
             ExecutionStrategy::WithAssembly {
                 base,
                 depth,
@@ -207,11 +177,6 @@ mod tests {
         let sources = SearchSources::none().with_summary();
         let strategy = ExecutionStrategy::from_sources(&sources, &config);
         assert_eq!(strategy, ExecutionStrategy::SummaryRecall);
-
-        // With relation
-        let sources = SearchSources::none().with_vector().with_relation();
-        let strategy = ExecutionStrategy::from_sources(&sources, &config);
-        matches!(strategy, ExecutionStrategy::WithRelationExpansion { .. });
     }
 
     #[test]

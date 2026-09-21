@@ -51,9 +51,6 @@ pub struct SearchArgs {
     /// Optional directory prefix to restrict results (e.g. "src/parser").
     #[serde(default)]
     pub directory_prefix: Option<String>,
-    /// Include call relations in each result (default false).
-    #[serde(default)]
-    pub with_relations: Option<bool>,
 }
 
 /// Arguments for keyword (BM25) search.
@@ -167,9 +164,6 @@ impl McpServerHandler {
         }
         if let Some(prefix) = args.directory_prefix.clone() {
             options = options.with_directory_prefix(prefix);
-        }
-        if args.with_relations.unwrap_or(false) {
-            options = options.with_relations();
         }
         match self.state.engine.search(args.project_id, &options).await {
             Ok(result) => {

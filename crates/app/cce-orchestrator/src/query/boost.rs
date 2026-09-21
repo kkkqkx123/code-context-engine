@@ -1,7 +1,7 @@
 //! Post-retrieval score boosting module
 //!
 //! Provides unified score boosting through additive aggregation of multiple
-//! boost sources (summary relevance, relation graph).
+//! boost sources (summary relevance).
 //! Each boost source contributes a capped additive value; the aggregator
 //! sums all contributions and caps the total to prevent score overshoot.
 //!
@@ -12,9 +12,6 @@
 //!     │
 //!     ├── SummaryBoost (summary boost)
 //!     │   └── File-level summary relevance contribution
-//!     │
-//!     ├── RelationBoost (relation boost)
-//!     │   └── Call graph hop-decay contribution
 //!     │
 //!     └── UnifiedBoostAggregator (unified boost aggregation)
 //!         └── Collects, caps, and applies all contributions to vector_score
@@ -34,12 +31,10 @@ use crate::query::types::SearchResult;
 
 // Sub-modules: individual boost contributors
 pub mod normalization;
-pub mod relation;
 pub mod summary;
 
 // Re-exports
 pub use normalization::{NormalizationStrategy, normalize_scores};
-pub use relation::{RelationBoost, RelationType};
 pub use summary::SummaryBoost;
 
 /// A single boost contribution from one source for one candidate result.
@@ -47,7 +42,7 @@ pub use summary::SummaryBoost;
 pub struct BoostContribution {
     /// The candidate result ID this contribution applies to
     pub candidate_id: String,
-    /// Source identifier: "bm25", "summary", "relation"
+    /// Source identifier: "bm25", "summary"
     pub source: &'static str,
     /// Normalized boost addition value [0.0, max_source_boost]
     pub boost_value: f32,
@@ -129,7 +124,6 @@ pub fn apply_boosts(
     let per_source_cap: HashMap<&str, f32> = {
         let mut m = HashMap::new();
         m.insert("summary", config.summary_max);
-        m.insert("relation", config.relation_max);
         m
     };
 

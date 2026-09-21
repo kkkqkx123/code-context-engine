@@ -14,7 +14,7 @@ use std::sync::Arc;
 use cce_config::project_registry::ProjectScope;
 
 use crate::query::assembly::AssemblyHandler;
-use crate::query::boost::{RelationBoost, SummaryBoost, apply_boosts};
+use crate::query::boost::{SummaryBoost, apply_boosts};
 use crate::query::error::QueryError;
 use crate::query::error::Result;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
@@ -42,8 +42,6 @@ pub struct Searcher {
     pub(crate) bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
     /// SQLite database for chunk content lookup (optional)
     pub(crate) sqlite: Option<Arc<SqliteClient>>,
-    /// Optional relation graph boost contributor
-    pub(crate) relation_boost: Option<Arc<RelationBoost>>,
     /// Optional summary relevance boost contributor
     pub(crate) summary_boost: Option<Arc<SummaryBoost>>,
     /// Immutable project scope binding project_id and project_group_id.
@@ -91,7 +89,6 @@ impl Searcher {
     ///     .with_sqlite(sqlite)
     ///     .with_assembler(assembler)
     ///     .with_rerank(rerank_handler)
-    ///     .with_relation_boost(relation_searcher)
     ///     .build();
     /// ```
     pub fn builder(
@@ -121,8 +118,7 @@ impl Searcher {
     /// Supports different search strategies based on SearchSources:
     ///    - Bm25Recall: Pure BM25 keyword recall (independent path)
     ///    - HybridRecall: Vector + BM25 parallel recall with weighted normalization fusion
-    ///    - DenseRecall: Pure dense vector recall
-    /// - WithRelationExpansion: Search with relation expansion
+    /// - DenseRecall: Pure dense vector recall
     /// - WithAssembly: Search with SPSR-Graph assembly
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
         let project_id = self.scope.project_id();
@@ -516,8 +512,7 @@ impl Searcher {
         // ============================================================================
         let recall_algo = match strategy {
             ExecutionStrategy::DenseRecall => RecallAlgorithm::Dense,
-            ExecutionStrategy::WithAssembly { base, .. }
-            | ExecutionStrategy::WithRelationExpansion { base, .. } => {
+            ExecutionStrategy::WithAssembly { base, .. } => {
                 return Box::pin(self.execute_search_flow(options, base)).await;
             }
             ExecutionStrategy::Bm25Recall | ExecutionStrategy::HybridRecall { .. } => {
@@ -628,29 +623,6 @@ impl Searcher {
                         }
                         Err(e) => {
                             tracing::warn!("Summary boost collection failed, skipping: {}", e);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4b: Relation graph boost (optional, only when WithRelationExpansion strategy)
-        if boost_config.enabled {
-            if let ExecutionStrategy::WithRelationExpansion { .. } = strategy {
-                if let Some(ref booster) = self.relation_boost {
-                    if options.sources.relation {
-                        tracing::trace!("Collecting relation graph boost contributions");
-                        match booster.collect(&results, options, boost_config).await {
-                            Ok(contribs) => {
-                                tracing::trace!(
-                                    count = contribs.len(),
-                                    "Relation boost contributions collected"
-                                );
-                                all_contributions.extend(contribs);
-                            }
-                            Err(e) => {
-                                tracing::warn!("Relation boost collection failed, skipping: {}", e);
-                            }
                         }
                     }
                 }

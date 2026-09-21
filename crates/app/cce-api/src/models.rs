@@ -2,6 +2,7 @@
 
 mod config;
 mod entity;
+mod graph;
 mod health;
 mod index;
 mod metrics;
@@ -15,6 +16,7 @@ mod watch;
 
 pub use config::*;
 pub use entity::*;
+pub use graph::*;
 pub use health::*;
 pub use index::*;
 pub use metrics::*;

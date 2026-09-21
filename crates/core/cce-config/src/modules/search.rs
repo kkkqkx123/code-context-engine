@@ -200,51 +200,6 @@ impl Default for ResultFilterConfig {
     }
 }
 
-/// Relation-based score boost configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct RelationBoostConfig {
-    /// Number of top results to enhance with relation data
-    pub top_n: usize,
-    /// Query depth for relation traversal
-    pub depth: usize,
-    /// Timeout in milliseconds for relation queries
-    pub timeout_ms: u64,
-    /// Base boost factor for directly related entities (1 hop)
-    pub boost_factor: f32,
-    /// Maximum number of hops in relation graph traversal
-    pub max_hops: usize,
-    /// Whether to include callees (forward expansion)
-    pub include_callees: bool,
-    /// Whether to include callers (backward expansion)
-    ///
-    /// When enabled, low-level utility functions can receive score boosts
-    /// from their high-level callers, improving recall for "who uses X"
-    /// style queries at the cost of additional graph traversal.
-    pub include_callers: bool,
-    /// Whether to enable relation boost by default for hybrid/hierarchical queries
-    ///
-    /// When true, `hybrid` and `hierarchical` query types automatically
-    /// include relation-based score boosting without requiring the client to
-    /// explicitly set `query_type: "semantic_with_relations"`.
-    pub enabled_by_default: bool,
-}
-
-impl Default for RelationBoostConfig {
-    fn default() -> Self {
-        Self {
-            top_n: 5,
-            depth: 2,
-            timeout_ms: 500,
-            boost_factor: 1.15,
-            max_hops: 2,
-            include_callees: true,
-            include_callers: false,
-            enabled_by_default: false,
-        }
-    }
-}
-
 /// Summary-based score boost configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -304,8 +259,6 @@ pub struct BoostAggregationConfig {
     pub max_source_boost: f32,
     /// Maximum addition for summary relevance boost
     pub summary_max: f32,
-    /// Maximum addition for relation graph boost
-    pub relation_max: f32,
 }
 
 impl Default for BoostAggregationConfig {
@@ -315,7 +268,6 @@ impl Default for BoostAggregationConfig {
             max_addition: 0.5,
             max_source_boost: 0.3,
             summary_max: 0.15,
-            relation_max: 0.15,
         }
     }
 }
@@ -643,9 +595,6 @@ pub struct SearchModuleConfig {
     /// Result filtering configuration
     #[serde(default)]
     pub result: ResultFilterConfig,
-    /// Relation-based score boost configuration
-    #[serde(default)]
-    pub relation: RelationBoostConfig,
     /// Summary-based score boost configuration
     #[serde(default)]
     pub summary: SummaryBoostConfig,

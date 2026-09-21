@@ -117,6 +117,31 @@ pub fn create_router(state: AppState) -> Router {
             "/api/project/{project_id}/relations/classification/{classification}",
             get(handlers::entity::get_relations_by_classification),
         )
+        // Graph traversal (independent retrieval path)
+        .route(
+            "/api/project/{project_id}/graph/ego",
+            get(handlers::graph::handle_graph_ego),
+        )
+        .route(
+            "/api/project/{project_id}/graph/path",
+            get(handlers::graph::handle_graph_path),
+        )
+        .route(
+            "/api/project/{project_id}/graph/subgraph",
+            get(handlers::graph::handle_graph_subgraph),
+        )
+        .route(
+            "/api/project/{project_id}/graph/components",
+            get(handlers::graph::handle_graph_components),
+        )
+        .route(
+            "/api/project/{project_id}/graph/export",
+            get(handlers::graph::handle_graph_export),
+        )
+        .route(
+            "/api/project/{project_id}/graph/impact",
+            get(handlers::graph::handle_graph_impact),
+        )
         // Metrics
         .route("/api/metrics", get(handlers::metrics::handle_get_metrics))
         .route(

@@ -11,14 +11,11 @@
 //!     ├── SemanticUnitExtractor (extract complete code units)
 //!     │       └── Read source files, extract by line range
 //!     │
-//!     ├── RelationSearcher (expand call relationships)
-//!     │       └── Delegates to CallChainQuery for BFS traversal
-//!     │
 //!     ├── SegmentAggregator (aggregate adjacent segments)
 //!     │       └── Merge adjacent segments, check file coverage
 //!     │
 //!     └── StructureConcatenator (assemble with structure)
-//!             └── Add file markers, relation markers, dedup
+//!             └── Add file markers, dedup
 //! ```
 //!
 //! # Usage
@@ -27,7 +24,7 @@
 //! use crate::query::assembly::{SPSRGraphAssembler, SPSRGraphConfig, SearchResultInput};
 //!
 //! let config = SPSRGraphConfig::conservative();
-//! let assembler = SPSRGraphAssembler::new(call_chain_query, config);
+//! let assembler = SPSRGraphAssembler::new(config);
 //!
 //! let input = SearchResultInput {
 //!     id: "id".to_string(),
@@ -49,7 +46,6 @@ pub mod concatenator;
 pub mod error;
 pub mod extractor;
 pub mod handler;
-pub mod relation_enricher;
 pub mod types;
 
 // Re-export main types
@@ -59,7 +55,6 @@ pub use concatenator::StructureConcatenator;
 pub use error::{AssemblyError, Result};
 pub use extractor::SemanticUnitExtractor;
 pub use handler::AssemblyHandler;
-pub use relation_enricher::RelationInfoEnricher;
 pub use types::{
     AssembledResult, AssemblyMetadata, CallChainAssembly, DedupStrategy, ExpandedUnit,
     ExpansionStrategy, FileInfo, RelationType, SPSRGraphConfig, SearchResultInput,

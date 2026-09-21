@@ -6,6 +6,7 @@
 //! ## Module Structure
 //!
 //! - `entity/` - Entity queries (immediate return, read-only)
+//! - `graph` - Graph traversal over the relation snapshot (read-only)
 //! - `index/` - Index operations (long-running, resource-intensive)
 //! - `project/` - Project management (configuration management)
 //! - `tools/` - Tool APIs for programming tasks (compression, diagnosis, symbol lookup)
@@ -18,6 +19,7 @@
 pub mod config;
 pub mod entity;
 pub mod entity_search;
+pub mod graph;
 pub mod health;
 pub mod index;
 pub mod metrics;

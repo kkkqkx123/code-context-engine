@@ -26,10 +26,11 @@ pub use cce_config::{
 };
 
 pub use query::{
-    AggregatedQueryOptions, CallInfo, ExecutionStrategy, PathQueryOptions, QueryCoordinator,
-    QueryError, QueryOptions, QueryOptions as SearchOptions, QueryResult,
-    QueryResult as SearchQueryResult, RelationQueryOptions, RelationSearcher, Relations,
-    Result as QueryResultType, SearchConfig, SearchResult, SearchSources, Searcher, SubQuery,
+    AggregatedQueryOptions, Confidence, ExecutionStrategy, GraphDirection, GraphEdge, GraphNode,
+    GraphService, PathQueryOptions, QueryCoordinator, QueryError, QueryOptions,
+    QueryOptions as SearchOptions, QueryResult, QueryResult as SearchQueryResult,
+    RelationQueryOptions, RelationSearcher, Result as QueryResultType, SearchConfig, SearchResult,
+    SearchSources, Searcher, SubGraph, SubQuery,
 };
 
 pub use index::{

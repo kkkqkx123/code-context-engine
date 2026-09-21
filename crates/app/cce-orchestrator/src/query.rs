@@ -16,8 +16,7 @@
 //!     │   │   └── Strategies (retrieval strategies: Dense, DenseSparse)
 //!     │   │
 //!     │   ├── Boost Layer (unified boosting)
-//!     │   │   ├── SummaryBoost (summary relevance boost)
-//!     │   │   └── RelationBoost (relation graph boost)
+//!     │   │   └── SummaryBoost (summary relevance boost)
 //!     │   │
 //!     │   ├── Ranking Layer (ordering)
 //!     │   │   ├── LlmReranker (LLM re-ranking)
@@ -35,7 +34,6 @@
 //!     ├── AssemblyHandler (SPSR-Graph assembly)
 //!     │   └── SPSRGraphAssembler
 //!     │       ├── SemanticUnitExtractor (semantic unit extraction)
-//!     │       ├── RelationSearcher (relation expansion)
 //!     │       ├── SegmentAggregator (segment aggregation)
 //!     │       └── StructureConcatenator (structure concatenation)
 //!     │
@@ -116,11 +114,11 @@ pub mod ranking;
 // SPSR-Graph assembly
 pub mod assembly;
 
+// Independent graph retrieval path
+pub mod graph;
+
 // Retrieval layer (separated from storage)
 pub mod retrieval;
-
-// Relation enrichment bridge
-pub mod relation_bridge;
 
 // Retry queue for fault tolerance
 pub mod retry_queue;
@@ -133,8 +131,8 @@ pub mod cached_embedder;
 
 // Re-export main types
 pub use types::{
-    AggregatedQueryOptions, CallInfo, ExcludableContentType, ExecutionStrategy, QueryConfigBuilder,
-    QueryOptions, QueryResult, Relations, SearchConfig, SearchResult, SearchSources, SubQuery,
+    AggregatedQueryOptions, ExcludableContentType, ExecutionStrategy, QueryConfigBuilder,
+    QueryOptions, QueryResult, SearchConfig, SearchResult, SearchSources, SubQuery,
 };
 
 // Re-export cache types
@@ -153,13 +151,14 @@ pub use searcher::{Searcher, SearcherBuilder};
 // Re-export relation searcher
 pub use relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationSearcher};
 
+// Re-export graph path
+pub use graph::{Confidence, GraphDirection, GraphEdge, GraphNode, GraphService, SubGraph};
+
 // Re-export query coordinator
 pub use coordinator::QueryCoordinator;
 
 // Re-export boost module components
-pub use boost::{
-    BoostAggregationConfig, BoostContribution, RelationBoost, SummaryBoost, apply_boosts,
-};
+pub use boost::{BoostAggregationConfig, BoostContribution, SummaryBoost, apply_boosts};
 pub use boost::{NormalizationStrategy, normalize_scores};
 
 // Re-export ranking module components (includes LlmReranker)

@@ -98,7 +98,6 @@ impl DenseRetrieval {
                 end_line: 0,
                 is_boosted: false,
                 boost_reason: None,
-                relations: None,
                 metadata: HashMap::new(),
                 pattern_info: None,
                 category: None,

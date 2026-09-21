@@ -1,6 +1,6 @@
 //! Assembly handler for SPSR-Graph result assembly
 //!
-//! Handles the assembly of search results with relation expansion
+//! Handles the structure-preserving assembly of search results
 //! using the SPSR-Graph assembler.
 
 use std::sync::Arc;
@@ -23,10 +23,10 @@ impl AssemblyHandler {
         Self { assembler }
     }
 
-    /// Assemble search results with SPSR-Graph expansion
+    /// Assemble search results with SPSR-Graph structure preservation
     ///
-    /// For each search result, expands it using the assembler to include
-    /// related entities based on the specified depth and strategy.
+    /// For each search result, extracts the primary semantic unit and
+    /// concatenates it while preserving code structure.
     pub async fn assemble_results(
         &self,
         results: Vec<SearchResult>,
@@ -92,7 +92,6 @@ impl AssemblyHandler {
             end_line: assembled.end_line,
             is_boosted: original.is_boosted,
             boost_reason: original.boost_reason,
-            relations: original.relations,
             category: None,
             metadata: {
                 let mut metadata = original.metadata;
@@ -122,20 +121,13 @@ impl AssemblyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::relation_searcher::RelationSearcher;
-    use cce_relation::CallChainQuery;
 
     #[test]
     fn test_assembly_handler_creation() {
         // This test verifies that the handler can be created
         // Full integration tests would require a real assembler
         let config = crate::query::assembly::SPSRGraphConfig::default();
-        let mock_relation_searcher =
-            Arc::new(RelationSearcher::new(Arc::new(CallChainQuery::new())));
-        let mock_assembler = Arc::new(SPSRGraphAssembler::from_relation_searcher(
-            mock_relation_searcher,
-            config,
-        ));
+        let mock_assembler = Arc::new(SPSRGraphAssembler::new(config));
         let _handler = AssemblyHandler::new(mock_assembler);
 
         // Just verify it compiles and creates successfully
