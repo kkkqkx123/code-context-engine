@@ -123,6 +123,38 @@ fn javascript_basic_entities_and_import() {
 }
 
 #[test]
+fn javascript_prototype_style_method_assignments() {
+    let parsed = parse_file(
+        "response.js",
+        r#"
+var res = Object.create(null);
+
+res.status = function status(code) {
+  this.statusCode = code;
+  return this;
+};
+
+res.send = function send(body) {
+  var chunk = body;
+  return this;
+};
+
+res.json = function json(obj) {
+  return this.send(JSON.stringify(obj));
+};
+
+res.links = function(next) {
+  return this;
+};
+"#,
+    );
+    find(&parsed.entities, EntityKind::Method, "status");
+    find(&parsed.entities, EntityKind::Method, "send");
+    find(&parsed.entities, EntityKind::Method, "json");
+    find(&parsed.entities, EntityKind::Method, "links");
+}
+
+#[test]
 fn typescript_interface_and_generic_function() {
     let parsed = parse_file(
         "app.ts",

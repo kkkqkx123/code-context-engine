@@ -336,6 +336,67 @@ pub fn entity_js_only() -> &'static str {
 (field_definition
   property: (private_property_identifier) @entity.property.name
 ) @entity.property
+
+; ============================================
+; Prototype-style Method Assignments
+; ============================================
+; Patterns for `obj.method = function method(args) {}` and variants.
+; Common in older JavaScript codebases and prototype-based inheritance.
+
+; Function expression assigned to member expression (named or anonymous)
+; e.g., res.send = function send(body) { ... }
+; e.g., res.send = function(body) { ... }
+(assignment_expression
+  left: (member_expression
+    object: (identifier)
+    property: (property_identifier) @entity.method.name
+  )
+  right: (function_expression
+    parameters: (formal_parameters) @entity.method.params
+    body: (statement_block
+      (return_statement (_) @entity.method.return_type)?
+    ) @entity.method.body
+  )
+) @entity.method
+
+; Arrow function assigned to member expression
+; e.g., res.send = (body) => { ... }
+(assignment_expression
+  left: (member_expression
+    object: (identifier)
+    property: (property_identifier) @entity.method.name
+  )
+  right: (arrow_function
+    parameters: (formal_parameters) @entity.method.params
+  )
+) @entity.method
+
+; Variable declaration with function expression assigned to member expression
+; e.g., var res = Object.create(http.ServerResponse.prototype); res.send = function send(body) {}
+; This is handled by the assignment_expression patterns above.
+; For completeness, also handle: var res = { send: function send(body) {} }
+; Object literal property with function expression
+(object
+  (pair
+    key: (property_identifier) @entity.method.name
+    value: (function_expression
+      parameters: (formal_parameters) @entity.method.params
+      body: (statement_block
+        (return_statement (_) @entity.method.return_type)?
+      ) @entity.method.body
+    )
+  )
+) @entity.method
+
+; Object literal property with arrow function
+(object
+  (pair
+    key: (property_identifier) @entity.method.name
+    value: (arrow_function
+      parameters: (formal_parameters) @entity.method.params
+    )
+  )
+) @entity.method
 "#
 }
 
