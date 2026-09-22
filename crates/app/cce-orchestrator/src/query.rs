@@ -31,12 +31,6 @@
 //!     │       ├── CandidateSelection (candidate selection)
 //!     │       └── ThresholdFilter (threshold filtering)
 //!     │
-//!     ├── AssemblyHandler (SPSR-Graph assembly)
-//!     │   └── SPSRGraphAssembler
-//!     │       ├── SemanticUnitExtractor (semantic unit extraction)
-//!     │       ├── SegmentAggregator (segment aggregation)
-//!     │       └── StructureConcatenator (structure concatenation)
-//!     │
 //!     └── RelationSearcher (standalone relation queries)
 //!         ├── Call chain queries
 //!         ├── Path finding
@@ -55,7 +49,6 @@
 //! - **SearchPipeline**: search pipeline executing retrieval, enhancement and post-processing in order
 //! - **Retrieval Strategies**: pluggable retrieval strategies supporting multiple search modes
 //! - **Enhancement**: optional result enhancers that can be enabled/disabled independently
-//! - **Assembly**: assembles search results into an SPSR-Graph structure, preserving code structure and semantics
 //!
 //! # Usage Example
 //!
@@ -65,7 +58,6 @@
 //! // Create a Searcher via its builder
 //! let searcher = Searcher::builder(qdrant, embedder, bm25, project_group_id)
 //!     .with_sqlite(sqlite)
-//!     .with_assembler(assembler)
 //!     .with_rerank(rerank_handler)
 //!     .build();
 //!

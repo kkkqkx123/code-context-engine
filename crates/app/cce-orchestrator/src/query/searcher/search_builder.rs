@@ -7,13 +7,11 @@
 //!
 //! The searcher delegates to specialized components:
 //! - ResultProcessor: Ranking, filtering, and threshold application
-//! - AssemblyHandler: SPSR-Graph assembly operations
 
 use std::sync::Arc;
 
 use cce_config::project_registry::ProjectScope;
 
-use crate::query::assembly::{AssemblyHandler, SPSRGraphAssembler};
 use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
@@ -34,7 +32,6 @@ pub struct SearcherBuilder {
     embedder: Arc<dyn Embedder>,
     bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
     sqlite: Option<Arc<SqliteClient>>,
-    assembly_handler: Option<Arc<AssemblyHandler>>,
     rerank_handler: Option<Arc<ProductionRerankHandler>>,
     plugin_rerank_plugins: Vec<std::sync::Arc<dyn cce_plugin::CodePlugin>>,
     plugin_registry: Option<Arc<cce_plugin::PluginRegistry>>,
@@ -56,7 +53,6 @@ impl SearcherBuilder {
             embedder,
             bm25,
             sqlite: None,
-            assembly_handler: None,
             rerank_handler: None,
             plugin_rerank_plugins: Vec::new(),
             plugin_registry: None,
@@ -69,12 +65,6 @@ impl SearcherBuilder {
     /// Enable SQLite support for chunk content lookup
     pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
         self.sqlite = Some(sqlite);
-        self
-    }
-
-    /// Enable SPSR-Graph assembly support
-    pub fn with_assembler(mut self, assembler: Arc<SPSRGraphAssembler>) -> Self {
-        self.assembly_handler = Some(Arc::new(AssemblyHandler::new(assembler)));
         self
     }
 
@@ -151,7 +141,6 @@ impl SearcherBuilder {
             embedder,
             bm25: self.bm25,
             sqlite: self.sqlite,
-            assembly_handler: self.assembly_handler,
             reranker: Arc::new(LlmReranker::new(self.rerank_handler)),
             plugin_reranker: Arc::new(PluginReranker::new(self.plugin_rerank_plugins)),
             plugin_registry: self.plugin_registry,

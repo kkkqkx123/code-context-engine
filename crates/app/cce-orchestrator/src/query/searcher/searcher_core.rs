@@ -7,13 +7,11 @@
 //!
 //! The searcher delegates to specialized components:
 //! - ResultProcessor: Ranking, filtering, and threshold application
-//! - AssemblyHandler: SPSR-Graph assembly operations
 
 use std::sync::Arc;
 
 use cce_config::project_registry::ProjectScope;
 
-use crate::query::assembly::AssemblyHandler;
 use crate::query::boost::{SummaryBoost, apply_boosts};
 use crate::query::error::QueryError;
 use crate::query::error::Result;
@@ -59,8 +57,6 @@ pub struct Searcher {
     pub(crate) threshold_filter: Arc<ThresholdFilter>,
     /// Glob filter for include/exclude pattern filtering
     pub(crate) glob_filter: Arc<GlobFilter>,
-    /// Optional assembly handler for SPSR-Graph assembly
-    pub(crate) assembly_handler: Option<Arc<AssemblyHandler>>,
     /// Optional search metrics collector
     pub(crate) search_metrics: Option<Arc<SearchMetrics>>,
 }
@@ -87,7 +83,6 @@ impl Searcher {
     /// ```ignore
     /// let searcher = Searcher::builder(qdrant, embedder, bm25, scope)
     ///     .with_sqlite(sqlite)
-    ///     .with_assembler(assembler)
     ///     .with_rerank(rerank_handler)
     ///     .build();
     /// ```

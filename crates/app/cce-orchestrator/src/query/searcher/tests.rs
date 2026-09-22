@@ -7,7 +7,6 @@
 //!
 //! The searcher delegates to specialized components:
 //! - ResultProcessor: Ranking, filtering, and threshold application
-//! - AssemblyHandler: SPSR-Graph assembly operations
 
 use crate::query::error::QueryError;
 use crate::query::types::SearchResult;

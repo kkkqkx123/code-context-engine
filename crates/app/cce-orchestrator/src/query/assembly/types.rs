@@ -91,6 +91,14 @@ impl std::fmt::Display for SemanticUnitType {
     }
 }
 
+/// Relation type for expanded units
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationType {
+    Primary,
+    Secondary,
+    Tertiary,
+}
+
 /// Expanded semantic unit
 #[derive(Debug, Clone)]
 pub struct ExpandedUnit {
@@ -108,6 +116,10 @@ pub struct ExpandedUnit {
     pub name: String,
     /// Semantic unit type
     pub unit_type: SemanticUnitType,
+    /// Relation type
+    pub relation: RelationType,
+    /// Depth in the expansion tree
+    pub depth: u32,
 }
 
 impl ExpandedUnit {
@@ -127,6 +139,8 @@ impl ExpandedUnit {
             end_line,
             name,
             unit_type: SemanticUnitType::Unknown,
+            relation: RelationType::Primary,
+            depth: 0,
         }
     }
 

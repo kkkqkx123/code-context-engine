@@ -5,7 +5,7 @@
 //! between the in-memory graph service, the HTTP graph endpoints,
 //! and future offline consumers.
 
-use cce_types::{EntityId, RelationType, ResolvedRelation, relation::CallContext};
+use cce_types::{ResolvedRelation, relation::CallContext};
 use serde::{Deserialize, Serialize};
 
 /// Confidence of a graph edge.
@@ -105,6 +105,7 @@ pub fn kind_label(kind: &cce_types::EntityKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cce_types::{EntityId, RelationType};
 
     fn resolved(caller: u64, callee: Option<u64>, external: bool) -> ResolvedRelation {
         ResolvedRelation {

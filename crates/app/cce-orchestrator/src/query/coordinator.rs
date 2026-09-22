@@ -30,7 +30,6 @@ use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 
 use super::SearcherBuilder;
-use super::assembly::SPSRGraphAssembler;
 use super::cache::{CacheConfig, QueryCache};
 use super::capabilities::IndexCapabilities;
 use super::error::{QueryError, Result};
@@ -124,14 +123,6 @@ impl QueryCoordinatorBuilder {
         self.sqlite = Some(sqlite.clone());
         if let Some(builder) = self.searcher_builder.take() {
             self.searcher_builder = Some(builder.with_sqlite(sqlite));
-        }
-        self
-    }
-
-    /// Enable SPSR-Graph assembly support
-    pub fn with_assembler(mut self, assembler: Arc<SPSRGraphAssembler>) -> Self {
-        if let Some(builder) = self.searcher_builder.take() {
-            self.searcher_builder = Some(builder.with_assembler(assembler));
         }
         self
     }
