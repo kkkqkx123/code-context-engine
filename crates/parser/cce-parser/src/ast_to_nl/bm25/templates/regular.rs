@@ -102,6 +102,15 @@ impl GroupTemplate for RegularGroupTemplate {
         // Import-like members (import/require/include/export) are skipped: they carry
         // no retrieval value in the BM25 path (file-level summary and the relation
         // index cover them instead).
+        // Merged fragment groups always carry a header (the first
+        // fragment), but the group-level features above only cover that
+        // fragment. Remaining fragments are emitted as independent member
+        // conversions by the converter; expanding them here as well would
+        // duplicate the same text twice.
+        if group.group_type == cce_types::GroupType::MergedFragments {
+            let refs: Vec<&str> = all_parts.iter().map(|s| s.as_str()).collect();
+            return helpers::join_parts(&refs);
+        }
         let is_module = group.kind.is_module_like();
         for member in &group.members {
             if member.kind.is_import_like() {

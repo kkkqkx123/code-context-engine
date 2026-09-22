@@ -387,10 +387,6 @@ pub struct HeaderPathParams<'a> {
     pub header_entity_id: Option<EntityId>,
     /// Entity ids of the members that contributed text, in assembly order.
     pub member_entity_ids: &'a [EntityId],
-    /// All entities whose content is folded into the header conversion text
-    /// (e.g. every fragment of a merged group). These join the first chunk's
-    /// content attribution and source coverage.
-    pub header_source_entity_ids: &'a [EntityId],
     pub chunk_index: usize,
     pub total_chunks: usize,
     pub include_header_in_first_coverage: bool,
@@ -500,10 +496,8 @@ fn build_unsplit_header_chunk(
         let mut ids: Vec<EntityId> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for id in header
-            .header_source_entity_ids
-            .iter()
-            .copied()
-            .chain(header.header_entity_id)
+            .header_entity_id
+            .into_iter()
             .chain(header.member_entity_ids.iter().copied())
         {
             if seen.insert(id) {

@@ -71,6 +71,15 @@ impl GroupTemplate for RegularGroupTemplate {
             results.push(group_desc);
         }
 
+        // Merged fragment groups always carry a header (the first
+        // fragment), but the group description only covers that fragment.
+        // Remaining fragments are emitted as independent member conversions
+        // by the converter, so emitting them here as well would duplicate
+        // the same text twice (once folded into the header, once as members).
+        if group.group_type == GroupType::MergedFragments {
+            return results;
+        }
+
         let mut suppressed_modules = Vec::new();
 
         for member in self.members_for_description(group) {
@@ -190,6 +199,20 @@ impl RegularGroupTemplate {
             if !member_desc.contains(&relation) {
                 member_desc.push('\n');
                 member_desc.push_str(&relation);
+            }
+        }
+
+        // Preserve the full assignment for member/identifier assignments so
+        // export paths (`module.exports = ...`, `exports.etag = ...`) and
+        // config assignments survive in retrieval text.
+        if member.kind == EntityKind::Variable && !member.signature.trim().is_empty() {
+            let sig = member.signature.trim();
+            if (sig.contains('=') || sig.contains('.')) && !member_desc.contains(sig) {
+                member_desc.push('\n');
+                member_desc.push_str(sig);
+                if !sig.ends_with('.') {
+                    member_desc.push('.');
+                }
             }
         }
 

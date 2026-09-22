@@ -63,13 +63,74 @@ pub fn split_text_by_sentences(
 pub fn find_sentence_boundaries(text: &str) -> Vec<usize> {
     let mut boundaries = Vec::new();
     let sentence_endings = ['.', '!', '?', '。', '！', '？', '\n'];
+    // Bracket depth is tracked incrementally in a single pass and reset at
+    // each newline: newlines always terminate a sentence block, so depth
+    // only needs to be meaningful within the current line. This keeps the
+    // scan O(n) and prevents an unclosed bracket on an earlier line from
+    // suppressing every later boundary.
+    let mut depth_paren: i32 = 0;
+    let mut depth_brack: i32 = 0;
+    let mut depth_brace: i32 = 0;
 
     for (i, ch) in text.char_indices() {
-        if sentence_endings.contains(&ch) {
+        // Newlines always terminate a sentence block.
+        if ch == '\n' {
+            depth_paren = 0;
+            depth_brack = 0;
+            depth_brace = 0;
             let next_pos = i + ch.len_utf8();
             if next_pos < text.len() {
                 boundaries.push(next_pos);
             }
+            continue;
+        }
+        match ch {
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '[' => depth_brack += 1,
+            ']' => depth_brack -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            _ => {}
+        }
+        if !sentence_endings.contains(&ch) {
+            continue;
+        }
+        let next_pos = i + ch.len_utf8();
+        // CJK terminators are unambiguous sentence ends: CJK prose never
+        // separates sentences with spaces, while member-access dots are
+        // always ASCII. Split eagerly instead of requiring trailing
+        // whitespace that CJK text never has.
+        if matches!(ch, '。' | '！' | '？') {
+            if next_pos < text.len() {
+                boundaries.push(next_pos);
+            }
+            continue;
+        }
+        // Do not split inside member access (e.g. `req.fresh`) or between
+        // an identifier and a trailing dot (`if (req.`).
+        let prev = text[..i].chars().next_back();
+        let next = text[next_pos..].chars().next();
+        let prev_is_ident = prev.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$');
+        let next_is_ident = next.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$');
+        if prev_is_ident && next_is_ident {
+            continue;
+        }
+        if next.is_none() {
+            continue;
+        }
+        // Require whitespace or closing punctuation after `.`/`!`/`?`
+        // so `e.g.`-like dots and unclosed `if (req.` do not split.
+        let next_ok = matches!(next, Some(c) if c.is_whitespace() || c == ')' || c == ']' || c == '}' || c == '"' || c == '\'' || c == '`');
+        if !next_ok {
+            continue;
+        }
+        // Avoid splitting inside unbalanced brackets/parens on this line.
+        if depth_paren > 0 || depth_brack > 0 || depth_brace > 0 {
+            continue;
+        }
+        if next_pos < text.len() {
+            boundaries.push(next_pos);
         }
     }
 
@@ -123,8 +184,45 @@ mod tests {
         let text = "你好。世界！";
         let boundaries = find_sentence_boundaries(text);
 
-        assert!(!boundaries.is_empty());
+        // 你好。(9 bytes) splits eagerly despite no trailing space;
+        // the trailing ！ is covered by the end-of-text push.
+        assert_eq!(boundaries, vec![9, text.len()]);
+    }
+
+    #[test]
+    fn test_find_sentence_boundaries_cjk_no_spaces() {
+        let text = "第一句。第二句。第三句。";
+        let boundaries = find_sentence_boundaries(text);
+
+        assert_eq!(boundaries, vec![12, 24, text.len()]);
+    }
+
+    #[test]
+    fn test_find_sentence_boundaries_member_access() {
+        let text = "Check req.fresh flag. Done.";
+        let boundaries = find_sentence_boundaries(text);
+
+        // The dot inside `req.fresh` must not produce a boundary.
+        assert_eq!(boundaries, vec![21, text.len()]);
+    }
+
+    #[test]
+    fn test_find_sentence_boundaries_unclosed_paren_skips() {
+        let text = "Call foo(bar. Next line here. End.";
+        let boundaries = find_sentence_boundaries(text);
+
+        // Byte 13 (just after `bar.`) sits inside an unclosed paren.
+        assert!(!boundaries.contains(&13));
         assert_eq!(*boundaries.last().unwrap(), text.len());
+    }
+
+    #[test]
+    fn test_find_sentence_boundaries_depth_resets_each_line() {
+        let text = "Open (never closed\nSecond line ends. Third.";
+        let boundaries = find_sentence_boundaries(text);
+
+        // The unclosed paren on line 1 must not suppress line 2 splits.
+        assert_eq!(boundaries, vec![19, 36, text.len()]);
     }
 
     #[test]

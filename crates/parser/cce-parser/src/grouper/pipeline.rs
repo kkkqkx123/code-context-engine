@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 use cce_plugin::PluginCapability;
 use cce_types::FILE_DOC_SENTINEL_ID;
+use cce_types::FILE_FALLBACK_SENTINEL_ID;
 use cce_types::entity::{Entity, EntityId, EntityKind, GroupedEntity, ParsedFile};
 use cce_types::language::Language;
 use cce_types::test_info::TestInfo;
@@ -511,6 +512,40 @@ impl PreprocessingPipeline {
                     "Failed to generate combined source for group {}",
                     group.group_id
                 );
+            }
+        }
+
+        // File-level fallback: guarantee every non-empty source file yields
+        // at least one group so zero-entity files are not silently dropped.
+        if groups.is_empty() {
+            let source = parsed_file.source.as_ref();
+            if !source.trim().is_empty() {
+                let file_name = cce_types::path::file_name_str(&parsed_file.path);
+                let file_id = cce_types::path::group_id_base(&parsed_file.path);
+                let mut fallback =
+                    EntityGroup::new(format!("file_fallback_{}", file_id), GroupType::Standalone);
+                fallback.kind = EntityKind::Module;
+                fallback.name = CompactString::from(file_name);
+                fallback.language = parsed_file.language;
+                let span =
+                    cce_types::Span::new(0, source.len(), 0, 0, source.matches('\n').count(), 0);
+                fallback.span = span;
+                // Sentinel ID shared with nothing else: the file has no real
+                // entities, but a file-local ID starting at 0 would collide
+                // with the real ID space. Register the span so source
+                // coverage and member ordering see the pseudo-entity.
+                let sentinel_id = FILE_FALLBACK_SENTINEL_ID;
+                fallback.entity_spans.insert(sentinel_id, span);
+                fallback.combined_source = Some(std::sync::Arc::from(source.to_string()));
+                fallback.header = Some(GroupedEntity {
+                    id: sentinel_id,
+                    name: file_name.to_string(),
+                    kind: EntityKind::Module,
+                    doc_comment: None,
+                    ..Default::default()
+                });
+                fallback.header_id = Some(sentinel_id);
+                groups.push(fallback);
             }
         }
 

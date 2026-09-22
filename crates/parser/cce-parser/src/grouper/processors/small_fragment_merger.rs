@@ -286,6 +286,28 @@ impl SmallFragmentMerger {
                         }
                     }
                 }
+
+                // Bound merged span lines: chaining every small fragment within
+                // proximity can span a whole file (e.g. dozens of describes),
+                // making the first chunk claim the entire file. Flush when the
+                // batch would exceed the configured span budget.
+                if let Some(first) = current_batch.first() {
+                    let start_row = first
+                        .span
+                        .start_position
+                        .row
+                        .min(group.span.start_position.row);
+                    let end_row = first.span.end_position.row.max(group.span.end_position.row);
+                    if end_row.saturating_sub(start_row) > self.max_span_lines
+                        && !current_batch.is_empty()
+                    {
+                        if let Some(merged) =
+                            self.create_merged_group(std::mem::take(&mut current_batch))
+                        {
+                            merged_groups.push(merged);
+                        }
+                    }
+                }
             }
 
             current_batch.push(group);

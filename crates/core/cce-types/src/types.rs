@@ -30,8 +30,8 @@ pub use chunk_refs::ChunkEntityRefs;
 pub use entity::{
     BehaviorFact, BehaviorFactKind, BehaviorStore, ControlFlowFact, ControlFlowFactKind,
     ControlFlowStore, EmbeddedBlockSnapshot, Entity, EntityBehavior, EntityControlFlow, EntityId,
-    EntityKind, EntitySnapshot, FILE_DOC_SENTINEL_ID, GroupedEntity, ParsedFile, RawRelationData,
-    find_outer_else_offset, has_outer_else_branch,
+    EntityKind, EntitySnapshot, FILE_DOC_SENTINEL_ID, FILE_FALLBACK_SENTINEL_ID, GroupedEntity,
+    ParsedFile, RawRelationData, find_outer_else_offset, has_outer_else_branch,
 };
 
 pub use position::{Position, Span};

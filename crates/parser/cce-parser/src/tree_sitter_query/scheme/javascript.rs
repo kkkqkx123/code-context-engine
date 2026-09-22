@@ -346,11 +346,9 @@ pub fn entity_js_only() -> &'static str {
 ; Function expression assigned to member expression (named or anonymous)
 ; e.g., res.send = function send(body) { ... }
 ; e.g., res.send = function(body) { ... }
+; e.g., View.prototype.lookup = function lookup(name) { ... }
 (assignment_expression
-  left: (member_expression
-    object: (identifier)
-    property: (property_identifier) @entity.method.name
-  )
+  left: (member_expression) @entity.method.name
   right: (function_expression
     parameters: (formal_parameters) @entity.method.params
     body: (statement_block
@@ -362,14 +360,64 @@ pub fn entity_js_only() -> &'static str {
 ; Arrow function assigned to member expression
 ; e.g., res.send = (body) => { ... }
 (assignment_expression
-  left: (member_expression
-    object: (identifier)
-    property: (property_identifier) @entity.method.name
-  )
+  left: (member_expression) @entity.method.name
   right: (arrow_function
     parameters: (formal_parameters) @entity.method.params
   )
 ) @entity.method
+
+; Chained assignment outermost span, e.g. res.set = res.header = function() {}
+(assignment_expression
+  left: (member_expression) @entity.method.chain.name
+  right: (assignment_expression)
+) @entity.method.chain
+
+; Generic member assignment with non-function value, e.g. exports.etag,
+; module.exports = req, process.env.NODE_ENV = 'test', app.request = ...
+(assignment_expression
+  left: (member_expression) @entity.variable.member.name
+  right: (_) @entity.variable.member.value
+) @entity.variable.member
+
+; Subscript member assignment, e.g. opts.engines[this.ext] = fn
+(assignment_expression
+  left: (subscript_expression
+    object: (_)
+  ) @entity.variable.subscript.name
+  right: (_) @entity.variable.subscript.value
+) @entity.variable.subscript
+
+; Identifier assignment, e.g. exports = module.exports = ..., online = online(db)
+(assignment_expression
+  left: (identifier) @entity.variable.assign.name
+  right: (_) @entity.variable.assign.value
+) @entity.variable.assign
+
+; Top-level call statement, e.g. app.use(...), app.get('/', handler),
+; users.push(...)
+(program
+  (expression_statement
+    (call_expression
+      function: (_) @entity.function.top_call.name
+    ) @entity.function.top_call
+  )
+)
+
+; Top-level if statement, e.g. if (!module.parent) { app.listen(...) }
+(program
+  (if_statement
+    condition: (_) @entity.function.top_if.name
+  ) @entity.function.top_if
+)
+
+; Async IIFE startup block, e.g. (async () => { await init(); })()
+(program
+  (expression_statement
+    (call_expression
+      function: (parenthesized_expression) @entity.function.iife.name
+    ) @entity.function.iife
+  )
+)
 
 ; Variable declaration with function expression assigned to member expression
 ; e.g., var res = Object.create(http.ServerResponse.prototype); res.send = function send(body) {}

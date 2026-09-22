@@ -196,17 +196,26 @@ fn process_path(
     tracker: &mut GroupTracker,
     input: PathInput,
 ) -> Vec<ChunkedResult> {
+    let mut ordered_members: Vec<ConversionResult> = input.member_convs.to_vec();
+    ordered_members.sort_by_key(|m| {
+        ctx.group
+            .entity_spans
+            .get(&m.entity_id)
+            .map(|s| (s.start_byte, s.end_byte))
+            .unwrap_or((usize::MAX, usize::MAX))
+    });
+    let member_convs_sorted = ordered_members;
+    let member_convs: &[ConversionResult] = &member_convs_sorted;
     let first_budget = input.helper.header_budget(&input.texts.first, input.path);
     let continuation_budget = input
         .helper
         .header_budget(&input.texts.continuation, input.path);
-    let member_self_contained: Vec<bool> = input
-        .member_convs
+    let member_self_contained: Vec<bool> = member_convs
         .iter()
         .map(|m| super::chunk_builder::entity_has_own_descriptor(ctx.group, m.entity_id))
         .collect();
     let member_groups = input.helper.group_members_by_header_budget(
-        input.member_convs,
+        member_convs,
         first_budget,
         continuation_budget,
         input.path,
@@ -214,22 +223,21 @@ fn process_path(
     );
     let total = member_groups.len();
 
-    // Entities folded into the header conversion text (e.g. every fragment of
-    // a merged group). The first chunk's content attribution and source
-    // coverage must include them so the chunk's line range reflects the text
-    // it actually carries.
-    let header_source_entity_ids: Vec<EntityId> = input
-        .header_conv
-        .as_ref()
-        .map(|c| c.source_entity_ids.clone())
-        .unwrap_or_default();
-
     let mut chunks: Vec<ChunkedResult> = member_groups
         .into_iter()
         .enumerate()
         .flat_map(|(idx, members)| {
+            let continuation_for_block: String;
             let header_text = if idx == 0 {
                 &input.texts.first
+            } else if input.path == ChunkPath::Embedding {
+                if let Some(first) = members.first() {
+                    continuation_for_block =
+                        format!("{} {} (continuation).", first.kind.kind_label(), first.name);
+                    &continuation_for_block
+                } else {
+                    &input.texts.continuation
+                }
             } else {
                 &input.texts.continuation
             };
@@ -258,7 +266,6 @@ fn process_path(
                     tracker,
                     header_entity_id: ctx.group.header_id,
                     member_entity_ids: &member_entity_ids,
-                    header_source_entity_ids: &header_source_entity_ids,
                     chunk_index: idx,
                     total_chunks: total,
                     include_header_in_first_coverage: idx == 0,
@@ -406,7 +413,6 @@ mod tests {
                 tracker,
                 header_entity_id: group.header_id,
                 member_entity_ids,
-                header_source_entity_ids: &[],
                 chunk_index,
                 total_chunks: 1,
                 include_header_in_first_coverage: chunk_index == 0,

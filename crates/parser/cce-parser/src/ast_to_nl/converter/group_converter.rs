@@ -37,7 +37,10 @@ use crate::grouper::ProcessingResult;
 use crate::grouper::{EntityGroup, PatternInfo};
 use cce_types::ConversionResult;
 use cce_types::OutputMode;
-use cce_types::entity::{EntityId, EntityKind, GroupedEntity, meta_keys};
+use cce_types::entity::{
+    EntityId, EntityKind, GroupedEntity, VARIABLE_TYPE_METADATA_KEYS, is_export_assignment_name,
+    meta_keys,
+};
 use std::collections::{HashMap, HashSet};
 
 use super::index_enrichment::IndexTextEnricher;
@@ -150,10 +153,14 @@ impl super::AstToNlConverter {
         let mut converted_entity_ids: HashSet<EntityId> = HashSet::new();
 
         for group in groups {
-            // Skip standalone groups for low-level entities.
+            // Skip standalone groups for low-level local variables.
+            // Top-level variables (file scope exports, seed data, config
+            // assignments) carry retrieval value and must be kept.
             if group.members.is_empty() {
                 if let Some(ref header) = group.header {
-                    if matches!(header.kind, EntityKind::Variable) {
+                    if matches!(header.kind, EntityKind::Variable)
+                        && !Self::is_top_level_variable_group(group, header)
+                    {
                         continue;
                     }
                 }
@@ -808,6 +815,55 @@ impl super::AstToNlConverter {
         (!names.is_empty()).then(|| format!("Trait implementations: {}.", names.join(", ")))
     }
 
+    fn variable_carries_retrieval_value(entity: &GroupedEntity) -> bool {
+        if entity
+            .doc_comment
+            .as_deref()
+            .is_some_and(|d| !d.trim().is_empty())
+        {
+            return true;
+        }
+        if VARIABLE_TYPE_METADATA_KEYS
+            .iter()
+            .any(|k| entity.metadata.contains_key(*k))
+        {
+            return true;
+        }
+        is_export_assignment_name(&entity.name)
+    }
+
+    fn is_top_level_variable_group(group: &EntityGroup, header: &GroupedEntity) -> bool {
+        if group.parent_group_id.is_some() || group.nesting_level != 0 {
+            return false;
+        }
+        if Self::variable_carries_retrieval_value(header) {
+            return true;
+        }
+        matches!(
+            group.group_type,
+            cce_types::GroupType::Standalone
+                | cce_types::GroupType::MergedFragments
+                | cce_types::GroupType::ModuleWithContents
+                | cce_types::GroupType::RelatedFunctions
+        )
+    }
+
+    fn is_top_level_variable_member(group: &EntityGroup, member: &GroupedEntity) -> bool {
+        if group.parent_group_id.is_some() {
+            return false;
+        }
+        if !matches!(
+            group.group_type,
+            cce_types::GroupType::MergedFragments
+                | cce_types::GroupType::Standalone
+                | cce_types::GroupType::ModuleWithContents
+                | cce_types::GroupType::RelatedFunctions
+        ) {
+            return false;
+        }
+        Self::variable_carries_retrieval_value(member) || group.nesting_level == 0
+    }
+
     fn should_convert_member(
         &self,
         group: &EntityGroup,
@@ -835,10 +891,25 @@ impl super::AstToNlConverter {
             return false;
         }
 
-        // Skip low-level entities (local variables) from appearing as
-        // standalone sections. These are implementation details that should
-        // only appear in their parent function's text content.
-        if matches!(member.kind, EntityKind::Variable) {
+        // Skip low-level local variables from appearing as standalone
+        // sections. Top-level variables (merged file-scope fragments such as
+        // exports, seed data, config assignments) must be kept, otherwise
+        // file-scope statements silently disappear from retrieval.
+        if matches!(member.kind, EntityKind::Variable)
+            && !Self::is_top_level_variable_member(group, member)
+        {
+            return false;
+        }
+
+        // Function members absorbed into their parent body must not be
+        // converted independently, otherwise the same callback text appears
+        // twice (once inside the parent body, once as its own section).
+        if matches!(group.group_type, cce_types::GroupType::FunctionWithMembers)
+            && matches!(
+                member.kind,
+                EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+            )
+        {
             return false;
         }
 

@@ -273,10 +273,7 @@ impl<'a> SubGraphBuilder<'a> {
         let node_id = self.node_id(node.function_id);
         if self.seen.insert(node_id.clone()) {
             let (kind, location) = match self.entity_metadata(node.function_id) {
-                Some(entity) => (
-                    kind_label(&entity.kind),
-                    location_of(&entity.span),
-                ),
+                Some(entity) => (kind_label(&entity.kind), location_of(&entity.span)),
                 None => ("unknown".to_string(), String::new()),
             };
             let location = match node.call_line {

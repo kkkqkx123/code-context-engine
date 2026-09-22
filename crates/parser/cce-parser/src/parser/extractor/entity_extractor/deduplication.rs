@@ -7,6 +7,7 @@
 //!   (untyped local variables) and duplicate decorated definitions, while
 //!   preserving type-bearing locals for inference.
 
+use cce_types::entity::{VARIABLE_TYPE_METADATA_KEYS, is_export_assignment_name};
 use cce_types::{Entity, EntityKind};
 use std::collections::{HashMap, HashSet};
 
@@ -94,7 +95,12 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
 
             // Only remove truly low-value implementation detail entities:
             // bare local variables. Typed locals are kept for inference.
-            if matches!(child.kind, EntityKind::Variable) && !variable_carries_type_info(child) {
+            // Export assignments (`module.exports`, `exports.*`) are kept
+            // even when bare and nested inside a chain assignment, otherwise
+            // the export path silently disappears.
+            if matches!(child.kind, EntityKind::Variable) && !variable_carries_type_info(child)
+                && !is_export_assignment_name(&child.name)
+            {
                 to_remove.insert(child.id);
             }
 
@@ -148,17 +154,7 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
 /// removal. `source_type` records destructuring provenance (tuple unpacking,
 /// loop/except/with/case bindings) and feeds positional element mapping.
 pub(crate) fn variable_carries_type_info(entity: &Entity) -> bool {
-    const TYPE_KEYS: &[&str] = &[
-        "type_annotation",
-        "constructor_type",
-        "literal_type",
-        "call_target",
-        "explicit_type",
-        "var_type",
-        "inferred_type",
-        "source_type",
-    ];
-    TYPE_KEYS
+    VARIABLE_TYPE_METADATA_KEYS
         .iter()
         .any(|key| entity.metadata.contains_key(*key))
 }

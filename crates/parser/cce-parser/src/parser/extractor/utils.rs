@@ -194,6 +194,24 @@ pub fn capture_name_contains(capture_name: &str, substring: &str) -> bool {
         .contains(&substring.to_lowercase())
 }
 
+/// Maximum entity name length in chars.
+///
+/// Names come straight from AST node text, so structural captures (long
+/// conditions, chained receivers, IIFE bodies that escape the dedicated
+/// rename) can yield names far beyond any usable identifier. The cap keeps
+/// group names, NL headers, and symbol tables bounded; a name longer than
+/// this is never a usable lookup key anyway.
+pub const MAX_ENTITY_NAME_LEN: usize = 200;
+
+/// Truncate an entity name to [`MAX_ENTITY_NAME_LEN`] on a char boundary.
+pub fn truncate_entity_name(name: String) -> String {
+    if name.chars().count() > MAX_ENTITY_NAME_LEN {
+        name.chars().take(MAX_ENTITY_NAME_LEN).collect()
+    } else {
+        name
+    }
+}
+
 fn collect_comment_ranges(
     node: Node<'_>,
     start: usize,

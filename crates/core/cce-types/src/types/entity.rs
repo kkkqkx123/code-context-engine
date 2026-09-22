@@ -31,6 +31,7 @@ mod grouped;
 mod id;
 mod kind;
 pub mod meta_keys;
+pub mod names;
 pub use behavior::{BehaviorFact, BehaviorFactKind, BehaviorStore, EntityBehavior};
 pub use control_flow::{
     ControlFlowFact, ControlFlowFactKind, ControlFlowStore, EntityControlFlow,
@@ -42,5 +43,6 @@ pub use embedded_block::{
 pub use file::{ParseStatus, ParsedFile, RawRelationData};
 pub use full::{Entity, EntitySnapshot};
 pub use grouped::GroupedEntity;
-pub use id::{EntityId, FILE_DOC_SENTINEL_ID};
+pub use id::{EntityId, FILE_DOC_SENTINEL_ID, FILE_FALLBACK_SENTINEL_ID};
 pub use kind::EntityKind;
+pub use names::{VARIABLE_TYPE_METADATA_KEYS, is_export_assignment_name};

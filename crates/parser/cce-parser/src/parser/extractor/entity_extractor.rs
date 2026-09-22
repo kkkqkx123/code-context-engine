@@ -190,7 +190,7 @@ impl EntityExtractor {
                             }
                             let mut sibling = entity.clone();
                             sibling.id = context.next_entity_id();
-                            sibling.name = sibling_name.to_string();
+                            sibling.name = utils::truncate_entity_name(sibling_name.to_string());
                             sibling.span = utils::create_span_from_capture(cap);
                             pattern_siblings.push(sibling);
                         }
@@ -479,6 +479,15 @@ impl EntityExtractor {
         if language == &Language::Ruby && entity.name.starts_with(':') {
             entity.name = entity.name[1..].to_string();
         }
+
+        // Structural captures name entities after whole AST subtrees (an IIFE
+        // is named by its entire parenthesized body). Such names carry no
+        // identifier value and pollute group names, NL headers, and symbol
+        // tables, so they get a short synthesized name instead.
+        if entity.subtype.as_deref() == Some("iife") {
+            entity.name = "iife".to_string();
+        }
+        entity.name = utils::truncate_entity_name(entity.name);
 
         // Generic destructuring-source hookup: any `@....source` capture
         // records the provenance expression for pattern-bound variables

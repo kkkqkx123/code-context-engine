@@ -266,7 +266,8 @@ mod tests {
         let concat = StructureConcatenator::new(config);
 
         let primary = ExpandedUnit::new(
-            "fn multiply(a: i32, b: i32) -> i32 {\n    compute(a, b) + compute(a, b)\n}".to_string(),
+            "fn multiply(a: i32, b: i32) -> i32 {\n    compute(a, b) + compute(a, b)\n}"
+                .to_string(),
             "src/calc.rs".to_string(),
             10,
             12,
@@ -391,7 +392,11 @@ mod tests {
 
         // Should contain truncation marker if primary was truncated
         // Current implementation only processes primary, so test verifies primary truncation works
-        assert!(result.contains("omitted") || result.contains("Truncated") || result.contains("large_function"));
+        assert!(
+            result.contains("omitted")
+                || result.contains("Truncated")
+                || result.contains("large_function")
+        );
     }
 
     #[test]

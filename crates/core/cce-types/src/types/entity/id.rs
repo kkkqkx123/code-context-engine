@@ -28,6 +28,12 @@ pub struct EntityId(pub u64);
 /// FileDocumentation group header so both refer to the same pseudo-entity.
 pub const FILE_DOC_SENTINEL_ID: EntityId = EntityId(u64::MAX - 1);
 
+/// Sentinel entity ID for the grouper's file-level fallback group header.
+/// Zero-entity files get a synthetic Module header so they are not silently
+/// dropped; the sentinel keeps the pseudo-entity out of the real file-local
+/// ID space (which starts at 0).
+pub const FILE_FALLBACK_SENTINEL_ID: EntityId = EntityId(u64::MAX);
+
 impl std::fmt::Display for EntityId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
