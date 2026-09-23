@@ -62,7 +62,12 @@ impl RelationResolver {
     ) -> Option<EntityId> {
         let target_name = symbol_ref.metadata.name_str();
         let target_file = symbol_ref.metadata.location.file_path.as_ref();
-        self.resolve_entity_by_name(target_name, Some(target_file), entity_index)
+        self.resolve_entity_by_name(
+            target_name,
+            Some(target_file),
+            Some(target_file),
+            entity_index,
+        )
     }
 
     /// Resolve a bare target name to a real entity ID via the entity index.
@@ -72,28 +77,44 @@ impl RelationResolver {
     /// and must never be cast into `EntityId` — doing so produced dangling
     /// `callee_id`s that only surfaced at snapshot validation.
     ///
-    /// When `prefer_file` is supplied, entities in that file win; otherwise
-    /// the first entity registered under the name is used.
+    /// When `prefer_file` is supplied, an entity in that file wins outright.
+    /// Otherwise a single candidate is taken directly; multiple candidates
+    /// go through the shared affinity arbitration (caller-directory
+    /// preference, then non-test preference) and resolution is abandoned on
+    /// a remaining tie instead of picking an arbitrary first entry.
     pub(crate) fn resolve_entity_by_name(
         &self,
         name: &str,
         prefer_file: Option<&str>,
+        caller_file: Option<&str>,
         entity_index: &RelationIndex,
     ) -> Option<EntityId> {
         let ids = entity_index.get_function_ids_by_name(name);
-        match prefer_file {
-            Some(file_path) => ids
-                .iter()
-                .copied()
-                .find(|id| {
-                    entity_index
-                        .get_file_path_by_entity(*id)
-                        .as_deref()
-                        .is_some_and(|p| Self::paths_equivalent(p, file_path))
-                })
-                .or_else(|| ids.first().copied()),
-            None => ids.first().copied(),
+        if ids.is_empty() {
+            return None;
         }
+        if let Some(file_path) = prefer_file {
+            if let Some(id) = ids.iter().copied().find(|id| {
+                entity_index
+                    .get_file_path_by_entity(*id)
+                    .as_deref()
+                    .is_some_and(|p| Self::paths_equivalent(p, file_path))
+            }) {
+                return Some(id);
+            }
+        }
+        if ids.len() == 1 {
+            return ids.first().copied();
+        }
+        let candidate_paths: Vec<Option<String>> = ids
+            .iter()
+            .map(|id| entity_index.get_file_path_by_entity(*id))
+            .collect();
+        crate::resolution_affinity::unique_candidate_by_affinity(
+            caller_file.or(prefer_file),
+            &candidate_paths,
+        )
+        .map(|winner| ids[winner])
     }
 
     /// Snapshot a symbol reference for storage inside resolved relations.

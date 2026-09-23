@@ -98,7 +98,8 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
             // Export assignments (`module.exports`, `exports.*`) are kept
             // even when bare and nested inside a chain assignment, otherwise
             // the export path silently disappears.
-            if matches!(child.kind, EntityKind::Variable) && !variable_carries_type_info(child)
+            if matches!(child.kind, EntityKind::Variable)
+                && !variable_carries_type_info(child)
                 && !is_export_assignment_name(&child.name)
             {
                 to_remove.insert(child.id);

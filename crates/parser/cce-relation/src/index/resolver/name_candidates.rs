@@ -235,9 +235,14 @@ impl RelationResolver {
                     .get_by_qualified_name(&qualified_name)
                     .is_some()
                 {
-                    self.resolve_entity_by_name(name, Some(&parsed.path), entity_index)
+                    self.resolve_entity_by_name(
+                        name,
+                        Some(&parsed.path),
+                        Some(&parsed.path),
+                        entity_index,
+                    )
                 } else if symbol_table.get_by_simple_name(name).is_some() {
-                    self.resolve_entity_by_name(name, None, entity_index)
+                    self.resolve_entity_by_name(name, None, Some(&parsed.path), entity_index)
                 } else if self.should_block_last_segment_fallback(name, is_stdlib, ctx) {
                     None
                 } else if let Some(last) = self.last_segment_for_resolution(name, is_stdlib) {
@@ -246,9 +251,14 @@ impl RelationResolver {
                         .get_by_qualified_name(&qualified_last)
                         .is_some()
                     {
-                        self.resolve_entity_by_name(last, Some(&parsed.path), entity_index)
+                        self.resolve_entity_by_name(
+                            last,
+                            Some(&parsed.path),
+                            Some(&parsed.path),
+                            entity_index,
+                        )
                     } else if symbol_table.get_by_simple_name(last).is_some() {
-                        self.resolve_entity_by_name(last, None, entity_index)
+                        self.resolve_entity_by_name(last, None, Some(&parsed.path), entity_index)
                     } else {
                         parsed
                             .local_symbols
@@ -294,9 +304,32 @@ impl RelationResolver {
         is_stdlib: bool,
         ctx: &NameCandidateContext<'_>,
     ) -> bool {
-        // Delegated to the centralized post-processor so all `clone` heuristics
-        // live in one deterministic location.
+        // Receiver type knowledge is resolved here (the resolver owns the
+        // inference lookups); the decision rules stay centralized in the
+        // post-processor.
+        let receiver_type_known = if is_stdlib || (!name.contains('.') && !name.contains(':')) {
+            false
+        } else {
+            let head = name.split(['.', ':']).next().unwrap_or("");
+            !head.is_empty()
+                && self
+                    .lookup_inferred_receiver_type(
+                        head,
+                        &ctx.parsed.path,
+                        ctx.symbol_table,
+                        ctx.parsed,
+                    )
+                    .is_some()
+        };
+        // Delegated to the centralized post-processor so all receiver
+        // heuristics live in one deterministic location.
         self.effective_post_processor()
-            .should_block_last_segment_fallback(name, ctx.parsed, ctx.symbol_table, is_stdlib)
+            .should_block_last_segment_fallback(
+                name,
+                ctx.parsed,
+                ctx.symbol_table,
+                is_stdlib,
+                receiver_type_known,
+            )
     }
 }

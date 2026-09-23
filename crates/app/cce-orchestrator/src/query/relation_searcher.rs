@@ -3,13 +3,16 @@
 //! Provides a unified interface for relation queries with pagination
 //! and error handling.
 
+use cce_relation::index::SnapshotEntityQueryOps;
 use cce_relation::query::QueryCache;
 use cce_relation::{CallChainNode, CallChainQuery};
-use cce_types::{EntityId, ResolvedRelation};
+use cce_types::{EntityId, ResolvedRelation, TestInfo, language::LanguageInfo};
 use parking_lot::RwLock;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::error::Result;
+use super::types::ExcludableContentType;
 
 /// Relation query options
 #[derive(Debug, Clone)]
@@ -22,6 +25,12 @@ pub struct RelationQueryOptions {
     pub limit: usize,
     /// Include start node in results
     pub include_start: bool,
+    /// Keep only entities whose file path is under this directory prefix
+    pub directory_prefix: Option<String>,
+    /// Content types to exclude (mirrors the main query path)
+    pub exclude_content_types: Vec<ExcludableContentType>,
+    /// Exact file paths to exclude (normalized project paths)
+    pub excluded_files: Vec<String>,
 }
 
 impl Default for RelationQueryOptions {
@@ -31,6 +40,9 @@ impl Default for RelationQueryOptions {
             offset: 0,
             limit: 20,
             include_start: false,
+            directory_prefix: None,
+            exclude_content_types: Vec::new(),
+            excluded_files: Vec::new(),
         }
     }
 }
@@ -63,6 +75,93 @@ impl RelationQueryOptions {
     pub fn with_include_start(mut self, include_start: bool) -> Self {
         self.include_start = include_start;
         self
+    }
+
+    /// Set directory prefix filter
+    pub fn with_directory_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.directory_prefix = Some(prefix.into());
+        self
+    }
+
+    /// Exclude test files from results
+    pub fn with_exclude_tests(mut self, exclude: bool) -> Self {
+        if exclude
+            && !self
+                .exclude_content_types
+                .contains(&ExcludableContentType::Test)
+        {
+            self.exclude_content_types.push(ExcludableContentType::Test);
+        }
+        self
+    }
+
+    /// Set exact file paths to exclude
+    pub fn with_excluded_files(mut self, files: Vec<String>) -> Self {
+        self.excluded_files = files;
+        self
+    }
+}
+
+/// File-level post-filter derived from `RelationQueryOptions`.
+///
+/// The relation snapshot is a pure in-memory index (no storage-layer filter
+/// pushdown like Qdrant/tantivy), so filtering is applied on query output
+/// and direct-neighbor results. Test-file detection reuses the single
+/// authoritative rule set (`cce_types::TestInfo`), shared with the main
+/// query path.
+#[derive(Debug, Default, Clone)]
+struct RelationFileFilter {
+    directory_prefix: Option<String>,
+    exclude_tests: bool,
+    excluded_files: HashSet<String>,
+}
+
+impl RelationFileFilter {
+    fn from_options(options: &RelationQueryOptions) -> Self {
+        Self {
+            directory_prefix: options
+                .directory_prefix
+                .as_deref()
+                .map(|p| cce_types::normalize_project_path(p.trim_matches('/'))),
+            exclude_tests: options
+                .exclude_content_types
+                .contains(&ExcludableContentType::Test),
+            excluded_files: options
+                .excluded_files
+                .iter()
+                .map(|f| cce_types::normalize_project_path(f))
+                .collect(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.directory_prefix.is_none() && !self.exclude_tests && self.excluded_files.is_empty()
+    }
+
+    /// Whether a file path passes the filter. An unknown path is only kept
+    /// when no directory constraint is active, so a scoped query never
+    /// reports nodes it cannot place.
+    fn matches_path(&self, path: Option<&str>) -> bool {
+        let Some(path) = path else {
+            return self.directory_prefix.is_none();
+        };
+        let normalized = cce_types::normalize_project_path(path);
+        if let Some(prefix) = &self.directory_prefix {
+            let inside = normalized == *prefix || normalized.starts_with(&format!("{prefix}/"));
+            if !inside {
+                return false;
+            }
+        }
+        if self.exclude_tests {
+            let info = LanguageInfo::detect_from_path(&normalized);
+            if TestInfo::from_path(Some(&info.language), &normalized).is_test() {
+                return false;
+            }
+        }
+        if self.excluded_files.contains(&normalized) {
+            return false;
+        }
+        true
     }
 }
 
@@ -160,42 +259,109 @@ impl RelationSearcher {
         callers
     }
 
-    /// Get callees with pagination
+    /// Get callees with pagination (file-filtered per options)
     pub fn get_callees_paginated(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Vec<ResolvedRelation> {
-        let callees = self.get_callees(entity_id);
-        callees
+        self.filter_callees(entity_id, options)
             .into_iter()
             .skip(options.offset)
             .take(options.limit)
             .collect()
     }
 
-    /// Get callers with pagination
+    /// Get callees after applying the file-level filter (pre-pagination).
+    pub fn filter_callees(
+        &self,
+        entity_id: EntityId,
+        options: &RelationQueryOptions,
+    ) -> Vec<ResolvedRelation> {
+        let filter = RelationFileFilter::from_options(options);
+        let callees = self.get_callees(entity_id);
+        if filter.is_empty() {
+            return callees;
+        }
+        callees
+            .into_iter()
+            .filter(|relation| match relation.callee_id {
+                Some(callee_id) => filter.matches_path(
+                    self.query
+                        .index()
+                        .get_file_path_by_entity(callee_id)
+                        .as_deref(),
+                ),
+                None => filter.matches_path(None),
+            })
+            .collect()
+    }
+
+    /// Get callers with pagination (file-filtered per options)
     pub fn get_callers_paginated(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Vec<EntityId> {
-        let callers = self.get_callers(entity_id);
-        callers
+        self.filter_callers(entity_id, options)
             .into_iter()
             .skip(options.offset)
             .take(options.limit)
+            .collect()
+    }
+
+    /// Get callers after applying the file-level filter (pre-pagination).
+    pub fn filter_callers(
+        &self,
+        entity_id: EntityId,
+        options: &RelationQueryOptions,
+    ) -> Vec<EntityId> {
+        let filter = RelationFileFilter::from_options(options);
+        let callers = self.get_callers(entity_id);
+        if filter.is_empty() {
+            return callers;
+        }
+        callers
+            .into_iter()
+            .filter(|caller_id| {
+                filter.matches_path(
+                    self.query
+                        .index()
+                        .get_file_path_by_entity(*caller_id)
+                        .as_deref(),
+                )
+            })
             .collect()
     }
 
     // ========== Call Chain Queries ==========
 
     /// Query forward call chain (caller -> callees) with caching
+    ///
+    /// When the options carry a file filter the result is filtered
+    /// post-traversal and the shared cache is bypassed (its key does not
+    /// include filter state).
     pub fn query_forward(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Result<Vec<CallChainNode>> {
+        let filter = RelationFileFilter::from_options(options);
+        let apply = |nodes: Vec<CallChainNode>| -> Vec<CallChainNode> {
+            if filter.is_empty() {
+                return nodes;
+            }
+            nodes
+                .into_iter()
+                .filter(|node| filter.matches_path(Some(&node.file_path)))
+                .collect()
+        };
+        if !filter.is_empty() {
+            let result = self
+                .query
+                .query_forward_by_entity(entity_id, options.max_depth)?;
+            return Ok(apply(result));
+        }
         let cache_key = (entity_id, options.max_depth, false);
         if let Some(cached) = self.cache.write().get_call_chain(cache_key).cloned() {
             return Ok(cached);
@@ -213,11 +379,29 @@ impl RelationSearcher {
     }
 
     /// Query backward call chain (callee -> callers) with caching
+    ///
+    /// Filtered queries bypass the shared cache (see `query_forward`).
     pub fn query_backward(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Result<Vec<CallChainNode>> {
+        let filter = RelationFileFilter::from_options(options);
+        let apply = |nodes: Vec<CallChainNode>| -> Vec<CallChainNode> {
+            if filter.is_empty() {
+                return nodes;
+            }
+            nodes
+                .into_iter()
+                .filter(|node| filter.matches_path(Some(&node.file_path)))
+                .collect()
+        };
+        if !filter.is_empty() {
+            let result = self
+                .query
+                .query_backward_by_entity(entity_id, options.max_depth)?;
+            return Ok(apply(result));
+        }
         let cache_key = (entity_id, options.max_depth, true);
         if let Some(cached) = self.cache.write().get_call_chain(cache_key).cloned() {
             return Ok(cached);

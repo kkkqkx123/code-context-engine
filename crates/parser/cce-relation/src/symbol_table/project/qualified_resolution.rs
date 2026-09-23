@@ -423,11 +423,23 @@ impl ProjectSymbolTable {
                 ) {
                     return Some(symbol);
                 }
-            }
-
-            for entry in &candidates {
-                if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
+                if let Some(symbol) = self.arbitrate_simple_name_candidates(
+                    &candidates,
+                    name,
+                    caller_file,
+                    from_scope,
+                ) {
                     return Some(symbol);
+                }
+                // Multiple candidates remain and no deterministic rule can
+                // single one out: abstain instead of taking the first entry,
+                // so an unrelated same-name symbol can never hijack the edge.
+                // External dependency exports below stay eligible.
+            } else {
+                for entry in &candidates {
+                    if let Some(symbol) = self.symbol_from_entry(entry, name, from_scope) {
+                        return Some(symbol);
+                    }
                 }
             }
         }
@@ -627,6 +639,39 @@ impl ProjectSymbolTable {
         }
 
         None
+    }
+
+    /// Deterministic last-resort arbitration for an ambiguous simple name.
+    ///
+    /// Applied only after the heuristic disambiguation factors found no
+    /// winner. Candidates are ranked by module affinity (longest common
+    /// directory prefix with the caller file) and then by test-file
+    /// preference. Returns a symbol only when a unique winner emerges; a
+    /// remaining tie abstains (callers must not fall back to an arbitrary
+    /// first pick).
+    fn arbitrate_simple_name_candidates(
+        &self,
+        candidates: &[SimpleNameEntry],
+        name: &str,
+        caller_file: Option<&str>,
+        from_scope: Option<&ScopeContext>,
+    ) -> Option<SymbolRef> {
+        let symbolizable: Vec<&SimpleNameEntry> = candidates
+            .iter()
+            .filter(|entry| self.symbol_from_entry(entry, name, from_scope).is_some())
+            .collect();
+        if symbolizable.is_empty() {
+            return None;
+        }
+        let candidate_paths: Vec<Option<String>> = symbolizable
+            .iter()
+            .map(|entry| entry.file_path().map(|p| p.to_string()))
+            .collect();
+        let winner = crate::resolution_affinity::unique_candidate_by_affinity(
+            caller_file,
+            &candidate_paths,
+        )?;
+        self.symbol_from_entry(symbolizable[winner], name, from_scope)
     }
 
     fn candidate_arity(&self, entry: &SimpleNameEntry, name: &str) -> Option<usize> {

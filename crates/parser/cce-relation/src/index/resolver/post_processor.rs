@@ -3,7 +3,9 @@
 //! Centralizes all filtering logic that was previously scattered across the
 //! resolver. The design follows `docs/plan/symbol-resolution-deterministic.md`.
 
+use cce_types::ImportKind;
 use cce_types::ParsedFile;
+use cce_types::TargetKind;
 use cce_types::entity::EntityKind;
 use cce_types::language::Language;
 use regex::Regex;
@@ -208,6 +210,35 @@ impl RelationPostProcessor {
         )
     }
 
+    /// Whether `head` names a module-object import binding in this file.
+    ///
+    /// Only receivers that bind a module pass: plain `import x` (or its root
+    /// segment), `from . import y` submodules, aliased/default module imports,
+    /// and targets explicitly marked as modules. A symbol imported from a
+    /// module (`from mod import obj`) binds an instance, so its attribute
+    /// lookup must not unlock the global last-segment fallback.
+    fn is_import_local_receiver(parsed: &ParsedFile, head: &str) -> bool {
+        let Some(import_table) = parsed.import_table.as_ref() else {
+            return false;
+        };
+        import_table.standardized_imports.iter().any(|import| {
+            let local = import.alias.as_deref().unwrap_or(&import.target.local_name);
+            match import.kind {
+                ImportKind::ModuleImport | ImportKind::DefaultImport => {
+                    local == head || import.source.split(['.', '/']).next() == Some(head)
+                }
+                ImportKind::SymbolImport => {
+                    local == head
+                        && (import.target.kind == TargetKind::Module
+                            || (import.is_relative
+                                && !import.source.is_empty()
+                                && import.source.chars().all(|c| c == '.')))
+                }
+                _ => false,
+            }
+        })
+    }
+
     /// Simple deterministic receiver extraction without allocation.
     fn extract_receiver_raw_simple(dst_name: &str) -> &str {
         if let Some(pos) = dst_name.rfind("::") {
@@ -226,20 +257,26 @@ impl RelationPostProcessor {
         ""
     }
 
-    /// Decide whether `name`'s last-segment fallback should be blocked for
-    /// Rust generic receivers. Centralizes the heuristic previously scattered
-    /// in `name_candidates.rs::should_block_last_segment_fallback`.
+    /// Decide whether `name`'s last-segment fallback should be blocked.
+    ///
+    /// Rust: centralized `clone`-family heuristics for generic receivers.
+    /// Other languages: attribute-call receiver gating. A qualified call
+    /// (`recv.attr`) may only fall back to the cross-file simple-name search
+    /// for its last segment when the receiver is resolvable in some
+    /// deterministic way: it names a type (uppercase), appears in the
+    /// caller's import table, has an inferred type, or the last segment is
+    /// defined in the caller's own file. Otherwise the fallback would let
+    /// any same-name symbol anywhere (including tests) hijack the edge, so
+    /// it is blocked (abstain rather than guess).
     pub fn should_block_last_segment_fallback(
         &self,
         name: &str,
         parsed: &ParsedFile,
         symbol_table: &ProjectSymbolTable,
         is_stdlib: bool,
+        receiver_type_known: bool,
     ) -> bool {
         if is_stdlib {
-            return false;
-        }
-        if parsed.language != Language::Rust {
             return false;
         }
         if !name.contains('.') && !name.contains(':') {
@@ -249,6 +286,22 @@ impl RelationPostProcessor {
             Some(l) => l,
             None => return false,
         };
+        if parsed.language != Language::Rust {
+            if receiver_type_known || parsed.local_symbols.contains_key(last) {
+                return false;
+            }
+            let head = name.split(['.', ':']).next().unwrap_or("");
+            if head.is_empty() || head == last {
+                return false;
+            }
+            if head.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                return false;
+            }
+            if Self::is_import_local_receiver(parsed, head) {
+                return false;
+            }
+            return true;
+        }
         if !parsed.local_symbols.contains_key(last) {
             return false;
         }
@@ -527,14 +580,67 @@ mod tests {
         let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
         let p = RelationPostProcessor::default();
         // `x.clone` where x is lowercase variable and local symbol `clone` exists → should block
-        assert!(p.should_block_last_segment_fallback("x.clone", &parsed, &symbols, false));
+        assert!(p.should_block_last_segment_fallback("x.clone", &parsed, &symbols, false, false));
         // stdlib should not block
-        assert!(!p.should_block_last_segment_fallback("x.clone", &parsed, &symbols, true));
-        // non-Rust should not block
+        assert!(!p.should_block_last_segment_fallback("x.clone", &parsed, &symbols, true, false));
+        // Python: target defined in the caller's own file → fallback stays allowed
         let mut py_parsed = cce_types::ParsedFile::new(Language::Python, "test.py".to_string(), "");
         py_parsed
             .local_symbols
             .insert("clone".to_string(), vec![EntityId(2)]);
-        assert!(!p.should_block_last_segment_fallback("x.clone", &py_parsed, &symbols, false));
+        assert!(
+            !p.should_block_last_segment_fallback("x.clone", &py_parsed, &symbols, false, false)
+        );
+        // Python: untyped local receiver and no same-file target → block
+        let py_bare = cce_types::ParsedFile::new(Language::Python, "test.py".to_string(), "");
+        assert!(p.should_block_last_segment_fallback("x.clone", &py_bare, &symbols, false, false));
+        // ...unless the receiver type was inferred
+        assert!(!p.should_block_last_segment_fallback("x.clone", &py_bare, &symbols, false, true));
+    }
+
+    #[test]
+    fn import_receiver_gate_only_binds_modules() {
+        use crate::index::builder::SymbolTableBuilder;
+        use cce_types::language::Language;
+        use cce_types::{ImportKind, ImportTable, ImportTarget, StandardizedImport, TargetKind};
+        use std::path::PathBuf;
+
+        let mut parsed = cce_types::ParsedFile::new(Language::Python, "ctx.py".to_string(), "");
+        let mut table = ImportTable::default();
+        // `from .globals import _cv_app` binds an instance, not a module
+        table.standardized_imports.push(StandardizedImport {
+            kind: ImportKind::SymbolImport,
+            source: ".globals".to_string(),
+            target: ImportTarget::new("_cv_app", TargetKind::Other),
+            is_relative: true,
+            ..Default::default()
+        });
+        // `from . import sessions` binds a submodule of the package
+        table.standardized_imports.push(StandardizedImport {
+            kind: ImportKind::SymbolImport,
+            source: ".".to_string(),
+            target: ImportTarget::new("sessions", TargetKind::Other),
+            is_relative: true,
+            ..Default::default()
+        });
+        parsed.import_table = Some(table);
+
+        let files = [&parsed];
+        let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+        let p = RelationPostProcessor::default();
+        assert!(p.should_block_last_segment_fallback(
+            "_cv_app.set",
+            &parsed,
+            &symbols,
+            false,
+            false
+        ));
+        assert!(!p.should_block_last_segment_fallback(
+            "sessions.open_session",
+            &parsed,
+            &symbols,
+            false,
+            false
+        ));
     }
 }

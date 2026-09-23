@@ -419,6 +419,22 @@ impl EntityExtractor {
             }
         };
         let mut subtype = capture_module::parser::extract_subtype_from_capture(&main_capture.name);
+
+        // Python: `self.x = ...` registers a class field only when it is a
+        // real attribute declaration (in `__init__` or directly in a class
+        // body). The same statement inside any other method is local
+        // behavior, and registering it pollutes the field table and the
+        // type-member index.
+        if kind == cce_types::EntityKind::Field && language == &Language::Python {
+            let field_node = tree
+                .root_node()
+                .descendant_for_byte_range(main_capture.start_byte, main_capture.end_byte);
+            let allow =
+                field_node.is_some_and(|node| python_field_scope_allows(node, source.as_bytes()));
+            if !allow {
+                return None;
+            }
+        }
         // `entity.macro.attribute.inner` shares the `attribute` subtype with
         // its outer counterpart; distinguish file-level inner attributes
         // (`#![...]`) so they are never buffered as entity modifiers.
@@ -553,6 +569,32 @@ impl Default for EntityExtractor {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Whether a Python `self.x = ...` statement is a field declaration:
+/// directly inside a class body, or inside `__init__`. Walking stops at the
+/// nearest enclosing function/class definition, so a nested helper inside
+/// `__init__` does not count as declaring a field.
+fn python_field_scope_allows(node: tree_sitter::Node, source: &[u8]) -> bool {
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        match ancestor.kind() {
+            "class_definition" => return true,
+            "function_definition" | "lambda" => {
+                if ancestor.kind() != "function_definition" {
+                    return false;
+                }
+                let Some(name_node) = ancestor.child_by_field_name("name") else {
+                    return false;
+                };
+                return name_node
+                    .utf8_text(source)
+                    .is_ok_and(|name| name == "__init__");
+            }
+            _ => current = ancestor.parent(),
+        }
+    }
+    false
 }
 
 fn adjust_namespace_spans(entities: &mut [cce_types::Entity], source: &str, language: &Language) {

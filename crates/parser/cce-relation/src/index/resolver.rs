@@ -196,6 +196,21 @@ impl RelationResolver {
         chain
     }
 
+    /// Whether `name` is bound as a parameter of any entity in the caller's
+    /// scope chain (innermost to outermost entities all count: a method, its
+    /// enclosing functions, etc.).
+    fn is_bound_in_scope_chain(
+        name: &str,
+        scope_chain: &[EntityId],
+        entity_map: &HashMap<EntityId, &Entity>,
+    ) -> bool {
+        scope_chain.iter().any(|id| {
+            entity_map
+                .get(id)
+                .is_some_and(|entity| entity.parameters.iter().any(|(param, _)| param == name))
+        })
+    }
+
     /// Resolve a single raw relation
     ///
     /// Attempts to resolve the callee in the global symbol table and determines
@@ -390,19 +405,33 @@ impl RelationResolver {
             file_remap: file_remap.as_ref(),
             overload_ctx: Some(&overload_ctx),
         };
+        // Local-binding termination: a bare callee name bound as a parameter
+        // (or an implicit receiver like Python's `cls`/`self`) anywhere in
+        // the caller's scope chain is a local binding. Such a name must never
+        // fall through to project-wide symbol resolution, where an unrelated
+        // same-name symbol in another file could hijack the edge.
+        let locally_bound = is_bare
+            && raw_data.relation_type.is_call()
+            && Self::is_bound_in_scope_chain(
+                &raw_data.dst_name,
+                &resolution_context.scope_chain,
+                entity_map,
+            );
         let mut symbol_ref: Option<SymbolRef> = None;
         let mut resolved_entity_id: Option<EntityId> = None;
-        for name in self.resolution_names(&raw_data.dst_name, parsed) {
-            let (candidate_ref, candidate_id) =
-                self.resolve_name_candidate(&name, is_stdlib, &candidate_ctx);
-            if candidate_id.is_some() {
-                symbol_ref = candidate_ref;
-                resolved_entity_id = candidate_id;
-                break;
+        if !locally_bound {
+            for name in self.resolution_names(&raw_data.dst_name, parsed) {
+                let (candidate_ref, candidate_id) =
+                    self.resolve_name_candidate(&name, is_stdlib, &candidate_ctx);
+                if candidate_id.is_some() {
+                    symbol_ref = candidate_ref;
+                    resolved_entity_id = candidate_id;
+                    break;
+                }
+                // Keep the closest symbol ref so the snapshot still records a
+                // best-effort symbol even when every candidate fails.
+                symbol_ref = symbol_ref.or(candidate_ref);
             }
-            // Keep the closest symbol ref so the snapshot still records a
-            // best-effort symbol even when every candidate fails.
-            symbol_ref = symbol_ref.or(candidate_ref);
         }
 
         // Unified post-processing filter for Rust `clone`/`clone_from` on

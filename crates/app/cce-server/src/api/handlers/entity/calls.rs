@@ -43,6 +43,35 @@ impl IntoResponse for CallsApiResponse {
     }
 }
 
+/// File-scope filter parameters shared by relation query endpoints.
+/// Flattened into each query params struct.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RelationFilterParams {
+    /// Exclude entities located in test files
+    #[serde(default)]
+    pub exclude_tests: Option<bool>,
+    /// Keep only entities under this directory prefix
+    #[serde(default)]
+    pub directory_prefix: Option<String>,
+    /// Exact file paths to exclude
+    #[serde(default)]
+    pub excluded_files: Option<Vec<String>>,
+}
+
+impl RelationFilterParams {
+    /// Apply the HTTP filter parameters onto query options.
+    pub fn apply(self, options: RelationQueryOptions) -> RelationQueryOptions {
+        let mut options = options.with_exclude_tests(self.exclude_tests.unwrap_or(false));
+        if let Some(prefix) = self.directory_prefix {
+            options = options.with_directory_prefix(prefix);
+        }
+        if let Some(files) = self.excluded_files {
+            options = options.with_excluded_files(files);
+        }
+        options
+    }
+}
+
 /// Query parameters for call chain queries
 #[derive(Debug, Deserialize)]
 pub struct CallChainQueryParams {
@@ -52,6 +81,8 @@ pub struct CallChainQueryParams {
     pub offset: Option<usize>,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    #[serde(flatten)]
+    pub filter: RelationFilterParams,
 }
 
 fn default_max_depth() -> usize {
@@ -75,10 +106,12 @@ async fn stale_relation_info(
 
 impl From<CallChainQueryParams> for RelationQueryOptions {
     fn from(params: CallChainQueryParams) -> Self {
-        RelationQueryOptions::new()
-            .with_max_depth(params.max_depth)
-            .with_offset(params.offset.unwrap_or(0))
-            .with_limit(params.limit)
+        params.filter.apply(
+            RelationQueryOptions::new()
+                .with_max_depth(params.max_depth)
+                .with_offset(params.offset.unwrap_or(0))
+                .with_limit(params.limit),
+        )
     }
 }
 
@@ -157,11 +190,15 @@ pub async fn handle_function_calls(
             ));
         }
     };
-    let resolved_callees: Vec<cce_types::ResolvedRelation> =
-        searcher.get_callees_paginated(entity_id, &options);
-
-    // Total before pagination for header
-    let total = searcher.get_callees(entity_id).len();
+    let filtered_callees: Vec<cce_types::ResolvedRelation> =
+        searcher.filter_callees(entity_id, &options);
+    // Total after filtering, before pagination
+    let total = filtered_callees.len();
+    let resolved_callees: Vec<cce_types::ResolvedRelation> = filtered_callees
+        .into_iter()
+        .skip(options.offset)
+        .take(options.limit)
+        .collect();
     // Convert ResolvedRelation to CallChainNode
     let callees: Vec<CallChainNode> = resolved_callees
         .into_iter()
@@ -299,8 +336,13 @@ pub async fn handle_function_callers(
             ));
         }
     };
-    let total_callers = searcher.get_callers(entity_id).len();
-    let caller_ids = searcher.get_callers_paginated(entity_id, &options);
+    let filtered_callers: Vec<cce_types::EntityId> = searcher.filter_callers(entity_id, &options);
+    let total_callers = filtered_callers.len();
+    let caller_ids: Vec<cce_types::EntityId> = filtered_callers
+        .into_iter()
+        .skip(options.offset)
+        .take(options.limit)
+        .collect();
 
     // Convert EntityId to CallChainNode
     let callers: Vec<CallChainNode> = caller_ids
@@ -372,10 +414,21 @@ mod tests {
             max_depth: 5,
             offset: Some(10),
             limit: 50,
+            filter: RelationFilterParams {
+                exclude_tests: Some(true),
+                directory_prefix: Some("src/flask".to_string()),
+                excluded_files: Some(vec!["src/flask/app.py".to_string()]),
+            },
         };
         let opts: RelationQueryOptions = params.into();
         assert_eq!(opts.max_depth, 5);
         assert_eq!(opts.offset, 10);
         assert_eq!(opts.limit, 50);
+        assert!(
+            opts.exclude_content_types
+                .contains(&cce_orchestrator::query::ExcludableContentType::Test)
+        );
+        assert_eq!(opts.directory_prefix.as_deref(), Some("src/flask"));
+        assert_eq!(opts.excluded_files.len(), 1);
     }
 }

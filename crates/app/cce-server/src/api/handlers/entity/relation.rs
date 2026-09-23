@@ -114,6 +114,8 @@ pub struct CallChainDirectionParams {
     pub offset: Option<usize>,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    #[serde(flatten)]
+    pub filter: super::calls::RelationFilterParams,
 }
 
 fn default_direction() -> String {
@@ -181,10 +183,12 @@ pub async fn handle_call_chain(
         }
     };
     let direction = params.direction.to_lowercase();
-    let options = RelationQueryOptions::new()
-        .with_max_depth(max_depth)
-        .with_offset(params.offset.unwrap_or(0))
-        .with_limit(params.limit);
+    let options = params.filter.apply(
+        RelationQueryOptions::new()
+            .with_max_depth(max_depth)
+            .with_offset(params.offset.unwrap_or(0))
+            .with_limit(params.limit),
+    );
     let nodes_result = match direction.as_str() {
         "down" | "forward" => searcher.query_forward_paginated(entity_id, &options),
         "up" | "backward" => searcher.query_backward_paginated(entity_id, &options),
