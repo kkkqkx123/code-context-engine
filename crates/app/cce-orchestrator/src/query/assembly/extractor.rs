@@ -90,7 +90,8 @@ impl SemanticUnitExtractor {
             end_line,
             name: name.to_string(),
             unit_type,
-            relation: super::types::RelationType::Primary,
+            origin: super::types::ExpansionOrigin::Primary,
+            edge_label: String::new(),
             depth: 0,
         })
     }
@@ -145,7 +146,8 @@ impl SemanticUnitExtractor {
             end_line,
             name: name.to_string(),
             unit_type,
-            relation: super::types::RelationType::Primary,
+            origin: super::types::ExpansionOrigin::Primary,
+            edge_label: String::new(),
             depth: 0,
         })
     }

@@ -19,6 +19,8 @@ pub struct AggregatedSegment {
     pub source_units: Vec<ExpandedUnit>,
     /// Whether this is a whole file
     pub is_whole_file: bool,
+    /// Optional relation marker rendered above the segment code
+    pub marker: Option<String>,
 }
 
 impl AggregatedSegment {
@@ -31,6 +33,7 @@ impl AggregatedSegment {
             code,
             source_units: Vec::new(),
             is_whole_file: false,
+            marker: None,
         }
     }
 
@@ -43,6 +46,7 @@ impl AggregatedSegment {
             code: unit.code.clone(),
             source_units: vec![unit],
             is_whole_file: false,
+            marker: None,
         }
     }
 

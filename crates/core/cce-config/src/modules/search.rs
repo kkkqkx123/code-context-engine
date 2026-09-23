@@ -394,6 +394,14 @@ pub struct SPSRGraphConfig {
     pub enable_file_coverage_threshold: bool,
     /// File coverage threshold (0.0-1.0), return whole file if exceeded
     pub file_coverage_threshold: f32,
+    /// Enable relation expansion: attach pre-resolved call-graph neighbours
+    /// (callees/callers) supplied by the caller to each assembled result.
+    pub expansion_enabled: bool,
+    /// Maximum number of expansion units attached to one result
+    /// (shared across both directions; forward units are taken first).
+    pub max_expanded_units: usize,
+    /// Include caller-side (backward) expansion units.
+    pub expansion_include_callers: bool,
 }
 
 impl Default for SPSRGraphConfig {
@@ -408,6 +416,9 @@ impl Default for SPSRGraphConfig {
             segment_merge_gap: 2,
             enable_file_coverage_threshold: true,
             file_coverage_threshold: 0.6,
+            expansion_enabled: false,
+            max_expanded_units: 4,
+            expansion_include_callers: true,
         }
     }
 }
@@ -431,6 +442,24 @@ impl SPSRGraphConfig {
     /// Set the maximum assembled content length in tokens (builder pattern).
     pub fn with_max_length(mut self, length: usize) -> Self {
         self.max_assembled_length = length;
+        self
+    }
+
+    /// Enable or disable relation expansion (builder pattern).
+    pub fn with_expansion(mut self, enabled: bool) -> Self {
+        self.expansion_enabled = enabled;
+        self
+    }
+
+    /// Set the maximum expansion units per result (builder pattern).
+    pub fn with_max_expanded_units(mut self, count: usize) -> Self {
+        self.max_expanded_units = count;
+        self
+    }
+
+    /// Include or exclude caller-side expansion units (builder pattern).
+    pub fn with_caller_expansion(mut self, include: bool) -> Self {
+        self.expansion_include_callers = include;
         self
     }
 
@@ -467,6 +496,12 @@ impl Validate for SPSRGraphConfig {
                 self.file_coverage_threshold.to_string(),
                 "0.0",
                 "1.0",
+            ));
+        }
+        if self.expansion_enabled && self.max_expanded_units == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_expanded_units",
+                "must be greater than 0 when expansion is enabled",
             ));
         }
 

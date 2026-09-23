@@ -37,7 +37,9 @@
 //!     content: "fn foo() { ... }".to_string(),
 //!     score: 0.95,
 //! };
-//! let result = assembler.assemble_single(input).await?;
+//! let result = assembler
+//!     .assemble_single(input, Vec::new(), Vec::new())
+//!     .await?;
 //! ```
 //!
 //! # Status (dormant)
@@ -50,6 +52,12 @@
 //! generates per-query assembled outputs for manual inspection. Once that
 //! review produces a verdict, either re-integrate the module behind a
 //! config gate or delete it entirely.
+//!
+//! Relation expansion is now driven by the caller: `assemble_single` takes
+//! pre-resolved forward (callee) and backward (caller) [`ExpandedUnit`]s and
+//! only performs structure-preserving concatenation, dedup and budget
+//! capping. Graph traversal itself lives on the caller side (the review
+//! example reads call edges from the benchmark relation sidecar).
 //!
 //! The `#[allow(dead_code)]` below suppresses the resulting unused warnings
 //! and MUST be removed together with the final resolution.
@@ -71,6 +79,6 @@ pub use assembler::SPSRGraphAssembler;
 pub use concatenator::StructureConcatenator;
 pub use error::{AssemblyError, Result};
 pub use types::{
-    AssembledResult, AssemblyMetadata, DedupStrategy, ExpandedUnit, FileInfo, SPSRGraphConfig,
-    SearchResultInput, SemanticUnitType, TruncationStrategy, UnitDeduplicator,
+    AssembledResult, AssemblyMetadata, DedupStrategy, ExpandedUnit, ExpansionOrigin, FileInfo,
+    SPSRGraphConfig, SearchResultInput, SemanticUnitType, TruncationStrategy, UnitDeduplicator,
 };

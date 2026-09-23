@@ -4,7 +4,7 @@
 //! Uses unit-level boundaries (from AST parsing) rather than text pattern matching.
 
 use super::aggregator::{AggregatedSegment, SegmentAggregator};
-use super::types::{ExpandedUnit, FileInfo, SPSRGraphConfig};
+use super::types::{ExpandedUnit, ExpansionOrigin, FileInfo, SPSRGraphConfig};
 use cce_utils::file::read_file_to_utf8_async;
 
 /// Structure-aware concatenator
@@ -25,6 +25,11 @@ impl StructureConcatenator {
 
     /// Concatenate units into a single string
     ///
+    /// The primary unit goes through position-based aggregation and file
+    /// coverage replacement; expansion units are appended after it in
+    /// forward-then-backward order, each rendered with its relation marker
+    /// and kept as an indivisible unit under the token budget.
+    ///
     /// # Arguments
     ///
     /// * `primary` - The primary result unit
@@ -37,8 +42,8 @@ impl StructureConcatenator {
     pub async fn concatenate(
         &self,
         primary: &ExpandedUnit,
-        _forward: &[ExpandedUnit],
-        _backward: &[ExpandedUnit],
+        forward: &[ExpandedUnit],
+        backward: &[ExpandedUnit],
     ) -> (String, Vec<FileInfo>) {
         // Aggregate segments from the primary unit
         let units = vec![primary.clone()];
@@ -50,8 +55,38 @@ impl StructureConcatenator {
             self.apply_coverage_replacement(&mut segments).await;
         }
 
+        // Expansion units keep explicit relation ordering; position-based
+        // merging must not fold them into primary segments.
+        for unit in forward.iter().chain(backward.iter()) {
+            let mut segment = AggregatedSegment::from_unit(unit.clone());
+            segment.marker = Self::relation_marker(unit);
+            segments.push(segment);
+        }
+
         // Always use semantic boundary strategy (respect unit boundaries)
         self.concatenate_respect_unit_boundaries(&segments)
+    }
+
+    /// Build the relation marker line for an expansion unit
+    fn relation_marker(unit: &ExpandedUnit) -> Option<String> {
+        let arrow = match unit.origin {
+            ExpansionOrigin::Primary => return None,
+            ExpansionOrigin::Forward => "-->",
+            ExpansionOrigin::Backward => "<--",
+        };
+        let label = if unit.edge_label.is_empty() {
+            match unit.origin {
+                ExpansionOrigin::Forward => "calls",
+                ExpansionOrigin::Backward => "called by",
+                ExpansionOrigin::Primary => "",
+            }
+        } else {
+            unit.edge_label.as_str()
+        };
+        Some(format!(
+            "// {} {}: {} ({}:{}-{})",
+            arrow, label, unit.name, unit.file_path, unit.start_line, unit.end_line
+        ))
     }
 
     /// Respect unit boundaries - never split a semantic unit
@@ -119,6 +154,12 @@ impl StructureConcatenator {
                 .or_insert_with(|| FileInfo::new(segment.file_path.clone()));
         }
 
+        // Add the relation marker for expansion segments
+        if let Some(marker) = &segment.marker {
+            result.push_str(marker);
+            result.push('\n');
+        }
+
         // Add the code
         result.push_str(&segment.code);
         result.push('\n');
@@ -139,6 +180,10 @@ impl StructureConcatenator {
         use cce_utils::token_estimation::TokenEstimator;
 
         let mut token_count = TokenEstimator::estimate(&segment.code) + 1; // Code tokens + newline
+
+        if let Some(marker) = &segment.marker {
+            token_count += TokenEstimator::estimate(marker) + 1; // Marker + newline
+        }
 
         // Calculate actual file marker size (only if entering new file)
         if self.config.include_file_markers && *current_file != Some(segment.file_path.clone()) {
@@ -201,6 +246,7 @@ impl StructureConcatenator {
                 code: content,
                 source_units: Vec::new(),
                 is_whole_file: true,
+                marker: None,
             };
             segments.push(whole_file_seg);
         }
@@ -274,20 +320,24 @@ mod tests {
             "multiply".to_string(),
         );
 
-        let forward = vec![ExpandedUnit::new(
-            "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}".to_string(),
-            "src/math.rs".to_string(),
-            1,
-            3,
-            "add".to_string(),
-        )];
+        let forward = vec![
+            ExpandedUnit::new(
+                "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}".to_string(),
+                "src/math.rs".to_string(),
+                1,
+                3,
+                "add".to_string(),
+            )
+            .with_expansion(ExpansionOrigin::Forward, "calls"),
+        ];
 
         let (result, files) = concat.concatenate(&primary, &forward, &[]).await;
 
-        // Current implementation only assembles the primary unit
+        // Forward expansion is attached with its relation marker
         assert!(result.contains("multiply"));
-        assert!(!result.contains("fn add")); // forward not included in concatenate
-        assert_eq!(files.len(), 1);
+        assert!(result.contains("fn add"));
+        assert!(result.contains("// --> calls: add (src/math.rs:1-3)"));
+        assert_eq!(files.len(), 2);
     }
 
     #[test]
@@ -390,13 +440,10 @@ mod tests {
 
         let (result, _) = concat.concatenate(&primary, &[extra_unit], &[]).await;
 
-        // Should contain truncation marker if primary was truncated
-        // Current implementation only processes primary, so test verifies primary truncation works
-        assert!(
-            result.contains("omitted")
-                || result.contains("Truncated")
-                || result.contains("large_function")
-        );
+        // The primary is always kept whole; the expansion unit does not fit
+        // the tiny budget and must be reported through the omission marker
+        assert!(result.contains("large_function"));
+        assert!(result.contains("omitted"));
     }
 
     #[test]

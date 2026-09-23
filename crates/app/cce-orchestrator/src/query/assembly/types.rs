@@ -91,12 +91,15 @@ impl std::fmt::Display for SemanticUnitType {
     }
 }
 
-/// Relation type for expanded units
+/// Origin of an expanded unit relative to the primary result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RelationType {
+pub enum ExpansionOrigin {
+    /// The primary search-result unit itself.
     Primary,
-    Secondary,
-    Tertiary,
+    /// A callee of the primary unit (forward call-graph edge).
+    Forward,
+    /// A caller of the primary unit (backward call-graph edge).
+    Backward,
 }
 
 /// Expanded semantic unit
@@ -116,8 +119,10 @@ pub struct ExpandedUnit {
     pub name: String,
     /// Semantic unit type
     pub unit_type: SemanticUnitType,
-    /// Relation type
-    pub relation: RelationType,
+    /// Origin of this unit relative to the primary result
+    pub origin: ExpansionOrigin,
+    /// Relation label rendered in the expansion marker (e.g. "calls")
+    pub edge_label: String,
     /// Depth in the expansion tree
     pub depth: u32,
 }
@@ -139,9 +144,21 @@ impl ExpandedUnit {
             end_line,
             name,
             unit_type: SemanticUnitType::Unknown,
-            relation: RelationType::Primary,
+            origin: ExpansionOrigin::Primary,
+            edge_label: String::new(),
             depth: 0,
         }
+    }
+
+    /// Set origin and edge label as an expansion unit
+    pub fn with_expansion(
+        mut self,
+        origin: ExpansionOrigin,
+        edge_label: impl Into<String>,
+    ) -> Self {
+        self.origin = origin;
+        self.edge_label = edge_label.into();
+        self
     }
 
     /// Set entity ID
@@ -197,10 +214,14 @@ impl FileInfo {
 /// Assembly metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssemblyMetadata {
-    /// Whether assembly was performed
+    /// Whether relation expansion attached any unit
     pub expanded: bool,
-    /// Number of expanded nodes
+    /// Number of expanded nodes (forward + backward)
     pub expanded_nodes: usize,
+    /// Number of forward (callee) expansion units
+    pub forward_nodes: usize,
+    /// Number of backward (caller) expansion units
+    pub backward_nodes: usize,
     /// Number of involved files
     pub file_count: usize,
     /// Original content length
@@ -216,6 +237,8 @@ impl Default for AssemblyMetadata {
         Self {
             expanded: false,
             expanded_nodes: 0,
+            forward_nodes: 0,
+            backward_nodes: 0,
             file_count: 1,
             original_length: 0,
             assembled_length: 0,
@@ -271,6 +294,8 @@ impl AssembledResult {
             metadata: AssemblyMetadata {
                 expanded: false,
                 expanded_nodes: 0,
+                forward_nodes: 0,
+                backward_nodes: 0,
                 file_count: 1,
                 original_length,
                 assembled_length: original_length,
