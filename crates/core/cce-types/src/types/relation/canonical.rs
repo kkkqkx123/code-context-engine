@@ -259,6 +259,56 @@ impl StableSymbolKey {
         }
     }
 
+    /// Build the key from a live entity, folding the inputs that define a
+    /// stable symbol identity into the discriminator.
+    ///
+    /// Discriminator inputs (in order): normalized signature, kind, the
+    /// entity's own `cfg` predicate, and the byte span when the signature is
+    /// empty or the kind is position-scoped (`is_variable_like`).
+    ///
+    /// The `cfg` fold lets mutually-exclusive conditional-compilation variants
+    /// of a same-named symbol each keep their own key. An empty predicate adds
+    /// no bytes to the hash, so entities without `cfg` produce the same
+    /// discriminator as the plain-signature path. The span fold for
+    /// variable-like kinds separates same-named local bindings and
+    /// enum-variant fields that share a signature; those kinds never
+    /// participate in overload resolution, so position is their identity.
+    ///
+    /// Every input is persisted on the entity (signature, span, metadata), so a
+    /// later reload reconstructs an identical key and stays conflict-free.
+    pub fn for_entity(file_path: &str, scoped_name: &str, entity: &Entity) -> Self {
+        let normalized_signature = entity
+            .signature
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let cfg_predicate = entity
+            .get_metadata(crate::types::entity::meta_keys::CFG_PREDICATE)
+            .map(String::as_str)
+            .unwrap_or("");
+        let fold_span = normalized_signature.is_empty() || entity.kind.is_variable_like();
+
+        let mut hasher = Sha256::new();
+        if normalized_signature.is_empty() {
+            hasher.update(b"__span__");
+        } else {
+            hasher.update(normalized_signature.as_bytes());
+        }
+        hasher.update(entity.kind.to_string().as_bytes());
+        hasher.update(cfg_predicate.as_bytes());
+        if fold_span {
+            hasher.update(entity.span.start_byte.to_le_bytes().as_ref());
+            hasher.update(entity.span.end_byte.to_le_bytes().as_ref());
+        }
+
+        Self {
+            file_path: normalize_project_path(file_path),
+            scoped_name: scoped_name.to_string(),
+            kind: entity.kind,
+            overload_discriminator: format!("{:x}", hasher.finalize()),
+        }
+    }
+
     pub fn sort_key(&self) -> String {
         format!(
             "{}\u{0}{}\u{0}{}\u{0}{}",

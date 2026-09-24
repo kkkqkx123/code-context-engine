@@ -163,16 +163,18 @@ fn split_type_args(inner: &str) -> Vec<String> {
 
 /// Check if a name looks like a generic type parameter.
 ///
-/// Matches single uppercase letters (T, K, V, E) and common multi-letter
+/// Matches single uppercase letters (T, K, V, E, F) and common multi-letter
 /// parameter names (Value, Key, etc.).
 fn is_type_param_name(name: &str) -> bool {
     if name.len() == 1 {
         let is_upper = name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
         if is_upper {
-            // Single-letter type params outside the well-known set (`T`/`K`/`V`/`E`
+            // Single-letter type params outside the well-known set (`T`/`K`/`V`/`E`/`F`
             // etc.) are still accepted, but log a warning so unknown
             // conventions are visible for future deterministic tightening.
-            const KNOWN: &[&str] = &["T", "K", "V", "E", "U", "R", "A", "B", "C"];
+            // `F` is the standard PEP 484 Function TypeVar used by decorator
+            // identity annotations (`Callable[[F], F]`).
+            const KNOWN: &[&str] = &["T", "K", "V", "E", "U", "R", "A", "B", "C", "F"];
             if !KNOWN.contains(&name) {
                 tracing::warn!(
                     type_param = name,
@@ -184,7 +186,19 @@ fn is_type_param_name(name: &str) -> bool {
     }
     matches!(
         name,
-        "T" | "K" | "V" | "E" | "U" | "R" | "A" | "B" | "C" | "Value" | "Key" | "Element" | "Item"
+        "T" | "K"
+            | "V"
+            | "E"
+            | "U"
+            | "R"
+            | "A"
+            | "B"
+            | "C"
+            | "F"
+            | "Value"
+            | "Key"
+            | "Element"
+            | "Item"
     )
 }
 
@@ -923,6 +937,7 @@ mod tests {
         assert!(is_type_param_name("K"));
         assert!(is_type_param_name("V"));
         assert!(is_type_param_name("E"));
+        assert!(is_type_param_name("F"));
         assert!(!is_type_param_name("a"));
         assert!(!is_type_param_name("x"));
     }

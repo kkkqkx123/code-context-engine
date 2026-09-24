@@ -195,6 +195,15 @@ impl<'a> FileProcessor<'a> {
 
         let scoped_names = file.resolve_all_scoped_names();
         for entity in &file.entities {
+            // Import directives and bare impl blocks are not addressable
+            // definitions: nothing references them by stable symbol key (call
+            // and import resolution go through the project symbol table and the
+            // dedicated import/export tables). Registering them only produces
+            // spurious first-wins collisions between cfg-gated duplicates, so
+            // they are excluded from stable-key registration.
+            if entity.kind.is_import_like() || entity.kind.is_impl_block() {
+                continue;
+            }
             let new_id = remap.get(&entity.id).copied().unwrap_or(entity.id);
             if self.index.function_index().contains_key(&new_id)
                 && let Some(scoped_name) = scoped_names.get(&entity.id)

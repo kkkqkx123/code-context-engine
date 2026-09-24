@@ -337,7 +337,23 @@ impl ParsedFile {
                     entity.span.start_position.row, entity.span.start_position.column
                 )
             } else {
-                entity.name.clone()
+                // A trait implementation is disambiguated by its self type:
+                // several `impl Trait for Type` blocks share the trait name, so
+                // a bare `Trait::method` collapses every implementation (and the
+                // trait declaration itself) onto one scoped name. Rendering the
+                // segment as `<Type as Trait>` keeps each implementation a
+                // distinct logical address while leaving the display name intact.
+                match entity.kind {
+                    crate::types::entity::EntityKind::TraitImpl => {
+                        match entity.get_metadata("impl_for_type") {
+                            Some(for_type) if !for_type.is_empty() => {
+                                format!("<{} as {}>", for_type, entity.name)
+                            }
+                            _ => entity.name.clone(),
+                        }
+                    }
+                    _ => entity.name.clone(),
+                }
             };
             names.push(name);
             current_id = entity.parent;

@@ -116,9 +116,20 @@ impl ClassMethodProcessor {
                 .filter(|e| e.kind.is_variable_like())
                 .collect();
 
+            // Definitions nested inside a method body (a Python `def` inside a
+            // method, a Rust `fn` inside a function) are descendants of the
+            // enclosing function rather than of the type. They have to be
+            // claimed with the type group: left unclaimed they become
+            // standalone groups whose spans nest inside this group, breaking
+            // the exclusive partition the chunker relies on.
+            let inner_functions = collect_nested_functions(&entity, ctx.entities);
+            let inner_function_ids: HashSet<EntityId> =
+                inner_functions.iter().map(|e| e.id).collect();
+
             let methods: Vec<Entity> = children
                 .iter()
                 .filter(|e| e.kind.is_function_like())
+                .chain(inner_functions.iter())
                 .cloned()
                 .collect();
 
@@ -210,6 +221,12 @@ impl ClassMethodProcessor {
                         cce_types::entity::EntityKind::Constructor
                             | cce_types::entity::EntityKind::Destructor
                     ) {
+                        processed_ids.insert(child.id);
+                        continue;
+                    }
+                    // Definitions nested in a method body are covered by the
+                    // group of the method that encloses them.
+                    if inner_function_ids.contains(&child.id) {
                         processed_ids.insert(child.id);
                         continue;
                     }
@@ -307,4 +324,38 @@ impl ClassMethodProcessor {
             source_len / 30 + 1
         }
     }
+}
+
+/// Collect the function-like entities defined inside `container`'s method bodies.
+///
+/// Descent starts at the container's function-like children and follows their
+/// own children, so a definition nested at any depth in a method body is found.
+/// It stops at type definitions and impl blocks because those form groups of
+/// their own and already claim everything below them.
+fn collect_nested_functions(container: &Entity, all_entities: &[Entity]) -> Vec<Entity> {
+    let by_id: HashMap<EntityId, &Entity> = all_entities.iter().map(|e| (e.id, e)).collect();
+
+    let mut found = Vec::new();
+    let mut stack: Vec<EntityId> = container
+        .children
+        .iter()
+        .filter_map(|id| by_id.get(id))
+        .filter(|child| child.kind.is_function_like())
+        .flat_map(|child| child.children.iter().copied())
+        .collect();
+
+    while let Some(id) = stack.pop() {
+        let Some(child) = by_id.get(&id) else {
+            continue;
+        };
+        if child.kind.is_type_definition() || child.kind.is_impl_block() {
+            continue;
+        }
+        if child.kind.is_function_like() {
+            found.push((*child).clone());
+        }
+        stack.extend(child.children.iter().copied());
+    }
+
+    found
 }

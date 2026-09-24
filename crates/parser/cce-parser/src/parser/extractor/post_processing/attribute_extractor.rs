@@ -72,7 +72,10 @@ pub fn extract_rust_attributes(mat: &QueryMatch, source: &str, entity: &mut Enti
         "#[doc(cfg(",
     ];
 
+    let mut cfg_predicates: Vec<String> = Vec::new();
+
     for attr_start in param_attr_starts {
+        let is_cfg = *attr_start == "#[cfg(" || *attr_start == "#[cfg_attr(";
         let mut search_pos = 0;
         while let Some(start) = preceding_text[search_pos..].find(attr_start) {
             let abs_start = search_pos + start;
@@ -111,6 +114,9 @@ pub fn extract_rust_attributes(mat: &QueryMatch, source: &str, entity: &mut Enti
 
                 let full_attr = &preceding_text[abs_start..=end_pos];
                 let attr_content = full_attr.trim_start_matches("#[").trim_end_matches(']');
+                if is_cfg {
+                    cfg_predicates.push(attr_content.to_string());
+                }
                 if let Some(existing) = entity.metadata.get(meta_keys::ANNOTATIONS) {
                     let combined = format!("{}, {}", existing, attr_content);
                     entity.set_metadata(meta_keys::ANNOTATIONS.to_string(), combined);
@@ -122,5 +128,16 @@ pub fn extract_rust_attributes(mat: &QueryMatch, source: &str, entity: &mut Enti
 
             search_pos = abs_start + 1;
         }
+    }
+
+    if !cfg_predicates.is_empty() {
+        // Sort so the predicate string is independent of source attribute order
+        // and capture iteration order, keeping the derived symbol identity stable.
+        cfg_predicates.sort();
+        cfg_predicates.dedup();
+        entity.set_metadata(
+            meta_keys::CFG_PREDICATE.to_string(),
+            cfg_predicates.join(" ; "),
+        );
     }
 }

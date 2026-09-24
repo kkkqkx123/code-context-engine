@@ -1014,18 +1014,7 @@ impl RelationIndex {
         entity: &Entity,
         entity_id: EntityId,
     ) -> bool {
-        let key = if entity.signature.is_empty() {
-            SymbolKey::new_with_span(
-                file_path,
-                scoped_name,
-                entity.kind,
-                &entity.signature,
-                entity.span.start_byte,
-                entity.span.end_byte,
-            )
-        } else {
-            SymbolKey::new(file_path, scoped_name, entity.kind, &entity.signature)
-        };
+        let key = SymbolKey::for_entity(file_path, scoped_name, entity);
         // First-wins: write-lock for atomic check-and-insert.
         {
             let mut map = self.symbol_key_to_entity.write();

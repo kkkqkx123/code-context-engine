@@ -1057,3 +1057,71 @@ fn test_nested_group_max_depth_zero() {
         "Max depth 0 should produce no nested groups"
     );
 }
+
+/// A definition nested in a method body belongs to the enclosing type group.
+///
+/// Left unclaimed it becomes a top-level group whose span nests inside the
+/// class group, which trips the same-named nesting invariant (a Python `def
+/// view` inside `View.as_view`).
+#[test]
+fn test_function_nested_in_method_body_joins_class_group() {
+    let class_id = EntityId(0);
+    let mut class = Entity::new(
+        class_id,
+        EntityKind::Class,
+        "View".to_string(),
+        Span {
+            start_position: cce_types::Position { row: 0, column: 0 },
+            end_position: cce_types::Position { row: 40, column: 0 },
+            start_byte: 0,
+            end_byte: 1000,
+        },
+    );
+
+    let method_id = EntityId(1);
+    let mut method = Entity::new(
+        method_id,
+        EntityKind::Method,
+        "as_view".to_string(),
+        Span {
+            start_position: cce_types::Position { row: 5, column: 4 },
+            end_position: cce_types::Position { row: 38, column: 4 },
+            start_byte: 100,
+            end_byte: 900,
+        },
+    );
+
+    let inner_id = EntityId(2);
+    let inner = Entity::new(
+        inner_id,
+        EntityKind::Function,
+        "view".to_string(),
+        Span {
+            start_position: cce_types::Position { row: 10, column: 8 },
+            end_position: cce_types::Position { row: 20, column: 8 },
+            start_byte: 300,
+            end_byte: 500,
+        },
+    );
+
+    class.children = vec![method_id];
+    method.children = vec![inner_id];
+    let entities = vec![class, method, inner];
+
+    let parsed_file = ParsedFile::new(Language::Python, "views.py".to_string(), "");
+    let config = NestProcessorConfig::default();
+    let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
+
+    let processor = ClassMethodProcessor::new(&GetterSetterDetectionConfig::default());
+    let (groups, _) = processor.process(ctx);
+
+    assert_eq!(groups.len(), 1, "nested definition must not leak out");
+    assert_eq!(groups[0].group_type, GroupType::ClassWithMethods);
+    assert!(
+        groups[0]
+            .members
+            .iter()
+            .any(|m| m.id == inner_id && m.name == "view"),
+        "nested definition should be a member of the class group"
+    );
+}

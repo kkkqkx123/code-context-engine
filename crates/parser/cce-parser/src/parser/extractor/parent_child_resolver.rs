@@ -168,6 +168,108 @@ pub fn establish_struct_field_relationships(entities: &mut [Entity]) {
     }
 }
 
+/// Establish parent-child relationships for entities nested inside function
+/// bodies: nested function definitions and local variables get the innermost
+/// enclosing function-like entity as parent.
+///
+/// Tree-sitter returns flat matches, and the extraction-context stack does not
+/// survive across matches, so nested definitions start with `parent = None`.
+/// Without this pass their scoped names collapse to the bare identifier
+/// (`buffer` instead of `test_teardown_on_pop::buffer`), which makes distinct
+/// same-named locals collide on the stable symbol key.
+///
+/// Only function-like containers are considered for `Variable` parents so
+/// class attributes stay unparented here (they are claimed by the module pass
+/// instead and must not be misread as class fields). Function-like entities
+/// may also nest inside type definitions; the innermost container wins so a
+/// method inside a class inside a function still parents to the class.
+pub fn establish_function_scope_relationships(entities: &mut [Entity]) {
+    let function_spans: Vec<(EntityId, std::ops::Range<usize>)> = entities
+        .iter()
+        .filter(|e| e.kind.is_function_like())
+        .map(|e| (e.id, e.span.start_byte..e.span.end_byte))
+        .collect();
+    let type_spans: Vec<(EntityId, std::ops::Range<usize>)> = entities
+        .iter()
+        .filter(|e| e.kind.is_type_definition())
+        .map(|e| (e.id, e.span.start_byte..e.span.end_byte))
+        .collect();
+
+    if function_spans.is_empty() && type_spans.is_empty() {
+        return;
+    }
+
+    for entity in entities.iter_mut() {
+        if entity.parent.is_some() {
+            continue;
+        }
+        let is_nested_candidate = entity.kind.is_function_like()
+            || matches!(entity.kind, EntityKind::Variable | EntityKind::Constant)
+            // A type declared inside a function body is a local: without this
+            // pass its scoped name collapses to the bare identifier, so the
+            // same helper type (a `Void`/`Never` marker) declared in two
+            // functions collides on the stable symbol key.
+            || matches!(
+                entity.kind,
+                EntityKind::Struct
+                    | EntityKind::Enum
+                    | EntityKind::Union
+                    | EntityKind::Trait
+                    | EntityKind::TypeAlias
+            );
+        if !is_nested_candidate {
+            continue;
+        }
+        let entity_range = entity.span.start_byte..entity.span.end_byte;
+        let entity_id = entity.id;
+        // Variables must not parent to type definitions (class attributes stay
+        // for the module pass). Function-like entities may, so a method claims
+        // its class when no tighter function container applies. An associated
+        // type alias additionally claims the impl or trait body that declares
+        // it; a `type` written inside a method body still prefers the method
+        // because the innermost (smallest) containing span wins.
+        let allow_type_parent =
+            entity.kind.is_function_like() || entity.kind == EntityKind::TypeAlias;
+
+        let mut best_id = None;
+        let mut best_size = usize::MAX;
+        for (id, range) in &function_spans {
+            if *id == entity_id {
+                continue;
+            }
+            if range.start <= entity_range.start
+                && entity_range.end <= range.end
+                && range.len() < best_size
+            {
+                best_id = Some(*id);
+                best_size = range.len();
+            }
+        }
+        // Variables must not parent to type definitions (class attributes);
+        // function-like entities may, so methods claim the class when no
+        // tighter function container applies.
+        if allow_type_parent {
+            for (id, range) in &type_spans {
+                if *id == entity_id {
+                    continue;
+                }
+                if range.start <= entity_range.start
+                    && entity_range.end <= range.end
+                    && range.len() < best_size
+                {
+                    best_id = Some(*id);
+                    best_size = range.len();
+                }
+            }
+        }
+
+        if let Some(parent_id) = best_id {
+            entity.parent = Some(parent_id);
+            entity.depth += 1;
+        }
+    }
+}
+
 /// Establish container -> function-like method relationships based on span containment.
 ///
 /// This handles languages where methods are syntactically nested inside
@@ -352,6 +454,85 @@ mod tests {
         establish_class_method_relationships(&mut entities);
 
         assert_eq!(entities[2].parent, Some(EntityId(0)));
+    }
+
+    #[test]
+    fn test_function_scope_nests_local_variable() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Function, "test_teardown_on_pop", 0, 100),
+            make_entity(1, EntityKind::Variable, "buffer", 20, 35),
+        ];
+
+        establish_function_scope_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, Some(EntityId(0)));
+        assert_eq!(entities[1].depth, 1);
+    }
+
+    #[test]
+    fn test_function_scope_nests_local_variable_in_its_own_function() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Function, "test_a", 0, 50),
+            make_entity(1, EntityKind::Variable, "buffer", 10, 25),
+            make_entity(2, EntityKind::Function, "test_b", 51, 100),
+            make_entity(3, EntityKind::Variable, "buffer", 61, 76),
+        ];
+
+        establish_function_scope_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, Some(EntityId(0)));
+        assert_eq!(entities[3].parent, Some(EntityId(2)));
+    }
+
+    #[test]
+    fn test_function_scope_nests_nested_function() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Function, "test_teardown_on_pop", 0, 100),
+            make_entity(1, EntityKind::Function, "end_of_request", 30, 80),
+        ];
+
+        establish_function_scope_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, Some(EntityId(0)));
+    }
+
+    #[test]
+    fn test_function_scope_skips_class_attribute_variable() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Class, "MyClass", 0, 100),
+            make_entity(1, EntityKind::Variable, "attr", 20, 35),
+        ];
+
+        establish_function_scope_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, None);
+    }
+
+    #[test]
+    fn test_function_scope_prefers_innermost_function_for_nested_method() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Function, "outer", 0, 200),
+            make_entity(1, EntityKind::Class, "Inner", 20, 150),
+            make_entity(2, EntityKind::Method, "method", 40, 100),
+        ];
+
+        establish_function_scope_relationships(&mut entities);
+
+        // Method parents to the class, not the outer function.
+        assert_eq!(entities[2].parent, Some(EntityId(1)));
+    }
+
+    #[test]
+    fn test_function_scope_skips_existing_parent() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Function, "outer", 0, 100),
+            make_entity(1, EntityKind::Function, "inner", 10, 50),
+        ];
+        entities[1].parent = Some(EntityId(99));
+
+        establish_function_scope_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, Some(EntityId(99)));
     }
 
     #[test]

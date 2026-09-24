@@ -32,9 +32,9 @@ use super::annotation_handler::{
 use super::capture as capture_module;
 use super::context::ExtractionContext;
 use super::parent_child_resolver::{
-    establish_class_method_relationships, establish_go_method_relationships,
-    establish_impl_method_relationships, establish_module_entity_relationships,
-    establish_struct_field_relationships,
+    establish_class_method_relationships, establish_function_scope_relationships,
+    establish_go_method_relationships, establish_impl_method_relationships,
+    establish_module_entity_relationships, establish_struct_field_relationships,
 };
 use super::post_processing;
 use super::utils;
@@ -350,6 +350,12 @@ impl EntityExtractor {
 
         // Fifth pass: establish impl block -> method relationships based on span
         establish_impl_method_relationships(&mut entities);
+
+        // Fifth-B: nest local variables and nested functions under the
+        // innermost enclosing function (or type definition for methods) so
+        // scoped names encode the enclosing scope and same-named locals in
+        // different functions do not collide on stable symbol keys.
+        establish_function_scope_relationships(&mut entities);
 
         // Sixth pass: establish struct/class -> field relationships based on span
         // Must run before module relationships so fields are claimed by their
