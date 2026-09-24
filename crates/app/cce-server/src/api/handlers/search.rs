@@ -221,6 +221,7 @@ pub async fn handle_search(
                 items,
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 sources_used: result.sources,
+                failed_sub_queries: result.failed_sub_queries,
             };
 
             SearchApiResponse::Success(response)
@@ -474,6 +475,7 @@ pub async fn handle_aggregated_search(
                 items,
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 sources_used: result.sources,
+                failed_sub_queries: result.failed_sub_queries,
             })
         }
         Err(e) => {

@@ -186,8 +186,6 @@ pub struct ResultFilterConfig {
     pub limit: usize,
     /// Minimum score threshold for final results
     pub min_score: f32,
-    /// Maximum results per file (diversity control)
-    pub max_per_file: usize,
 }
 
 impl Default for ResultFilterConfig {
@@ -195,7 +193,6 @@ impl Default for ResultFilterConfig {
         Self {
             limit: 10,
             min_score: 0.25,
-            max_per_file: 3,
         }
     }
 }
@@ -232,7 +229,11 @@ impl Default for SummaryBoostConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScoreNormalizationConfig {
-    /// Whether to enable pre-boost score normalization
+    /// Whether to enable score normalization before thresholding.
+    ///
+    /// Enabled by default so the final `result.min_score` threshold observes a
+    /// uniform score scale across all recall strategies (bm25 raw scores are
+    /// unbounded without it).
     pub enable: bool,
     /// Normalization strategy
     pub strategy: NormalizationStrategy,
@@ -241,7 +242,7 @@ pub struct ScoreNormalizationConfig {
 impl Default for ScoreNormalizationConfig {
     fn default() -> Self {
         Self {
-            enable: false,
+            enable: true,
             strategy: NormalizationStrategy::MinMax,
         }
     }
@@ -562,9 +563,6 @@ pub struct SearchModuleConfig {
     /// Unified boost aggregation configuration
     #[serde(default)]
     pub boost: BoostAggregationConfig,
-    /// SPSR-Graph assembly configuration
-    #[serde(default)]
-    pub spsr_graph: SPSRGraphConfig,
     /// Query-side plugin hooks configuration (`QueryRewrite` / `Fusion` /
     /// `ResultFilter`).
     #[serde(default)]
@@ -602,7 +600,6 @@ mod tests {
         let config = ResultFilterConfig::default();
         assert_eq!(config.limit, 10);
         assert_eq!(config.min_score, 0.25);
-        assert_eq!(config.max_per_file, 3);
     }
 
     #[test]

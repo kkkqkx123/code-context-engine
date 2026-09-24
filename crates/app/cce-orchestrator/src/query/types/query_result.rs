@@ -49,4 +49,8 @@ pub struct QueryResult {
     pub sources: Vec<String>,
     /// Number of sub-queries executed (for aggregated search)
     pub sub_queries_count: usize,
+    /// Sub-query texts that failed during aggregated search (empty for single
+    /// queries). Makes partial degradation visible to the caller instead of a
+    /// silent union of the surviving sub-queries.
+    pub failed_sub_queries: Vec<String>,
 }

@@ -23,7 +23,14 @@ pub enum ExecutionStrategy {
 }
 
 impl ExecutionStrategy {
-    /// Determine execution strategy from user options
+    /// Determine execution strategy from user options.
+    ///
+    /// The `summary` flag selects the SummaryRecall path only when it is the
+    /// sole source. Combined with vector/bm25 it acts as a boost gate (file
+    /// summary relevance added on top of dense/hybrid scores), not a third
+    /// recall path. Callers must reject empty sources beforehand
+    /// (`Searcher::search_with_view` does); the fallback below only covers
+    /// unreachable direct calls.
     pub fn from_sources(
         sources: &SearchSources,
         config: &super::search_config::SearchConfig,
@@ -44,7 +51,8 @@ impl ExecutionStrategy {
             // Summary only -> SummaryRecall (pure summary vector search)
             (false, false, true) => ExecutionStrategy::SummaryRecall,
 
-            // Default fallback -> dense recall
+            // Unreachable via Searcher (empty sources are rejected upfront);
+            // kept as dense recall for direct callers.
             _ => ExecutionStrategy::DenseRecall,
         }
     }

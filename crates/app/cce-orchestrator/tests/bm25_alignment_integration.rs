@@ -162,7 +162,6 @@ impl AlignmentHarness {
             result: cce_orchestrator::query::types::ResultFilterConfig {
                 min_score: 0.0,
                 limit,
-                max_per_file: usize::MAX,
             },
             ..Default::default()
         };

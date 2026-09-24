@@ -8,8 +8,6 @@
 //! The runtime types here can be constructed from serde-compatible
 //! config file types via `From<cce_config::modules::search::SearchModuleConfig>`.
 
-use crate::query::assembly::SPSRGraphConfig;
-
 /// Re-export reusable configuration types from the search module.
 ///
 /// These are the serde-compatible, data-only types that map 1:1
@@ -65,7 +63,6 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 /// | `rerank` | LLM reranking (enable, model, candidates, temperature) |
 /// | `score` | Score normalization (enable, strategy) |
 /// | `boost` | Unified boost aggregation configuration |
-/// | `spsr_graph` | SPSR-Graph assembly configuration |
 #[derive(Debug, Clone, Default)]
 pub struct SearchConfig {
     /// Vector retrieval configuration
@@ -82,8 +79,6 @@ pub struct SearchConfig {
     pub score: ScoreNormalizationConfig,
     /// Unified boost aggregation configuration
     pub boost: BoostAggregationConfig,
-    /// SPSR-Graph assembly configuration
-    pub spsr_graph: SPSRGraphConfig,
     /// Query-side plugin hooks configuration
     pub plugin: PluginSearchConfig,
 }
@@ -101,7 +96,6 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             rerank: RerankConfig::default(),
             score: cfg.score,
             boost: cfg.boost,
-            spsr_graph: cfg.spsr_graph,
             plugin: cfg.plugin,
         }
     }

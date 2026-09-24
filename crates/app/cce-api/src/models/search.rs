@@ -60,6 +60,10 @@ pub struct SearchResponse {
     pub elapsed_ms: u64,
     #[serde(default)]
     pub sources_used: Vec<String>,
+    /// Sub-query texts that failed during an aggregated search (empty for
+    /// single queries); makes partial degradation visible to the caller.
+    #[serde(default)]
+    pub failed_sub_queries: Vec<String>,
 }
 
 /// Search result item
@@ -141,6 +145,9 @@ pub struct AggregatedSearchResponse {
     pub sub_queries_count: usize,
     #[serde(default)]
     pub sources_used: Vec<String>,
+    /// Sub-query texts that failed during aggregation (empty when all succeeded)
+    #[serde(default)]
+    pub failed_sub_queries: Vec<String>,
 }
 
 /// Search result used in aggregated search response

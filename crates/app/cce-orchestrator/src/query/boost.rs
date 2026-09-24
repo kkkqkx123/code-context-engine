@@ -22,8 +22,11 @@
 //! ```text
 //! total_addition = Σ source_contributions  (each capped at max_source_boost)
 //! capped_addition = min(total_addition, max_addition)
-//! score = vector_score × (1.0 + capped_addition)
+//! score = base_score × (1.0 + capped_addition)
 //! ```
+//!
+//! The base is the incoming candidate score: normalized fused score on the
+//! hybrid path, normalized vector score on the dense path.
 
 use std::collections::HashMap;
 
@@ -94,8 +97,11 @@ pub use cce_config::modules::search::BoostAggregationConfig;
 ///
 /// Takes a list of contributions from all boost sources and applies them
 /// to the candidate results. Each source's contribution is independently
-/// capped, then the total is globally capped before being applied to
-/// `result.score = result.vector_score × (1.0 + capped_addition)`.
+/// capped, then the total is globally capped before being applied as
+/// `result.score = base_score × (1.0 + capped_addition)`, where the base is
+/// the incoming `result.score` (normalized fused score on the hybrid path,
+/// normalized vector score on the dense path). Results without contributions
+/// keep their incoming score unchanged.
 ///
 /// # Arguments
 /// * `results` - Search results to boost (will be modified in place)
@@ -176,7 +182,8 @@ pub fn apply_boosts(
                 continue;
             }
 
-            let new_score = result.vector_score * boost.effective_multiplier;
+            let base_score = result.score;
+            let new_score = base_score * boost.effective_multiplier;
             result.score = new_score;
             result
                 .sources
@@ -192,8 +199,8 @@ pub fn apply_boosts(
                 })
                 .collect();
             result.boost_reason = Some(format!(
-                "agg(vector={:.3}, add={:.3}, capped={:.3}) [{}]",
-                result.vector_score,
+                "agg(base={:.3}, add={:.3}, capped={:.3}) [{}]",
+                base_score,
                 boost.raw_total_addition,
                 boost.capped_addition,
                 reasons.join(", ")
@@ -210,8 +217,8 @@ pub fn apply_boosts(
                     .join(","),
             );
         } else {
-            // No boost for this result, keep base score
-            result.score = result.vector_score;
+            // No boost for this result, keep incoming score (fused score on
+            // the hybrid path, vector score on the dense path).
         }
     }
 }

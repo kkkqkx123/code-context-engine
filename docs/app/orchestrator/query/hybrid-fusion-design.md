@@ -95,7 +95,9 @@ This expansion happens in `Searcher::expand_multi_entity_results()` before calli
 
 This ensures the same entity from different sub-queries or paths is correctly deduplicated.
 
-## Post-Fusion Assembly (Optional)
+## Post-Fusion Assembly (Dormant)
+
+SPSR-Graph 组装已与在线管线断开（仅 `cce-e2e-tests` 离线 assembly-review 消费），以下为历史设计保留：
 
 When `WithAssembly` strategy is enabled, the fused results undergo additional processing:
 
@@ -126,4 +128,4 @@ file_coverage_threshold = 0.6
 
 2. **No cross-path chunk boundary alignment**: The system intentionally avoids mapping chunk N in BM25 to chunk M in Embedding. This means fine-grained positional correspondence is lost.
 
-3. **Segment aggregation is assembly-only**: The `SegmentAggregator` only runs in the `WithAssembly` path. Standard hybrid results may contain fragmented segments from the same file.
+3. **Segment aggregation is assembly-only**: The `SegmentAggregator` only runs in the dormant `WithAssembly` path (removed from online pipeline). Standard hybrid results may contain fragmented segments from the same file.

@@ -3,10 +3,21 @@
 //! Provides a unified search interface that combines vector retrieval,
 //! BM25 enhancement, and result ranking into a cohesive search flow.
 //!
-//! # Architecture
+//! # Pipeline invariants
 //!
-//! The searcher delegates to specialized components:
-//! - ResultProcessor: Ranking, filtering, and threshold application
+//! Every execution strategy runs the same stage contract:
+//! retrieval → (hybrid: entity expansion + weighted fusion) → glob filter →
+//! optional score normalization → summary boost (dense + hybrid; skipped in
+//! SummaryRecall where the summary path is already the scorer) → SQLite chunk
+//! enrichment → post-processing (rerank, sort, filter, threshold).
+//!
+//! - SQLite enrichment is always the last data-shaping step before
+//!   post-processing: fusion, filtering, normalization and boost only need
+//!   index-carried fields (scores, entity/segment ids, file_path), so the
+//!   expensive content lookups run once, on the surviving candidate set.
+//! - When `config.score.enable` is set, normalization applies uniformly to
+//!   all strategies, so the final `result.min_score` threshold observes one
+//!   score scale regardless of recall mode.
 
 use std::sync::Arc;
 
@@ -15,6 +26,7 @@ use cce_config::project_registry::ProjectScope;
 use crate::query::boost::{SummaryBoost, apply_boosts};
 use crate::query::error::QueryError;
 use crate::query::error::Result;
+use crate::query::filter::QueryFilter;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
 use crate::query::types::{ExecutionStrategy, QueryOptions, QueryResult, SearchResult};
@@ -26,6 +38,8 @@ use cce_storage_qdrant::QdrantRetrieval;
 use cce_storage_bm25::Bm25Client;
 use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
+
+use super::search_builder::SearcherBuilder;
 
 /// Unified searcher
 ///
@@ -73,8 +87,6 @@ pub struct Searcher {
 /// itself); re-exported here to keep the historical import path stable.
 pub use crate::query::retrieval::post_processing::fusion::expand_multi_entity_results;
 
-use super::search_builder::SearcherBuilder;
-
 impl Searcher {
     /// Create a new searcher builder with a required project scope
     ///
@@ -110,11 +122,20 @@ impl Searcher {
 
     /// Execute search with given options
     ///
-    /// Supports different search strategies based on SearchSources:
-    ///    - Bm25Recall: Pure BM25 keyword recall (independent path)
-    ///    - HybridRecall: Vector + BM25 parallel recall with weighted normalization fusion
-    /// - DenseRecall: Pure dense vector recall
+    /// Loads the active epoch view itself. Callers that already resolved a
+    /// [`QueryFilter`] (query cache, retry replay) should use
+    /// [`Searcher::search_with_view`] to avoid a second manifest read.
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
+        let query_filter = self.load_query_filter(options.project_id)?;
+        self.search_with_view(options, &query_filter).await
+    }
+
+    /// Execute search against a caller-resolved epoch view.
+    pub async fn search_with_view(
+        &self,
+        options: &QueryOptions,
+        query_filter: &QueryFilter,
+    ) -> Result<QueryResult> {
         let project_id = self.scope.project_id();
         if project_id != options.project_id {
             return Err(QueryError::config(&format!(
@@ -122,377 +143,246 @@ impl Searcher {
                 options.project_id
             )));
         }
-        let start = std::time::Instant::now();
-        async {
-            // Apply query rewriting (QueryRewrite capability) before strategy
-            // determination. Plugins chain by priority; on failure the previous
-            // query text is kept. The original query is always preserved as the
-            // final recall fallback via `QueryOptions::query` rewriting below.
-            let mut options = options.clone();
-            if options.config.plugin.rewrite_enabled {
-                options = self.apply_query_rewrite(options).await?;
-            }
-
-            // Determine execution strategy from sources
-            let strategy = options.execution_strategy();
-
-            // Execute search flow (retrieval + fusion + ranking)
-            let results = self.execute_search_flow(&options, &strategy).await?;
-
-            let elapsed_ms = start.elapsed().as_millis() as u64;
-            tracing::trace!(
-                total_elapsed_ms = elapsed_ms,
-                strategy = %strategy,
-                result_count = results.len(),
-                "Search completed"
-            );
-
-            // Record search metrics with query type distribution
-            if let Some(metrics) = &self.search_metrics {
-                metrics.record_search(
-                    elapsed_ms as f64,
-                    SearchType::from_label(strategy.query_type_label()),
-                );
-            }
-
-            Ok(QueryResult {
-                total: results.len(),
-                items: results,
-                elapsed_ms,
-                sources: vec![strategy.to_string()],
-                sub_queries_count: 1, // Single query by default
-            })
+        if options.sources.is_empty() {
+            return Err(QueryError::invalid(
+                "at least one search source (vector, bm25, summary) must be enabled",
+            ));
         }
-        .await
+        let start = std::time::Instant::now();
+
+        // Apply query rewriting (QueryRewrite capability) before strategy
+        // determination. Plugins chain by priority; on failure the previous
+        // query text is kept.
+        let mut options = options.clone();
+        if options.config.plugin.rewrite_enabled {
+            options = self.apply_query_rewrite(options).await?;
+        }
+
+        // Determine execution strategy from sources
+        let strategy = options.execution_strategy();
+
+        // Execute search flow (retrieval + fusion + ranking)
+        let results = self
+            .execute_search_flow(&options, &strategy, query_filter)
+            .await?;
+
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        tracing::trace!(
+            total_elapsed_ms = elapsed_ms,
+            strategy = %strategy,
+            result_count = results.len(),
+            "Search completed"
+        );
+
+        // Record search metrics with query type distribution
+        if let Some(metrics) = &self.search_metrics {
+            metrics.record_search(
+                elapsed_ms as f64,
+                SearchType::from_label(strategy.query_type_label()),
+            );
+        }
+
+        Ok(QueryResult {
+            total: results.len(),
+            items: results,
+            elapsed_ms,
+            sources: vec![strategy.to_string()],
+            sub_queries_count: 1, // Single query by default
+            failed_sub_queries: Vec::new(),
+        })
     }
 
-    /// Execute the complete search flow: retrieval → fusion → ranking
+    /// Execute the complete search flow, dispatching per strategy.
     async fn execute_search_flow(
         &self,
         options: &QueryOptions,
         strategy: &ExecutionStrategy,
+        query_filter: &QueryFilter,
     ) -> Result<Vec<SearchResult>> {
-        use crate::query::retrieval::post_processing::{
-            HybridFusionConfig, fuse_hybrid_results_with_stats,
-        };
-        use crate::query::retrieval::post_processing::{enrich_from_chunk, get_chunk_records};
-        use crate::query::retrieval::strategies::RecallAlgorithm;
-
-        // Get active epoch for version-aware filtering
-        let query_filter = self.load_query_filter(options.project_id)?;
         tracing::trace!(
             epoch = query_filter.epoch_value(),
             "Using query filter with epoch"
         );
-
-        // ============================================================================
-        // Handle Bm25Recall: pure BM25 keyword recall (no vector dependency)
-        // ============================================================================
-        if let ExecutionStrategy::Bm25Recall = strategy {
-            tracing::trace!("Starting pure BM25 recall");
-            let retrieval_start = std::time::Instant::now();
-
-            // BM25 now uses native project_id filtering via the index itself
-            let bm25_strategy =
-                crate::query::retrieval::strategies::bm25::Bm25Strategy::new(self.bm25.clone());
-            let mut results = bm25_strategy.retrieve(options, &query_filter).await?;
-
-            let retrieval_elapsed = retrieval_start.elapsed();
-            tracing::trace!(
-                count = results.len(),
-                elapsed_ms = retrieval_elapsed.as_millis(),
-                "BM25 recall completed"
-            );
-
-            // Entity enrichment (SQLite lookup for start_line/end_line)
-            if let Some(ref sqlite_db) = self.sqlite {
-                let point_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-                if !point_ids.is_empty() {
-                    match sqlite_db.read_connection() {
-                        Ok(conn) => {
-                            match get_chunk_records(
-                                &conn,
-                                &point_ids,
-                                options.project_id,
-                                &query_filter,
-                            ) {
-                                Ok(Some(records)) => {
-                                    let project_root =
-                                        cce_storage_sqlite::source_reader::resolve_project_root(
-                                            &conn,
-                                            options.project_id,
-                                        );
-                                    for result in &mut results {
-                                        enrich_from_chunk(
-                                            result,
-                                            &records,
-                                            project_root.as_deref(),
-                                        );
-                                    }
-                                }
-                                Ok(None) => {}
-                                Err(e) => {
-                                    tracing::warn!("Chunk enrichment failed: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to get SQLite connection: {}", e);
-                        }
-                    }
-                }
+        match strategy {
+            ExecutionStrategy::Bm25Recall => self.run_bm25_recall(options, query_filter).await,
+            ExecutionStrategy::HybridRecall {
+                vector_weight,
+                bm25_weight,
+            } => {
+                self.run_hybrid_recall(options, query_filter, *vector_weight, *bm25_weight)
+                    .await
             }
-
-            // Glob filter (include/exclude pattern filtering)
-            let results = self.glob_filter.apply(
-                results,
-                &options.include_patterns,
-                &options.exclude_patterns,
-            )?;
-
-            // Post-processing (skip BM25 boost step for Bm25Recall)
-            return self.post_process_results(results, options).await;
+            ExecutionStrategy::DenseRecall | ExecutionStrategy::SummaryRecall => {
+                self.run_vector_recall(options, strategy, query_filter)
+                    .await
+            }
         }
+    }
 
-        // ============================================================================
-        // Handle HybridRecall: vector + BM25 parallel recall + weighted fusion
-        // ============================================================================
-        if let ExecutionStrategy::HybridRecall {
-            vector_weight,
-            bm25_weight,
-        } = strategy
-        {
-            tracing::trace!(
-                vector_weight = vector_weight,
-                bm25_weight = bm25_weight,
-                "Starting hybrid recall (vector + BM25 parallel)"
-            );
+    /// Pure BM25 keyword recall (no vector dependency).
+    async fn run_bm25_recall(
+        &self,
+        options: &QueryOptions,
+        query_filter: &QueryFilter,
+    ) -> Result<Vec<SearchResult>> {
+        use crate::query::retrieval::strategies::RecallAlgorithm;
 
-            let (vector_attempt, bm25_attempt) = tokio::join!(
-                // Vector path
-                async {
-                    let algo = RecallAlgorithm::Dense;
-                    let retrieval = algo.create_strategy(self);
-                    tracing::trace!("Hybrid: executing vector recall path");
-                    let start = std::time::Instant::now();
-                    let results = retrieval.retrieve(options, &query_filter).await;
-                    let elapsed = start.elapsed();
-                    match &results {
-                        Ok(r) => tracing::trace!(
-                            count = r.len(),
-                            elapsed_ms = elapsed.as_millis(),
-                            "Hybrid: vector recall path completed"
-                        ),
-                        Err(e) => tracing::warn!(
-                            error = %e,
-                            elapsed_ms = elapsed.as_millis(),
-                            "Hybrid: vector recall path failed"
-                        ),
-                    }
-                    results
-                },
-                // BM25 path
-                async {
-                    let algo = RecallAlgorithm::Bm25;
-                    let retrieval = algo.create_strategy(self);
-                    tracing::trace!("Hybrid: executing BM25 recall path");
-                    let start = std::time::Instant::now();
-                    let results = retrieval.retrieve(options, &query_filter).await;
-                    let elapsed = start.elapsed();
-                    match &results {
-                        Ok(r) => tracing::trace!(
-                            count = r.len(),
-                            elapsed_ms = elapsed.as_millis(),
-                            "Hybrid: BM25 recall path completed"
-                        ),
-                        Err(e) => tracing::warn!(
-                            error = %e,
-                            elapsed_ms = elapsed.as_millis(),
-                            "Hybrid: BM25 recall path failed"
-                        ),
-                    }
-                    results
-                }
-            );
+        tracing::trace!("Starting pure BM25 recall");
+        let retrieval_start = std::time::Instant::now();
 
-            // Both paths must succeed — never degrade one to the other.
-            // Genuine configuration errors pass through unchanged so they are
-            // not mislabeled as transient; runtime failures become retryable.
-            let vector_results = vector_attempt.map_err(|e| {
-                if e.is_config_error() {
-                    e
-                } else {
-                    QueryError::retryable("qdrant", format!("Vector recall path failed: {e}"))
-                }
-            })?;
-            let bm25_results = bm25_attempt.map_err(|e| {
-                if e.is_config_error() {
-                    e
-                } else {
-                    QueryError::retryable("bm25", format!("BM25 recall path failed: {e}"))
-                }
-            })?;
+        let strategy = RecallAlgorithm::Bm25.create_strategy(self);
+        let mut results = strategy.retrieve(options, query_filter).await?;
 
-            // Enrich vector results with SQLite data (line numbers, content)
-            let mut vector_results = vector_results;
-            if !vector_results.is_empty() {
-                if let Some(ref sqlite_db) = self.sqlite {
-                    let point_ids: Vec<String> =
-                        vector_results.iter().map(|r| r.id.clone()).collect();
-                    if !point_ids.is_empty() {
-                        match sqlite_db.read_connection() {
-                            Ok(conn) => {
-                                match get_chunk_records(
-                                    &conn,
-                                    &point_ids,
-                                    options.project_id,
-                                    &query_filter,
-                                ) {
-                                    Ok(Some(records)) => {
-                                        let project_root =
-                                            cce_storage_sqlite::source_reader::resolve_project_root(
-                                                &conn,
-                                                options.project_id,
-                                            );
-                                        for result in &mut vector_results {
-                                            enrich_from_chunk(
-                                                result,
-                                                &records,
-                                                project_root.as_deref(),
-                                            );
-                                        }
-                                    }
-                                    Ok(None) => {}
-                                    Err(e) => {
-                                        tracing::warn!("Chunk enrichment failed: {}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get SQLite connection: {}", e);
-                            }
-                        }
-                    }
-                }
+        tracing::trace!(
+            count = results.len(),
+            elapsed_ms = retrieval_start.elapsed().as_millis(),
+            "BM25 recall completed"
+        );
+
+        results = self.apply_glob_filter(results, options)?;
+        self.apply_score_normalization(&mut results, options);
+        self.enrich_results(&mut results, options.project_id, query_filter);
+        self.post_process_results(results, options).await
+    }
+
+    /// Hybrid recall: vector + BM25 parallel paths, fused by weighted normalization.
+    async fn run_hybrid_recall(
+        &self,
+        options: &QueryOptions,
+        query_filter: &QueryFilter,
+        vector_weight: f32,
+        bm25_weight: f32,
+    ) -> Result<Vec<SearchResult>> {
+        use crate::query::retrieval::post_processing::{
+            HybridFusionConfig, fuse_hybrid_results_with_stats,
+        };
+        use crate::query::retrieval::strategies::RecallAlgorithm;
+
+        tracing::trace!(
+            vector_weight = vector_weight,
+            bm25_weight = bm25_weight,
+            "Starting hybrid recall (vector + BM25 parallel)"
+        );
+
+        let retrieve = |algo: RecallAlgorithm| async move {
+            let strategy = algo.create_strategy(self);
+            let start = std::time::Instant::now();
+            let results = strategy.retrieve(options, query_filter).await;
+            match &results {
+                Ok(r) => tracing::trace!(
+                    path = %algo,
+                    count = r.len(),
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "Recall path completed"
+                ),
+                Err(e) => tracing::warn!(
+                    path = %algo,
+                    error = %e,
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "Recall path failed"
+                ),
             }
-
-            // Enrich BM25 results with SQLite data (line numbers, content)
-            let mut bm25_results = bm25_results;
-            if !bm25_results.is_empty() {
-                if let Some(ref sqlite_db) = self.sqlite {
-                    let bm25_point_ids: Vec<String> =
-                        bm25_results.iter().map(|r| r.id.clone()).collect();
-                    if !bm25_point_ids.is_empty() {
-                        match sqlite_db.read_connection() {
-                            Ok(conn) => {
-                                match get_chunk_records(
-                                    &conn,
-                                    &bm25_point_ids,
-                                    options.project_id,
-                                    &query_filter,
-                                ) {
-                                    Ok(Some(records)) => {
-                                        let project_root =
-                                            cce_storage_sqlite::source_reader::resolve_project_root(
-                                                &conn,
-                                                options.project_id,
-                                            );
-                                        for result in &mut bm25_results {
-                                            enrich_from_chunk(
-                                                result,
-                                                &records,
-                                                project_root.as_deref(),
-                                            );
-                                        }
-                                    }
-                                    Ok(None) => {}
-                                    Err(e) => {
-                                        tracing::warn!("Chunk enrichment failed: {}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get SQLite connection: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Expand multi-entity results before fusion for entity-level alignment
-            let vector_results = expand_multi_entity_results(vector_results);
-            let bm25_results = expand_multi_entity_results(bm25_results);
-
-            // Fuse results using weighted normalization (before filtering).
-            // The alignment coverage stats are produced by fusion and recorded
-            // here so the metric and the internal log observe a single pass.
-            tracing::trace!("Fusing hybrid results");
-            let fusion_start = std::time::Instant::now();
-            // include_single_path/min_score/dedup_by_chunk are reserved tuning
-            // switches pending the retrieval-method benchmark; the production
-            // defaults keep single-path recall included, unbounded, and collapse
-            // multi-entity duplicates per physical chunk (dedup_by_chunk).
-            let fusion_config = HybridFusionConfig {
-                vector_weight: *vector_weight,
-                bm25_weight: *bm25_weight,
-                ..HybridFusionConfig::default()
-            };
-            // Plugin fusion-weight override (Fusion capability).
-            let fusion_config = if options.config.plugin.fusion_enabled {
-                self.apply_fusion_override(
-                    options,
-                    fusion_config,
-                    vector_results.len(),
-                    bm25_results.len(),
-                )
-                .await
-            } else {
-                fusion_config
-            };
-            let (fused_results, alignment_stats) =
-                fuse_hybrid_results_with_stats(vector_results, bm25_results, &fusion_config);
-            if let Some(metrics) = &self.search_metrics {
-                metrics.record_hybrid_alignment(
-                    alignment_stats.vector_keys,
-                    alignment_stats.bm25_keys,
-                    alignment_stats.matched_keys,
-                );
-            }
-            let fusion_elapsed = fusion_start.elapsed();
-            tracing::trace!(
-                count = fused_results.len(),
-                elapsed_ms = fusion_elapsed.as_millis(),
-                "Hybrid fusion completed"
-            );
-
-            // Apply glob filter to fused results
-            let fused_results = self.glob_filter.apply(
-                fused_results,
-                &options.include_patterns,
-                &options.exclude_patterns,
-            )?;
-
-            // Post-processing (skip BM25 boost step for hybrid recall)
-            return self.post_process_results(fused_results, options).await;
-        }
-
-        // ============================================================================
-        // Strategy: DenseRecall (pure dense vector recall)
-        // ============================================================================
-        let recall_algo = match strategy {
-            ExecutionStrategy::DenseRecall => RecallAlgorithm::Dense,
-            ExecutionStrategy::Bm25Recall | ExecutionStrategy::HybridRecall { .. } => {
-                unreachable!("Bm25Recall and HybridRecall are handled above")
-            }
-            ExecutionStrategy::SummaryRecall => RecallAlgorithm::Summary,
+            results
         };
 
-        // Step 1: Retrieval phase (pure recall path, no enrichment)
+        let (vector_attempt, bm25_attempt) = tokio::join!(
+            retrieve(RecallAlgorithm::Dense),
+            retrieve(RecallAlgorithm::Bm25)
+        );
+
+        // Both paths must succeed — never degrade one to the other.
+        // Genuine configuration errors pass through unchanged so they are
+        // not mislabeled as transient; runtime failures become retryable.
+        let vector_results = vector_attempt.map_err(|e| {
+            if e.is_config_error() {
+                e
+            } else {
+                QueryError::retryable("qdrant", format!("Vector recall path failed: {e}"))
+            }
+        })?;
+        let bm25_results = bm25_attempt.map_err(|e| {
+            if e.is_config_error() {
+                e
+            } else {
+                QueryError::retryable("bm25", format!("BM25 recall path failed: {e}"))
+            }
+        })?;
+
+        // Expand multi-entity results before fusion for entity-level alignment.
+        // Fusion consumes only index-carried fields (scores, entity/segment
+        // ids), so SQLite enrichment runs once after fusion, on the surviving
+        // candidate set.
+        let vector_results = expand_multi_entity_results(vector_results);
+        let bm25_results = expand_multi_entity_results(bm25_results);
+
+        // include_single_path/min_score/dedup_by_chunk are reserved tuning
+        // switches pending the retrieval-method benchmark; the production
+        // defaults keep single-path recall included, unbounded, and collapse
+        // multi-entity duplicates per physical chunk (dedup_by_chunk).
+        let fusion_config = HybridFusionConfig {
+            vector_weight,
+            bm25_weight,
+            ..HybridFusionConfig::default()
+        };
+        // Plugin fusion-weight override (Fusion capability).
+        let fusion_config = if options.config.plugin.fusion_enabled {
+            self.apply_fusion_override(
+                options,
+                fusion_config,
+                vector_results.len(),
+                bm25_results.len(),
+            )
+            .await
+        } else {
+            fusion_config
+        };
+        let fusion_start = std::time::Instant::now();
+        let (mut fused_results, alignment_stats) =
+            fuse_hybrid_results_with_stats(vector_results, bm25_results, &fusion_config);
+        if let Some(metrics) = &self.search_metrics {
+            metrics.record_hybrid_alignment(
+                alignment_stats.vector_keys,
+                alignment_stats.bm25_keys,
+                alignment_stats.matched_keys,
+            );
+        }
+        tracing::trace!(
+            count = fused_results.len(),
+            elapsed_ms = fusion_start.elapsed().as_millis(),
+            "Hybrid fusion completed"
+        );
+
+        fused_results = self.apply_glob_filter(fused_results, options)?;
+        self.apply_score_normalization(&mut fused_results, options);
+        // Summary boost applies on the fused score (not a third recall path):
+        // `sources.summary` in hybrid mode means "boost fused hits by file
+        // summary relevance", mirroring the dense-path boost.
+        self.apply_summary_boost(&mut fused_results, options).await;
+        self.enrich_results(&mut fused_results, options.project_id, query_filter);
+        self.post_process_results(fused_results, options).await
+    }
+
+    /// Single-path vector recall (dense chunks or file-level summaries),
+    /// with optional summary relevance boosting.
+    async fn run_vector_recall(
+        &self,
+        options: &QueryOptions,
+        strategy: &ExecutionStrategy,
+        query_filter: &QueryFilter,
+    ) -> Result<Vec<SearchResult>> {
+        use crate::query::retrieval::strategies::RecallAlgorithm;
+
+        let recall_algo = match strategy {
+            ExecutionStrategy::DenseRecall => RecallAlgorithm::Dense,
+            ExecutionStrategy::SummaryRecall => RecallAlgorithm::Summary,
+            _ => unreachable!("only dense and summary strategies reach this path"),
+        };
+
         let retrieval = recall_algo.create_strategy(self);
         tracing::trace!(algorithm = %recall_algo, "Starting retrieval");
         let retrieval_start = std::time::Instant::now();
         let mut results = retrieval
-            .retrieve(options, &query_filter)
+            .retrieve(options, query_filter)
             .await
             .map_err(|e| {
                 QueryError::retryable(
@@ -500,113 +390,141 @@ impl Searcher {
                     format!("{} retrieval failed: {}", recall_algo, e),
                 )
             })?;
-        let retrieval_elapsed = retrieval_start.elapsed();
         tracing::trace!(
             count = results.len(),
-            elapsed_ms = retrieval_elapsed.as_millis(),
+            elapsed_ms = retrieval_start.elapsed().as_millis(),
             "Retrieval completed"
         );
 
-        // Step 2: Entity enrichment phase (SQLite chunk content lookup)
-        if let Some(ref sqlite_db) = self.sqlite {
-            let point_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-            if !point_ids.is_empty() {
-                match sqlite_db.read_connection() {
-                    Ok(conn) => match get_chunk_records(
-                        &conn,
-                        &point_ids,
-                        options.project_id,
-                        &query_filter,
-                    ) {
-                        Ok(Some(records)) => {
-                            let project_root =
-                                cce_storage_sqlite::source_reader::resolve_project_root(
-                                    &conn,
-                                    options.project_id,
-                                );
-                            for result in &mut results {
-                                enrich_from_chunk(result, &records, project_root.as_deref());
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            tracing::warn!("Chunk enrichment failed: {}", e);
-                        }
-                    },
-                    Err(e) => {
-                        tracing::warn!("Failed to get SQLite connection for enrichment: {}", e);
-                    }
-                }
-            }
+        // Glob filter uses the index-carried file path, so it runs before
+        // enrichment to keep the SQLite lookups on the surviving set.
+        results = self.apply_glob_filter(results, options)?;
+        self.apply_score_normalization(&mut results, options);
+
+        // Summary boost is skipped in SummaryRecall where the summary path is
+        // already the scorer.
+        if !matches!(strategy, ExecutionStrategy::SummaryRecall) {
+            self.apply_summary_boost(&mut results, options).await;
         }
 
-        // Glob filter (include/exclude pattern filtering), applied after
-        // enrichment (file_path available) but before normalization/boost.
-        results = self.glob_filter.apply(
+        self.enrich_results(&mut results, options.project_id, query_filter);
+        self.post_process_results(results, options).await
+    }
+
+    /// Collect summary relevance boost contributions and apply them to the
+    /// incoming scores (fused score on hybrid, normalized vector score on
+    /// dense). No-op unless the booster exists and both boost gates
+    /// (`boost.enabled`, `summary.enable_boost`, `sources.summary`) are set.
+    /// Boost collection failure degrades to unboosted scores, never an error.
+    async fn apply_summary_boost(&self, results: &mut [SearchResult], options: &QueryOptions) {
+        let boost_config = &options.config.boost;
+        let Some(ref booster) = self.summary_boost else {
+            return;
+        };
+        if !boost_config.enabled || !options.sources.summary || !options.config.summary.enable_boost
+        {
+            return;
+        }
+        tracing::trace!("Collecting summary relevance boost contributions");
+        match booster
+            .collect(results, &options.query, &options.config, boost_config)
+            .await
+        {
+            Ok(contribs) => {
+                tracing::trace!(
+                    count = contribs.len(),
+                    "Summary boost contributions collected"
+                );
+                apply_boosts(results, contribs, boost_config);
+            }
+            Err(e) => {
+                tracing::warn!("Summary boost collection failed, skipping: {}", e);
+            }
+        }
+    }
+
+    /// Apply include/exclude path patterns to a result set.
+    fn apply_glob_filter(
+        &self,
+        results: Vec<SearchResult>,
+        options: &QueryOptions,
+    ) -> Result<Vec<SearchResult>> {
+        self.glob_filter.apply(
             results,
             &options.include_patterns,
             &options.exclude_patterns,
-        )?;
+        )
+    }
 
-        // Step 3: Score Normalization phase (optional, pre-boost normalization)
-        if options.config.score.enable {
-            tracing::trace!(
-                strategy = ?options.config.score.strategy,
-                "Applying pre-boost score normalization"
-            );
-            let mut scores: Vec<f32> = results.iter().map(|r| r.score).collect();
-            if let Err(e) =
-                crate::query::boost::normalize_scores(&mut scores, &options.config.score.strategy)
-            {
-                tracing::warn!(error = %e, "Score normalization failed, using unnormalized scores");
-            } else {
-                for (result, new_score) in results.iter_mut().zip(scores) {
-                    result.score = new_score;
-                    result.vector_score = new_score;
-                }
-            }
+    /// Optional score normalization, applied uniformly across all strategies
+    /// when `config.score.enable` is set so the final threshold sees one
+    /// score scale. Fields carrying the same raw score (`vector_score`,
+    /// `bm25_score`) are mirrored; fields that already diverged from the
+    /// effective score (e.g. after boosting) stay untouched.
+    fn apply_score_normalization(&self, results: &mut [SearchResult], options: &QueryOptions) {
+        if !options.config.score.enable || results.is_empty() {
+            return;
         }
-
-        // Step 4: Collect boost contributions from all sources
-        let boost_config = &options.config.boost;
-        let mut all_contributions = Vec::new();
-
-        // 4a: Summary relevance boost (optional, skip in SummaryRecall mode)
-        if !matches!(strategy, ExecutionStrategy::SummaryRecall) && boost_config.enabled {
-            if let Some(ref booster) = self.summary_boost {
-                if options.sources.summary && options.config.summary.enable_boost {
-                    tracing::trace!("Collecting summary relevance boost contributions");
-                    match booster
-                        .collect(&results, &options.query, &options.config, boost_config)
-                        .await
-                    {
-                        Ok(contribs) => {
-                            tracing::trace!(
-                                count = contribs.len(),
-                                "Summary boost contributions collected"
-                            );
-                            all_contributions.extend(contribs);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Summary boost collection failed, skipping: {}", e);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Step 5: Apply unified boost aggregation
+        tracing::trace!(
+            strategy = ?options.config.score.strategy,
+            "Applying pre-boost score normalization"
+        );
+        let mut scores: Vec<f32> = results.iter().map(|r| r.score).collect();
+        if let Err(e) =
+            crate::query::boost::normalize_scores(&mut scores, &options.config.score.strategy)
         {
-            let boost_start = std::time::Instant::now();
-            apply_boosts(&mut results, all_contributions, boost_config);
-            let boost_elapsed = boost_start.elapsed();
-            tracing::trace!(
-                elapsed_ms = boost_elapsed.as_millis(),
-                "Unified boost aggregation completed"
-            );
+            tracing::warn!(error = %e, "Score normalization failed, using unnormalized scores");
+            return;
         }
+        for (result, new_score) in results.iter_mut().zip(scores) {
+            let old = result.score;
+            result.score = new_score;
+            if (result.vector_score - old).abs() <= f32::EPSILON {
+                result.vector_score = new_score;
+            }
+            if result
+                .bm25_score
+                .is_some_and(|b| (b - old).abs() <= f32::EPSILON)
+            {
+                result.bm25_score = Some(new_score);
+            }
+        }
+    }
 
-        // Step 6: Post-processing phase (rerank, sort, filter)
-        self.post_process_results(results, options).await
+    /// Batch-enrich results from SQLite chunk records (content/snippet, line
+    /// ranges, kind, entity fallback). Lookup failures degrade to unenriched
+    /// results; enrichment is data-only and never fails the request.
+    fn enrich_results(
+        &self,
+        results: &mut [SearchResult],
+        project_id: i64,
+        query_filter: &QueryFilter,
+    ) {
+        use crate::query::retrieval::post_processing::{enrich_from_chunk, get_chunk_records};
+
+        let Some(sqlite_db) = &self.sqlite else {
+            return;
+        };
+        if results.is_empty() {
+            return;
+        }
+        let point_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+        let Ok(conn) = sqlite_db.read_connection() else {
+            tracing::warn!("Failed to get SQLite connection for enrichment");
+            return;
+        };
+        match get_chunk_records(&conn, &point_ids, project_id, query_filter) {
+            Ok(Some(records)) => {
+                let project_root =
+                    cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
+                for result in results.iter_mut() {
+                    enrich_from_chunk(result, &records, project_root.as_deref());
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("Chunk enrichment failed: {}", e);
+            }
+        }
     }
 }

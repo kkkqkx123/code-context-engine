@@ -7,36 +7,34 @@
 //! The query module follows a layered architecture with clear separation of concerns:
 //!
 //! ```text
-//! QueryCoordinator (unified entry point)
+//! QueryCoordinator (unified entry point: capabilities, cache, retry queue)
 //!     │
-//!     ├── Searcher (core search engine)
-//!     │   ├── Retrieval Layer (base retrieval)
-//!     │   │   ├── VectorRetrieval (vector search)
-//!     │   │   ├── Bm25Retrieval (BM25 search)
-//!     │   │   └── Strategies (retrieval strategies: Dense, DenseSparse)
+//!     ├── Searcher (core search engine, one pipeline per ExecutionStrategy)
+//!     │   ├── Retrieval Strategies (retrieval/strategies: Dense, Bm25, Summary)
+//!     │   │   └── core/ = stateless storage access (Qdrant), strategies = orchestration
 //!     │   │
-//!     │   ├── Boost Layer (unified boosting)
-//!     │   │   └── SummaryBoost (summary relevance boost)
+//!     │   ├── Hybrid Fusion (retrieval/post_processing/fusion)
+//!     │   │   └── entity-level alignment, weighted normalized score fusion
 //!     │   │
-//!     │   ├── Ranking Layer (ordering)
-//!     │   │   ├── LlmReranker (LLM re-ranking)
-//!     │   │   ├── ScoreSorter (score ordering)
-//!     │   │   ├── DiversityControl (diversity control)
-//!     │   │   ├── CandidateSelection (candidate selection)
-//!     │   │   └── ThresholdFilter (threshold filtering)
+//!     │   ├── Glob Filter + Score Normalization + Enrichment
+//!     │   │   └── path filtering, uniform score scale, SQLite chunk enrichment
 //!     │   │
-//!     │   └── Post-Processing Layer (post-processing)
-//!     │       ├── ScoreSorter (score ordering)
-//!     │       ├── DiversityControl (diversity control)
-//!     │       ├── CandidateSelection (candidate selection)
-//!     │       └── ThresholdFilter (threshold filtering)
+//!     │   ├── Boost Layer (boost: additive score boosting)
+//!     │   │   └── SummaryBoost (dense + hybrid paths; skipped in SummaryRecall)
+//!     │   │
+//!     │   └── Post-processing (ranking: rerank → sort → ResultFilter → threshold)
+//!     │       ├── LlmReranker / PluginReranker
+//!     │       ├── ScoreSorter
+//!     │       └── ThresholdFilter (min_score + limit)
 //!     │
-//!     └── RelationSearcher (standalone relation queries)
-//!         ├── Call chain queries
-//!         ├── Path finding
-//!         └── Inheritance queries
+//!     └── RelationSearcher (standalone relation queries, not semantic-scored)
+//!         ├── Call chain queries / path finding / inheritance
+//!         └── GraphService (ego graph, shortest path, components, export)
 //!
-//! Tools Module (code analysis tools)
+//! Dormant: assembly/ (SPSR-Graph) is disconnected from the online pipeline;
+//! it is kept only for the offline assembly-review example in cce-e2e-tests.
+//!
+//! Tools Module (code analysis tools, outside the query pipeline)
 //!     ├── SymbolLookup (symbol lookup: find references, goto definition)
 //!     ├── AstDiagnosis (AST diagnosis)
 //!     └── Compression (code compression)
@@ -44,11 +42,10 @@
 //!
 //! # Key Components
 //!
-//! - **QueryCoordinator**: unified entry point coordinating all query operations, with caching and capability checks
-//! - **Searcher**: core search engine orchestrating retrieval, enhancement and post-processing through a pipeline
-//! - **SearchPipeline**: search pipeline executing retrieval, enhancement and post-processing in order
-//! - **Retrieval Strategies**: pluggable retrieval strategies supporting multiple search modes
-//! - **Enhancement**: optional result enhancers that can be enabled/disabled independently
+//! - **QueryCoordinator**: unified entry point coordinating all query operations, with caching, capability checks and retry-queue fault tolerance
+//! - **Searcher**: core search engine executing the per-strategy pipeline (retrieval → fusion → filter → normalize → boost → enrich → post-process)
+//! - **Retrieval Strategies**: pluggable recall strategies (Dense / Bm25 / Summary) with static dispatch
+//! - **Boost / Ranking**: additive score boosting and deterministic rerank/sort/threshold stages
 //!
 //! # Usage Example
 //!
@@ -56,7 +53,7 @@
 //! use code_context_engine::orchestrator::query::{QueryCoordinator, Searcher};
 //!
 //! // Create a Searcher via its builder
-//! let searcher = Searcher::builder(qdrant, embedder, bm25, project_group_id)
+//! let searcher = Searcher::builder(qdrant, embedder, bm25, scope)
 //!     .with_sqlite(sqlite)
 //!     .with_rerank(rerank_handler)
 //!     .build();
@@ -64,7 +61,8 @@
 //! // Create a QueryCoordinator
 //! let coordinator = QueryCoordinator::new(
 //!     Arc::new(searcher),
-//!     Arc::new(relation_searcher)
+//!     Arc::new(relation_searcher),
+//!     project_id,
 //! );
 //!
 //! // Run a search
@@ -154,9 +152,7 @@ pub use boost::{BoostAggregationConfig, BoostContribution, SummaryBoost, apply_b
 pub use boost::{NormalizationStrategy, normalize_scores};
 
 // Re-export ranking module components (includes LlmReranker)
-pub use ranking::{
-    CandidateSelection, DiversityControl, LlmReranker, ScoreSorter, ThresholdFilter,
-};
+pub use ranking::{LlmReranker, ScoreSorter, ThresholdFilter};
 pub use retrieval::{FilterOptions, GlobFilter};
 
 // Re-export query filter

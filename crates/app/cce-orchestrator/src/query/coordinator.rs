@@ -435,14 +435,24 @@ impl QueryCoordinator {
     /// when the service recovers. The error is still propagated to the
     /// caller so the degradation is visible.
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
+        let view = self.searcher.load_query_filter(options.project_id)?;
+        self.search_with_view(options, &view).await
+    }
+
+    /// Execute a search against a pre-resolved epoch view, sharing it with
+    /// the searcher so one request reads the active manifest only once.
+    async fn search_with_view(
+        &self,
+        options: &QueryOptions,
+        view: &crate::query::filter::QueryFilter,
+    ) -> Result<QueryResult> {
         let start = std::time::Instant::now();
 
         // Check capabilities before executing
         self.check_capabilities(options)?;
-        let view = self.searcher.load_query_filter(options.project_id)?;
 
         // Check cache first
-        if let Some(cached) = self.cache.get_result_for_view(options, &view).await {
+        if let Some(cached) = self.cache.get_result_for_view(options, view).await {
             tracing::trace!("Cache hit for query: {}", options.query);
 
             // Record metrics if enabled (cache hit)
@@ -458,11 +468,11 @@ impl QueryCoordinator {
 
         // Execute search — no silent degradation. If services are unavailable,
         // the error propagates to the caller, and the query is queued for retry.
-        match self.searcher.search(options).await {
+        match self.searcher.search_with_view(options, view).await {
             Ok(result) => {
                 // Store in cache
                 self.cache
-                    .put_result_for_view(options, &view, result.clone())
+                    .put_result_for_view(options, view, result.clone())
                     .await;
 
                 // Record metrics if enabled (cache miss)
@@ -517,7 +527,7 @@ impl QueryCoordinator {
                     continue;
                 }
             };
-            match self.searcher.search(&options).await {
+            match self.searcher.search_with_view(&options, &view).await {
                 Ok(result) => {
                     self.cache
                         .put_result_for_view(&options, &view, result)
@@ -549,15 +559,19 @@ impl QueryCoordinator {
 
     /// Execute aggregated search with multiple sub-queries
     ///
-    /// Runs each sub-query in sequence and merges the results,
-    /// deduplicating by entity ID and sorting by score.
+    /// Runs each sub-query in sequence against one shared epoch view and
+    /// merges the results, deduplicating by entity ID and sorting by score.
+    /// A failed sub-query does not abort the search; its text is reported in
+    /// [`QueryResult::failed_sub_queries`] so partial degradation is visible.
     pub async fn search_aggregated(
         &self,
         agg_options: &AggregatedQueryOptions,
     ) -> Result<QueryResult> {
         let start = std::time::Instant::now();
+        let view = self.searcher.load_query_filter(agg_options.project_id)?;
         let mut all_results: Vec<crate::query::types::SearchResult> = Vec::new();
         let mut sources_used: Vec<String> = Vec::new();
+        let mut failed_sub_queries: Vec<String> = Vec::new();
         let sub_queries_count = agg_options.sub_queries.len();
 
         for sub_query in &agg_options.sub_queries {
@@ -589,7 +603,7 @@ impl QueryCoordinator {
                 enable_rerank: agg_options.enable_rerank,
             };
 
-            match self.search(&options).await {
+            match self.search_with_view(&options, &view).await {
                 Ok(result) => {
                     for source in &result.sources {
                         if !sources_used.contains(source) {
@@ -604,6 +618,7 @@ impl QueryCoordinator {
                         error = %e,
                         "Sub-query failed in aggregated search"
                     );
+                    failed_sub_queries.push(sub_query.text.clone());
                 }
             }
         }
@@ -651,6 +666,7 @@ impl QueryCoordinator {
             elapsed_ms: start.elapsed().as_millis() as u64,
             sources: sources_used,
             sub_queries_count,
+            failed_sub_queries,
         })
     }
 
@@ -948,7 +964,7 @@ impl QueryCoordinator {
             .ok_or_else(|| QueryError::index_not_available("sqlite"))?;
 
         let conn = sqlite
-            .write_connection()
+            .read_connection()
             .map_err(|e| QueryError::invalid(&format!("Failed to connect to SQLite: {}", e)))?;
 
         let view = self.searcher.load_query_filter(project_id)?;

@@ -64,9 +64,12 @@ impl Searcher {
 
         // Result filtering (ResultFilter capability), which runs after
         // reranking + sorting and before the threshold filter so plugins can
-        // remove/boost/annotate candidates.
+        // remove/boost/annotate candidates. Boosts change scores, so the list
+        // is re-sorted afterwards; otherwise the threshold filter would
+        // truncate by the pre-boost order.
         let sorted_results = if options.config.plugin.filter_enabled {
-            self.apply_result_filter(&sorted_results, options).await
+            let filtered = self.apply_result_filter(&sorted_results, options).await;
+            self.score_sorter.sort(filtered)
         } else {
             sorted_results
         };

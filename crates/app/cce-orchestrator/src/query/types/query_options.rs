@@ -15,7 +15,8 @@ pub struct SearchSources {
     pub vector: bool,
     /// Enable BM25 keyword search
     pub bm25: bool,
-    /// Enable summary-level search
+    /// Enable summary-level search: standalone summary recall when alone,
+    /// summary relevance boost on top of dense/hybrid scores when combined.
     pub summary: bool,
 }
 
@@ -404,12 +405,6 @@ impl QueryConfigBuilder {
     /// Set result minimum score
     pub fn result_min_score(mut self, score: f32) -> Self {
         self.config.result.min_score = score;
-        self
-    }
-
-    /// Set max results per file
-    pub fn max_per_file(mut self, max: usize) -> Self {
-        self.config.result.max_per_file = max;
         self
     }
 
