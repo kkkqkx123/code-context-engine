@@ -673,6 +673,9 @@ impl super::AstToNlConverter {
                     let descriptions = self.embedding_generator.generate_for_group(group);
                     if descriptions.is_empty() {
                         let text = self.embedding_generator.generate(header);
+                        let text = super::entity_converter::qualify_group_function_heads(
+                            group, file_path, &text,
+                        );
                         (text, Vec::new())
                     } else {
                         let mut line_count = 0usize;
@@ -690,7 +693,11 @@ impl super::AstToNlConverter {
                                 }
                             })
                             .collect();
-                        (descriptions.join("\n"), offsets)
+                        let joined = descriptions.join("\n");
+                        let joined = super::entity_converter::qualify_group_function_heads(
+                            group, file_path, &joined,
+                        );
+                        (joined, offsets)
                     }
                 } else {
                     (String::new(), Vec::new())
@@ -711,7 +718,10 @@ impl super::AstToNlConverter {
                     None
                 };
                 let embedding_brief = if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
-                    Some(self.embedding_generator.generate_brief_for_group(group))
+                    let brief = self.embedding_generator.generate_brief_for_group(group);
+                    Some(super::entity_converter::qualify_group_function_heads(
+                        group, file_path, &brief,
+                    ))
                 } else {
                     None
                 };
@@ -775,7 +785,23 @@ impl super::AstToNlConverter {
 
         for member in &group.members {
             if self.should_convert_member(group, member, header_only_ids) {
-                let member_result = self.convert_grouped(member, file_path, request);
+                let mut member_result = self.convert_grouped(member, file_path, request);
+                // Member conversion runs without group context; re-attach the
+                // owner so chunk bodies carry `Group.member` for disambiguation.
+                if let Some(ref mut bm25) = member_result.bm25_text {
+                    *bm25 = super::entity_converter::qualify_member_head(
+                        &group.name,
+                        &member.name,
+                        bm25,
+                    );
+                }
+                if let Some(ref mut emb) = member_result.embedding_text {
+                    *emb = super::entity_converter::qualify_member_head(
+                        &group.name,
+                        &member.name,
+                        emb,
+                    );
+                }
                 results.push(member_result);
             }
         }

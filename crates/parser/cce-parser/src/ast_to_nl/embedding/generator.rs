@@ -6,12 +6,11 @@
 use crate::ast_to_nl::common::{NameNormalizer, create_standalone_group};
 use crate::ast_to_nl::embedding::templates::GroupTemplateDispatcher;
 use crate::ast_to_nl::embedding::text_cleaner::EmbeddingTextCleaner;
-use crate::ast_to_nl::embedding::text_cleaner::find_trim_point;
 use crate::ast_to_nl::noise::NoiseProfile;
 use crate::grouper::types::{EntityGroup, GroupType};
 use cce_config::EmbeddingGeneratorConfig;
 use cce_types::{EntityKind, GroupedEntity};
-use cce_utils::token_estimation::{TokenEstimator, estimate_tokens};
+use cce_utils::token_estimation::estimate_tokens;
 
 /// Minimum token count for a docstring to be split into a separate description segment.
 const LONG_DOC_THRESHOLD: usize = 500;
@@ -77,16 +76,13 @@ impl EmbeddingGenerator {
         let mut group_descs = self.template_dispatcher.dispatch(group);
         descriptions.append(&mut group_descs);
 
-        // If the group has a very long doc_comment (> 500 tokens), split into
-        // a brief summary and a full documentation segment.
+        // If the group has a very long doc_comment (> 500 tokens), emit it as
+        // a single full documentation segment. The group description already
+        // omits long docstrings, so this writes the text exactly once.
         if let Some(ref header) = group.header {
             if let Some(ref doc) = header.doc_comment {
                 let doc_tokens = estimate_tokens(doc);
                 if doc_tokens > LONG_DOC_THRESHOLD {
-                    let byte_pos = TokenEstimator::default().find_split_point(doc, 150);
-                    let split_point = find_trim_point(doc, byte_pos);
-                    let doc_summary = &doc[..split_point];
-                    descriptions.push(doc_summary.to_string());
                     descriptions.push(format!("Documentation of {}:\n{}", group.name, doc));
                 }
             }
@@ -190,6 +186,9 @@ impl EmbeddingGenerator {
     /// Compress a file-level documentation comment into a single summary
     /// segment capped at ~300 tokens.
     fn file_doc_summary(&self, doc: &str) -> String {
+        use crate::ast_to_nl::embedding::text_cleaner::find_trim_point;
+        use cce_utils::token_estimation::TokenEstimator;
+
         const FILE_DOC_SUMMARY_TOKENS: usize = 300;
         if estimate_tokens(doc) <= FILE_DOC_SUMMARY_TOKENS {
             return doc.to_string();

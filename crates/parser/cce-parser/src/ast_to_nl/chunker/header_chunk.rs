@@ -232,8 +232,19 @@ fn process_path(
                 &input.texts.first
             } else if input.path == ChunkPath::Embedding {
                 if let Some(first) = members.first() {
+                    let owner =
+                        if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str() {
+                            String::new()
+                        } else {
+                            format!("{}.{}", ctx.group.name, first.name)
+                        };
+                    let display = if owner.is_empty() {
+                        first.name.clone()
+                    } else {
+                        owner
+                    };
                     continuation_for_block =
-                        format!("{} {} (continuation).", first.kind.kind_label(), first.name);
+                        format!("{} {} (continuation).", first.kind.kind_label(), display);
                     &continuation_for_block
                 } else {
                     &input.texts.continuation

@@ -29,6 +29,12 @@ use crate::ast_to_nl::noise::NoiseProfile;
 use crate::grouper::types::{EntityGroup, GroupType};
 use cce_types::entity::{EntityKind, meta_keys};
 use cce_utils::normalize_whitespace;
+use cce_utils::token_estimation::estimate_tokens;
+
+/// Docstring token count above which the generator emits a separate full
+/// documentation segment; the group description then omits the docstring so
+/// the text is not written twice.
+const LONG_DOC_THRESHOLD: usize = 500;
 
 /// Regular entity group template
 ///
@@ -135,18 +141,79 @@ impl RegularGroupTemplate {
             }
         }
 
-        if let Some(doc) = group
+        // Long docstrings are emitted as a separate documentation segment by
+        // the generator; including them here as well would write them twice.
+        let doc = group
             .header
             .as_ref()
             .and_then(|h| Self::clean_doc_comment(h.doc_comment.as_deref(), profile))
-        {
+            .filter(|doc| estimate_tokens(doc) <= LONG_DOC_THRESHOLD);
+        if let Some(doc) = doc {
             if !Self::is_text_duplicate(&desc, &doc) {
                 desc.push('\n');
                 desc.push_str(&doc);
             }
         }
 
+        // Surface method signatures early so class-level header chunks carry
+        // more than a bare docstring and survive header truncation.
+        if let Some(signatures) = Self::method_signature_summary(group) {
+            if !desc.contains(&signatures) {
+                desc.push('\n');
+                desc.push_str(&signatures);
+            }
+        }
+
         desc
+    }
+
+    /// Compact `name(params)` list for callable members of a type-like group.
+    fn method_signature_summary(group: &EntityGroup) -> Option<String> {
+        if !matches!(
+            group.kind,
+            EntityKind::Class
+                | EntityKind::Struct
+                | EntityKind::Trait
+                | EntityKind::Interface
+                | EntityKind::Enum
+                | EntityKind::Union
+        ) {
+            return None;
+        }
+        let role_map = group.build_role_map();
+        let mut sigs: Vec<String> = Vec::new();
+        for member in &group.members {
+            if !matches!(
+                member.kind,
+                EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+            ) {
+                continue;
+            }
+            if Self::is_pure_declaration(member) {
+                continue;
+            }
+            if role_map
+                .get(&member.id)
+                .is_some_and(|role| role.is_boilerplate())
+            {
+                continue;
+            }
+            let defaults = TemplateHelpers::decode_param_defaults(&member.metadata);
+            let params = TemplateHelpers::build_signature_with_defaults(
+                &member.parameters,
+                &defaults,
+                member.return_type.as_deref(),
+            );
+            sigs.push(format!("{}{}", member.name, params));
+            if sigs.len() >= 12 {
+                break;
+            }
+        }
+        if sigs.is_empty() {
+            None
+        } else {
+            Some(format!("Methods: {}.", sigs.join("; ")))
+        }
     }
 
     fn inheritance_description(group: &EntityGroup) -> Option<String> {
@@ -185,8 +252,19 @@ impl RegularGroupTemplate {
             return String::new();
         }
 
+        // Inline the group qualifier so embedding text carries ownership in
+        // the entity line itself (`Flask.make_response`), not only in a
+        // separate anchor that header truncation can drop.
+        let display_name = if group.group_type != GroupType::MergedFragments
+            && !group.name.is_empty()
+            && group.name != member.name
+        {
+            format!("{}.{}", group.name, member.name)
+        } else {
+            member.name.clone()
+        };
         let mut member_desc =
-            Self::semantic_entity_description(&member.name, member.kind, Some(member));
+            Self::semantic_entity_description(&display_name, member.kind, Some(member));
 
         if let Some(doc) = Self::clean_doc_comment(member.doc_comment.as_deref(), profile) {
             if !Self::is_text_duplicate(&member_desc, &doc) {
@@ -223,7 +301,7 @@ impl RegularGroupTemplate {
             }
         }
 
-        Self::append_member_group_name(member_desc, member, group)
+        member_desc
     }
 
     fn variable_relation_description(member: &cce_types::entity::GroupedEntity) -> Option<String> {
@@ -314,15 +392,10 @@ impl RegularGroupTemplate {
     fn is_duplicate_member(
         group_desc: &str,
         member_desc: &str,
-        member: &cce_types::entity::GroupedEntity,
+        _member: &cce_types::entity::GroupedEntity,
     ) -> bool {
-        // Use original identifier for duplicate detection
-        if group_desc.contains(&member.name) {
-            return true;
-        }
-
-        // Check text containment between normalized descriptions to catch
-        // members whose full description is already subsumed by group description
+        // Method-signature summaries intentionally mention member names in the
+        // group description; only full-text subsumption marks a member redundant.
         let group_norm = normalize_whitespace(group_desc).to_lowercase();
         let member_norm = normalize_whitespace(member_desc).to_lowercase();
         if !member_norm.is_empty()
@@ -490,21 +563,6 @@ impl RegularGroupTemplate {
                     && !member.metadata.contains_key(meta_keys::ANNOTATIONS)
             }
             _ => false,
-        }
-    }
-
-    fn append_member_group_name(
-        member_desc: String,
-        member: &cce_types::entity::GroupedEntity,
-        group: &EntityGroup,
-    ) -> String {
-        if group.group_type == GroupType::MergedFragments {
-            return member_desc;
-        }
-        if group.name.is_empty() || group.name == member.name {
-            member_desc
-        } else {
-            format!("{}.{}\n{}", group.name, member.name, member_desc)
         }
     }
 }
@@ -765,11 +823,16 @@ mod tests {
             results
         );
         let member_desc = &results[1];
+        assert!(
+            member_desc.contains("OnceCell.get_mut"),
+            "qualified name should be inlined into the kind line, got: {}",
+            member_desc
+        );
         let get_mut_count = member_desc.matches("get_mut").count();
-        // get_mut appears in: kind label, doc_comment, and path anchor
+        // get_mut appears in: inlined qualified name and doc_comment
         assert_eq!(
-            get_mut_count, 3,
-            "expected 'get_mut' in kind label, doc_comment, and path, got: {}",
+            get_mut_count, 2,
+            "expected 'get_mut' in qualified name and doc_comment, got: {}",
             member_desc
         );
     }

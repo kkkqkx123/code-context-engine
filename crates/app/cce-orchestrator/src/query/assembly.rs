@@ -59,6 +59,11 @@
 //! capping. Graph traversal itself lives on the caller side (the review
 //! example reads call edges from the benchmark relation sidecar).
 //!
+//! The caller owns path/visibility policy: expansion units must be filtered
+//! against the query's exclusion rules (path filters, epoch view) *before*
+//! reaching `assemble_single`, so excluded neighbours never occupy an
+//! expansion budget slot. The assembler itself never filters by path.
+//!
 //! The `#[allow(dead_code)]` below suppresses the resulting unused warnings
 //! and MUST be removed together with the final resolution.
 
