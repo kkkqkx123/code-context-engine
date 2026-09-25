@@ -80,6 +80,7 @@ Code Context Engine 提供了一组 RESTful API，用于代码索引、搜索、
 - [POST /api/tools/compress](./tools.md#post-apitoolscompress) - 压缩代码
 - [POST /api/tools/compress/batch](./tools.md#post-apitoolscompressbatch) - 批量压缩
 - [POST /api/tools/diagnose](./tools.md#post-apitoolsdiagnose) - 诊断代码
+- [POST /api/tools/fold](./tools.md#post-apitoolsfold) - 折叠文件骨架（无状态）
 - [POST /api/tools/keyword-search](./tools.md#post-apitoolskeyword-search) - 关键词搜索
 - [POST /api/tools/symbols](./tools.md#post-apitoolssymbols) - 获取符号信息
 - [POST /api/tools/references](./tools.md#post-apitoolsreferences) - 查找引用

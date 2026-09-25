@@ -33,6 +33,7 @@
 			items: [
 				{ href: '/search', label: 'Search' },
 				{ href: '/entities', label: 'Entities' },
+				{ href: '/graph', label: 'Graph' },
 				{ href: '/summary', label: 'Summary' },
 			],
 		},

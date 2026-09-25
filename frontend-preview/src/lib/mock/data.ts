@@ -355,6 +355,18 @@ export const mockDiagnoseResult = {
 	}
 };
 
+export const mockFoldResult = {
+	success: true,
+	folded_text:
+		'// File: fold.rs\n// Language: Rust\n\n// Definitions:\n1 | struct User\n12 | [normalize_name, format_user] fn normalize_name(), fn format_user()',
+	language: 'Rust',
+	structure_known: true,
+	original_tokens: 120,
+	folded_tokens: 28,
+	kept_sections: 2,
+	dropped_sections: 0
+};
+
 export const mockSymbolsResult = {
 	success: true,
 	result: {

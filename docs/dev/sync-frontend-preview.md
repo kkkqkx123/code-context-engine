@@ -112,7 +112,7 @@ export const mockClient = {
 };
 ```
 
-## 自动化
+## 自动化（当前暂时不添加）
 
 可将此脚本集成到 CI/CD 流程中，确保 `frontend-preview` 与 `frontend` 保持同步：
 

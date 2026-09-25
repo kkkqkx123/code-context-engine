@@ -45,6 +45,11 @@
 		window.location.href = `/entities/${id}`;
 	}
 
+	/** Hand the current entity off to the graph explorer, focused on it. */
+	function openInGraph(id: string) {
+		window.location.href = `/graph?entity=${encodeURIComponent(id)}`;
+	}
+
 	function loadCallChain(direction: 'up' | 'down') {
 		if (entityId) {
 			entityActions.loadCallChain(entityId, direction);
@@ -157,6 +162,11 @@
 				{/if}
 			{:else if currentTab === 'call-graph'}
 				<Card title="Call Graph" subtitle="Visual relationship map">
+					<div class="graph-actions">
+						<button type="button" class="graph-action-btn" onclick={() => openInGraph(String(entityId))}>
+							Open in Graph Explorer
+						</button>
+					</div>
 					{#if CallGraph}
 						<CallGraph 
 							nodes={$entityState.callChain}
@@ -275,6 +285,29 @@
 	.call-chain-list {
 		display: grid;
 		gap: 1rem;
+	}
+
+	.graph-actions {
+		display: flex;
+		justify-content: flex-end;
+		margin-bottom: 1rem;
+	}
+
+	.graph-action-btn {
+		padding: 0.5rem 0.85rem;
+		background: var(--black);
+		color: var(--white);
+		border: 1px solid var(--black);
+		cursor: pointer;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		transition: all 0.15s;
+	}
+
+	.graph-action-btn:hover {
+		background: var(--gray-900);
 	}
 
 	.chain-item {

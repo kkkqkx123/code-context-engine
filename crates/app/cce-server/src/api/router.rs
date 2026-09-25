@@ -221,6 +221,7 @@ pub fn create_router(state: AppState) -> Router {
             "/api/tools/diagnose",
             post(handlers::tools::handle_diagnose),
         )
+        .route("/api/tools/fold", post(handlers::tools::handle_fold))
         .route(
             "/api/tools/keyword-search",
             post(handlers::tools::handle_keyword_search),

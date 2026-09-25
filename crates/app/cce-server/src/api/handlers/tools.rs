@@ -8,15 +8,18 @@
 //!
 //! - **Compression**: `/api/tools/compress`, `/api/tools/compress/batch`
 //! - **AST Diagnosis**: `/api/tools/diagnose`
+//! - **File Fold**: `/api/tools/fold`
 //! - **Keyword Search**: `/api/tools/keyword-search`
 //! - **Symbol Lookup**: `/api/tools/symbols`, `/api/tools/references`, `/api/tools/definition`
 
 pub mod compression;
 pub mod diagnosis;
+pub mod fold;
 pub mod keyword;
 pub mod symbol;
 
 pub use compression::{handle_compress, handle_compress_batch};
 pub use diagnosis::handle_diagnose;
+pub use fold::handle_fold;
 pub use keyword::handle_keyword_search;
 pub use symbol::{handle_find_references, handle_get_symbols, handle_goto_definition};

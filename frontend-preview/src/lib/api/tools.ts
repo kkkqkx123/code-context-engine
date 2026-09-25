@@ -77,6 +77,25 @@ export interface DiagnoseResponse {
 	diagnostics: Diagnostic[];
 }
 
+export interface FoldRequest {
+	text: string;
+	language?: string;
+	file_name?: string;
+	max_tokens?: number;
+	mode?: string;
+}
+
+export interface FoldResponse {
+	success: boolean;
+	folded_text: string;
+	language: string;
+	structure_known: boolean;
+	original_tokens: number;
+	folded_tokens: number;
+	kept_sections: number;
+	dropped_sections: number;
+}
+
 export interface SymbolInfo {
 	name: string;
 	kind: string;
@@ -173,6 +192,9 @@ export const toolsApi = {
 	// Diagnose code
 	diagnose: (data: DiagnoseRequest) =>
 		apiClient.post<DiagnoseResponse>('/api/tools/diagnose', data),
+
+	// Fold raw text into a symbol skeleton (stateless)
+	fold: (data: FoldRequest) => apiClient.post<FoldResponse>('/api/tools/fold', data),
 
 	// Extract symbols from files (project-scoped)
 	getSymbols: async (data: GetSymsRequest) => {

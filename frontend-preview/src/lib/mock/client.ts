@@ -76,6 +76,7 @@ export const mockClient = {
 		if (endpoint === '/api/tools/compress') return mockData.mockCompressResult as T;
 		if (endpoint === '/api/tools/compress/batch') return { successes: [], failures: [] } as T;
 		if (endpoint === '/api/tools/diagnose') return mockData.mockDiagnoseResult as T;
+		if (endpoint === '/api/tools/fold') return mockData.mockFoldResult as T;
 		if (endpoint === '/api/tools/symbols') return mockData.mockSymbolsResult as T;
 		if (endpoint === '/api/tools/references') return { success: true, result: {} } as T;
 		if (endpoint === '/api/tools/definition') return { success: true, result: {} } as T;

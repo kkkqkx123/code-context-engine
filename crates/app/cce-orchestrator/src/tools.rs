@@ -24,6 +24,10 @@
 //!     │   └── batch_compress() - Batch compression
 //!     │       └── AST parsing → Grouping → NL conversion
 //!     │
+//!     ├── FileFold (stateless skeleton fold)
+//!     │   └── fold() - Raw text → symbol skeleton
+//!     │       └── Language resolve → Parse → Fold → Token accounting
+//!     │
 //!     └── KeywordSearch (keyword search)
 //!         └── search() - BM25 keyword search with highlighted snippets
 //!             └── BM25 → SQLite → highlight generation
@@ -33,6 +37,7 @@
 //!
 //! - **Compression**: Semantic compression for code files (AST parsing, grouping, NL conversion)
 //! - **AST Diagnosis**: Parse code snippets and diagnose syntax errors
+//! - **File Fold**: Stateless symbol skeleton extraction from raw text (degrade, never error)
 //! - **Symbol Lookup**: LSP-like functionality using internal indexes (find references, get symbols, goto definition)
 //!
 //! # Usage Example
@@ -51,6 +56,7 @@
 
 pub mod ast_diagnosis;
 pub mod compression;
+pub mod file_fold;
 pub mod keyword_search;
 pub mod symbol_lookup;
 
@@ -62,6 +68,7 @@ pub use compression::{
     BatchCompressionRequest, BatchCompressionResponse, CompressionError, CompressionRequest,
     CompressionResponse, CompressionRetrieval,
 };
+pub use file_fold::{FileFoldMode, FileFoldRequest, FileFoldResponse, FileFoldTool};
 pub use keyword_search::{
     KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
     KeywordSearchTool,

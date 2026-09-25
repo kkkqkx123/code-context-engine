@@ -3,16 +3,18 @@
 	import Card from '$lib/components/ui/Card.svelte';
 
 	// Tab state
-	let activeTab = $state<'compress' | 'diagnose' | 'symbols'>('compress');
+	let activeTab = $state<'compress' | 'diagnose' | 'fold' | 'symbols'>('compress');
 
 	// Lazy loaded components
 	let CompressionTool: any = $state(null);
 	let DiagnosisTool: any = $state(null);
+	let FoldTool: any = $state(null);
 	let SymbolLookupTool: any = $state(null);
 
 	// Component props
 	let compressLanguage = $state('typescript');
 	let diagnoseLanguage = $state('typescript');
+	let foldLanguage = $state('rust');
 	let symbolFilePath = $state('');
 	let symbolLanguage = $state('typescript');
 
@@ -31,6 +33,13 @@
 		}
 	}
 
+	async function loadFoldTool() {
+		if (!FoldTool) {
+			const module = await import('$lib/components/tools/FoldTool.svelte');
+			FoldTool = module.default;
+		}
+	}
+
 	async function loadSymbolLookupTool() {
 		if (!SymbolLookupTool) {
 			const module = await import('$lib/components/tools/SymbolLookupTool.svelte');
@@ -44,6 +53,8 @@
 			loadCompressionTool();
 		} else if (activeTab === 'diagnose') {
 			loadDiagnosisTool();
+		} else if (activeTab === 'fold') {
+			loadFoldTool();
 		} else if (activeTab === 'symbols') {
 			loadSymbolLookupTool();
 		}
@@ -74,6 +85,9 @@
 			>
 				Code Diagnosis
 			</button>
+			<button class="tab-btn" class:active={activeTab === 'fold'} onclick={() => activeTab = 'fold'}>
+				File Fold
+			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'symbols'}
@@ -101,6 +115,17 @@
 					<DiagnosisTool language={diagnoseLanguage} />
 				{:else}
 					<div class="loading-placeholder">Loading diagnosis tool...</div>
+				{/if}
+			</Card>
+		{/if}
+
+		<!-- File Fold Tool -->
+		{#if activeTab === 'fold'}
+			<Card title="File Fold" subtitle="Extract a symbol skeleton from raw text">
+				{#if FoldTool}
+					<FoldTool language={foldLanguage} />
+				{:else}
+					<div class="loading-placeholder">Loading fold tool...</div>
 				{/if}
 			</Card>
 		{/if}

@@ -195,6 +195,71 @@ curl -X POST "http://localhost:3000/api/tools/diagnose" \
 
 ---
 
+## POST /api/tools/fold
+
+无状态文件折叠，抽取符号骨架。纯计算，不读写索引，不要求项目上下文，不要求文件落在服务端磁盘。
+
+语言按显式语言、文件名后缀、未知顺序解析，未知语言、解析失败、超限、空输入一律降级返回截断文本并标记结构未知。
+
+### 请求
+
+**方法**: `POST`
+
+**Content-Type**: `application/json`
+
+**请求体**:
+
+```json
+{
+  "text": "pub struct User { pub name: String }",
+  "language": "rust",
+  "file_name": "user.rs",
+  "max_tokens": 2000,
+  "mode": "detailed"
+}
+```
+
+**请求字段**:
+
+| 字段 | 类型 | 必填 | 默认值 | 描述 |
+|-----|------|------|--------|------|
+| `text` | string | 是 | - | 待折叠原始文本 |
+| `language` | string | 否 | 自动推断 | 语言提示，优先于文件名 |
+| `file_name` | string | 否 | - | 文件名提示，用于后缀推断 |
+| `max_tokens` | number | 否 | `2000` | 期望上限，上限 `8000` |
+| `mode` | string | 否 | `detailed` | `detailed` 含签名，`minimal` 仅名称 |
+
+当 `max_tokens` 小到无法容纳可表达的结构骨架时，响应仍为成功，但 `structure_known=false`，`folded_text` 为原始文本截断结果。
+
+### 响应
+
+```json
+{
+  "success": true,
+  "folded_text": "// Definitions:\n1 | struct User",
+  "language": "Rust",
+  "structure_known": true,
+  "original_tokens": 120,
+  "folded_tokens": 18,
+  "kept_sections": 1,
+  "dropped_sections": 0
+}
+```
+
+### 示例
+
+```bash
+curl -X POST "http://localhost:3000/api/tools/fold" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "fn main() {}",
+    "language": "rust",
+    "max_tokens": 2000
+  }'
+```
+
+---
+
 ## POST /api/tools/keyword-search
 
 BM25 关键词搜索。从 BM25 索引中检索匹配的代码块，从 SQLite 中获取完整内容并生成高亮片段（`<mark>` 标签）。

@@ -209,14 +209,16 @@ impl FileFolder {
         // Build sections from entities
         let sections = self.build_sections(&entities);
 
-        // Format content
-        let content = self.format_content(&sections, parsed_file);
+        // Format content with the original file prefix so token limiting can rebuild it
+        let prefix_lines = self.build_prefix_lines(parsed_file);
+        let section_lines = self.format_section_lines(&sections);
+        let content = Self::assemble_content(&prefix_lines, &section_lines);
 
         let mut folded = FoldedContent::new(content, sections);
 
         // Apply token limit if exceeded
         if folded.estimated_tokens > self.config.max_tokens {
-            folded = self.apply_token_limit(folded);
+            folded = self.apply_token_limit(folded, &prefix_lines);
         }
 
         folded
@@ -384,15 +386,13 @@ impl FileFolder {
         }
     }
 
-    /// Format sections into content string
-    fn format_content(&self, sections: &[FoldedSection], parsed_file: &ParsedFile) -> String {
-        let mut lines: Vec<String> = Vec::new();
+    /// Build the non-section prefix reused by token limiting.
+    fn build_prefix_lines(&self, parsed_file: &ParsedFile) -> Vec<String> {
+        let mut lines = vec![
+            format!("// File: {}", parsed_file.path),
+            format!("// Language: {}", parsed_file.language),
+        ];
 
-        // Add file header
-        lines.push(format!("// File: {}", parsed_file.path));
-        lines.push(format!("// Language: {}", parsed_file.language));
-
-        // Add imports if enabled
         if self.config.include_imports {
             let imports = self.format_imports(parsed_file);
             if !imports.is_empty() {
@@ -402,15 +402,23 @@ impl FileFolder {
             }
         }
 
+        lines
+    }
+
+    /// Format section lines for the current fold mode.
+    fn format_section_lines(&self, sections: &[FoldedSection]) -> Vec<String> {
+        sections
+            .iter()
+            .map(|section| self.format_section(section))
+            .collect()
+    }
+
+    /// Assemble final folded text from the reusable prefix and kept sections.
+    fn assemble_content(prefix_lines: &[String], section_lines: &[String]) -> String {
+        let mut lines = prefix_lines.to_vec();
         lines.push(String::new());
         lines.push("// Definitions:".to_string());
-
-        // Add sections
-        for section in sections {
-            let line = self.format_section(section);
-            lines.push(line);
-        }
-
+        lines.extend(section_lines.iter().cloned());
         lines.join("\n")
     }
 
@@ -524,84 +532,67 @@ impl FileFolder {
     /// Apply token limit by intelligently dropping sections
     ///
     /// Strategy:
-    /// 1. Keep imports section if present (usually most important for understanding dependencies)
+    /// 1. Keep imports and module sections first (usually most important for understanding structure)
     /// 2. Sort remaining sections by importance (types > functions, earlier in file = more important)
-    /// 3. Drop from lowest importance first
-    fn apply_token_limit(&self, mut folded: FoldedContent) -> FoldedContent {
+    /// 3. Drop from lowest importance first until the rebuilt content fits, or report no usable fold
+    fn apply_token_limit(&self, folded: FoldedContent, prefix_lines: &[String]) -> FoldedContent {
         let target_tokens = self.config.max_tokens;
-        let current_tokens = folded.estimated_tokens;
 
-        if current_tokens <= target_tokens {
+        if folded.estimated_tokens <= target_tokens {
             return folded;
         }
 
-        if folded.sections.is_empty() {
-            return folded;
-        }
-
-        // Separate imports (highest priority) from other sections
         let (import_sections, mut other_sections): (Vec<_>, Vec<_>) = folded
             .sections
             .into_iter()
-            .partition(|s| matches!(s.section_type, SectionType::Module));
+            .partition(|section| matches!(section.section_type, SectionType::Module));
 
-        // Calculate importance score for each section
-        // Higher score = more important = keep longer
         fn section_importance(section: &FoldedSection) -> usize {
             let type_priority = match section.section_type {
                 SectionType::Class | SectionType::Struct | SectionType::Interface => 100,
                 SectionType::Enum | SectionType::TypeAlias => 90,
-                SectionType::Module => 200, // Already separated, but keep for reference
+                SectionType::Module => 200,
                 SectionType::Functions => 50,
             };
 
-            // Earlier in file = more important (main entry points, public APIs)
             let position_score = 10000_usize.saturating_sub(section.start_line);
-
             type_priority + position_score
         }
 
-        // Sort other sections by importance (descending)
         other_sections.sort_by(|a, b| {
-            let score_a = section_importance(a);
-            let score_b = section_importance(b);
-            score_b.cmp(&score_a) // Descending order
+            section_importance(b)
+                .cmp(&section_importance(a))
+                .then_with(|| a.start_line.cmp(&b.start_line))
         });
 
-        // Rebuild sections list: imports first, then by importance
         let mut kept_sections = import_sections;
         kept_sections.append(&mut other_sections);
-
-        // Estimate average tokens per section
-        let avg_tokens_per_section = current_tokens / kept_sections.len();
-        let excess_tokens = current_tokens - target_tokens;
-        let sections_to_drop = excess_tokens.div_ceil(avg_tokens_per_section);
-
         let original_count = kept_sections.len();
 
-        if sections_to_drop >= kept_sections.len() {
-            // Keep at least the most important section (and imports if any)
-            let min_keep = if kept_sections.len() > 1 { 2 } else { 1 };
-            kept_sections.truncate(min_keep);
-            folded.sections_dropped = original_count - min_keep;
-        } else {
-            // Drop lowest importance sections (from the end since we sorted descending)
-            let keep_count = kept_sections.len() - sections_to_drop;
-            kept_sections.truncate(keep_count);
-            folded.sections_dropped = sections_to_drop;
+        loop {
+            if kept_sections.is_empty() {
+                return FoldedContent::empty();
+            }
+
+            let mut candidate = kept_sections.clone();
+            candidate.sort_by_key(|section| section.start_line);
+            let section_lines = self.format_section_lines(&candidate);
+            let content = Self::assemble_content(prefix_lines, &section_lines);
+            let estimated_tokens = estimate_tokens(&content);
+
+            if estimated_tokens <= target_tokens {
+                let dropped_sections = original_count - candidate.len();
+
+                return FoldedContent {
+                    content,
+                    sections: candidate,
+                    estimated_tokens,
+                    sections_dropped: dropped_sections,
+                };
+            }
+
+            kept_sections.pop();
         }
-
-        // Restore original order by sorting by line number
-        kept_sections.sort_by_key(|s| s.start_line);
-
-        folded.sections = kept_sections;
-
-        // Rebuild content with kept sections
-        let dummy_file = ParsedFile::new(cce_types::Language::Unknown, "file".to_string(), "");
-        folded.content = self.format_content(&folded.sections, &dummy_file);
-        folded.estimated_tokens = estimate_tokens(&folded.content);
-
-        folded
     }
 }
 
@@ -639,7 +630,7 @@ pub fn is_folded_content_short(parsed_file: &ParsedFile, threshold_tokens: usize
         .with_merge_functions(true)
         .fold(parsed_file);
 
-    folded.estimated_tokens < threshold_tokens || folded.sections.len() <= 2
+    !folded.is_empty() && (folded.estimated_tokens < threshold_tokens || folded.sections.len() <= 2)
 }
 
 #[cfg(test)]
@@ -743,5 +734,38 @@ mod tests {
         assert!(!folded.is_empty());
         // Minimal mode should still include names
         assert!(folded.content.contains("main"));
+    }
+
+    #[test]
+    fn token_limit_keeps_original_header_and_fits_budget() {
+        let mut file = create_test_parsed_file();
+        for idx in 0..40 {
+            let entity_id = 100 + idx;
+            let line = 50 + idx;
+            let name = format!("function_{idx:02}_alpha_beta");
+            file.add_entity(create_test_entity(
+                entity_id,
+                EntityKind::Function,
+                &name,
+                line,
+            ));
+        }
+
+        let folded = FileFolder::new().with_max_tokens(40).fold(&file);
+
+        assert!(!folded.is_empty());
+        assert!(folded.sections_dropped > 0);
+        assert!(folded.estimated_tokens <= 40);
+        assert!(folded.content.starts_with("// File: src/main.rs"));
+        assert!(folded.content.contains("// Language: Rust"));
+    }
+
+    #[test]
+    fn token_limit_reports_empty_when_budget_is_too_tight() {
+        let file = create_test_parsed_file();
+
+        let folded = FileFolder::new().with_max_tokens(1).fold(&file);
+
+        assert!(folded.is_empty());
     }
 }

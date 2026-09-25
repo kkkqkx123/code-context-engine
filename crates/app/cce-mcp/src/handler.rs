@@ -2,8 +2,9 @@
 //!
 //! Every tool delegates to the shared `AppState`/engine, so the MCP surface
 //! stays a thin adapter over the same capabilities used by the HTTP API and the
-//! CLI. `project_id` is always an explicit tool argument to match the engine's
-//! per-project lazy-loading model.
+//! CLI. `project_id` is an explicit tool argument for project-scoped tools to
+//! match the engine's per-project lazy-loading model. The stateless `fold`
+//! tool is the exception and carries no `project_id`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -124,6 +125,25 @@ pub struct IncrementalIndexArgs {
 pub struct ProjectArgs {
     /// Project ID (required).
     pub project_id: i64,
+}
+
+/// Arguments for stateless file folding (no project context).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FoldArgs {
+    /// Raw source text to fold.
+    pub text: String,
+    /// Optional language hint (e.g. "rust", "python").
+    #[serde(default)]
+    pub language: Option<String>,
+    /// Optional file name hint for suffix inference.
+    #[serde(default)]
+    pub file_name: Option<String>,
+    /// Optional token budget for the folded text.
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
+    /// Optional fold mode ("detailed" or "minimal").
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[tool_router]
@@ -540,6 +560,49 @@ impl McpServerHandler {
     }
 
     #[tool(
+        description = "Fold raw source text into a symbol skeleton (stateless, no project_id). Degrades to truncated text with structure_known=false for unknown languages or parse failures."
+    )]
+    async fn fold(
+        &self,
+        Parameters(args): Parameters<FoldArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_enabled("fold")?;
+        use cce_orchestrator::{FileFoldMode, FileFoldRequest, FileFoldTool};
+        use cce_types::language::Language;
+
+        let mut request = FileFoldRequest::new(args.text);
+        if let Some(name) = args.language.as_deref()
+            && let Some(language) = Language::from_name(name)
+        {
+            request = request.with_language(language);
+        }
+        if let Some(file_name) = args.file_name.clone() {
+            request = request.with_file_name(file_name);
+        }
+        if let Some(max_tokens) = args.max_tokens {
+            request = request.with_max_tokens(max_tokens);
+        }
+        if let Some(mode) = args.mode.as_deref() {
+            request = request.with_mode(FileFoldMode::parse(Some(mode)));
+        }
+
+        let mut coordinator = self.state.parser.lock().await;
+        let folded = FileFoldTool::fold(&mut coordinator, request);
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({
+                "folded_text": folded.folded_text,
+                "language": folded.language,
+                "structure_known": folded.structure_known,
+                "original_tokens": folded.original_tokens,
+                "folded_tokens": folded.folded_tokens,
+                "kept_sections": folded.kept_sections,
+                "dropped_sections": folded.dropped_sections,
+            })
+            .to_string(),
+        )]))
+    }
+
+    #[tool(
         description = "Health summary of the engine's storage backends for a project (metadata store, BM25, relation runtime)."
     )]
     async fn health(
@@ -583,8 +646,9 @@ impl ServerHandler for McpServerHandler {
             .with_server_info(Implementation::from_build_env())
             .with_instructions(
                 "Code Context Engine MCP server. Provides hybrid and keyword code search, \
-                 entity/relation queries, index management, and project listing. Every tool \
-                 takes an explicit `project_id`."
+                 entity/relation queries, index management, and project listing. \
+                 Project-scoped tools take an explicit `project_id`; the stateless \
+                 `fold` tool takes raw text instead."
                     .to_string(),
             )
     }

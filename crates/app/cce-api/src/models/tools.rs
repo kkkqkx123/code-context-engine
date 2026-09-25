@@ -61,6 +61,41 @@ pub struct DiagnoseApiResponse {
     pub error: Option<String>,
 }
 
+/// File fold request (stateless skeleton extraction)
+///
+/// Carries raw text plus language hints plus caller token budget.
+/// Language resolution is explicit language first, then file-name suffix,
+/// then unknown (degraded, never an error).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FoldRequest {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+/// File fold response
+///
+/// Degrade-not-error: unknown language, parse failure, over-limit and empty
+/// input all return this shape with a truncated text and
+/// `structure_known=false`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FoldResponse {
+    pub success: bool,
+    pub folded_text: String,
+    pub language: String,
+    pub structure_known: bool,
+    pub original_tokens: usize,
+    pub folded_tokens: usize,
+    pub kept_sections: usize,
+    pub dropped_sections: usize,
+}
+
 /// Diagnose issue
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DiagnoseIssue {
