@@ -49,6 +49,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             path TEXT NOT NULL DEFAULT 'emb',
             bm25_keywords TEXT NOT NULL DEFAULT '',
             segment_id TEXT NOT NULL DEFAULT '',
+            truncated INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (project_id, epoch, chunk_id),
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         )",

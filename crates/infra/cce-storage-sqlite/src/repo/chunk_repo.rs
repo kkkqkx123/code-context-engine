@@ -45,8 +45,9 @@ impl ChunkRepository {
                 chunk_type, test_status, test_source,
                 created_at, updated_at, project_id, epoch, batch_id, path,
                 bm25_keywords,
-                segment_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                segment_id,
+                truncated
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
              ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
                 file_path = excluded.file_path,
                 content = excluded.content,
@@ -63,7 +64,8 @@ impl ChunkRepository {
                 batch_id = excluded.batch_id,
                 path = excluded.path,
                 bm25_keywords = excluded.bm25_keywords,
-                segment_id = excluded.segment_id",
+                segment_id = excluded.segment_id,
+                truncated = excluded.truncated",
             params![
                 chunk.chunk_id,
                 chunk.file_path,
@@ -83,6 +85,7 @@ impl ChunkRepository {
                 chunk.path,
                 chunk.bm25_keywords,
                 chunk.segment_id,
+                chunk.truncated,
             ],
             "insert chunk",
         )
@@ -105,8 +108,9 @@ impl ChunkRepository {
                 chunk_type, test_status, test_source,
                 created_at, updated_at, project_id, epoch, batch_id, path,
                 bm25_keywords,
-                segment_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                segment_id,
+                truncated
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
              ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
                 file_path = excluded.file_path,
                 content = excluded.content,
@@ -123,7 +127,8 @@ impl ChunkRepository {
                 batch_id = excluded.batch_id,
                 path = excluded.path,
                 bm25_keywords = excluded.bm25_keywords,
-                segment_id = excluded.segment_id",
+                segment_id = excluded.segment_id,
+                truncated = excluded.truncated",
             )
             .map_err(|e| StorageError::insert(format!("Failed to prepare statement: {}", e)))?;
 
@@ -147,6 +152,7 @@ impl ChunkRepository {
                 chunk.path,
                 chunk.bm25_keywords,
                 chunk.segment_id,
+                chunk.truncated,
             ])
             .map_err(|e| StorageError::insert(format!("Failed to insert chunk: {}", e)))?;
         }
@@ -170,7 +176,7 @@ impl ChunkRepository {
                     start_line, end_line, entity_ids, entity_names,
                     chunk_type, test_status, test_source,
                     created_at, updated_at, project_id, epoch, batch_id, path,
-                    bm25_keywords, segment_id
+                    bm25_keywords, segment_id, truncated
              FROM chunks
              WHERE chunk_id = ?1 AND project_id = ?2
                AND epoch = (
@@ -198,7 +204,7 @@ impl ChunkRepository {
                     start_line, end_line, entity_ids, entity_names,
                     chunk_type, test_status, test_source,
                     created_at, updated_at, project_id, epoch, batch_id, path,
-                    bm25_keywords, segment_id
+                    bm25_keywords, segment_id, truncated
              FROM chunks
              WHERE file_path = ?1 AND project_id = ?2 AND path = 'emb'
                AND epoch = (
@@ -228,7 +234,7 @@ impl ChunkRepository {
                     start_line, end_line, entity_ids, entity_names,
                     chunk_type, test_status, test_source,
                     created_at, updated_at, project_id, epoch, batch_id, path,
-                    bm25_keywords, segment_id
+                    bm25_keywords, segment_id, truncated
              FROM chunks WHERE project_id = ?1 AND path = 'emb'
               ORDER BY file_path, start_line LIMIT ?2 OFFSET ?3",
             params![project_id, limit, offset],
@@ -257,7 +263,7 @@ impl ChunkRepository {
                     c.start_line, c.end_line, c.entity_ids, c.entity_names,
                     c.chunk_type, c.test_status, c.test_source,
                     c.created_at, c.updated_at, c.project_id, c.epoch,
-                    c.batch_id, c.path, c.bm25_keywords, c.segment_id,
+                    c.batch_id, c.path, c.bm25_keywords, c.segment_id, c.truncated,
                     COALESCE(f.category, 4)
              FROM chunks c
              LEFT JOIN files f
@@ -268,7 +274,7 @@ impl ChunkRepository {
             params![project_id, epoch, limit, offset],
             |row| {
                 let record = Self::map_row(row)?;
-                let category = row.get(18)?;
+                let category = row.get(19)?;
                 Ok((record, category))
             },
         )
@@ -300,7 +306,7 @@ impl ChunkRepository {
                     start_line, end_line, entity_ids, entity_names,
                     chunk_type, test_status, test_source,
                     created_at, updated_at, project_id, epoch, batch_id, path,
-                    bm25_keywords, segment_id
+                    bm25_keywords, segment_id, truncated
              FROM chunks WHERE project_id = ?1 AND chunk_id IN ({}){}",
             placeholders, epoch_clause
         );
@@ -427,6 +433,7 @@ impl ChunkRepository {
             path: row.get(15)?,
             bm25_keywords: row.get(16)?,
             segment_id: row.get(17)?,
+            truncated: row.get::<_, u8>(18)?,
         })
     }
 }
@@ -456,6 +463,7 @@ mod tests {
                 path TEXT NOT NULL DEFAULT 'emb',
                 bm25_keywords TEXT NOT NULL DEFAULT '',
                 segment_id TEXT NOT NULL DEFAULT '',
+                truncated INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (project_id, epoch, chunk_id)
             )",
             [],

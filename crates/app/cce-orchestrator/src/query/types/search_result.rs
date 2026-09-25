@@ -55,6 +55,8 @@ pub struct SearchResult {
     pub pattern_info: Option<String>,
     /// File category for category-aware search (e.g., "test", "config", "normal")
     pub category: Option<String>,
+    /// Whether the stored content was token-budget truncated during indexing.
+    pub truncated: bool,
 }
 
 impl Default for SearchResult {
@@ -80,6 +82,7 @@ impl Default for SearchResult {
             metadata: HashMap::new(),
             pattern_info: None,
             category: None,
+            truncated: false,
         }
     }
 }

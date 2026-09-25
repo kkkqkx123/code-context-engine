@@ -240,6 +240,7 @@ pub(crate) fn merge_two_chunks(
         // residue becomes mixed content and must not keep vetoing further
         // rescue merges down the chain.
         self_contained: a.self_contained && b.self_contained,
+        truncated: false,
         metadata: ChunkMetadata {
             content_type: a.metadata.content_type.clone(),
             file_path: a.metadata.file_path.clone(),

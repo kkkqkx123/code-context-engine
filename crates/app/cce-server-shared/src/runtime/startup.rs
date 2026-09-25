@@ -50,6 +50,24 @@ impl StartupCoordinator {
         );
     }
 
+    /// Schedule the periodic dead-letter truncate-retry sweep.
+    ///
+    /// The sweep interval comes from the global orchestrator configuration;
+    /// whether a project actually self-heals is decided per project by the
+    /// cached orchestrator's `indexer.dead_letter_truncate_retry` switch.
+    pub fn start_periodic_dead_letter_retry(&self) {
+        let global_config = match cce_config::Settings::global() {
+            Ok(config) => config,
+            Err(e) => {
+                warn!(error = %e, "Failed to load global config for dead-letter retry task");
+                return;
+            }
+        };
+        self.engine.start_dead_letter_retry_task(
+            global_config.orchestrator.dead_letter_retry_interval_secs,
+        );
+    }
+
     /// Execute all startup recovery and initialization tasks
     ///
     /// This method should be called during application initialization before

@@ -253,3 +253,16 @@ fn default_true() -> bool {
 fn default_max_files() -> usize {
     100
 }
+
+/// Dead-letter truncate-retry response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeadLetterRetryResponse {
+    pub success: bool,
+    /// Files re-chunked from disk and re-stored.
+    pub retried: usize,
+    /// Files whose Embedding module succeeded after the truncate retry.
+    pub succeeded: usize,
+    /// Files retried that failed again; they stay in the dead letter state.
+    pub still_failed: usize,
+    pub message: String,
+}

@@ -31,6 +31,7 @@ pub use modules::{
     IndexConfig, IndexerConfig, NestProcessorConfig, OrchestratorConfig, PreprocessorConfig,
     QdrantConfig, RelationBuilderParams, RelationConfig, RerankConfig, ScannerConfig,
     SummaryConfig, SummaryGenerationStrategy, SymbolResolutionConfig,
+    default_embed_input_token_limit,
 };
 
 pub use project_registry::{ProjectEntry, ProjectMetadata, ProjectScope, RegistryError};

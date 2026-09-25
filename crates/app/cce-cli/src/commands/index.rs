@@ -6,7 +6,8 @@ use crate::cli::IndexCommands;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
-    IncrementalIndexRequest, IncrementalIndexResponse, IndexResponse, ParseRequest, ParseResponse,
+    DeadLetterRetryResponse, IncrementalIndexRequest, IncrementalIndexResponse, IndexResponse,
+    ParseRequest, ParseResponse,
 };
 
 /// Index run parameters
@@ -50,7 +51,34 @@ pub async fn execute(cmd: &IndexCommands, server: &str, verbose: bool) -> Result
         IndexCommands::Parse { file, language } => {
             parse_file(&client, file, language, verbose).await
         }
+        IndexCommands::RetryDeadLetter { project_id } => {
+            retry_dead_letter(&client, *project_id, verbose).await
+        }
     }
+}
+
+async fn retry_dead_letter(client: &ApiClient, project_id: i64, verbose: bool) -> Result<()> {
+    if verbose {
+        println!(
+            "Running dead-letter truncate-retry for project {}...",
+            project_id
+        );
+    }
+
+    let url = format!("/api/project/{}/dead-letter/retry", project_id);
+    let empty_body = serde_json::json!({});
+    let response: DeadLetterRetryResponse = client.post(&url, &empty_body).await?;
+
+    if response.success {
+        print_success(&response.message);
+        println!(
+            "  retried={} succeeded={} still_failed={}",
+            response.retried, response.succeeded, response.still_failed
+        );
+    } else {
+        print_error(&response.message);
+    }
+    Ok(())
 }
 
 async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: bool) -> Result<()> {

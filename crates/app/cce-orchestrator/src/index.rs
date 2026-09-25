@@ -29,6 +29,7 @@ pub use file_indexer::FileIndexer;
 pub use file_processor::FileProcessor;
 pub(crate) use file_processor::read_verified_utf8;
 pub use options::IndexOptions;
+pub use orchestrator::DeadLetterRetryReport;
 pub use orchestrator::IndexOrchestrator;
 pub use relation_base_cache::RelationBaseCache;
 pub use relation_publisher::{RelationPublication, RelationSnapshotPublisher};

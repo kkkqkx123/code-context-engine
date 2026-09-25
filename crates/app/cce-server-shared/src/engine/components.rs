@@ -572,6 +572,64 @@ impl super::CodeContextEngine {
         );
     }
 
+    /// Start the periodic dead-letter truncate-retry sweep.
+    ///
+    /// Only iterates orchestrators that are already cached: a project with no
+    /// live engine state is never instantiated just for the sweep. Projects
+    /// with the switch disabled, or whose orchestrator is busy with an
+    /// ongoing operation, are skipped. Manual API/CLI retries ignore the
+    /// switch but reuse the same executor.
+    pub fn start_dead_letter_retry_task(&self, interval_secs: u64) {
+        let orchestrator_cache = self.orchestrator_cache.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+
+                let mut targets: Vec<(i64, Arc<Mutex<cce_orchestrator::IndexOrchestrator>>)> =
+                    Vec::new();
+                orchestrator_cache
+                    .for_each(|project_id, orchestrator| {
+                        targets.push((project_id, orchestrator.clone()));
+                    })
+                    .await;
+
+                for (project_id, orchestrator) in targets {
+                    let Ok(mut guard) = orchestrator.try_lock() else {
+                        continue;
+                    };
+                    if !guard.dead_letter_truncate_retry_enabled() {
+                        continue;
+                    }
+                    match guard.retry_dead_letter_with_truncation().await {
+                        Ok(report) if report.retried > 0 => {
+                            tracing::info!(
+                                project_id,
+                                retried = report.retried,
+                                succeeded = report.succeeded,
+                                still_failed = report.still_failed,
+                                "Dead-letter truncate-retry sweep finished"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            tracing::warn!(
+                                project_id,
+                                %error,
+                                "Dead-letter truncate-retry sweep failed"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+
+        tracing::info!(interval_secs, "Started dead-letter truncate-retry task");
+    }
+
     pub fn start_generation_gc_worker(
         &self,
         interval_secs: u64,

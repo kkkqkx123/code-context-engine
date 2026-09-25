@@ -146,6 +146,7 @@ impl ChunkBuilder {
             next_overlap: None,
             related_groups: tracker.get_related_groups(&ctx.group.group_id),
             self_contained: false,
+            truncated: false,
             metadata: {
                 let mut meta = ChunkMetadata::for_code(
                     ctx.file_path.to_string(),
@@ -320,6 +321,7 @@ impl ChunkBuilder {
                     next_overlap: None,
                     related_groups: related_groups.clone(),
                     self_contained,
+                    truncated: false,
                     metadata: {
                         let mut meta = ChunkMetadata::for_code(
                             file_path.to_string(),
@@ -404,6 +406,7 @@ impl ChunkBuilder {
             next_overlap: None,
             related_groups: ctx.related_groups,
             self_contained,
+            truncated: false,
             metadata: {
                 let mut meta = ChunkMetadata::for_code(
                     ctx.file_path.to_string(),

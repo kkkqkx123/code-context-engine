@@ -145,6 +145,7 @@ impl Bm25Strategy {
                     metadata: HashMap::new(),
                     pattern_info: None,
                     category: None,
+                    truncated: false,
                 }
             })
             .collect();

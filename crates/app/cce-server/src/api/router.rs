@@ -72,6 +72,10 @@ pub fn create_router(state: AppState) -> Router {
             post(handlers::project::handle_project_index),
         )
         .route(
+            "/api/project/{id}/dead-letter/retry",
+            post(handlers::project::handle_dead_letter_retry),
+        )
+        .route(
             "/api/project/{id}/reload",
             post(handlers::project::handle_reload_project_config),
         )

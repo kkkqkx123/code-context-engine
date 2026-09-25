@@ -31,6 +31,7 @@ fn make_test_chunk(
         next_overlap: None,
         related_groups: vec![],
         self_contained: false,
+        truncated: false,
         metadata: ChunkMetadata {
             file_path: "test.rs".to_string(),
             source_span,
@@ -91,6 +92,7 @@ fn make_test_chunk_with_code_meta(
         next_overlap: None,
         related_groups: vec![],
         self_contained: false,
+        truncated: false,
         metadata: ChunkMetadata {
             content_type: ChunkContentType::Code {
                 language: cce_types::language::Language::Rust,

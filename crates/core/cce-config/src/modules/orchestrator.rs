@@ -52,6 +52,13 @@ pub struct OrchestratorConfig {
     /// `heartbeat_timeout_secs` (300s) used by the queue.
     #[serde(default = "default_heartbeat_interval_secs")]
     pub heartbeat_interval_secs: u64,
+    /// Dead-letter truncate-retry sweep period in seconds (default: 300 = 5m)
+    ///
+    /// The server runtime periodically runs the truncate-retry executor over
+    /// already-cached project orchestrators on this cadence when
+    /// `indexer.dead_letter_truncate_retry` is enabled.
+    #[serde(default = "default_dead_letter_retry_interval_secs")]
+    pub dead_letter_retry_interval_secs: u64,
 }
 
 fn default_checkpoint_ttl_seconds() -> u64 {
@@ -66,6 +73,10 @@ fn default_heartbeat_interval_secs() -> u64 {
     60
 }
 
+fn default_dead_letter_retry_interval_secs() -> u64 {
+    300
+}
+
 impl Default for OrchestratorConfig {
     fn default() -> Self {
         Self {
@@ -76,6 +87,7 @@ impl Default for OrchestratorConfig {
             checkpoint_ttl_seconds: default_checkpoint_ttl_seconds(),
             checkpoint_cleanup_interval_secs: default_checkpoint_cleanup_interval_secs(),
             heartbeat_interval_secs: default_heartbeat_interval_secs(),
+            dead_letter_retry_interval_secs: default_dead_letter_retry_interval_secs(),
         }
     }
 }
@@ -524,6 +536,25 @@ pub struct IndexerConfig {
     /// while still building relations during full index.
     #[serde(default = "default_true")]
     pub build_relations: bool,
+    /// Auto-retry Embedding dead letters with token-budget truncation.
+    ///
+    /// Deterministic over-length failures (embedder 400) fail identically on
+    /// every retry; enabling this lets the periodic sweep and the manual
+    /// trigger re-chunk the file, truncate over-budget chunks and re-embed
+    /// them once. Manual API/CLI invocation ignores this switch; a module is
+    /// only ever retried once (`truncated` marker in the index state).
+    #[serde(default)]
+    pub dead_letter_truncate_retry: bool,
+    /// Embedder input token budget used as the truncation threshold.
+    ///
+    /// Chunks whose estimated token count exceeds this limit are truncated
+    /// before (re-)embedding. Defaults to the bge-m3 input limit (8192).
+    #[serde(default = "default_embed_input_token_limit")]
+    pub embed_input_token_limit: usize,
+}
+
+pub fn default_embed_input_token_limit() -> usize {
+    8192
 }
 
 fn default_extensions() -> Vec<String> {
@@ -576,6 +607,8 @@ impl Default for IndexerConfig {
             store_summaries: true,
             embed_summaries: true,
             build_relations: true,
+            dead_letter_truncate_retry: false,
+            embed_input_token_limit: default_embed_input_token_limit(),
         }
     }
 }

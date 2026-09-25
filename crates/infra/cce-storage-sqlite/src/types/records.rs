@@ -261,6 +261,8 @@ pub struct ChunkRecord {
     pub path: String,
     pub bm25_keywords: String,
     pub segment_id: String,
+    /// Token-budget truncation marker: 1 when `content` was truncated.
+    pub truncated: u8,
 }
 
 impl ChunkRecord {
@@ -292,11 +294,18 @@ impl ChunkRecord {
             path: "emb".to_string(),
             bm25_keywords: String::new(),
             segment_id: String::new(),
+            truncated: 0,
         }
     }
 
     pub fn with_bm25_keywords(mut self, keywords: impl Into<String>) -> Self {
         self.bm25_keywords = keywords.into();
+        self.updated_at = chrono::Utc::now().timestamp();
+        self
+    }
+
+    pub fn with_truncated(mut self, truncated: bool) -> Self {
+        self.truncated = truncated as u8;
         self.updated_at = chrono::Utc::now().timestamp();
         self
     }
@@ -466,6 +475,7 @@ impl FromRow for ChunkRecord {
             path: row.get(15)?,
             bm25_keywords: row.get(16)?,
             segment_id: row.get(17)?,
+            truncated: row.get::<_, u8>(18)?,
         })
     }
 }

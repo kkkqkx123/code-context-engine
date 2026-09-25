@@ -47,6 +47,23 @@ impl super::CodeContextEngine {
         Ok(recovered_count)
     }
 
+    /// Run a manual dead-letter truncate-retry pass for a project.
+    ///
+    /// The manual path ignores the per-project enable switch (the periodic
+    /// sweep honours it) but still respects the one-truncate-attempt rule
+    /// enforced by the state tracker.
+    pub async fn retry_dead_letters(
+        &self,
+        project_id: i64,
+    ) -> Result<cce_orchestrator::DeadLetterRetryReport, EngineError> {
+        let orchestrator = self.get_orchestrator(project_id).await?;
+        let mut orchestrator = orchestrator.lock().await;
+        orchestrator
+            .retry_dead_letter_with_truncation()
+            .await
+            .map_err(EngineError::Index)
+    }
+
     /// Perform startup recovery for a project
     ///
     /// This triggers the complete recovery sequence:

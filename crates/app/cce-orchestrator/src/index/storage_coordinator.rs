@@ -204,6 +204,22 @@ impl StorageCoordinator {
             .map_err(OrchestratorError::Storage)
     }
 
+    /// Align the write epoch to the active (published) data generation.
+    ///
+    /// Recovery writes that must land in the generation queries read —
+    /// without a surrounding candidate-epoch switch — call this before
+    /// storing. Returns the aligned epoch, or `None` when the project was
+    /// never indexed.
+    pub(crate) fn align_epoch_to_active_generation(
+        &mut self,
+    ) -> Result<Option<i64>, OrchestratorError> {
+        let epoch = self.active_data_epoch()?;
+        if let Some(epoch) = epoch {
+            self.epoch.store(epoch, Ordering::Release);
+        }
+        Ok(epoch)
+    }
+
     /// Check if storage is configured
     pub fn is_configured(&self) -> bool {
         self.qdrant.is_some() || self.bm25.is_some()

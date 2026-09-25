@@ -134,6 +134,7 @@ pub(crate) fn build_chunk_record(
     .with_test_status(test_storage_value(&chunk.metadata.test_info))
     .with_test_source(test_source_storage_value(&chunk.metadata.test_info))
     .with_segment_id(chunk_segment_id(chunk))
+    .with_truncated(chunk.truncated)
     .with_path(chunk.path.as_str())
     .with_epoch(epoch)
     .with_batch_id(batch_id)

@@ -48,6 +48,7 @@ pub async fn serve(mut engine: CodeContextEngine, host: &str, port: u16) -> anyh
     let engine_arc = Arc::new(engine);
     let coordinator = StartupCoordinator::new(engine_arc.clone());
     coordinator.start_periodic_checkpoint_cleanup();
+    coordinator.start_periodic_dead_letter_retry();
 
     // Start background generation GC worker (scans hourly, retains 2 active generations)
     engine_arc.start_generation_gc_worker(3600, 2, 3600);

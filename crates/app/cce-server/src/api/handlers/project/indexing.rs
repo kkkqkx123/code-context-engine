@@ -120,6 +120,48 @@ pub async fn handle_project_index(
     )
 }
 
+/// Handle a manual dead-letter truncate-retry request
+pub async fn handle_dead_letter_retry(
+    State(state): State<crate::api::state::AppState>,
+    Path(id_str): Path<String>,
+) -> impl IntoResponse {
+    let id: i64 = match id_str.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(error_response(
+                    error_codes::INVALID_INPUT,
+                    "Invalid project ID: must be a number",
+                )),
+            );
+        }
+    };
+
+    match state.engine.retry_dead_letters(id).await {
+        Ok(report) => (
+            StatusCode::OK,
+            Json(json!({
+                "success": true,
+                "retried": report.retried,
+                "succeeded": report.succeeded,
+                "still_failed": report.still_failed,
+                "message": format!(
+                    "dead-letter retry: {} retried, {} succeeded, {} still failed",
+                    report.retried, report.succeeded, report.still_failed
+                ),
+            })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(error_response(
+                error_codes::INTERNAL_ERROR,
+                &format!("Dead-letter retry failed: {}", e),
+            )),
+        ),
+    }
+}
+
 /// Create error response JSON
 fn error_response(code: &str, message: &str) -> serde_json::Value {
     json!({

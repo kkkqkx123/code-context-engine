@@ -34,7 +34,8 @@ pub use query::{
 };
 
 pub use index::{
-    IndexOptions, IndexOrchestrator, IndexResult, RelationPublication, RelationSnapshotPublisher,
+    DeadLetterRetryReport, IndexOptions, IndexOrchestrator, IndexResult, RelationPublication,
+    RelationSnapshotPublisher,
 };
 
 pub use hot_update::{

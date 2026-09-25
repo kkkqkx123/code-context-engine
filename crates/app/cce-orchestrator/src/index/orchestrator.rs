@@ -28,15 +28,21 @@
 
 mod batch;
 mod checkpoint;
+mod dead_letter;
 mod finalize;
 mod incremental;
+
+pub use dead_letter::DeadLetterRetryReport;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::export::NlDocumentExporter;
 use cce_config::modules::summary::SummaryGenerationStrategy as SummaryStrategy;
-use cce_config::{AstToNlConfig, BatchConfig, NestProcessorConfig, RelationConfig, SummaryConfig};
+use cce_config::{
+    AstToNlConfig, BatchConfig, NestProcessorConfig, RelationConfig, SummaryConfig,
+    default_embed_input_token_limit,
+};
 use cce_llm::ChatConfig;
 use cce_llm_client::HttpLlmClient;
 use cce_metrics::ProgressTracker;
@@ -108,6 +114,12 @@ pub struct IndexOrchestrator {
     /// Cached build-config parser from `init_relation_builder`; reused in
     /// `build_and_publish_relations` to avoid a second filesystem scan.
     cached_build_config: Option<cce_relation::BuildConfigParser>,
+    /// Whether the periodic scan drives the dead-letter truncate-retry executor.
+    /// Manual (CLI/API) invocation ignores this flag.
+    dead_letter_truncate_retry: bool,
+    /// Embedder input token budget used as the truncation threshold by the
+    /// dead-letter truncate-retry executor.
+    embed_input_token_limit: usize,
 }
 
 impl IndexOrchestrator {
@@ -141,6 +153,8 @@ impl IndexOrchestrator {
             checkpoint_manager: None,
             relation_publisher: None,
             cached_build_config: None,
+            dead_letter_truncate_retry: false,
+            embed_input_token_limit: default_embed_input_token_limit(),
         })
     }
 
@@ -157,6 +171,26 @@ impl IndexOrchestrator {
         let mut orchestrator = Self::new(project_id)?;
         orchestrator.batch_config = config;
         Ok(orchestrator)
+    }
+
+    /// Configure the dead-letter truncate-retry executor.
+    ///
+    /// `enabled` gates only the periodic scan entry point; a manual
+    /// (CLI/API) invocation runs regardless. `embed_input_token_limit` is the
+    /// per-chunk truncation threshold passed to the embedder.
+    pub fn with_dead_letter_config(
+        mut self,
+        enabled: bool,
+        embed_input_token_limit: usize,
+    ) -> Self {
+        self.dead_letter_truncate_retry = enabled;
+        self.embed_input_token_limit = embed_input_token_limit;
+        self
+    }
+
+    /// Whether the periodic scan should drive the dead-letter truncate-retry executor.
+    pub fn dead_letter_truncate_retry_enabled(&self) -> bool {
+        self.dead_letter_truncate_retry
     }
 
     /// Set shared progress tracker for lock-free metrics access

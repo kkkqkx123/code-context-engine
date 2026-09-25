@@ -198,6 +198,7 @@ mod tests {
                 next_overlap: None,
                 related_groups: Vec::new(),
                 self_contained: true,
+                truncated: false,
                 metadata: Default::default(),
             },
             ChunkedResult {
@@ -217,6 +218,7 @@ mod tests {
                 next_overlap: None,
                 related_groups: Vec::new(),
                 self_contained: false,
+                truncated: false,
                 metadata: Default::default(),
             },
         ]

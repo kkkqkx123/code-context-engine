@@ -125,6 +125,7 @@ mod tests {
             kind: String::new(),
             name: String::new(),
             file_path: file_path.to_string(),
+            truncated: false,
             score: 1.0,
             original_score: 1.0,
             vector_score: 1.0,

@@ -310,7 +310,8 @@ impl StorageCoordinator {
                 .with_entity_ids(content_entity_ids)
                 .with_segment_id(chunk_segment_id(chunk))
                 .with_test(chunk.metadata.test_info.is_test())
-                .with_test_source(chunk.metadata.test_info.source);
+                .with_test_source(chunk.metadata.test_info.source)
+                .with_truncated(chunk.truncated);
 
             // Create vector point with project-scoped ID
             let point_id = project_chunk_point_id(&group_id, epoch, &chunk.chunk_id);
@@ -544,7 +545,8 @@ fn build_reembed_points<'a>(
                 .with_entity_ids(record.get_entity_ids())
                 .with_segment_id(segment_id)
                 .with_test(record.test_status == 1)
-                .with_test_source(TestSource::from_u8(record.test_source));
+                .with_test_source(TestSource::from_u8(record.test_source))
+                .with_truncated(record.truncated != 0);
 
             VectorPoint::new(
                 project_chunk_point_id(group_id, record.epoch, &record.chunk_id),

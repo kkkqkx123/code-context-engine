@@ -337,6 +337,11 @@ pub struct ModuleUpdateRecord {
     pub retry_count: u32,
     /// Error message (if failed)
     pub error_message: Option<String>,
+    /// Whether this module has already gone through a lossy truncate-retry.
+    /// A dead-letter module that was truncated once is never truncated again,
+    /// so a persistent deterministic failure cannot be shaved down repeatedly.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 impl Default for ModuleUpdateRecord {
@@ -346,7 +351,16 @@ impl Default for ModuleUpdateRecord {
             last_attempt: None,
             retry_count: 0,
             error_message: None,
+            truncated: false,
         }
+    }
+}
+
+impl ModuleUpdateRecord {
+    /// Whether this record is eligible for a lossy truncate-retry: a dead
+    /// letter that has not been truncated before.
+    pub const fn is_truncate_candidate(&self) -> bool {
+        matches!(self.state, ModuleUpdateState::DeadLetter) && !self.truncated
     }
 }
 
@@ -534,6 +548,15 @@ impl FileUpdateState {
             }
 
             record.last_attempt = Some(Utc::now());
+            self.updated_at = Utc::now();
+        }
+    }
+
+    /// Record that a module already went through a lossy truncate-retry,
+    /// excluding it from future truncate attempts.
+    pub fn set_module_truncated(&mut self, module: ModuleType) {
+        if let Some(record) = self.module_states.get_mut(&module) {
+            record.truncated = true;
             self.updated_at = Utc::now();
         }
     }
@@ -842,6 +865,39 @@ mod tests {
         let record = state.get_module_state(ModuleType::Summary);
         assert_eq!(record.retry_count, 4);
         assert!(matches!(record.state, ModuleUpdateState::DeadLetter));
+    }
+
+    #[test]
+    fn test_truncate_candidate_flow() {
+        let mut state = FileUpdateState::new("test.rs".to_string(), 1, FileChangeType::Modified, 1);
+
+        // Not a candidate while still pending
+        assert!(
+            !state
+                .get_module_state(ModuleType::Embedding)
+                .is_truncate_candidate()
+        );
+
+        // Drive the embedding module into dead letter
+        for _ in 0..MAX_RETRY_COUNT {
+            state.mark_module_failed(ModuleType::Embedding, "400 too long".to_string());
+        }
+        let record = state.get_module_state(ModuleType::Embedding);
+        assert!(matches!(record.state, ModuleUpdateState::DeadLetter));
+        assert!(record.is_truncate_candidate());
+
+        // After a truncate-retry attempt it is no longer a candidate
+        state.set_module_truncated(ModuleType::Embedding);
+        assert!(
+            !state
+                .get_module_state(ModuleType::Embedding)
+                .is_truncate_candidate()
+        );
+
+        // The marker survives serde round-trip (durable projection)
+        let json = serde_json::to_string(&state).expect("serialize");
+        let restored: FileUpdateState = serde_json::from_str(&json).expect("deserialize");
+        assert!(restored.get_module_state(ModuleType::Embedding).truncated);
     }
 
     #[test]

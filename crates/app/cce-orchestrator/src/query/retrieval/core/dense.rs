@@ -101,6 +101,7 @@ impl DenseRetrieval {
                 metadata: HashMap::new(),
                 pattern_info: None,
                 category: None,
+                truncated: r.payload.truncated.unwrap_or(false),
             })
             .collect();
 

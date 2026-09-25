@@ -412,10 +412,10 @@ impl StorageCoordinator {
                     "INSERT INTO chunks
                         (chunk_id, file_path, content, start_line, end_line,
                          entity_ids, entity_names, chunk_type, created_at, updated_at,
-                         project_id, epoch, batch_id)
+                         project_id, epoch, batch_id, truncated)
                      SELECT chunk_id, file_path, content, start_line, end_line,
                             entity_ids, entity_names, chunk_type, created_at, updated_at,
-                            project_id, ?2, batch_id
+                            project_id, ?2, batch_id, truncated
                      FROM chunks WHERE project_id = ?1{chunks_exclusion_sql}"
                 );
                 {

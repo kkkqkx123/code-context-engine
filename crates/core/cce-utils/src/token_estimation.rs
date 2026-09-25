@@ -8,7 +8,11 @@
 /// Symbols like `->`, `(`, `{` are typically tokenized separately from
 /// identifiers. Counting them at the latin factor would underestimate
 /// code-heavy text; 0.5 per symbol approximates standalone punctuation tokens.
-pub const SYMBOL_FACTOR: f32 = 0.5;
+/// Tokens per ASCII punctuation character. Code-dense text (long identifiers,
+/// heavy punctuation) tokenizes at roughly 2 chars/token on provider
+/// tokenizers; punctuation counted at 1.0 keeps estimates on the high side
+/// instead of systematically underestimating and sending over-limit requests.
+pub const SYMBOL_FACTOR: f32 = 1.0;
 
 /// Token estimator for mixed-language text
 #[derive(Debug, Clone, Copy)]
@@ -198,6 +202,96 @@ pub fn estimate_tokens(text: &str) -> usize {
     TokenEstimator::estimate(text)
 }
 
+/// Proportional cut applied per truncation round (80% = 4/5 of current length)
+const TRUNCATE_RATIO_NUM: usize = 4;
+const TRUNCATE_RATIO_DEN: usize = 5;
+
+/// Never truncate below this byte length; shorter text that still fails
+/// should surface as an error rather than be shaved to nothing.
+const MIN_TRUNCATED_LEN: usize = 2_000;
+
+/// Outcome of [`truncate_to_token_budget`].
+#[derive(Debug, Clone)]
+pub struct TruncationResult {
+    /// The (possibly shortened) text
+    pub text: String,
+    /// Whether any content was removed
+    pub truncated: bool,
+    /// Byte length before truncation
+    pub original_len: usize,
+    /// Byte length after truncation
+    pub final_len: usize,
+    /// Estimated tokens before truncation
+    pub original_estimate: usize,
+}
+
+/// Proportionally truncate text until its token estimate fits `max_tokens`.
+///
+/// The estimator can underestimate code-dense text, so instead of trusting a
+/// single absolute split the loop cuts the text to 80% of its current length
+/// (aligned to the last line boundary at or before the target) and re-estimates,
+/// repeating until the estimate fits or the minimum length floor is reached.
+/// A final `find_split_point` pass guarantees an absolute cut when the floor is
+/// hit while the estimate is still over budget.
+pub fn truncate_to_token_budget(text: &str, max_tokens: usize) -> TruncationResult {
+    let estimator = TokenEstimator::default();
+    let original_len = text.len();
+    let original_estimate = estimator.estimate_text(text);
+
+    if original_estimate <= max_tokens {
+        return TruncationResult {
+            text: text.to_string(),
+            truncated: false,
+            original_len,
+            final_len: original_len,
+            original_estimate,
+        };
+    }
+
+    let mut current = text.to_string();
+    while estimator.estimate_text(&current) > max_tokens {
+        let mut target = current.len() * TRUNCATE_RATIO_NUM / TRUNCATE_RATIO_DEN;
+        while !current.is_char_boundary(target) {
+            target -= 1;
+        }
+        if target < MIN_TRUNCATED_LEN {
+            break;
+        }
+        let cut = current[..target]
+            .rfind('\n')
+            .map(|p| p + 1)
+            .unwrap_or(target);
+        tracing::info!(
+            from_bytes = current.len(),
+            to_bytes = cut,
+            estimate = estimator.estimate_text(&current),
+            max_tokens,
+            "Text over token budget, truncating proportionally at line boundary"
+        );
+        current = current[..cut].trim_end().to_string();
+    }
+
+    if estimator.estimate_text(&current) > max_tokens {
+        let split = estimator.find_split_point(&current, max_tokens);
+        tracing::info!(
+            from_bytes = current.len(),
+            to_bytes = split,
+            max_tokens,
+            "Proportional truncation hit floor, applying absolute split"
+        );
+        current = current[..split].to_string();
+    }
+
+    let final_len = current.len();
+    TruncationResult {
+        text: current,
+        truncated: final_len < original_len,
+        original_len,
+        final_len,
+        original_estimate,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,8 +368,9 @@ mod tests {
 
         let text = "How are you?";
         let tokens = estimator.estimate_with_config(text);
-        // 12 ASCII chars (including spaces) * 0.3 = 3.6 -> rounded to 4 tokens
-        assert_eq!(tokens, 4, "tokens: {}", tokens);
+        // 9 letters * 0.3 = 2.7, symbol '?' * 1.0 = 1.0, 3 spaces * 0.5 = 1.5
+        // total 5.2 -> 5 tokens
+        assert_eq!(tokens, 5, "tokens: {}", tokens);
     }
 
     #[test]
@@ -302,10 +397,10 @@ mod tests {
         let text = "fn foo() -> u32";
         let tokens = estimate_tokens(text);
         // letters: "fnfoou32" = 8 * 0.25 = 2.0
-        // symbols: "()->" = 4 * 0.5 = 2.0
+        // symbols: "()->" = 4 * 1.0 = 4.0
         // whitespace: 3 * 0.5 = 1.5
-        // total 5.5 -> 6
-        assert_eq!(tokens, 6, "tokens: {}", tokens);
+        // total 7.5 -> 8
+        assert_eq!(tokens, 8, "tokens: {}", tokens);
     }
 
     #[test]
@@ -332,5 +427,40 @@ mod tests {
         let split = TokenEstimator::default().find_split_point(text, 5);
         assert!(split < text.len());
         assert!(split > 0);
+    }
+
+    #[test]
+    fn test_truncate_noop_within_budget() {
+        let text = "short text";
+        let result = truncate_to_token_budget(text, 8192);
+        assert!(!result.truncated);
+        assert_eq!(result.text, text);
+        assert_eq!(result.original_len, result.final_len);
+    }
+
+    #[test]
+    fn test_truncate_over_budget_fits_after_loop() {
+        // Many lines so proportional line-boundary cuts converge above the floor.
+        let text = "fn example() {\n    let x = compute(a, b, c);\n}\n".repeat(3000);
+        let max_tokens = 7200;
+        let result = truncate_to_token_budget(&text, max_tokens);
+        assert!(result.truncated);
+        assert!(result.final_len < result.original_len);
+        assert!(
+            TokenEstimator::default().estimate_text(&result.text) <= max_tokens,
+            "truncated text must fit budget"
+        );
+        assert!(result.text.is_char_boundary(result.text.len()));
+    }
+
+    #[test]
+    fn test_truncate_absolute_split_when_below_floor() {
+        // A single long token-less run with no line boundaries and no spaces:
+        // the proportional loop cannot cut above the floor, so the absolute
+        // split must still bring the estimate within budget.
+        let text = "a".repeat(2000); // ~500 tokens at 0.25/char
+        let result = truncate_to_token_budget(&text, 50);
+        assert!(result.truncated);
+        assert!(TokenEstimator::default().estimate_text(&result.text) <= 50);
     }
 }

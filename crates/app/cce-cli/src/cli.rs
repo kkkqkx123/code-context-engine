@@ -195,6 +195,13 @@ pub enum IndexCommands {
         #[arg(short, long)]
         language: Option<String>,
     },
+
+    /// Run a truncate-retry pass over the Embedding dead letter queue
+    RetryDeadLetter {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
 }
 
 /// Search commands

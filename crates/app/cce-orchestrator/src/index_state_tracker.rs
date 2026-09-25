@@ -538,6 +538,44 @@ impl UpdateStateTracker {
             .collect()
     }
 
+    /// Get files whose Embedding module is eligible for a lossy truncate-retry
+    /// (dead letter, never truncated before).
+    pub async fn get_truncate_retry_candidates(&self) -> Vec<FileUpdateState> {
+        let states = self.states.read().await;
+
+        states
+            .values()
+            .filter(|state| {
+                state
+                    .module_states
+                    .get(&ModuleType::Embedding)
+                    .is_some_and(|r| r.is_truncate_candidate())
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Record that a module already went through a lossy truncate-retry so it
+    /// is excluded from future truncate attempts.
+    pub async fn set_module_truncated(
+        &self,
+        file_path: &Path,
+        module: ModuleType,
+    ) -> Result<(), StateTrackerError> {
+        let path_str = file_path.to_string_lossy().to_string();
+        let mut states = self.states.write().await;
+
+        if let Some(state) = states.get_mut(&path_str) {
+            state.set_module_truncated(module);
+            let state = state.clone();
+            drop(states);
+            self.persist_state(&state).await;
+            Ok(())
+        } else {
+            Err(StateTrackerError::StateNotFound(path_str))
+        }
+    }
+
     /// Get all files that are currently being updated
     pub async fn get_updating_files(&self) -> Vec<FileUpdateState> {
         let states = self.states.read().await;
@@ -965,5 +1003,58 @@ mod tests {
         let dead_letters = tracker.get_dead_letters().await;
         assert_eq!(dead_letters.len(), 1);
         assert_eq!(dead_letters[0].file_path, "file1.rs");
+    }
+
+    #[tokio::test]
+    async fn test_truncate_retry_candidates() {
+        let tracker = UpdateStateTracker::new(1);
+        let path = Path::new("file1.rs");
+
+        tracker.create_update(path, FileChangeType::Modified).await;
+        assert!(tracker.get_truncate_retry_candidates().await.is_empty());
+
+        // Drive Embedding into dead letter -> becomes a candidate
+        for _ in 0..3 {
+            tracker
+                .mark_failed(path, ModuleType::Embedding, "400 too long".to_string())
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            tracker
+                .get_truncate_retry_candidates()
+                .await
+                .iter()
+                .map(|s| s.file_path.clone())
+                .collect::<Vec<_>>(),
+            vec!["file1.rs".to_string()]
+        );
+
+        // Drive a non-Embedding dead letter -> never a candidate
+        tracker
+            .create_update(Path::new("file2.rs"), FileChangeType::Modified)
+            .await;
+        for _ in 0..3 {
+            tracker
+                .mark_failed(Path::new("file2.rs"), ModuleType::Bm25, "err".to_string())
+                .await
+                .expect("state exists");
+        }
+        assert_eq!(
+            tracker
+                .get_truncate_retry_candidates()
+                .await
+                .iter()
+                .map(|s| s.file_path.clone())
+                .collect::<Vec<_>>(),
+            vec!["file1.rs".to_string()]
+        );
+
+        // After marking truncated it leaves the candidate set permanently
+        tracker
+            .set_module_truncated(path, ModuleType::Embedding)
+            .await
+            .expect("state exists");
+        assert!(tracker.get_truncate_retry_candidates().await.is_empty());
     }
 }

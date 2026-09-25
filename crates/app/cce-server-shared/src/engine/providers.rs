@@ -219,6 +219,11 @@ impl super::CodeContextEngine {
                 .with_project_fingerprint(project_group_id.clone())
                 .with_relation_publisher(relation_publisher)
                 .with_relation_config(config.relation.clone())
+                // Dead-letter truncate-retry settings for this project
+                .with_dead_letter_config(
+                    config.orchestrator.indexer.dead_letter_truncate_retry,
+                    config.orchestrator.indexer.embed_input_token_limit,
+                )
                 // Attach global metrics registry for pipeline-level metrics
                 .with_metrics_registry(self.metrics_registry.clone());
 

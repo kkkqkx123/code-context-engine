@@ -124,6 +124,7 @@ impl ChunkBuilder {
             next_overlap: None,
             related_groups: vec![],
             self_contained: false,
+            truncated: false,
             metadata: meta,
         }
     }

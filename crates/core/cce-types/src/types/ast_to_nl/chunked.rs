@@ -285,6 +285,12 @@ pub struct ChunkedResult {
     #[serde(default)]
     pub self_contained: bool,
 
+    /// Whether this chunk's text was lossily truncated to fit the embedder
+    /// input token budget. Always `false` outside the dead-letter
+    /// truncate-retry path.
+    #[serde(default)]
+    pub truncated: bool,
+
     /// Metadata
     pub metadata: ChunkMetadata,
 }
@@ -744,6 +750,7 @@ impl ChunkedResult {
             next_overlap: None,
             related_groups: Vec::new(),
             self_contained: false,
+            truncated: false,
             bm25_title: None,
             bm25_keywords: Vec::new(),
             metadata: ChunkMetadata::default(),

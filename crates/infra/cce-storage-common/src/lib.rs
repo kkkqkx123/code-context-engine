@@ -207,6 +207,10 @@ pub struct Payload {
     /// Always populated on new writes; `Option` is read-side defense only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test_source: Option<TestSource>,
+    /// Marker that the stored text was token-budget truncated. Only chunk
+    /// writes populate it; `Option` keeps non-chunk payloads free of the key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
     /// Epoch/version for version-aware filtering
     #[serde(skip_serializing_if = "Option::is_none")]
     pub epoch: Option<i64>,
@@ -237,6 +241,7 @@ impl Payload {
             category: None,
             test: None,
             test_source: None,
+            truncated: None,
             epoch: None,
             batch_id: None,
             entity_ids: None,
@@ -277,6 +282,12 @@ impl Payload {
     /// Set the test determination source
     pub fn with_test_source(mut self, test_source: TestSource) -> Self {
         self.test_source = Some(test_source);
+        self
+    }
+
+    /// Set the token-budget truncation marker
+    pub fn with_truncated(mut self, truncated: bool) -> Self {
+        self.truncated = Some(truncated);
         self
     }
 

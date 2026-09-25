@@ -463,6 +463,7 @@ pub fn lua_table_to_chunked_result(table: &Table) -> Result<ChunkedResult, mlua:
         self_contained: table
             .get::<Option<bool>>("self_contained")?
             .unwrap_or(false),
+        truncated: false,
         metadata,
     })
 }

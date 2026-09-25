@@ -118,6 +118,7 @@ pub(crate) fn enrich_from_chunk(
         result.start_line = chunk.start_line as u32;
         result.end_line = chunk.end_line as u32;
         result.kind = chunk.chunk_type.clone();
+        result.truncated = chunk.truncated != 0;
 
         let entity_names: Vec<String> =
             serde_json::from_str(&chunk.entity_names).unwrap_or_default();

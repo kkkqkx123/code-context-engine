@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use cce_types::StorageError;
 
 /// The schema version represented by the table definitions in `schema/tables`.
-pub(crate) const LATEST_SCHEMA_VERSION: i64 = 2;
+pub(crate) const LATEST_SCHEMA_VERSION: i64 = 3;
 
 /// Reject databases written by an incompatible schema state.
 pub fn run(conn: &Connection) -> Result<(), StorageError> {
