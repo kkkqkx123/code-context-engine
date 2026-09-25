@@ -16,6 +16,13 @@ pub const ANNOTATIONS: &str = "annotations";
 /// definition among mutually-exclusive `cfg` variants.
 pub const CFG_PREDICATE: &str = "cfg_predicate";
 
+/// Zero-based source-order index among siblings that share the same parent,
+/// name, kind, and normalized signature. Rebinding patterns (a test function
+/// defining `class Module` twice) are legal in the source; the ordinal keeps
+/// each occurrence addressable on the stable symbol key. Absent for entities
+/// without such duplicates.
+pub const DUPLICATE_SIBLING_ORDINAL: &str = "duplicate_sibling_ordinal";
+
 pub const INHERENT_IMPL_COUNT: &str = "inherent_impl_count";
 
 pub const CALL_PATHS: &str = "call_paths";

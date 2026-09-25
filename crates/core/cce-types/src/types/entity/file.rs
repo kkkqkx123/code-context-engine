@@ -309,7 +309,7 @@ impl ParsedFile {
     /// Anonymous entities (closures/lambdas) use special naming:
     /// <anonymous@{line}:{col}> to avoid EntityId dependency.
     pub fn resolve_scoped_name(&self, entity_id: EntityId) -> Option<String> {
-        self.resolve_scoped_name_from_map(
+        Self::resolve_scoped_name_from_map(
             entity_id,
             &self.entities.iter().map(|e| (e.id, e)).collect(),
         )
@@ -320,7 +320,6 @@ impl ParsedFile {
     /// Callers resolving many names from the same file should build the map
     /// once  instead of relying on the linear `get_entity` scan.
     fn resolve_scoped_name_from_map(
-        &self,
         entity_id: EntityId,
         entity_map: &HashMap<EntityId, &Entity>,
     ) -> Option<String> {
@@ -380,11 +379,19 @@ impl ParsedFile {
     /// Builds the id -> entity lookup map once (O(E)) and walks each parent
     /// chain through it, avoiding the previous O(E) linear scan per entity.
     pub fn resolve_all_scoped_names(&self) -> std::collections::HashMap<EntityId, String> {
-        let entity_map: HashMap<EntityId, &Entity> =
-            self.entities.iter().map(|e| (e.id, e)).collect();
-        let mut result = std::collections::HashMap::with_capacity(self.entities.len());
-        for entity in &self.entities {
-            if let Some(scoped_name) = self.resolve_scoped_name_from_map(entity.id, &entity_map) {
+        Self::resolve_scoped_names(&self.entities)
+    }
+
+    /// Resolve scoped names directly from a slice of entities whose parent
+    /// links are final. Used by extraction-time identity passes, before a
+    /// [`ParsedFile`] exists over the same entities.
+    pub fn resolve_scoped_names(
+        entities: &[Entity],
+    ) -> std::collections::HashMap<EntityId, String> {
+        let entity_map: HashMap<EntityId, &Entity> = entities.iter().map(|e| (e.id, e)).collect();
+        let mut result = std::collections::HashMap::with_capacity(entities.len());
+        for entity in entities {
+            if let Some(scoped_name) = Self::resolve_scoped_name_from_map(entity.id, &entity_map) {
                 result.insert(entity.id, scoped_name);
             }
         }

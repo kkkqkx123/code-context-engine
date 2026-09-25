@@ -73,12 +73,7 @@ pub(super) fn compute_entity_diff<V: RelationIndexView>(
                         .map(|v| v.clone())
                         .unwrap_or_default();
                     (
-                        SymbolKey::new(
-                            &fallback_path,
-                            &entity.name,
-                            entity.kind,
-                            &entity.signature,
-                        ),
+                        SymbolKey::for_entity(&fallback_path, &entity.name, entity),
                         fallback_path,
                     )
                 }

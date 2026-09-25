@@ -141,12 +141,7 @@ pub(super) fn symbol_key_of_id(
         .map(|v| v.clone())
         .unwrap_or_default();
     match function_index.get(&id) {
-        Some(entity) => SymbolKey::new(
-            &file,
-            &entity.value().name,
-            entity.value().kind,
-            &entity.value().signature,
-        ),
+        Some(entity) => SymbolKey::for_entity(&file, &entity.value().name, entity.value()),
         None => SymbolKey::new(&file, name_fallback, EntityKind::Function, name_fallback),
     }
 }

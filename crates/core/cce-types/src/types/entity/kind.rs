@@ -349,6 +349,13 @@ impl EntityKind {
         )
     }
 
+    /// Check if this kind's identity is positional: it never participates in
+    /// overload resolution, so same-named siblings in one file are told apart
+    /// by source position rather than by signature.
+    pub fn is_position_scoped(&self) -> bool {
+        self.is_variable_like() || self.is_annotation_like()
+    }
+
     /// Check if this is a module/namespace
     pub fn is_module_like(&self) -> bool {
         matches!(

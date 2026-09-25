@@ -215,47 +215,63 @@ pub struct StableSymbolKey {
 }
 
 impl StableSymbolKey {
-    pub fn new(file_path: &str, scoped_name: &str, kind: EntityKind, signature: &str) -> Self {
-        let normalized_signature = signature.split_whitespace().collect::<Vec<_>>().join(" ");
-        let mut signature_hasher = Sha256::new();
-        signature_hasher.update(normalized_signature.as_bytes());
-        signature_hasher.update(kind.to_string().as_bytes());
-        Self {
-            file_path: normalize_project_path(file_path),
-            scoped_name: scoped_name.to_string(),
-            kind,
-            overload_discriminator: format!("{:x}", signature_hasher.finalize()),
-        }
-    }
-
-    /// Create a symbol key with span-based fallback for empty signatures.
+    /// The single discriminator rule shared by every key constructor.
     ///
-    /// When `signature` is empty, the entity's byte span is included in the
-    /// discriminator hash to avoid collisions between different overloads or
-    /// destructuring patterns that share the same scoped name and kind.
-    pub fn new_with_span(
-        file_path: &str,
-        scoped_name: &str,
+    /// Hash inputs (in order): the normalized signature — or a `__span__`
+    /// marker when the signature is empty — the kind, the `cfg` predicate,
+    /// the duplicate-sibling ordinal, and the byte span when `fold_span` is
+    /// set. Empty inputs add no bytes, so plain signature-addressed keys are
+    /// unaffected by the extra slots.
+    fn discriminator(
+        normalized_signature: &str,
         kind: EntityKind,
-        signature: &str,
+        cfg_predicate: &str,
+        sibling_ordinal: &str,
         span_start: usize,
         span_end: usize,
-    ) -> Self {
-        let normalized_signature = signature.split_whitespace().collect::<Vec<_>>().join(" ");
-        let mut signature_hasher = Sha256::new();
+        fold_span: bool,
+    ) -> String {
+        let mut hasher = Sha256::new();
         if normalized_signature.is_empty() {
-            signature_hasher.update(b"__span__");
-            signature_hasher.update(span_start.to_le_bytes().as_ref());
-            signature_hasher.update(span_end.to_le_bytes().as_ref());
+            hasher.update(b"__span__");
         } else {
-            signature_hasher.update(normalized_signature.as_bytes());
+            hasher.update(normalized_signature.as_bytes());
         }
-        signature_hasher.update(kind.to_string().as_bytes());
+        hasher.update(kind.to_string().as_bytes());
+        hasher.update(cfg_predicate.as_bytes());
+        hasher.update(sibling_ordinal.as_bytes());
+        if fold_span {
+            hasher.update(span_start.to_le_bytes().as_ref());
+            hasher.update(span_end.to_le_bytes().as_ref());
+        }
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Build a key for a signature-addressed symbol that has no live entity:
+    /// placeholders (`<file>`, unknown targets) and synthetic export names.
+    ///
+    /// Entities must go through [`Self::for_entity`] instead: position-scoped
+    /// kinds, empty signatures and duplicate siblings take their discriminator
+    /// inputs from the entity, which this constructor does not have.
+    pub fn new(file_path: &str, scoped_name: &str, kind: EntityKind, signature: &str) -> Self {
+        debug_assert!(
+            !kind.is_position_scoped() && !signature.trim().is_empty(),
+            "entity-backed keys must use for_entity: position-scoped kinds and empty signatures fold the entity span into the discriminator"
+        );
+        let normalized_signature = signature.split_whitespace().collect::<Vec<_>>().join(" ");
         Self {
             file_path: normalize_project_path(file_path),
             scoped_name: scoped_name.to_string(),
             kind,
-            overload_discriminator: format!("{:x}", signature_hasher.finalize()),
+            overload_discriminator: Self::discriminator(
+                &normalized_signature,
+                kind,
+                "",
+                "",
+                0,
+                0,
+                false,
+            ),
         }
     }
 
@@ -263,16 +279,22 @@ impl StableSymbolKey {
     /// stable symbol identity into the discriminator.
     ///
     /// Discriminator inputs (in order): normalized signature, kind, the
-    /// entity's own `cfg` predicate, and the byte span when the signature is
-    /// empty or the kind is position-scoped (`is_variable_like`).
+    /// entity's own `cfg` predicate, the duplicate-sibling ordinal, and the
+    /// byte span when the signature is empty or the kind is position-scoped
+    /// (`is_position_scoped`: variable-like kinds and annotations).
     ///
     /// The `cfg` fold lets mutually-exclusive conditional-compilation variants
     /// of a same-named symbol each keep their own key. An empty predicate adds
     /// no bytes to the hash, so entities without `cfg` produce the same
     /// discriminator as the plain-signature path. The span fold for
-    /// variable-like kinds separates same-named local bindings and
-    /// enum-variant fields that share a signature; those kinds never
-    /// participate in overload resolution, so position is their identity.
+    /// position-scoped kinds separates same-named siblings that share a
+    /// signature — local bindings, enum-variant fields, and repeated
+    /// decorators/annotations: those kinds never participate in overload
+    /// resolution, so position is their identity. The sibling-ordinal fold
+    /// separates signature-addressed duplicates (a name rebound twice in one
+    /// scope, e.g. two `class Module` mocks in a test function) that the
+    /// extractor tagged with `DUPLICATE_SIBLING_ORDINAL`; entities without the
+    /// tag keep the plain hash.
     ///
     /// Every input is persisted on the entity (signature, span, metadata), so a
     /// later reload reconstructs an identical key and stays conflict-free.
@@ -286,26 +308,25 @@ impl StableSymbolKey {
             .get_metadata(crate::types::entity::meta_keys::CFG_PREDICATE)
             .map(String::as_str)
             .unwrap_or("");
-        let fold_span = normalized_signature.is_empty() || entity.kind.is_variable_like();
-
-        let mut hasher = Sha256::new();
-        if normalized_signature.is_empty() {
-            hasher.update(b"__span__");
-        } else {
-            hasher.update(normalized_signature.as_bytes());
-        }
-        hasher.update(entity.kind.to_string().as_bytes());
-        hasher.update(cfg_predicate.as_bytes());
-        if fold_span {
-            hasher.update(entity.span.start_byte.to_le_bytes().as_ref());
-            hasher.update(entity.span.end_byte.to_le_bytes().as_ref());
-        }
+        let sibling_ordinal = entity
+            .get_metadata(crate::types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
+            .map(String::as_str)
+            .unwrap_or("");
+        let fold_span = normalized_signature.is_empty() || entity.kind.is_position_scoped();
 
         Self {
             file_path: normalize_project_path(file_path),
             scoped_name: scoped_name.to_string(),
             kind: entity.kind,
-            overload_discriminator: format!("{:x}", hasher.finalize()),
+            overload_discriminator: Self::discriminator(
+                &normalized_signature,
+                entity.kind,
+                cfg_predicate,
+                sibling_ordinal,
+                entity.span.start_byte,
+                entity.span.end_byte,
+                fold_span,
+            ),
         }
     }
 
@@ -701,6 +722,37 @@ mod tests {
         );
     }
 
+    /// Repeated decorators/annotations share a name and a signature within one
+    /// file; as a position-scoped kind their span must keep them addressable.
+    #[test]
+    fn for_entity_folds_span_for_annotation_kind() {
+        let first = entity_with(
+            EntityKind::Annotation,
+            "@setupmethod",
+            Span::new(100, 112, 0, 0, 0, 0),
+            None,
+        );
+        let second = entity_with(
+            EntityKind::Annotation,
+            "@setupmethod",
+            Span::new(400, 412, 0, 0, 0, 0),
+            None,
+        );
+        let first_key = StableSymbolKey::for_entity("src/app.py", "setupmethod", &first);
+        let second_key = StableSymbolKey::for_entity("src/app.py", "setupmethod", &second);
+        assert_ne!(
+            first_key.overload_discriminator, second_key.overload_discriminator,
+            "distinct decorator occurrences must not collide on one stable key"
+        );
+
+        let reload = entity_with(EntityKind::Annotation, "@setupmethod", first.span, None);
+        assert_eq!(
+            first_key.overload_discriminator,
+            StableSymbolKey::for_entity("src/app.py", "setupmethod", &reload)
+                .overload_discriminator
+        );
+    }
+
     /// The entity's own `cfg` predicate is folded so mutually-exclusive
     /// conditional-compilation variants of a same-named symbol each keep their
     /// own identity; an absent and an empty predicate stay equivalent.
@@ -731,6 +783,46 @@ mod tests {
             StableSymbolKey::for_entity("src/lib.rs", "imp", &empty_cfg).overload_discriminator,
             StableSymbolKey::for_entity("src/lib.rs", "imp", &no_cfg).overload_discriminator,
             "empty cfg must not perturb the discriminator"
+        );
+    }
+
+    /// Duplicate siblings tagged with distinct ordinals keep distinct keys,
+    /// while an untagged entity hashes exactly like the plain path.
+    #[test]
+    fn for_entity_folds_duplicate_sibling_ordinal() {
+        let span = Span::new(0, 12, 0, 0, 0, 0);
+        let mut first = entity_with(EntityKind::Class, "class Module", span, None);
+        let mut second = entity_with(EntityKind::Class, "class Module", span, None);
+        first.set_metadata(
+            crate::types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL,
+            "0".to_string(),
+        );
+        second.set_metadata(
+            crate::types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL,
+            "1".to_string(),
+        );
+        assert_ne!(
+            StableSymbolKey::for_entity("tests/t.py", "fn::Module", &first).overload_discriminator,
+            StableSymbolKey::for_entity("tests/t.py", "fn::Module", &second).overload_discriminator,
+            "source-order ordinals must separate rebound same-signature siblings"
+        );
+
+        let untagged = entity_with(EntityKind::Class, "class Module", span, None);
+        assert_ne!(
+            StableSymbolKey::for_entity("tests/t.py", "fn::Module", &first).overload_discriminator,
+            StableSymbolKey::for_entity("tests/t.py", "fn::Module", &untagged)
+                .overload_discriminator,
+            "an ordinal-tagged key must differ from its untagged form"
+        );
+        assert_eq!(
+            StableSymbolKey::for_entity("tests/t.py", "fn::Module", &untagged),
+            StableSymbolKey::new(
+                "tests/t.py",
+                "fn::Module",
+                EntityKind::Class,
+                "class Module"
+            ),
+            "untagged entities keep the plain new-path key"
         );
     }
 

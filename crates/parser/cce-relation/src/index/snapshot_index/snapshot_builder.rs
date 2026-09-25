@@ -31,12 +31,7 @@ impl RelationSnapshotIndex {
             .map(|v| v.clone())
             .unwrap_or_default();
         match self.function_index.get(&entity_id) {
-            Some(entity) => SymbolKey::new(
-                &file,
-                &entity.value().name,
-                entity.value().kind,
-                &entity.value().signature,
-            ),
+            Some(entity) => SymbolKey::for_entity(&file, &entity.value().name, entity.value()),
             None => SymbolKey::new(&file, "<unknown>", EntityKind::Unknown, "<unknown>"),
         }
     }
@@ -57,12 +52,7 @@ impl RelationSnapshotIndex {
             .map(|v| v.clone())
             .unwrap_or_default();
         match self.function_index.get(&entity_id) {
-            Some(entity) => SymbolKey::new(
-                &file,
-                &entity.value().name,
-                entity.value().kind,
-                &entity.value().signature,
-            ),
+            Some(entity) => SymbolKey::for_entity(&file, &entity.value().name, entity.value()),
             None => SymbolKey::new(&file, name_fallback, EntityKind::Unknown, name_fallback),
         }
     }

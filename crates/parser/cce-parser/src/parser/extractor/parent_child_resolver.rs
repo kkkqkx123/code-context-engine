@@ -169,8 +169,9 @@ pub fn establish_struct_field_relationships(entities: &mut [Entity]) {
 }
 
 /// Establish parent-child relationships for entities nested inside function
-/// bodies: nested function definitions and local variables get the innermost
-/// enclosing function-like entity as parent.
+/// bodies: nested function definitions, local variables, and local type
+/// declarations (classes and other types defined inside a `def`) get the
+/// innermost enclosing function-like entity as parent.
 ///
 /// Tree-sitter returns flat matches, and the extraction-context stack does not
 /// survive across matches, so nested definitions start with `parent = None`.
@@ -214,11 +215,13 @@ pub fn establish_function_scope_relationships(entities: &mut [Entity]) {
             || matches!(entity.kind, EntityKind::Variable | EntityKind::Constant)
             // A type declared inside a function body is a local: without this
             // pass its scoped name collapses to the bare identifier, so the
-            // same helper type (a `Void`/`Never` marker) declared in two
-            // functions collides on the stable symbol key.
+            // same helper type (a `Void`/`Never` marker, or a `MethodView`
+            // subclass redefined per test function) declared in two functions
+            // collides on the stable symbol key.
             || matches!(
                 entity.kind,
-                EntityKind::Struct
+                EntityKind::Class
+                    | EntityKind::Struct
                     | EntityKind::Enum
                     | EntityKind::Union
                     | EntityKind::Trait
@@ -273,6 +276,65 @@ pub fn establish_function_scope_relationships(entities: &mut [Entity]) {
         if let Some(parent_id) = best_id {
             entity.parent = Some(parent_id);
             entity.depth += 1;
+        }
+    }
+}
+
+/// Tag duplicate siblings with a deterministic source-order ordinal.
+///
+/// Entities that resolve to the same scoped name, kind, and normalized
+/// signature collapse onto one stable symbol key. Rebinding is legal in the
+/// source — a test function defining `class Module` twice to swap mock
+/// behavior, a re-`def` of the same method name — so each occurrence is tagged
+/// with its zero-based index (ordered by span start) in
+/// `DUPLICATE_SIBLING_ORDINAL`, which the stable key folds into its
+/// discriminator.
+///
+/// Grouping uses the resolved scoped name (not the direct parent id): members
+/// of two duplicate parents resolve to the same chain themselves (the two
+/// `create_app` methods under two same-named local `Module` classes share
+/// `test_find_best_app::Module::create_app`), so the disambiguation must
+/// propagate down the whole chain.
+///
+/// Position-scoped kinds and empty signatures are skipped: their key already
+/// folds the entity span, which keeps occurrences distinct without metadata.
+/// Entities in groups of one receive no tag, leaving their key untouched.
+///
+/// Runs after every parenting pass so `parent` reflects the final hierarchy.
+pub fn disambiguate_duplicate_siblings(entities: &mut [Entity]) {
+    use std::collections::HashMap;
+
+    let scoped_names = cce_types::entity::ParsedFile::resolve_scoped_names(entities);
+    let mut groups: HashMap<(String, EntityKind, String), Vec<usize>> = HashMap::new();
+    for (idx, entity) in entities.iter().enumerate() {
+        let normalized_signature = entity
+            .signature
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if entity.kind.is_position_scoped() || normalized_signature.is_empty() {
+            continue;
+        }
+        let Some(scoped_name) = scoped_names.get(&entity.id) else {
+            continue;
+        };
+        groups
+            .entry((scoped_name.clone(), entity.kind, normalized_signature))
+            .or_default()
+            .push(idx);
+    }
+
+    for indices in groups.into_values() {
+        if indices.len() < 2 {
+            continue;
+        }
+        let mut ordered = indices;
+        ordered.sort_by_key(|&idx| entities[idx].span.start_byte);
+        for (ordinal, idx) in ordered.iter().enumerate() {
+            entities[*idx].set_metadata(
+                cce_types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL,
+                ordinal.to_string(),
+            );
         }
     }
 }
@@ -492,6 +554,29 @@ mod tests {
     }
 
     #[test]
+    fn test_function_scope_nests_local_class_and_claims_innermost_for_methods() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::Function, "test_index_view", 0, 60),
+            make_entity(1, EntityKind::Class, "Index", 10, 55),
+            make_entity(2, EntityKind::Method, "get", 20, 40),
+            make_entity(3, EntityKind::Function, "test_other_view", 61, 120),
+            make_entity(4, EntityKind::Class, "Index", 71, 115),
+            make_entity(5, EntityKind::Method, "get", 81, 100),
+        ];
+
+        establish_function_scope_relationships(&mut entities);
+
+        // Same-named classes defined in two sibling functions claim their own
+        // function, so their scoped names stay distinct.
+        assert_eq!(entities[1].parent, Some(EntityId(0)));
+        assert_eq!(entities[4].parent, Some(EntityId(3)));
+        // Methods claim the innermost container: the local class, not the
+        // enclosing function.
+        assert_eq!(entities[2].parent, Some(EntityId(1)));
+        assert_eq!(entities[5].parent, Some(EntityId(4)));
+    }
+
+    #[test]
     fn test_function_scope_nests_nested_function() {
         let mut entities = vec![
             make_entity(0, EntityKind::Function, "test_teardown_on_pop", 0, 100),
@@ -636,5 +721,161 @@ mod tests {
         assert_eq!(normalize_type_name("pkg.User"), "User");
         assert_eq!(normalize_type_name("*pkg.User"), "User");
         assert_eq!(normalize_type_name("  *pkg.User  "), "User");
+    }
+
+    fn class_with_signature(id: u64, name: &str, sig: &str, start: usize, end: usize) -> Entity {
+        make_entity_with_signature(id, EntityKind::Class, name, sig, start, end)
+    }
+
+    fn make_entity_with_signature(
+        id: u64,
+        kind: EntityKind,
+        name: &str,
+        sig: &str,
+        start: usize,
+        end: usize,
+    ) -> Entity {
+        Entity::new(
+            EntityId(id),
+            kind,
+            name.to_string(),
+            Span::new(start, end, 0, 0, 0, 0),
+        )
+        .with_signature(sig.to_string())
+    }
+
+    #[test]
+    fn test_duplicate_siblings_get_source_order_ordinals() {
+        let mut entities = vec![
+            class_with_signature(0, "Module", "class Module", 40, 80),
+            class_with_signature(1, "Module", "class Module", 0, 40),
+            class_with_signature(2, "App", "class App", 81, 120),
+        ];
+
+        disambiguate_duplicate_siblings(&mut entities);
+
+        // Ordinals follow span start, not extraction order.
+        assert_eq!(
+            entities[1]
+                .get_metadata(cce_types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
+                .map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            entities[0]
+                .get_metadata(cce_types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
+                .map(String::as_str),
+            Some("1")
+        );
+        // A unique sibling is left untouched.
+        assert_eq!(
+            entities[2]
+                .get_metadata(cce_types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
+                .map(String::as_str),
+            None
+        );
+    }
+
+    #[test]
+    fn test_duplicate_siblings_skipped_for_position_scoped_kinds() {
+        let mut entities = vec![
+            Entity::new(
+                EntityId(1),
+                EntityKind::Annotation,
+                "decorated".to_string(),
+                Span::new(0, 10, 0, 0, 0, 0),
+            )
+            .with_signature("@decorated".to_string()),
+            Entity::new(
+                EntityId(2),
+                EntityKind::Annotation,
+                "decorated".to_string(),
+                Span::new(20, 30, 0, 0, 0, 0),
+            )
+            .with_signature("@decorated".to_string()),
+        ];
+
+        disambiguate_duplicate_siblings(&mut entities);
+
+        for entity in &entities {
+            assert_eq!(
+                entity
+                    .get_metadata(cce_types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
+                    .map(String::as_str),
+                None,
+                "position-scoped duplicates are separated by the span fold"
+            );
+        }
+    }
+
+    #[test]
+    fn test_duplicate_siblings_are_per_scope() {
+        let mut entities = vec![
+            class_with_signature(0, "Alpha", "class Alpha", 0, 40),
+            class_with_signature(1, "Module", "class Module", 5, 35),
+            class_with_signature(2, "Beta", "class Beta", 41, 90),
+            class_with_signature(3, "Module", "class Module", 50, 80),
+        ];
+        entities[1].parent = Some(EntityId(0));
+        entities[3].parent = Some(EntityId(2));
+
+        disambiguate_duplicate_siblings(&mut entities);
+
+        // Different enclosing scopes resolve to different chain prefixes, so
+        // the two `Module` classes are not duplicates of each other.
+        for entity in &entities {
+            assert_eq!(
+                entity
+                    .get_metadata(cce_types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
+                    .map(String::as_str),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn test_duplicate_siblings_propagate_to_children_of_duplicates() {
+        // Two same-named classes rebound in one function, each with its own
+        // `create_app`: the methods sit under *different* parents but resolve
+        // to the *same* scoped name, so they must be tagged too.
+        let mut entities = vec![
+            make_entity(0, EntityKind::Function, "test_find_best_app", 0, 200),
+            class_with_signature(1, "Module", "class Module", 10, 90),
+            class_with_signature(2, "Module", "class Module", 100, 190),
+            make_entity_with_signature(
+                3,
+                EntityKind::Method,
+                "create_app",
+                "def create_app(self)",
+                20,
+                80,
+            ),
+            make_entity_with_signature(
+                4,
+                EntityKind::Method,
+                "create_app",
+                "def create_app(self)",
+                110,
+                180,
+            ),
+        ];
+        entities[1].parent = Some(EntityId(0));
+        entities[2].parent = Some(EntityId(0));
+        entities[3].parent = Some(EntityId(1));
+        entities[4].parent = Some(EntityId(2));
+
+        disambiguate_duplicate_siblings(&mut entities);
+
+        let ordinal = |id: usize| {
+            entities[id]
+                .get_metadata(cce_types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
+                .map(String::as_str)
+                .unwrap_or("<none>")
+                .to_string()
+        };
+        assert_eq!(ordinal(1), "0");
+        assert_eq!(ordinal(2), "1");
+        assert_eq!(ordinal(3), "0");
+        assert_eq!(ordinal(4), "1");
     }
 }
