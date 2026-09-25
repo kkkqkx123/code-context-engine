@@ -186,7 +186,14 @@ pub fn establish_struct_field_relationships(entities: &mut [Entity]) {
 pub fn establish_function_scope_relationships(entities: &mut [Entity]) {
     let function_spans: Vec<(EntityId, std::ops::Range<usize>)> = entities
         .iter()
-        .filter(|e| e.kind.is_function_like())
+        .filter(|e| {
+            e.kind.is_function_like()
+                // A test case or test hook is a function body too: closures and
+                // locals declared inside it must claim the test function as
+                // parent, otherwise same-named helpers across sibling tests
+                // collapse onto one scoped name and collide on the key.
+                || matches!(e.kind, EntityKind::TestCase | EntityKind::TestHook)
+        })
         .map(|e| (e.id, e.span.start_byte..e.span.end_byte))
         .collect();
     let type_spans: Vec<(EntityId, std::ops::Range<usize>)> = entities
@@ -533,6 +540,24 @@ mod tests {
         establish_function_scope_relationships(&mut entities);
 
         assert_eq!(entities[1].parent, Some(EntityId(99)));
+    }
+
+    /// A closure bound inside a `#[test]` function has kind `Function` while its
+    /// enclosing test is kind `TestCase`; the test body still acts as a scope
+    /// container so sibling tests' same-named helpers do not collapse.
+    #[test]
+    fn test_function_scope_nests_closure_under_test_case() {
+        let mut entities = vec![
+            make_entity(0, EntityKind::TestCase, "test_after_context", 0, 200),
+            make_entity(1, EntityKind::Function, "mkctx", 20, 60),
+            make_entity(2, EntityKind::TestCase, "test_before_context", 101, 200),
+            make_entity(3, EntityKind::Function, "mkctx", 120, 160),
+        ];
+
+        establish_function_scope_relationships(&mut entities);
+
+        assert_eq!(entities[1].parent, Some(EntityId(0)));
+        assert_eq!(entities[3].parent, Some(EntityId(2)));
     }
 
     #[test]

@@ -343,13 +343,23 @@ impl ParsedFile {
                 // trait declaration itself) onto one scoped name. Rendering the
                 // segment as `<Type as Trait>` keeps each implementation a
                 // distinct logical address while leaving the display name intact.
+                // A generic trait (`impl Add<&Stats> for Stats` vs `impl Add for
+                // Stats`) shares its simple name across differently-parameterized
+                // impls, so the segment keeps the generic arguments when present
+                // to separate them; non-generic traits render with the simple name.
                 match entity.kind {
                     crate::types::entity::EntityKind::TraitImpl => {
-                        match entity.get_metadata("impl_for_type") {
-                            Some(for_type) if !for_type.is_empty() => {
-                                format!("<{} as {}>", for_type, entity.name)
-                            }
-                            _ => entity.name.clone(),
+                        let for_type = entity
+                            .get_metadata("impl_for_type")
+                            .filter(|t| !t.is_empty());
+                        let trait_text = entity
+                            .get_metadata("impl_trait")
+                            .filter(|t| t.contains('<'))
+                            .map(String::as_str)
+                            .unwrap_or(entity.name.as_str());
+                        match for_type {
+                            Some(for_type) => format!("<{} as {}>", for_type, trait_text),
+                            None => entity.name.clone(),
                         }
                     }
                     _ => entity.name.clone(),
@@ -406,5 +416,83 @@ mod tests {
             "",
         );
         assert_eq!(windows.path, "scripts/tool.py");
+    }
+
+    fn trait_impl_entity(id: u64, trait_simple: &str, for_type: &str, impl_trait: &str) -> Entity {
+        let mut entity = Entity::new(
+            EntityId(id),
+            crate::types::entity::EntityKind::TraitImpl,
+            trait_simple.to_string(),
+            Span::default(),
+        );
+        entity.set_metadata("impl_for_type", for_type.to_string());
+        entity.set_metadata("impl_trait", impl_trait.to_string());
+        entity
+    }
+
+    /// An associated item's scoped name qualifies the `impl Trait for Type`
+    /// segment as `<Type as Trait>` so distinct implementations (and the trait
+    /// declaration itself) never collapse onto one stable symbol.
+    #[test]
+    fn trait_impl_segment_qualifies_with_self_type() {
+        let file = ParsedFile {
+            entities: vec![
+                trait_impl_entity(0, "Add", "Stats", "Add"),
+                Entity::new(
+                    EntityId(1),
+                    crate::types::entity::EntityKind::TypeAlias,
+                    "Output".to_string(),
+                    Span::default(),
+                )
+                .with_parent(Some(EntityId(0))),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            file.resolve_scoped_name(EntityId(1)).as_deref(),
+            Some("<Stats as Add>::Output")
+        );
+    }
+
+    /// Two impls of the same trait that differ only in the trait's generic
+    /// arguments (`Add` vs `Add<&Stats>`) share a simple trait name, so the
+    /// segment keeps the generic arguments to keep them addressable apart.
+    #[test]
+    fn trait_impl_segment_keeps_generic_args_to_disambiguate() {
+        let file = ParsedFile {
+            entities: vec![
+                trait_impl_entity(0, "Add", "Stats", "Add"),
+                trait_impl_entity(2, "Add", "Stats", "Add<&'a Stats>"),
+                Entity::new(
+                    EntityId(1),
+                    crate::types::entity::EntityKind::TypeAlias,
+                    "Output".to_string(),
+                    Span::default(),
+                )
+                .with_parent(Some(EntityId(0))),
+                Entity::new(
+                    EntityId(3),
+                    crate::types::entity::EntityKind::TypeAlias,
+                    "Output".to_string(),
+                    Span::default(),
+                )
+                .with_parent(Some(EntityId(2))),
+            ],
+            ..Default::default()
+        };
+        let names = file.resolve_all_scoped_names();
+        assert_eq!(
+            names.get(&EntityId(1)).map(String::as_str),
+            Some("<Stats as Add>::Output")
+        );
+        assert_eq!(
+            names.get(&EntityId(3)).map(String::as_str),
+            Some("<Stats as Add<&'a Stats>>::Output")
+        );
+        assert_ne!(
+            names.get(&EntityId(1)),
+            names.get(&EntityId(3)),
+            "generic-argument-only impls must not share a scoped name"
+        );
     }
 }

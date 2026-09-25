@@ -635,6 +635,105 @@ mod tests {
         );
     }
 
+    fn entity_with(
+        kind: EntityKind,
+        signature: &str,
+        span: Span,
+        cfg: Option<&str>,
+    ) -> crate::types::Entity {
+        let mut entity = Entity::new(EntityId(1), kind, "sym".to_string(), span)
+            .with_signature(signature.to_string());
+        if let Some(cfg) = cfg {
+            entity.set_metadata(
+                crate::types::entity::meta_keys::CFG_PREDICATE.to_string(),
+                cfg.to_string(),
+            );
+        }
+        entity
+    }
+
+    /// An entity with a non-empty signature, no `cfg`, and a kind that
+    /// participates in overloading must hash identically to the plain
+    /// `new` path, so folding the new inputs is a zero-regression change.
+    #[test]
+    fn for_entity_matches_plain_key_without_cfg_or_span_fold() {
+        let entity = entity_with(EntityKind::Function, "run()", Span::default(), None);
+        assert_eq!(
+            StableSymbolKey::for_entity("src/lib.rs", "run", &entity),
+            StableSymbolKey::new("src/lib.rs", "run", EntityKind::Function, "run()"),
+        );
+    }
+
+    /// Variable-like kinds are position-scoped and never overloaded, so their
+    /// span is folded to keep same-named, same-signature bindings apart.
+    #[test]
+    fn for_entity_folds_span_for_variable_like_kind() {
+        let first = entity_with(
+            EntityKind::Variable,
+            "err",
+            Span::new(10, 20, 0, 0, 0, 0),
+            None,
+        );
+        let second = entity_with(
+            EntityKind::Variable,
+            "err",
+            Span::new(80, 90, 0, 0, 0, 0),
+            None,
+        );
+        let first_key = StableSymbolKey::for_entity("src/lib.rs", "scope::err", &first);
+        let second_key = StableSymbolKey::for_entity("src/lib.rs", "scope::err", &second);
+        assert_ne!(
+            first_key.overload_discriminator, second_key.overload_discriminator,
+            "distinct spans must separate same-named locals"
+        );
+
+        // Reconstructing from the persisted fields reproduces the key exactly,
+        // which is what keeps reload and delta replay conflict-free.
+        let reload = entity_with(
+            EntityKind::Variable,
+            first.signature.as_str(),
+            first.span,
+            None,
+        );
+        assert_eq!(
+            first_key.overload_discriminator,
+            StableSymbolKey::for_entity("src/lib.rs", "scope::err", &reload).overload_discriminator
+        );
+    }
+
+    /// The entity's own `cfg` predicate is folded so mutually-exclusive
+    /// conditional-compilation variants of a same-named symbol each keep their
+    /// own identity; an absent and an empty predicate stay equivalent.
+    #[test]
+    fn for_entity_folds_cfg_predicate() {
+        let span = Span::new(0, 5, 0, 0, 0, 0);
+        let std_variant = entity_with(
+            EntityKind::Module,
+            "mod imp",
+            span,
+            Some(r#"cfg(feature = "std")"#),
+        );
+        let no_std_variant = entity_with(
+            EntityKind::Module,
+            "mod imp",
+            span,
+            Some(r#"cfg(not(feature = "std"))"#),
+        );
+        assert_ne!(
+            StableSymbolKey::for_entity("src/lib.rs", "imp", &std_variant).overload_discriminator,
+            StableSymbolKey::for_entity("src/lib.rs", "imp", &no_std_variant)
+                .overload_discriminator,
+        );
+
+        let empty_cfg = entity_with(EntityKind::Module, "mod imp", span, Some(""));
+        let no_cfg = entity_with(EntityKind::Module, "mod imp", span, None);
+        assert_eq!(
+            StableSymbolKey::for_entity("src/lib.rs", "imp", &empty_cfg).overload_discriminator,
+            StableSymbolKey::for_entity("src/lib.rs", "imp", &no_cfg).overload_discriminator,
+            "empty cfg must not perturb the discriminator"
+        );
+    }
+
     #[test]
     fn fingerprint_ignores_top_level_insertion_order() {
         let mut first = CanonicalRelationSnapshot::new("config".to_string());
