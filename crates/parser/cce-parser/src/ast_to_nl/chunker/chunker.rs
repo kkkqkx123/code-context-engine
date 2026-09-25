@@ -108,7 +108,7 @@ impl GroupChunker {
             splitter: &self.splitter,
         };
 
-        if !bm25_text.is_empty() {
+        if !bm25_text.trim().is_empty() {
             let input = ChunkInput {
                 infra: &infra,
                 group,
@@ -132,7 +132,7 @@ impl GroupChunker {
             splitter: &self.splitter,
         };
 
-        if !embedding_text.is_empty() {
+        if !embedding_text.trim().is_empty() {
             let input = ChunkInput {
                 infra: &infra,
                 group,
@@ -456,6 +456,16 @@ pub fn chunk_single_path(input: ChunkInput) -> Vec<ChunkedResult> {
     assert!(
         !segments.is_empty(),
         "over-limit text produced no segments (path={path}, strategy={strategy:?})"
+    );
+
+    // A chunk text must carry real content: whitespace-only text would be
+    // rejected by embedding providers with an opaque 400 and pollutes the
+    // index. Callers gate on `trim().is_empty()`; this catches segments that
+    // are still blank after splitting (a splitter/converter bug).
+    debug_assert!(
+        segments.iter().all(|s| !s.text.trim().is_empty()),
+        "blank segment produced for path={path}, group={}",
+        group.group_id
     );
 
     let fresh_tracker = GroupTracker::new();
