@@ -284,6 +284,37 @@ Math.max(1, 2);
 }
 
 #[test]
+fn javascript_hof_and_method_matches_collapse_to_one_edge() {
+    // Regression: `app.use(function(){})` is matched by both `call.method`
+    // (span = property identifier) and `call.hof` (span = whole member
+    // expression). The call site must yield exactly one edge, keeping the
+    // shorter property span so downstream span matching stays consistent.
+    let mut ast_parser = AstParser::new();
+    let entity_extractor = EntityExtractor::new();
+    let relation_extractor = RelationExtractor::new();
+
+    let code = "function main() {\n  app.use(function(){});\n}\n";
+    let tree = ast_parser
+        .parse_with_tree(code, &Language::JavaScript)
+        .expect("Failed to parse")
+        .0;
+    let entities = entity_extractor
+        .extract(&tree, code, &Language::JavaScript)
+        .expect("Failed to extract entities");
+    let relations = relation_extractor
+        .extract(&tree, code, &Language::JavaScript, &entities, Some(1))
+        .expect("Failed to extract relations");
+
+    let app_use: Vec<_> = relations
+        .iter()
+        .filter(|r| r.dst_name() == "app.use")
+        .collect();
+    assert_eq!(app_use.len(), 1, "expected one app.use edge");
+    let text = &code[app_use[0].span.start_byte..app_use[0].span.end_byte];
+    assert_eq!(text, "use", "callee span must cover the property name");
+}
+
+#[test]
 fn test_build_full_callee_name_trivial_receiver_falls_back() {
     // Regression: `this.method()` inside a JS method must still
     // produce `method` (the receiver is trivial) so local resolution

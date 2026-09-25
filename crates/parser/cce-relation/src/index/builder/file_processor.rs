@@ -324,7 +324,10 @@ impl<'a> FileProcessor<'a> {
                     && !Self::spans_close(&local_call.span, &raw_data.span)
                 {
                     tracing::warn!(
+                        file = %normalized_path,
                         caller = ?raw_data.src,
+                        raw_dst = %raw_data.dst_name,
+                        local_callee = %local_call.callee_name,
                         local_span = ?local_call.span,
                         raw_span = ?raw_data.span,
                         "Span mismatch: local_call and raw_relation overlap with different spans"

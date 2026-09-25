@@ -570,9 +570,24 @@ pub fn call_shared() -> &'static str {
 ; 6. Higher-Order Function Calls
 ; ============================================
 
+; The callee captures mirror `call.function` / `call.method` exactly (same
+; capture suffixes, same nodes) so an `f(cb)` / `obj.m(cb)` site yields one
+; edge after deduplication instead of two with divergent names and spans.
+
 ; Higher-order function call with arrow function argument
 (call_expression
-  function: (_) @call.hof.name
+  function: (identifier) @call.hof.name
+  arguments: (arguments
+    (arrow_function) @call.hof.callback
+  )
+) @call.hof.arrow
+
+; Higher-order method call with arrow function argument
+(call_expression
+  function: (member_expression
+    object: (_) @call.hof.method.object
+    property: (property_identifier) @call.hof.method.name
+  )
   arguments: (arguments
     (arrow_function) @call.hof.callback
   )
@@ -580,7 +595,18 @@ pub fn call_shared() -> &'static str {
 
 ; Higher-order function call with function expression argument
 (call_expression
-  function: (_) @call.hof.name
+  function: (identifier) @call.hof.name
+  arguments: (arguments
+    (function_expression) @call.hof.callback
+  )
+) @call.hof.function_expr
+
+; Higher-order method call with function expression argument
+(call_expression
+  function: (member_expression
+    object: (_) @call.hof.method.object
+    property: (property_identifier) @call.hof.method.name
+  )
   arguments: (arguments
     (function_expression) @call.hof.callback
   )

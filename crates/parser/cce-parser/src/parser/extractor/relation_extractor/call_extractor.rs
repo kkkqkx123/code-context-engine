@@ -92,11 +92,15 @@ pub(crate) fn process_call_match(
 
 /// Remove duplicate call edges for the same call site.
 ///
-/// Overlapping call patterns (e.g. Go's generic `call.callback` matching any
-/// `f(x)` alongside the precise `call.direct`) emit two edges with identical
-/// caller, callee and span. Keep one edge per
-/// `(caller, callee, span)`, preferring the more specific relation type so the
-/// call graph has no duplicate rows.
+/// Overlapping query patterns emit several edges for one call site: Go's
+/// generic `call.callback` matches any `f(x)` alongside the precise
+/// `call.direct`, and JS/TS `call.hof` captures the callee as a whole
+/// member expression (`app.use`) while `call.method` captures only the
+/// property identifier (`use`). Two edges belong to the same call site
+/// when they share caller and callee name and their spans overlap; keep
+/// one per site, preferring the higher-priority relation type and, on a
+/// tie, the shorter (more precise) span, so the call graph has no
+/// duplicate rows and downstream span matching stays consistent.
 pub(crate) fn deduplicate_call_relations(relations: &mut Vec<Relation>) {
     use std::collections::{HashMap, HashSet};
     if relations.len() <= 1 {
@@ -120,40 +124,62 @@ pub(crate) fn deduplicate_call_relations(relations: &mut Vec<Relation>) {
             _ => 2,
         }
     }
-    let mut best: HashMap<(i64, String, usize, usize), usize> = HashMap::new();
+    fn span_len(rel: &Relation) -> usize {
+        rel.span.end_byte.saturating_sub(rel.span.start_byte)
+    }
+
+    // Group call-relation indices by (caller, callee name).
+    let mut groups: HashMap<(i64, &str), Vec<usize>> = HashMap::new();
     for (idx, rel) in relations.iter().enumerate() {
-        if !rel.relation_type.is_call() {
+        if rel.relation_type.is_call() {
+            groups
+                .entry((rel.caller_id, rel.dst_name()))
+                .or_default()
+                .push(idx);
+        }
+    }
+
+    let mut drop: HashSet<usize> = HashSet::new();
+    for idxs in groups.values() {
+        if idxs.len() <= 1 {
             continue;
         }
-        let key = (
-            rel.caller_id,
-            rel.dst_name().to_string(),
-            rel.span.start_byte,
-            rel.span.end_byte,
-        );
-        match best.get(&key) {
-            Some(&prev) => {
-                if priority(&rel.relation_type) > priority(&relations[prev].relation_type) {
-                    best.insert(key, idx);
+        let mut sorted = idxs.clone();
+        sorted.sort_by_key(|&i| (relations[i].span.start_byte, relations[i].span.end_byte));
+        // Sweep the group in start order; consecutive spans that overlap
+        // form one call site.
+        let mut cluster: Vec<usize> = vec![sorted[0]];
+        let mut cluster_end = relations[sorted[0]].span.end_byte;
+        let finish = |cluster: &mut Vec<usize>, drop: &mut HashSet<usize>| {
+            let mut best = cluster[0];
+            for &i in &cluster[1..] {
+                let (pa, pb) = (
+                    priority(&relations[best].relation_type),
+                    priority(&relations[i].relation_type),
+                );
+                if pb > pa || (pb == pa && span_len(&relations[i]) < span_len(&relations[best])) {
+                    best = i;
                 }
             }
-            None => {
-                best.insert(key, idx);
+            drop.extend(cluster.iter().copied().filter(|&i| i != best));
+            cluster.clear();
+        };
+        for &i in &sorted[1..] {
+            if relations[i].span.start_byte > cluster_end {
+                finish(&mut cluster, &mut drop);
             }
+            cluster.push(i);
+            cluster_end = cluster_end.max(relations[i].span.end_byte);
         }
+        finish(&mut cluster, &mut drop);
     }
-    if best.len()
-        == relations
-            .iter()
-            .filter(|r| r.relation_type.is_call())
-            .count()
-    {
+
+    if drop.is_empty() {
         return;
     }
-    let keep: HashSet<usize> = best.into_values().collect();
     let mut kept = Vec::with_capacity(relations.len());
     for (idx, rel) in relations.drain(..).enumerate() {
-        if !rel.relation_type.is_call() || keep.contains(&idx) {
+        if !drop.contains(&idx) {
             kept.push(rel);
         }
     }

@@ -231,10 +231,12 @@ fn build_hof_callee_name(
     tree: &tree_sitter::Tree,
     source: &str,
 ) -> Option<String> {
-    // Try to find the HOF function name capture
-    if let Some(name) = utils::find_capture_by_name(&mat.captures, |name| {
-        name.ends_with(".hof.name") || name.ends_with(".hof.method.name")
-    }) {
+    // Try to find the HOF function name capture. A bare `.hof.name` is the
+    // whole (identifier) callee; `.hof.method.name` is only the method
+    // segment and must be combined with its receiver below.
+    if let Some(name) =
+        utils::find_capture_by_name(&mat.captures, |name| name.ends_with(".hof.name"))
+    {
         return ast_name_from_capture(name, tree, source)
             .or_else(|| Some(normalize_callee_name(&name.text)));
     }
