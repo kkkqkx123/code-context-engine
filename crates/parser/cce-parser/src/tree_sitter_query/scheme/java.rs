@@ -85,12 +85,13 @@ pub fn entity_query() -> &'static str {
 ; 2. Methods
 ; ============================================
 
-; Method definition
+; Method definition. The body is optional so interface abstract method
+; declarations (no `(block)` child) are extracted as entities too.
 (method_declaration
   type: (_) @entity.method.return_type
   name: (identifier) @entity.method.name
   parameters: (formal_parameters) @entity.method.params
-  body: (block) @entity.method.body
+  body: (block)? @entity.method.body
 ) @entity.method
 
 ; Constructor definition

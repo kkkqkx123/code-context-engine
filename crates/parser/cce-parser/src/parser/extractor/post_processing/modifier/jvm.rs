@@ -8,7 +8,13 @@ pub fn extract_jvm_modifiers(mat: &QueryMatch, entity: &mut Entity) {
         Some(c) => c,
         None => return,
     };
-    let text = &main_capture.text;
+    // Modifiers are declaration keywords; a type capture spans its whole body,
+    // so scanning past the opening brace would leak member visibility (e.g. a
+    // `private` field making the class itself read as `private class`).
+    let text = match main_capture.text.split_once('{') {
+        Some((header, _)) => header,
+        None => &main_capture.text,
+    };
     let tokens: Vec<String> = text
         .split_whitespace()
         .map(|t| {
@@ -129,5 +135,15 @@ mod tests {
         let m = make_match("private protected void foo() {");
         extract_jvm_modifiers(&m, &mut e);
         assert!(e.modifiers.contains(&"private protected".to_string()));
+    }
+
+    #[test]
+    fn jvm_extract_ignores_body_modifiers() {
+        let mut e = make_entity("UserApiController");
+        let m = make_match(
+            "public class UserApiController { private static final Logger log; protected void p() {} }",
+        );
+        extract_jvm_modifiers(&m, &mut e);
+        assert_eq!(e.modifiers, vec!["public".to_string()]);
     }
 }

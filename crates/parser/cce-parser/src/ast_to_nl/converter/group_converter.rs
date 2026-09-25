@@ -788,19 +788,25 @@ impl super::AstToNlConverter {
                 let mut member_result = self.convert_grouped(member, file_path, request);
                 // Member conversion runs without group context; re-attach the
                 // owner so chunk bodies carry `Group.member` for disambiguation.
-                if let Some(ref mut bm25) = member_result.bm25_text {
-                    *bm25 = super::entity_converter::qualify_member_head(
-                        &group.name,
-                        &member.name,
-                        bm25,
-                    );
-                }
-                if let Some(ref mut emb) = member_result.embedding_text {
-                    *emb = super::entity_converter::qualify_member_head(
-                        &group.name,
-                        &member.name,
-                        emb,
-                    );
+                // MergedFragments groups are named after their first fragment,
+                // which is not the owner of the remaining siblings — qualifying
+                // with it would fabricate a false relation (`getId.setName`),
+                // so those members keep their standalone names.
+                if group.group_type != cce_types::GroupType::MergedFragments {
+                    if let Some(ref mut bm25) = member_result.bm25_text {
+                        *bm25 = super::entity_converter::qualify_member_head(
+                            &group.name,
+                            &member.name,
+                            bm25,
+                        );
+                    }
+                    if let Some(ref mut emb) = member_result.embedding_text {
+                        *emb = super::entity_converter::qualify_member_head(
+                            &group.name,
+                            &member.name,
+                            emb,
+                        );
+                    }
                 }
                 results.push(member_result);
             }

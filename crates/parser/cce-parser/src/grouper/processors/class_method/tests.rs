@@ -324,6 +324,80 @@ fn test_getter_setter_with_field_name() {
 }
 
 #[test]
+fn test_query_method_is_not_a_property_accessor() {
+    // `getAllUsers()` matches the getter name heuristic but accesses no field
+    // and has no setter counterpart: it must stay a significant method and the
+    // class must not be reported as a data class.
+    let class_id = EntityId(0);
+    let mut class = Entity::new(
+        class_id,
+        EntityKind::Class,
+        "UserService".to_string(),
+        Span {
+            start_position: cce_types::Position { row: 0, column: 0 },
+            end_position: cce_types::Position { row: 20, column: 0 },
+            start_byte: 0,
+            end_byte: 500,
+        },
+    );
+
+    let field_id = EntityId(1);
+    let field = Entity::new(
+        field_id,
+        EntityKind::Field,
+        "userRepository".to_string(),
+        Span {
+            start_position: cce_types::Position { row: 2, column: 4 },
+            end_position: cce_types::Position { row: 2, column: 30 },
+            start_byte: 40,
+            end_byte: 80,
+        },
+    );
+
+    let query_id = EntityId(2);
+    let mut query = Entity::new(
+        query_id,
+        EntityKind::Method,
+        "getAllUsers".to_string(),
+        Span {
+            start_position: cce_types::Position { row: 10, column: 4 },
+            end_position: cce_types::Position { row: 12, column: 4 },
+            start_byte: 100,
+            end_byte: 200,
+        },
+    );
+    query.return_type = Some("List<User>".to_string());
+
+    class.children = vec![field_id, query_id];
+    let entities = vec![class, field, query];
+
+    let config = NestProcessorConfig {
+        enable_getter_setter_merging: true,
+        small_class_threshold: 100,
+        ..Default::default()
+    };
+
+    let parsed_file = ParsedFile::new(Language::Java, "UserService.java".to_string(), "");
+    let ctx = FileProcessingContext::new(&entities, &parsed_file, &config);
+
+    let processor = ClassMethodProcessor::new(&GetterSetterDetectionConfig::default());
+    let (groups, _) = processor.process(ctx);
+
+    assert_eq!(groups.len(), 1);
+    assert!(
+        matches!(groups[0].pattern_info, PatternInfo::None),
+        "Query method must not trigger the data-class pattern, got {:?}",
+        groups[0].pattern_info
+    );
+    assert!(
+        groups[0].members.iter().any(|m| m.name == "getAllUsers"),
+        "Query method should remain a member of the class group"
+    );
+    let role = get_member_role(&groups[0].member_roles, &query_id);
+    assert_eq!(role, Some(&MemberRole::SignificantMethod));
+}
+
+#[test]
 fn test_nested_entity_group_extraction() {
     let config = NestProcessorConfig {
         enable_nested_entity_grouping: true,

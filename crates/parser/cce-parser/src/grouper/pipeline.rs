@@ -248,9 +248,24 @@ impl PreprocessingPipeline {
         // Filter out low-value entities before any downstream processing.
         // This handles phantom nodes (zero/negative width) from tree-sitter
         // error recovery, zero-variant enums, and stub functions.
+        //
+        // Local variables inside a function body are also dropped here: their
+        // bytes stay covered by the enclosing group's span and source, while a
+        // standalone `variable x` group adds only zero-value fragments to the
+        // retrieval text. File-scope variables have no function-like parent
+        // and are kept.
+        let function_like_ids: std::collections::HashSet<_> = remaining_entities
+            .iter()
+            .filter(|e| e.kind.is_function_like())
+            .map(|e| e.id)
+            .collect();
         let filtered_entities: Vec<_> = remaining_entities
             .into_iter()
             .filter(|e| !should_skip_low_value_entity(e))
+            .filter(|e| {
+                !(e.kind == EntityKind::Variable
+                    && e.parent.is_some_and(|p| function_like_ids.contains(&p)))
+            })
             .collect();
 
         if self.config.enable_class_method_association && !filtered_entities.is_empty() {

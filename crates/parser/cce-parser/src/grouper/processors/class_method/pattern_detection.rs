@@ -15,7 +15,7 @@ impl ClassMethodProcessor {
     pub(super) fn apply_pattern_processing(
         &self,
         _class: &Entity,
-        _fields: &[&Entity],
+        fields: &[&Entity],
         methods: &[Entity],
         language: &Language,
         config: &NestProcessorConfig,
@@ -25,6 +25,11 @@ impl ClassMethodProcessor {
 
         // Track getter/setter properties for GetterSetterSummary
         let mut getter_setter_properties: Vec<String> = Vec::new();
+
+        // Lowercased sibling method names, used to recognize get/set pairs in
+        // languages where the backing field is not an extracted entity.
+        let method_names: std::collections::HashSet<String> =
+            methods.iter().map(|m| m.name.to_lowercase()).collect();
 
         // Process each method
         for method in methods {
@@ -56,7 +61,49 @@ impl ClassMethodProcessor {
                     .getter_setter_detector
                     .detect_method_type(method, language);
                 match method_type {
-                    MethodType::SimpleGetter | MethodType::SimpleSetter | MethodType::Property => {
+                    // A `getX`/`setX` name alone is not enough to call a method
+                    // an accessor: `getAllUsers()` reads like a getter but is a
+                    // query, not a field accessor. Treat it as a boilerplate
+                    // accessor only when it names an actual field of the class
+                    // or forms a get/set pair with a sibling method (some
+                    // languages expose no field entities). Otherwise keep it as
+                    // a significant method so the class is not misreported as a
+                    // data class.
+                    MethodType::SimpleGetter | MethodType::SimpleSetter => {
+                        let lowered = method.name.to_lowercase();
+                        let backed_field = self
+                            .getter_setter_detector
+                            .get_field_name(method)
+                            .filter(|field_name| {
+                                fields
+                                    .iter()
+                                    .any(|f| f.name.eq_ignore_ascii_case(field_name))
+                                    || match lowered.strip_prefix("get") {
+                                        Some(rest) => method_names.contains(&format!("set{rest}")),
+                                        None => match lowered.strip_prefix("set") {
+                                            Some(rest) => {
+                                                method_names.contains(&format!("get{rest}"))
+                                            }
+                                            None => false,
+                                        },
+                                    }
+                            });
+                        match backed_field {
+                            Some(field_name) => {
+                                if !getter_setter_properties.contains(&field_name) {
+                                    getter_setter_properties.push(field_name);
+                                }
+                                include_method = false;
+                                roles_builder.mark_boilerplate(method.id);
+                            }
+                            None => {
+                                roles_builder.mark_significant(method.id);
+                            }
+                        }
+                    }
+                    MethodType::Property => {
+                        // An explicit property declaration is always an accessor;
+                        // `get_field_name` still yields its underlying name.
                         if let Some(field_name) = self.getter_setter_detector.get_field_name(method)
                         {
                             if !getter_setter_properties.contains(&field_name) {
