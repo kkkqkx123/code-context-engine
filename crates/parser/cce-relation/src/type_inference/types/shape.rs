@@ -163,43 +163,15 @@ fn split_type_args(inner: &str) -> Vec<String> {
 
 /// Check if a name looks like a generic type parameter.
 ///
-/// Matches single uppercase letters (T, K, V, E, F) and common multi-letter
-/// parameter names (Value, Key, etc.).
+/// Matches any single uppercase letter (the dominant convention across
+/// Rust, Java, Kotlin and friends — real codebases use the full alphabet,
+/// e.g. `I: IntoIterator`, `P: Pattern`) and common multi-letter parameter
+/// names (Value, Key, etc.).
 fn is_type_param_name(name: &str) -> bool {
     if name.len() == 1 {
-        let is_upper = name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
-        if is_upper {
-            // Single-letter type params outside the well-known set (`T`/`K`/`V`/`E`/`F`
-            // etc.) are still accepted, but log a warning so unknown
-            // conventions are visible for future deterministic tightening.
-            // `F` is the standard PEP 484 Function TypeVar used by decorator
-            // identity annotations (`Callable[[F], F]`).
-            const KNOWN: &[&str] = &["T", "K", "V", "E", "U", "R", "A", "B", "C", "F"];
-            if !KNOWN.contains(&name) {
-                tracing::warn!(
-                    type_param = name,
-                    "unrecognized single-letter type param, treating as generic"
-                );
-            }
-        }
-        return is_upper;
+        return name.chars().next().is_some_and(|c| c.is_ascii_uppercase());
     }
-    matches!(
-        name,
-        "T" | "K"
-            | "V"
-            | "E"
-            | "U"
-            | "R"
-            | "A"
-            | "B"
-            | "C"
-            | "F"
-            | "Value"
-            | "Key"
-            | "Element"
-            | "Item"
-    )
+    matches!(name, "Value" | "Key" | "Element" | "Item")
 }
 
 /// Parse a type name string into a TypeShape.
