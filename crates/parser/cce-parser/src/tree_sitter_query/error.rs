@@ -6,7 +6,7 @@ use thiserror::Error;
 
 /// Error type for Tree-sitter query operations
 #[derive(Error, Debug)]
-pub enum QueryError {
+pub enum TreeSitterQueryError {
     /// Error from tree-sitter query execution
     #[error("Tree-sitter query error: {0}")]
     TreeSitter(String),
@@ -24,17 +24,17 @@ pub enum QueryError {
     InvalidQuery(String),
 }
 
-impl QueryError {
+impl TreeSitterQueryError {
     /// Create a tree-sitter error
     pub fn tree_sitter(msg: String) -> Self {
-        QueryError::TreeSitter(msg)
+        TreeSitterQueryError::TreeSitter(msg)
     }
 
     /// Create an unsupported language error
     pub fn unsupported_language(lang: String) -> Self {
-        QueryError::UnsupportedLanguage(lang)
+        TreeSitterQueryError::UnsupportedLanguage(lang)
     }
 }
 
 /// Result type alias for Tree-sitter query operations
-pub type Result<T> = std::result::Result<T, QueryError>;
+pub type Result<T> = std::result::Result<T, TreeSitterQueryError>;

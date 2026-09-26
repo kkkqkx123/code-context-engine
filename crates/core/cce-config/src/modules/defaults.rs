@@ -6,7 +6,10 @@ pub(crate) fn default_true() -> bool {
 }
 
 /// Default timeout in seconds for network requests.
-pub(crate) fn default_timeout() -> u64 {
+///
+/// Single source of truth for the request timeout default; the LLM client
+/// reuses this instead of defining its own.
+pub fn default_timeout() -> u64 {
     30
 }
 

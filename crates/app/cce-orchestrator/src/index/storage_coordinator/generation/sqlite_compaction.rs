@@ -120,7 +120,7 @@ pub(super) fn insert_entity_copies_tx(
                 entity.batch_id,
             ],
         )
-        .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+        .map_err(|error| cce_types::StorageError::insert("entities", error.to_string()))?;
         let new_id = tx.last_insert_rowid();
         entity_ids.insert(entity.old_id, new_id);
         parent_updates.push((new_id, entity.old_parent_id));
@@ -134,7 +134,7 @@ pub(super) fn insert_entity_copies_tx(
                 "UPDATE entities SET parent_id = ?1 WHERE id = ?2",
                 rusqlite::params![parent_new_id, new_id],
             )
-            .map_err(|error| cce_types::StorageError::update(error.to_string()))?;
+            .map_err(|error| cce_types::StorageError::update("entities", error.to_string()))?;
         }
     }
     Ok(entity_ids)
@@ -161,31 +161,47 @@ impl StorageCoordinator {
         // `chunks.file_path` carries the project-relative file path, while
         // `chunks.path` is the point-type marker ('emb'/'bm25'/'nl').
         let chunk_scope = format!(" AND file_path IN ({placeholders})");
-        for sql in [
-            format!(
-                "DELETE FROM entity_detail_mappings WHERE project_id = ?1 AND epoch = ?2 AND entity_id IN
-                 (SELECT id FROM entities WHERE project_id = ?1 AND epoch = ?2 AND file_id IN
-                  (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2{scope}))"
+        for (table, sql) in [
+            (
+                "entity_detail_mappings",
+                format!(
+                    "DELETE FROM entity_detail_mappings WHERE project_id = ?1 AND epoch = ?2 AND entity_id IN
+                     (SELECT id FROM entities WHERE project_id = ?1 AND epoch = ?2 AND file_id IN
+                     (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2{scope}))"
+                ),
             ),
-            format!("DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2{chunk_scope}"),
-            format!(
-                "DELETE FROM file_summaries WHERE epoch = ?2 AND file_id IN
-                 (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2{scope})"
+            (
+                "chunks",
+                format!("DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2{chunk_scope}"),
             ),
-            format!(
-                "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2 AND file_id IN
-                 (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2{scope})"
+            (
+                "file_summaries",
+                format!(
+                    "DELETE FROM file_summaries WHERE epoch = ?2 AND file_id IN
+                     (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2{scope})"
+                ),
             ),
-            format!("DELETE FROM files WHERE project_id = ?1 AND epoch = ?2{scope}"),
+            (
+                "entities",
+                format!(
+                    "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2 AND file_id IN
+                     (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2{scope})"
+                ),
+            ),
+            (
+                "files",
+                format!("DELETE FROM files WHERE project_id = ?1 AND epoch = ?2{scope}"),
+            ),
         ] {
             let mut params: Vec<&dyn rusqlite::ToSql> = vec![&project_id, &target_epoch];
             for path in paths {
                 params.push(path);
             }
             tx.execute(&sql, params.as_slice()).map_err(|error| {
-                cce_types::StorageError::delete(format!(
-                    "failed to clear materialization residue: {error}"
-                ))
+                cce_types::StorageError::delete(
+                    table,
+                    format!("failed to clear materialization residue: {error}"),
+                )
             })?;
         }
         Ok(())
@@ -308,7 +324,7 @@ impl StorageCoordinator {
                             batch_id,
                         ],
                     )
-                    .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))?;
                     file_ids.insert(old_id, tx.last_insert_rowid());
                 }
 
@@ -395,7 +411,7 @@ impl StorageCoordinator {
                             updated_at,
                         ],
                     )
-                    .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::insert("entity_detail_mappings", error.to_string()))?;
                 }
 
                 // Chunks of non-overridden files only: overridden files own
@@ -421,7 +437,7 @@ impl StorageCoordinator {
                 {
                     let mut statement = tx
                         .prepare(&chunks_sql)
-                        .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                        .map_err(|error| cce_types::StorageError::insert("chunks", error.to_string()))?;
                     let mut params: Vec<&dyn rusqlite::ToSql> =
                         vec![&self.project_id, &target_epoch, &source_epoch];
                     for path in excluded_paths {
@@ -429,7 +445,7 @@ impl StorageCoordinator {
                     }
                     statement
                         .execute(params.as_slice())
-                        .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                        .map_err(|error| cce_types::StorageError::insert("chunks", error.to_string()))?;
                 }
 
                 let summaries = {
@@ -493,7 +509,7 @@ impl StorageCoordinator {
                             updated_at,
                         ],
                     )
-                    .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::insert("file_summaries", error.to_string()))?;
                 }
                 Ok(())
             })

@@ -192,9 +192,10 @@ impl OpenAICompatibleProvider {
             LlmError::InvalidInput(_) | LlmError::InvalidResponse(_) => {
                 EmbeddingErrorType::InvalidRequest
             }
-            LlmError::ModelNotFound(_) | LlmError::Http(_) | LlmError::Api(_) => {
-                EmbeddingErrorType::ServiceUnavailable
-            }
+            LlmError::ModelNotFound(_)
+            | LlmError::Http(_)
+            | LlmError::Api(_)
+            | LlmError::CircuitBreakerOpen(_) => EmbeddingErrorType::ServiceUnavailable,
             LlmError::HttpStatus { status, .. } if (500..=599).contains(status) => {
                 EmbeddingErrorType::ServiceUnavailable
             }

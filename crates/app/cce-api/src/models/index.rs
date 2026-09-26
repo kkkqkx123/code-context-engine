@@ -24,6 +24,17 @@ pub struct IndexResponse {
     pub files_scanned: usize,
     pub files_indexed: usize,
     pub failed_files: usize,
+    /// Files that completed "successfully" but produced degraded content
+    /// (lossy decode, zero entities/chunks, or a transient summary fallback).
+    #[serde(default)]
+    pub degraded_files: usize,
+    /// Files with deterministic failures skipped without retry.
+    #[serde(default)]
+    pub skipped_permanent: usize,
+    /// Whether a backend circuit breaker (vector store or LLM service)
+    /// opened during this run.
+    #[serde(default)]
+    pub circuit_open: bool,
     pub total_entities: usize,
     pub total_relations: usize,
     pub total_vectors: usize,

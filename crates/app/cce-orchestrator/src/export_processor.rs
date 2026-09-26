@@ -364,7 +364,7 @@ impl NlDocumentUpdateProcessor {
         &self,
         parse_result: &ParseResultWithChanges,
         processing_result: Option<&ProcessingResult>,
-    ) -> Vec<cce_parser::ast_to_nl::chunker::ChunkedResult> {
+    ) -> anyhow::Result<Vec<cce_parser::ast_to_nl::chunker::ChunkedResult>> {
         export_staging::extract_chunks_from_parse_result(
             &self.converter,
             &self.chunker,
@@ -541,9 +541,27 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
                             "Failed to stage via direct exporter, falling back to chunking"
                         );
                     }
-                    let chunks = self
+                    let chunks = match self
                         .extract_chunks_from_parse_result(parse_result, render_groups.as_ref())
-                        .await;
+                        .await
+                    {
+                        Ok(chunks) => chunks,
+                        Err(e) => {
+                            failed_modules.push(ModuleFailure {
+                                file_path: path_str.clone(),
+                                module_name: "export".to_string(),
+                                error: e.to_string(),
+                                retry_count: 0,
+                                next_retry_time: None,
+                            });
+                            tracing::error!(
+                                path = %parse_result.file_path.display(),
+                                error = %e,
+                                "Failed to chunk file for export"
+                            );
+                            continue;
+                        }
+                    };
                     let source = &*parse_result.parsed_file.source;
                     self.stage_file_update(
                         &parse_result.file_path,

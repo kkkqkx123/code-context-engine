@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::parser::extractor::utils::extract_text_without_comments;
 use crate::tree_sitter_query::capture::control::{extract_control_kind, is_main_control_capture};
-use crate::tree_sitter_query::error::QueryError;
+use crate::tree_sitter_query::error::TreeSitterQueryError;
 use crate::tree_sitter_query::executor::{QueryExecutor, QueryMatch};
 use cce_types::language::Language;
 use cce_types::{ControlFlowFact, ControlFlowFactKind, ControlFlowStore, Entity, EntityId};
@@ -67,7 +67,7 @@ impl ControlFlowExtractor {
         language: &Language,
         entities: &[Entity],
         control_flow: &mut ControlFlowStore,
-    ) -> Result<(), QueryError> {
+    ) -> Result<(), TreeSitterQueryError> {
         if !Self::supports_language(language) {
             return Ok(());
         }

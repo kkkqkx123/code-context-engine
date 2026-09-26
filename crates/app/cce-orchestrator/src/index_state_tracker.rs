@@ -201,7 +201,9 @@ impl UpdateStateTracker {
                 ],
             )
             .map(|_| ())
-            .map_err(|error| cce_types::StorageError::Insert(error.to_string()))
+            .map_err(|error| {
+                cce_types::StorageError::insert("index_state_projection", error.to_string())
+            })
         });
         if let Err(error) = result {
             tracing::warn!(%error, file = %state.file_path, "Failed to persist index state");
@@ -225,7 +227,9 @@ impl UpdateStateTracker {
                 rusqlite::params![self.project_id, operation_id, file_path],
             )
             .map(|_| ())
-            .map_err(|error| cce_types::StorageError::Delete(error.to_string()))
+            .map_err(|error| {
+                cce_types::StorageError::delete("index_state_projection", error.to_string())
+            })
         });
         if let Err(error) = result {
             tracing::warn!(%error, file = %file_path, "Failed to delete persisted index state");
@@ -1057,7 +1061,7 @@ mod tests {
                 ModuleType::Embedding,
                 TrackerFailure {
                     message: "Token limit exceeded: 9000 > 8192".to_string(),
-                    code: Some(TOKEN_LIMIT_ERROR_CODE),
+                    code: Some(TOKEN_LIMIT_ERROR_CODE.to_string()),
                     retryable: false,
                 },
             )
@@ -1084,7 +1088,7 @@ mod tests {
                     ModuleType::Bm25,
                     TrackerFailure {
                         message: "Token limit exceeded: 9000 > 8192".to_string(),
-                        code: Some(TOKEN_LIMIT_ERROR_CODE),
+                        code: Some(TOKEN_LIMIT_ERROR_CODE.to_string()),
                         retryable: false,
                     },
                 )

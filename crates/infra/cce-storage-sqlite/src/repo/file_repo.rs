@@ -44,7 +44,7 @@ impl FileRepository {
                 file.project_id,
                 file.content_hash
             ],
-            "file",
+            "files",
         )
     }
 
@@ -69,7 +69,7 @@ impl FileRepository {
                     file.content_hash
                 ],
             )
-            .map_err(|e| StorageError::insert(format!("Failed to insert file: {}", e)))?;
+            .map_err(|e| StorageError::insert("files", format!("Failed to insert file: {e}")))?;
 
         Ok(if inserted == 0 {
             0
@@ -107,7 +107,7 @@ impl FileRepository {
             "INSERT INTO files (path, language, category, last_modified, created_at, project_id, content_hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             &param_list,
-            "file",
+            "files",
         )
     }
 
@@ -206,7 +206,7 @@ impl FileRepository {
             tx,
             "UPDATE files SET last_modified = ?1 WHERE id = ?2",
             params![last_modified, id],
-            "update file",
+            "files",
         )
     }
 
@@ -221,7 +221,7 @@ impl FileRepository {
             tx,
             "UPDATE files SET content_hash = ?1 WHERE path = ?2 AND project_id = ?3",
             params![content_hash, path, project_id],
-            "update file content hash",
+            "files",
         )
     }
 
@@ -253,7 +253,7 @@ impl FileRepository {
                 epoch,
             ],
         )
-        .map_err(|e| StorageError::insert(format!("Failed to insert file record for epoch: {}", e)))?;
+        .map_err(|e| StorageError::insert("files", format!("Failed to insert file record for epoch: {e}")))?;
 
         Ok(())
     }
@@ -273,7 +273,9 @@ impl FileRepository {
                 "UPDATE files SET content_hash = ?1 WHERE path = ?2 AND project_id = ?3",
                 params![content_hash, path_str.as_ref(), project_id],
             )
-            .map_err(|e| StorageError::update(format!("Failed to update file hash: {}", e)))?;
+            .map_err(|e| {
+                StorageError::update("files", format!("Failed to update file hash: {e}"))
+            })?;
 
         if updated == 0 {
             let now = chrono::Utc::now().timestamp();
@@ -288,7 +290,7 @@ impl FileRepository {
                     project_id,
                     content_hash,
                 ],
-            ).map_err(|e| StorageError::insert(format!("Failed to insert file record: {}", e)))?;
+            ).map_err(|e| StorageError::insert("files", format!("Failed to insert file record: {e}")))?;
         }
 
         Ok(())
@@ -343,12 +345,7 @@ impl FileRepository {
 
     /// Delete a file by ID
     pub fn delete(tx: &rusqlite::Transaction, id: i64) -> Result<(), StorageError> {
-        execute_update(
-            tx,
-            "DELETE FROM files WHERE id = ?1",
-            params![id],
-            "delete file",
-        )
+        execute_update(tx, "DELETE FROM files WHERE id = ?1", params![id], "files")
     }
 
     /// Delete a file by path (project-scoped)
@@ -361,7 +358,7 @@ impl FileRepository {
             tx,
             "DELETE FROM files WHERE path = ?1 AND project_id = ?2",
             params![path, project_id],
-            "delete file",
+            "files",
         )
     }
 
@@ -376,7 +373,7 @@ impl FileRepository {
             tx,
             "DELETE FROM files WHERE path = ?1 AND project_id = ?2 AND epoch = ?3",
             params![path, project_id, epoch],
-            "delete file at epoch",
+            "files",
         )
     }
 

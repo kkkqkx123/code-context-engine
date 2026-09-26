@@ -37,8 +37,6 @@ pub struct SummaryConfig {
     pub max_retries: usize,
     /// Timeout for LLM requests in seconds (0 means no timeout)
     pub request_timeout_secs: u64,
-    /// Whether to enable graceful degradation when LLM fails
-    pub enable_graceful_degradation: bool,
 }
 
 impl SummaryConfig {
@@ -69,7 +67,6 @@ impl Default for SummaryConfig {
             max_concurrent: 5,
             max_retries: 3,
             request_timeout_secs: 30,
-            enable_graceful_degradation: true,
         }
     }
 }
@@ -88,7 +85,6 @@ mod tests {
         assert_eq!(config.max_concurrent, 5);
         assert_eq!(config.max_retries, 3);
         assert_eq!(config.request_timeout_secs, 30);
-        assert!(config.enable_graceful_degradation);
     }
 
     #[test]

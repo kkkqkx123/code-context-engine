@@ -58,10 +58,6 @@ pub enum OrchestratorError {
     /// Hot update error - hot update operation failures
     #[error("Hot update error: {operation} - {reason}")]
     HotUpdate { operation: String, reason: String },
-
-    /// Scan error - file scanning failures
-    #[error("Scan error: {path} - {reason}")]
-    Scan { path: String, reason: String },
 }
 
 impl OrchestratorError {
@@ -96,23 +92,15 @@ impl OrchestratorError {
         }
     }
 
-    /// Create a scan error
-    pub fn scan(path: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::Scan {
-            path: path.into(),
-            reason: reason.into(),
-        }
-    }
-
-    /// Whether this error is the vector store rejecting an operation because
-    /// its circuit breaker is open. Surfaced on the index result so callers
-    /// can distinguish an outage from per-file failures.
+    /// Whether this error means a backend rejected the operation because its
+    /// circuit breaker is open (vector store or LLM provider). Surfaced on the
+    /// index result so callers can distinguish an outage from per-file failures.
     pub fn is_circuit_open(&self) -> bool {
         matches!(
             self,
             Self::Storage(cce_types::error::StorageError::Qdrant(
                 cce_types::error::QdrantError::CircuitBreakerOpen(_)
-            ))
+            )) | Self::Llm(cce_llm_client::LlmError::CircuitBreakerOpen(_))
         )
     }
 
@@ -131,21 +119,31 @@ impl OrchestratorError {
             Self::Merge { .. } => "merge_error",
             Self::Cache { .. } => "cache_error",
             Self::HotUpdate { .. } => "hot_update_error",
-            Self::Scan { .. } => "scan_error",
         }
     }
 
     /// Project this error into a classified module failure for the state
     /// tracker. Retryability matches the file-level transient/permanent split
     /// (`is_transient`), and typed inner errors keep their stable error code
-    /// (the token limit code drives dead-letter truncate eligibility).
+    /// so dead-letter reports can aggregate by code and recovery routing can
+    /// act on it (the token limit code drives truncate eligibility).
     pub fn as_module_failure(&self) -> crate::index_state::TrackerFailure {
         use crate::index_state::TrackerFailure;
         TrackerFailure {
             message: self.to_string(),
             code: match self {
-                Self::Llm(err) => Some(err.error_code()),
-                _ => None,
+                Self::Llm(err) => Some(err.error_code().to_string()),
+                Self::Parse(err) => Some(err.error_code().to_string()),
+                Self::Storage(err) => Some(err.error_code().to_string()),
+                Self::Scanner(err) => Some(err.error_code().to_string()),
+                Self::Query(err) => Some(err.error_code().to_string()),
+                Self::Config(err) => Some(err.error_code().to_string()),
+                Self::NotFound(_) => Some("ORCH_NOT_FOUND_ERROR".to_string()),
+                Self::Timeout(_) => Some("ORCH_TIMEOUT_ERROR".to_string()),
+                Self::Index { .. } => Some("ORCH_INDEX_ERROR".to_string()),
+                Self::Cache { .. } => Some("ORCH_CACHE_ERROR".to_string()),
+                Self::HotUpdate { .. } => Some("ORCH_HOT_UPDATE_ERROR".to_string()),
+                Self::Merge { .. } => Some("ORCH_MERGE_ERROR".to_string()),
             },
             retryable: self.is_transient(),
         }
@@ -162,18 +160,18 @@ impl ErrorClassify for OrchestratorError {
             Self::Parse(err) => err.is_transient(),
             Self::Llm(err) => err.is_transient(),
             Self::Scanner(err) => err.is_transient(),
+            Self::Storage(err) => err.is_transient(),
+            Self::Query(err) => err.is_transient(),
             Self::Timeout(_) => true,
-            Self::Config(_) | Self::NotFound(_) | Self::Query(_) => false,
-            // Storage and string-reason orchestrator variants on a per-file
-            // path are infrastructure faults (checkpoint writes, spool I/O),
-            // never deterministic content failures: keep them retryable so a
-            // file is only skipped when its own content caused the failure.
-            Self::Storage(_)
-            | Self::Index { .. }
+            Self::Config(_) | Self::NotFound(_) => false,
+            // String-reason orchestrator variants are infrastructure faults
+            // recorded during batch bookkeeping (checkpoint writes, spool I/O,
+            // merge passes), never deterministic content failures, so a file
+            // is only skipped when its own content caused the failure.
+            Self::Index { .. }
             | Self::Cache { .. }
             | Self::HotUpdate { .. }
-            | Self::Merge { .. }
-            | Self::Scan { .. } => true,
+            | Self::Merge { .. } => true,
         }
     }
 
@@ -227,8 +225,11 @@ mod tests {
         assert!(err.to_string().contains("update"));
         assert!(err.to_string().contains("test reason"));
 
-        let err = OrchestratorError::scan("/test/path", "test reason");
-        assert!(matches!(err, OrchestratorError::Scan { .. }));
+        let err = OrchestratorError::Scanner(cce_scanner::ScannerError::scan(
+            "/test/path",
+            "test reason",
+        ));
+        assert!(matches!(err, OrchestratorError::Scanner(_)));
         assert!(err.to_string().contains("/test/path"));
         assert!(err.to_string().contains("test reason"));
     }
@@ -249,8 +250,9 @@ mod tests {
             "hot_update_error"
         );
         assert_eq!(
-            OrchestratorError::scan("test", "test").error_type(),
-            "scan_error"
+            OrchestratorError::Scanner(cce_scanner::ScannerError::scan("test", "test"))
+                .error_type(),
+            "scanner_error"
         );
     }
 
@@ -267,9 +269,17 @@ mod tests {
             OrchestratorError::Parse(cce_types::error::ParseError::from(transient_io))
                 .is_transient()
         );
-        // Storage faults are infrastructure and always retryable at file level.
+        // Transient storage faults stay retryable at file level.
         let plain = OrchestratorError::Storage(cce_types::error::StorageError::sqlite("locked"));
         assert!(plain.is_transient());
+        // Regression: a content-level NotFound surfacing on a per-file path
+        // must classify as permanent, not burn retries before dead-lettering.
+        let not_found = OrchestratorError::Storage(cce_types::error::StorageError::not_found(
+            "missing work unit",
+        ));
+        assert!(not_found.is_permanent());
+        assert!(!not_found.is_transient());
+        assert!(!not_found.as_module_failure().retryable);
         // String-reason orchestrator variants stay retryable by default.
         assert!(OrchestratorError::index("op", "reason").is_transient());
     }
@@ -285,6 +295,12 @@ mod tests {
             cce_types::error::QdrantError::request("connection reset"),
         ));
         assert!(!other.is_circuit_open());
+
+        let llm = OrchestratorError::Llm(cce_llm_client::LlmError::circuit_breaker_open("open"));
+        assert!(llm.is_circuit_open());
+
+        let llm_other = OrchestratorError::Llm(cce_llm_client::LlmError::http("connection reset"));
+        assert!(!llm_other.is_circuit_open());
     }
 
     #[test]
@@ -292,12 +308,33 @@ mod tests {
         let err =
             OrchestratorError::Llm(cce_llm_client::LlmError::token_limit_exceeded(9000, 8192));
         let failure = err.as_module_failure();
-        assert_eq!(failure.code, Some("LLM_TOKEN_LIMIT_EXCEEDED_ERROR"));
+        assert_eq!(
+            failure.code.as_deref(),
+            Some("LLM_TOKEN_LIMIT_EXCEEDED_ERROR")
+        );
         assert!(!failure.retryable);
 
         let storage = OrchestratorError::Storage(cce_types::error::StorageError::sqlite("locked"));
         let failure = storage.as_module_failure();
         assert!(failure.retryable);
-        assert_eq!(failure.code, None);
+        assert_eq!(failure.code.as_deref(), Some("STORAGE_SQLITE_ERROR"));
+    }
+
+    #[test]
+    fn module_failure_projection_covers_all_variants() {
+        let query = OrchestratorError::Query(crate::query::QueryError::not_found("missing".into()));
+        let failure = query.as_module_failure();
+        assert_eq!(failure.code.as_deref(), Some("QUERY_NOT_FOUND"));
+        assert!(!failure.retryable);
+
+        let config = OrchestratorError::Config(ConfigError::missing_env_var("CCE_KEY"));
+        let failure = config.as_module_failure();
+        assert_eq!(failure.code.as_deref(), Some("CONFIG_MISSING_ENV_VAR"));
+        assert!(!failure.retryable);
+
+        let index = OrchestratorError::index("op", "reason");
+        let failure = index.as_module_failure();
+        assert_eq!(failure.code.as_deref(), Some("ORCH_INDEX_ERROR"));
+        assert!(failure.retryable);
     }
 }

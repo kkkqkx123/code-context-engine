@@ -25,7 +25,7 @@ pub struct LlmConfig {
     pub endpoints: HashMap<ServiceType, String>,
 
     /// Request timeout in seconds
-    #[serde(default = "default_timeout")]
+    #[serde(default = "cce_config::modules::defaults::default_timeout")]
     pub timeout_secs: u64,
 
     /// Maximum retry attempts
@@ -92,10 +92,6 @@ pub struct EmbeddingConfig {
 pub use cce_llm::{ChatConfig, ResponseFormat};
 
 // Default value functions
-fn default_timeout() -> u64 {
-    60
-}
-
 fn default_max_retries() -> u32 {
     3
 }
@@ -214,7 +210,7 @@ impl Default for LlmConfig {
             api_keys: Vec::new(),
             base_url: String::new(),
             endpoints: HashMap::new(),
-            timeout_secs: default_timeout(),
+            timeout_secs: cce_config::modules::defaults::default_timeout(),
             max_retries: default_max_retries(),
             retry_delay_ms: default_retry_delay(),
             retry_jitter: default_retry_jitter(),

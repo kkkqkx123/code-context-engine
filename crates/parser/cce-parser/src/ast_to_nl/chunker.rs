@@ -114,7 +114,7 @@ mod test;
 // Re-export main types
 pub use boundary::{ChunkBoundary, NlEntityBoundary, SplitReason};
 pub use cce_config::modules::ChunkingConfig;
-pub use chunker::GroupChunker;
+pub use chunker::{ChunkOutput, GroupChunker};
 pub use overlap::OverlapManager;
 pub use result::{
     ChunkContentType, ChunkMetadata, ChunkPath, ChunkedResult, CodeSpecificMetadata, GroupRelation,

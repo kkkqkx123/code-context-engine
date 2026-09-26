@@ -39,9 +39,9 @@ pub struct IndexResult {
     pub total_vectors: usize,
     /// Total tokens used for embedding
     pub total_tokens: u64,
-    /// Whether the vector store circuit breaker opened during this run,
-    /// meaning vector writes were rejected by an outage rather than by
-    /// per-file content failures.
+    /// Whether a backend circuit breaker (vector store or LLM service)
+    /// opened during this run, meaning writes or summaries were rejected by
+    /// an outage rather than by per-file content failures.
     pub circuit_open: bool,
     /// Execution outcome (Success or Incomplete)
     pub outcome: IndexExecutionOutcome,
@@ -109,7 +109,7 @@ impl IndexResult {
             self.elapsed_ms
         );
         if self.circuit_open {
-            summary.push_str(" (vector-store circuit breaker open)");
+            summary.push_str(" (circuit breaker open)");
         }
         summary
     }

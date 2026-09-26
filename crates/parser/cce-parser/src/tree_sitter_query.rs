@@ -22,7 +22,7 @@ pub(crate) mod utils;
 pub use capture::entity_name;
 pub use capture::entity_name_with_subtype;
 
-pub use error::{QueryError, Result};
+pub use error::{Result, TreeSitterQueryError};
 pub use executor::{Capture, QueryExecutor, QueryMatch};
 pub use loader::{QueryLoader, QueryType};
 

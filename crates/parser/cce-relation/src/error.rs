@@ -2,7 +2,7 @@
 //!
 //! Provides detailed error types for different failure scenarios.
 
-use cce_types::EntityId;
+use cce_types::{EntityId, error::common::ErrorClassify};
 use thiserror::Error;
 
 /// Relation module error
@@ -145,6 +145,22 @@ impl RelationQueryError {
     /// Create invalid error (alias for invalid_query)
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::InvalidQuery(message.into())
+    }
+}
+
+impl ErrorClassify for RelationQueryError {
+    // Relation queries are deterministic reads over the in-memory graph and
+    // published snapshot; none of these failures clear up on their own.
+    fn is_retryable(&self) -> bool {
+        false
+    }
+
+    fn is_transient(&self) -> bool {
+        false
+    }
+
+    fn is_permanent(&self) -> bool {
+        true
     }
 }
 

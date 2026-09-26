@@ -66,7 +66,7 @@ impl GenerationOverrideRepository {
                 disposition = excluded.disposition",
             params![project_id, epoch, file_path, disposition.as_str()],
         )
-        .map_err(|error| StorageError::Insert(error.to_string()))?;
+        .map_err(|error| StorageError::insert("generation_overrides", error.to_string()))?;
         Ok(())
     }
 
@@ -109,7 +109,7 @@ impl GenerationOverrideRepository {
             "DELETE FROM generation_overrides WHERE project_id = ?1 AND epoch = ?2",
             params![project_id, epoch],
         )
-        .map_err(|error| StorageError::Delete(error.to_string()))?;
+        .map_err(|error| StorageError::delete("generation_overrides", error.to_string()))?;
         Ok(())
     }
 }

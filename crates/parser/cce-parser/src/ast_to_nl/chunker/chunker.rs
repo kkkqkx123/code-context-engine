@@ -27,10 +27,36 @@
 use crate::grouper::EntityGroup;
 use cce_plugin::CodePlugin;
 use cce_types::ConversionResult;
+use cce_types::ParseError;
 use cce_types::Span;
 use cce_types::entity::EntityId;
 use cce_utils::token_estimation::TokenEstimator;
 use std::sync::Arc;
+
+/// Output of one chunking unit (a single text path, a group, or a whole file).
+///
+/// `dropped_blank_segments` counts segments the splitter produced as
+/// whitespace-only and had to drop: content loss that must surface as a
+/// degraded file rather than stay invisible behind a warn log.
+#[derive(Debug, Default)]
+pub struct ChunkOutput {
+    pub chunks: Vec<ChunkedResult>,
+    pub dropped_blank_segments: usize,
+}
+
+impl ChunkOutput {
+    pub(crate) fn with_chunks(chunks: Vec<ChunkedResult>) -> Self {
+        Self {
+            chunks,
+            dropped_blank_segments: 0,
+        }
+    }
+
+    pub(crate) fn absorb(&mut self, other: ChunkOutput) {
+        self.chunks.extend(other.chunks);
+        self.dropped_blank_segments += other.dropped_blank_segments;
+    }
+}
 
 /// (Before-builtin, below-builtin fallback) override-tier chunks.
 type OverridePlugins = (Vec<Arc<dyn CodePlugin>>, Vec<Arc<dyn CodePlugin>>);
@@ -93,13 +119,13 @@ impl GroupChunker {
         group: &EntityGroup,
         conversion: &ConversionResult,
         file_path: &str,
-    ) -> Vec<ChunkedResult> {
+    ) -> Result<ChunkOutput, ParseError> {
         self.tracker.record_group(group);
 
         let bm25_text = conversion.bm25_text.clone().unwrap_or_default();
         let embedding_text = conversion.embedding_text.clone().unwrap_or_default();
 
-        let mut all_chunks = Vec::new();
+        let mut all_chunks = ChunkOutput::default();
         let strategy = SplitStrategy::for_group_type(group.group_type);
 
         let infra = ChunkInfrastructure {
@@ -120,11 +146,10 @@ impl GroupChunker {
                 nl_boundaries: None,
                 header_mode: None,
             };
-            let bm25_chunks = chunk_single_path(input);
-            all_chunks.extend(bm25_chunks);
+            all_chunks.absorb(chunk_single_path(input)?);
         }
 
-        let bm25_count = all_chunks.len();
+        let bm25_count = all_chunks.chunks.len();
 
         let infra = ChunkInfrastructure {
             config: &self.config,
@@ -144,23 +169,22 @@ impl GroupChunker {
                 nl_boundaries: None,
                 header_mode: None,
             };
-            let embedding_chunks = chunk_single_path(input);
-            all_chunks.extend(embedding_chunks);
+            all_chunks.absorb(chunk_single_path(input)?);
         }
 
-        let total = all_chunks.len();
+        let total = all_chunks.chunks.len();
         if bm25_count > 0 {
             self.overlap_manager
-                .apply_overlap(&mut all_chunks[..bm25_count], ChunkPath::Bm25);
+                .apply_overlap(&mut all_chunks.chunks[..bm25_count], ChunkPath::Bm25);
         }
         if bm25_count < total {
             self.overlap_manager
-                .apply_overlap(&mut all_chunks[bm25_count..], ChunkPath::Embedding);
+                .apply_overlap(&mut all_chunks.chunks[bm25_count..], ChunkPath::Embedding);
         }
 
-        add_relations(&self.tracker, &mut all_chunks);
+        add_relations(&self.tracker, &mut all_chunks.chunks);
 
-        all_chunks
+        Ok(all_chunks)
     }
 
     /// Process entity group with multiple conversions
@@ -174,7 +198,7 @@ impl GroupChunker {
         group: &EntityGroup,
         group_conversions: &crate::ast_to_nl::converter::GroupConversions,
         file_path: &str,
-    ) -> Vec<ChunkedResult> {
+    ) -> Result<ChunkOutput, ParseError> {
         let infra = ChunkInfrastructure {
             config: &self.config,
             estimator: &self.estimator,
@@ -205,7 +229,7 @@ impl GroupChunker {
         &mut self,
         group_conversions: &[crate::ast_to_nl::converter::GroupConversions],
         file_path: &str,
-    ) -> Vec<ChunkedResult> {
+    ) -> Result<ChunkOutput, ParseError> {
         self.tracker.reset();
 
         // Plugin `Chunk` override: the first matching plugin replaces the
@@ -233,17 +257,17 @@ impl GroupChunker {
 
         if let Some((above, below)) = override_plugins {
             if let Some(chunks) = self.try_plugin_chunk(group_conversions, file_path, &above) {
-                return chunks;
+                return Ok(ChunkOutput::with_chunks(chunks));
             }
 
-            let builtin = self.chunk_groups_builtin(group_conversions, file_path);
+            let builtin = self.chunk_groups_builtin(group_conversions, file_path)?;
 
-            if builtin.is_empty() {
+            if builtin.chunks.is_empty() {
                 if let Some(chunks) = self.try_plugin_chunk(group_conversions, file_path, &below) {
-                    return chunks;
+                    return Ok(ChunkOutput::with_chunks(chunks));
                 }
             }
-            return builtin;
+            return Ok(builtin);
         }
 
         self.chunk_groups_builtin(group_conversions, file_path)
@@ -254,16 +278,16 @@ impl GroupChunker {
         &mut self,
         group_conversions: &[crate::ast_to_nl::converter::GroupConversions],
         file_path: &str,
-    ) -> Vec<ChunkedResult> {
-        let mut all_chunks = Vec::new();
+    ) -> Result<ChunkOutput, ParseError> {
+        let mut all_chunks = ChunkOutput::default();
         let groups: Vec<EntityGroup> = group_conversions
             .iter()
             .map(|gc| gc.group.clone())
             .collect();
 
         for gc in group_conversions {
-            let chunks = self.chunk_group_with_conversions(&gc.group, gc, file_path);
-            all_chunks.extend(chunks);
+            let chunks = self.chunk_group_with_conversions(&gc.group, gc, file_path)?;
+            all_chunks.absorb(chunks);
         }
 
         let group_spans: std::collections::HashMap<String, Span> = groups
@@ -272,15 +296,18 @@ impl GroupChunker {
             .collect();
 
         let mut emb_chunks: Vec<ChunkedResult> = all_chunks
+            .chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
             .cloned()
             .collect();
         let mut bm25_chunks: Vec<ChunkedResult> = all_chunks
+            .chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
             .cloned()
             .collect();
+        let dropped_blank_segments = all_chunks.dropped_blank_segments;
 
         emb_chunks =
             super::merge::merge_small_chunks_cross_group(emb_chunks, &group_spans, &self.config);
@@ -297,7 +324,10 @@ impl GroupChunker {
         let mut result = Vec::with_capacity(total_chunks);
         result.extend(emb_chunks);
         result.extend(bm25_chunks);
-        result
+        Ok(ChunkOutput {
+            chunks: result,
+            dropped_blank_segments,
+        })
     }
 
     /// Try to satisfy `chunk_groups` via a `Chunk`-capability plugin.
@@ -397,7 +427,7 @@ pub struct HeaderPathParams<'a> {
 /// Unified orchestration for both the plain single-path flow and the
 /// header-path flow (header + members): check limits, split, enforce segment
 /// limits, then build chunks.
-pub fn chunk_single_path(input: ChunkInput) -> Vec<ChunkedResult> {
+pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
     let ChunkInput {
         infra,
         group,
@@ -417,22 +447,24 @@ pub fn chunk_single_path(input: ChunkInput) -> Vec<ChunkedResult> {
         let fresh_tracker = GroupTracker::new();
         let tracker: &GroupTracker = header_mode.as_ref().map_or(&fresh_tracker, |h| h.tracker);
         let builder = ChunkBuilder::new();
-        return if let Some(header) = &header_mode {
-            vec![build_unsplit_header_chunk(
-                &builder, tracker, header, group, file_path, path, text, word_count, keywords,
-            )]
-        } else {
-            vec![builder.from_single_text(
-                tracker,
-                SingleChunkContext {
-                    group,
-                    file_path,
-                    path,
-                    text,
-                    keywords,
-                },
-            )]
-        };
+        return Ok(ChunkOutput::with_chunks(
+            if let Some(header) = &header_mode {
+                vec![build_unsplit_header_chunk(
+                    &builder, tracker, header, group, file_path, path, text, word_count, keywords,
+                )]
+            } else {
+                vec![builder.from_single_text(
+                    tracker,
+                    SingleChunkContext {
+                        group,
+                        file_path,
+                        path,
+                        text,
+                        keywords,
+                    },
+                )]
+            },
+        ));
     }
 
     let segments = if let Some(nl) = nl_boundaries {
@@ -453,17 +485,22 @@ pub fn chunk_single_path(input: ChunkInput) -> Vec<ChunkedResult> {
 
     // Over-limit text must always produce at least one segment; empty output
     // means content was silently lost, which the splitter invariants forbid.
-    assert!(
-        !segments.is_empty(),
-        "over-limit text produced no segments (path={path}, strategy={strategy:?})"
-    );
+    // This is a deterministic splitter bug for the given content, so it is
+    // reported as a permanent `CodeSplitting` failure instead of a panic
+    // (which would bypass error classification and be retried as transient).
+    if segments.is_empty() {
+        return Err(ParseError::code_splitting(format!(
+            "over-limit text produced no segments (path={path}, strategy={strategy:?}, group={})",
+            group.group_id
+        )));
+    }
 
     // A chunk text must carry real content: whitespace-only text would be
     // rejected by embedding providers with an opaque 400 and pollutes the
     // index. Callers gate on `trim().is_empty()`; this catches segments that
     // are still blank after splitting (a splitter/converter bug). The check
     // is enforced in release builds too: blank segments must never reach
-    // storage, and dropping them is reported rather than asserted away.
+    // storage, and the drop count is reported so the file is marked degraded.
     let blank_count = segments.iter().filter(|s| s.text.trim().is_empty()).count();
     let segments = if blank_count > 0 {
         tracing::warn!(
@@ -480,7 +517,10 @@ pub fn chunk_single_path(input: ChunkInput) -> Vec<ChunkedResult> {
         segments
     };
     if segments.is_empty() {
-        return Vec::new();
+        return Ok(ChunkOutput {
+            chunks: Vec::new(),
+            dropped_blank_segments: blank_count,
+        });
     }
 
     let fresh_tracker = GroupTracker::new();
@@ -492,16 +532,19 @@ pub fn chunk_single_path(input: ChunkInput) -> Vec<ChunkedResult> {
         include_header_in_first_coverage: h.include_header_in_first_coverage,
     });
 
-    builder.from_segments(
-        tracker,
-        &segments,
-        path,
-        group,
-        file_path,
-        keywords,
-        nl_boundaries.unwrap_or_default(),
-        header_ctx,
-    )
+    Ok(ChunkOutput {
+        chunks: builder.from_segments(
+            tracker,
+            &segments,
+            path,
+            group,
+            file_path,
+            keywords,
+            nl_boundaries.unwrap_or_default(),
+            header_ctx,
+        ),
+        dropped_blank_segments: blank_count,
+    })
 }
 
 /// Build an unsplit chunk with header semantics (header + members).

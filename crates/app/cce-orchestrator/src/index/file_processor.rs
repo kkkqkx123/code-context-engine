@@ -11,7 +11,7 @@
 use cce_config::NestProcessorConfig;
 use cce_config::{AstToNlConfig, ChunkingConfig, LicenseHeaderConfig, Settings};
 use cce_metrics::{FileProcessingMetrics, ParserMetrics, PipelineStageMetrics};
-use cce_parser::ast_to_nl::chunker::{ChunkedResult, GroupChunker};
+use cce_parser::ast_to_nl::chunker::{ChunkOutput, ChunkedResult, GroupChunker};
 use cce_parser::ast_to_nl::{AstToNlConverter, ConversionRequest};
 use cce_parser::document::PipelineRouter;
 use cce_parser::grouper::{PreprocessingPipeline, ProcessingResult};
@@ -95,6 +95,10 @@ pub struct CompleteFileProcessResult {
     pub processing_result: Option<ProcessingResult>,
     /// Document summary (for document files)
     pub doc_summary: Option<cce_parser::document::DocSummary>,
+    /// Blank segments the chunker had to drop while producing `chunks`.
+    /// Non-zero means indexed content is incomplete: the file must be
+    /// reported as degraded even though processing succeeded.
+    pub dropped_blank_segments: usize,
 }
 
 /// Chunk cache statistics
@@ -121,8 +125,8 @@ pub struct FileProcessor {
     /// LRU cache for chunk results to avoid duplicate processing
     ///
     /// Key: project_id + file_path + source_hash
-    /// Value: chunked results
-    chunk_cache: Arc<RwLock<LruCache<String, Vec<ChunkedResult>>>>,
+    /// Value: chunked results + blank segments dropped during chunking
+    chunk_cache: Arc<RwLock<LruCache<String, (Vec<ChunkedResult>, usize)>>>,
     /// Chunking configuration for document/text processing
     chunking_config: ChunkingConfig,
     /// Document-specific chunking configuration (if None, uses chunking_config)
@@ -278,13 +282,12 @@ impl FileProcessor {
             Ok(Some(chunks))
         } else {
             let parsed = {
-                let mut coordinator = self
-                    .coordinator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut coordinator = self.coordinator.lock().map_err(|_| {
+                    OrchestratorError::index("parse", "parser coordinator lock poisoned")
+                })?;
                 coordinator.parse_with_language_info(relative_path, &content, &language_info)
             }?;
-            let chunks = self.process_parsed_file(&parsed).await?;
+            let (chunks, _) = self.process_parsed_file(&parsed).await?;
             Ok(Some(chunks))
         }
     }
@@ -304,7 +307,7 @@ impl FileProcessor {
         let mut coordinator = self
             .coordinator
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .expect("parser coordinator lock poisoned; refusing to mutate poisoned state");
         coordinator.set_license_config(config);
         drop(coordinator);
         self
@@ -464,9 +467,10 @@ impl FileProcessor {
 
         // Re-inject parser metrics if previously set, since we replaced the coordinator
         if let Some(ref metrics) = self.parser_metrics {
-            if let Ok(mut coord) = self.coordinator.lock() {
-                coord.set_metrics(metrics.clone());
-            }
+            self.coordinator
+                .lock()
+                .expect("parser coordinator lock poisoned; refusing to skip metrics injection")
+                .set_metrics(metrics.clone());
         }
 
         self
@@ -474,9 +478,10 @@ impl FileProcessor {
 
     /// Inject parser metrics into the coordinator
     pub fn with_parser_metrics(mut self, metrics: Arc<ParserMetrics>) -> Self {
-        if let Ok(mut coord) = self.coordinator.lock() {
-            coord.set_metrics(metrics.clone());
-        }
+        self.coordinator
+            .lock()
+            .expect("parser coordinator lock poisoned; refusing to skip metrics injection")
+            .set_metrics(metrics.clone());
         self.parser_metrics = Some(metrics);
         self
     }
@@ -673,6 +678,7 @@ impl FileProcessor {
             chunks,
             processing_result: None,
             doc_summary,
+            dropped_blank_segments: 0,
         })
     }
 
@@ -709,10 +715,9 @@ impl FileProcessor {
 
         // Step 1: Parse file with pre-detected language info
         let parsed = {
-            let mut coordinator = self
-                .coordinator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut coordinator = self.coordinator.lock().map_err(|_| {
+                OrchestratorError::index("parse", "parser coordinator lock poisoned")
+            })?;
             coordinator.parse_with_language_info(
                 &file_entry.relative_path.to_string_lossy(),
                 content,
@@ -751,7 +756,10 @@ impl FileProcessor {
                     format!("Failed to acquire chunker lock: {}", e),
                 )
             })?;
-            Ok(chunker.chunk_groups(&group_conversions, &parsed.path))
+            chunker
+                .chunk_groups(&group_conversions, &parsed.path)
+                .map(|output| output.chunks)
+                .map_err(OrchestratorError::Parse)
         })();
         let chunker_latency = chunker_start.elapsed().as_secs_f64() * 1000.0;
         let chunks = match chunk_result {
@@ -845,10 +853,9 @@ impl FileProcessor {
 
         // Step 1: Parse file with pre-detected language info
         let parsed = {
-            let mut coordinator = self
-                .coordinator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut coordinator = self.coordinator.lock().map_err(|_| {
+                OrchestratorError::index("parse", "parser coordinator lock poisoned")
+            })?;
             coordinator.parse_with_language_info(
                 &file_entry.relative_path.to_string_lossy(),
                 content,
@@ -884,23 +891,32 @@ impl FileProcessor {
 
         // Step 4: Chunk the conversion results
         let chunker_start = std::time::Instant::now();
-        let chunker_locked = self.chunker.lock().map_err(|e| {
+        let chunk_result = match self.chunker.lock().map_err(|e| {
             OrchestratorError::index(
                 "chunk_groups",
                 format!("Failed to acquire chunker lock: {}", e),
             )
-        });
+        }) {
+            Ok(mut chunker) => chunker
+                .chunk_groups(&group_conversions, &parsed.path)
+                .map_err(OrchestratorError::Parse),
+            Err(e) => Err(e),
+        };
         let chunker_latency = chunker_start.elapsed().as_secs_f64() * 1000.0;
-        let chunks = match chunker_locked {
-            Ok(mut chunker) => {
-                let c = chunker.chunk_groups(&group_conversions, &parsed.path);
+        let chunk_output = match chunk_result {
+            Ok(output) => {
                 if let Some(ref metrics) = self.chunker_metrics {
-                    metrics.record(group_conversions.len(), c.len(), chunker_latency, false);
-                    for chunk in &c {
+                    metrics.record(
+                        group_conversions.len(),
+                        output.chunks.len(),
+                        chunker_latency,
+                        false,
+                    );
+                    for chunk in &output.chunks {
                         metrics.record_chunk_size(chunk.text.len());
                     }
                 }
-                c
+                output
             }
             Err(e) => {
                 if let Some(ref metrics) = self.chunker_metrics {
@@ -911,7 +927,9 @@ impl FileProcessor {
         };
 
         // Step 5: Enhance chunks with entity association info
-        let enhanced_chunks: Vec<ChunkedResult> = chunks
+        let dropped_blank_segments = chunk_output.dropped_blank_segments;
+        let enhanced_chunks: Vec<ChunkedResult> = chunk_output
+            .chunks
             .into_iter()
             .map(|mut chunk| {
                 chunk.metadata.file_category = FileCategory::determine(&parsed);
@@ -933,6 +951,7 @@ impl FileProcessor {
             chunks: enhanced_chunks,
             processing_result: Some(processing_result),
             doc_summary: None,
+            dropped_blank_segments,
         })
     }
 
@@ -970,7 +989,7 @@ impl FileProcessor {
         {
             let mut cache = self.chunk_cache.write().await;
             if let Some(cached) = cache.get(&cache_key) {
-                return Ok(cached.clone());
+                return Ok(cached.0.clone());
             }
         }
 
@@ -982,7 +1001,7 @@ impl FileProcessor {
 
         let (chunks, _) = self.process_doc(source, path, output_mode, chunking_config)?;
         let mut cache = self.chunk_cache.write().await;
-        cache.put(cache_key, chunks.clone());
+        cache.put(cache_key, (chunks.clone(), 0));
         Ok(chunks)
     }
 
@@ -997,7 +1016,7 @@ impl FileProcessor {
     pub async fn process_parsed_file(
         &mut self,
         parsed: &ParsedFile,
-    ) -> Result<Vec<ChunkedResult>, OrchestratorError> {
+    ) -> Result<(Vec<ChunkedResult>, usize), OrchestratorError> {
         let cache_key = self.chunk_cache_key(&parsed.path, &parsed.source, "ast");
 
         // Check cache
@@ -1032,21 +1051,28 @@ impl FileProcessor {
 
         // Step 3: Chunk the conversion results
         let chunker_start = std::time::Instant::now();
-        let chunk_result = (|| -> Result<Vec<ChunkedResult>, OrchestratorError> {
+        let chunk_result = (|| -> Result<ChunkOutput, OrchestratorError> {
             let mut chunker = self.chunker.lock().map_err(|e| {
                 OrchestratorError::index(
                     "chunk_groups",
                     format!("Failed to acquire chunker lock: {}", e),
                 )
             })?;
-            Ok(chunker.chunk_groups(&group_conversions, &parsed.path))
+            chunker
+                .chunk_groups(&group_conversions, &parsed.path)
+                .map_err(OrchestratorError::Parse)
         })();
         let chunker_latency = chunker_start.elapsed().as_secs_f64() * 1000.0;
         let chunks = match chunk_result {
             Ok(c) => {
                 if let Some(ref metrics) = self.chunker_metrics {
-                    metrics.record(group_conversions.len(), c.len(), chunker_latency, false);
-                    for chunk in &c {
+                    metrics.record(
+                        group_conversions.len(),
+                        c.chunks.len(),
+                        chunker_latency,
+                        false,
+                    );
+                    for chunk in &c.chunks {
                         metrics.record_chunk_size(chunk.text.len());
                     }
                 }
@@ -1061,7 +1087,9 @@ impl FileProcessor {
         };
 
         // Step 4: Enhance chunks with entity association info
+        let dropped_blank_segments = chunks.dropped_blank_segments;
         let enhanced_chunks: Vec<ChunkedResult> = chunks
+            .chunks
             .into_iter()
             .map(|mut chunk| {
                 chunk.metadata.file_category = FileCategory::determine(parsed);
@@ -1082,10 +1110,10 @@ impl FileProcessor {
         // Update cache
         {
             let mut cache = self.chunk_cache.write().await;
-            cache.put(cache_key, enhanced_chunks.clone());
+            cache.put(cache_key, (enhanced_chunks.clone(), dropped_blank_segments));
         }
 
-        Ok(enhanced_chunks)
+        Ok((enhanced_chunks, dropped_blank_segments))
     }
 
     /// Rebuild downstream artifacts from a persisted parser result.
@@ -1103,9 +1131,12 @@ impl FileProcessor {
         output_mode: OutputMode,
     ) -> Result<CompleteFileProcessResult, OrchestratorError> {
         let processing_result = self.pre_processor.process(parsed);
-        let chunks = if content_route.is_document() {
-            self.process_document_chunks(&parsed.path, &parsed.source, output_mode)
-                .await?
+        let (chunks, dropped_blank_segments) = if content_route.is_document() {
+            (
+                self.process_document_chunks(&parsed.path, &parsed.source, output_mode)
+                    .await?,
+                0,
+            )
         } else {
             self.process_parsed_file(parsed).await?
         };
@@ -1115,6 +1146,7 @@ impl FileProcessor {
             chunks,
             processing_result: Some(processing_result),
             doc_summary: None,
+            dropped_blank_segments,
         })
     }
 
@@ -1279,7 +1311,7 @@ mod tests {
         assert!(!parsed.entities.is_empty());
 
         let mut processor = FileProcessor::new();
-        let chunks = processor
+        let (chunks, _dropped) = processor
             .process_parsed_file(&parsed)
             .await
             .expect("code chunks");

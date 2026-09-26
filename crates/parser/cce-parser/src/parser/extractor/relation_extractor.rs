@@ -23,7 +23,7 @@ mod entity_index;
 mod relation_handlers;
 mod require_filter;
 
-use crate::tree_sitter_query::error::QueryError;
+use crate::tree_sitter_query::error::TreeSitterQueryError;
 use crate::tree_sitter_query::executor::QueryExecutor;
 use crate::tree_sitter_query::loader::{QueryLoader, QueryType};
 use cce_types::language::Language;
@@ -73,7 +73,7 @@ impl RelationExtractor {
     /// # Returns
     ///
     /// * `Ok(Vec<Relation>)` - List of relations (unresolved)
-    /// * `Err(QueryError)` - If query execution fails
+    /// * `Err(TreeSitterQueryError)` - If query execution fails
     pub fn extract(
         &self,
         tree: &Tree,
@@ -81,7 +81,7 @@ impl RelationExtractor {
         language: &Language,
         entities: &[Entity],
         file_id: Option<i64>,
-    ) -> Result<Vec<Relation>, QueryError> {
+    ) -> Result<Vec<Relation>, TreeSitterQueryError> {
         let mut relations = Vec::new();
 
         // Extract call relations
@@ -103,7 +103,7 @@ impl RelationExtractor {
         language: &Language,
         entities: &[Entity],
         file_id: Option<i64>,
-    ) -> Result<Vec<Relation>, QueryError> {
+    ) -> Result<Vec<Relation>, TreeSitterQueryError> {
         // Template and style languages declare no call query: they have no
         // call semantics, so absence yields no relations instead of an error.
         if !matches!(language, Language::Custom(_))
@@ -160,7 +160,7 @@ impl RelationExtractor {
         language: &Language,
         entities: &[Entity],
         file_id: Option<i64>,
-    ) -> Result<Vec<Relation>, QueryError> {
+    ) -> Result<Vec<Relation>, TreeSitterQueryError> {
         // Languages without a declared dependency query have no dependency
         // semantics; absence yields no relations instead of an error.
         if !matches!(language, Language::Custom(_))

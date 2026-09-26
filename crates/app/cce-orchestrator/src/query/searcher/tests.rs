@@ -10,6 +10,7 @@
 
 use crate::query::error::QueryError;
 use crate::query::types::SearchResult;
+use cce_types::error::common::ErrorClassify;
 
 use super::post_processing::{
     apply_result_filter_chain, merge_fusion_weights_override, query_fusion_weights_from_plugins,
@@ -181,7 +182,7 @@ fn test_read_legacy_active_epoch_unparseable_value_is_error() {
     .expect("insert active_epoch");
     let err = crate::query::filter::read_legacy_active_epoch(&conn, 7)
         .expect_err("unparseable value must fail");
-    assert!(matches!(err, QueryError::Storage(_)));
+    assert!(matches!(err, QueryError::Invalid(_)));
     assert!(!err.is_retryable());
     assert!(!err.is_config_error());
 }

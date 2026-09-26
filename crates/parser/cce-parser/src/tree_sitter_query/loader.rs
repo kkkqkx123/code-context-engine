@@ -16,7 +16,7 @@
 //! - Query cache uses DashMap for concurrent access
 //! - No nested locks to prevent deadlocks
 
-use super::error::{QueryError, Result};
+use super::error::{Result, TreeSitterQueryError};
 
 use crate::tree_sitter_init;
 use crate::tree_sitter_query::scheme;
@@ -99,7 +99,7 @@ impl QueryLoader {
         // Get language - NO LOCK (read-only HashMap after initialization)
         let ts_language =
             tree_sitter_init::get_tree_sitter_language(language).ok_or_else(|| {
-                QueryError::InvalidQuery(format!(
+                TreeSitterQueryError::InvalidQuery(format!(
                     "Tree-sitter language not available for {}",
                     language
                 ))
@@ -113,7 +113,7 @@ impl QueryLoader {
                 query_type, language, e
             );
 
-            QueryError::InvalidQuery(error_msg)
+            TreeSitterQueryError::InvalidQuery(error_msg)
         })?;
 
         // Wrap query in Arc
@@ -210,13 +210,13 @@ impl QueryLoader {
                     return Ok(scheme);
                 }
             }
-            return Err(QueryError::InvalidQuery(format!(
+            return Err(TreeSitterQueryError::InvalidQuery(format!(
                 "No query scheme for custom language {} (query type {query_type})",
                 language
             )));
         }
         Self::builtin_scheme(*language, query_type).ok_or_else(|| {
-            QueryError::InvalidQuery(format!(
+            TreeSitterQueryError::InvalidQuery(format!(
                 "Query type {} not supported for language {}",
                 query_type, language
             ))

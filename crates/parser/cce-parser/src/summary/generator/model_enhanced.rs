@@ -7,7 +7,7 @@ use crate::grouper::{PreprocessingPipeline, ProcessingResult};
 use crate::summary::SummaryConfig;
 use crate::summary::generator::{RuleBasedGenerator, specialized};
 use crate::summary::strategy::{FileCategory, ImportanceDecision, ImportanceLevel};
-use crate::summary::types::{FileSummary, GenerationDecision};
+use crate::summary::types::{FileSummary, GenerationDecision, SummaryOutcome};
 use cce_llm::{ChatConfig, ChatResult, LlmClient, Message};
 use cce_metrics::SummaryMetrics;
 use cce_types::ParsedFile;
@@ -208,10 +208,32 @@ impl<C: LlmClient> ModelEnhancedGenerator<C> {
                     Err(e) => {
                         let rate_limited = matches!(e, cce_llm::LlmError::RateLimitExceeded(_));
                         self.handle_model_error(&e, &parsed_file.path, "ModelEnhanced");
-                        // Keep rule-based summary as fallback
+                        // Keep the rule-based text as content, but record the
+                        // failure class so the caller can degrade or dead-letter
+                        // the file instead of treating it as a clean success.
+                        summary.outcome = Self::outcome_for_error(&e);
                         (summary, rate_limited)
                     }
                 }
+            }
+        }
+    }
+
+    /// Map a model-generation failure onto the summary outcome classification.
+    ///
+    /// Permanent errors (auth, config, model-not-found, token limit, 4xx)
+    /// dead-letter the summary module; everything transient only degrades the
+    /// file because a later retry can succeed.
+    fn outcome_for_error(error: &cce_llm::LlmError) -> SummaryOutcome {
+        use cce_types::error::common::ErrorClassify;
+        if error.is_permanent() {
+            SummaryOutcome::Failed {
+                code: error.error_code().to_string(),
+                message: error.to_string(),
+            }
+        } else {
+            SummaryOutcome::Fallback {
+                reason: error.to_string(),
             }
         }
     }
@@ -275,14 +297,14 @@ impl<C: LlmClient> ModelEnhancedGenerator<C> {
                                 self.config.request_timeout_secs
                             )),
                         );
-                        last_error = Some(error);
+                        last_error = Some(error.clone());
                         if attempt < max_retries - 1 {
                             // Exponential backoff: 100ms, 200ms, 400ms, ...
                             let backoff_ms = 100 * 2u64.pow(attempt as u32);
                             tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
                             continue;
                         }
-                        return Err(last_error.unwrap());
+                        return Err(error);
                     }
                 }
             } else {
@@ -301,14 +323,10 @@ impl<C: LlmClient> ModelEnhancedGenerator<C> {
                     return parsed;
                 }
                 Err(err) => {
-                    // Check if we should retry
-                    let should_retry = matches!(
-                        err,
-                        cce_llm::LlmError::RateLimitExceeded(_)
-                            | cce_llm::LlmError::Timeout(_)
-                            | cce_llm::LlmError::Http(_)
-                            | cce_llm::LlmError::HttpStatus { .. }
-                    );
+                    // Retryability comes from the shared LlmError
+                    // classification: e.g. 4xx HttpStatus is permanent and
+                    // must not consume the retry budget.
+                    let should_retry = cce_types::error::common::ErrorClassify::is_retryable(&err);
 
                     if should_retry && attempt < max_retries - 1 {
                         // Exponential backoff for retries
@@ -693,7 +711,7 @@ Folded code representation:
                     strategy = %strategy,
                     actual_tokens = actual,
                     limit_tokens = limit,
-                    "Token limit exceeded, using rule-based fallback"
+                    "Token limit exceeded; summary module marked failed"
                 );
             }
             LlmError::Timeout(_) => {
@@ -728,6 +746,14 @@ Folded code representation:
                     "LLM API error, using rule-based fallback"
                 );
             }
+            LlmError::CircuitBreakerOpen(msg) => {
+                tracing::warn!(
+                    file = %file_path,
+                    strategy = %strategy,
+                    error = %msg,
+                    "LLM circuit breaker open, using rule-based fallback"
+                );
+            }
             LlmError::InvalidResponse(msg) => {
                 tracing::warn!(
                     file = %file_path,
@@ -741,7 +767,7 @@ Folded code representation:
                     file = %file_path,
                     strategy = %strategy,
                     error = %msg,
-                    "Invalid input for LLM, using rule-based fallback"
+                    "Invalid input for LLM; summary module marked failed"
                 );
             }
             LlmError::Internal(msg) => {
@@ -749,7 +775,7 @@ Folded code representation:
                     file = %file_path,
                     strategy = %strategy,
                     error = %msg,
-                    "Internal LLM error, using rule-based fallback"
+                    "Internal LLM error; summary module marked failed"
                 );
             }
         }
@@ -1179,21 +1205,55 @@ mod tests {
     }
 
     #[test]
+    fn permanent_llm_errors_yield_failed_outcome() {
+        for err in [
+            LlmError::auth("bad key"),
+            LlmError::config("missing endpoint"),
+            LlmError::model_not_found("gpt-x"),
+            LlmError::token_limit_exceeded(9000, 8192),
+            LlmError::invalid_input("empty prompt"),
+            LlmError::internal("bug"),
+            LlmError::http_status(404, "not found"),
+        ] {
+            let outcome = ModelEnhancedGenerator::<TestLlmClient>::outcome_for_error(&err);
+            assert!(
+                matches!(outcome, SummaryOutcome::Failed { .. }),
+                "expected Failed for {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn transient_llm_errors_yield_fallback_outcome() {
+        for err in [
+            LlmError::rate_limit_exceeded(1000),
+            LlmError::http("connection reset"),
+            LlmError::invalid_response("not json"),
+            LlmError::api("overloaded"),
+            LlmError::http_status(503, "unavailable"),
+            LlmError::Timeout(cce_types::error::common::TimeoutError("too slow".into())),
+        ] {
+            let outcome = ModelEnhancedGenerator::<TestLlmClient>::outcome_for_error(&err);
+            assert!(
+                matches!(outcome, SummaryOutcome::Fallback { .. }),
+                "expected Fallback for {err}"
+            );
+        }
+    }
+
+    #[test]
     fn test_summary_config_retry_and_timeout_settings() {
         let config = SummaryConfig::default();
         assert_eq!(config.max_retries, 3);
         assert_eq!(config.request_timeout_secs, 30);
-        assert!(config.enable_graceful_degradation);
 
         let config = SummaryConfig {
             max_retries: 5,
             request_timeout_secs: 60,
-            enable_graceful_degradation: false,
             ..Default::default()
         };
         assert_eq!(config.max_retries, 5);
         assert_eq!(config.request_timeout_secs, 60);
-        assert!(!config.enable_graceful_degradation);
     }
 
     #[test]

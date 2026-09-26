@@ -107,6 +107,11 @@ pub enum LlmError {
     #[error("API error: {0}")]
     Api(String),
 
+    /// Circuit breaker rejected the request while open — the operation can
+    /// proceed once the breaker half-opens, unlike a generic API failure
+    #[error("Circuit breaker is open: {0}")]
+    CircuitBreakerOpen(String),
+
     /// Configuration error - uses common ConfigError
     #[error("{0}")]
     Config(#[from] ConfigError),
@@ -163,6 +168,11 @@ impl LlmError {
         Self::Api(reason.into())
     }
 
+    /// Create a circuit breaker rejection error
+    pub fn circuit_breaker_open(reason: impl Into<String>) -> Self {
+        Self::CircuitBreakerOpen(reason.into())
+    }
+
     /// Create a configuration error
     pub fn config(reason: impl Into<String>) -> Self {
         Self::Config(ConfigError::Other(reason.into()))
@@ -209,6 +219,7 @@ impl LlmError {
             Self::Http(_) => "LLM_HTTP_ERROR",
             Self::HttpStatus { .. } => "LLM_HTTP_STATUS_ERROR",
             Self::Api(_) => "LLM_API_ERROR",
+            Self::CircuitBreakerOpen(_) => "LLM_CIRCUIT_BREAKER_OPEN",
             Self::Config(_) => "LLM_CONFIG_ERROR",
             Self::InvalidInput(_) => "LLM_INVALID_INPUT_ERROR",
             Self::RateLimitExceeded(_) => "LLM_RATE_LIMIT_EXCEEDED_ERROR",
@@ -235,7 +246,7 @@ impl cce_types::error::common::ErrorClassify for LlmError {
     }
 
     fn is_transient(&self) -> bool {
-        self.is_retryable() || matches!(self, Self::Api(_))
+        self.is_retryable() || matches!(self, Self::Api(_) | Self::CircuitBreakerOpen(_))
     }
 
     fn is_permanent(&self) -> bool {
@@ -309,6 +320,6 @@ impl LlmRetryErrorClass {
 
 impl cce_circuit_breaker::CircuitBreakerRejected for LlmError {
     fn circuit_open(message: impl Into<String>) -> Self {
-        LlmError::api(message.into())
+        LlmError::CircuitBreakerOpen(message.into())
     }
 }

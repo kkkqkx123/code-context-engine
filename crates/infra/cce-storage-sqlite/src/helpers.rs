@@ -52,10 +52,10 @@ pub fn execute_insert(
     tx: &Transaction,
     sql: &str,
     params: &[&dyn ToSql],
-    entity_name: &str,
+    table: &str,
 ) -> Result<i64, StorageError> {
     tx.execute(sql, params)
-        .map_err(|e| StorageError::insert(format!("Failed to insert {}: {}", entity_name, e)))?;
+        .map_err(|e| StorageError::insert(table, format!("Failed to insert {table}: {e}")))?;
     Ok(tx.last_insert_rowid())
 }
 
@@ -64,7 +64,7 @@ pub fn execute_insert_batch(
     tx: &Transaction,
     sql: &str,
     param_list: &[Vec<&dyn ToSql>],
-    entity_name: &str,
+    table: &str,
 ) -> Result<Vec<i64>, StorageError> {
     if param_list.is_empty() {
         return Ok(Vec::new());
@@ -72,28 +72,39 @@ pub fn execute_insert_batch(
 
     let mut stmt = tx
         .prepare(sql)
-        .map_err(|e| StorageError::insert(format!("Failed to prepare statement: {}", e)))?;
+        .map_err(|e| StorageError::insert(table, format!("Failed to prepare statement: {e}")))?;
 
     let mut ids = Vec::with_capacity(param_list.len());
     for params in param_list {
-        stmt.execute(params.as_slice()).map_err(|e| {
-            StorageError::insert(format!("Failed to insert {}: {}", entity_name, e))
-        })?;
+        stmt.execute(params.as_slice())
+            .map_err(|e| StorageError::insert(table, format!("Failed to insert {table}: {e}")))?;
         ids.push(tx.last_insert_rowid());
     }
 
     Ok(ids)
 }
 
-/// Execute a DELETE or UPDATE statement.
+/// Execute a DELETE, UPDATE, or INSERT statement.
+///
+/// The error variant is inferred from the SQL prefix so callers only supply
+/// the logical table name from the nearby statement.
 pub fn execute_update(
     tx: &Transaction,
     sql: &str,
     params: &[&dyn ToSql],
-    operation_name: &str,
+    table: &str,
 ) -> Result<(), StorageError> {
-    tx.execute(sql, params)
-        .map_err(|e| StorageError::delete(format!("Failed to {}: {}", operation_name, e)))?;
+    let normalized = sql.trim_start().to_ascii_uppercase();
+    if normalized.starts_with("DELETE") {
+        tx.execute(sql, params)
+            .map_err(|e| StorageError::delete(table, e.to_string()))?;
+    } else if normalized.starts_with("UPDATE") {
+        tx.execute(sql, params)
+            .map_err(|e| StorageError::update(table, e.to_string()))?;
+    } else {
+        tx.execute(sql, params)
+            .map_err(|e| StorageError::insert(table, e.to_string()))?;
+    }
     Ok(())
 }
 

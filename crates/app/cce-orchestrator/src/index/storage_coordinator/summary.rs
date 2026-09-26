@@ -215,7 +215,7 @@ impl<'a> SummaryStorage<'a> {
             {
                 Ok(_count) => {
                     // Update bm25_doc_id in SQLite
-                    self.update_bm25_doc_ids(summaries, &bm25_documents).await;
+                    self.update_bm25_doc_ids(summaries, &bm25_documents).await?;
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to index summaries in BM25, continuing");
@@ -231,36 +231,35 @@ impl<'a> SummaryStorage<'a> {
         &self,
         summaries: &[FileSummary],
         bm25_documents: &[Bm25Document],
-    ) {
+    ) -> Result<(), OrchestratorError> {
         let Some(ref db) = self.coordinator.metadata_store else {
-            return;
+            return Ok(());
         };
 
-        if let Ok(conn) = db.write_connection() {
-            let _ = conn.unchecked_transaction().map(|tx| {
-                for (summary, doc) in summaries.iter().zip(bm25_documents.iter()) {
-                    let file_path_str = &summary.file_path;
-                    let project_id = self.coordinator.project_id;
-                    if let Ok(Some(file_record)) =
-                        cce_storage_sqlite::FileRepository::get_by_path_and_project_at_epoch(
-                            &tx,
-                            file_path_str,
-                            project_id,
-                            self.coordinator.epoch(),
-                        )
-                    {
-                        let _ =
-                            cce_storage_sqlite::FileSummaryRepository::update_bm25_doc_id_at_epoch(
-                                &tx,
-                                file_record.id,
-                                self.coordinator.epoch(),
-                                Some(doc.document_id.clone()),
-                            );
-                    }
-                }
-                let _ = tx.commit();
-            });
-        }
+        let project_id = self.coordinator.project_id;
+        let epoch = self.coordinator.epoch();
+        db.with_transaction(|tx| {
+            for (summary, doc) in summaries.iter().zip(bm25_documents.iter()) {
+                let Some(file_record) =
+                    cce_storage_sqlite::FileRepository::get_by_path_and_project_at_epoch(
+                        tx,
+                        &summary.file_path,
+                        project_id,
+                        epoch,
+                    )?
+                else {
+                    continue;
+                };
+                cce_storage_sqlite::FileSummaryRepository::update_bm25_doc_id_at_epoch(
+                    tx,
+                    file_record.id,
+                    epoch,
+                    Some(doc.document_id.clone()),
+                )?;
+            }
+            Ok(())
+        })
+        .map_err(OrchestratorError::Storage)
     }
 }
 

@@ -159,8 +159,9 @@ impl RetryPolicy {
             }
         }
 
-        error!("LLM request failed after retries exhausted");
-        Err(LlmError::api("Max retries exceeded"))
+        // Unreachable: every Err outcome returns through the should_retry or
+        // retry-budget checks before the loop can complete.
+        unreachable!("retry loop always terminates via a return")
     }
 
     /// Execute a function with retry and custom error handler
@@ -204,8 +205,9 @@ impl RetryPolicy {
             }
         }
 
-        error!("LLM request failed after retries exhausted");
-        Err(LlmError::api("Max retries exceeded"))
+        // Unreachable: every Err outcome returns through the should_retry or
+        // retry-budget checks before the loop can complete.
+        unreachable!("retry loop always terminates via a return")
     }
 
     fn retry_budget(&self, error: &LlmError) -> u32 {
@@ -229,6 +231,9 @@ impl RetryPolicy {
             LlmError::Auth(_) => false,
             LlmError::ModelNotFound(_) => false,
             LlmError::Api(_) => false,
+            // Retrying in place while the breaker is open just gets rejected
+            // again; recovery is left to the breaker half-open cycle.
+            LlmError::CircuitBreakerOpen(_) => false,
             LlmError::InvalidResponse(_) => true,
             LlmError::TokenLimitExceeded(_, _) => false,
             LlmError::Timeout(_) => true,
@@ -302,7 +307,8 @@ impl FixedIntervalPolicy {
             }
         }
 
-        Err(LlmError::api("Max retries exceeded"))
+        // Unreachable: the final attempt returns its error directly.
+        unreachable!("fixed interval loop always terminates via a return")
     }
 }
 

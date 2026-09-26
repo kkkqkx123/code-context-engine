@@ -101,16 +101,13 @@ impl HttpRequestService {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = breaker.try_acquire::<LlmError>();
         self.sync_circuit_state_metrics(&breaker);
-        match result {
-            Ok(()) => Ok(()),
-            Err(_) => {
-                if let Some(metrics) = &self.retry_metrics {
-                    metrics.record_circuit_rejection();
-                }
-                error!("Circuit breaker is open; LLM request rejected");
-                Err(LlmError::api("Circuit breaker is open"))
+        result.map_err(|error| {
+            if let Some(metrics) = &self.retry_metrics {
+                metrics.record_circuit_rejection();
             }
-        }
+            error!(error = %error, "Circuit breaker is open; LLM request rejected");
+            error
+        })
     }
 
     /// Record the outcome of a request against the circuit breaker.
@@ -238,8 +235,15 @@ impl HttpRequestService {
         );
 
         let response = req.send().await.map_err(|e| {
-            warn!(error = %e, "Request failed to send");
-            LlmError::http(format!("Request failed: {}", e))
+            if e.is_timeout() {
+                warn!(error = %e, "Request timed out");
+                LlmError::from(cce_types::error::common::TimeoutError::new(format!(
+                    "Request timed out: {e}"
+                )))
+            } else {
+                warn!(error = %e, "Request failed to send");
+                LlmError::http(format!("Request failed: {}", e))
+            }
         })?;
 
         let status = response.status();

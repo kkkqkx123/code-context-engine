@@ -12,7 +12,7 @@
 //! were previously never consumed by any extractor, causing data loss.
 
 use crate::tree_sitter_query::capture;
-use crate::tree_sitter_query::error::QueryError;
+use crate::tree_sitter_query::error::TreeSitterQueryError;
 use crate::tree_sitter_query::executor::{QueryExecutor, QueryMatch};
 use cce_types::language::Language;
 use cce_types::{Entity, EntityId, EntityKind, Relation, RelationTarget, RelationType};
@@ -69,7 +69,7 @@ impl StructuralExtractor {
         source: &str,
         language: &Language,
         entities: &[Entity],
-    ) -> Result<(Vec<Entity>, Vec<Relation>), QueryError> {
+    ) -> Result<(Vec<Entity>, Vec<Relation>), TreeSitterQueryError> {
         if !Self::supports_language(language) {
             return Ok((Vec::new(), Vec::new()));
         }

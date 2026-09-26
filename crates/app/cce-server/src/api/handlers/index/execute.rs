@@ -43,6 +43,9 @@ fn index_response_from_result(result: IndexResult) -> IndexResponse {
         files_scanned: result.total_files,
         files_indexed: result.indexed_files,
         failed_files: result.failed_files,
+        degraded_files: result.degraded_files,
+        skipped_permanent: result.skipped_permanent,
+        circuit_open: result.circuit_open,
         total_entities: result.total_entities,
         total_relations: result.total_relations,
         total_vectors: result.total_vectors,
@@ -79,6 +82,9 @@ pub async fn handle_index(
                 files_scanned: 0,
                 files_indexed: 0,
                 failed_files: 0,
+                degraded_files: 0,
+                skipped_permanent: 0,
+                circuit_open: false,
                 total_entities: 0,
                 total_relations: 0,
                 total_vectors: 0,
@@ -99,6 +105,9 @@ pub async fn handle_index(
                 files_scanned: 0,
                 files_indexed: 0,
                 failed_files: 0,
+                degraded_files: 0,
+                skipped_permanent: 0,
+                circuit_open: false,
                 total_entities: 0,
                 total_relations: 0,
                 total_vectors: 0,
@@ -117,6 +126,9 @@ pub async fn handle_index(
                 files_scanned: 0,
                 files_indexed: 0,
                 failed_files: 0,
+                degraded_files: 0,
+                skipped_permanent: 0,
+                circuit_open: false,
                 total_entities: 0,
                 total_relations: 0,
                 total_vectors: 0,
@@ -170,6 +182,9 @@ pub async fn handle_index(
                     files_scanned: 0,
                     files_indexed: 0,
                     failed_files: 0,
+                    degraded_files: 0,
+                    skipped_permanent: 0,
+                    circuit_open: false,
                     total_entities: 0,
                     total_relations: 0,
                     total_vectors: 0,
@@ -229,5 +244,26 @@ mod tests {
         assert_eq!(response.files_scanned, 10);
         assert_eq!(response.files_indexed, 9);
         assert_eq!(response.failed_files, 1);
+        assert_eq!(response.degraded_files, 0);
+        assert_eq!(response.skipped_permanent, 0);
+        assert!(!response.circuit_open);
+    }
+
+    #[test]
+    fn test_index_response_carries_degradation_signals() {
+        let result = IndexResult {
+            total_files: 10,
+            indexed_files: 8,
+            failed_files: 1,
+            degraded_files: 3,
+            skipped_permanent: 2,
+            circuit_open: true,
+            ..Default::default()
+        };
+
+        let response = index_response_from_result(result);
+        assert_eq!(response.degraded_files, 3);
+        assert_eq!(response.skipped_permanent, 2);
+        assert!(response.circuit_open);
     }
 }

@@ -211,7 +211,15 @@ impl StorageCoordinator {
         .await;
 
         if result.is_err() {
-            let _ = self.fail_project_manifest(operation_id, "candidate preparation failed");
+            if let Err(manifest_error) =
+                self.fail_project_manifest(operation_id, "candidate preparation failed")
+            {
+                tracing::error!(
+                    operation_id = %operation_id,
+                    error = %manifest_error,
+                    "Failed to mark candidate manifest failed after preparation error"
+                );
+            }
             if let Ok(mut current) = self.candidate_operation.lock() {
                 *current = None;
             }
@@ -535,7 +543,7 @@ impl StorageCoordinator {
                         "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3 AND path = 'nl'",
                         rusqlite::params![self.project_id, epoch, path],
                     )
-                    .map_err(|error| cce_types::StorageError::delete(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
                     GenerationOverrideRepository::upsert(
                         tx,
                         self.project_id,
@@ -574,7 +582,7 @@ impl StorageCoordinator {
                         "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3 AND path = 'emb'",
                         rusqlite::params![self.project_id, epoch, path],
                     )
-                    .map_err(|error| cce_types::StorageError::delete(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
                     GenerationOverrideRepository::upsert(
                         tx,
                         self.project_id,
@@ -609,7 +617,9 @@ impl StorageCoordinator {
                          (SELECT id FROM files WHERE path = ?2 AND project_id = ?3 AND epoch = ?1)",
                         rusqlite::params![epoch, path, self.project_id],
                     )
-                    .map_err(|error| cce_types::StorageError::delete(error.to_string()))?;
+                    .map_err(|error| {
+                        cce_types::StorageError::delete("file_summaries", error.to_string())
+                    })?;
                     Ok(())
                 })
                 .map_err(OrchestratorError::Storage)?;
@@ -629,18 +639,18 @@ impl StorageCoordinator {
                          (SELECT id FROM files WHERE path = ?2 AND project_id = ?3 AND epoch = ?1)",
                         rusqlite::params![epoch, path, self.project_id],
                     )
-                    .map_err(|error| cce_types::StorageError::delete(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::delete("file_summaries", error.to_string()))?;
                     tx.execute(
                         "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3",
                         rusqlite::params![self.project_id, epoch, path],
                     )
-                    .map_err(|error| cce_types::StorageError::delete(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
                     tx.execute(
                         "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2 AND file_id IN
                          (SELECT id FROM files WHERE path = ?3 AND project_id = ?1 AND epoch = ?2)",
                         rusqlite::params![self.project_id, epoch, path],
                     )
-                    .map_err(|error| cce_types::StorageError::delete(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::delete("entities", error.to_string()))?;
                     Ok(())
                 })
                 .map_err(OrchestratorError::Storage)?;
@@ -659,19 +669,35 @@ impl StorageCoordinator {
         project_id: i64,
         epoch: i64,
     ) -> Result<(), cce_types::StorageError> {
-        for sql in [
-            "DELETE FROM file_summaries WHERE epoch = ?2 AND file_id IN
+        for (table, sql) in [
+            (
+                "file_summaries",
+                "DELETE FROM file_summaries WHERE epoch = ?2 AND file_id IN
              (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2)",
-            "DELETE FROM entity_detail_mappings WHERE project_id = ?1 AND epoch = ?2",
-            "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2",
-            "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2",
-            "DELETE FROM files WHERE project_id = ?1 AND epoch = ?2",
+            ),
+            (
+                "entity_detail_mappings",
+                "DELETE FROM entity_detail_mappings WHERE project_id = ?1 AND epoch = ?2",
+            ),
+            (
+                "chunks",
+                "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2",
+            ),
+            (
+                "entities",
+                "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2",
+            ),
+            (
+                "files",
+                "DELETE FROM files WHERE project_id = ?1 AND epoch = ?2",
+            ),
         ] {
             tx.execute(sql, rusqlite::params![project_id, epoch])
                 .map_err(|error| {
-                    cce_types::StorageError::delete(format!(
-                        "failed to clear candidate generation: {error}"
-                    ))
+                    cce_types::StorageError::delete(
+                        table,
+                        format!("failed to clear candidate generation: {error}"),
+                    )
                 })?;
         }
         Ok(())
@@ -766,7 +792,7 @@ mod tests {
                     [],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))
+                .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))
             })
             .expect("initial generation should be created");
 
@@ -844,7 +870,7 @@ mod tests {
                     [],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))
+                .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))
             })
             .expect("initial generation should be created");
 
@@ -1121,7 +1147,7 @@ mod tests {
                         rusqlite::params![path],
                     )
                     .map(|_| ())
-                    .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                    .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))?;
                 }
                 // Generation 2 inherited from generation 1 and was published;
                 // one file was replaced inside it (own row + `replaced`).
@@ -1135,7 +1161,7 @@ mod tests {
                     [],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))?;
                 cce_storage_sqlite::GenerationOverrideRepository::upsert(
                     tx,
                     1,

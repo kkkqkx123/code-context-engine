@@ -79,9 +79,10 @@ impl StorageCoordinator {
                         ],
                     )
                     .map_err(|error| {
-                        cce_types::StorageError::insert(format!(
-                            "failed to ensure file record: {error}"
-                        ))
+                        cce_types::StorageError::insert(
+                            "files",
+                            format!("failed to ensure file record: {error}"),
+                        )
                     })?;
                 }
                 Ok(())
@@ -132,10 +133,10 @@ impl StorageCoordinator {
                         ],
                     )
                     .map_err(|error| {
-                        cce_types::StorageError::insert(format!(
-                            "failed to ensure file record for {}: {error}",
-                            parsed.path
-                        ))
+                        cce_types::StorageError::insert(
+                            "files",
+                            format!("failed to ensure file record for {}: {error}", parsed.path),
+                        )
                     })?;
 
                     let file_id: i64 = tx
@@ -181,27 +182,36 @@ impl StorageCoordinator {
                             depth: Some(entity.depth as i64),
                             parent_id: None,
                             metadata: Some(serde_json::to_string(&metadata).map_err(|error| {
-                                cce_types::StorageError::insert(format!(
-                                    "failed to serialize metadata for {}: {error}",
-                                    entity.name
-                                ))
+                                cce_types::StorageError::insert(
+                                    "entities",
+                                    format!(
+                                        "failed to serialize metadata for {}: {error}",
+                                        entity.name
+                                    ),
+                                )
                             })?),
                             parameters_json: Some(
                                 serde_json::to_string(&entity.parameters).map_err(|error| {
-                                    cce_types::StorageError::insert(format!(
-                                        "failed to serialize parameters for {}: {error}",
-                                        entity.name
-                                    ))
+                                    cce_types::StorageError::insert(
+                                        "entities",
+                                        format!(
+                                            "failed to serialize parameters for {}: {error}",
+                                            entity.name
+                                        ),
+                                    )
                                 })?,
                             ),
                             return_type: entity.return_type.clone(),
                             doc_comment: entity.doc_comment.clone(),
                             modifiers_json: Some(
                                 serde_json::to_string(&entity.modifiers).map_err(|error| {
-                                    cce_types::StorageError::insert(format!(
-                                        "failed to serialize modifiers for {}: {error}",
-                                        entity.name
-                                    ))
+                                    cce_types::StorageError::insert(
+                                        "entities",
+                                        format!(
+                                            "failed to serialize modifiers for {}: {error}",
+                                            entity.name
+                                        ),
+                                    )
                                 })?,
                             ),
                             project_id: self.project_id,
@@ -234,10 +244,10 @@ impl StorageCoordinator {
                             ],
                         )
                         .map_err(|error| {
-                            cce_types::StorageError::update(format!(
-                                "failed to persist parent entity for {}: {error}",
-                                parsed.path
-                            ))
+                            cce_types::StorageError::update(
+                                "entities",
+                                format!("failed to persist parent entity for {}: {error}", parsed.path),
+                            )
                         })?;
                     }
                 }

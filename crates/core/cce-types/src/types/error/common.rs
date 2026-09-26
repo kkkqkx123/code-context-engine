@@ -3,6 +3,8 @@
 //! This module defines base error types that are shared across multiple modules
 //! to avoid duplication and provide consistent error handling.
 
+use std::sync::Arc;
+
 use thiserror::Error;
 
 /// Error classification trait
@@ -29,107 +31,19 @@ pub trait ErrorClassify {
     fn is_permanent(&self) -> bool;
 }
 
-/// Aggregate error for batch operations
-///
-/// This error type is used when multiple errors occur during a batch operation.
-/// It collects all errors and provides summary information.
-#[derive(Debug)]
-pub enum AggregateError<E: std::fmt::Display + std::fmt::Debug> {
-    /// Multiple errors occurred during batch operation
-    Multiple {
-        /// All errors that occurred
-        errors: Vec<E>,
-        /// Total number of items processed
-        total: usize,
-        /// Number of items that failed
-        failed: usize,
-    },
-}
-
-impl<E: std::fmt::Display + std::fmt::Debug> std::fmt::Display for AggregateError<E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Multiple {
-                errors,
-                total,
-                failed,
-            } => {
-                write!(
-                    f,
-                    "Failed to process {}/{} items:\n{}",
-                    failed,
-                    total,
-                    errors
-                        .iter()
-                        .enumerate()
-                        .map(|(i, e)| format!("  {}. {}", i + 1, e))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            }
-        }
-    }
-}
-
-impl<E: std::fmt::Display + std::fmt::Debug> std::error::Error for AggregateError<E> {}
-
-impl<E: std::fmt::Display + std::fmt::Debug> AggregateError<E> {
-    /// Create a new aggregate error from a list of errors
-    ///
-    /// If there's only one error, it's returned directly. Otherwise,
-    /// an aggregate error is created.
-    pub fn from_errors(errors: Vec<E>, total: usize) -> Self {
-        let failed = errors.len();
-        if failed == 1 {
-            // For single error, we can't return it directly due to type constraints
-            // The caller should handle this case separately
-            Self::Multiple {
-                errors,
-                total,
-                failed,
-            }
-        } else {
-            Self::Multiple {
-                errors,
-                total,
-                failed,
-            }
-        }
-    }
-
-    /// Get the number of failed items
-    pub fn failed_count(&self) -> usize {
-        match self {
-            Self::Multiple { failed, .. } => *failed,
-        }
-    }
-
-    /// Get the total number of items processed
-    pub fn total_count(&self) -> usize {
-        match self {
-            Self::Multiple { total, .. } => *total,
-        }
-    }
-
-    /// Get a reference to all errors
-    pub fn errors(&self) -> &[E] {
-        match self {
-            Self::Multiple { errors, .. } => errors,
-        }
-    }
-}
-
 /// Common IO wrapper error
 ///
 /// This type wraps std::io::Error and can be used across modules
 /// that need IO error handling without duplicating the definition.
-#[derive(Error, Debug)]
+/// The inner error is shared via `Arc` so cloning keeps the full
+/// error (kind, OS code and source chain) intact.
+#[derive(Error, Debug, Clone)]
 #[error("IO error: {0}")]
-pub struct IoError(pub std::io::Error);
+pub struct IoError(pub Arc<std::io::Error>);
 
 impl From<std::io::Error> for IoError {
     fn from(err: std::io::Error) -> Self {
-        Self(err)
+        Self(Arc::new(err))
     }
 }
 
@@ -163,12 +77,6 @@ impl ErrorClassify for IoError {
 
     fn is_permanent(&self) -> bool {
         !self.is_transient()
-    }
-}
-
-impl Clone for IoError {
-    fn clone(&self) -> Self {
-        IoError(std::io::Error::new(self.0.kind(), self.0.to_string()))
     }
 }
 
@@ -291,27 +199,5 @@ mod tests {
         let json_err = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
         let err = JsonError::from(json_err);
         assert!(err.to_string().contains("JSON error"));
-    }
-
-    #[test]
-    fn test_aggregate_error_display() {
-        let errors = vec!["Error 1", "Error 2", "Error 3"];
-        let aggregate = AggregateError::from_errors(errors, 10);
-
-        let display = format!("{}", aggregate);
-        assert!(display.contains("Failed to process 3/10 items"));
-        assert!(display.contains("1. Error 1"));
-        assert!(display.contains("2. Error 2"));
-        assert!(display.contains("3. Error 3"));
-    }
-
-    #[test]
-    fn test_aggregate_error_counts() {
-        let errors = vec!["Error 1", "Error 2"];
-        let aggregate = AggregateError::from_errors(errors, 5);
-
-        assert_eq!(aggregate.failed_count(), 2);
-        assert_eq!(aggregate.total_count(), 5);
-        assert_eq!(aggregate.errors().len(), 2);
     }
 }

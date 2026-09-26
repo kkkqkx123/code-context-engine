@@ -115,9 +115,14 @@ async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: boo
         println!("  Files scanned:   {}", response.files_scanned);
         println!("  Files indexed:   {}", response.files_indexed);
         println!("  Failed files:    {}", response.failed_files);
+        println!("  Degraded files:  {}", response.degraded_files);
+        println!("  Skipped (perm):  {}", response.skipped_permanent);
         println!("  Total entities:  {}", response.total_entities);
         println!("  Total relations: {}", response.total_relations);
         println!("  Total vectors:   {}", response.total_vectors);
+        if response.circuit_open {
+            print_error("Backend circuit breaker opened during this run");
+        }
         println!(
             "  Elapsed time:    {}",
             format_duration(response.elapsed_ms)
@@ -132,6 +137,15 @@ async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: boo
         }
     } else {
         print_error(&response.message);
+        println!("  Failed files:    {}", response.failed_files);
+        println!("  Degraded files:  {}", response.degraded_files);
+        println!("  Skipped (perm):  {}", response.skipped_permanent);
+        if response.circuit_open {
+            print_error("Backend circuit breaker opened during this run");
+        }
+        for error in &response.errors {
+            print_error(error);
+        }
     }
 
     Ok(())

@@ -208,7 +208,7 @@ mod tests {
                     [],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                .map_err(|error| cce_types::StorageError::insert("projects", error.to_string()))?;
                 ChunkRepository::insert_batch(
                     tx,
                     &[

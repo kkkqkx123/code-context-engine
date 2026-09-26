@@ -135,30 +135,6 @@ impl QdrantError {
         matches!(self, Self::CollectionNotFound(_))
     }
 
-    /// Check if this is retryable
-    ///
-    /// A retryable error is one that may succeed on a subsequent attempt or
-    /// that signals a transient backend fault the caller should treat as such:
-    /// - Connection-level failures (refused, timeout, DNS)
-    /// - Transport/request failures (client could not complete the round trip)
-    /// - Circuit breaker open (indicating transient overload)
-    /// - Operation timeout (server may recover)
-    ///
-    /// `Api` (HTTP status returned by the server) is deliberately excluded: the
-    /// type layer cannot distinguish a retryable 5xx from a deterministic 4xx,
-    /// so it is surfaced through `is_transient` instead.
-    pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Connection(_)
-                | Self::ConnectionRefused { .. }
-                | Self::ConnectionTimeout(_)
-                | Self::OperationTimeout(_)
-                | Self::CircuitBreakerOpen(_)
-                | Self::Request(_)
-        )
-    }
-
     /// Get error code for programmatic error handling
     pub fn error_code(&self) -> &'static str {
         match self {

@@ -28,6 +28,7 @@ use cce_relation::CallChainQuery;
 use cce_storage_bm25::Bm25Client;
 use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
+use cce_types::error::common::ErrorClassify;
 
 use super::SearcherBuilder;
 use super::cache::{CacheConfig, QueryCache};

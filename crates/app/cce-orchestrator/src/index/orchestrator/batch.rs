@@ -22,7 +22,7 @@ use crate::error::OrchestratorError;
 use crate::index::file_processor::read_verified_utf8;
 
 use crate::index::options::IndexOptions;
-use crate::index_state::{IndexPhase, ModuleType, ModuleUpdateState};
+use crate::index_state::{IndexPhase, ModuleType, ModuleUpdateState, TrackerFailure};
 
 impl IndexOrchestrator {
     /// Process all remaining batches in the deterministic batch loop.
@@ -204,7 +204,11 @@ impl IndexOrchestrator {
 
             self.progress.set_total(ctx.total_files);
 
-            // Store results immediately
+            // Store results immediately. Entity persistence failures are
+            // recorded as batch errors without stopping the batch: the batch
+            // still proceeds to vector/BM25 stages, and the uncommitted work
+            // is replayed on resume with entity records reconciled via
+            // ensure_file_records.
             if !batch_result.parsed_files.is_empty() {
                 if let Err(error) = self.storage.store_parsed_files(&batch_result.parsed_files) {
                     tracing::error!(
@@ -445,14 +449,57 @@ impl IndexOrchestrator {
 
                 match self.storage.store_summaries(&summaries).await {
                     Ok(_) => {
-                        // Mark Summary success
+                        // A permanent model failure keeps the rule-based text
+                        // (already stored above) but must not masquerade as a
+                        // clean Summary success: those files dead-letter with
+                        // zero retries so a resume re-picks them after the
+                        // config/key is fixed. Transient fallbacks and clean
+                        // generations mark success; degraded counting happens
+                        // in the per-file loop.
                         for path in &success_paths {
-                            self.state_tracker
-                                .mark_success(path, ModuleType::Summary)
-                                .await
-                                .unwrap_or_else(|e| {
-                                    tracing::warn!(error = %e, "State tracking operation failed");
-                                });
+                            let outcome = file_summary_map
+                                .get(path.to_string_lossy().as_ref())
+                                .map(|s| s.outcome.clone());
+                            match outcome {
+                                // A permanent model failure keeps the
+                                // rule-based text (already stored above) but
+                                // must not masquerade as a clean Summary
+                                // success: the module dead-letters with zero
+                                // retries so a resume re-picks the file once
+                                // the LLM configuration is fixed.
+                                Some(cce_parser::summary::SummaryOutcome::Failed {
+                                    code,
+                                    message,
+                                }) => {
+                                    let failure = TrackerFailure {
+                                        message,
+                                        code: Some(code),
+                                        retryable: false,
+                                    };
+                                    self.state_tracker
+                                        .mark_failed(path, ModuleType::Summary, failure)
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            tracing::warn!(error = %e, "State tracking operation failed");
+                                        });
+                                }
+                                _ => {
+                                    // A transient fallback produced usable but
+                                    // rule-only content: the file is degraded.
+                                    if matches!(
+                                        outcome,
+                                        Some(cce_parser::summary::SummaryOutcome::Fallback { .. })
+                                    ) {
+                                        ctx.total_degraded += 1;
+                                    }
+                                    self.state_tracker
+                                        .mark_success(path, ModuleType::Summary)
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            tracing::warn!(error = %e, "State tracking operation failed");
+                                        });
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -791,6 +838,13 @@ impl IndexOrchestrator {
                         if let Some(metrics) = &self.quality_metrics {
                             metrics.record_empty_file();
                         }
+                        batch_result.degraded_files += 1;
+                    } else if process_result.dropped_blank_segments > 0 {
+                        tracing::warn!(
+                            file = %pf.path,
+                            dropped = process_result.dropped_blank_segments,
+                            "Chunker dropped blank segments; indexed content is incomplete"
+                        );
                         batch_result.degraded_files += 1;
                     }
                 }

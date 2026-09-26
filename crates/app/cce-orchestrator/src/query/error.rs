@@ -19,8 +19,9 @@
 //! ```
 
 use cce_llm_client::LlmError;
-use cce_parser::tree_sitter_query::QueryError as TreeSitterQueryError;
+use cce_parser::tree_sitter_query::TreeSitterQueryError;
 use cce_relation::RelationQueryError;
+use cce_types::error::common::ErrorClassify;
 use thiserror::Error;
 
 /// Errors that can occur during query operations
@@ -181,6 +182,28 @@ impl QueryError {
         }
     }
 
+    /// Stable machine-readable code for dead-letter aggregation.
+    /// Typed vector failures keep the inner LLM code so reports stay precise.
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            Self::Vector(err) => err.error_code(),
+            Self::Bm25(_) => "QUERY_BM25_ERROR",
+            Self::Relation(_) => "QUERY_RELATION_ERROR",
+            Self::Storage(_) => "QUERY_STORAGE_ERROR",
+            Self::Config(_) => "QUERY_CONFIG_ERROR",
+            Self::InvalidQuery(_) => "QUERY_INVALID_QUERY",
+            Self::NotFound(_) => "QUERY_NOT_FOUND",
+            Self::Timeout { .. } => "QUERY_TIMEOUT",
+            Self::Traversal(_) => "QUERY_TRAVERSAL_ERROR",
+            Self::PathNotFound(..) => "QUERY_PATH_NOT_FOUND",
+            Self::Invalid(_) => "QUERY_INVALID_ERROR",
+            Self::IndexNotAvailable(_) => "QUERY_INDEX_NOT_AVAILABLE",
+            Self::Assembly(_) => "QUERY_ASSEMBLY_ERROR",
+            Self::Rerank(_) => "QUERY_RERANK_ERROR",
+            Self::Retryable { .. } => "QUERY_RETRYABLE_ERROR",
+        }
+    }
+
     /// Get recovery suggestion for this error
     ///
     /// Returns actionable steps the user can take to resolve the error.
@@ -222,20 +245,6 @@ impl QueryError {
         }
     }
 
-    /// Check if this error is retryable
-    ///
-    /// Returns true for transient errors that may succeed on retry.
-    pub fn is_retryable(&self) -> bool {
-        match self {
-            QueryError::Vector(LlmError::Http(_))
-            | QueryError::Bm25(_)
-            | QueryError::Timeout { .. }
-            | QueryError::Retryable { .. } => true,
-            QueryError::Vector(LlmError::HttpStatus { status, .. }) => (500..=599).contains(status),
-            _ => false,
-        }
-    }
-
     /// Check if this error indicates a configuration problem
     pub fn is_config_error(&self) -> bool {
         matches!(
@@ -247,5 +256,59 @@ impl QueryError {
     }
 }
 
+impl ErrorClassify for QueryError {
+    fn is_retryable(&self) -> bool {
+        self.is_transient()
+    }
+
+    fn is_transient(&self) -> bool {
+        match self {
+            // Typed inner errors carry their own layered classification.
+            QueryError::Vector(err) => err.is_transient(),
+            QueryError::Relation(err) => err.is_transient(),
+            // Service/IO availability faults on the query path.
+            QueryError::Bm25(_)
+            | QueryError::Storage(_)
+            | QueryError::Timeout { .. }
+            | QueryError::Rerank(_)
+            | QueryError::Retryable { .. } => true,
+            // Deterministic input, configuration, and graph-navigation faults.
+            QueryError::Config(_)
+            | QueryError::InvalidQuery(_)
+            | QueryError::NotFound(_)
+            | QueryError::Traversal(_)
+            | QueryError::PathNotFound { .. }
+            | QueryError::Invalid(_)
+            | QueryError::IndexNotAvailable(_)
+            | QueryError::Assembly(_) => false,
+        }
+    }
+
+    fn is_permanent(&self) -> bool {
+        !self.is_transient()
+    }
+}
+
 /// Result type alias for query operations
 pub type Result<T> = std::result::Result<T, QueryError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_error_codes_stable() {
+        assert_eq!(
+            QueryError::not_found("x".into()).error_code(),
+            "QUERY_NOT_FOUND"
+        );
+        assert_eq!(
+            QueryError::Timeout { timeout_ms: 1 }.error_code(),
+            "QUERY_TIMEOUT"
+        );
+        assert_eq!(
+            QueryError::Vector(LlmError::token_limit_exceeded(9, 8)).error_code(),
+            "LLM_TOKEN_LIMIT_EXCEEDED_ERROR"
+        );
+    }
+}

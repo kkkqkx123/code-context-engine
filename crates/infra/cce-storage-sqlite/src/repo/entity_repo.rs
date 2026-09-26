@@ -58,7 +58,7 @@ impl EntityRepository {
                 entity.epoch,
                 entity.batch_id
             ],
-            "entity",
+            "entities",
         )
     }
 
@@ -105,7 +105,7 @@ impl EntityRepository {
             "INSERT INTO entities (name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             &param_list,
-            "entity",
+            "entities",
         )
     }
 
@@ -340,7 +340,7 @@ impl EntityRepository {
             tx,
             "DELETE FROM entities WHERE id = ?1",
             params![id],
-            "delete entity",
+            "entities",
         )
     }
 
@@ -351,7 +351,7 @@ impl EntityRepository {
             tx,
             "DELETE FROM entities WHERE file_id = ?1",
             params![file_id],
-            "delete entities by file",
+            "entities",
         )
     }
 
@@ -367,7 +367,7 @@ impl EntityRepository {
             tx,
             "DELETE FROM entities WHERE file_id = ?1 AND epoch = ?2",
             params![file_id, epoch],
-            "delete entities by file at epoch",
+            "entities",
         )
     }
 
@@ -380,7 +380,7 @@ impl EntityRepository {
             tx,
             "DELETE FROM entities WHERE project_id = ?1",
             params![project_id],
-            "delete entities by project",
+            "entities",
         )
     }
 
@@ -394,7 +394,7 @@ impl EntityRepository {
             tx,
             "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2",
             params![project_id, epoch],
-            "delete entities by project and epoch",
+            "entities",
         )
     }
 
@@ -410,7 +410,7 @@ impl EntityRepository {
             tx,
             "DELETE FROM entities WHERE project_id = ?1 AND file_id IN (SELECT id FROM files WHERE path = ?2)",
             rusqlite::params![project_id, file_path],
-            "delete entities by file path",
+            "entities",
         )
     }
 
@@ -426,7 +426,7 @@ impl EntityRepository {
             tx,
             "DELETE FROM entities WHERE project_id = ?1 AND epoch = ?2 AND file_id IN (SELECT id FROM files WHERE path = ?3)",
             rusqlite::params![project_id, epoch, file_path],
-            "delete entities by file path and epoch",
+            "entities",
         )
     }
 
@@ -443,7 +443,7 @@ impl EntityRepository {
             tx,
             "UPDATE entities SET scoped_name = ?1, span_start_byte = ?2, span_end_byte = ?3 WHERE id = ?4",
             params![scoped_name, span_start_byte, span_end_byte, entity_id],
-            "update entity symbol info",
+            "entities",
         )
     }
 

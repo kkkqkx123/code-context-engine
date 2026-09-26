@@ -13,7 +13,7 @@ use cce_circuit_breaker::CircuitBreaker;
 #[derive(Debug, Default)]
 pub struct LlmRateLimiterRegistry {
     limiters: Mutex<HashMap<String, Arc<ConfigurableRateLimiter>>>,
-    circuit_breakers: Mutex<HashMap<String, Arc<Mutex<CircuitBreaker>>>>,
+    circuit_breakers: Mutex<HashMap<String, (Arc<Mutex<CircuitBreaker>>, CircuitBreakerConfig)>>,
 }
 
 impl LlmRateLimiterRegistry {
@@ -40,6 +40,10 @@ impl LlmRateLimiterRegistry {
     }
 
     /// Get (or create) the circuit breaker for an upstream base URL.
+    ///
+    /// The first registration for a base URL wins; a later registration with
+    /// different parameters keeps the existing breaker but warns so the
+    /// config drift stays visible.
     pub fn circuit_breaker_for(
         &self,
         base_url: &str,
@@ -53,7 +57,20 @@ impl LlmRateLimiterRegistry {
             .circuit_breakers
             .lock()
             .expect("circuit breaker registry mutex poisoned");
-        if let Some(existing) = guard.get(base_url) {
+        if let Some((existing, existing_config)) = guard.get(base_url) {
+            if existing_config.failure_threshold != config.failure_threshold
+                || existing_config.recovery_timeout_secs != config.recovery_timeout_secs
+            {
+                tracing::warn!(
+                    base_url,
+                    registered_failure_threshold = existing_config.failure_threshold,
+                    requested_failure_threshold = config.failure_threshold,
+                    registered_recovery_timeout_secs = existing_config.recovery_timeout_secs,
+                    requested_recovery_timeout_secs = config.recovery_timeout_secs,
+                    "Circuit breaker already registered for this base URL with different \
+                     parameters; keeping the first registration"
+                );
+            }
             return Some(existing.clone());
         }
 
@@ -61,7 +78,7 @@ impl LlmRateLimiterRegistry {
             config.failure_threshold,
             Duration::from_secs(config.recovery_timeout_secs),
         )));
-        guard.insert(base_url.to_string(), breaker.clone());
+        guard.insert(base_url.to_string(), (breaker.clone(), config.clone()));
         Some(breaker)
     }
 }
@@ -154,6 +171,17 @@ mod tests {
         let breaker = registry
             .circuit_breaker_for("https://api.example.com", &strict)
             .expect("breaker should exist");
+
+        // A later registration with different parameters keeps the first breaker.
+        let lenient = CircuitBreakerConfig {
+            failure_threshold: 10,
+            recovery_timeout_secs: 600,
+            ..Default::default()
+        };
+        let reused = registry
+            .circuit_breaker_for("https://api.example.com", &lenient)
+            .expect("breaker should exist");
+        assert!(Arc::ptr_eq(&breaker, &reused));
 
         let mut breaker = breaker.lock().expect("breaker mutex poisoned");
         for _ in 0..2 {

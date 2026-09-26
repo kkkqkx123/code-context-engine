@@ -34,7 +34,7 @@ impl EntityDetailMappingRepository {
                 mapping.created_at,
                 mapping.updated_at,
             ],
-            "entity detail mapping",
+            "entity_detail_mappings",
         )
     }
 
@@ -99,7 +99,10 @@ impl EntityDetailMappingRepository {
             ],
         )
         .map_err(|e| {
-            StorageError::insert(format!("Failed to upsert entity detail mapping: {}", e))
+            StorageError::insert(
+                "entity_detail_mappings",
+                format!("Failed to upsert entity detail mapping: {e}"),
+            )
         })?;
         tx.query_row(
             "SELECT id FROM entity_detail_mappings
@@ -174,10 +177,10 @@ impl EntityDetailMappingRepository {
             ],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to update Qdrant point IDs for entity {}: {}",
-                entity_id, e
-            ))
+            StorageError::update(
+                "entity_detail_mappings",
+                format!("Failed to update Qdrant point IDs for entity {entity_id}: {e}"),
+            )
         })
     }
 
@@ -204,10 +207,10 @@ impl EntityDetailMappingRepository {
             ],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to update BM25 doc IDs for entity {}: {}",
-                entity_id, e
-            ))
+            StorageError::update(
+                "entity_detail_mappings",
+                format!("Failed to update BM25 doc IDs for entity {entity_id}: {e}"),
+            )
         })
     }
 
@@ -222,10 +225,10 @@ impl EntityDetailMappingRepository {
             params![entity_id, project_id],
         )
         .map_err(|e| {
-            StorageError::delete(format!(
-                "Failed to delete entity detail mapping for entity {}: {}",
-                entity_id, e
-            ))
+            StorageError::delete(
+                "entity_detail_mappings",
+                format!("Failed to delete entity detail mapping for entity {entity_id}: {e}"),
+            )
         })
     }
 
@@ -241,10 +244,12 @@ impl EntityDetailMappingRepository {
             params![entity_id, project_id, epoch],
         )
         .map_err(|e| {
-            StorageError::delete(format!(
-                "Failed to delete entity detail mapping for entity {} at epoch {}: {}",
-                entity_id, epoch, e
-            ))
+            StorageError::delete(
+                "entity_detail_mappings",
+                format!(
+                    "Failed to delete entity detail mapping for entity {entity_id} at epoch {epoch}: {e}"
+                ),
+            )
         })
     }
 
@@ -261,10 +266,12 @@ impl EntityDetailMappingRepository {
             params![file_id, epoch],
         )
         .map_err(|e| {
-            StorageError::delete(format!(
-                "Failed to delete entity detail mappings for file {} at epoch {}: {}",
-                file_id, epoch, e
-            ))
+            StorageError::delete(
+                "entity_detail_mappings",
+                format!(
+                    "Failed to delete entity detail mappings for file {file_id} at epoch {epoch}: {e}"
+                ),
+            )
         })
     }
 
@@ -280,10 +287,10 @@ impl EntityDetailMappingRepository {
             params![file_id],
         )
         .map_err(|e| {
-            StorageError::delete(format!(
-                "Failed to delete entity detail mappings for file {}: {}",
-                file_id, e
-            ))
+            StorageError::delete(
+                "entity_detail_mappings",
+                format!("Failed to delete entity detail mappings for file {file_id}: {e}"),
+            )
         })
     }
 

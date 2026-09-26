@@ -2,7 +2,7 @@
 //!
 //! Executes Tree-sitter queries on parsed trees and returns structured results.
 
-use super::error::{QueryError, Result};
+use super::error::{Result, TreeSitterQueryError};
 use crate::tree_sitter_query::loader::{QueryLoader, QueryType};
 
 use cce_types::language::Language;
@@ -253,7 +253,7 @@ impl QueryExecutor {
                 let text = node
                     .utf8_text(source.as_bytes())
                     .map_err(|e| {
-                        QueryError::InvalidQuery(format!("Failed to extract text: {}", e))
+                        TreeSitterQueryError::InvalidQuery(format!("Failed to extract text: {}", e))
                     })?
                     .to_string();
 
@@ -315,7 +315,7 @@ impl QueryExecutor {
             QueryType::Dependency => self.execute_dependency_query(tree, source, language)?,
             QueryType::Comment => self.execute_comment_query(tree, source, language)?,
             QueryType::Embedded => {
-                return Err(QueryError::InvalidQuery(
+                return Err(TreeSitterQueryError::InvalidQuery(
                     "Embedded query type does not support capture filtering".to_string(),
                 ));
             }

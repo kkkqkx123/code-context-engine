@@ -23,7 +23,8 @@ pub trait SqliteStore: Send + Sync + 'static {
     ///
     /// Implementations should wrap the batch in a single transaction when
     /// possible. The default implementation falls back to repeated
-    /// `execute_write` calls so in-memory fakes keep working.
+    /// `execute_write` calls so in-memory fakes keep working; a failing
+    /// row aborts the batch instead of being silently dropped.
     fn execute_write_batch(
         &self,
         sql: &str,
@@ -32,9 +33,8 @@ pub trait SqliteStore: Send + Sync + 'static {
         let mut inserted = 0;
         for params in batch {
             let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-            if self.execute_write(sql, &refs).is_ok() {
-                inserted += 1;
-            }
+            self.execute_write(sql, &refs)?;
+            inserted += 1;
         }
         Ok(inserted)
     }

@@ -1023,7 +1023,15 @@ impl UpdateProcessor for RelationUpdateProcessor {
                     .activate_hot_update_candidate(&operation_id)
                     .map_err(|error| HotUpdateError::relation(error.to_string()))?,
                 Err(error) => {
-                    let _ = storage.fail_hot_update_candidate(&operation_id, &error.to_string());
+                    if let Err(fail_error) =
+                        storage.fail_hot_update_candidate(&operation_id, &error.to_string())
+                    {
+                        tracing::error!(
+                            operation_id = %operation_id,
+                            error = %fail_error,
+                            "Failed to mark hot update candidate failed after config change error"
+                        );
+                    }
                     return Err(error);
                 }
             }

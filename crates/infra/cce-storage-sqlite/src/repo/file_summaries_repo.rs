@@ -54,7 +54,12 @@ impl FileSummaryRepository {
                 updated_at = excluded.updated_at",
             params![file_id, epoch, summary_json, now, now],
         )
-        .map_err(|e| StorageError::insert(format!("Failed to upsert file summary: {}", e)))?;
+        .map_err(|e| {
+            StorageError::insert(
+                "file_summaries",
+                format!("Failed to upsert file summary: {}", e),
+            )
+        })?;
 
         tx.query_row(
             "SELECT id FROM file_summaries WHERE file_id = ?1 AND epoch = ?2",
@@ -149,10 +154,10 @@ impl FileSummaryRepository {
             params![file_id],
         )
         .map_err(|e| {
-            StorageError::delete(format!(
-                "Failed to delete file summary for file {}: {}",
-                file_id, e
-            ))
+            StorageError::delete(
+                "file_summaries",
+                format!("Failed to delete file summary for file {}: {}", file_id, e),
+            )
         })?;
 
         Ok(())
@@ -169,10 +174,13 @@ impl FileSummaryRepository {
             params![file_id, epoch],
         )
         .map_err(|e| {
-            StorageError::delete(format!(
-                "Failed to delete file summary for file {} at epoch {}: {}",
-                file_id, epoch, e
-            ))
+            StorageError::delete(
+                "file_summaries",
+                format!(
+                    "Failed to delete file summary for file {} at epoch {}: {}",
+                    file_id, epoch, e
+                ),
+            )
         })?;
 
         Ok(())
@@ -192,10 +200,13 @@ impl FileSummaryRepository {
             params![point_id, now, file_id],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to update Qdrant point ID for file {}: {}",
-                file_id, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!(
+                    "Failed to update Qdrant point ID for file {}: {}",
+                    file_id, e
+                ),
+            )
         })?;
         Ok(())
     }
@@ -215,10 +226,13 @@ impl FileSummaryRepository {
             params![point_id, now, file_id, epoch],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to update Qdrant point ID for file {} at epoch {}: {}",
-                file_id, epoch, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!(
+                    "Failed to update Qdrant point ID for file {} at epoch {}: {}",
+                    file_id, epoch, e
+                ),
+            )
         })?;
         Ok(())
     }
@@ -237,10 +251,10 @@ impl FileSummaryRepository {
             params![doc_id, now, file_id],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to update BM25 doc ID for file {}: {}",
-                file_id, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!("Failed to update BM25 doc ID for file {}: {}", file_id, e),
+            )
         })?;
         Ok(())
     }
@@ -260,10 +274,13 @@ impl FileSummaryRepository {
             params![doc_id, now, file_id, epoch],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to update BM25 doc ID for file {} at epoch {}: {}",
-                file_id, epoch, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!(
+                    "Failed to update BM25 doc ID for file {} at epoch {}: {}",
+                    file_id, epoch, e
+                ),
+            )
         })?;
         Ok(())
     }
@@ -278,10 +295,13 @@ impl FileSummaryRepository {
             params![now, file_id],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to clear Qdrant point ID for file {}: {}",
-                file_id, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!(
+                    "Failed to clear Qdrant point ID for file {}: {}",
+                    file_id, e
+                ),
+            )
         })?;
         Ok(())
     }
@@ -300,10 +320,13 @@ impl FileSummaryRepository {
             params![now, file_id, epoch],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to clear Qdrant point ID for file {} at epoch {}: {}",
-                file_id, epoch, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!(
+                    "Failed to clear Qdrant point ID for file {} at epoch {}: {}",
+                    file_id, epoch, e
+                ),
+            )
         })?;
         Ok(())
     }
@@ -318,10 +341,10 @@ impl FileSummaryRepository {
             params![now, file_id],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to clear BM25 doc ID for file {}: {}",
-                file_id, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!("Failed to clear BM25 doc ID for file {}: {}", file_id, e),
+            )
         })?;
         Ok(())
     }
@@ -340,10 +363,13 @@ impl FileSummaryRepository {
             params![now, file_id, epoch],
         )
         .map_err(|e| {
-            StorageError::update(format!(
-                "Failed to clear BM25 doc ID for file {} at epoch {}: {}",
-                file_id, epoch, e
-            ))
+            StorageError::update(
+                "file_summaries",
+                format!(
+                    "Failed to clear BM25 doc ID for file {} at epoch {}: {}",
+                    file_id, epoch, e
+                ),
+            )
         })?;
         Ok(())
     }
@@ -420,13 +446,13 @@ mod tests {
                      VALUES ('probe', '/probe', 0, 0)",
                     [],
                 )
-                .map_err(|e| StorageError::insert(e.to_string()))?;
+                .map_err(|e| StorageError::insert("projects", e.to_string()))?;
                 tx.execute(
                     "INSERT INTO files (path, language, last_modified, created_at, project_id, \
                      content_hash, epoch, batch_id) VALUES (?1, 'rust', 1, 1, 1, 'hash', 3, 0)",
                     rusqlite::params![path],
                 )
-                .map_err(|e| StorageError::insert(e.to_string()))?;
+                .map_err(|e| StorageError::insert("files", e.to_string()))?;
                 Ok(tx.last_insert_rowid())
             })
             .expect("seed project + file")

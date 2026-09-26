@@ -342,7 +342,7 @@ pub struct TrackerFailure {
     /// Human-readable failure message.
     pub message: String,
     /// Stable error code of the underlying failure, when known.
-    pub code: Option<&'static str>,
+    pub code: Option<String>,
     /// Whether retrying the same work could succeed.
     pub retryable: bool,
 }
@@ -588,7 +588,7 @@ impl FileUpdateState {
         if let Some(record) = self.module_states.get_mut(&module) {
             record.retry_count += 1;
             record.error_message = Some(failure.message);
-            record.error_code = failure.code.map(str::to_string);
+            record.error_code = failure.code;
 
             // Determine next state based on retryability and retry count
             if !failure.retryable || record.retry_count >= MAX_RETRY_COUNT {
@@ -944,7 +944,7 @@ mod tests {
             ModuleType::Embedding,
             TrackerFailure {
                 message: "Token limit exceeded: 9000 > 8192".to_string(),
-                code: Some(TOKEN_LIMIT_ERROR_CODE),
+                code: Some(TOKEN_LIMIT_ERROR_CODE.to_string()),
                 retryable: false,
             },
         );
@@ -971,7 +971,7 @@ mod tests {
             ModuleType::Embedding,
             TrackerFailure {
                 message: "Token limit exceeded: 9000 > 8192".to_string(),
-                code: Some(TOKEN_LIMIT_ERROR_CODE),
+                code: Some(TOKEN_LIMIT_ERROR_CODE.to_string()),
                 retryable: false,
             },
         );

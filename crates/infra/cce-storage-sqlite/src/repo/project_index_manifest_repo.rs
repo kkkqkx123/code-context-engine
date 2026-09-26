@@ -131,7 +131,7 @@ impl ProjectIndexManifestRepository {
             "INSERT INTO project_index_manifests
                 (project_id, publication_epoch, data_epoch, relation_epoch,
                  operation_id, state, input_fingerprint, created_at)
-             VALUES (?1, ?2, ?3, 0, ?4, 'building', ?5, ?6)",
+              VALUES (?1, ?2, ?3, 0, ?4, 'building', ?5, ?6)",
             params![
                 project_id,
                 publication_epoch,
@@ -141,7 +141,7 @@ impl ProjectIndexManifestRepository {
                 now,
             ],
         )
-        .map_err(|error| StorageError::Insert(error.to_string()))?;
+        .map_err(|error| StorageError::insert("project_index_manifests", error.to_string()))?;
         Ok(ProjectIndexManifest {
             project_id,
             publication_epoch,
@@ -563,11 +563,11 @@ impl ProjectIndexManifestRepository {
                      (SELECT id FROM files WHERE project_id = ?1 AND epoch = ?2)",
                 params![project_id, epoch],
             )
-            .map_err(|error| StorageError::Delete(error.to_string()))?;
+            .map_err(|error| StorageError::delete("file_summaries", error.to_string()))?;
             for table in ["entity_detail_mappings", "chunks", "entities", "files"] {
                 let sql = format!("DELETE FROM {table} WHERE project_id = ?1 AND epoch = ?2");
                 tx.execute(&sql, params![project_id, epoch])
-                    .map_err(|error| StorageError::Delete(error.to_string()))?;
+                    .map_err(|error| StorageError::delete(table, error.to_string()))?;
             }
             // Overrides die with their generation; a recycled epoch number
             // must never inherit a stale exclusion set.
@@ -581,7 +581,7 @@ impl ProjectIndexManifestRepository {
                  WHERE project_id = ?1 AND publication_epoch = ?2",
                 params![project_id, publication_epoch],
             )
-            .map_err(|error| StorageError::Delete(error.to_string()))?;
+            .map_err(|error| StorageError::delete("project_index_manifests", error.to_string()))?;
         }
         for epoch in &plan.stale_relation_epochs {
             tx.execute(
@@ -589,7 +589,9 @@ impl ProjectIndexManifestRepository {
                  WHERE project_id = ?1 AND relation_epoch = ?2",
                 params![project_id, epoch],
             )
-            .map_err(|error| StorageError::Delete(error.to_string()))?;
+            .map_err(|error| {
+                StorageError::delete("relation_snapshot_manifest", error.to_string())
+            })?;
         }
         Ok(())
     }
@@ -642,7 +644,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 ProjectIndexManifestRepository::activate(tx, 1, 3, 0, "operation-1", None)?;
                 ProjectIndexManifestRepository::activate(
                     tx,
@@ -680,7 +682,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 let manifest = ProjectIndexManifestRepository::begin_building(
                     tx, 1, 2, "operation", None,
                 )?;
@@ -709,7 +711,7 @@ mod tests {
              VALUES (?1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
             params![project_id],
         )
-        .map_err(|error| StorageError::Insert(error.to_string()))?;
+        .map_err(|error| StorageError::insert("projects", error.to_string()))?;
         for epoch in 1..=depth as i64 {
             let operation = format!("operation-{epoch}");
             if epoch > 1 {
@@ -773,7 +775,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 ProjectIndexManifestRepository::activate(tx, 1, 1, 0, "operation-1", None)
                     .map(|_| ())?;
 
@@ -822,7 +824,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 for (epoch, operation) in [(1, "operation-1"), (2, "operation-2")] {
                     ProjectIndexManifestRepository::activate(tx, 1, epoch, 0, operation, None)
                         .map(|_| ())?;
@@ -868,7 +870,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 for (epoch, operation) in [(1, "operation-1"), (2, "operation-2"), (3, "operation-3")] {
                     ProjectIndexManifestRepository::activate(tx, 1, epoch, 0, operation, None)?;
                 }
@@ -909,7 +911,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 ProjectIndexManifestRepository::activate(tx, 1, 3, 0, "operation-1", None)?;
                 Ok(())
             })
@@ -938,7 +940,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 ProjectIndexManifestRepository::activate(tx, 1, 3, 0, "operation-1", None)?;
                 Ok(())
             })
@@ -967,7 +969,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 ProjectIndexManifestRepository::begin_building(tx, 1, 2, "operation-1", None)?;
                 Ok(())
             })
@@ -990,7 +992,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 ProjectIndexManifestRepository::begin_building(tx, 1, 3, "operation-1", None)?;
                 ProjectIndexManifestRepository::set_parent_data_epoch(tx, 1, "operation-1", Some(2))?;
                 Ok(())
@@ -1028,7 +1030,7 @@ mod tests {
                      VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 ProjectIndexManifestRepository::begin_building(tx, 1, 2, "operation-1", None)?;
                 Ok(())
             })

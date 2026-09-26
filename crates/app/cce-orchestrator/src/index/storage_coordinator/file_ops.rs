@@ -41,7 +41,7 @@ impl StorageCoordinator {
                     "DELETE FROM files WHERE path = ?1 AND project_id = ?2",
                     params![&file_id, self.project_id],
                 )
-                .ok();
+                .map_err(|e| cce_types::StorageError::Sqlite(e.to_string()))?;
                 Ok(())
             });
 
@@ -243,9 +243,7 @@ impl StorageCoordinator {
                     })?;
                     Ok(())
                 });
-            if let Err(e) = result {
-                tracing::warn!(file = %file_id, error = %e, "Failed to clear Qdrant references");
-            }
+            result.map_err(OrchestratorError::Storage)?;
         }
 
         Ok(())
@@ -291,9 +289,7 @@ impl StorageCoordinator {
                     })?;
                     Ok(())
                 });
-            if let Err(e) = result {
-                tracing::warn!(file = %file_id, error = %e, "Failed to clear BM25 references");
-            }
+            result.map_err(OrchestratorError::Storage)?;
         }
 
         Ok(())

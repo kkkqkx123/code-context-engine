@@ -113,6 +113,9 @@ pub struct BatchConfig {
     /// Milliseconds to sleep between embedding batches
     /// Helps avoid API rate limits
     pub embedding_batch_delay_ms: u64,
+    /// Wall-clock deadline for one embedding stage pass, in seconds.
+    /// 0 means auto-derive: microbatch count x per-microbatch retry budget.
+    pub embedding_stage_timeout_secs: u64,
 }
 
 impl Default for BatchConfig {
@@ -124,6 +127,7 @@ impl Default for BatchConfig {
             store_batch_size: 50,
             embedding_batch_size: 32,
             embedding_batch_delay_ms: 100,
+            embedding_stage_timeout_secs: 0,
         }
     }
 }
@@ -181,6 +185,7 @@ impl BatchConfig {
             store_batch_size: 25,
             embedding_batch_size: 32,
             embedding_batch_delay_ms: 50,
+            embedding_stage_timeout_secs: 0,
         }
     }
 
@@ -193,6 +198,7 @@ impl BatchConfig {
             store_batch_size: 100,
             embedding_batch_size: 64,
             embedding_batch_delay_ms: 200,
+            embedding_stage_timeout_secs: 0,
         }
     }
 
@@ -205,6 +211,7 @@ impl BatchConfig {
             store_batch_size: 10,
             embedding_batch_size: 16,
             embedding_batch_delay_ms: 150,
+            embedding_stage_timeout_secs: 0,
         }
     }
 }

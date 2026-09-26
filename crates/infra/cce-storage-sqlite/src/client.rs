@@ -134,7 +134,9 @@ impl SqliteClient {
                     now,
                 ],
             )
-            .map_err(|e| StorageError::insert(format!("Failed to seed project row: {e}")))?;
+            .map_err(|e| {
+                StorageError::insert("projects", format!("Failed to seed project row: {e}"))
+            })?;
             Ok(())
         })?;
 
@@ -643,7 +645,7 @@ mod tests {
                      VALUES ('test', '/tmp/test', 1, 1)",
                     [],
                 )
-                .map_err(|error| StorageError::Insert(error.to_string()))?;
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
                 Ok(())
             })
             .expect("Failed to insert test project");

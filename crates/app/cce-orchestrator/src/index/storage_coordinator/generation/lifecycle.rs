@@ -287,7 +287,7 @@ mod tests {
                     [],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))
+                .map_err(|error| cce_types::StorageError::insert("project_meta", error.to_string()))
             })
             .expect("meta should be inserted");
 
@@ -362,7 +362,7 @@ mod tests {
                     [],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))
+                .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))
             })
             .expect("file row should be inserted");
         client
@@ -373,7 +373,7 @@ mod tests {
                     [],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))
+                .map_err(|error| cce_types::StorageError::insert("entities", error.to_string()))
             })
             .expect("entity row should be inserted");
 

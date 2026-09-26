@@ -36,21 +36,9 @@ pub enum ParseError {
     #[error("Failed to compile regex: {0}")]
     RegexCompilation(String),
 
-    /// JSON parsing error
-    #[error("JSON parsing failed: {0}")]
-    JsonParsing(String),
-
-    /// XML parsing error
-    #[error("XML parsing failed: {0}")]
-    XmlParsing(String),
-
-    /// TOML parsing error
-    #[error("TOML parsing failed: {0}")]
-    TomlParsing(String),
-
-    /// YAML parsing error
-    #[error("YAML parsing failed: {0}")]
-    YamlParsing(String),
+    /// Format document parsing error
+    #[error("Format {format} parsing failed: {reason}")]
+    FormatParsing { format: String, reason: String },
 
     /// Content changed between the scan phase and processing (stale snapshot)
     #[error("Content changed since scan: {0}")]
@@ -92,24 +80,32 @@ impl ParseError {
         Self::RegexCompilation(reason.into())
     }
 
+    /// Create a unified format parsing error
+    pub fn format_parsing(format: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::FormatParsing {
+            format: format.into(),
+            reason: reason.into(),
+        }
+    }
+
     /// Create a JSON parsing error
     pub fn json(reason: impl Into<String>) -> Self {
-        Self::JsonParsing(reason.into())
+        Self::format_parsing("json", reason)
     }
 
     /// Create an XML parsing error
     pub fn xml(reason: impl Into<String>) -> Self {
-        Self::XmlParsing(reason.into())
+        Self::format_parsing("xml", reason)
     }
 
     /// Create a TOML parsing error
     pub fn toml(reason: impl Into<String>) -> Self {
-        Self::TomlParsing(reason.into())
+        Self::format_parsing("toml", reason)
     }
 
     /// Create a YAML parsing error
     pub fn yaml(reason: impl Into<String>) -> Self {
-        Self::YamlParsing(reason.into())
+        Self::format_parsing("yaml", reason)
     }
 
     /// Create a content-drift error
@@ -132,10 +128,7 @@ impl ParseError {
             Self::InvalidFilePath(_) => "PARSE_INVALID_FILE_PATH_ERROR",
             Self::UnsupportedLanguage(_) => "PARSE_UNSUPPORTED_LANGUAGE_ERROR",
             Self::RegexCompilation(_) => "PARSE_REGEX_COMPILATION_ERROR",
-            Self::JsonParsing(_) => "PARSE_JSON_PARSING_ERROR",
-            Self::XmlParsing(_) => "PARSE_XML_PARSING_ERROR",
-            Self::TomlParsing(_) => "PARSE_TOML_PARSING_ERROR",
-            Self::YamlParsing(_) => "PARSE_YAML_PARSING_ERROR",
+            Self::FormatParsing { .. } => "PARSE_FORMAT_PARSING_ERROR",
             Self::ContentChanged(_) => "PARSE_CONTENT_CHANGED_ERROR",
             Self::Encoding(_) => "PARSE_ENCODING_ERROR",
         }
@@ -188,10 +181,10 @@ mod tests {
             ParseError::ast_parsing("boom"),
             ParseError::code_splitting("boom"),
             ParseError::regex_compilation("boom"),
-            ParseError::json("bad json"),
-            ParseError::xml("bad xml"),
-            ParseError::toml("bad toml"),
-            ParseError::yaml("bad yaml"),
+            ParseError::format_parsing("json", "bad json"),
+            ParseError::format_parsing("xml", "bad xml"),
+            ParseError::format_parsing("toml", "bad toml"),
+            ParseError::format_parsing("yaml", "bad yaml"),
             ParseError::content_changed("drifted"),
             ParseError::encoding("undecodable"),
             io_error(std::io::ErrorKind::NotFound),
@@ -202,6 +195,39 @@ mod tests {
             assert!(!err.is_retryable(), "{err} must not be retryable");
             assert!(err.is_permanent(), "{err} must be permanent");
         }
+    }
+
+    #[test]
+    fn format_parsing_covers_all_formats_with_unified_code() {
+        for format in ["json", "xml", "toml", "yaml"] {
+            let err = ParseError::format_parsing(format, "bad data");
+            match &err {
+                ParseError::FormatParsing {
+                    format: actual,
+                    reason: _,
+                } => assert_eq!(actual, format),
+                _ => panic!("expected FormatParsing variant"),
+            }
+            assert_eq!(err.error_code(), "PARSE_FORMAT_PARSING_ERROR");
+            assert!(!err.is_retryable());
+            assert!(err.is_permanent());
+        }
+        assert_eq!(
+            ParseError::json("bad").error_code(),
+            "PARSE_FORMAT_PARSING_ERROR"
+        );
+        assert_eq!(
+            ParseError::xml("bad").error_code(),
+            "PARSE_FORMAT_PARSING_ERROR"
+        );
+        assert_eq!(
+            ParseError::toml("bad").error_code(),
+            "PARSE_FORMAT_PARSING_ERROR"
+        );
+        assert_eq!(
+            ParseError::yaml("bad").error_code(),
+            "PARSE_FORMAT_PARSING_ERROR"
+        );
     }
 
     #[test]

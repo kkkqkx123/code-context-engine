@@ -87,7 +87,7 @@ impl ChunkRepository {
                 chunk.segment_id,
                 chunk.truncated,
             ],
-            "insert chunk",
+            "chunks",
         )
     }
 
@@ -130,7 +130,7 @@ impl ChunkRepository {
                 segment_id = excluded.segment_id,
                 truncated = excluded.truncated",
             )
-            .map_err(|e| StorageError::insert(format!("Failed to prepare statement: {}", e)))?;
+            .map_err(|e| StorageError::insert("chunks", format!("Failed to prepare statement: {e}")))?;
 
         for chunk in chunks {
             stmt.execute(params![
@@ -154,7 +154,7 @@ impl ChunkRepository {
                 chunk.segment_id,
                 chunk.truncated,
             ])
-            .map_err(|e| StorageError::insert(format!("Failed to insert chunk: {}", e)))?;
+            .map_err(|e| StorageError::insert("chunks", format!("Failed to insert chunk: {e}")))?;
         }
 
         Ok(())
@@ -342,7 +342,7 @@ impl ChunkRepository {
             "DELETE FROM chunks WHERE file_path = ?1 AND project_id = ?2",
             params![file_path, project_id],
         )
-        .map_err(|e| StorageError::delete(format!("Failed to delete chunks: {}", e)))
+        .map_err(|e| StorageError::delete("chunks", format!("Failed to delete chunks: {e}")))
     }
 
     /// Delete a chunk by its ID (project-scoped)
@@ -355,7 +355,7 @@ impl ChunkRepository {
             "DELETE FROM chunks WHERE chunk_id = ?1 AND project_id = ?2",
             params![chunk_id, project_id],
         )
-        .map_err(|e| StorageError::delete(format!("Failed to delete chunk: {}", e)))
+        .map_err(|e| StorageError::delete("chunks", format!("Failed to delete chunk: {e}")))
     }
 
     /// Get chunk count by file path and project ID

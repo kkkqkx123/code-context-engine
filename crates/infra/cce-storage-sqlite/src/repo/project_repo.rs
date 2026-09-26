@@ -37,7 +37,7 @@ impl ProjectRepository {
                 now,
             ],
         )
-        .map_err(|e| StorageError::insert(format!("Failed to insert project: {}", e)))?;
+        .map_err(|e| StorageError::insert("projects", format!("Failed to insert project: {e}")))?;
 
         Ok(tx.last_insert_rowid())
     }
@@ -81,7 +81,7 @@ impl ProjectRepository {
             tx,
             "DELETE FROM projects WHERE id = ?1",
             params![id],
-            "delete project",
+            "projects",
         )
     }
 
@@ -94,9 +94,9 @@ impl ProjectRepository {
         for table in &["checkpoint_file", "checkpoint_batch", "checkpoint"] {
             execute_update(
                 tx,
-                &format!("DELETE FROM {} WHERE project_id = ?1", table),
+                &format!("DELETE FROM {table} WHERE project_id = ?1"),
                 params![id],
-                &format!("delete {} by project", table),
+                table,
             )?;
         }
 

@@ -20,7 +20,7 @@
 use tree_sitter::Tree;
 
 use crate::parser::extractor::utils::extract_text_without_comments;
-use crate::tree_sitter_query::error::QueryError;
+use crate::tree_sitter_query::error::TreeSitterQueryError;
 use cce_types::language::Language;
 use cce_types::{BehaviorFact, BehaviorFactKind, BehaviorStore, Entity, EntityId, EntityKind};
 
@@ -46,7 +46,7 @@ impl MacroBodyExtractor {
         language: &Language,
         entities: &[Entity],
         behavior: &mut BehaviorStore,
-    ) -> Result<(), QueryError> {
+    ) -> Result<(), TreeSitterQueryError> {
         if !Self::supports_language(language) {
             return Ok(());
         }

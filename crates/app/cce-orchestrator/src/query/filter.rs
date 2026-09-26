@@ -224,7 +224,7 @@ pub(crate) fn read_legacy_active_epoch(conn: &Connection, project_id: i64) -> Re
         |row| row.get::<_, String>(0),
     ) {
         Ok(value) => value.parse().map_err(|_| {
-            QueryError::storage(&format!(
+            QueryError::invalid(&format!(
                 "project_meta active_epoch for project {project_id} is not a valid integer: {value}"
             ))
         }),

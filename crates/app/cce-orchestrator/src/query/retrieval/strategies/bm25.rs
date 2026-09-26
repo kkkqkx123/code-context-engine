@@ -203,6 +203,7 @@ mod tests {
         use super::classify_bm25_error;
         use crate::query::error::QueryError;
         use cce_storage_bm25::Bm25Error;
+        use cce_types::error::common::ErrorClassify;
 
         let config_error = classify_bm25_error(Bm25Error::Disabled);
         assert!(matches!(config_error, QueryError::Config(_)));
@@ -215,6 +216,7 @@ mod tests {
         use super::classify_bm25_error;
         use crate::query::error::QueryError;
         use cce_storage_bm25::Bm25Error;
+        use cce_types::error::common::ErrorClassify;
 
         let runtime_error = classify_bm25_error(Bm25Error::Search("reader unavailable".into()));
         match &runtime_error {

@@ -17,7 +17,7 @@
 //! post-processing logic.
 
 use crate::parser::comment_processor::CommentProcessor;
-use crate::tree_sitter_query::error::QueryError;
+use crate::tree_sitter_query::error::TreeSitterQueryError;
 use crate::tree_sitter_query::executor::{QueryExecutor, QueryMatch};
 use cce_types::language::Language;
 use cce_types::{Entity, EntityKind};
@@ -142,7 +142,7 @@ impl EntityExtractor {
         tree: &Tree,
         source: &str,
         language: &Language,
-    ) -> Result<Vec<Entity>, QueryError> {
+    ) -> Result<Vec<Entity>, TreeSitterQueryError> {
         let matches = self
             .query_executor
             .execute_entity_query(tree, source, language)?;

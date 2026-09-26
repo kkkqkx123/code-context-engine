@@ -5,7 +5,7 @@
 
 pub mod ast_to_nl;
 pub mod cache;
-pub(crate) mod defaults;
+pub mod defaults;
 pub mod embedder;
 pub mod export;
 pub mod grouper;

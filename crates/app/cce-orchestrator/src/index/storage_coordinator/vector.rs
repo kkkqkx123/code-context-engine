@@ -26,6 +26,16 @@ use super::mapping::{
     build_chunk_record, chunk_segment_id, compute_work_unit_hash, project_chunk_point_id,
 };
 
+/// Identifiable error code for an embedding stage that exceeded its
+/// wall-clock deadline (kept uncommitted for resume).
+pub(crate) const EMBEDDING_STAGE_TIMEOUT_CODE: &str = "EMBEDDING_STAGE_TIMEOUT";
+
+/// Per-microbatch wall-clock budget used to derive the embedding stage
+/// deadline when none is configured: the single-request HTTP timeout (30s)
+/// multiplied by a factor covering the client's retry/backoff budget for
+/// both the first pass and the deferred-retry pass.
+const EMBEDDING_MICROBATCH_BUDGET_SECS: u64 = 600;
+
 /// Whether an embedding failure should be retried rather than aborting the
 /// whole batch pass: rate limits (429) and transient server errors (5xx) are
 /// deferred, everything else is a hard failure.
@@ -40,12 +50,60 @@ impl StorageCoordinator {
     /// 1. Control memory usage during embedding
     /// 2. Avoid API rate limits by adding delays between batches
     ///
+    /// When an embedding stage deadline is configured, the whole pass is
+    /// bounded by it: a wedged provider that keeps tripping retries can no
+    /// longer hang the index run indefinitely. The deadline surfaces as a
+    /// batch-level error so the checkpoint boundary does not advance and a
+    /// resume replays the uncommitted work units.
+    ///
     /// # Arguments
     ///
     /// * `chunks` - Chunked results to store
     /// * `batch_size` - Number of chunks per embedding API call
     /// * `batch_delay_ms` - Milliseconds to sleep between batches
     pub async fn store_vectors_batched(
+        &self,
+        chunks: &[ChunkedResult],
+        batch_size: usize,
+        batch_delay_ms: u64,
+    ) -> Result<usize, OrchestratorError> {
+        let embedding_count = chunks
+            .iter()
+            .filter(|c| c.path == ChunkPath::Embedding)
+            .count();
+        if embedding_count == 0 {
+            return self
+                .store_vectors_batched_impl(chunks, batch_size, batch_delay_ms)
+                .await;
+        }
+        // 0 means auto-derive: microbatch count x per-microbatch budget. A
+        // configured value overrides it. Either way the pass is bounded so a
+        // wedged provider cannot hang the run indefinitely.
+        let num_microbatches = embedding_count.div_ceil(batch_size.max(1)) as u64;
+        let timeout_secs = if self.embedding_stage_timeout_secs > 0 {
+            self.embedding_stage_timeout_secs
+        } else {
+            num_microbatches.saturating_mul(EMBEDDING_MICROBATCH_BUDGET_SECS)
+        };
+        let deadline = std::time::Duration::from_secs(timeout_secs);
+        match tokio::time::timeout(
+            deadline,
+            self.store_vectors_batched_impl(chunks, batch_size, batch_delay_ms),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(OrchestratorError::index(
+                EMBEDDING_STAGE_TIMEOUT_CODE,
+                format!(
+                    "embedding stage exceeded its {}s deadline; work units left uncommitted for resume",
+                    timeout_secs
+                ),
+            )),
+        }
+    }
+
+    async fn store_vectors_batched_impl(
         &self,
         chunks: &[ChunkedResult],
         batch_size: usize,
@@ -301,6 +359,18 @@ impl StorageCoordinator {
         dense_embeddings: &[Vec<f32>],
     ) -> Result<(Vec<VectorPoint>, Vec<ChunkRecord>, Vec<EntityDetailMapping>), OrchestratorError>
     {
+        // A plugin or custom embedder may return a mismatched vector count;
+        // zipping silently would drop the tail chunks from storage.
+        if dense_embeddings.len() != chunks.len() {
+            return Err(OrchestratorError::index(
+                "embedding",
+                format!(
+                    "embedder returned {} vectors for {} chunks",
+                    dense_embeddings.len(),
+                    chunks.len()
+                ),
+            ));
+        }
         let mut points = Vec::new();
         let mut chunk_records = Vec::new();
         // Use a map to aggregate multiple chunks per entity
@@ -415,25 +485,40 @@ impl StorageCoordinator {
             .map_err(|error| {
                 OrchestratorError::Storage(cce_types::StorageError::query(error.to_string()))
             })?;
+        let mut malformed = 0usize;
         for row in rows {
             let (path, metadata, db_id) = row.map_err(|error| {
                 OrchestratorError::Storage(cce_types::StorageError::query(error.to_string()))
             })?;
-            let Some(metadata) = metadata else {
-                continue;
-            };
-            let Ok(metadata) =
-                serde_json::from_str::<std::collections::HashMap<String, String>>(&metadata)
-            else {
-                continue;
-            };
-            let Some(source_id) = metadata
-                .get("__source_entity_id")
-                .and_then(|value| value.parse::<i64>().ok())
-            else {
-                continue;
-            };
-            result.insert((path, source_id), db_id);
+            // Every stored entity carries `__source_entity_id` in its
+            // metadata; a row without a parseable one is malformed and its
+            // entity -> vector link will miss in the mapping lookup.
+            let source_id = metadata
+                .as_deref()
+                .and_then(|raw| {
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(raw).ok()
+                })
+                .and_then(|map| {
+                    map.get("__source_entity_id")
+                        .and_then(|value| value.parse::<i64>().ok())
+                });
+            match source_id {
+                Some(source_id) => {
+                    result.insert((path, source_id), db_id);
+                }
+                None => malformed += 1,
+            }
+        }
+        if malformed > 0 {
+            if let Some(metrics) = &self.quality_metrics {
+                metrics.record_entity_metadata_malformed(malformed);
+            }
+            tracing::warn!(
+                count = malformed,
+                project_id = self.project_id,
+                epoch = self.epoch(),
+                "Skipped entity rows with malformed metadata while loading source entity IDs"
+            );
         }
         Ok(result)
     }
@@ -744,6 +829,57 @@ mod tests {
         );
     }
 
+    /// Embedder stub that never answers: proves the stage deadline fires.
+    struct HangingEmbedder;
+
+    #[async_trait::async_trait]
+    impl Embedder for HangingEmbedder {
+        async fn embed(&self, _texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            unreachable!("the deadline must cancel this call first")
+        }
+
+        async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
+            self.embed(&[text]).await.map(|r| r.embeddings[0].clone())
+        }
+
+        async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
+            self.embed(texts).await.map(|r| r.embeddings)
+        }
+
+        fn dimension(&self) -> usize {
+            2
+        }
+
+        fn model_name(&self) -> &str {
+            "hanging-embedder"
+        }
+
+        fn is_healthy(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn embedding_stage_deadline_surfaces_as_identifiable_error() {
+        let qdrant_url = spawn_mock_qdrant_url().await;
+        let embedder: Arc<dyn Embedder> = Arc::new(HangingEmbedder);
+        let mut storage = storage_with(&qdrant_url, embedder);
+        storage.set_embedding_stage_timeout(1);
+
+        let chunks = [embedding_chunk("a", "first")];
+        let error = storage
+            .store_vectors_batched(&chunks, 1, 0)
+            .await
+            .expect_err("a wedged embedder must hit the stage deadline");
+        match error {
+            crate::error::OrchestratorError::Index { operation, .. } => {
+                assert_eq!(operation, super::EMBEDDING_STAGE_TIMEOUT_CODE);
+            }
+            other => panic!("expected an index-stage timeout, got {other}"),
+        }
+    }
+
     #[tokio::test]
     async fn rate_limited_retry_failure_surfaces_as_batch_error() {
         let qdrant_url = spawn_mock_qdrant_url().await;
@@ -771,6 +907,32 @@ mod tests {
             stub.calls.load(Ordering::SeqCst),
             4,
             "expected: batch a (429) + batch b (429) + both retries"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_storage_data_rejects_vector_count_mismatch() {
+        let chunk = ChunkedResult::new(
+            "chunk-a".to_string(),
+            "source-a".to_string(),
+            ChunkPath::Embedding,
+            0,
+            1,
+        );
+        let storage = StorageCoordinator::new(7)
+            .expect("valid project ID")
+            .with_project_group_id("project-7-root");
+        let chunks = [&chunk];
+        let embeddings: [Vec<f32>; 0] = [];
+
+        let err = storage
+            .build_storage_data(&chunks, &embeddings)
+            .await
+            .expect_err("mismatched vector count must fail instead of truncating");
+        assert!(
+            err.to_string()
+                .contains("embedder returned 0 vectors for 1 chunks"),
+            "unexpected error: {err}"
         );
     }
 

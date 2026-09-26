@@ -2,6 +2,8 @@
 //!
 //! This module defines error types specific to hot update operations.
 
+use std::sync::Arc;
+
 use thiserror::Error;
 
 /// Error type for hot update operations
@@ -9,100 +11,61 @@ use thiserror::Error;
 pub enum HotUpdateError {
     /// Scan operation failed
     #[error("Scan failed: {reason}")]
-    Scan {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Scan { reason: String },
 
     /// File operation failed
     #[error("File operation failed: {path:?}: {reason}")]
     File {
         path: Option<String>,
         reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// Parse operation failed
     #[error("Parse failed: {file}: {reason}")]
-    Parse {
-        file: String,
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Parse { file: String, reason: String },
 
     /// Hot update operation failed
     #[error("Hot update failed: {reason}")]
-    HotUpdate {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    HotUpdate { reason: String },
 
     /// Relation update failed
     #[error("Relation update failed: {reason}")]
-    Relation {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Relation { reason: String },
 
     /// Summary update failed
     #[error("Summary update failed: {reason}")]
-    Summary {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Summary { reason: String },
 
     /// Embedding update failed
     #[error("Embedding update failed: {reason}")]
-    Embedding {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Embedding { reason: String },
 
     /// BM25 update failed
     #[error("BM25 update failed: {reason}")]
-    Bm25 {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Bm25 { reason: String },
 
     /// Export update failed
     #[error("Export update failed: {reason}")]
-    Export {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Export { reason: String },
 
     /// State tracker error
     #[error("State tracker error: {reason}")]
-    StateTracker {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    StateTracker { reason: String },
 
     /// Configuration error
     #[error("Configuration error: {reason}")]
-    Config {
-        reason: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
+    Config { reason: String },
 
     /// Permission denied error
     #[error("Permission denied: {reason}")]
-    PermissionDenied {
+    PermissionDenied { reason: String },
+
+    /// Orchestrator failure with preserved type for programmatic handling
+    #[error("Orchestrator failed: {reason}")]
+    Orchestrator {
         reason: String,
         #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Arc<crate::error::OrchestratorError>,
     },
 }
 
@@ -114,18 +77,6 @@ impl HotUpdateError {
     pub fn scan(reason: impl Into<String>) -> Self {
         Self::Scan {
             reason: reason.into(),
-            source: None,
-        }
-    }
-
-    /// Create a scan error with source
-    pub fn scan_with_source<E>(reason: impl Into<String>, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self::Scan {
-            reason: reason.into(),
-            source: Some(Box::new(source)),
         }
     }
 
@@ -134,7 +85,6 @@ impl HotUpdateError {
         Self::File {
             path: None,
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -143,19 +93,6 @@ impl HotUpdateError {
         Self::File {
             path: Some(path.into()),
             reason: reason.into(),
-            source: None,
-        }
-    }
-
-    /// Create a file error with source
-    pub fn file_with_source<E>(reason: impl Into<String>, source: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        Self::File {
-            path: None,
-            reason: reason.into(),
-            source: Some(Box::new(source)),
         }
     }
 
@@ -164,7 +101,6 @@ impl HotUpdateError {
         Self::Parse {
             file: file.into(),
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -172,7 +108,6 @@ impl HotUpdateError {
     pub fn hot_update(reason: impl Into<String>) -> Self {
         Self::HotUpdate {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -180,7 +115,6 @@ impl HotUpdateError {
     pub fn relation(reason: impl Into<String>) -> Self {
         Self::Relation {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -188,7 +122,6 @@ impl HotUpdateError {
     pub fn summary(reason: impl Into<String>) -> Self {
         Self::Summary {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -196,7 +129,6 @@ impl HotUpdateError {
     pub fn embedding(reason: impl Into<String>) -> Self {
         Self::Embedding {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -204,7 +136,6 @@ impl HotUpdateError {
     pub fn bm25(reason: impl Into<String>) -> Self {
         Self::Bm25 {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -212,7 +143,6 @@ impl HotUpdateError {
     pub fn export(reason: impl Into<String>) -> Self {
         Self::Export {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -220,7 +150,6 @@ impl HotUpdateError {
     pub fn state_tracker(reason: impl Into<String>) -> Self {
         Self::StateTracker {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -228,7 +157,6 @@ impl HotUpdateError {
     pub fn config(reason: impl Into<String>) -> Self {
         Self::Config {
             reason: reason.into(),
-            source: None,
         }
     }
 
@@ -236,17 +164,20 @@ impl HotUpdateError {
     pub fn permission_denied(reason: impl Into<String>) -> Self {
         Self::PermissionDenied {
             reason: reason.into(),
-            source: None,
         }
+    }
+
+    /// Wrap an orchestrator failure while keeping its type for callers
+    pub fn orchestrator(source: impl Into<Arc<crate::error::OrchestratorError>>) -> Self {
+        let source = source.into();
+        let reason = source.to_string();
+        Self::Orchestrator { reason, source }
     }
 }
 
 impl From<crate::error::OrchestratorError> for HotUpdateError {
     fn from(e: crate::error::OrchestratorError) -> Self {
-        Self::HotUpdate {
-            reason: e.to_string(),
-            source: Some(Box::new(e)),
-        }
+        Self::orchestrator(Arc::new(e))
     }
 }
 
@@ -255,7 +186,6 @@ impl From<std::io::Error> for HotUpdateError {
         Self::File {
             path: None,
             reason: e.to_string(),
-            source: Some(Box::new(e)),
         }
     }
 }
@@ -329,5 +259,16 @@ mod tests {
     fn test_error_permission_denied() {
         let error = HotUpdateError::permission_denied("Access denied");
         assert!(error.to_string().contains("Access denied"));
+    }
+
+    #[test]
+    fn test_orchestrator_source_preserved() {
+        use std::error::Error;
+        let inner = crate::error::OrchestratorError::index("op", "boom");
+        let error = HotUpdateError::from(inner);
+        assert!(matches!(error, HotUpdateError::Orchestrator { .. }));
+        assert!(error.to_string().contains("boom"));
+        let source = error.source().expect("orchestrator source kept");
+        assert!(source.to_string().contains("boom"));
     }
 }

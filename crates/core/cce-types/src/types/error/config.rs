@@ -51,6 +51,13 @@ pub enum ConfigError {
     #[error("invalid project_id: {project_id} (must be positive)")]
     InvalidProjectId { project_id: i64 },
 
+    /// IO failure without an associated config file path
+    #[error("Config IO error: {source}")]
+    Io {
+        #[source]
+        source: Arc<std::io::Error>,
+    },
+
     /// Generic / unclassified configuration error
     #[error("{0}")]
     Other(String),
@@ -70,7 +77,7 @@ impl ConfigError {
     }
 
     /// Create a TOML parse error.
-    pub fn tomal_parse(path: impl Into<PathBuf>, reason: impl Into<String>) -> Self {
+    pub fn toml_parse(path: impl Into<PathBuf>, reason: impl Into<String>) -> Self {
         Self::TomlParse {
             path: path.into(),
             reason: reason.into(),
@@ -104,11 +111,29 @@ impl ConfigError {
             reason: reason.into(),
         }
     }
+
+    /// Stable machine-readable code for dead-letter aggregation.
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            Self::FileNotFound { .. } => "CONFIG_FILE_NOT_FOUND",
+            Self::FileRead { .. } => "CONFIG_FILE_READ_ERROR",
+            Self::TomlParse { .. } => "CONFIG_TOML_PARSE_ERROR",
+            Self::MissingEnvVar { .. } => "CONFIG_MISSING_ENV_VAR",
+            Self::InvalidEnvVar { .. } => "CONFIG_INVALID_ENV_VAR",
+            Self::Validation(_) => "CONFIG_VALIDATION_ERROR",
+            Self::AlreadyInitialized => "CONFIG_ALREADY_INITIALIZED",
+            Self::InvalidProjectId { .. } => "CONFIG_INVALID_PROJECT_ID",
+            Self::Io { .. } => "CONFIG_IO_ERROR",
+            Self::Other(_) => "CONFIG_OTHER_ERROR",
+        }
+    }
 }
 
 impl From<std::io::Error> for ConfigError {
     fn from(e: std::io::Error) -> Self {
-        Self::Other(e.to_string())
+        Self::Io {
+            source: Arc::new(e),
+        }
     }
 }
 
@@ -245,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_config_error_toml_parse() {
-        let err = ConfigError::tomal_parse("/etc/config.toml", "invalid TOML");
+        let err = ConfigError::toml_parse("/etc/config.toml", "invalid TOML");
         assert!(matches!(err, ConfigError::TomlParse { .. }));
         assert!(err.to_string().contains("invalid TOML"));
     }
@@ -330,5 +355,21 @@ mod tests {
         let validation_err = ConfigValidationError::missing_field("host");
         let config_err: ConfigError = validation_err.into();
         assert!(matches!(config_err, ConfigError::Validation(_)));
+    }
+
+    #[test]
+    fn test_config_error_codes_stable() {
+        assert_eq!(
+            ConfigError::missing_env_var("K").error_code(),
+            "CONFIG_MISSING_ENV_VAR"
+        );
+        assert_eq!(
+            ConfigError::toml_parse("/c.toml", "bad").error_code(),
+            "CONFIG_TOML_PARSE_ERROR"
+        );
+        assert_eq!(
+            ConfigError::invalid_project_id(-1).error_code(),
+            "CONFIG_INVALID_PROJECT_ID"
+        );
     }
 }

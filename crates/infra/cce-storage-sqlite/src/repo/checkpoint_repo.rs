@@ -49,7 +49,9 @@ impl CheckpointRepository {
                 &checkpoint.failed_at,
             ],
         )
-        .map_err(|e| StorageError::insert(format!("Failed to create checkpoint: {}", e)))?;
+        .map_err(|e| {
+            StorageError::insert("checkpoint", format!("Failed to create checkpoint: {e}"))
+        })?;
 
         Ok(tx.last_insert_rowid())
     }
@@ -119,7 +121,7 @@ impl CheckpointRepository {
             "UPDATE checkpoint SET status = ?, active_flag = ?, updated_at = ? WHERE project_id = ? AND operation_id = ?",
             params![status.as_str(), active_flag, &now, project_id, operation_id],
         )
-        .map_err(|e| StorageError::update(format!("Failed to update checkpoint status: {}", e)))?;
+        .map_err(|e| StorageError::update("checkpoint", format!("Failed to update checkpoint status: {e}")))?;
 
         Ok(())
     }
@@ -136,7 +138,7 @@ impl CheckpointRepository {
             params![batch_index, Utc::now().to_rfc3339(), project_id, operation_id],
         )
         .map_err(|e| {
-            StorageError::update(format!("Failed to update current batch index: {}", e))
+            StorageError::update("checkpoint", format!("Failed to update current batch index: {e}"))
         })?;
 
         Ok(())
@@ -176,7 +178,9 @@ impl CheckpointRepository {
                 &checkpoint.operation_id,
             ],
         )
-        .map_err(|e| StorageError::update(format!("Failed to update checkpoint: {}", e)))?;
+        .map_err(|e| {
+            StorageError::update("checkpoint", format!("Failed to update checkpoint: {e}"))
+        })?;
 
         Ok(())
     }
@@ -214,7 +218,12 @@ impl CheckpointRepository {
                 &batch.updated_at,
             ],
         )
-        .map_err(|e| StorageError::insert(format!("Failed to insert batch checkpoint: {}", e)))?;
+        .map_err(|e| {
+            StorageError::insert(
+                "checkpoint_batch",
+                format!("Failed to insert batch checkpoint: {e}"),
+            )
+        })?;
 
         Ok(tx.last_insert_rowid())
     }
@@ -317,7 +326,12 @@ impl CheckpointRepository {
                 ],
             )
         }
-        .map_err(|e| StorageError::insert(format!("Failed to upsert file checkpoint: {}", e)))?;
+        .map_err(|e| {
+            StorageError::insert(
+                "checkpoint_file",
+                format!("Failed to upsert file checkpoint: {e}"),
+            )
+        })?;
 
         Ok(())
     }
@@ -661,7 +675,10 @@ impl CheckpointRepository {
             ],
         )
         .map_err(|e| {
-            StorageError::insert(format!("Failed to insert work unit checkpoint: {}", e))
+            StorageError::insert(
+                "work_unit_checkpoint",
+                format!("Failed to insert work unit checkpoint: {e}"),
+            )
         })?;
 
         Ok(tx.last_insert_rowid())
@@ -689,7 +706,12 @@ impl CheckpointRepository {
                 work_unit_hash,
             ],
         )
-        .map_err(|e| StorageError::update(format!("Failed to update work unit status: {}", e)))?;
+        .map_err(|e| {
+            StorageError::update(
+                "work_unit_checkpoint",
+                format!("Failed to update work unit status: {e}"),
+            )
+        })?;
 
         Ok(())
     }
@@ -847,7 +869,9 @@ impl CheckpointRepository {
              WHERE project_id = ? AND operation_id = ?",
             params![priority, &now, &now, project_id, operation_id],
         )
-        .map_err(|e| StorageError::update(format!("Failed to set active flag: {}", e)))?;
+        .map_err(|e| {
+            StorageError::update("checkpoint", format!("Failed to set active flag: {e}"))
+        })?;
 
         Ok(())
     }
@@ -867,7 +891,9 @@ impl CheckpointRepository {
              WHERE project_id = ? AND operation_id = ?",
             params![Utc::now().to_rfc3339(), project_id, operation_id],
         )
-        .map_err(|e| StorageError::update(format!("Failed to clear active flag: {}", e)))?;
+        .map_err(|e| {
+            StorageError::update("checkpoint", format!("Failed to clear active flag: {e}"))
+        })?;
 
         Ok(())
     }
@@ -886,7 +912,9 @@ impl CheckpointRepository {
                  WHERE project_id = ? AND operation_id = ? AND active_flag = 1",
                 params![&now, &now, project_id, operation_id],
             )
-            .map_err(|e| StorageError::update(format!("Failed to update heartbeat: {}", e)))?;
+            .map_err(|e| {
+                StorageError::update("checkpoint", format!("Failed to update heartbeat: {e}"))
+            })?;
 
         if rows_affected == 0 {
             return Err(cce_types::StorageError::from(
@@ -916,7 +944,10 @@ impl CheckpointRepository {
                 params![project_id, operation_id],
             )
             .map_err(|e| {
-                StorageError::delete(format!("Failed to delete checkpoint files: {}", e))
+                StorageError::delete(
+                    "checkpoint_file",
+                    format!("Failed to delete checkpoint files: {e}"),
+                )
             })?;
 
         Ok(deleted)
@@ -934,7 +965,10 @@ impl CheckpointRepository {
                 params![project_id, operation_id],
             )
             .map_err(|e| {
-                StorageError::delete(format!("Failed to delete checkpoint batches: {}", e))
+                StorageError::delete(
+                    "checkpoint_batch",
+                    format!("Failed to delete checkpoint batches: {e}"),
+                )
             })?;
 
         Ok(deleted)
@@ -951,7 +985,12 @@ impl CheckpointRepository {
                 "DELETE FROM work_unit_checkpoint WHERE project_id = ? AND operation_id = ?",
                 params![project_id, operation_id],
             )
-            .map_err(|e| StorageError::delete(format!("Failed to delete work units: {}", e)))?;
+            .map_err(|e| {
+                StorageError::delete(
+                    "work_unit_checkpoint",
+                    format!("Failed to delete work units: {e}"),
+                )
+            })?;
 
         Ok(deleted)
     }
@@ -975,7 +1014,12 @@ impl CheckpointRepository {
                  WHERE project_id = ? AND operation_id = ? AND module_progress IS NOT NULL",
                 params![Utc::now().to_rfc3339(), project_id, operation_id],
             )
-            .map_err(|e| StorageError::update(format!("Failed to clear module progress: {}", e)))?;
+            .map_err(|e| {
+                StorageError::update(
+                    "checkpoint_file",
+                    format!("Failed to clear module progress: {e}"),
+                )
+            })?;
 
         Ok(cleared)
     }
@@ -1002,7 +1046,10 @@ impl CheckpointRepository {
                 params![project_id, &cutoff],
             )
             .map_err(|e| {
-                StorageError::delete(format!("Failed to delete expired checkpoints: {}", e))
+                StorageError::delete(
+                    "checkpoint",
+                    format!("Failed to delete expired checkpoints: {e}"),
+                )
             })?;
 
         Ok(deleted)
@@ -1025,7 +1072,7 @@ impl CheckpointRepository {
                 params![Utc::now().to_rfc3339(), project_id, &cutoff_time],
             )
             .map_err(|e| {
-                StorageError::delete(format!("Failed to cleanup stale active checkpoints: {}", e))
+                StorageError::update("checkpoint", format!("Failed to cleanup stale active checkpoints: {e}"))
             })?;
 
         Ok(rows_affected)

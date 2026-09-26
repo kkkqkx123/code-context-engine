@@ -65,6 +65,18 @@ impl ScannerError {
             reason: reason.into(),
         }
     }
+
+    /// Get error code for programmatic error handling
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            Self::Io(_) => "SCANNER_IO_ERROR",
+            Self::NotFound(_) => "SCANNER_NOT_FOUND_ERROR",
+            Self::InvalidArgument { .. } => "SCANNER_INVALID_ARGUMENT",
+            Self::Scan { .. } => "SCANNER_SCAN_ERROR",
+            Self::Path { .. } => "SCANNER_PATH_ERROR",
+            Self::PermissionDenied { .. } => "SCANNER_PERMISSION_DENIED",
+        }
+    }
 }
 
 // Implement From<std::io::Error> for ScannerError via IoError
@@ -129,6 +141,11 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "test");
         let err = ScannerError::from(io_err);
         assert!(matches!(err, ScannerError::Io(_)));
+        assert_eq!(err.error_code(), "SCANNER_IO_ERROR");
+        assert_eq!(
+            ScannerError::permission_denied("/x", "denied").error_code(),
+            "SCANNER_PERMISSION_DENIED"
+        );
     }
 
     #[test]

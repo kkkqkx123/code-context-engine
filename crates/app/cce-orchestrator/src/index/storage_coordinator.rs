@@ -79,6 +79,9 @@ pub struct StorageCoordinator {
     prepared_files: Arc<StdMutex<HashSet<String>>>,
     /// Index-quality counters for silent-loss surfaces that do not fail the batch.
     quality_metrics: Option<Arc<IndexQualityMetrics>>,
+    /// Wall-clock deadline for one `store_vectors_batched` pass, in seconds.
+    /// 0 means derive: microbatch count x per-request retry budget factor.
+    embedding_stage_timeout_secs: u64,
 }
 
 impl StorageCoordinator {
@@ -107,6 +110,7 @@ impl StorageCoordinator {
             candidate_relation_epoch: Arc::new(AtomicI64::new(0)),
             prepared_files: Arc::new(StdMutex::new(HashSet::new())),
             quality_metrics: None,
+            embedding_stage_timeout_secs: 0,
         })
     }
 
@@ -132,6 +136,11 @@ impl StorageCoordinator {
     pub fn with_embedder(mut self, embedder: Arc<dyn Embedder>) -> Self {
         self.embedder = Some(embedder);
         self
+    }
+
+    /// Set the embedding stage wall-clock deadline in seconds (0 = no deadline).
+    pub(crate) fn set_embedding_stage_timeout(&mut self, secs: u64) {
+        self.embedding_stage_timeout_secs = secs;
     }
 
     /// Set metadata store

@@ -87,9 +87,16 @@ impl ResolutionPipelineService {
         });
         if let Err(error) = write_result {
             let reason = error.to_string();
-            let _ = self.db_client.with_transaction(|tx| {
+            if let Err(mark_error) = self.db_client.with_transaction(|tx| {
                 RelationSnapshotRepository::mark_failed(tx, project_id, epoch, &reason)
-            });
+            }) {
+                tracing::error!(
+                    project_id,
+                    epoch,
+                    error = %mark_error,
+                    "Failed to mark relation snapshot building as failed after write error"
+                );
+            }
             return Err(error);
         }
 

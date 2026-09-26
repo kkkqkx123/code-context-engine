@@ -199,29 +199,31 @@ pub async fn extract_chunks_from_parse_result(
     file_path: &std::path::Path,
     parsed_file: &ParsedFile,
     processing_result: Option<&ProcessingResult>,
-) -> Vec<ChunkedResult> {
+) -> anyhow::Result<Vec<ChunkedResult>> {
     let processing_result = match processing_result {
         Some(result) => result,
         None => {
-            return Vec::new();
+            return Ok(Vec::new());
         }
     };
 
     if processing_result.groups.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let group_conversions =
         converter.convert_entity_groups(&processing_result.groups, &file_path.to_string_lossy());
 
     let mut chunker = chunker.lock().await;
-    let chunks = chunker.chunk_groups(&group_conversions, &file_path.to_string_lossy());
+    let chunks = chunker
+        .chunk_groups(&group_conversions, &file_path.to_string_lossy())?
+        .chunks;
     let category = cce_parser::summary::FileCategory::determine(parsed_file);
-    chunks
+    Ok(chunks
         .into_iter()
         .map(|mut chunk| {
             chunk.metadata.file_category = category;
             chunk
         })
-        .collect()
+        .collect())
 }

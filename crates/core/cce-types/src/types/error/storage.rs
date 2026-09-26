@@ -19,8 +19,8 @@ pub enum StorageError {
     Query(String),
 
     /// Insert error
-    #[error("Insert failed: {0}")]
-    Insert(String),
+    #[error("Insert into {table} failed: {reason}")]
+    Insert { table: String, reason: String },
 
     /// Transaction error
     #[error("Transaction failed: {0}")]
@@ -31,12 +31,12 @@ pub enum StorageError {
     Table(String),
 
     /// Delete error
-    #[error("Delete failed: {0}")]
-    Delete(String),
+    #[error("Delete from {table} failed: {reason}")]
+    Delete { table: String, reason: String },
 
     /// Update error
-    #[error("Update failed: {0}")]
-    Update(String),
+    #[error("Update {table} failed: {reason}")]
+    Update { table: String, reason: String },
 
     /// Validation error
     #[error("Validation failed: {0}")]
@@ -84,8 +84,11 @@ impl StorageError {
     }
 
     /// Create an insert error
-    pub fn insert(reason: impl Into<String>) -> Self {
-        Self::Insert(reason.into())
+    pub fn insert(table: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::Insert {
+            table: table.into(),
+            reason: reason.into(),
+        }
     }
 
     /// Create a transaction error
@@ -99,13 +102,19 @@ impl StorageError {
     }
 
     /// Create a delete error
-    pub fn delete(reason: impl Into<String>) -> Self {
-        Self::Delete(reason.into())
+    pub fn delete(table: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::Delete {
+            table: table.into(),
+            reason: reason.into(),
+        }
     }
 
     /// Create an update error
-    pub fn update(reason: impl Into<String>) -> Self {
-        Self::Update(reason.into())
+    pub fn update(table: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::Update {
+            table: table.into(),
+            reason: reason.into(),
+        }
     }
 
     /// Create a validation error
@@ -133,11 +142,11 @@ impl StorageError {
         match self {
             Self::Connection(_) => "STORAGE_CONNECTION_ERROR",
             Self::Query(_) => "STORAGE_QUERY_ERROR",
-            Self::Insert(_) => "STORAGE_INSERT_ERROR",
+            Self::Insert { .. } => "STORAGE_INSERT_ERROR",
             Self::Transaction(_) => "STORAGE_TRANSACTION_ERROR",
             Self::Table(_) => "STORAGE_TABLE_ERROR",
-            Self::Delete(_) => "STORAGE_DELETE_ERROR",
-            Self::Update(_) => "STORAGE_UPDATE_ERROR",
+            Self::Delete { .. } => "STORAGE_DELETE_ERROR",
+            Self::Update { .. } => "STORAGE_UPDATE_ERROR",
             Self::Validation(_) => "STORAGE_VALIDATION_ERROR",
             Self::NotFound(_) => "STORAGE_NOT_FOUND_ERROR",
             Self::Io(_) => "STORAGE_IO_ERROR",
@@ -160,19 +169,21 @@ impl super::common::ErrorClassify for StorageError {
     fn is_retryable(&self) -> bool {
         // Backend errors delegate to their own classification; the remaining
         // variants are retryable when they are connection failures, query-time
-        // failures, or write conflicts that can succeed on a subsequent
-        // attempt (epoch conflicts resolve once the caller retries with a
-        // newer base snapshot).
+        // failures, sqlite runtime faults (busy/locked), or write conflicts
+        // that can succeed on a subsequent attempt (epoch conflicts resolve
+        // once the caller retries with a newer base snapshot).
         match self {
             Self::Qdrant(err) => err.is_retryable(),
             Self::Bm25(err) => err.is_retryable(),
+            Self::Io(err) => err.is_retryable(),
             _ => matches!(
                 self,
                 Self::Connection(_)
                     | Self::Query(_)
-                    | Self::Insert(_)
-                    | Self::Update(_)
+                    | Self::Insert { .. }
+                    | Self::Update { .. }
                     | Self::Transaction(_)
+                    | Self::Sqlite(_)
                     | Self::EpochConflict { .. }
             ),
         }
@@ -182,6 +193,7 @@ impl super::common::ErrorClassify for StorageError {
         match self {
             Self::Qdrant(err) => err.is_transient(),
             Self::Bm25(err) => err.is_transient(),
+            Self::Io(err) => err.is_transient(),
             _ => self.is_retryable(),
         }
     }
@@ -194,7 +206,7 @@ impl super::common::ErrorClassify for StorageError {
             Self::Bm25(err) => err.is_permanent(),
             _ => matches!(
                 self,
-                Self::NotFound(_) | Self::Table(_) | Self::Delete(_) | Self::Validation(_)
+                Self::NotFound(_) | Self::Table(_) | Self::Delete { .. } | Self::Validation(_)
             ),
         }
     }

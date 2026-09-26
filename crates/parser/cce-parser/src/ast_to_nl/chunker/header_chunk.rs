@@ -1,9 +1,10 @@
 use crate::grouper::EntityGroup;
 use cce_types::ConversionResult;
+use cce_types::ParseError;
 use cce_types::entity::EntityId;
 
 use super::chunk_builder::ChunkBuilder;
-use super::chunker::ChunkInfrastructure;
+use super::chunker::{ChunkInfrastructure, ChunkOutput};
 use super::header::HeaderHelper;
 use super::result::{ChunkPath, ChunkedResult};
 
@@ -37,7 +38,7 @@ pub fn chunk_group_with_conversions(
     group: &EntityGroup,
     group_conversions: &crate::ast_to_nl::converter::GroupConversions,
     file_path: &str,
-) -> Vec<ChunkedResult> {
+) -> Result<ChunkOutput, ParseError> {
     let header_conv = &group_conversions.header_conversion;
     let member_convs = &group_conversions.member_conversions;
 
@@ -48,7 +49,7 @@ pub fn chunk_group_with_conversions(
             let bm25_text = header.bm25_text.clone().unwrap_or_default();
             let embedding_text = header.embedding_text.clone().unwrap_or_default();
 
-            let mut all_chunks = Vec::new();
+            let mut all_chunks = ChunkOutput::default();
 
             if !bm25_text.is_empty() {
                 let nl_boundaries = super::boundary::locate_entities_in_nl_text(&bm25_text, group);
@@ -67,8 +68,7 @@ pub fn chunk_group_with_conversions(
                     nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
                     header_mode: None,
                 };
-                let bm25_chunks = super::chunker::chunk_single_path(input);
-                all_chunks.extend(bm25_chunks);
+                all_chunks.absorb(super::chunker::chunk_single_path(input)?);
             }
 
             if !embedding_text.is_empty() {
@@ -89,15 +89,14 @@ pub fn chunk_group_with_conversions(
                     nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
                     header_mode: None,
                 };
-                let embedding_chunks = super::chunker::chunk_single_path(input);
-                all_chunks.extend(embedding_chunks);
+                all_chunks.absorb(super::chunker::chunk_single_path(input)?);
             }
 
-            super::chunker::add_relations(tracker, &mut all_chunks);
+            super::chunker::add_relations(tracker, &mut all_chunks.chunks);
 
-            all_chunks
+            Ok(all_chunks)
         } else {
-            vec![]
+            Ok(ChunkOutput::default())
         };
     }
 
@@ -118,7 +117,7 @@ fn smart_chunk_with_header(
     tracker: &mut GroupTracker,
     header_conv: Option<&ConversionResult>,
     member_convs: &[ConversionResult],
-) -> Vec<ChunkedResult> {
+) -> Result<ChunkOutput, ParseError> {
     tracker.record_group(group);
 
     let helper = HeaderHelper::new(infra.config);
@@ -147,7 +146,7 @@ fn smart_chunk_with_header(
         .cloned()
         .unwrap_or_default();
 
-    let mut all_chunks = Vec::new();
+    let mut all_chunks = ChunkOutput::default();
 
     if !header_bm25.is_empty() || member_convs.iter().any(|c| c.bm25_text.is_some()) {
         let texts = HeaderTexts {
@@ -161,8 +160,7 @@ fn smart_chunk_with_header(
             texts: &texts,
             helper: &helper,
         };
-        let groups = process_path(&ctx, tracker, path_input);
-        all_chunks.extend(groups);
+        all_chunks.absorb(process_path(&ctx, tracker, path_input)?);
     }
 
     if !header_embedding.is_empty() || member_convs.iter().any(|c| c.embedding_text.is_some()) {
@@ -182,20 +180,19 @@ fn smart_chunk_with_header(
             texts: &texts,
             helper: &helper,
         };
-        let groups = process_path(&ctx, tracker, path_input);
-        all_chunks.extend(groups);
+        all_chunks.absorb(process_path(&ctx, tracker, path_input)?);
     }
 
-    super::chunker::add_relations(tracker, &mut all_chunks);
+    super::chunker::add_relations(tracker, &mut all_chunks.chunks);
 
-    all_chunks
+    Ok(all_chunks)
 }
 
 fn process_path(
     ctx: &GroupChunkContext,
     tracker: &mut GroupTracker,
     input: PathInput,
-) -> Vec<ChunkedResult> {
+) -> Result<ChunkOutput, ParseError> {
     let mut ordered_members: Vec<ConversionResult> = input.member_convs.to_vec();
     ordered_members.sort_by_key(|m| {
         ctx.group
@@ -223,71 +220,68 @@ fn process_path(
     );
     let total = member_groups.len();
 
-    let mut chunks: Vec<ChunkedResult> = member_groups
-        .into_iter()
-        .enumerate()
-        .flat_map(|(idx, members)| {
-            let continuation_for_block: String;
-            let header_text = if idx == 0 {
-                &input.texts.first
-            } else if input.path == ChunkPath::Embedding {
-                if let Some(first) = members.first() {
-                    let owner =
-                        if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str() {
-                            String::new()
-                        } else {
-                            format!("{}.{}", ctx.group.name, first.name)
-                        };
-                    let display = if owner.is_empty() {
-                        first.name.clone()
-                    } else {
-                        owner
-                    };
-                    continuation_for_block =
-                        format!("{} {} (continuation).", first.kind.kind_label(), display);
-                    &continuation_for_block
+    let mut output = ChunkOutput::default();
+    for (idx, members) in member_groups.into_iter().enumerate() {
+        let continuation_for_block: String;
+        let header_text = if idx == 0 {
+            &input.texts.first
+        } else if input.path == ChunkPath::Embedding {
+            if let Some(first) = members.first() {
+                let owner = if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str() {
+                    String::new()
                 } else {
-                    &input.texts.continuation
-                }
+                    format!("{}.{}", ctx.group.name, first.name)
+                };
+                let display = if owner.is_empty() {
+                    first.name.clone()
+                } else {
+                    owner
+                };
+                continuation_for_block =
+                    format!("{} {} (continuation).", first.kind.kind_label(), display);
+                &continuation_for_block
             } else {
                 &input.texts.continuation
-            };
-            let nl_boundaries = super::chunker::compute_nl_boundaries_for_group(
-                header_text,
-                input.header_conv.as_ref().map(|c| c.entity_id),
-                &members,
-                input.path,
-            );
-            let (combined_text, member_entity_ids) =
-                assemble_combined_text(header_text, &members, input.path);
-            let input = super::chunker::ChunkInput {
-                infra: ctx.infra,
-                group: ctx.group,
-                text: &combined_text,
-                file_path: ctx.file_path,
-                keywords: &ChunkBuilder::aggregate_keywords(&members),
-                path: input.path,
-                strategy: if nl_boundaries.is_empty() {
-                    SplitStrategy::for_group_type(ctx.group.group_type)
-                } else {
-                    SplitStrategy::ByNlEntityBoundaries
-                },
-                nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
-                header_mode: Some(super::chunker::HeaderPathParams {
-                    tracker,
-                    header_entity_id: ctx.group.header_id,
-                    member_entity_ids: &member_entity_ids,
-                    chunk_index: idx,
-                    total_chunks: total,
-                    include_header_in_first_coverage: idx == 0,
-                }),
-            };
-            super::chunker::chunk_single_path(input)
-        })
-        .collect();
+            }
+        } else {
+            &input.texts.continuation
+        };
+        let nl_boundaries = super::chunker::compute_nl_boundaries_for_group(
+            header_text,
+            input.header_conv.as_ref().map(|c| c.entity_id),
+            &members,
+            input.path,
+        );
+        let (combined_text, member_entity_ids) =
+            assemble_combined_text(header_text, &members, input.path);
+        let chunk_input = super::chunker::ChunkInput {
+            infra: ctx.infra,
+            group: ctx.group,
+            text: &combined_text,
+            file_path: ctx.file_path,
+            keywords: &ChunkBuilder::aggregate_keywords(&members),
+            path: input.path,
+            strategy: if nl_boundaries.is_empty() {
+                SplitStrategy::for_group_type(ctx.group.group_type)
+            } else {
+                SplitStrategy::ByNlEntityBoundaries
+            },
+            nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
+            header_mode: Some(super::chunker::HeaderPathParams {
+                tracker,
+                header_entity_id: ctx.group.header_id,
+                member_entity_ids: &member_entity_ids,
+                chunk_index: idx,
+                total_chunks: total,
+                include_header_in_first_coverage: idx == 0,
+            }),
+        };
+        let path_out = super::chunker::chunk_single_path(chunk_input)?;
+        output.absorb(path_out);
+    }
 
-    finalize_group_path_chunks(&mut chunks);
-    chunks
+    finalize_group_path_chunks(&mut output.chunks);
+    Ok(output)
 }
 
 /// Assemble the combined header + member text for one member group, along
@@ -670,7 +664,9 @@ mod tests {
         let infra = infra(&cfg, &est, &splitter);
         let input = header_input(&infra, &group, &combined, &nlb, &tracker, &member_ids, 0);
 
-        let results = super::super::chunker::chunk_single_path(input);
+        let results = super::super::chunker::chunk_single_path(input)
+            .expect("chunk")
+            .chunks;
         assert_eq!(results.len(), 1);
         assert!(!results[0].text.is_empty());
         assert_eq!(results[0].chunk_index, 0);
@@ -710,7 +706,9 @@ mod tests {
         let infra = infra(&cfg, &est, &splitter);
         let input = header_input(&infra, &group, &combined, &nlb, &tracker, &member_ids, 0);
 
-        let results = super::super::chunker::chunk_single_path(input);
+        let results = super::super::chunker::chunk_single_path(input)
+            .expect("chunk")
+            .chunks;
         assert!(results.len() > 1);
         assert!(results.iter().all(|r| !r.text.is_empty()));
     }
@@ -732,7 +730,9 @@ mod tests {
         let infra = infra(&cfg, &est, &splitter);
         let input = header_input(&infra, &group, &combined, &nlb, &tracker, &member_ids, 0);
 
-        let results = super::super::chunker::chunk_single_path(input);
+        let results = super::super::chunker::chunk_single_path(input)
+            .expect("chunk")
+            .chunks;
         assert!(results.len() > 1);
         assert!(results.iter().all(|r| !r.text.is_empty()));
     }

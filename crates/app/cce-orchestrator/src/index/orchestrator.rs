@@ -504,6 +504,11 @@ impl IndexOrchestrator {
         // but skip writing summary vectors to Qdrant.
         self.storage.set_embed_summaries(options.embed_summaries);
 
+        // Bound the embedding stage so a wedged provider cannot hang the batch
+        // loop past its checkpoint-resume window (0 keeps auto-derivation).
+        self.storage
+            .set_embedding_stage_timeout(self.batch_config.embedding_stage_timeout_secs);
+
         // ===== CHECKPOINT RECOVERY (before creating new operation) =====
         // Check if we can resume from a previous checkpoint FIRST,
         // before creating a new operation/checkpoint.

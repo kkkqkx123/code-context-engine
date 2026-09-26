@@ -474,7 +474,10 @@ impl EmbeddingUpdateProcessor {
                     )
                     .await
             } else {
-                file_processor.process_parsed_file(parsed_file).await
+                file_processor
+                    .process_parsed_file(parsed_file)
+                    .await
+                    .map(|(chunks, _)| chunks)
             }
             .map_err(|e| {
                 HotUpdateError::embedding(format!(

@@ -90,7 +90,7 @@ impl StorageCoordinator {
                         batch_id,
                     ],
                 )
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))?;
+                .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))?;
                 let new_file_id = tx.last_insert_rowid();
 
                 let entities = {
@@ -146,7 +146,7 @@ mod tests {
                      VALUES ('src/lib.rs', 'rust', 1, 1, 1, 'hash-1', 5, 2)",
                     [],
                 )
-                .map_err(|e| cce_types::StorageError::insert(e.to_string()))?;
+                .map_err(|e| cce_types::StorageError::insert("files", e.to_string()))?;
                 let file_id: i64 = tx.last_insert_rowid();
                 tx.execute(
                     "INSERT INTO entities (name, kind, file_id, signature, scoped_name, metadata, project_id, epoch, batch_id)
@@ -154,7 +154,7 @@ mod tests {
                              '{\"__source_entity_id\":\"100\"}', 1, 5, 2)",
                     rusqlite::params![file_id],
                 )
-                .map_err(|e| cce_types::StorageError::insert(e.to_string()))?;
+                .map_err(|e| cce_types::StorageError::insert("entities", e.to_string()))?;
                 let parent_db_id = tx.last_insert_rowid();
                 tx.execute(
                     "INSERT INTO entities (name, kind, file_id, signature, scoped_name, parent_id, metadata, project_id, epoch, batch_id)
@@ -162,7 +162,7 @@ mod tests {
                              '{\"__source_entity_id\":\"101\"}', 1, 5, 2)",
                     rusqlite::params![file_id, parent_db_id],
                 )
-                .map_err(|e| cce_types::StorageError::insert(e.to_string()))?;
+                .map_err(|e| cce_types::StorageError::insert("entities", e.to_string()))?;
                 Ok(())
             })
             .expect("seed source generation");

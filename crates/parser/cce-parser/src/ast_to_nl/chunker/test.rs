@@ -85,7 +85,10 @@ mod tests {
             "hello function prints hello message",
             "Outputs a greeting message.",
         );
-        let result = chunker.chunk_group(&group, &conv, "src/main.rs");
+        let result = chunker
+            .chunk_group(&group, &conv, "src/main.rs")
+            .expect("chunk")
+            .chunks;
 
         assert!(!result.is_empty(), "Should produce at least one chunk");
         for chunk in &result {
@@ -105,7 +108,10 @@ mod tests {
         let group = create_small_group();
         let long_text = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".to_string();
         let conv = create_conversion(&long_text, "Short embedding text.");
-        let result = chunker.chunk_group(&group, &conv, "src/main.rs");
+        let result = chunker
+            .chunk_group(&group, &conv, "src/main.rs")
+            .expect("chunk")
+            .chunks;
 
         assert!(!result.is_empty());
     }
@@ -188,7 +194,10 @@ mod tests {
             member_conversions: vec![member_conv],
         };
 
-        let result = chunker.chunk_group_with_conversions(&group, &group_convs, "src/calc.rs");
+        let result = chunker
+            .chunk_group_with_conversions(&group, &group_convs, "src/calc.rs")
+            .expect("chunk")
+            .chunks;
         assert!(
             !result.is_empty(),
             "Should produce chunks for class with methods"
@@ -208,7 +217,10 @@ mod tests {
             "hello function prints hello message to console",
             "Outputs a greeting message to the standard output.",
         );
-        let result = chunker.chunk_group(&group, &conv, "src/main.rs");
+        let result = chunker
+            .chunk_group(&group, &conv, "src/main.rs")
+            .expect("chunk")
+            .chunks;
 
         let has_bm25 = result.iter().any(|c| c.path.to_string() == "bm25");
         let has_embedding = result.iter().any(|c| c.path.to_string() == "emb");
@@ -231,7 +243,10 @@ mod tests {
             embedding_text: None,
             ..Default::default()
         };
-        let result = chunker.chunk_group(&group, &conv, "src/main.rs");
+        let result = chunker
+            .chunk_group(&group, &conv, "src/main.rs")
+            .expect("chunk")
+            .chunks;
 
         assert!(result.is_empty(), "No text should produce no chunks");
     }
@@ -270,7 +285,10 @@ mod tests {
             member_conversions: vec![],
         };
 
-        let result = chunker.chunk_group_with_conversions(&group, &group_convs, "src/empty.rs");
+        let result = chunker
+            .chunk_group_with_conversions(&group, &group_convs, "src/empty.rs")
+            .expect("chunk")
+            .chunks;
         assert!(result.is_empty(), "No header should produce no chunks");
     }
 
@@ -284,7 +302,10 @@ mod tests {
         let mut chunker = GroupChunker::new(config);
         let group = create_small_group();
         let conv = create_conversion("hello function prints hello", "Outputs a greeting.");
-        let result = chunker.chunk_group(&group, &conv, "src/main.rs");
+        let result = chunker
+            .chunk_group(&group, &conv, "src/main.rs")
+            .expect("chunk")
+            .chunks;
 
         for chunk in &result {
             assert_eq!(chunk.metadata.file_path, "src/main.rs");
@@ -385,7 +406,10 @@ mod tests {
             },
         ];
 
-        let chunks = chunker.chunk_groups(&group_convs, "test.rs");
+        let chunks = chunker
+            .chunk_groups(&group_convs, "test.rs")
+            .expect("chunk")
+            .chunks;
         let emb_chunks: Vec<_> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
@@ -426,7 +450,10 @@ mod tests {
             },
         ];
 
-        let chunks = chunker.chunk_groups(&group_convs, "test.rs");
+        let chunks = chunker
+            .chunk_groups(&group_convs, "test.rs")
+            .expect("chunk")
+            .chunks;
         let bm25_chunks: Vec<_> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
@@ -458,7 +485,10 @@ mod tests {
             },
         ];
 
-        let chunks = chunker.chunk_groups(&group_convs, "test.rs");
+        let chunks = chunker
+            .chunk_groups(&group_convs, "test.rs")
+            .expect("chunk")
+            .chunks;
         let emb_chunks: Vec<_> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
@@ -496,7 +526,10 @@ mod tests {
             },
         ];
 
-        let chunks = chunker.chunk_groups(&group_convs, "test.rs");
+        let chunks = chunker
+            .chunk_groups(&group_convs, "test.rs")
+            .expect("chunk")
+            .chunks;
         let emb_chunks: Vec<_> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
@@ -533,7 +566,10 @@ mod tests {
             },
         ];
 
-        let chunks = chunker.chunk_groups(&group_convs, "test.rs");
+        let chunks = chunker
+            .chunk_groups(&group_convs, "test.rs")
+            .expect("chunk")
+            .chunks;
 
         let emb_chunks: Vec<_> = chunks
             .iter()
@@ -573,7 +609,10 @@ mod tests {
             },
         ];
 
-        let chunks = chunker.chunk_groups(&group_convs, "test.rs");
+        let chunks = chunker
+            .chunk_groups(&group_convs, "test.rs")
+            .expect("chunk")
+            .chunks;
 
         // Check per-path consistency: indices within each path are 0-based and total_chunks matches
         let emb_chunks: Vec<_> = chunks
@@ -675,7 +714,10 @@ mod tests {
         let conversion = create_test_conversion("Short text");
 
         let mut chunker = GroupChunker::new(config);
-        let chunks = chunker.chunk_group(&group, &conversion, "test.rs");
+        let chunks = chunker
+            .chunk_group(&group, &conversion, "test.rs")
+            .expect("chunk")
+            .chunks;
 
         assert!(!chunks.is_empty());
     }
@@ -691,7 +733,10 @@ mod tests {
         let conversion = create_test_conversion(text);
 
         let mut chunker = GroupChunker::new(config);
-        let chunks = chunker.chunk_group(&group, &conversion, "test.rs");
+        let chunks = chunker
+            .chunk_group(&group, &conversion, "test.rs")
+            .expect("chunk")
+            .chunks;
 
         assert!(chunks.len() > 1, "Should split into multiple chunks");
         assert!(chunks.iter().all(|c| !c.text.is_empty()));
@@ -744,7 +789,9 @@ mod tests {
             &group,
             &group_conversions,
             "test.rs",
-        );
+        )
+        .expect("chunk")
+        .chunks;
 
         assert!(!chunks.is_empty());
     }
@@ -760,7 +807,7 @@ mod tests {
     #[test]
     fn test_chunk_groups_empty() {
         let mut chunker = GroupChunker::new(ChunkingConfig::default());
-        let chunks = chunker.chunk_groups(&[], "test.rs");
+        let chunks = chunker.chunk_groups(&[], "test.rs").expect("chunk").chunks;
         assert!(chunks.is_empty());
     }
 
@@ -883,7 +930,10 @@ mod tests {
             None,
         )]);
 
-        let chunks = chunker.chunk_groups(&chunk_conversions(), "app.py");
+        let chunks = chunker
+            .chunk_groups(&chunk_conversions(), "app.py")
+            .expect("chunk")
+            .chunks;
         assert_eq!(
             chunks.len(),
             1,
@@ -922,7 +972,10 @@ mod tests {
             ),
         ]);
 
-        let chunks = chunker.chunk_groups(&chunk_conversions(), "app.py");
+        let chunks = chunker
+            .chunk_groups(&chunk_conversions(), "app.py")
+            .expect("chunk")
+            .chunks;
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "SECOND-PLUGIN");
     }
@@ -940,7 +993,10 @@ mod tests {
             None,
         )]);
 
-        let chunks = chunker.chunk_groups(&chunk_conversions(), "app.py");
+        let chunks = chunker
+            .chunk_groups(&chunk_conversions(), "app.py")
+            .expect("chunk")
+            .chunks;
         assert!(!chunks.is_empty(), "built-in chunker must produce chunks");
         assert!(
             chunks.iter().all(|c| !c.text.contains("PLUGIN")),
@@ -961,7 +1017,10 @@ mod tests {
             None,
         )]);
 
-        let chunks = chunker.chunk_groups(&chunk_conversions(), "app.py");
+        let chunks = chunker
+            .chunk_groups(&chunk_conversions(), "app.py")
+            .expect("chunk")
+            .chunks;
         assert!(
             !chunks.is_empty(),
             "built-in chunker must take over on error"
@@ -987,7 +1046,10 @@ mod tests {
         )]);
 
         // `.rs` file does not match the plugin's pattern → built-in chunker.
-        let chunks = chunker.chunk_groups(&chunk_conversions(), "lib.rs");
+        let chunks = chunker
+            .chunk_groups(&chunk_conversions(), "lib.rs")
+            .expect("chunk")
+            .chunks;
         assert!(!chunks.is_empty());
         assert!(
             chunks
@@ -1015,7 +1077,10 @@ mod tests {
         )]);
 
         // Content present → built-in produces chunks → below tier stays silent.
-        let chunks = chunker.chunk_groups(&chunk_conversions(), "app.py");
+        let chunks = chunker
+            .chunk_groups(&chunk_conversions(), "app.py")
+            .expect("chunk")
+            .chunks;
         assert!(!chunks.is_empty());
         assert!(
             chunks.iter().all(|c| !c.text.contains("BELOW-FALLBACK")),
@@ -1028,7 +1093,10 @@ mod tests {
             header_conversion: Some(create_merge_test_conversion("")),
             member_conversions: vec![],
         }];
-        let chunks = chunker.chunk_groups(&empty, "app.py");
+        let chunks = chunker
+            .chunk_groups(&empty, "app.py")
+            .expect("chunk")
+            .chunks;
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].text, "BELOW-FALLBACK");
     }

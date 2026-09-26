@@ -381,7 +381,7 @@ mod tests {
                     rusqlite::params![hash],
                 )
                 .map(|_| ())
-                .map_err(|error| cce_types::StorageError::insert(error.to_string()))
+                .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))
             })
             .expect("initial generation should be created");
 
@@ -410,7 +410,7 @@ mod tests {
                     ModuleType::Embedding,
                     TrackerFailure {
                         message: "Token limit exceeded: 9000 > 8192".to_string(),
-                        code: Some(crate::index_state::TOKEN_LIMIT_ERROR_CODE),
+                        code: Some(crate::index_state::TOKEN_LIMIT_ERROR_CODE.to_string()),
                         retryable: false,
                     },
                 )

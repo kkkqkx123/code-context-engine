@@ -14,6 +14,25 @@ use cce_utils::normalize_whitespace;
 // Re-export ImportanceLevel from strategy module
 pub use crate::summary::strategy::ImportanceLevel;
 
+/// Outcome of model-enhanced summary generation for one file
+///
+/// The rule-based text is always kept as the summary content; the outcome
+/// records whether the model contribution succeeded so callers can classify
+/// the file (degraded / dead-letter) instead of treating a swallowed LLM
+/// error as a clean success.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryOutcome {
+    /// Rule-based output, or successful model enhancement
+    #[default]
+    Generated,
+    /// Transient model failure: rule-based fallback kept, file is degraded
+    Fallback { reason: String },
+    /// Permanent model failure: rule-based text kept, but the summary module
+    /// must be reported as failed (dead-letter), not as success
+    Failed { code: String, message: String },
+}
+
 /// File summary for hierarchical retrieval
 ///
 /// Captures high-level semantic information about a code file
@@ -57,6 +76,9 @@ pub struct FileSummary {
 
     /// File-level test marker (path rule plus aggregated group signals)
     pub test_info: TestInfo,
+
+    /// Classification of how the summary content was produced
+    pub outcome: SummaryOutcome,
 }
 
 impl FileSummary {

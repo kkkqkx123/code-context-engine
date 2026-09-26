@@ -132,6 +132,7 @@ impl HotUpdateStorageMetrics {
 pub struct IndexQualityMetrics {
     pub embedding_deferred_uncommitted_total: LabeledCounter,
     pub entity_mapping_miss_total: LabeledCounter,
+    pub entity_metadata_malformed_total: LabeledCounter,
     pub empty_files_total: LabeledCounter,
     pub dead_letter_truncated_total: LabeledCounter,
 }
@@ -146,6 +147,10 @@ impl IndexQualityMetrics {
             ),
             entity_mapping_miss_total: registry
                 .counter("entity_mapping_miss_total", &[("project_id", &proj_val)]),
+            entity_metadata_malformed_total: registry.counter(
+                "entity_metadata_malformed_total",
+                &[("project_id", &proj_val)],
+            ),
             empty_files_total: registry.counter("empty_files_total", &[("project_id", &proj_val)]),
             dead_letter_truncated_total: registry
                 .counter("dead_letter_truncated_total", &[("project_id", &proj_val)]),
@@ -160,6 +165,12 @@ impl IndexQualityMetrics {
 
     pub fn record_entity_mapping_miss(&self) {
         self.entity_mapping_miss_total.increment();
+    }
+
+    pub fn record_entity_metadata_malformed(&self, count: usize) {
+        if count > 0 {
+            self.entity_metadata_malformed_total.add(count as u64);
+        }
     }
 
     pub fn record_empty_file(&self) {

@@ -80,5 +80,5 @@ pub use cce_config::modules::summary::SummaryGenerationStrategy as SummaryStrate
 // Re-export types
 pub use types::{
     FileSummary, GenerationDecision, SummaryGenerationStrategy, SummaryGenerator,
-    SummaryOrchestrator, SummaryPayload,
+    SummaryOrchestrator, SummaryOutcome, SummaryPayload,
 };

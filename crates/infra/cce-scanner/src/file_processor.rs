@@ -147,7 +147,7 @@ impl FileProcessor {
 
     /// Create IO error with context, preserving the original error kind
     fn io_error(context: &str, path: &Path, e: std::io::Error) -> crate::error::ScannerError {
-        crate::error::ScannerError::Io(common::IoError(std::io::Error::new(
+        crate::error::ScannerError::Io(common::IoError::from(std::io::Error::new(
             e.kind(),
             format!("{}: {} - {}", context, path.display(), e),
         )))
