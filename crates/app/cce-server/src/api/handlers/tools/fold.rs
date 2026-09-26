@@ -4,13 +4,12 @@
 //! shared parse coordinator, maps caller language names, and always returns
 //! the fold shape: degenerate inputs degrade instead of erroring.
 
-use axum::{Json, extract::State};
+use axum::Json;
 
 use cce_api::models::{FoldRequest, FoldResponse};
 use cce_orchestrator::{FileFoldMode, FileFoldRequest, FileFoldTool};
+use cce_parser::parser::ParseCoordinator;
 use cce_types::language::Language;
-
-use crate::api::AppState;
 
 /// Handle stateless file folding
 ///
@@ -25,7 +24,6 @@ use crate::api::AppState;
     )
 )]
 pub async fn handle_fold(
-    State(state): State<AppState>,
     Json(request): Json<FoldRequest>,
 ) -> Json<FoldResponse> {
     let language = request.language.as_deref().and_then(Language::from_name);
@@ -48,7 +46,7 @@ pub async fn handle_fold(
         tool_request = tool_request.with_mode(parsed_mode);
     }
 
-    let mut coordinator = state.parser.lock().await;
+    let mut coordinator = ParseCoordinator::new();
     let folded = FileFoldTool::fold(&mut coordinator, tool_request);
 
     Json(FoldResponse {

@@ -115,7 +115,7 @@ pub async fn handle_function_detail(
         })
         .unwrap_or_else(|| {
             // Entity not found in relation index, try SQLite
-            if let Some(client) = state.metadata_store.as_deref()
+            if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
                 && let Ok(project) = client.for_project(project_id)
                 && let Ok(numeric_id) = id.parse::<i64>()
             {

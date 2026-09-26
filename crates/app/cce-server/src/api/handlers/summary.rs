@@ -3,13 +3,14 @@
 //! Provides temporary file summary generation without storage.
 //! Supports single files, multiple files, and directory scanning.
 
-use axum::{Json, extract::State};
+use axum::Json;
 use std::path::PathBuf;
 use tracing::{debug, info};
 
 use cce_api::models::{
     ErrorResponse, FileSummaryItem, SummaryRequest, SummaryResponse, error_codes,
 };
+use cce_parser::parser::ParseCoordinator;
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::summary::RuleBasedGenerator;
 use cce_scanner::{FSScanner, ScanOptions};
@@ -35,7 +36,6 @@ pub type SummaryApiResponse = ApiResult<SummaryResponse>;
     )
 )]
 pub async fn handle_summary(
-    State(state): State<crate::api::state::AppState>,
     Json(request): Json<SummaryRequest>,
 ) -> SummaryApiResponse {
     let start = std::time::Instant::now();
@@ -138,7 +138,7 @@ pub async fn handle_summary(
 
     let generator = RuleBasedGenerator::new();
     let preprocessing_pipeline = PreprocessingPipeline::new();
-    let mut parser = state.parser.lock().await;
+    let mut parser = ParseCoordinator::new();
 
     for file_path in files_to_process {
         let file_path_str = file_path.to_string_lossy().to_string();

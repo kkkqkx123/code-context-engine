@@ -230,7 +230,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<KeywordSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("keyword_search")?;
-        let Some(sqlite) = self.state.metadata_store.clone() else {
+        let Some(sqlite) = self.state.engine.metadata_store_clone() else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "metadata store is not configured; keyword search unavailable",
             )]));
@@ -394,7 +394,7 @@ impl McpServerHandler {
     #[tool(description = "List all registered projects with their IDs, names and root paths.")]
     async fn list_projects(&self) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("list_projects")?;
-        let Some(store) = self.state.metadata_store.as_ref() else {
+        let Some(store) = self.state.engine.metadata_store() else {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "metadata store is not configured; cannot list projects",
             )]));
@@ -586,7 +586,7 @@ impl McpServerHandler {
             request = request.with_mode(FileFoldMode::parse(Some(mode)));
         }
 
-        let mut coordinator = self.state.parser.lock().await;
+        let mut coordinator = cce_parser::parser::ParseCoordinator::new();
         let folded = FileFoldTool::fold(&mut coordinator, request);
         Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({
@@ -630,7 +630,7 @@ impl McpServerHandler {
         Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({
                 "project_id": args.project_id,
-                "metadata_store_configured": self.state.metadata_store.is_some(),
+                "metadata_store_configured": self.state.engine.metadata_store().is_some(),
                 "bm25_enabled": bm25_enabled,
                 "relation": relation,
             })

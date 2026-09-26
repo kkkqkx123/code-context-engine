@@ -90,7 +90,7 @@ pub async fn handle_find_references(
     // Zero-copy: the tool shares the published snapshot's maps.
     let index = snapshot.index.clone();
     let mut tool = FindReferencesTool::new(index, request.project_id);
-    if let Some(sqlite) = state.metadata_store.as_ref()
+    if let Some(sqlite) = state.engine.metadata_store().map(|c| c.as_ref())
         && let Ok(project) = sqlite.for_project(request.project_id)
     {
         tool = tool.with_sqlite(project);
@@ -311,7 +311,7 @@ pub async fn handle_goto_definition(
     // Zero-copy: the tool shares the published snapshot's maps.
     let index = snapshot.index.clone();
     let mut tool = GotoDefinitionTool::new(index, request.project_id);
-    if let Some(sqlite) = state.metadata_store.as_ref()
+    if let Some(sqlite) = state.engine.metadata_store().map(|c| c.as_ref())
         && let Ok(project) = sqlite.for_project(request.project_id)
     {
         tool = tool.with_sqlite(project);

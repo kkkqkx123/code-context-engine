@@ -882,7 +882,7 @@ mod locality_tests {
             "duplicate".to_string(),
             dummy_span(),
         );
-        propagator.insert_file("a.py", &callee_ctx, &[callee.clone()]);
+        propagator.insert_file("a.py", &callee_ctx, std::slice::from_ref(&callee));
 
         let dup = Entity::new(
             EntityId(2),

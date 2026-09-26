@@ -141,14 +141,15 @@ pub async fn handle_config_reload(
                     generator
                 });
             let processors_result = factory.create_all_processors(
-                state.qdrant.clone(),
-                state.bm25.clone(),
+                Some(state.engine.qdrant_clone()),
+                Some(state.engine.bm25_clone()),
                 state
-                    .metadata_store
+                    .engine
+                    .metadata_store_clone()
                     .as_ref()
                     .and_then(|client| client.for_project(project_id).ok())
-                    .or_else(|| state.metadata_store.clone()),
-                state.embedder.clone(),
+                    .or_else(|| state.engine.metadata_store_clone()),
+                Some(state.engine.embedder_clone()),
                 Some(project_group_id),
                 project_id,
                 relation_publisher,
@@ -223,16 +224,14 @@ pub async fn handle_config_reload(
         (status = 500, body = ErrorResponse, description = "Internal error")
     )
 )]
-pub async fn handle_config_info(
-    State(state): State<crate::api::state::AppState>,
-) -> ApiResult<ConfigInfoResponse> {
+pub async fn handle_config_info() -> ApiResult<ConfigInfoResponse> {
     let initialized = Settings::is_initialized();
     let (database, embedder, project_count) = if initialized {
         match Settings::global() {
             Ok(config) => {
                 let db = serde_json::to_value(&config.database).unwrap_or_default();
                 let emb = serde_json::to_value(&config.embedder).unwrap_or_default();
-                let pcount = state.project_registry.as_ref().map(|_| 1).unwrap_or(0);
+                let pcount = 1;
                 (db, emb, pcount)
             }
             Err(_) => (json!(null), json!(null), 0),

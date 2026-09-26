@@ -5,22 +5,14 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 use crate::engine::CodeContextEngine;
 use crate::engine::ProjectCache;
-use cce_llm::Embedder;
 use cce_metrics::ProgressTracker;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
 use cce_orchestrator::query::RelationSearcher;
-use cce_orchestrator::{AstDiagnosis, CompressionRetrieval, KeywordSearchTool};
-use cce_parser::parser::ParseCoordinator;
 use cce_relation::CallChainQuery;
-use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
-use cce_storage_qdrant::QdrantProcessHandle;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::project_registry::ProjectRegistry;
 
 type RelationSearcherEntry = (i64, Arc<RelationSearcher>);
 type RelationSearcherCache = Arc<RwLock<HashMap<i64, RelationSearcherEntry>>>;
@@ -30,27 +22,12 @@ type RelationSearcherCache = Arc<RwLock<HashMap<i64, RelationSearcherEntry>>>;
 pub struct AppState {
     /// Code Context Engine - provides unified access to all components
     pub engine: Arc<CodeContextEngine>,
-    pub parser: Arc<Mutex<ParseCoordinator>>,
-    pub qdrant: Option<Arc<QdrantClient>>,
-    pub bm25: Option<Arc<Mutex<Bm25Client>>>,
-    pub embedder: Option<Arc<dyn Embedder>>,
-    /// SQLite metadata store for storage operations
-    pub metadata_store: Option<Arc<SqliteClient>>,
-    /// Compression retrieval tool (optional, for semantic compression)
-    pub compression_retrieval: Option<Arc<CompressionRetrieval>>,
-    /// AST diagnosis tool
-    pub ast_diagnosis: Arc<Mutex<AstDiagnosis>>,
     /// Watch status tracker (per-project)
     pub watch_status: Arc<RwLock<HashMap<i64, WatchStatusTracker>>>,
-    /// Project registry for multi-project support
-    pub project_registry: Option<Arc<ProjectRegistry>>,
-    /// Keyword search tool (BM25-based with highlighted snippets)
-    pub keyword_search: Option<Arc<KeywordSearchTool>>,
     /// Per-project progress trackers for lock-free metrics access
     pub progress_tracker: ProjectCache<ProgressTracker>,
-
     /// Qdrant subprocess lifecycle control handle
-    pub qdrant_control: Option<QdrantProcessHandle>,
+    pub qdrant_control: Option<cce_storage_qdrant::QdrantProcessHandle>,
     /// Per-project relation searcher cache (LRU caching for hot queries)
     pub relation_searcher_cache: RelationSearcherCache,
 }
@@ -67,21 +44,12 @@ impl AppState {
     /// * `qdrant_handle` - Optional Qdrant process handle
     pub async fn from_engine(
         engine: &CodeContextEngine,
-        qdrant_handle: Option<QdrantProcessHandle>,
+        qdrant_handle: Option<cce_storage_qdrant::QdrantProcessHandle>,
     ) -> Self {
         Self {
             engine: Arc::new(engine.clone()),
-            parser: Arc::new(Mutex::new(ParseCoordinator::new())),
-            qdrant: Some(engine.qdrant().clone()),
-            bm25: Some(engine.bm25().clone()),
-            embedder: Some(engine.embedder().clone()),
-            metadata_store: engine.metadata_store().cloned(),
-            compression_retrieval: None,
-            ast_diagnosis: Arc::new(Mutex::new(AstDiagnosis::new())),
             watch_status: Arc::new(RwLock::new(HashMap::new())),
-            project_registry: Some(engine.project_registry().clone()),
-            keyword_search: Some(Arc::new(KeywordSearchTool::new(engine.bm25().clone()))),
-            progress_tracker: engine.progress_tracker().clone(), // Arc<RwLock<HashMap<i64, Arc<ProgressTracker>>>>
+            progress_tracker: engine.progress_tracker().clone(),
             qdrant_control: qdrant_handle,
             relation_searcher_cache: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -134,6 +102,34 @@ impl AppState {
         let mut cache = self.relation_searcher_cache.write().await;
         cache.remove(&project_id);
     }
+
+    // --- Component access helpers ---
+    // These provide convenient access to components stored in the engine.
+
+    /// Get a clone of the Qdrant client
+    pub fn qdrant_clone(&self) -> Arc<cce_storage_qdrant::QdrantClient> {
+        self.engine.qdrant_clone()
+    }
+
+    /// Get a clone of the BM25 client
+    pub fn bm25_clone(&self) -> Arc<tokio::sync::Mutex<cce_storage_bm25::Bm25Client>> {
+        self.engine.bm25_clone()
+    }
+
+    /// Get a clone of the embedder
+    pub fn embedder_clone(&self) -> Arc<dyn cce_llm::Embedder> {
+        self.engine.embedder_clone()
+    }
+
+    /// Get a clone of the metadata store (SQLite client)
+    pub fn metadata_store_clone(&self) -> Option<Arc<cce_storage_sqlite::SqliteClient>> {
+        self.engine.metadata_store_clone()
+    }
+
+    /// Get a clone of the project registry
+    pub fn project_registry_clone(&self) -> Arc<cce_storage_sqlite::project_registry::ProjectRegistry> {
+        self.engine.project_registry_clone()
+    }
 }
 
 #[cfg(test)]
@@ -184,13 +180,13 @@ mod tests {
         config
     }
 
-    /// AppState::from_engine correctly initializes metadata_store
+    /// Test metadata store accessibility via engine
     ///
-    /// Verifies that AppState::from_engine now properly initializes the
-    /// metadata_store field from the CodeContextEngine's sqlite client,
-    /// so all project CRUD API endpoints can operate correctly.
+    /// Verifies that the engine properly initializes its SQLite metadata store
+    /// so all project CRUD API endpoints can operate correctly by accessing it
+    /// through the engine facade.
     #[tokio::test]
-    async fn test_metadata_store_is_initialized_in_from_engine() {
+    async fn test_metadata_store_accessible_via_engine() {
         let config = create_test_config();
         let db_path = config.database.sqlite.path.clone();
 
@@ -201,28 +197,18 @@ mod tests {
             .await
             .expect("CodeContextEngine should build with test config");
 
-        // Verify engine itself has a metadata store
+        // Verify engine has a metadata store
         assert!(
             engine.metadata_store().is_some(),
             "CodeContextEngine should have a metadata_store after construction"
         );
 
-        // Create AppState via the public API
-        let state = AppState::from_engine(&engine, None).await;
+        // Create AppState - it delegates to engine for component access
+        let _state = AppState::from_engine(&engine, None).await;
 
-        // metadata_store should now be properly initialized from the engine
-        assert!(
-            state.metadata_store.is_some(),
-            "metadata_store should be initialized from engine. \
-             AppState::from_engine must read engine.metadata_store() to set this field. \
-             Configured sqlite path: {}",
-            db_path
-        );
-
-        // Verify the metadata store is functional
-        let store = state
-            .metadata_store
-            .as_ref()
+        // Metadata store is accessible through the engine
+        let store = engine
+            .metadata_store()
             .expect("metadata_store should be initialized");
         assert!(
             store.as_ref().read_connection().is_ok(),

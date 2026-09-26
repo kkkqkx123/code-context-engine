@@ -2,12 +2,14 @@
 //!
 //! Provides single file parsing functionality.
 
-use axum::{Json, extract::State};
+use axum::Json;
 use std::path::Path;
 
 use cce_api::models::{
     EntityInfo, ErrorResponse, ParseRequest, ParseResponse, RelationInfo, error_codes,
 };
+
+use cce_parser::parser::ParseCoordinator;
 
 use crate::api::response::ApiResult;
 
@@ -26,7 +28,6 @@ pub type ParseApiResponse = ApiResult<ParseResponse>;
     )
 )]
 pub async fn handle_parse(
-    State(state): State<crate::api::state::AppState>,
     Json(request): Json<ParseRequest>,
 ) -> ParseApiResponse {
     let start = std::time::Instant::now();
@@ -54,7 +55,7 @@ pub async fn handle_parse(
         };
 
     // Parse file
-    let mut parser = state.parser.lock().await;
+    let mut parser = ParseCoordinator::new();
     let parsed = match parser.parse(&request.file_path, &content) {
         Ok(parsed) => parsed,
         Err(e) => {

@@ -4,6 +4,7 @@ use cce_api::models::{
     KeywordSearchApiResponse, KeywordSearchRequest, KeywordSearchResult, KeywordTermOperator,
 };
 use cce_orchestrator::KeywordSearchRequest as OrchKeywordSearchRequest;
+use cce_orchestrator::KeywordSearchTool;
 use cce_storage_bm25::TermOperator;
 
 use super::to_api_model;
@@ -20,13 +21,7 @@ pub async fn handle_keyword_search(
     State(state): State<AppState>,
     Json(request): Json<KeywordSearchRequest>,
 ) -> Json<KeywordSearchApiResponse> {
-    let Some(tool) = state.keyword_search.as_ref() else {
-        return Json(KeywordSearchApiResponse {
-            success: false,
-            result: None,
-            error: Some("Keyword search tool not initialized".to_string()),
-        });
-    };
+    let tool = KeywordSearchTool::new(state.engine.bm25_clone());
 
     let mut request = OrchKeywordSearchRequest {
         query: request.query,
@@ -39,7 +34,7 @@ pub async fn handle_keyword_search(
         },
     };
     if request.epoch.is_none()
-        && let Some(sqlite) = &state.metadata_store
+        && let Some(sqlite) = state.engine.metadata_store()
         && let Ok(project) = sqlite.for_project(request.project_id)
         && let Ok(conn) = project.read_connection()
     {

@@ -49,7 +49,6 @@ mod tests {
             result: ResultFilterConfig {
                 min_score: 0.5,
                 limit: 2,
-                ..Default::default()
             },
             ..Default::default()
         };

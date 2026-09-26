@@ -25,6 +25,7 @@ cce-config = { path = "../../core/cce-config" }
 cce-types = { path = "../../core/cce-types" }
 cce-server-shared = { path = "../cce-server-shared" }
 cce-orchestrator = { path = "../cce-orchestrator" }
+cce-parser = { path = "../../parser/cce-parser" }
 cce-relation = { path = "../../parser/cce-relation" }
 cce-storage-sqlite = { path = "../../infra/cce-storage-sqlite" }
 

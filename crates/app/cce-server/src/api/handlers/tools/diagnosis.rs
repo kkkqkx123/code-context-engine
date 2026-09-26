@@ -4,14 +4,13 @@
 //! Can locate code format issues such as unclosed brackets, unclosed strings,
 //! missing semicolons, etc.
 
-use axum::{Json, extract::State};
+use axum::Json;
 
 use cce_api::models::{DiagnoseApiResponse, DiagnoseRequest, DiagnoseResult};
-use cce_orchestrator::DiagnosisRequest;
+use cce_orchestrator::{AstDiagnosis, DiagnosisRequest};
 use cce_types::language::Language;
 
 use super::to_api_model;
-use crate::api::AppState;
 
 /// Handle AST diagnosis
 ///
@@ -26,10 +25,9 @@ use crate::api::AppState;
     )
 )]
 pub async fn handle_diagnose(
-    State(state): State<AppState>,
     Json(request): Json<DiagnoseRequest>,
 ) -> Json<DiagnoseApiResponse> {
-    let mut diagnosis = state.ast_diagnosis.lock().await;
+    let mut diagnosis = AstDiagnosis::new();
 
     let mut req = DiagnosisRequest::new(&request.code);
 

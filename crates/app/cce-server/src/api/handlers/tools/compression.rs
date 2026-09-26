@@ -3,15 +3,13 @@
 //! Provides semantic compression for code files, converting AST to natural language
 //! for large monolithic files. This is an on-demand operation without side effects.
 
-use axum::{Json, extract::State};
+use axum::Json;
 
 use cce_api::models::{
     BatchCompressFailure, BatchCompressRequest, BatchCompressResponse, BatchCompressSuccess,
     CompressApiResponse, CompressRequest, CompressResult,
 };
-use cce_orchestrator::{BatchCompressionRequest, CompressionRequest};
-
-use crate::api::AppState;
+use cce_orchestrator::{BatchCompressionRequest, CompressionRequest, CompressionRetrieval};
 
 fn to_compress_result(response: cce_orchestrator::CompressionResponse) -> CompressResult {
     CompressResult {
@@ -38,16 +36,9 @@ fn to_compress_result(response: cce_orchestrator::CompressionResponse) -> Compre
     )
 )]
 pub async fn handle_compress(
-    State(state): State<AppState>,
     Json(request): Json<CompressRequest>,
 ) -> Json<CompressApiResponse> {
-    let Some(retrieval) = state.compression_retrieval.as_ref() else {
-        return Json(CompressApiResponse {
-            success: false,
-            result: None,
-            error: Some("Compression tool not initialized".to_string()),
-        });
-    };
+    let retrieval = CompressionRetrieval::new();
 
     let req = CompressionRequest {
         file_path: request.file_path,
@@ -82,22 +73,9 @@ pub async fn handle_compress(
     )
 )]
 pub async fn handle_compress_batch(
-    State(state): State<AppState>,
     Json(request): Json<BatchCompressRequest>,
 ) -> Json<BatchCompressResponse> {
-    let Some(retrieval) = state.compression_retrieval.as_ref() else {
-        return Json(BatchCompressResponse {
-            successes: Vec::new(),
-            failures: request
-                .file_paths
-                .into_iter()
-                .map(|path| BatchCompressFailure {
-                    path,
-                    error: "Compression tool not initialized".to_string(),
-                })
-                .collect(),
-        });
-    };
+    let retrieval = CompressionRetrieval::new();
 
     let req = BatchCompressionRequest {
         file_paths: request.file_paths,

@@ -24,7 +24,7 @@ pub async fn handle_list_projects(
     State(state): State<crate::api::state::AppState>,
 ) -> ApiResult<ProjectListResponse> {
     // Check if metadata store is available
-    let metadata_store = match &state.metadata_store {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -84,7 +84,7 @@ pub async fn handle_get_project(
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available
-    let metadata_store = match &state.metadata_store {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(

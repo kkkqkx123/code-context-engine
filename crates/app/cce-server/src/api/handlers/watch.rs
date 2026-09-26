@@ -148,21 +148,21 @@ pub async fn handle_start_watch(
                     tracker.start(&canonical_watch);
                     drop(status_map);
 
-                    return ApiResult::Success(StartWatchResponse {
+                    ApiResult::Success(StartWatchResponse {
                         success: true,
                         message: "File watching started".to_string(),
                         project_id,
                         path: canonical_watch.to_string_lossy().into_owned(),
                         extensions: request.extensions,
                         debounce_ms: request.debounce_ms,
-                    });
+                    })
                 }
                 Err(e) => {
-                    return ApiResult::Error(ErrorResponse::with_details(
+                    ApiResult::Error(ErrorResponse::with_details(
                         error_codes::INTERNAL_ERROR,
                         "Failed to start event loop",
                         e.to_string(),
-                    ));
+                    ))
                 }
             }
         }

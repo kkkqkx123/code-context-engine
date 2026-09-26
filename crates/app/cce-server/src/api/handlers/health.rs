@@ -59,12 +59,13 @@ pub async fn handle_qdrant_health(
     State(state): State<AppState>,
 ) -> ApiResult<QdrantHealthResponse> {
     let circuit_breaker = state
-        .qdrant
-        .as_ref()
-        .map(|q| q.circuit_breaker_state())
-        .unwrap_or_else(|| "no client".to_string());
+        .engine
+        .qdrant()
+        .circuit_breaker_state()
+        .to_string();
 
-    let diagnostic = if let Some(qdrant) = &state.qdrant {
+    let diagnostic = {
+        let qdrant = state.engine.qdrant();
         match qdrant.diagnose().await {
             Ok(diag) => QdrantDiagnostic {
                 reachable: diag.reachable,
@@ -80,14 +81,6 @@ pub async fn handle_qdrant_health(
                 points_count: 0,
                 error: Some(format!("Diagnostic failed: {}", e)),
             },
-        }
-    } else {
-        QdrantDiagnostic {
-            reachable: false,
-            version: None,
-            collection_exists: false,
-            points_count: 0,
-            error: Some("Qdrant client not configured".to_string()),
         }
     };
 
@@ -114,7 +107,8 @@ pub async fn handle_qdrant_health(
 pub async fn handle_embedding_health(
     State(state): State<AppState>,
 ) -> ApiResult<EmbeddingHealthResponse> {
-    let (healthy, model_name, message) = if let Some(embedder) = &state.embedder {
+    let (healthy, model_name, message) = {
+        let embedder = state.engine.embedder();
         let healthy = embedder.is_healthy();
         let model_name = Some(embedder.model_name().to_string());
         let message = if healthy {
@@ -126,8 +120,6 @@ pub async fn handle_embedding_health(
             )
         };
         (healthy, model_name, message)
-    } else {
-        (false, None, "Embedding provider not configured".to_string())
     };
 
     ApiResult::Success(EmbeddingHealthResponse {
@@ -149,15 +141,13 @@ pub async fn handle_embedding_health(
     )
 )]
 pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25HealthResponse> {
-    let (enabled, connected, index_path) = if let Some(bm25) = &state.bm25 {
-        let bm25 = bm25.lock().await;
+    let (enabled, connected, index_path) = {
+        let bm25 = state.engine.bm25().lock().await;
         (
             bm25.is_enabled(),
             bm25.is_connected(),
             bm25.config().index_path.clone(),
         )
-    } else {
-        (false, false, None)
     };
 
     ApiResult::Success(Bm25HealthResponse {
@@ -245,70 +235,51 @@ pub async fn handle_retry_queue_clear(
 // --- Internal helpers ---
 
 async fn check_qdrant(state: &AppState) -> ServiceStatus {
-    match &state.qdrant {
-        Some(qdrant) => match qdrant.health().await {
-            Ok(true) => ServiceStatus {
-                reachable: true,
-                message: "Qdrant is reachable and healthy".to_string(),
-            },
-            Ok(false) => ServiceStatus {
-                reachable: false,
-                message: "Qdrant returned non-success health status".to_string(),
-            },
-            Err(e) => ServiceStatus {
-                reachable: false,
-                message: format!("Qdrant health check failed: {}", e),
-            },
+    match state.engine.qdrant().health().await {
+        Ok(true) => ServiceStatus {
+            reachable: true,
+            message: "Qdrant is reachable and healthy".to_string(),
         },
-        None => ServiceStatus {
+        Ok(false) => ServiceStatus {
             reachable: false,
-            message: "Qdrant client not configured".to_string(),
+            message: "Qdrant returned non-success health status".to_string(),
+        },
+        Err(e) => ServiceStatus {
+            reachable: false,
+            message: format!("Qdrant health check failed: {}", e),
         },
     }
 }
 
 async fn check_bm25(state: &AppState) -> ServiceStatus {
-    match &state.bm25 {
-        Some(bm25) => {
-            let bm25 = bm25.lock().await;
-            if bm25.is_enabled() && bm25.is_connected() {
-                ServiceStatus {
-                    reachable: true,
-                    message: "BM25 is enabled and connected".to_string(),
-                }
-            } else if bm25.is_connected() {
-                ServiceStatus {
-                    reachable: true,
-                    message: "BM25 is connected but disabled in config".to_string(),
-                }
-            } else if bm25.config().enabled {
-                ServiceStatus {
-                    reachable: false,
-                    message: "BM25 is enabled but not connected".to_string(),
-                }
-            } else {
-                ServiceStatus {
-                    reachable: false,
-                    message: "BM25 is disabled".to_string(),
-                }
-            }
+    let bm25 = state.engine.bm25().lock().await;
+    if bm25.is_enabled() && bm25.is_connected() {
+        ServiceStatus {
+            reachable: true,
+            message: "BM25 is enabled and connected".to_string(),
         }
-        None => ServiceStatus {
+    } else if bm25.is_connected() {
+        ServiceStatus {
+            reachable: true,
+            message: "BM25 is connected but disabled in config".to_string(),
+        }
+    } else if bm25.config().enabled {
+        ServiceStatus {
             reachable: false,
-            message: "BM25 client not configured".to_string(),
-        },
+            message: "BM25 is enabled but not connected".to_string(),
+        }
+    } else {
+        ServiceStatus {
+            reachable: false,
+            message: "BM25 is disabled".to_string(),
+        }
     }
 }
 
 fn check_embedding(state: &AppState) -> ServiceStatus {
-    let (healthy, model_name) = if let Some(embedder) = &state.embedder {
-        (
-            embedder.is_healthy(),
-            Some(embedder.model_name().to_string()),
-        )
-    } else {
-        (false, None)
-    };
+    let embedder = state.engine.embedder();
+    let healthy = embedder.is_healthy();
+    let model_name = Some(embedder.model_name().to_string());
 
     ServiceStatus {
         reachable: healthy,

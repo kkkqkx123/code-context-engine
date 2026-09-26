@@ -58,9 +58,9 @@ pub async fn handle_clear_index(
 
     let maintenance = ProjectIndexMaintenanceService::new(
         state.engine.clone(),
-        state.qdrant.clone(),
-        state.bm25.clone(),
-        state.metadata_store.clone(),
+        Some(state.engine.qdrant_clone()),
+        Some(state.engine.bm25_clone()),
+        state.engine.metadata_store_clone(),
     );
 
     let m_result = maintenance.clear_project_index(request.project_id).await;
@@ -126,7 +126,8 @@ pub async fn handle_delete_file(
 
     // Step 1: Remove from Qdrant
     let vectors_deleted = 0;
-    if let Some(ref qdrant) = state.qdrant {
+    {
+        let qdrant = state.engine.qdrant();
         if let Some(ref gid) = group_id {
             let result = qdrant
                 .delete_by_file_path_scoped(&file_path, gid, None)
@@ -148,17 +149,16 @@ pub async fn handle_delete_file(
     }
 
     // Step 2: Remove from BM25
-    let mut bm25_deleted = 0;
-    if let Some(ref bm25) = state.bm25 {
-        let mut client = bm25.lock().await;
+    let bm25_deleted = {
+        let mut client = state.engine.bm25().lock().await;
         let result = client
             .delete_by_file_path_scoped("default", &file_path, project_id)
             .await
             .map(|_| ());
         match result {
             Ok(()) => {
-                bm25_deleted = 1;
                 tracing::info!(file = %file_path, %project_id, "Deleted documents from BM25");
+                1
             }
             Err(e) => {
                 tracing::error!(file = %file_path, error = %e, "Failed to delete from BM25");
@@ -169,7 +169,7 @@ pub async fn handle_delete_file(
                 ));
             }
         }
-    }
+    };
 
     // Step 3: Remove relations from relation index
     let relations_deleted;
@@ -195,7 +195,7 @@ pub async fn handle_delete_file(
     }
 
     // Step 4: Remove entity detail mappings and file summary mappings from SQLite
-    if let Some(client) = state.metadata_store.as_deref()
+    if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
         && let Ok(project) = client.for_project(project_id)
     {
         let file_id_opt = match project.with_transaction(|tx| {
@@ -298,7 +298,8 @@ pub async fn handle_delete_entity(
 
     // Step 2: Remove from Qdrant
     let mut vectors_deleted = 0;
-    if let Some(ref qdrant) = state.qdrant {
+    {
+        let qdrant = state.engine.qdrant();
         if let Some(ref file_path) = entity_file_path {
             if let Some(ref gid) = group_id {
                 let result = qdrant
@@ -313,9 +314,9 @@ pub async fn handle_delete_entity(
 
     // Step 3: Remove from BM25
     let mut bm25_deleted = 0;
-    if let Some(ref bm25) = state.bm25 {
+    {
         if let Some(ref file_path) = entity_file_path {
-            let mut client = bm25.lock().await;
+            let mut client = state.engine.bm25().lock().await;
             let result = client
                 .delete_by_file_path_scoped("default", file_path, project_id)
                 .await
@@ -359,7 +360,7 @@ pub async fn handle_delete_entity(
     }
 
     // Step 5: Remove entity detail mapping from SQLite
-    if let Some(client) = state.metadata_store.as_deref()
+    if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
         && let Ok(project) = client.for_project(project_id)
     {
         let _ = project.with_transaction(|tx| {
@@ -421,7 +422,8 @@ pub async fn handle_batch_delete(
     // Delete files
     for file_path in &request.file_paths {
         // Delete from Qdrant
-        if let Some(ref qdrant) = state.qdrant {
+        {
+        let qdrant = state.engine.qdrant();
             if let Some(ref gid) = group_id {
                 let result = qdrant
                     .delete_by_file_path_scoped(file_path, gid, None)
@@ -437,8 +439,8 @@ pub async fn handle_batch_delete(
         }
 
         // Delete from BM25
-        if let Some(ref bm25) = state.bm25 {
-            let mut client = bm25.lock().await;
+        {
+            let mut client = state.engine.bm25().lock().await;
             let result = client
                 .delete_by_file_path_scoped("default", file_path, project_id)
                 .await
@@ -480,7 +482,8 @@ pub async fn handle_batch_delete(
         };
 
         if let Some(ref fp) = file_path {
-            if let Some(ref qdrant) = state.qdrant {
+            {
+        let qdrant = state.engine.qdrant();
                 if let Some(ref gid) = group_id {
                     let result = qdrant.delete_by_file_path_scoped(fp, gid, None).await;
                     if let Err(e) = result {
@@ -493,8 +496,8 @@ pub async fn handle_batch_delete(
                 }
             }
 
-            if let Some(ref bm25) = state.bm25 {
-                let mut client = bm25.lock().await;
+            {
+                let mut client = state.engine.bm25().lock().await;
                 let result = client
                     .delete_by_file_path_scoped("default", fp, project_id)
                     .await
@@ -592,25 +595,28 @@ pub async fn handle_index_stats(
     let group_id = resolve_group_id(&state, project_id).await;
 
     // Get Qdrant stats (project-scoped via group filter)
-    let vector_count = if let (Some(qdrant), Some(gid)) = (&state.qdrant, &group_id) {
-        qdrant.count_points_by_group(gid).await.unwrap_or(0)
-    } else {
-        0
-    };
-
-    // Get BM25 stats (project-scoped)
-    let bm25_doc_count = if let Some(ref bm25) = state.bm25 {
-        let client = bm25.lock().await;
-        client
-            .document_count_by_project(project_id)
+    let vector_count = if let Some(gid) = &group_id {
+        state
+            .engine
+            .qdrant()
+            .count_points_by_group(gid)
             .await
             .unwrap_or(0)
     } else {
         0
     };
 
+    // Get BM25 stats (project-scoped)
+    let bm25_doc_count = {
+        let client = state.engine.bm25().lock().await;
+        client
+            .document_count_by_project(project_id)
+            .await
+            .unwrap_or(0)
+    };
+
     // Get file count from metadata store (project-scoped)
-    let file_count = if let Some(client) = state.metadata_store.as_deref()
+    let file_count = if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
         && let Ok(project) = client.for_project(project_id)
     {
         use cce_storage_sqlite::FileRepository;
@@ -653,59 +659,39 @@ pub async fn handle_index_stats(
 pub async fn handle_storage_status(
     State(state): State<crate::api::state::AppState>,
 ) -> ApiResult<StorageStatusResponse> {
-    let mut vector_storage = StorageComponentStatus {
-        connected: false,
-        item_count: 0,
-        disk_usage_mb: 0.0,
-        version: None,
-        last_error: None,
-    };
-
-    let mut bm25_storage = StorageComponentStatus {
-        connected: false,
-        item_count: 0,
-        disk_usage_mb: 0.0,
-        version: None,
-        last_error: None,
-    };
-
     // Check Qdrant with comprehensive diagnostics
-    if let Some(ref qdrant) = state.qdrant {
+    let vector_storage = {
+        let qdrant = state.engine.qdrant();
         match qdrant.diagnose().await {
-            Ok(diag) => {
-                vector_storage = StorageComponentStatus {
-                    connected: diag.reachable,
-                    item_count: diag.points_count as usize,
-                    disk_usage_mb: 0.0, // Qdrant does not expose disk usage via REST API
-                    version: diag.version,
-                    last_error: diag.error,
-                };
-            }
-            Err(e) => {
-                vector_storage = StorageComponentStatus {
-                    connected: false,
-                    item_count: 0,
-                    disk_usage_mb: 0.0,
-                    version: None,
-                    last_error: Some(format!("Diagnostic failed: {}", e)),
-                };
-            }
+            Ok(diag) => StorageComponentStatus {
+                connected: diag.reachable,
+                item_count: diag.points_count as usize,
+                disk_usage_mb: 0.0, // Qdrant does not expose disk usage via REST API
+                version: diag.version,
+                last_error: diag.error,
+            },
+            Err(e) => StorageComponentStatus {
+                connected: false,
+                item_count: 0,
+                disk_usage_mb: 0.0,
+                version: None,
+                last_error: Some(format!("Diagnostic failed: {}", e)),
+            },
         }
-    }
+    };
 
     // Check BM25
-    if let Some(ref bm25) = state.bm25 {
-        let client = bm25.lock().await;
+    let bm25_storage = {
+        let client = state.engine.bm25().lock().await;
         let item_count = client.document_count().await.unwrap_or(0);
-        bm25_storage = StorageComponentStatus {
+        StorageComponentStatus {
             connected: client.is_connected(),
             item_count,
             disk_usage_mb: 0.0,
             version: None,
             last_error: None,
-        };
-        drop(client);
-    }
+        }
+    };
 
     // Get relation storage stats (cached from all loaded runtimes)
     let relation_item_count = 0;
@@ -727,7 +713,8 @@ pub async fn handle_storage_status(
             status,
         })
     } else {
-        state.qdrant.as_ref().map(|qdrant| {
+        let qdrant = state.engine.qdrant();
+        Some({
             let config = qdrant.config();
             QdrantProcessInfo {
                 managed: config.auto_start,
@@ -765,7 +752,7 @@ pub async fn handle_storage_status(
 ///
 /// Returns `None` if the project is not found or has no root_path configured.
 async fn resolve_group_id(state: &crate::api::state::AppState, project_id: i64) -> Option<String> {
-    let registry = state.project_registry.as_ref()?;
+    let registry = state.engine.project_registry();
     match registry.get_or_load(project_id).await {
         Ok(entry) => {
             let gid = cce_storage_qdrant::generate_project_group_id(

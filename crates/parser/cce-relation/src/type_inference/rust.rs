@@ -397,9 +397,7 @@ fn parse_rust_pattern_chain(text: &str) -> Option<(Vec<String>, String)> {
         if constructor.is_empty() || !is_valid_ident(&constructor) {
             return None;
         }
-        let Some(inner) = extract_balanced_parens(&rest[paren..]) else {
-            return None;
-        };
+        let inner = extract_balanced_parens(&rest[paren..])?;
         constructors.push(constructor);
         rest = inner;
     }

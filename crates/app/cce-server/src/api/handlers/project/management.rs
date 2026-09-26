@@ -70,7 +70,7 @@ pub async fn handle_create_project(
     let root_path_str = canonical_path.to_string_lossy().to_string();
 
     // Check if metadata store is available
-    let metadata_store = match &state.metadata_store {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -184,7 +184,7 @@ pub async fn handle_update_project(
     Json(request): Json<UpdateProjectRequest>,
 ) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available
-    let metadata_store = match &state.metadata_store {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(
@@ -314,9 +314,9 @@ pub async fn handle_delete_project(
     // 2. Use unified maintenance service for all storage-layer cleanup
     let maintenance = crate::maintenance::ProjectIndexMaintenanceService::new(
         state.engine.clone(),
-        state.qdrant.clone(),
-        state.bm25.clone(),
-        state.metadata_store.clone(),
+        Some(state.engine.qdrant_clone()),
+        Some(state.engine.bm25_clone()),
+        state.engine.metadata_store_clone(),
     );
 
     let m_result = maintenance.delete_project(id).await;

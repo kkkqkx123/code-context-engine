@@ -9,11 +9,13 @@ use cce_config::modules::CircuitBreakerConfig;
 use crate::core::rate_limiter::ConfigurableRateLimiter;
 use cce_circuit_breaker::CircuitBreaker;
 
+type CircuitBreakerEntry = (Arc<Mutex<CircuitBreaker>>, CircuitBreakerConfig);
+
 /// Shared rate limiter registry keyed by upstream base URL
 #[derive(Debug, Default)]
 pub struct LlmRateLimiterRegistry {
     limiters: Mutex<HashMap<String, Arc<ConfigurableRateLimiter>>>,
-    circuit_breakers: Mutex<HashMap<String, (Arc<Mutex<CircuitBreaker>>, CircuitBreakerConfig)>>,
+    circuit_breakers: Mutex<HashMap<String, CircuitBreakerEntry>>,
 }
 
 impl LlmRateLimiterRegistry {

@@ -25,7 +25,7 @@ pub async fn handle_project_index(
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectIndexResponse> {
     // Check if metadata store is available
-    let metadata_store = match &state.metadata_store {
+    let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
         None => {
             return ApiResult::Error(ErrorResponse::new(

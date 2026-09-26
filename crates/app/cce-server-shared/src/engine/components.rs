@@ -20,9 +20,19 @@ impl super::CodeContextEngine {
         &self.project_registry
     }
 
+    /// Get a clone of the project registry
+    pub fn project_registry_clone(&self) -> Arc<ProjectRegistry> {
+        self.project_registry.clone()
+    }
+
     /// Get a reference to the Qdrant client
     pub fn qdrant(&self) -> &Arc<QdrantClient> {
         &self.qdrant
+    }
+
+    /// Get a clone of the Qdrant client
+    pub fn qdrant_clone(&self) -> Arc<QdrantClient> {
+        self.qdrant.clone()
     }
 
     /// Get a reference to the BM25 client
@@ -30,14 +40,29 @@ impl super::CodeContextEngine {
         &self.bm25
     }
 
+    /// Get a clone of the BM25 client
+    pub fn bm25_clone(&self) -> Arc<Mutex<Bm25Client>> {
+        self.bm25.clone()
+    }
+
     /// Get a reference to the embedder
     pub fn embedder(&self) -> &Arc<dyn Embedder> {
         &self.embedder
     }
 
+    /// Get a clone of the embedder
+    pub fn embedder_clone(&self) -> Arc<dyn Embedder> {
+        self.embedder.clone()
+    }
+
     /// Get a reference to the SQLite metadata store
     pub fn metadata_store(&self) -> Option<&Arc<SqliteClient>> {
         self.metadata_store.as_ref()
+    }
+
+    /// Get a clone of the SQLite metadata store
+    pub fn metadata_store_clone(&self) -> Option<Arc<SqliteClient>> {
+        self.metadata_store.clone()
     }
 
     /// Reload project configuration and recreate components

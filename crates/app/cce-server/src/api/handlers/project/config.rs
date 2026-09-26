@@ -34,15 +34,8 @@ pub async fn handle_update_project_config(
     Json(payload): Json<ProjectConfigUpdateRequest>,
 ) -> ApiResult<ProjectConfigUpdateResponse> {
     // Check if project registry is available
-    let registry = match &state.project_registry {
-        Some(registry) => registry,
-        None => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                "Project registry not initialized",
-            ));
-        }
-    };
+    let registry = state.engine.project_registry();
+    let registry = &**registry;
 
     // Validate the submitted config against the application schema
     let config = match serde_json::from_value::<AppConfig>(payload.config) {
@@ -157,15 +150,8 @@ pub async fn handle_reload_project_config(
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectConfigReloadResponse> {
     // Check if project registry is available
-    let project_registry = match &state.project_registry {
-        Some(registry) => registry,
-        None => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                "Project registry not initialized",
-            ));
-        }
-    };
+    let project_registry = state.engine.project_registry();
+    let project_registry = &**project_registry;
 
     // Invalidate cache to force reload from file on next access
     let _ = project_registry.invalidate_cache(Some(id)).await;

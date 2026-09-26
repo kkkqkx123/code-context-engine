@@ -25,6 +25,8 @@ use cce_types::{ContentRoute, LanguageInfo, OutputMode, ParsedFile};
 
 use super::super::error::OrchestratorError;
 
+type ChunkCache = Arc<RwLock<LruCache<String, (Vec<ChunkedResult>, usize)>>>;
+
 use lru::LruCache;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
@@ -132,7 +134,7 @@ pub struct FileProcessor {
     ///
     /// Key: project_id + file_path + source_hash
     /// Value: chunked results + blank segments dropped during chunking
-    chunk_cache: Arc<RwLock<LruCache<String, (Vec<ChunkedResult>, usize)>>>,
+    chunk_cache: ChunkCache,
     /// Chunking configuration for document/text processing
     chunking_config: ChunkingConfig,
     /// Document-specific chunking configuration (if None, uses chunking_config)

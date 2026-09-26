@@ -80,7 +80,7 @@ pub async fn handle_entity_search(
     };
 
     // Get SQLite connection from state
-    let sqlite_client = match &state.metadata_store {
+    let sqlite_client = match state.engine.metadata_store() {
         Some(client) => match client.for_project(project_id) {
             Ok(project) => project,
             Err(e) => {
