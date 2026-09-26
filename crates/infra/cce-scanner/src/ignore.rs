@@ -83,7 +83,17 @@ impl Pattern {
             pattern_str.to_string()
         };
 
-        let glob = Glob::new(&glob_pattern).ok();
+        let glob = match Glob::new(&glob_pattern) {
+            Ok(glob) => Some(glob),
+            Err(e) => {
+                tracing::warn!(
+                    pattern = %original,
+                    error = %e,
+                    "Ignore pattern failed to compile; it will never match"
+                );
+                None
+            }
+        };
 
         Some(Self {
             original,

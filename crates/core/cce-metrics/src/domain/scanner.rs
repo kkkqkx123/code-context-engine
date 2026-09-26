@@ -8,6 +8,7 @@ pub struct ScannerMetrics {
     pub files_filtered_total: LabeledCounter,
     pub files_skipped_total: LabeledCounter,
     pub files_hash_reused_total: LabeledCounter,
+    pub files_error_total: LabeledCounter,
     pub scan_latency_ms: LabeledHistogram,
     pub languages_detected_total: LabeledCounter,
 }
@@ -24,6 +25,8 @@ impl ScannerMetrics {
                 .counter("scanner_files_skipped_total", &[("project_id", &proj)]),
             files_hash_reused_total: registry
                 .counter("scanner_files_hash_reused_total", &[("project_id", &proj)]),
+            files_error_total: registry
+                .counter("scanner_files_error_total", &[("project_id", &proj)]),
             scan_latency_ms: registry
                 .histogram_default("scanner_scan_latency_ms", &[("project_id", &proj)]),
             languages_detected_total: registry
@@ -46,6 +49,12 @@ impl ScannerMetrics {
     /// because its (size, mtime) fingerprint was unchanged.
     pub fn record_hash_reuse(&self) {
         self.files_hash_reused_total.increment();
+    }
+
+    /// Record a file the walk could not process (read, hash, parse prep), which
+    /// was skipped with an error while the walk continued.
+    pub fn record_scan_error(&self) {
+        self.files_error_total.increment();
     }
 }
 

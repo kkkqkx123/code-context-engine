@@ -8,6 +8,7 @@ rust-version.workspace = true
 cce-types = { path = "../../core/cce-types" }
 cce-config = { path = "../../core/cce-config" }
 cce-text = { path = "../../core/cce-text" }
+cce-utils = { path = "../../core/cce-utils" }
 tantivy = { workspace = true }
 tokio = { workspace = true }
 rayon = { workspace = true }

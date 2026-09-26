@@ -5,7 +5,7 @@
 //! recursive globstar patterns (**).
 
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::ignore::IgnoreMatcher;
 use cce_utils::Glob;
@@ -40,22 +40,28 @@ pub struct PatternMatcher {
 }
 
 impl PatternMatcher {
+    /// Compile glob patterns, warning about (and skipping) invalid ones.
+    fn compile_globs(patterns: Vec<String>, kind: &str) -> Vec<Glob> {
+        patterns
+            .into_iter()
+            .filter_map(|p| match Glob::new(&p) {
+                Ok(glob) => Some(glob),
+                Err(e) => {
+                    warn!(
+                        pattern = %p,
+                        kind,
+                        error = %e,
+                        "Invalid glob pattern skipped"
+                    );
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Create a new pattern matcher
     pub fn new(include_patterns: Vec<String>, exclude_patterns: Vec<String>) -> Self {
-        let include_globs = include_patterns
-            .into_iter()
-            .filter_map(|p| Glob::new(&p).ok())
-            .collect();
-        let exclude_globs = exclude_patterns
-            .into_iter()
-            .filter_map(|p| Glob::new(&p).ok())
-            .collect();
-
-        Self {
-            include_patterns: include_globs,
-            exclude_patterns: exclude_globs,
-            gitignore: None,
-        }
+        Self::with_gitignore(include_patterns, exclude_patterns, None)
     }
 
     /// Create a new pattern matcher with gitignore support
@@ -64,18 +70,9 @@ impl PatternMatcher {
         exclude_patterns: Vec<String>,
         gitignore: Option<IgnoreMatcher>,
     ) -> Self {
-        let include_globs = include_patterns
-            .into_iter()
-            .filter_map(|p| Glob::new(&p).ok())
-            .collect();
-        let exclude_globs = exclude_patterns
-            .into_iter()
-            .filter_map(|p| Glob::new(&p).ok())
-            .collect();
-
         Self {
-            include_patterns: include_globs,
-            exclude_patterns: exclude_globs,
+            include_patterns: Self::compile_globs(include_patterns, "include"),
+            exclude_patterns: Self::compile_globs(exclude_patterns, "exclude"),
             gitignore,
         }
     }
@@ -120,10 +117,10 @@ impl PatternMatcher {
                         matcher = Some(file_matcher);
                     }
                     Err(e) => {
-                        debug!(
+                        warn!(
                             path = %path_display,
                             error = %e,
-                            "Failed to load ignore file"
+                            "Failed to load ignore file; its patterns are not applied"
                         );
                     }
                 }

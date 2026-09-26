@@ -2,12 +2,13 @@
 //!
 //! Deterministic embedding failures (input over the provider token budget)
 //! always fail again under plain retry, so those files pile up in the dead
-//! letter queue. This executor performs a single lossy self-heal pass: it
-//! re-chunks each dead-lettered file from its hash-verified on-disk content,
-//! truncates embedding-path chunks over the embedder input budget, and
-//! re-stores them into the ACTIVE data generation. The tracker `truncated`
-//! marker is consumed before processing, so every file/module gets at most
-//! one truncate attempt regardless of the outcome.
+//! letter queue. This executor performs a lossy self-heal pass: it re-chunks
+//! each dead-lettered file from its hash-verified on-disk content, truncates
+//! embedding-path chunks over the embedder input budget, and re-stores them
+//! into the ACTIVE data generation. The tracker `truncated` marker is only
+//! consumed once the repair is fully recorded (store + success mark), so an
+//! infrastructure blip mid-pass leaves the file queued for an idempotent
+//! replay instead of burning its single lossy attempt.
 
 use std::path::Path;
 
@@ -30,6 +31,8 @@ pub struct DeadLetterRetryReport {
     pub succeeded: usize,
     /// Files retried that failed again; they stay in the dead letter state.
     pub still_failed: usize,
+    /// Embedding chunks cut to the input token budget by this pass.
+    pub truncated_chunks: usize,
 }
 
 /// Resolve the root-relative path stored in the `files` table from the
@@ -51,8 +54,9 @@ impl IndexOrchestrator {
     /// Only the Embedding module is eligible: BM25 has no provider token
     /// budget, so truncation there would only lose recall. Files that are
     /// missing on disk or whose content drifted outside change tracking are
-    /// skipped (the regular change flow owns them) and still consume their
-    /// single truncate attempt.
+    /// skipped (the regular change flow owns them); one-file errors are
+    /// recorded and the pass continues so a single bad file never interrupts
+    /// the whole queue.
     pub async fn retry_dead_letter_with_truncation(
         &mut self,
     ) -> Result<DeadLetterRetryReport, OrchestratorError> {
@@ -109,21 +113,6 @@ impl IndexOrchestrator {
             let tracker_path = Path::new(&state.file_path);
             let file = state.file_path.as_str();
 
-            // Consume the single truncate attempt up front: missing, drifted
-            // or failed files must never re-enter this queue.
-            if let Err(error) = self
-                .state_tracker
-                .set_module_truncated(tracker_path, ModuleType::Embedding)
-                .await
-            {
-                tracing::warn!(
-                    file,
-                    %error,
-                    "dead-letter retry: truncate attempt could not be recorded; skipping"
-                );
-                continue;
-            }
-
             let Some(relative_path) = project_relative_path(&root, file) else {
                 tracing::warn!(
                     file,
@@ -133,11 +122,36 @@ impl IndexOrchestrator {
             };
 
             let content_hash = {
-                let conn = client
-                    .read_connection()
-                    .map_err(OrchestratorError::Storage)?;
-                FileRepository::get_content_hash_by_path(&conn, &relative_path, self.project_id)
-                    .map_err(OrchestratorError::Storage)?
+                let read_result = client.read_connection().map_err(OrchestratorError::Storage);
+                match read_result {
+                    Ok(conn) => {
+                        match FileRepository::get_content_hash_by_path(
+                            &conn,
+                            &relative_path,
+                            self.project_id,
+                        ) {
+                            Ok(hash) => hash,
+                            Err(error) => {
+                                // Infrastructure fault: keep the file queued so
+                                // a later pass can retry the lookup.
+                                tracing::error!(
+                                    file,
+                                    %error,
+                                    "dead-letter retry: content hash lookup failed; file stays queued"
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            file,
+                            %error,
+                            "dead-letter retry: database connection failed; file stays queued"
+                        );
+                        continue;
+                    }
+                }
             };
             let Some(content_hash) = content_hash.filter(|hash| !hash.is_empty()) else {
                 tracing::warn!(
@@ -148,7 +162,7 @@ impl IndexOrchestrator {
             };
 
             let read_path = root.join(&relative_path);
-            let Some(mut chunks) = self
+            let mut chunks = match self
                 .file_processor
                 .rechunk_file_from_disk(
                     &read_path,
@@ -156,16 +170,30 @@ impl IndexOrchestrator {
                     &content_hash,
                     OutputMode::Embedding,
                 )
-                .await?
-            else {
-                tracing::warn!(
-                    file,
-                    "dead-letter retry: on-disk content missing or drifted; skipping"
-                );
-                continue;
+                .await
+            {
+                Ok(Some(chunks)) => chunks,
+                Ok(None) => {
+                    tracing::warn!(
+                        file,
+                        "dead-letter retry: on-disk content missing or drifted; skipping"
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    // One file's re-chunk error must not abort the queue; the
+                    // truncate marker is not consumed, so a later pass replays.
+                    tracing::error!(
+                        file,
+                        %error,
+                        "dead-letter retry: re-chunk failed; file stays queued for the next pass"
+                    );
+                    continue;
+                }
             };
 
             let truncated_chunks = self.apply_embed_budget(file, &mut chunks);
+            report.truncated_chunks += truncated_chunks;
             if !chunks.iter().any(|c| c.path == ChunkPath::Embedding) {
                 tracing::warn!(
                     file,
@@ -186,10 +214,23 @@ impl IndexOrchestrator {
                         .mark_success(tracker_path, ModuleType::Embedding)
                         .await
                     {
+                        // The vectors are stored; leaving the truncate marker
+                        // unconsumed lets the next pass replay idempotently
+                        // and confirm the success state.
                         tracing::error!(
                             file,
                             %error,
                             "dead-letter retry stored chunks but could not mark Embedding success"
+                        );
+                    } else if let Err(error) = self
+                        .state_tracker
+                        .set_module_truncated(tracker_path, ModuleType::Embedding)
+                        .await
+                    {
+                        tracing::error!(
+                            file,
+                            %error,
+                            "dead-letter retry succeeded but the truncate marker could not be recorded"
                         );
                     }
                     report.succeeded += 1;
@@ -202,7 +243,11 @@ impl IndexOrchestrator {
                 Err(error) => {
                     if let Err(state_error) = self
                         .state_tracker
-                        .mark_failed(tracker_path, ModuleType::Embedding, error.to_string())
+                        .mark_failed(
+                            tracker_path,
+                            ModuleType::Embedding,
+                            error.as_module_failure(),
+                        )
                         .await
                     {
                         tracing::error!(
@@ -220,6 +265,9 @@ impl IndexOrchestrator {
                     );
                 }
             }
+        }
+        if let Some(metrics) = &self.quality_metrics {
+            metrics.record_dead_letter_truncated(report.truncated_chunks);
         }
         Ok(report)
     }
@@ -265,7 +313,7 @@ mod tests {
 
     use super::super::IndexOrchestrator;
     use crate::hot_update::FileChangeType;
-    use crate::index_state::{ModuleType, ModuleUpdateState};
+    use crate::index_state::{ModuleType, ModuleUpdateState, TrackerFailure};
     use cce_storage_sqlite::{
         NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
     };
@@ -344,23 +392,26 @@ mod tests {
             .with_file_processor_configs(NestProcessorConfig::default(), &AstToNlConfig::both())
             .with_dead_letter_config(true, 8);
 
-        // Drive Embedding into the dead letter queue for the recorded file.
+        // Drive Embedding into the dead letter queue for the recorded file
+        // with the token-limit classification that makes it a truncate target.
         let recorded = file_path.to_string_lossy().to_string();
         {
             let tracker = orchestrator.state_tracker();
             tracker
                 .create_update(Path::new(&recorded), FileChangeType::Modified)
                 .await;
-            for _ in 0..3 {
-                tracker
-                    .mark_failed(
-                        Path::new(&recorded),
-                        ModuleType::Embedding,
-                        "400 input over token limit".to_string(),
-                    )
-                    .await
-                    .expect("state exists");
-            }
+            tracker
+                .mark_failed(
+                    Path::new(&recorded),
+                    ModuleType::Embedding,
+                    TrackerFailure {
+                        message: "Token limit exceeded: 9000 > 8192".to_string(),
+                        code: Some(crate::index_state::TOKEN_LIMIT_ERROR_CODE),
+                        retryable: false,
+                    },
+                )
+                .await
+                .expect("state exists");
             assert_eq!(tracker.get_truncate_retry_candidates().await.len(), 1);
         }
 
@@ -371,6 +422,10 @@ mod tests {
         assert_eq!(report.retried, 1);
         assert_eq!(report.succeeded, 1);
         assert_eq!(report.still_failed, 0);
+        assert!(
+            report.truncated_chunks > 0,
+            "over-budget chunks should be counted in the report"
+        );
 
         // The module left the dead letter queue and consumed its one attempt.
         let tracker = orchestrator.state_tracker();

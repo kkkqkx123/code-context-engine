@@ -19,7 +19,7 @@ use tracing::{debug, info};
 
 use crate::CheckpointManager;
 use cce_metrics::ScannerMetrics;
-use cce_scanner::{FSScanner, FileEntry, ScanOptions};
+use cce_scanner::{FSScanner, FileEntry, ScanFailure, ScanOptions};
 use cce_storage_sqlite::types::{BatchCheckpointRecord, CheckpointRecord, CheckpointStatus};
 use cce_types::{OperationKind, StorageError};
 
@@ -50,6 +50,10 @@ pub struct FileIndexer {
     file_list_hash: String,
     /// Checkpoint record
     checkpoint: CheckpointRecord,
+    /// Paths the scanner skipped with an error (unreadable directories,
+    /// files that failed to process). Surfaced in the index result so a
+    /// subtree lost to permissions is not invisible.
+    scan_failures: Vec<ScanFailure>,
 }
 
 impl FileIndexer {
@@ -76,12 +80,15 @@ impl FileIndexer {
         if let Some(registry) = plugin_registry {
             scanner = scanner.with_plugin_registry(registry);
         }
-        let mut files = scanner
-            .scan(scan_options)
+        let report = scanner
+            .scan_report(scan_options)
             .map_err(|e| StorageError::query(format!("Failed to scan files: {}", e)))?;
+        let scan_failures = report.failures;
+        let mut files = report.entries;
 
         info!(
             count = files.len(),
+            scan_failures = scan_failures.len(),
             root_dir = %root_dir.display(),
             "Scanned files, now sorting for deterministic processing"
         );
@@ -155,6 +162,7 @@ impl FileIndexer {
             sorted_files: files,
             file_list_hash,
             checkpoint,
+            scan_failures,
         })
     }
 
@@ -342,9 +350,11 @@ impl FileIndexer {
         if let Some(ref metrics) = scanner_metrics {
             scanner = scanner.with_scanner_metrics(metrics.clone());
         }
-        let mut files = scanner
-            .scan(scan_options)
+        let report = scanner
+            .scan_report(scan_options)
             .map_err(|e| RecoveryValidation::new(format!("Failed to scan files: {}", e)))?;
+        let scan_failures = report.failures;
+        let mut files = report.entries;
 
         // 2. Sort files deterministically by path
         files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -372,6 +382,7 @@ impl FileIndexer {
             sorted_files: files,
             file_list_hash,
             checkpoint: existing_checkpoint,
+            scan_failures,
         })
     }
 
@@ -417,11 +428,6 @@ impl FileIndexer {
         Ok(())
     }
 
-    /// Set a new operation_id on the checkpoint (for recovery reuse)
-    pub fn set_operation_id(&mut self, operation_id: String) {
-        self.checkpoint.operation_id = operation_id;
-    }
-
     /// Get the operation ID
     pub fn operation_id(&self) -> &str {
         &self.checkpoint.operation_id
@@ -440,6 +446,11 @@ impl FileIndexer {
     /// Get the file list hash
     pub fn file_list_hash(&self) -> &str {
         &self.file_list_hash
+    }
+
+    /// Paths the scanner skipped with an error during this run's scan.
+    pub fn scan_failures(&self) -> &[ScanFailure] {
+        &self.scan_failures
     }
 }
 
@@ -582,6 +593,7 @@ mod tests {
                 last_heartbeat: None,
                 failed_at: None,
             },
+            scan_failures: Vec::new(),
         }
     }
 

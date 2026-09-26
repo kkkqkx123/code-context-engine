@@ -24,6 +24,13 @@ pub struct IndexResult {
     pub indexed_files: usize,
     /// Files that failed
     pub failed_files: usize,
+    /// Files that completed "successfully" but produced degraded content:
+    /// lossy decoding (U+FFFD) or zero entities and zero chunks.
+    pub degraded_files: usize,
+    /// Files with deterministic failures that were skipped without retry
+    /// (unsupported language, drifted or undecodable content). Separate from
+    /// `failed_files`, which only counts transient failures kept for resume.
+    pub skipped_permanent: usize,
     /// Total entities extracted
     pub total_entities: usize,
     /// Total relations extracted
@@ -32,6 +39,10 @@ pub struct IndexResult {
     pub total_vectors: usize,
     /// Total tokens used for embedding
     pub total_tokens: u64,
+    /// Whether the vector store circuit breaker opened during this run,
+    /// meaning vector writes were rejected by an outage rather than by
+    /// per-file content failures.
+    pub circuit_open: bool,
     /// Execution outcome (Success or Incomplete)
     pub outcome: IndexExecutionOutcome,
     /// Elapsed time in milliseconds
@@ -44,10 +55,13 @@ impl Default for IndexResult {
             total_files: 0,
             indexed_files: 0,
             failed_files: 0,
+            degraded_files: 0,
+            skipped_permanent: 0,
             total_entities: 0,
             total_relations: 0,
             total_vectors: 0,
             total_tokens: 0,
+            circuit_open: false,
             outcome: IndexExecutionOutcome::Success,
             elapsed_ms: 0,
         }
@@ -83,15 +97,21 @@ impl IndexResult {
 
     /// Format summary for logging
     pub fn format_summary(&self) -> String {
-        format!(
-            "Indexed {}/{} files, {} entities, {} relations, {} vectors in {}ms",
+        let mut summary = format!(
+            "Indexed {}/{} files ({} degraded, {} permanently skipped), {} entities, {} relations, {} vectors in {}ms",
             self.indexed_files,
             self.total_files,
+            self.degraded_files,
+            self.skipped_permanent,
             self.total_entities,
             self.total_relations,
             self.total_vectors,
             self.elapsed_ms
-        )
+        );
+        if self.circuit_open {
+            summary.push_str(" (vector-store circuit breaker open)");
+        }
+        summary
     }
 }
 

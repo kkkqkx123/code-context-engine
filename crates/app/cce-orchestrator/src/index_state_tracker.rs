@@ -18,7 +18,7 @@ use cce_storage_sqlite::SqliteClient;
 use crate::hot_update::FileChangeType;
 use crate::index_state::{
     Checkpoint, FileUpdateState, IndexOperationType, IndexPhase, IndexStateReport, ModuleType,
-    ModuleUpdateState, StateTrackerError,
+    ModuleUpdateState, StateTrackerError, TrackerFailure,
 };
 
 /// Update state tracker statistics
@@ -58,9 +58,24 @@ impl UpdateStateTracker {
     }
 
     /// Attach the checkpoint database used for the durable state projection.
-    pub fn set_database(&self, database: Arc<SqliteClient>) {
-        if let Ok(mut value) = self.database.try_write() {
-            *value = Some(database);
+    ///
+    /// Binding is required for dead-letter and truncate state to survive a
+    /// restart; a failure to acquire the write lock is reported so the caller
+    /// can decide whether running with an in-memory-only projection is
+    /// acceptable.
+    pub fn set_database(&self, database: Arc<SqliteClient>) -> Result<(), StateTrackerError> {
+        match self.database.try_write() {
+            Ok(mut value) => {
+                *value = Some(database);
+                Ok(())
+            }
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    "Failed to bind durable database to index state tracker"
+                );
+                Err(StateTrackerError::DatabaseBindBusy)
+            }
         }
     }
 
@@ -227,18 +242,27 @@ impl UpdateStateTracker {
         root_dir: String,
     ) -> String {
         let operation_id = format!("full_{}", chrono::Utc::now().timestamp_millis());
-        self.start_full_index_for_operation(operation_id, total_files, batch_size, root_dir)
-            .await
+        self.start_full_index_for_operation(
+            operation_id.clone(),
+            total_files,
+            batch_size,
+            root_dir,
+        )
+        .await;
+        operation_id
     }
 
     /// Start a full index using the operation id persisted by CheckpointManager.
+    ///
+    /// The tracker adopts the caller-supplied id verbatim as the projection
+    /// key; there is nothing to hand back.
     pub async fn start_full_index_for_operation(
         &self,
         operation_id: String,
         total_files: usize,
         batch_size: usize,
         root_dir: String,
-    ) -> String {
+    ) {
         // Clear existing states
         {
             let mut states = self.states.write().await;
@@ -263,8 +287,6 @@ impl UpdateStateTracker {
             root_dir = %root_dir,
             "Started full index operation"
         );
-
-        operation_id
     }
 
     /// Create states for a batch of files in full index
@@ -409,19 +431,24 @@ impl UpdateStateTracker {
         }
     }
 
-    /// Mark a module as failed (triggers retry logic)
+    /// Mark a module as failed with its classified failure
+    ///
+    /// Retryable failures enter the exponential-backoff retry schedule and
+    /// only reach the dead letter queue after the retry budget is exhausted;
+    /// a permanent failure dead-letters immediately.
     pub async fn mark_failed(
         &self,
         file_path: &Path,
         module: ModuleType,
-        error: String,
+        failure: TrackerFailure,
     ) -> Result<(), StateTrackerError> {
         let path_str = file_path.to_string_lossy().to_string();
         let mut states = self.states.write().await;
 
         if let Some(state) = states.get_mut(&path_str) {
             let prev_retry_count = state.get_module_state(module).retry_count;
-            state.mark_module_failed(module, error.clone());
+            let message = failure.message.clone();
+            state.mark_module_failed(module, failure);
             let new_state = state.get_module_state(module).state;
 
             match new_state {
@@ -430,7 +457,7 @@ impl UpdateStateTracker {
                         file = %path_str,
                         module = %module,
                         retry_count = prev_retry_count + 1,
-                        error = %error,
+                        error = %message,
                         "Module entered dead letter queue"
                     );
                 }
@@ -441,7 +468,7 @@ impl UpdateStateTracker {
                         module = %module,
                         retry_count = prev_retry_count + 1,
                         wait_secs = wait_secs,
-                        error = %error,
+                        error = %message,
                         "Module failed, will retry"
                     );
                 }
@@ -588,6 +615,9 @@ impl UpdateStateTracker {
     }
 
     /// Get files that can be resumed (have checkpoints and not complete)
+    ///
+    /// A dead letter on any module makes the file non-resumable; every module
+    /// state must be inspected because hash-map iteration order is random.
     pub async fn get_resumable_files(&self) -> Vec<FileUpdateState> {
         let states = self.states.read().await;
 
@@ -596,10 +626,10 @@ impl UpdateStateTracker {
             .filter(|s| {
                 s.checkpoint.is_some()
                     && !s.all_success()
-                    && !matches!(
-                        s.module_states.values().next().map(|r| r.state),
-                        Some(ModuleUpdateState::DeadLetter)
-                    )
+                    && !s
+                        .module_states
+                        .values()
+                        .any(|r| matches!(r.state, ModuleUpdateState::DeadLetter))
             })
             .cloned()
             .collect()
@@ -783,6 +813,7 @@ impl UpdateStateTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::index_state::TOKEN_LIMIT_ERROR_CODE;
     use crate::operation::CheckpointManager;
     use crate::operation::checkpoint::CreateCheckpointParams;
     use cce_storage_sqlite::SqliteClient;
@@ -843,7 +874,11 @@ mod tests {
 
         // Mark failure
         tracker
-            .mark_failed(path, ModuleType::Summary, "API error".to_string())
+            .mark_failed(
+                path,
+                ModuleType::Summary,
+                TrackerFailure::transient("API error"),
+            )
             .await
             .unwrap();
 
@@ -943,7 +978,9 @@ mod tests {
             .expect("checkpoint should be created");
 
         let tracker = UpdateStateTracker::new(1);
-        tracker.set_database(database.clone());
+        tracker
+            .set_database(database.clone())
+            .expect("database binding");
         tracker
             .start_full_index_for_operation(
                 "full-operation".to_string(),
@@ -967,7 +1004,7 @@ mod tests {
             .expect("state should update");
 
         let restored = UpdateStateTracker::new(1);
-        restored.set_database(database);
+        restored.set_database(database).expect("database binding");
         restored.restore_operation("full-operation").await;
         let state = restored
             .get_state(Path::new("src/lib.rs"))
@@ -994,7 +1031,7 @@ mod tests {
                 .mark_failed(
                     Path::new("file1.rs"),
                     ModuleType::Summary,
-                    "error".to_string(),
+                    TrackerFailure::transient("error"),
                 )
                 .await
                 .unwrap();
@@ -1013,12 +1050,46 @@ mod tests {
         tracker.create_update(path, FileChangeType::Modified).await;
         assert!(tracker.get_truncate_retry_candidates().await.is_empty());
 
-        // Drive Embedding into dead letter -> becomes a candidate
+        // A permanent token-limit dead letter -> becomes a candidate at once
+        tracker
+            .mark_failed(
+                path,
+                ModuleType::Embedding,
+                TrackerFailure {
+                    message: "Token limit exceeded: 9000 > 8192".to_string(),
+                    code: Some(TOKEN_LIMIT_ERROR_CODE),
+                    retryable: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            tracker
+                .get_truncate_retry_candidates()
+                .await
+                .iter()
+                .map(|s| s.file_path.clone())
+                .collect::<Vec<_>>(),
+            vec!["file1.rs".to_string()]
+        );
+
+        // A token-limit dead letter on a non-Embedding module -> never a candidate
+        tracker
+            .create_update(Path::new("file2.rs"), FileChangeType::Modified)
+            .await;
         for _ in 0..3 {
             tracker
-                .mark_failed(path, ModuleType::Embedding, "400 too long".to_string())
+                .mark_failed(
+                    Path::new("file2.rs"),
+                    ModuleType::Bm25,
+                    TrackerFailure {
+                        message: "Token limit exceeded: 9000 > 8192".to_string(),
+                        code: Some(TOKEN_LIMIT_ERROR_CODE),
+                        retryable: false,
+                    },
+                )
                 .await
-                .unwrap();
+                .expect("state exists");
         }
         assert_eq!(
             tracker
@@ -1030,13 +1101,17 @@ mod tests {
             vec!["file1.rs".to_string()]
         );
 
-        // Drive a non-Embedding dead letter -> never a candidate
+        // A non-token-limit dead letter is never a truncate candidate
         tracker
-            .create_update(Path::new("file2.rs"), FileChangeType::Modified)
+            .create_update(Path::new("file3.rs"), FileChangeType::Modified)
             .await;
         for _ in 0..3 {
             tracker
-                .mark_failed(Path::new("file2.rs"), ModuleType::Bm25, "err".to_string())
+                .mark_failed(
+                    Path::new("file3.rs"),
+                    ModuleType::Embedding,
+                    TrackerFailure::transient("connection reset"),
+                )
                 .await
                 .expect("state exists");
         }

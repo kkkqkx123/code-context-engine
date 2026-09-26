@@ -451,7 +451,7 @@ impl IndexOrchestrator {
                         .mark_failed(
                             &std::path::PathBuf::from(&file_path),
                             ModuleType::Export,
-                            e.to_string(),
+                            crate::index_state::TrackerFailure::transient(e.to_string()),
                         )
                         .await
                         .unwrap_or_else(|e| {
@@ -522,17 +522,29 @@ impl IndexOrchestrator {
                 .storage
                 .activate_project_manifest(&ctx.operation_id, relation_epoch)
             {
-                let _ = self.storage.fail_project_manifest(
+                if let Err(manifest_error) = self.storage.fail_project_manifest(
                     &ctx.operation_id,
                     &format!("manifest activation failed: {error}"),
-                );
+                ) {
+                    tracing::error!(
+                        operation_id = %ctx.operation_id,
+                        error = %manifest_error,
+                        "Failed to mark project manifest failed after activation error"
+                    );
+                }
                 return Err(error);
             }
             if let Err(error) = self.storage.publish_file_hashes(ctx.file_indexer.files()) {
-                let _ = self.storage.fail_project_manifest(
+                if let Err(manifest_error) = self.storage.fail_project_manifest(
                     &ctx.operation_id,
                     &format!("file hash publication failed: {error}"),
-                );
+                ) {
+                    tracing::error!(
+                        operation_id = %ctx.operation_id,
+                        error = %manifest_error,
+                        "Failed to mark project manifest failed after file hash publication error"
+                    );
+                }
                 return Err(error);
             }
             if let Err(error) = self.storage.gc_stale_generations().await {

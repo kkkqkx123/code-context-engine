@@ -77,7 +77,7 @@ impl StorageCoordinator {
                 };
 
             let documents = build_bm25_documents(batch, self.project_id, self.epoch());
-            let entity_mappings = self.build_bm25_entity_mappings(batch, &documents);
+            let entity_mappings = self.build_bm25_entity_mappings(batch, &documents)?;
 
             if !documents.is_empty() {
                 let mut client = bm25.lock().await;
@@ -129,7 +129,7 @@ impl StorageCoordinator {
         &self,
         chunks: &[&ChunkedResult],
         documents: &[Bm25Document],
-    ) -> Vec<EntityDetailMapping> {
+    ) -> Result<Vec<EntityDetailMapping>, OrchestratorError> {
         // Build a map from chunk_id to document_id to avoid zip-order alignment issues.
         // This is necessary because build_bm25_documents may filter out chunks with
         // empty text, causing document count to differ from chunk count.
@@ -138,7 +138,7 @@ impl StorageCoordinator {
             .map(|d| (d.fields.get("chunk_id").map_or("", |s| s.as_str()), d))
             .collect();
 
-        let source_entity_ids = self.load_source_entity_ids().unwrap_or_default();
+        let source_entity_ids = self.load_source_entity_ids()?;
 
         // Use a map to aggregate multiple BM25 docs per entity
         let mut entity_detail_map: std::collections::HashMap<i64, EntityDetailMapping> =
@@ -155,7 +155,20 @@ impl StorageCoordinator {
                         .get(&(chunk.metadata.file_path.clone(), entity_id.0 as i64))
                         .copied()
                     else {
-                        continue;
+                        // Every stored entity carries `__source_entity_id`, so a
+                        // miss means the entity record is absent from this epoch:
+                        // silently dropping the mapping would permanently sever
+                        // the entity -> BM25 document link.
+                        if let Some(metrics) = &self.quality_metrics {
+                            metrics.record_entity_mapping_miss();
+                        }
+                        return Err(OrchestratorError::index(
+                            "entity_mapping",
+                            format!(
+                                "no epoch-scoped entity record for {} (source entity {})",
+                                chunk.metadata.file_path, entity_id.0
+                            ),
+                        ));
                     };
                     db_id
                 } else {
@@ -176,6 +189,6 @@ impl StorageCoordinator {
             }
         }
 
-        entity_detail_map.into_values().collect()
+        Ok(entity_detail_map.into_values().collect())
     }
 }

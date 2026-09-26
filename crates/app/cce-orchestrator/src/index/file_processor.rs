@@ -20,6 +20,7 @@ use cce_parser::summary::FileCategory;
 use cce_plugin::PluginRegistry;
 use cce_scanner::FileEntry;
 use cce_types::error::ParseError;
+use cce_types::error::common::IoError;
 use cce_types::{ContentRoute, LanguageInfo, OutputMode, ParsedFile};
 
 use super::super::error::OrchestratorError;
@@ -29,24 +30,13 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::path::Path;
 
-/// Partial-hash window the scanner applies to large files.
-///
-/// Must stay in sync with `FileProcessorConfig::partial_hash_size` in
-/// `cce_infrastructure/src/scanner/file_processor.rs`.
-const SCAN_PARTIAL_HASH_SIZE: usize = 1024 * 1024;
-
 /// Check raw file bytes against the scan-phase content hash.
 ///
-/// The scanner hashes raw bytes — full content up to its large-file
-/// threshold, only the first [`SCAN_PARTIAL_HASH_SIZE`] bytes above it. The
-/// processor cannot see the scanner's threshold configuration, so both
-/// domains are tried; either match proves the bytes still correspond to the
-/// scanned snapshot. The partial check degrades gracefully: for files at or
-/// below the window it equals the full-content hash.
+/// The scanner hashes the raw bytes of the full file, so the full-content
+/// hash is the only domain: a match proves the bytes still correspond to the
+/// scanned snapshot.
 fn raw_bytes_match_scan_hash(bytes: &[u8], expected: &str) -> bool {
     cce_utils::hash::calculate_hash(bytes) == expected
-        || cce_utils::hash::calculate_hash_with_limit(bytes, Some(SCAN_PARTIAL_HASH_SIZE))
-            == expected
 }
 
 /// Read a file, verify its raw bytes against the scan-phase content hash,
@@ -61,19 +51,20 @@ fn raw_bytes_match_scan_hash(bytes: &[u8], expected: &str) -> bool {
 pub(crate) async fn read_verified_utf8(
     path: &Path,
     expected_hash: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, ParseError> {
     let bytes = tokio::fs::read(path)
         .await
-        .map_err(|e| format!("Failed to read file '{}': {}", path.display(), e))?;
+        .map_err(|e| ParseError::Io(IoError::from(e)))?;
     if let Some(expected) = expected_hash {
         if !raw_bytes_match_scan_hash(&bytes, expected) {
-            return Err(format!(
+            return Err(ParseError::content_changed(format!(
                 "content of '{}' changed between scan and processing (scan-time hash {expected} no longer matches); a re-scan is required",
                 path.display()
-            ));
+            )));
         }
     }
     cce_utils::file::decode_bytes_to_utf8(&bytes, path)
+        .map_err(|e| ParseError::encoding(format!("{}: {e}", path.display())))
 }
 
 /// Stable cache-key label for an output mode.
@@ -285,7 +276,10 @@ impl FileProcessor {
             Ok(Some(chunks))
         } else {
             let parsed = {
-                let mut coordinator = self.coordinator.lock().unwrap();
+                let mut coordinator = self
+                    .coordinator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 coordinator.parse_with_language_info(relative_path, &content, &language_info)
             }?;
             let chunks = self.process_parsed_file(&parsed).await?;
@@ -500,14 +494,14 @@ impl FileProcessor {
         // recorded during scanning (encoding detection happens after the check)
         let content = read_verified_utf8(&file_entry.path, file_entry.content_hash.as_deref())
             .await
-            .map_err(|e| OrchestratorError::index("read file", e.to_string()))?;
+            .map_err(OrchestratorError::Parse)?;
 
         // Use language info from FileEntry (already detected during scanning)
         let language_info = file_entry.language_info.as_ref().ok_or_else(|| {
-            OrchestratorError::index(
-                "get language info",
-                format!("No language info for file: {}", file_entry.path.display()),
-            )
+            OrchestratorError::Parse(ParseError::unsupported_language(format!(
+                "no language info for file: {}",
+                file_entry.path.display()
+            )))
         })?;
 
         // Route to different processing paths based on the shared routing
@@ -538,14 +532,14 @@ impl FileProcessor {
         // recorded during scanning (encoding detection happens after the check)
         let content = read_verified_utf8(&file_entry.path, file_entry.content_hash.as_deref())
             .await
-            .map_err(|e| OrchestratorError::index("read file", e.to_string()))?;
+            .map_err(OrchestratorError::Parse)?;
 
         // Use language info from FileEntry (already detected during scanning)
         let language_info = file_entry.language_info.as_ref().ok_or_else(|| {
-            OrchestratorError::index(
-                "get language info",
-                format!("No language info for file: {}", file_entry.path.display()),
-            )
+            OrchestratorError::Parse(ParseError::unsupported_language(format!(
+                "no language info for file: {}",
+                file_entry.path.display()
+            )))
         })?;
 
         // Route to different processing paths based on the shared routing
@@ -581,7 +575,9 @@ impl FileProcessor {
                 .doc_pipeline
                 .process(content, file_path, chunking_config, output_mode),
         };
-        result.map_err(|e| OrchestratorError::Parse(ParseError::ast_parsing(e.to_string())))
+        // The document pipeline already reports typed ParseError variants
+        // (Json/Yaml/Xml/... parsing); propagate instead of stringifying.
+        result.map_err(OrchestratorError::Parse)
     }
 
     /// Process a document-like file (documentation, config, plain text)
@@ -693,7 +689,10 @@ impl FileProcessor {
 
         // Step 1: Parse file with pre-detected language info
         let parsed = {
-            let mut coordinator = self.coordinator.lock().unwrap();
+            let mut coordinator = self
+                .coordinator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             coordinator.parse_with_language_info(
                 &file_entry.relative_path.to_string_lossy(),
                 content,
@@ -826,7 +825,10 @@ impl FileProcessor {
 
         // Step 1: Parse file with pre-detected language info
         let parsed = {
-            let mut coordinator = self.coordinator.lock().unwrap();
+            let mut coordinator = self
+                .coordinator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             coordinator.parse_with_language_info(
                 &file_entry.relative_path.to_string_lossy(),
                 content,
@@ -1278,17 +1280,17 @@ mod tests {
         assert!(raw_bytes_match_scan_hash(&bytes, &full));
     }
 
-    /// Large files are scanned under the partial-hash domain; verification
-    /// must accept a prefix-window match even though the full hash differs.
+    /// Only the full-content hash verifies: a stale prefix-window hash (the
+    /// retired partial-hash domain) must be rejected as drift.
     #[test]
-    fn raw_bytes_match_scan_hash_partial_domain() {
-        let big = vec![b'a'; SCAN_PARTIAL_HASH_SIZE + 128];
-        let prefix = cce_utils::hash::calculate_hash_with_limit(&big, Some(SCAN_PARTIAL_HASH_SIZE));
-        assert!(raw_bytes_match_scan_hash(&big, &prefix));
-
-        let unrelated = vec![b'b'; SCAN_PARTIAL_HASH_SIZE + 128];
-        let other_full = cce_utils::hash::calculate_hash(&unrelated);
-        assert!(!raw_bytes_match_scan_hash(&big, &other_full));
+    fn raw_bytes_match_scan_hash_rejects_prefix_hash() {
+        let big = vec![b'a'; 1024 * 1024 + 128];
+        let prefix = cce_utils::hash::calculate_hash_with_limit(&big, Some(1024 * 1024));
+        assert!(!raw_bytes_match_scan_hash(&big, &prefix));
+        assert!(raw_bytes_match_scan_hash(
+            &big,
+            &cce_utils::hash::calculate_hash(&big)
+        ));
     }
 
     /// Verified read accepts content whose raw bytes still hash to the
@@ -1319,7 +1321,12 @@ mod tests {
         let error = read_verified_utf8(&path, Some(&stale))
             .await
             .expect_err("drifted content must fail verification");
-        assert!(error.contains("changed between scan and processing"));
+        assert!(matches!(error, ParseError::ContentChanged(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("changed between scan and processing")
+        );
     }
 
     /// Without a scan baseline the check is skipped (event-driven reads).

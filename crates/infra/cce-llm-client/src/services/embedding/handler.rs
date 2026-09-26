@@ -7,6 +7,7 @@ use crate::services::embedding::response_parser::StandardEmbeddingData;
 use crate::services::embedding::types::EmbeddingResult;
 use crate::services::request_builder::RequestBuilder;
 use cce_config::modules::ServiceType;
+use cce_types::error::common::ErrorClassify;
 use cce_utils::token_estimation::estimate_tokens;
 use std::sync::Arc;
 
@@ -38,11 +39,28 @@ impl EmbeddingRequestHandler {
         let mut total_prompt_tokens = 0u64;
         let mut total_tokens = 0u64;
 
-        for batch in batches {
-            let result = self.embed_batch(&batch, config).await?;
+        let mut idx = 0;
+        while idx < batches.len() {
+            let result = match self.embed_batch(&batches[idx], config).await {
+                Ok(result) => result,
+                Err(error) if ErrorClassify::is_transient(&error) => {
+                    // A single failed sub-batch must not discard the already
+                    // embedded ones; replay only this sub-batch once and let a
+                    // second failure propagate.
+                    tracing::warn!(
+                        sub_batch = idx,
+                        sub_batch_count = batches.len(),
+                        error = %error,
+                        "Embedding sub-batch failed with transient error; replaying once"
+                    );
+                    self.embed_batch(&batches[idx], config).await?
+                }
+                Err(error) => return Err(error),
+            };
             all_embeddings.extend(result.embeddings);
             total_prompt_tokens += result.prompt_tokens;
             total_tokens += result.total_tokens;
+            idx += 1;
         }
 
         Ok(EmbeddingResult {

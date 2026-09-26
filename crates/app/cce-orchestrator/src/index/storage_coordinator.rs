@@ -28,6 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use crate::CheckpointManager;
 use cce_llm::Embedder;
+use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
 use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::ProjectIndexManifestRepository;
@@ -76,6 +77,8 @@ pub struct StorageCoordinator {
     candidate_relation_epoch: Arc<AtomicI64>,
     /// Files whose candidate generation has already been cleared for this operation.
     prepared_files: Arc<StdMutex<HashSet<String>>>,
+    /// Index-quality counters for silent-loss surfaces that do not fail the batch.
+    quality_metrics: Option<Arc<IndexQualityMetrics>>,
 }
 
 impl StorageCoordinator {
@@ -103,7 +106,14 @@ impl StorageCoordinator {
             candidate_operation: Arc::new(StdMutex::new(None)),
             candidate_relation_epoch: Arc::new(AtomicI64::new(0)),
             prepared_files: Arc::new(StdMutex::new(HashSet::new())),
+            quality_metrics: None,
         })
+    }
+
+    /// Set index-quality metrics
+    pub fn with_quality_metrics(mut self, metrics: Arc<IndexQualityMetrics>) -> Self {
+        self.quality_metrics = Some(metrics);
+        self
     }
 
     /// Set Qdrant client

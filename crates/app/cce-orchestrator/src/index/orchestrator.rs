@@ -50,7 +50,7 @@ use cce_metrics::{
     FileProcessingMetrics, MetricsRegistry, ParserMetrics, PipelineStage, PipelineStageMetrics,
     RelationMetrics, SummaryMetrics,
 };
-use cce_metrics::{ScannerMetrics, SearchMetrics};
+use cce_metrics::{IndexQualityMetrics, ScannerMetrics, SearchMetrics};
 use cce_parser::summary::{
     FileSummary, ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator,
 };
@@ -107,6 +107,8 @@ pub struct IndexOrchestrator {
     scanner_metrics: Option<Arc<ScannerMetrics>>,
     /// Search/index metrics collector
     search_metrics: Option<Arc<SearchMetrics>>,
+    /// Index-quality counters for silent-loss surfaces that do not fail the batch
+    quality_metrics: Option<Arc<IndexQualityMetrics>>,
     /// Checkpoint manager for operation progress persistence
     checkpoint_manager: Option<Arc<CheckpointManager>>,
     /// Publisher for final, complete relationship snapshots.
@@ -150,6 +152,7 @@ impl IndexOrchestrator {
             metrics_registry: None,
             scanner_metrics: None,
             search_metrics: None,
+            quality_metrics: None,
             checkpoint_manager: None,
             relation_publisher: None,
             cached_build_config: None,
@@ -201,8 +204,18 @@ impl IndexOrchestrator {
 
     /// Set checkpoint manager for operation progress persistence
     pub fn with_checkpoint_manager(mut self, checkpoint_manager: Arc<CheckpointManager>) -> Self {
-        self.state_tracker
-            .set_database(checkpoint_manager.database());
+        if let Err(error) = self
+            .state_tracker
+            .set_database(checkpoint_manager.database())
+        {
+            // The index run proceeds, but file-level module state (dead
+            // letters, truncate markers) stays in memory only and will not
+            // survive a restart.
+            tracing::error!(
+                %error,
+                "Index state tracker runs without durable projection"
+            );
+        }
         self.checkpoint_manager = Some(checkpoint_manager);
         self
     }
@@ -372,6 +385,11 @@ impl IndexOrchestrator {
         // Inject search metrics for index size and document counters
         self.search_metrics = Some(SearchMetrics::new(&registry, self.project_id));
 
+        // Inject index-quality counters, shared with the storage coordinator
+        let quality_metrics = IndexQualityMetrics::new(&registry, self.project_id);
+        self.storage = self.storage.with_quality_metrics(quality_metrics.clone());
+        self.quality_metrics = Some(quality_metrics);
+
         // Inject file-level end-to-end processing metrics
         let file_processing_metrics = FileProcessingMetrics::new(&registry, self.project_id);
         self.file_processor = self
@@ -439,8 +457,11 @@ struct FullIndexContext {
     errors: Vec<String>,
     total_indexed: usize,
     total_failed: usize,
+    total_degraded: usize,
+    total_skipped_permanent: usize,
     total_entities: usize,
     total_vectors: usize,
+    circuit_open: bool,
     all_batches_completed: bool,
     published_relation_epoch: Option<i64>,
 }
@@ -501,10 +522,16 @@ impl IndexOrchestrator {
         // and chunks reference them. The change-detector hashes remain
         // unpublished until the project manifest is activated.
         if let Err(error) = self.storage.ensure_file_records(file_indexer.files()) {
-            let _ = self.storage.fail_project_manifest(
+            if let Err(manifest_error) = self.storage.fail_project_manifest(
                 &operation_id,
                 &format!("failed to publish file hashes: {error}"),
-            );
+            ) {
+                tracing::error!(
+                    operation_id = %operation_id,
+                    error = %manifest_error,
+                    "Failed to mark project manifest failed after file record publication error"
+                );
+            }
             return Err(error);
         }
 
@@ -581,8 +608,7 @@ impl IndexOrchestrator {
             .await?;
         }
 
-        let _operation_id = self
-            .state_tracker
+        self.state_tracker
             .start_full_index_for_operation(
                 operation_id.clone(),
                 total_files,
@@ -610,11 +636,30 @@ impl IndexOrchestrator {
             errors,
             total_indexed: 0,
             total_failed: 0,
+            total_degraded: 0,
+            total_skipped_permanent: 0,
             total_entities: 0,
             total_vectors: 0,
+            circuit_open: false,
             all_batches_completed: true,
             published_relation_epoch: None,
         };
+
+        // Paths the scanner skipped with errors (unreadable directories,
+        // unprocessable files) are silent data loss: surface every one of
+        // them in the index result instead of only logging a warning.
+        for failure in ctx.file_indexer.scan_failures() {
+            tracing::warn!(
+                path = %failure.path.display(),
+                reason = %failure.reason,
+                "Scanner skipped a path with an error"
+            );
+            ctx.errors.push(format!(
+                "Scan skipped {}: {}",
+                failure.path.display(),
+                failure.reason
+            ));
+        }
 
         // On resume, accumulate the chunks of batches completed in the previous
         // run so their documents are exported once at the end (they were never
@@ -667,7 +712,11 @@ impl IndexOrchestrator {
         }
 
         // Create result with accumulated values
-        let outcome = if ctx.all_batches_completed {
+        // Any collected error (scanner skips, file failures, storage faults,
+        // finalize issues) makes the run Incomplete: `errors` is only exposed
+        // through that variant, so a Success outcome must mean the error list
+        // is genuinely empty.
+        let outcome = if ctx.all_batches_completed && ctx.errors.is_empty() {
             IndexExecutionOutcome::Success
         } else {
             IndexExecutionOutcome::Incomplete {
@@ -678,10 +727,13 @@ impl IndexOrchestrator {
             total_files,
             indexed_files: ctx.total_indexed,
             failed_files: ctx.total_failed,
+            degraded_files: ctx.total_degraded,
+            skipped_permanent: ctx.total_skipped_permanent,
             total_entities: ctx.total_entities,
             total_relations,
             total_vectors: ctx.total_vectors,
             total_tokens: 0,
+            circuit_open: ctx.circuit_open,
             outcome,
             elapsed_ms: 0,
         };

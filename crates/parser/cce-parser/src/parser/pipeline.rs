@@ -59,18 +59,26 @@ fn language_detection(
 fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Result<(), ParseError> {
     let language = *context
         .language()
-        .ok_or_else(|| ParseError::ast_parsing("Language not detected".to_string()))?;
+        .ok_or_else(|| ParseError::unsupported_language("language not detected"))?;
 
     if !language.is_supported_for_ast() {
-        return Err(ParseError::ast_parsing(format!(
-            "Language not supported for AST parsing: {}",
-            language
-        )));
+        return Err(ParseError::unsupported_language(language.to_string()));
     }
 
     let (tree, _) = components
         .ast_parser
         .parse_with_tree(&context.source, &language)?;
+
+    // Syntax errors produce a partial tree that is still consumed downstream;
+    // entities inside ERROR regions are silently lost, so surface the fact
+    // that this file's index result is degraded.
+    if tree.root_node().has_error() {
+        tracing::warn!(
+            file = %context.file_path,
+            language = %language,
+            "Parsed with syntax errors; extracted entities may be incomplete"
+        );
+    }
 
     context.tree = Some(tree);
     Ok(())

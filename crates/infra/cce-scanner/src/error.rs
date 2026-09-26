@@ -1,6 +1,6 @@
 //! Error types for scanner operations
 
-use cce_types::error::common::{IoError, NotFoundError};
+use cce_types::error::common::{ErrorClassify, IoError, NotFoundError};
 use thiserror::Error;
 
 /// Scanner error type
@@ -74,6 +74,30 @@ impl From<std::io::Error> for ScannerError {
     }
 }
 
+impl ErrorClassify for ScannerError {
+    fn is_retryable(&self) -> bool {
+        self.is_transient()
+    }
+
+    fn is_transient(&self) -> bool {
+        match self {
+            Self::Io(err) => err.is_transient(),
+            // Walker-level entry failures (races, transient read errors).
+            Self::Scan { .. } => true,
+            // Missing paths, bad arguments and permission denials are
+            // deterministic for the current scan snapshot.
+            Self::NotFound(_)
+            | Self::InvalidArgument { .. }
+            | Self::Path { .. }
+            | Self::PermissionDenied { .. } => false,
+        }
+    }
+
+    fn is_permanent(&self) -> bool {
+        !self.is_transient()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +129,23 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "test");
         let err = ScannerError::from(io_err);
         assert!(matches!(err, ScannerError::Io(_)));
+    }
+
+    #[test]
+    fn test_error_classification() {
+        use cce_types::error::common::ErrorClassify;
+
+        assert!(ScannerError::scan("/tmp/x", "entry read failed").is_transient());
+        assert!(
+            ScannerError::from(std::io::Error::new(std::io::ErrorKind::Interrupted, "x"))
+                .is_transient()
+        );
+        assert!(
+            ScannerError::from(std::io::Error::new(std::io::ErrorKind::NotFound, "x"))
+                .is_permanent()
+        );
+        assert!(ScannerError::path("/tmp/x", "bad path").is_permanent());
+        assert!(ScannerError::permission_denied("/tmp/x", "denied").is_permanent());
+        assert!(ScannerError::NotFound(NotFoundError::new("/tmp/x")).is_permanent(),);
     }
 }

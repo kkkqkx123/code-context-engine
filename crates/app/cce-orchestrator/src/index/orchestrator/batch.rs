@@ -5,7 +5,7 @@
 //! entities/vectors/BM25/summaries, and records progress. Processing a single
 //! batch concurrently with bounded concurrency lives in `process_batch_with_mode`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::CheckpointManager;
@@ -13,6 +13,7 @@ use crate::operation::checkpoint::{ParsedCheckpointPayload, decode_parsed_checkp
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_parser::document::DocSummaryExt;
 use cce_scanner::FileEntry;
+use cce_types::error::ParseError;
 use cce_types::{OutputMode, ParsedFile};
 
 use super::checkpoint::persist_parsed_checkpoint;
@@ -42,7 +43,6 @@ impl IndexOrchestrator {
         let root_dir = options.root_dir.to_string_lossy().to_string();
 
         for batch_idx in ctx.start_batch..ctx.total_batches {
-            let errors_before_batch = ctx.errors.len();
             let batch = match ctx.file_indexer.get_batch(batch_idx) {
                 Ok(b) => b,
                 Err(e) => {
@@ -100,10 +100,18 @@ impl IndexOrchestrator {
             // Process files in this batch concurrently with path-aware mode
             let recovered_parsed: HashMap<String, ParsedFile> =
                 if let Some(cm) = checkpoint_manager.as_ref() {
-                    let checkpoint_files = cm
-                        .get_batch_files(&operation_id, batch_idx as u32)
-                        .await
-                        .unwrap_or_default();
+                    let checkpoint_files =
+                        match cm.get_batch_files(&operation_id, batch_idx as u32).await {
+                            Ok(files) => files,
+                            Err(e) => {
+                                ctx.errors.push(format!(
+                                    "Failed to load checkpoint files for batch {}: {}",
+                                    batch_idx, e
+                                ));
+                                ctx.all_batches_completed = false;
+                                break;
+                            }
+                        };
                     checkpoint_files
                         .into_iter()
                         .filter_map(|record| {
@@ -139,8 +147,27 @@ impl IndexOrchestrator {
                 )
                 .await;
             ctx.errors.extend(batch_result.errors.iter().cloned());
+            ctx.total_skipped_permanent += batch_result.skipped_permanent.len();
+            // Baseline for batch-level (infrastructure) errors: per-file
+            // processing failures are merged above and must not abort the loop.
+            let errors_before_batch = ctx.errors.len();
+
+            // Per-file state projections must cover only the files that
+            // actually produced results; failed files stay at their initial
+            // state so a resume can retry them.
+            let succeeded: HashSet<&str> = batch_result
+                .parsed_files
+                .iter()
+                .map(|pf| pf.path.as_str())
+                .collect();
+            let success_paths: Vec<_> = batch_paths
+                .iter()
+                .filter(|p| succeeded.contains(p.to_string_lossy().as_ref()))
+                .cloned()
+                .collect();
             ctx.total_indexed += batch_result.success_count;
             ctx.total_failed += batch_result.failed_count;
+            ctx.total_degraded += batch_result.degraded_files;
             ctx.total_entities += batch_result.entity_count;
             if let Some(spool) = ctx.relation_spool.as_mut() {
                 let builder = self.relation_builder.as_ref().ok_or_else(|| {
@@ -169,7 +196,7 @@ impl IndexOrchestrator {
 
             // Mark batch as completing Parsing phase (after actual processing)
             self.state_tracker
-                .mark_phase_complete(&batch_paths, IndexPhase::Parsing)
+                .mark_phase_complete(&success_paths, IndexPhase::Parsing)
                 .await
                 .unwrap_or_else(|e| {
                     tracing::warn!(error = %e, "State tracking operation failed");
@@ -193,22 +220,25 @@ impl IndexOrchestrator {
             }
 
             if !batch_result.chunks.is_empty() {
-                // Mark all files as updating Embedding module
-                for path in &batch_paths {
-                    self.state_tracker
-                        .update_module_state(
-                            path,
-                            ModuleType::Embedding,
-                            ModuleUpdateState::Updating,
-                        )
-                        .await
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, "State tracking operation failed");
-                        });
-                }
+                let mut embedding_store_ok = true;
+                let mut bm25_store_ok = true;
 
                 if options.store_vectors {
-                    // Issue 4 fix: Only send Embedding-path chunks to vector store
+                    // Mark all files as updating Embedding module
+                    for path in &success_paths {
+                        self.state_tracker
+                            .update_module_state(
+                                path,
+                                ModuleType::Embedding,
+                                ModuleUpdateState::Updating,
+                            )
+                            .await
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(error = %e, "State tracking operation failed");
+                            });
+                    }
+
+                    // Only send Embedding-path chunks to vector store
                     let embedding_chunks: Vec<_> = batch_result
                         .chunks
                         .iter()
@@ -226,41 +256,104 @@ impl IndexOrchestrator {
                     {
                         Ok(stored) => {
                             ctx.total_vectors += stored;
+                            for path in &success_paths {
+                                self.state_tracker
+                                    .mark_success(path, ModuleType::Embedding)
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        tracing::warn!(error = %e, "State tracking operation failed");
+                                    });
+                            }
                         }
                         Err(e) => {
+                            embedding_store_ok = false;
+                            ctx.circuit_open |= e.is_circuit_open();
                             tracing::error!(error = %e, "Failed to store vectors for batch {}", batch_num);
                             ctx.errors.push(format!(
                                 "Vector storage failed for batch {}: {}",
                                 batch_num, e
                             ));
+                            // Feed the shared retry/dead-letter machinery the
+                            // same way hot updates do, with the failure's own
+                            // classification.
+                            let failure = e.as_module_failure();
+                            for path in &success_paths {
+                                self.state_tracker
+                                    .mark_failed(path, ModuleType::Embedding, failure.clone())
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        tracing::warn!(error = %e, "State tracking operation failed");
+                                    });
+                            }
                         }
                     }
                 }
 
                 if options.store_bm25 {
-                    // Issue 4 fix: Only send BM25-path chunks to BM25 index
+                    // Mark all files as updating Bm25 module
+                    for path in &success_paths {
+                        self.state_tracker
+                            .update_module_state(
+                                path,
+                                ModuleType::Bm25,
+                                ModuleUpdateState::Updating,
+                            )
+                            .await
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(error = %e, "State tracking operation failed");
+                            });
+                    }
+
+                    // Only send BM25-path chunks to BM25 index
                     let bm25_chunks: Vec<_> = batch_result
                         .chunks
                         .iter()
                         .filter(|c| c.path == cce_parser::ast_to_nl::chunker::ChunkPath::Bm25)
                         .cloned()
                         .collect();
-                    if let Err(e) = self.storage.store_bm25(&bm25_chunks).await {
-                        tracing::error!(error = %e, "Failed to store BM25 for batch {}", batch_num);
-                        ctx.errors.push(format!(
-                            "BM25 storage failed for batch {}: {}",
-                            batch_num, e
-                        ));
+                    match self.storage.store_bm25(&bm25_chunks).await {
+                        Ok(()) => {
+                            for path in &success_paths {
+                                self.state_tracker
+                                    .mark_success(path, ModuleType::Bm25)
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        tracing::warn!(error = %e, "State tracking operation failed");
+                                    });
+                            }
+                        }
+                        Err(e) => {
+                            bm25_store_ok = false;
+                            tracing::error!(error = %e, "Failed to store BM25 for batch {}", batch_num);
+                            ctx.errors.push(format!(
+                                "BM25 storage failed for batch {}: {}",
+                                batch_num, e
+                            ));
+                            let failure = e.as_module_failure();
+                            for path in &success_paths {
+                                self.state_tracker
+                                    .mark_failed(path, ModuleType::Bm25, failure.clone())
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        tracing::warn!(error = %e, "State tracking operation failed");
+                                    });
+                            }
+                        }
                     }
                 }
 
-                // Issue 3 fix: Mark Embedding phase complete AFTER storing (fixed timing)
-                self.state_tracker
-                    .mark_phase_complete(&batch_paths, IndexPhase::Embedding)
-                    .await
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(error = %e, "State tracking operation failed");
-                    });
+                // The Embedding phase is only complete once every attempted
+                // store of the batch actually succeeded: marking it after a
+                // storage failure would let a resume trust a phase whose
+                // data was lost.
+                if embedding_store_ok && bm25_store_ok {
+                    self.state_tracker
+                        .mark_phase_complete(&success_paths, IndexPhase::Embedding)
+                        .await
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, "State tracking operation failed");
+                        });
+                }
 
                 // Checkpoint progress is now tracked by CheckpointManager
                 // after file processing completion
@@ -281,14 +374,14 @@ impl IndexOrchestrator {
             if options.store_summaries && !batch_result.parsed_files.is_empty() {
                 // Mark phase as SummaryGenerating
                 self.state_tracker
-                    .mark_phase_complete(&batch_paths, IndexPhase::SummaryGenerating)
+                    .mark_phase_complete(&success_paths, IndexPhase::SummaryGenerating)
                     .await
                     .unwrap_or_else(|e| {
                         tracing::warn!(error = %e, "State tracking operation failed");
                     });
 
                 // Mark all files as updating Summary module
-                for path in &batch_paths {
+                for path in &success_paths {
                     self.state_tracker
                         .update_module_state(path, ModuleType::Summary, ModuleUpdateState::Updating)
                         .await
@@ -353,7 +446,7 @@ impl IndexOrchestrator {
                 match self.storage.store_summaries(&summaries).await {
                     Ok(_) => {
                         // Mark Summary success
-                        for path in &batch_paths {
+                        for path in &success_paths {
                             self.state_tracker
                                 .mark_success(path, ModuleType::Summary)
                                 .await
@@ -369,9 +462,10 @@ impl IndexOrchestrator {
                             batch_num, e
                         ));
                         // Mark Summary failed
-                        for path in &batch_paths {
+                        let failure = e.as_module_failure();
+                        for path in &success_paths {
                             self.state_tracker
-                                .mark_failed(path, ModuleType::Summary, e.to_string())
+                                .mark_failed(path, ModuleType::Summary, failure.clone())
                                 .await
                                 .unwrap_or_else(|e| {
                                     tracing::warn!(error = %e, "State tracking operation failed");
@@ -441,19 +535,42 @@ impl IndexOrchestrator {
 
             // Mark phase as Completed
             self.state_tracker
-                .mark_phase_complete(&batch_paths, IndexPhase::Completed)
+                .mark_phase_complete(&success_paths, IndexPhase::Completed)
                 .await
                 .unwrap_or_else(|e| {
                     tracing::warn!(error = %e, "State tracking operation failed");
                 });
 
-            if batch_result.failed_count > 0 || ctx.errors.len() > errors_before_batch {
-                ctx.all_batches_completed = false;
-                tracing::warn!(
-                    batch = batch_num,
-                    "Batch failed; checkpoint remains at the previous completed boundary"
-                );
-                break;
+            match classify_batch_action(
+                ctx.errors.len() - errors_before_batch,
+                batch_result.failed_count,
+            ) {
+                BatchAction::Stop => {
+                    // Batch-level infrastructure failure (entity/vector/BM25/
+                    // summary storage): every remaining batch would pile up the
+                    // same error, so stop and stay resumable.
+                    ctx.all_batches_completed = false;
+                    tracing::warn!(
+                        batch = batch_num,
+                        "Batch failed; checkpoint remains at the previous completed boundary"
+                    );
+                    break;
+                }
+                BatchAction::Continue => {
+                    // File-level failures only affect their own files: later
+                    // batches still make progress. The batch boundary is not
+                    // advanced here, and failed files have no file-level
+                    // checkpoint record, so a resume re-enters this batch and
+                    // retries them.
+                    ctx.all_batches_completed = false;
+                    tracing::warn!(
+                        batch = batch_num,
+                        failed = batch_result.failed_count,
+                        "Files failed in batch; continuing remaining batches without advancing the checkpoint boundary"
+                    );
+                    continue;
+                }
+                BatchAction::Proceed => {}
             }
 
             // Persist batch checkpoint progress
@@ -521,6 +638,7 @@ impl IndexOrchestrator {
             let file_operation_id = operation_id.to_string();
             let file_progress = progress.clone();
             let file_semaphore = semaphore.clone();
+            let handle_path = path_str.clone();
 
             let handle = tokio::spawn(async move {
                 // The semaphore is never closed in this scope; acquisition can
@@ -531,7 +649,10 @@ impl IndexOrchestrator {
                     Err(_) => {
                         return Err((
                             path_str.clone(),
-                            "concurrency semaphore closed during batch processing".to_string(),
+                            OrchestratorError::index(
+                                "batch_concurrency",
+                                "concurrency semaphore closed during batch processing",
+                            ),
                         ));
                     }
                 };
@@ -539,12 +660,13 @@ impl IndexOrchestrator {
                 file_progress.set_current_file(&file_entry_clone.path);
 
                 let result = async {
+                    let mut content_lossy = false;
                     let process_result = if let Some(parsed) = recovered {
                         let content_route = cce_types::ContentRoute::detect_from_path(&path_str);
                         processor
                             .process_parsed_file_complete(&parsed, content_route, output_mode)
                             .await
-                            .map_err(|error| (path_str.clone(), error.to_string()))?
+                            .map_err(|error| (path_str.clone(), error))?
                     } else {
                         // Verified read: the raw bytes must still match the
                         // hash recorded during scanning, otherwise the file
@@ -554,13 +676,20 @@ impl IndexOrchestrator {
                             file_entry_clone.content_hash.as_deref(),
                         )
                         .await
-                        .map_err(|error| {
-                            (path_str.clone(), format!("Failed to read file: {error}"))
-                        })?;
-                        let language_info = file_entry_clone
-                            .language_info
-                            .as_ref()
-                            .ok_or_else(|| (path_str.clone(), "No language info".to_string()))?;
+                        .map_err(|error| (path_str.clone(), OrchestratorError::Parse(error)))?;
+                        // Non-strict decoding of a mis-detected encoding
+                        // yields U+FFFD replacement characters: the file
+                        // parses "fine" but the indexed text is lossy.
+                        content_lossy = content.contains('\u{FFFD}');
+                        let language_info =
+                            file_entry_clone.language_info.as_ref().ok_or_else(|| {
+                                (
+                                    path_str.clone(),
+                                    OrchestratorError::Parse(ParseError::unsupported_language(
+                                        format!("no language info for file: {path_str}"),
+                                    )),
+                                )
+                            })?;
 
                         if language_info.is_document_like() {
                             processor
@@ -570,7 +699,7 @@ impl IndexOrchestrator {
                                     output_mode,
                                 )
                                 .await
-                                .map_err(|error| (path_str.clone(), error.to_string()))?
+                                .map_err(|error| (path_str.clone(), error))?
                         } else {
                             processor
                                 .process_code_file_with_mode(
@@ -579,7 +708,7 @@ impl IndexOrchestrator {
                                     output_mode,
                                 )
                                 .await
-                                .map_err(|error| (path_str.clone(), error.to_string()))?
+                                .map_err(|error| (path_str.clone(), error))?
                         }
                     };
 
@@ -591,17 +720,17 @@ impl IndexOrchestrator {
                         &process_result.parsed_file,
                     )
                     .await
-                    .map_err(|error| (path_str.clone(), error.to_string()))?;
+                    .map_err(|error| (path_str.clone(), error))?;
 
-                    Ok(process_result)
+                    Ok((process_result, content_lossy))
                 }
                 .await;
 
                 match result {
-                    Ok(process_result) => {
+                    Ok(complete) => {
                         file_progress.increment_processed();
                         file_progress.clear_current_file();
-                        Ok(process_result)
+                        Ok(complete)
                     }
                     Err(e) => {
                         file_progress.increment_error();
@@ -610,22 +739,27 @@ impl IndexOrchestrator {
                     }
                 }
             });
-            join_handles.push(handle);
+            join_handles.push((handle_path, handle));
         }
 
         // Await all handles; the semaphore already bounds concurrent work.
         let mut completed_handles = Vec::with_capacity(join_handles.len());
-        for handle in join_handles {
+        for (path, handle) in join_handles {
             match handle.await {
                 Ok(result) => completed_handles.push(result),
-                Err(e) => completed_handles.push(Err(("unknown".to_string(), e.to_string()))),
+                // A JoinError means the task panicked or was cancelled: keep
+                // the file identity so the failure is attributable.
+                Err(e) => completed_handles.push(Err((
+                    path,
+                    OrchestratorError::index("file_task_join", e.to_string()),
+                ))),
             }
         }
 
         // Process completed results
         for result in completed_handles {
             match result {
-                Ok(process_result) => {
+                Ok((process_result, content_lossy)) => {
                     let pf = &process_result.parsed_file;
                     batch_result.entity_count += pf.entities.len();
                     batch_result.parsed_files.push(pf.clone());
@@ -636,15 +770,64 @@ impl IndexOrchestrator {
                     if let Some(doc_summary) = &process_result.doc_summary {
                         batch_result.doc_summaries.push(doc_summary.clone());
                     }
+                    let produced_chunks = !process_result.chunks.is_empty();
                     batch_result.chunks.extend(process_result.chunks);
                     batch_result.success_count += 1;
+                    // A file counts as degraded when its indexed text was
+                    // lossily decoded or it produced neither entities nor
+                    // chunks: the run "succeeded" but the content is missing
+                    // or corrupted, which must be visible in the result.
+                    if content_lossy {
+                        tracing::warn!(
+                            file = %pf.path,
+                            "Indexed content contains U+FFFD replacement characters (lossy encoding detection)"
+                        );
+                        batch_result.degraded_files += 1;
+                    } else if pf.entities.is_empty() && !produced_chunks {
+                        tracing::warn!(
+                            file = %pf.path,
+                            "File indexed successfully but produced zero entities and zero chunks"
+                        );
+                        if let Some(metrics) = &self.quality_metrics {
+                            metrics.record_empty_file();
+                        }
+                        batch_result.degraded_files += 1;
+                    }
                 }
                 Err((path_str, error)) => {
-                    batch_result
-                        .errors
-                        .push(format!("Failed to process {}: {}", path_str, error));
-                    batch_result.failed_files.push(path_str);
-                    batch_result.failed_count += 1;
+                    let failure = error.as_module_failure();
+                    // Mirror the file-level outcome into the shared state
+                    // tracker so full-index failures feed the same retry and
+                    // dead-letter reporting as hot updates: transient
+                    // failures stay retryable, permanent ones dead-letter
+                    // immediately with zero retries.
+                    let file_path = std::path::Path::new(&path_str);
+                    for module in ModuleType::all() {
+                        self.state_tracker
+                            .mark_failed(file_path, module, failure.clone())
+                            .await
+                            .unwrap_or_else(|e| {
+                                tracing::warn!(error = %e, "State tracking operation failed");
+                            });
+                    }
+                    if failure.retryable {
+                        batch_result
+                            .errors
+                            .push(format!("Failed to process {}: {}", path_str, error));
+                        batch_result.failed_files.push(path_str);
+                        batch_result.failed_count += 1;
+                    } else {
+                        // Deterministic failure (unsupported language, drifted
+                        // content, undecodable bytes): retrying it on every
+                        // resume would loop forever, so it is recorded as a
+                        // permanent skip instead of a retryable failure.
+                        tracing::warn!(
+                            file = %path_str,
+                            error = %error,
+                            "File failed permanently; skipped and not retried on resume"
+                        );
+                        batch_result.skipped_permanent.push(path_str);
+                    }
                 }
             }
         }
@@ -661,9 +844,69 @@ struct BatchResult {
     chunks: Vec<ChunkedResult>,
     /// Document summaries from document files
     doc_summaries: Vec<cce_parser::document::DocSummary>,
+    /// Files whose failure is transient and will be retried on resume.
     failed_files: Vec<String>,
     errors: Vec<String>,
     success_count: usize,
+    /// Count of transient file failures only; permanent failures are tracked
+    /// in `skipped_permanent` and never retried within the operation.
     failed_count: usize,
+    /// Files whose failure is deterministic (unsupported language, drifted or
+    /// undecodable content): the checkpoint boundary advances over them so a
+    /// resume does not retry them without a re-scan.
+    skipped_permanent: Vec<String>,
+    /// Successfully processed files whose indexed content is missing or
+    /// corrupted (lossy decode, or zero entities and zero chunks).
+    degraded_files: usize,
     entity_count: usize,
+}
+
+/// How the batch loop should react after finishing one batch.
+///
+/// Batch-level infrastructure errors (a nonzero `new_errors` pushed by entity/
+/// vector/BM25/summary storage) outrank file-level failures: every remaining
+/// batch would hit the same fault, so the loop stops and stays resumable.
+/// Transient file-level failures only affect their own files, so later batches
+/// keep going. Permanent file failures are short-circuited at collection time
+/// and do not appear here: advancing the boundary past them is intentional.
+#[derive(Debug, PartialEq, Eq)]
+enum BatchAction {
+    Stop,
+    Continue,
+    Proceed,
+}
+
+fn classify_batch_action(new_errors: usize, failed_count: usize) -> BatchAction {
+    if new_errors > 0 {
+        BatchAction::Stop
+    } else if failed_count > 0 {
+        BatchAction::Continue
+    } else {
+        BatchAction::Proceed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_level_error_stops_loop_even_with_file_failures() {
+        // A storage fault (new error) must break the whole run, not just skip
+        // the batch, regardless of how many individual files failed.
+        assert_eq!(classify_batch_action(1, 0), BatchAction::Stop);
+        assert_eq!(classify_batch_action(2, 5), BatchAction::Stop);
+    }
+
+    #[test]
+    fn file_failures_continue_without_stopping() {
+        // Bad files must not halt remaining batches: continue, don't stop.
+        assert_eq!(classify_batch_action(0, 1), BatchAction::Continue);
+        assert_eq!(classify_batch_action(0, 3), BatchAction::Continue);
+    }
+
+    #[test]
+    fn clean_batch_proceeds() {
+        assert_eq!(classify_batch_action(0, 0), BatchAction::Proceed);
+    }
 }

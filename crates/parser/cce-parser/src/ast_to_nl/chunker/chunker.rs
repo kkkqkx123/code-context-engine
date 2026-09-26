@@ -461,12 +461,27 @@ pub fn chunk_single_path(input: ChunkInput) -> Vec<ChunkedResult> {
     // A chunk text must carry real content: whitespace-only text would be
     // rejected by embedding providers with an opaque 400 and pollutes the
     // index. Callers gate on `trim().is_empty()`; this catches segments that
-    // are still blank after splitting (a splitter/converter bug).
-    debug_assert!(
-        segments.iter().all(|s| !s.text.trim().is_empty()),
-        "blank segment produced for path={path}, group={}",
-        group.group_id
-    );
+    // are still blank after splitting (a splitter/converter bug). The check
+    // is enforced in release builds too: blank segments must never reach
+    // storage, and dropping them is reported rather than asserted away.
+    let blank_count = segments.iter().filter(|s| s.text.trim().is_empty()).count();
+    let segments = if blank_count > 0 {
+        tracing::warn!(
+            path = ?path,
+            group = %group.group_id,
+            blank = blank_count,
+            "Dropping blank segments produced by splitting (splitter/converter bug)"
+        );
+        segments
+            .into_iter()
+            .filter(|s| !s.text.trim().is_empty())
+            .collect::<Vec<_>>()
+    } else {
+        segments
+    };
+    if segments.is_empty() {
+        return Vec::new();
+    }
 
     let fresh_tracker = GroupTracker::new();
     let tracker: &GroupTracker = header_mode.as_ref().map_or(&fresh_tracker, |h| h.tracker);

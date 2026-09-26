@@ -3,8 +3,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use cce_types::error::common::ErrorClassify;
+use cce_utils::transient_backoff;
 use tantivy::collector::DocSetCollector;
 use tantivy::query::AllQuery;
 use tantivy::schema::Value;
@@ -18,6 +20,15 @@ use crate::{
     delete_documents_by_file_path_and_project, delete_documents_by_file_path_project_epoch,
     delete_documents_by_project, delete_documents_by_project_epoch,
 };
+
+/// Total attempts (first try plus retries) for a transiently failing batch write.
+const BATCH_MAX_ATTEMPTS: u32 = 3;
+/// First retry delay; doubles with each subsequent attempt.
+const BATCH_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
+/// Upper bound on the total time one batch write may spend retrying.
+const BATCH_RETRY_DEADLINE: Duration = Duration::from_millis(500);
+/// Random jitter ratio added on top of each computed backoff.
+const BATCH_RETRY_JITTER_RATIO: f64 = 0.3;
 
 /// BM25 storage client
 pub struct Bm25Client {
@@ -171,18 +182,50 @@ impl Bm25Client {
 
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
 
-        let manager_guard = manager.read().await;
-        let schema = manager_guard.schema();
+        let start = Instant::now();
+        let mut attempt: u32 = 0;
+        loop {
+            attempt += 1;
+            let result = {
+                let manager_guard = manager.read().await;
+                let schema = manager_guard.schema();
+                let docs: Vec<(String, HashMap<String, String>)> = documents
+                    .iter()
+                    .map(|d| (d.document_id.clone(), d.fields.clone()))
+                    .collect();
+                // batch_add_documents is idempotent per document id (delete-term
+                // then add), so replaying the whole batch after a transient
+                // writer/commit failure is safe.
+                match batch_add_documents(&manager_guard, schema, docs) {
+                    Ok(count) => manager_guard.reload_reader().map(|()| count),
+                    Err(e) => Err(e),
+                }
+            };
 
-        let docs: Vec<(String, HashMap<String, String>)> = documents
-            .iter()
-            .map(|d| (d.document_id.clone(), d.fields.clone()))
-            .collect();
-
-        let count = batch_add_documents(&manager_guard, schema, docs)?;
-        manager_guard.reload_reader()?;
-
-        Ok(count)
+            match result {
+                Ok(count) => return Ok(count),
+                Err(error) => {
+                    match transient_backoff(
+                        start,
+                        attempt,
+                        BATCH_MAX_ATTEMPTS,
+                        BATCH_INITIAL_BACKOFF,
+                        BATCH_RETRY_DEADLINE,
+                        BATCH_RETRY_JITTER_RATIO,
+                    ) {
+                        Some(delay) if ErrorClassify::is_retryable(&error) => {
+                            tracing::warn!(
+                                attempt,
+                                error = %error,
+                                "BM25 batch index failed with transient error; retrying"
+                            );
+                            tokio::time::sleep(delay).await;
+                        }
+                        _ => return Err(error),
+                    }
+                }
+            }
+        }
     }
 
     /// Delete a document by ID

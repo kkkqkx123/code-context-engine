@@ -101,6 +101,7 @@ impl StorageCoordinator {
         let mut deferred_retries: Vec<DeferredBatch<'_>> = Vec::new();
         let mut deferred_retry_after_ms: u64 = 0;
         let mut deferred_reason: Option<String> = None;
+        let mut deferred_failures: usize = 0;
 
         for (batch_idx, batch) in embedding_chunks.chunks(batch_size).enumerate() {
             // Work unit checkpoint: skip if this microbatch is already committed
@@ -201,9 +202,9 @@ impl StorageCoordinator {
                             .await?;
                     }
                     Err(err) if is_retryable_llm_error(&err) => {
-                        // Leave the work unit Running (uncommitted): the
-                        // checkpoint/resume mechanism reruns only this unit
-                        // instead of the whole operation.
+                        // Record the failure: the work unit stays Running
+                        // (uncommitted) so a resume replays exactly this unit,
+                        // but the caller must not treat the pass as complete.
                         let work_unit_hash = wu_state
                             .as_ref()
                             .map(|(_, _, hash)| hash.as_str())
@@ -211,12 +212,29 @@ impl StorageCoordinator {
                         tracing::warn!(
                             work_unit_hash,
                             error = %err,
-                            "Embedding batch still failing after retry; work unit left uncommitted for resume"
+                            "Embedding batch still failing after retry; work unit left uncommitted"
                         );
+                        deferred_failures += 1;
                     }
                     Err(e) => return Err(e.into()),
                 }
             }
+        }
+
+        // A deferred batch that is still failing means vectors were not
+        // produced for this pass. Reporting Ok here would let the batch loop
+        // advance the checkpoint boundary over silently-missing vectors, so
+        // the failure must surface as a batch-level error.
+        if deferred_failures > 0 {
+            if let Some(metrics) = &self.quality_metrics {
+                metrics.record_deferred_uncommitted(deferred_failures);
+            }
+            return Err(OrchestratorError::index(
+                "embedding_deferred_retry",
+                format!(
+                    "{deferred_failures} embedding batch(es) still failing after the deferred retry; work units left uncommitted for resume"
+                ),
+            ));
         }
 
         Ok(total_stored)
@@ -330,12 +348,20 @@ impl StorageCoordinator {
                         .get(&(chunk.metadata.file_path.clone(), entity_id.0 as i64))
                         .copied()
                     else {
-                        tracing::trace!(
-                            file = %chunk.metadata.file_path,
-                            source_entity_id = entity_id.0,
-                            "Skipping entity mapping without an epoch-scoped entity record"
-                        );
-                        continue;
+                        // Every stored entity carries `__source_entity_id`, so a
+                        // miss means the entity record is absent from this epoch:
+                        // silently dropping the mapping would permanently sever
+                        // the entity -> vector link.
+                        if let Some(metrics) = &self.quality_metrics {
+                            metrics.record_entity_mapping_miss();
+                        }
+                        return Err(OrchestratorError::index(
+                            "entity_mapping",
+                            format!(
+                                "no epoch-scoped entity record for {} (source entity {})",
+                                chunk.metadata.file_path, entity_id.0
+                            ),
+                        ));
                     };
                     db_id
                 } else {
@@ -634,7 +660,12 @@ mod tests {
                 tokio::spawn(async move {
                     let mut buf = [0u8; 4096];
                     let _ = socket.read(&mut buf).await;
-                    let response = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\ncontent-type: application/json\r\n\r\n{}";
+                    let body = r#"{"result":{"operation_id":1,"status":"ok"}}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: application/json\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
                     let _ = socket.write_all(response.as_bytes()).await;
                 });
             }
@@ -714,7 +745,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rate_limited_retry_failure_leaves_batch_uncommitted_but_continues() {
+    async fn rate_limited_retry_failure_surfaces_as_batch_error() {
         let qdrant_url = spawn_mock_qdrant_url().await;
         // Both the initial attempt and the deferred retry are rate limited.
         let stub = Arc::new(StubEmbedder {
@@ -728,15 +759,19 @@ mod tests {
             embedding_chunk("a", "first"),
             embedding_chunk("b", "second"),
         ];
-        let stored = storage
-            .store_vectors_batched(&chunks, 1, 0)
-            .await
-            .expect("store must not abort on rate-limited retry");
+        let result = storage.store_vectors_batched(&chunks, 1, 0).await;
 
-        // Batch "b" commits; batch "a" stays uncommitted (recoverable via the
-        // checkpoint/resume mechanism on a later operation).
-        assert_eq!(stored, 1);
-        assert_eq!(stub.calls.load(Ordering::SeqCst), 4);
+        // Both batches are rate limited on the first pass and deferred. On the
+        // retry pass batch "a" fails again while batch "b" succeeds. The
+        // retry-pass failure must not be reported as Ok: the caller stops
+        // advancing the checkpoint boundary so the uncommitted work unit is
+        // replayed on resume.
+        assert!(result.is_err(), "deferred retry failure must surface");
+        assert_eq!(
+            stub.calls.load(Ordering::SeqCst),
+            4,
+            "expected: batch a (429) + batch b (429) + both retries"
+        );
     }
 
     #[tokio::test]

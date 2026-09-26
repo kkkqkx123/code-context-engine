@@ -146,9 +146,10 @@ pub async fn handle_dead_letter_retry(
                 "retried": report.retried,
                 "succeeded": report.succeeded,
                 "still_failed": report.still_failed,
+                "truncated_chunks": report.truncated_chunks,
                 "message": format!(
-                    "dead-letter retry: {} retried, {} succeeded, {} still failed",
-                    report.retried, report.succeeded, report.still_failed
+                    "dead-letter retry: {} retried, {} succeeded, {} still failed, {} chunks truncated",
+                    report.retried, report.succeeded, report.still_failed, report.truncated_chunks
                 ),
             })),
         ),

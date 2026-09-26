@@ -2,8 +2,10 @@
 
 use reqwest::Client;
 use serde_json::json;
+use std::time::{Duration, Instant};
 
 use cce_types::PointKind;
+use cce_utils::transient_backoff;
 
 use crate::config::{HnswConfig, QdrantConfig, QuantizationConfig, VectorStorageConfig, WalConfig};
 use crate::error::QdrantError;
@@ -277,6 +279,23 @@ pub struct PointOperations {
     base_url: String,
 }
 
+/// Outcome classification of one point-operation attempt: transient failures
+/// are retried by the attempt loop, deterministic failures abort immediately.
+enum AttemptError {
+    Transient(QdrantError),
+    Fatal(QdrantError),
+}
+
+/// Total attempts (first try plus retries) for a transiently failing
+/// point operation.
+const POINT_MAX_ATTEMPTS: u32 = 3;
+/// First retry delay; doubles with each subsequent attempt.
+const POINT_INITIAL_BACKOFF: Duration = Duration::from_millis(200);
+/// Upper bound on the total time one point operation may spend retrying.
+const POINT_RETRY_DEADLINE: Duration = Duration::from_secs(2);
+/// Random jitter ratio added on top of each computed backoff.
+const POINT_RETRY_JITTER_RATIO: f64 = 0.3;
+
 fn serialize_point(p: &VectorPoint) -> serde_json::Value {
     let qdrant_id = to_qdrant_point_id(&p.id);
 
@@ -317,9 +336,17 @@ impl PointOperations {
         }
     }
 
+    /// Upsert points and confirm full application.
+    ///
+    /// `wait=true` forces Qdrant to apply the batch before responding; the
+    /// response `result.status` must be `ok`. An `ack` status means the batch
+    /// was not fully applied and HTTP 200 alone would hide point-level
+    /// failures. Transient failures (transport, 5xx/429/408, non-applied
+    /// batch) are retried with backoff; other 4xx is a deterministic request
+    /// or collection error and fails fast.
     pub async fn upsert(&self, points: &[VectorPoint]) -> Result<(), QdrantError> {
         let url = format!(
-            "{}/collections/{}/points",
+            "{}/collections/{}/points?wait=true",
             self.base_url, self.collection_name
         );
 
@@ -329,24 +356,92 @@ impl PointOperations {
             "points": points_json
         });
 
+        let start = Instant::now();
+        let mut attempt: u32 = 0;
+        loop {
+            attempt += 1;
+            match self.try_upsert(&url, &body, points.len()).await {
+                Ok(()) => return Ok(()),
+                Err(AttemptError::Fatal(error)) => return Err(error),
+                Err(AttemptError::Transient(error)) => {
+                    match transient_backoff(
+                        start,
+                        attempt,
+                        POINT_MAX_ATTEMPTS,
+                        POINT_INITIAL_BACKOFF,
+                        POINT_RETRY_DEADLINE,
+                        POINT_RETRY_JITTER_RATIO,
+                    ) {
+                        Some(delay) => {
+                            tracing::warn!(
+                                collection = %self.collection_name,
+                                attempt,
+                                error = %error,
+                                "Qdrant upsert failed with transient error; retrying"
+                            );
+                            tokio::time::sleep(delay).await;
+                        }
+                        None => return Err(error),
+                    }
+                }
+            }
+        }
+    }
+
+    async fn try_upsert(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+        point_count: usize,
+    ) -> Result<(), AttemptError> {
         let response = self
             .http_client
-            .put(&url)
-            .json(&body)
+            .put(url)
+            .json(body)
             .send()
             .await
-            .map_err(|e| QdrantError::request(e.to_string()))?;
+            .map_err(|e| {
+                AttemptError::Transient(QdrantError::request(format!(
+                    "upsert of {} points failed: {}",
+                    point_count, e
+                )))
+            })?;
 
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(QdrantError::api(format!(
-                "Failed to upsert points: {} - {}",
-                status, error_text
-            )));
+            let error = QdrantError::api(format!(
+                "Failed to upsert {} points: {} - {}",
+                point_count, status, error_text
+            ));
+            let transient = status.is_server_error()
+                || status == reqwest::StatusCode::REQUEST_TIMEOUT
+                || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
+            return Err(if transient {
+                AttemptError::Transient(error)
+            } else {
+                AttemptError::Fatal(error)
+            });
         }
 
-        Ok(())
+        let payload: serde_json::Value = response.json().await.map_err(|e| {
+            AttemptError::Transient(QdrantError::ResponseParse(format!(
+                "upsert response: {}",
+                e
+            )))
+        })?;
+
+        match payload.pointer("/result/status").and_then(|v| v.as_str()) {
+            Some("ok") => Ok(()),
+            Some(other) => Err(AttemptError::Transient(QdrantError::api(format!(
+                "Upsert of {} points was not fully applied: status '{}'",
+                point_count, other
+            )))),
+            None => Err(AttemptError::Fatal(QdrantError::ResponseParse(format!(
+                "Upsert response for {} points is missing result.status",
+                point_count
+            )))),
+        }
     }
 
     pub async fn delete_by_file_path_scoped(
@@ -616,7 +711,11 @@ impl PointOperations {
         Ok(all_points)
     }
 
-    async fn delete_by_filter(&self, filter: serde_json::Value) -> Result<(), QdrantError> {
+    /// Delete points by filter, retrying transient failures with backoff.
+    ///
+    /// Transport errors and 5xx/408/429 responses are retried; other 4xx is a
+    /// deterministic request or collection error and fails fast.
+    pub async fn delete_by_filter(&self, filter: serde_json::Value) -> Result<(), QdrantError> {
         let url = format!(
             "{}/collections/{}/points/delete",
             self.base_url, self.collection_name
@@ -626,21 +725,62 @@ impl PointOperations {
             "filter": filter
         });
 
+        let start = Instant::now();
+        let mut attempt: u32 = 0;
+        loop {
+            attempt += 1;
+            match self.try_delete(&url, &body).await {
+                Ok(()) => return Ok(()),
+                Err(AttemptError::Fatal(error)) => return Err(error),
+                Err(AttemptError::Transient(error)) => {
+                    match transient_backoff(
+                        start,
+                        attempt,
+                        POINT_MAX_ATTEMPTS,
+                        POINT_INITIAL_BACKOFF,
+                        POINT_RETRY_DEADLINE,
+                        POINT_RETRY_JITTER_RATIO,
+                    ) {
+                        Some(delay) => {
+                            tracing::warn!(
+                                collection = %self.collection_name,
+                                attempt,
+                                error = %error,
+                                "Qdrant delete failed with transient error; retrying"
+                            );
+                            tokio::time::sleep(delay).await;
+                        }
+                        None => return Err(error),
+                    }
+                }
+            }
+        }
+    }
+
+    async fn try_delete(&self, url: &str, body: &serde_json::Value) -> Result<(), AttemptError> {
         let response = self
             .http_client
-            .post(&url)
-            .json(&body)
+            .post(url)
+            .json(body)
             .send()
             .await
-            .map_err(|e| QdrantError::request(e.to_string()))?;
+            .map_err(|e| AttemptError::Transient(QdrantError::request(e.to_string())))?;
 
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(QdrantError::api(format!(
+            let error = QdrantError::api(format!(
                 "Failed to delete points: {} - {}",
                 status, error_text
-            )));
+            ));
+            let transient = status.is_server_error()
+                || status == reqwest::StatusCode::REQUEST_TIMEOUT
+                || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
+            return Err(if transient {
+                AttemptError::Transient(error)
+            } else {
+                AttemptError::Fatal(error)
+            });
         }
 
         Ok(())
@@ -780,6 +920,65 @@ impl Clone for CollectionOperations {
 mod tests {
     use super::*;
     use cce_types::{FileCategory, PointKind, TestSource};
+
+    /// In-process Qdrant stand-in that answers every request with `body`.
+    async fn spawn_mock_url(body: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock qdrant port");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(accepted) => accepted,
+                    Err(_) => break,
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = socket.read(&mut buf).await;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: application/json\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn sample_points() -> Vec<VectorPoint> {
+        vec![VectorPoint::new(
+            "group_1_emb_0".to_string(),
+            vec![0.5_f32, 0.5],
+            Payload::new("src/lib.rs"),
+        )]
+    }
+
+    #[tokio::test]
+    async fn upsert_returns_ok_when_status_is_ok() {
+        let base_url = spawn_mock_url(r#"{"result":{"operation_id":1,"status":"ok"}}"#).await;
+        let ops = PointOperations::new(Client::new(), "test".to_string(), base_url);
+        ops.upsert(&sample_points())
+            .await
+            .expect("upsert should succeed on ok status");
+    }
+
+    #[tokio::test]
+    async fn upsert_returns_err_when_batch_not_applied() {
+        let base_url = spawn_mock_url(r#"{"result":{"operation_id":1,"status":"ack"}}"#).await;
+        let ops = PointOperations::new(Client::new(), "test".to_string(), base_url);
+        let err = ops
+            .upsert(&sample_points())
+            .await
+            .expect_err("ack status must not be treated as success");
+        assert!(
+            err.to_string().contains("not fully applied"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn test_serialize_point_keeps_full_payload() {

@@ -94,7 +94,19 @@ impl super::CodeContextEngine {
 
         let coordinator = StartupRecoveryCoordinator::new(sqlite_client.as_ref().clone());
 
-        let orchestrator = self.get_orchestrator(project_id).await.ok();
+        // A failed orchestrator lookup leaves startup recovery running without
+        // relation rehydration; make that degradation visible.
+        let orchestrator = match self.get_orchestrator(project_id).await {
+            Ok(orchestrator) => Some(orchestrator),
+            Err(error) => {
+                tracing::error!(
+                    project_id,
+                    %error,
+                    "Failed to acquire orchestrator during startup recovery"
+                );
+                None
+            }
+        };
 
         let mut result: RecoveryResult = coordinator
             .recover_project(project_id, orchestrator)
@@ -274,11 +286,26 @@ impl super::CodeContextEngine {
         // Save build_relations flag before moving options
         let build_relations = options.build_relations;
 
-        // Execute indexing operation
-        let result: IndexResult = orchestrator
-            .execute(options)
-            .await
-            .map_err(EngineError::Index)?;
+        // Execute indexing operation. On hard failure the queue's active flag
+        // must be cleared here, otherwise every subsequent operation for this
+        // project is blocked by the dequeue gate.
+        let result: IndexResult = match orchestrator.execute(options).await {
+            Ok(result) => result,
+            Err(error) => {
+                if let Err(clear_error) = operation_coordinator
+                    .clear_active_by_operation(&operation_id)
+                    .await
+                {
+                    tracing::warn!(
+                        project_id,
+                        operation_id = %operation_id,
+                        error = %clear_error,
+                        "Failed to clear active flag after indexing error"
+                    );
+                }
+                return Err(EngineError::Index(error));
+            }
+        };
 
         // `IndexOrchestrator` publishes complete relation snapshots through
         // the injected publisher before returning a successful result.
@@ -332,17 +359,9 @@ impl super::CodeContextEngine {
             } else {
                 result.errors().join("; ")
             };
-            if let Err(error) = operation_coordinator
-                .checkpoint_manager()
-                .mark_operation_failed(&operation_id, &reason)
-                .await
-            {
-                tracing::warn!(
-                    operation_id = %operation_id,
-                    error = %error,
-                    "Failed to mark full-index checkpoint failed"
-                );
-            }
+            // The index checkpoint is intentionally left in progress: an
+            // incomplete full index must stay resumable, and file-level
+            // checkpoint records decide which batches are retried next run.
             if let Err(error) = operation_coordinator
                 .clear_active_by_operation(&operation_id)
                 .await
@@ -357,7 +376,7 @@ impl super::CodeContextEngine {
                 project_id,
                 operation_id = %operation_id,
                 reason = %reason,
-                "Operation marked failed and active flag cleared after indexing failure"
+                "Active flag cleared after incomplete full index; checkpoint remains resumable"
             );
         }
 

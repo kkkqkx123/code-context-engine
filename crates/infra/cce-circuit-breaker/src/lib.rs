@@ -225,7 +225,10 @@ impl CircuitBreaker {
     }
 
     fn on_failure(&mut self) {
-        self.failure_count += 1;
+        // Saturate instead of wrapping: a prolonged outage can drive this count
+        // past its ceiling across Open/half-open cycles because it is only reset
+        // on the success path, and a wrapped value would falsely read as healthy.
+        self.failure_count = self.failure_count.saturating_add(1);
         self.last_failure = Some(std::time::Instant::now());
 
         if self.state == CircuitState::HalfOpen || self.failure_count >= self.failure_threshold {

@@ -87,6 +87,24 @@ impl From<ScannerConfig> for ScanOptions {
     }
 }
 
+/// A path-level failure encountered while scanning: an unreadable directory,
+/// an inaccessible entry, or a file that could not be processed. The scan
+/// skips such paths (matching the per-file skip semantics) but records them
+/// so callers can surface the loss instead of silently indexing less.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanFailure {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+/// Buffered scan result: the file entries plus every path that was skipped
+/// with an error during the walk.
+#[derive(Debug, Default)]
+pub struct ScanReport {
+    pub entries: Vec<FileEntry>,
+    pub failures: Vec<ScanFailure>,
+}
+
 /// File system scanner implementation
 ///
 /// Uses composition to delegate pattern matching and file processing
@@ -138,18 +156,12 @@ impl FSScanner {
         // FileProcessor is stateless, nothing to reset
     }
 
-    /// Create IO error with context
-    fn io_error(
-        context: &str,
-        path: &Path,
-        e: impl std::fmt::Display,
-    ) -> crate::error::ScannerError {
-        crate::error::ScannerError::Io(common::IoError(std::io::Error::other(format!(
-            "{}: {} - {}",
-            context,
-            path.display(),
-            e
-        ))))
+    /// Create IO error with context, preserving the original error kind
+    fn io_error(context: &str, path: &Path, e: std::io::Error) -> crate::error::ScannerError {
+        crate::error::ScannerError::Io(common::IoError(std::io::Error::new(
+            e.kind(),
+            format!("{}: {} - {}", context, path.display(), e),
+        )))
     }
 
     /// Validate and prepare root path for scanning
@@ -256,8 +268,16 @@ impl FSScanner {
     /// Scan a directory and return all file entries
     ///
     /// This is a convenience method that internally uses streaming scan
-    /// and collects all entries.
+    /// and collects all entries. Prefer [`Self::scan_report`] to also observe
+    /// the paths that were skipped with errors.
     pub fn scan(&mut self, opts: &ScanOptions) -> Result<Vec<FileEntry>> {
+        Ok(self.scan_report(opts)?.entries)
+    }
+
+    /// Scan a directory and report both the file entries and every path that
+    /// was skipped with an error (unreadable directories, inaccessible
+    /// entries, files that failed to process).
+    pub fn scan_report(&mut self, opts: &ScanOptions) -> Result<ScanReport> {
         self.scan_impl(opts, None)
     }
 
@@ -275,6 +295,15 @@ impl FSScanner {
         opts: &ScanOptions,
         previous: &HashMap<PathBuf, FileEntry>,
     ) -> Result<Vec<FileEntry>> {
+        Ok(self.scan_incremental_report(opts, previous)?.entries)
+    }
+
+    /// Incremental scan returning both entries and skipped-path failures.
+    pub fn scan_incremental_report(
+        &mut self,
+        opts: &ScanOptions,
+        previous: &HashMap<PathBuf, FileEntry>,
+    ) -> Result<ScanReport> {
         self.scan_impl(opts, Some(previous))
     }
 
@@ -282,7 +311,7 @@ impl FSScanner {
         &mut self,
         opts: &ScanOptions,
         previous_entries: Option<&HashMap<PathBuf, FileEntry>>,
-    ) -> Result<Vec<FileEntry>> {
+    ) -> Result<ScanReport> {
         let abs_root = Self::prepare_root_path(&opts.root_path)?;
 
         debug!(
@@ -312,6 +341,7 @@ impl FSScanner {
         });
 
         let dirs_count = walker.dirs_count();
+        let failures = walker.into_failures();
 
         result?;
 
@@ -319,10 +349,11 @@ impl FSScanner {
             directory = %abs_root.display(),
             files_found = entries.len(),
             directories_scanned = dirs_count,
-            "Buffered scan completed successfully"
+            scan_failures = failures.len(),
+            "Buffered scan completed"
         );
 
-        Ok(entries)
+        Ok(ScanReport { entries, failures })
     }
 }
 
@@ -348,6 +379,10 @@ struct DirectoryWalker<'a> {
     /// (size, mtime) fingerprint is unchanged reuse the previous content hash
     /// instead of re-reading and re-hashing the file (incremental scan).
     previous_entries: Option<&'a HashMap<PathBuf, FileEntry>>,
+    /// Paths skipped with an error during the walk (permission failures,
+    /// unreadable directories, files that failed to process). Surfaced in
+    /// `ScanReport` so silent subtree loss becomes visible to callers.
+    failures: Vec<ScanFailure>,
 }
 
 impl<'a> DirectoryWalker<'a> {
@@ -369,7 +404,24 @@ impl<'a> DirectoryWalker<'a> {
             plugin_registry: None,
             filter_cache: HashMap::new(),
             previous_entries: None,
+            failures: Vec::new(),
         }
+    }
+
+    /// Take the collected scan failures out of the walker.
+    fn into_failures(self) -> Vec<ScanFailure> {
+        self.failures
+    }
+
+    /// Record a path that was skipped with an error, keeping the walk alive.
+    fn record_failure(&mut self, path: &Path, reason: impl Into<String>) {
+        if let Some(metrics) = &self.scanner_metrics {
+            metrics.record_scan_error();
+        }
+        self.failures.push(ScanFailure {
+            path: path.to_path_buf(),
+            reason: reason.into(),
+        });
     }
 
     /// Attach a plugin registry for the `FileFilter` capability.
@@ -559,12 +611,26 @@ impl<'a> DirectoryWalker<'a> {
         self.path_tracker.mark_visited(dir.to_path_buf());
         self.dirs_count += 1;
 
-        let entries_iter = std::fs::read_dir(dir)
-            .map_err(|e| FSScanner::io_error("failed to read directory", dir, e))?;
+        // An unreadable directory (permissions, races with removal) must not
+        // abort the whole scan; the per-file error path already skips instead.
+        let entries_iter = match std::fs::read_dir(dir) {
+            Ok(iter) => iter,
+            Err(e) => {
+                warn!(path = %dir.display(), error = %e, "Failed to read directory, skipping");
+                self.record_failure(dir, format!("failed to read directory: {e}"));
+                return Ok(());
+            }
+        };
 
         for entry in entries_iter {
-            let entry = entry
-                .map_err(|e| FSScanner::io_error("failed to access directory entry", dir, e))?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    warn!(path = %dir.display(), error = %e, "Failed to access directory entry, skipping");
+                    self.record_failure(dir, format!("failed to access directory entry: {e}"));
+                    continue;
+                }
+            };
 
             let path = entry.path();
 
@@ -580,9 +646,14 @@ impl<'a> DirectoryWalker<'a> {
                 continue;
             }
 
-            let file_type = entry
-                .file_type()
-                .map_err(|e| FSScanner::io_error("failed to get file type", &path, e))?;
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "Failed to get file type, skipping");
+                    self.record_failure(&path, format!("failed to get file type: {e}"));
+                    continue;
+                }
+            };
 
             if file_type.is_dir() {
                 self.handle_directory(&path, callback)?;
@@ -695,6 +766,7 @@ impl<'a> DirectoryWalker<'a> {
                     error = %e,
                     "Failed to process file, skipping"
                 );
+                self.record_failure(path, format!("failed to process file: {e}"));
                 Ok(())
             }
         }
@@ -750,6 +822,7 @@ impl<'a> DirectoryWalker<'a> {
                             error = %e,
                             "Failed to process symlink target"
                         );
+                        self.record_failure(path, format!("failed to process symlink target: {e}"));
                     }
                 }
             }
@@ -759,6 +832,7 @@ impl<'a> DirectoryWalker<'a> {
                 reason = "canonicalization_failed",
                 "Failed to resolve symbolic link target"
             );
+            self.record_failure(path, "failed to resolve symbolic link target");
         }
 
         Ok(())

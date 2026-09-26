@@ -611,6 +611,7 @@ impl super::CodeContextEngine {
                                 retried = report.retried,
                                 succeeded = report.succeeded,
                                 still_failed = report.still_failed,
+                                truncated_chunks = report.truncated_chunks,
                                 "Dead-letter truncate-retry sweep finished"
                             );
                         }

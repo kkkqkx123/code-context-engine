@@ -96,7 +96,9 @@ impl HttpRequestService {
         let Some(breaker) = &self.circuit_breaker else {
             return Ok(());
         };
-        let mut breaker = breaker.lock().expect("LLM circuit breaker mutex poisoned");
+        let mut breaker = breaker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let result = breaker.try_acquire::<LlmError>();
         self.sync_circuit_state_metrics(&breaker);
         match result {
@@ -116,7 +118,9 @@ impl HttpRequestService {
         let Some(breaker) = &self.circuit_breaker else {
             return;
         };
-        let mut breaker = breaker.lock().expect("LLM circuit breaker mutex poisoned");
+        let mut breaker = breaker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match result {
             Ok(_) => breaker.record_success(),
             Err(error) if LlmRetryErrorClass::from_error(error).counts_toward_circuit_failure() => {

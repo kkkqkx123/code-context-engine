@@ -12,7 +12,7 @@ use std::sync::Arc;
 use super::event_bus::{EventListener, EventType};
 use super::events::OperationEvent;
 use super::listener_priority;
-use crate::index_state::ModuleType;
+use crate::index_state::{ModuleType, TrackerFailure};
 use crate::index_state_tracker::UpdateStateTracker;
 
 /// StateTracker adapter for event-driven architecture
@@ -103,7 +103,11 @@ impl EventListener for StateTrackerListener {
                 };
 
                 self.state_tracker
-                    .mark_failed(Path::new(file_path), module_type, error.clone())
+                    .mark_failed(
+                        Path::new(file_path),
+                        module_type,
+                        TrackerFailure::transient(error.clone()),
+                    )
                     .await
                     .map_err(|e| {
                         anyhow!("Failed to mark module as failed for {}: {}", file_path, e)
@@ -173,7 +177,11 @@ impl EventListener for StateTrackerListener {
 
                     if let Err(e) = self
                         .state_tracker
-                        .mark_failed(Path::new(file_path), module_type, error_msg.clone())
+                        .mark_failed(
+                            Path::new(file_path),
+                            module_type,
+                            TrackerFailure::transient(error_msg.clone()),
+                        )
                         .await
                     {
                         tracing::error!(

@@ -122,6 +122,57 @@ impl HotUpdateStorageMetrics {
     }
 }
 
+/// Index-quality monitoring metrics
+///
+/// Counts the silent-loss surfaces that leave the index temporarily
+/// incomplete but do not fail the batch: deferred embedding batches that
+/// stayed uncommitted, entity mapping misses, files yielding no indexable
+/// content, and chunks truncated by dead-letter retry.
+#[derive(Debug)]
+pub struct IndexQualityMetrics {
+    pub embedding_deferred_uncommitted_total: LabeledCounter,
+    pub entity_mapping_miss_total: LabeledCounter,
+    pub empty_files_total: LabeledCounter,
+    pub dead_letter_truncated_total: LabeledCounter,
+}
+
+impl IndexQualityMetrics {
+    pub fn new(registry: &MetricsRegistry, project_id: i64) -> Arc<Self> {
+        let proj_val = project_id.to_string();
+        Arc::new(Self {
+            embedding_deferred_uncommitted_total: registry.counter(
+                "embedding_deferred_uncommitted_total",
+                &[("project_id", &proj_val)],
+            ),
+            entity_mapping_miss_total: registry
+                .counter("entity_mapping_miss_total", &[("project_id", &proj_val)]),
+            empty_files_total: registry.counter("empty_files_total", &[("project_id", &proj_val)]),
+            dead_letter_truncated_total: registry
+                .counter("dead_letter_truncated_total", &[("project_id", &proj_val)]),
+        })
+    }
+
+    pub fn record_deferred_uncommitted(&self, count: usize) {
+        if count > 0 {
+            self.embedding_deferred_uncommitted_total.add(count as u64);
+        }
+    }
+
+    pub fn record_entity_mapping_miss(&self) {
+        self.entity_mapping_miss_total.increment();
+    }
+
+    pub fn record_empty_file(&self) {
+        self.empty_files_total.increment();
+    }
+
+    pub fn record_dead_letter_truncated(&self, count: usize) {
+        if count > 0 {
+            self.dead_letter_truncated_total.add(count as u64);
+        }
+    }
+}
+
 /// File watch monitoring metrics
 #[derive(Debug)]
 pub struct WatchMetrics {
@@ -415,6 +466,25 @@ mod tests {
             "Expected ~66.67%, got {}%",
             rate
         );
+    }
+
+    #[test]
+    fn test_index_quality_metrics_record() {
+        let registry = MetricsRegistry::new();
+        let metrics = IndexQualityMetrics::new(&registry, 1);
+
+        assert_eq!(metrics.embedding_deferred_uncommitted_total.get(), 0);
+
+        metrics.record_deferred_uncommitted(2);
+        metrics.record_deferred_uncommitted(0);
+        metrics.record_entity_mapping_miss();
+        metrics.record_empty_file();
+        metrics.record_dead_letter_truncated(3);
+
+        assert_eq!(metrics.embedding_deferred_uncommitted_total.get(), 2);
+        assert_eq!(metrics.entity_mapping_miss_total.get(), 1);
+        assert_eq!(metrics.empty_files_total.get(), 1);
+        assert_eq!(metrics.dead_letter_truncated_total.get(), 3);
     }
 
     #[test]

@@ -207,7 +207,17 @@ impl ParseCoordinator {
 
         // Extract imports from AST if available (before source is moved into ParsedFile)
         let import_table = context.tree.as_ref().and_then(|tree| {
-            crate::relation_helpers::extract_imports(tree, &context.source, &language, None).ok()
+            match crate::relation_helpers::extract_imports(tree, &context.source, &language, None) {
+                Ok(table) => Some(table),
+                Err(e) => {
+                    tracing::warn!(
+                        path = %context.file_path,
+                        error = %e,
+                        "Import extraction failed; cross-file relations for this file will be incomplete"
+                    );
+                    None
+                }
+            }
         });
 
         // Extract named re-exports (Rust `pub use`, JS/TS `export { x } from`)

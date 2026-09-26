@@ -17,4 +17,4 @@ pub use ignore::IgnoreMatcher;
 pub use models::FileEntry;
 pub use path_tracker::PathTracker;
 pub use pattern_matcher::{PatternLoadOptions, PatternMatcher};
-pub use walker::{FSScanner, ScanOptions};
+pub use walker::{FSScanner, ScanFailure, ScanOptions, ScanReport};

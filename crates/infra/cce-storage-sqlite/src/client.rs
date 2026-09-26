@@ -495,14 +495,14 @@ impl cce_metrics::SqliteStore for SqliteClient {
             let mut stmt = tx
                 .prepare(sql)
                 .map_err(|e| StorageError::Sqlite(e.to_string()))?;
+            // A failing row aborts the whole batch: skipping rows here would
+            // report nominal success while silently losing metrics data that
+            // no replay mechanism can recover.
             for params in batch {
                 let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-                match stmt.execute(refs.as_slice()) {
-                    Ok(_) => inserted += 1,
-                    Err(e) => {
-                        warn!("Skipping failed batch row: {e}");
-                    }
-                }
+                stmt.execute(refs.as_slice())
+                    .map_err(|e| StorageError::Sqlite(format!("Failed batch row: {e}")))?;
+                inserted += 1;
             }
         }
         tx.commit()

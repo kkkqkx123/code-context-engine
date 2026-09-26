@@ -187,16 +187,14 @@ impl super::common::ErrorClassify for StorageError {
     }
 
     fn is_permanent(&self) -> bool {
+        // Sqlite runtime failures (busy/locked/IO) are excluded: they can
+        // succeed once the database frees up.
         match self {
             Self::Qdrant(err) => err.is_permanent(),
             Self::Bm25(err) => err.is_permanent(),
             _ => matches!(
                 self,
-                Self::NotFound(_)
-                    | Self::Table(_)
-                    | Self::Sqlite(_)
-                    | Self::Delete(_)
-                    | Self::Validation(_)
+                Self::NotFound(_) | Self::Table(_) | Self::Delete(_) | Self::Validation(_)
             ),
         }
     }

@@ -2,7 +2,7 @@
 //!
 //! This module defines error types related to parsing operations across the codebase.
 
-use super::common::IoError;
+use super::common::{ErrorClassify, IoError};
 use thiserror::Error;
 
 /// Parse error type for domain-specific parsing operations
@@ -51,6 +51,14 @@ pub enum ParseError {
     /// YAML parsing error
     #[error("YAML parsing failed: {0}")]
     YamlParsing(String),
+
+    /// Content changed between the scan phase and processing (stale snapshot)
+    #[error("Content changed since scan: {0}")]
+    ContentChanged(String),
+
+    /// Content could not be decoded with the detected encoding
+    #[error("Encoding detection failed: {0}")]
+    Encoding(String),
 }
 
 impl ParseError {
@@ -104,6 +112,16 @@ impl ParseError {
         Self::YamlParsing(reason.into())
     }
 
+    /// Create a content-drift error
+    pub fn content_changed(reason: impl Into<String>) -> Self {
+        Self::ContentChanged(reason.into())
+    }
+
+    /// Create an encoding detection error
+    pub fn encoding(reason: impl Into<String>) -> Self {
+        Self::Encoding(reason.into())
+    }
+
     /// Get error code for programmatic error handling
     pub fn error_code(&self) -> &'static str {
         match self {
@@ -118,7 +136,31 @@ impl ParseError {
             Self::XmlParsing(_) => "PARSE_XML_PARSING_ERROR",
             Self::TomlParsing(_) => "PARSE_TOML_PARSING_ERROR",
             Self::YamlParsing(_) => "PARSE_YAML_PARSING_ERROR",
+            Self::ContentChanged(_) => "PARSE_CONTENT_CHANGED_ERROR",
+            Self::Encoding(_) => "PARSE_ENCODING_ERROR",
         }
+    }
+}
+
+impl ErrorClassify for ParseError {
+    fn is_retryable(&self) -> bool {
+        self.is_transient()
+    }
+
+    fn is_transient(&self) -> bool {
+        match self {
+            // IO outcome depends on the failure kind (interruptions and
+            // resource pressure may succeed on retry).
+            Self::Io(err) => err.is_transient(),
+            // Every other variant is deterministic for the same file content
+            // (unsupported language, bad path, malformed document, splitter
+            // bug, undecodable bytes); retrying without a re-scan never helps.
+            _ => false,
+        }
+    }
+
+    fn is_permanent(&self) -> bool {
+        !self.is_transient()
     }
 }
 
@@ -126,5 +168,55 @@ impl ParseError {
 impl From<std::io::Error> for ParseError {
     fn from(err: std::io::Error) -> Self {
         Self::Io(IoError::from(err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn io_error(kind: std::io::ErrorKind) -> ParseError {
+        ParseError::Io(IoError::from(std::io::Error::new(kind, "test")))
+    }
+
+    #[test]
+    fn content_deterministic_variants_are_permanent() {
+        let cases = [
+            ParseError::unsupported_language("foo"),
+            ParseError::language_detection("ambiguous"),
+            ParseError::invalid_path("/x"),
+            ParseError::ast_parsing("boom"),
+            ParseError::code_splitting("boom"),
+            ParseError::regex_compilation("boom"),
+            ParseError::json("bad json"),
+            ParseError::xml("bad xml"),
+            ParseError::toml("bad toml"),
+            ParseError::yaml("bad yaml"),
+            ParseError::content_changed("drifted"),
+            ParseError::encoding("undecodable"),
+            io_error(std::io::ErrorKind::NotFound),
+            io_error(std::io::ErrorKind::PermissionDenied),
+            io_error(std::io::ErrorKind::InvalidData),
+        ];
+        for err in cases {
+            assert!(!err.is_retryable(), "{err} must not be retryable");
+            assert!(err.is_permanent(), "{err} must be permanent");
+        }
+    }
+
+    #[test]
+    fn transient_io_kinds_are_retryable() {
+        let cases = [
+            io_error(std::io::ErrorKind::TimedOut),
+            io_error(std::io::ErrorKind::Interrupted),
+            io_error(std::io::ErrorKind::WouldBlock),
+            io_error(std::io::ErrorKind::ResourceBusy),
+            io_error(std::io::ErrorKind::ConnectionReset),
+            io_error(std::io::ErrorKind::Other),
+        ];
+        for err in cases {
+            assert!(err.is_transient(), "{err} must be transient");
+            assert!(!err.is_permanent(), "{err} must not be permanent");
+        }
     }
 }

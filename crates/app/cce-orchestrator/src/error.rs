@@ -1,7 +1,7 @@
 //! Error types for orchestrator operations
 
 use cce_types::error::ConfigError;
-use cce_types::error::common::{IoError, NotFoundError, TimeoutError};
+use cce_types::error::common::{ErrorClassify, IoError, NotFoundError, TimeoutError};
 use thiserror::Error;
 
 /// Orchestrator error type with type-safe variants
@@ -104,6 +104,18 @@ impl OrchestratorError {
         }
     }
 
+    /// Whether this error is the vector store rejecting an operation because
+    /// its circuit breaker is open. Surfaced on the index result so callers
+    /// can distinguish an outage from per-file failures.
+    pub fn is_circuit_open(&self) -> bool {
+        matches!(
+            self,
+            Self::Storage(cce_types::error::StorageError::Qdrant(
+                cce_types::error::QdrantError::CircuitBreakerOpen(_)
+            ))
+        )
+    }
+
     /// Get error type for metrics collection
     pub fn error_type(&self) -> &'static str {
         match self {
@@ -121,6 +133,52 @@ impl OrchestratorError {
             Self::HotUpdate { .. } => "hot_update_error",
             Self::Scan { .. } => "scan_error",
         }
+    }
+
+    /// Project this error into a classified module failure for the state
+    /// tracker. Retryability matches the file-level transient/permanent split
+    /// (`is_transient`), and typed inner errors keep their stable error code
+    /// (the token limit code drives dead-letter truncate eligibility).
+    pub fn as_module_failure(&self) -> crate::index_state::TrackerFailure {
+        use crate::index_state::TrackerFailure;
+        TrackerFailure {
+            message: self.to_string(),
+            code: match self {
+                Self::Llm(err) => Some(err.error_code()),
+                _ => None,
+            },
+            retryable: self.is_transient(),
+        }
+    }
+}
+
+impl ErrorClassify for OrchestratorError {
+    fn is_retryable(&self) -> bool {
+        self.is_transient()
+    }
+
+    fn is_transient(&self) -> bool {
+        match self {
+            Self::Parse(err) => err.is_transient(),
+            Self::Llm(err) => err.is_transient(),
+            Self::Scanner(err) => err.is_transient(),
+            Self::Timeout(_) => true,
+            Self::Config(_) | Self::NotFound(_) | Self::Query(_) => false,
+            // Storage and string-reason orchestrator variants on a per-file
+            // path are infrastructure faults (checkpoint writes, spool I/O),
+            // never deterministic content failures: keep them retryable so a
+            // file is only skipped when its own content caused the failure.
+            Self::Storage(_)
+            | Self::Index { .. }
+            | Self::Cache { .. }
+            | Self::HotUpdate { .. }
+            | Self::Merge { .. }
+            | Self::Scan { .. } => true,
+        }
+    }
+
+    fn is_permanent(&self) -> bool {
+        !self.is_transient()
     }
 }
 
@@ -194,5 +252,52 @@ mod tests {
             OrchestratorError::scan("test", "test").error_type(),
             "scan_error"
         );
+    }
+
+    #[test]
+    fn test_classification() {
+        // Deterministic parse failures delegate to permanent.
+        assert!(
+            OrchestratorError::Parse(cce_types::error::ParseError::unsupported_language("foo"))
+                .is_permanent()
+        );
+        // IO-backed parse failures depend on the error kind.
+        let transient_io = std::io::Error::new(std::io::ErrorKind::Interrupted, "test");
+        assert!(
+            OrchestratorError::Parse(cce_types::error::ParseError::from(transient_io))
+                .is_transient()
+        );
+        // Storage faults are infrastructure and always retryable at file level.
+        let plain = OrchestratorError::Storage(cce_types::error::StorageError::sqlite("locked"));
+        assert!(plain.is_transient());
+        // String-reason orchestrator variants stay retryable by default.
+        assert!(OrchestratorError::index("op", "reason").is_transient());
+    }
+
+    #[test]
+    fn circuit_open_detection() {
+        let err = OrchestratorError::Storage(cce_types::error::StorageError::Qdrant(
+            cce_types::error::QdrantError::CircuitBreakerOpen("open".into()),
+        ));
+        assert!(err.is_circuit_open());
+
+        let other = OrchestratorError::Storage(cce_types::error::StorageError::Qdrant(
+            cce_types::error::QdrantError::request("connection reset"),
+        ));
+        assert!(!other.is_circuit_open());
+    }
+
+    #[test]
+    fn module_failure_projection_preserves_classification() {
+        let err =
+            OrchestratorError::Llm(cce_llm_client::LlmError::token_limit_exceeded(9000, 8192));
+        let failure = err.as_module_failure();
+        assert_eq!(failure.code, Some("LLM_TOKEN_LIMIT_EXCEEDED_ERROR"));
+        assert!(!failure.retryable);
+
+        let storage = OrchestratorError::Storage(cce_types::error::StorageError::sqlite("locked"));
+        let failure = storage.as_module_failure();
+        assert!(failure.retryable);
+        assert_eq!(failure.code, None);
     }
 }

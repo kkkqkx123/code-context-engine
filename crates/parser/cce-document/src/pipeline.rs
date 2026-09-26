@@ -83,8 +83,20 @@ pub trait TextPipeline {
     /// the [`DocSummary`] (e.g. the hot-update summary processor) share the
     /// exact same summary source as the full-index chunking stage.
     fn summarize_document(&self, content: &str, file_path: &str) -> Option<DocSummary> {
-        let nodes = self.parse(content).ok()?;
-        let groups = self.group(nodes.clone(), file_path).ok()?;
+        let nodes = match self.parse(content) {
+            Ok(nodes) => nodes,
+            Err(e) => {
+                warn!(path = %file_path, error = %e, "Document parse failed during summary");
+                return None;
+            }
+        };
+        let groups = match self.group(nodes.clone(), file_path) {
+            Ok(groups) => groups,
+            Err(e) => {
+                warn!(path = %file_path, error = %e, "Document grouping failed during summary");
+                return None;
+            }
+        };
         self.summarize(&nodes, &groups, file_path)
     }
 
@@ -293,16 +305,20 @@ impl PipelineRouter {
             DocType::PlainText => self.plain.process(content, file_path, config, output_mode),
         };
 
-        if let Err(e) = &result {
-            warn!(
-                file_path = %file_path,
-                doc_type = ?doc_type,
-                error = %e,
-                "Document processing failed"
-            );
+        // A malformed structured document must not lose the file entirely:
+        // degrade to the plain-text pipeline instead of failing indexing.
+        match result {
+            Err(e) if !matches!(doc_type, DocType::PlainText) => {
+                warn!(
+                    file_path = %file_path,
+                    doc_type = ?doc_type,
+                    error = %e,
+                    "Document processing failed; falling back to plain-text pipeline"
+                );
+                self.plain.process(content, file_path, config, output_mode)
+            }
+            other => other,
         }
-
-        result
     }
 
     /// Process document and return only chunks (for backward compatibility)

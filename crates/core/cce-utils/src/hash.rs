@@ -67,6 +67,27 @@ pub fn calculate_hash_with_limit(content: &[u8], limit: Option<usize>) -> String
     hex::encode(hasher.finalize())
 }
 
+/// Calculate the SHA-256 hash of a file by streaming it in fixed-size
+/// chunks, so arbitrarily large files hash to their true full-content value
+/// without being loaded into memory.
+///
+/// Identical to `calculate_hash` of the full file bytes.
+pub fn hash_file_stream(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +188,17 @@ mod tests {
             hash,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    #[test]
+    fn test_hash_file_stream_matches_full_content_hash() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("payload.bin");
+        // Larger than the internal 64 KiB chunk so multiple reads are covered.
+        let content: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &content).expect("write file");
+
+        let stream_hash = hash_file_stream(&path).expect("stream hash");
+        assert_eq!(stream_hash, calculate_hash(&content));
     }
 }

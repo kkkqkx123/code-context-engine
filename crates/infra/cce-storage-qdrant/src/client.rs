@@ -19,6 +19,7 @@ use crate::{
 };
 use cce_config::validation::Validate;
 use cce_types::PointKind;
+use cce_types::error::common::ErrorClassify;
 use cce_utils::hash::calculate_hash;
 
 /// Qdrant diagnostic information
@@ -186,16 +187,20 @@ impl QdrantClient {
     }
 
     /// Record operation outcome for circuit breaker tracking.
+    ///
+    /// The breaker counts transient backend faults — transport failures and
+    /// server-side rejections alike — so an outage opens the circuit even when
+    /// the request never reached the point where retryability is decided.
     async fn record_circuit_outcome<T>(&self, result: &Result<T, QdrantError>) {
         let mut breaker = self.circuit_breaker.lock().await;
         match result {
             Ok(_) => breaker.record_success(),
-            Err(e) if e.is_retryable() => {
+            Err(e) if ErrorClassify::is_transient(e) => {
                 tracing::warn!(error = %e, "Circuit breaker recording failure");
                 breaker.record_failure();
             }
             Err(_) => {
-                // Non-retryable errors don't affect circuit breaker state
+                // Deterministic errors don't affect circuit breaker state
             }
         }
         if let Some(metrics) = &self.metrics {
@@ -507,11 +512,15 @@ impl QdrantClient {
 
     /// Upsert vector points
     pub async fn upsert_points(&self, points: &[VectorPoint]) -> Result<(), QdrantError> {
+        self.check_circuit_breaker().await?;
+
         let point_count = points.len();
 
         let start = Instant::now();
         let result = self.point_ops.upsert(points).await;
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        self.record_circuit_outcome(&result).await;
 
         // Record metrics
         if let Some(metrics) = &self.metrics {
@@ -539,12 +548,16 @@ impl QdrantClient {
         group_id: &str,
         point_type: Option<PointKind>,
     ) -> Result<(), QdrantError> {
+        self.check_circuit_breaker().await?;
+
         let start = Instant::now();
         let result = self
             .point_ops
             .delete_by_file_path_scoped(file_path, Some(group_id), point_type)
             .await;
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_delete(latency_ms, 1, result.is_ok());
@@ -560,12 +573,15 @@ impl QdrantClient {
         group_id: &str,
         epoch: i64,
     ) -> Result<(), QdrantError> {
+        self.check_circuit_breaker().await?;
+
         let start = Instant::now();
         let result = self
             .point_ops
             .delete_by_file_path_scoped_epoch(file_path, group_id, epoch)
             .await;
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+        self.record_circuit_outcome(&result).await;
         if let Some(metrics) = &self.metrics {
             metrics.record_delete(latency_ms, 1, result.is_ok());
         }
@@ -578,9 +594,12 @@ impl QdrantClient {
         group_id: &str,
         epoch: i64,
     ) -> Result<(), QdrantError> {
+        self.check_circuit_breaker().await?;
+
         let start = Instant::now();
         let result = self.point_ops.delete_by_group_epoch(group_id, epoch).await;
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+        self.record_circuit_outcome(&result).await;
         if let Some(metrics) = &self.metrics {
             metrics.record_delete(latency_ms, 1, result.is_ok());
         }
@@ -594,6 +613,8 @@ impl QdrantClient {
 
     /// Delete all points for a given group (project namespace)
     pub async fn delete_by_group(&self, group_id: &str) -> Result<(), QdrantError> {
+        self.check_circuit_breaker().await?;
+
         debug!(
             collection = %self.collection_name,
             group_id = %group_id,
@@ -603,6 +624,8 @@ impl QdrantClient {
         let start = Instant::now();
         let result = self.point_ops.delete_by_group(group_id).await;
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_delete(latency_ms, 0, result.is_ok());
@@ -654,12 +677,16 @@ impl QdrantClient {
         group_id: &str,
         point_type: Option<PointKind>,
     ) -> Result<(), QdrantError> {
+        self.check_circuit_breaker().await?;
+
         let start = Instant::now();
         let result = self
             .point_ops
             .delete_by_file_paths_scoped(file_paths, Some(group_id), point_type)
             .await;
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_delete(latency_ms, file_paths.len(), result.is_ok());

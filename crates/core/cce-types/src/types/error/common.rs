@@ -140,6 +140,32 @@ impl IoError {
     }
 }
 
+impl ErrorClassify for IoError {
+    fn is_retryable(&self) -> bool {
+        self.is_transient()
+    }
+
+    fn is_transient(&self) -> bool {
+        // Deterministic local failures (missing file, permissions, invalid
+        // data, wrong path type) never succeed on retry; interruptions,
+        // resource pressure and connection faults may.
+        !matches!(
+            self.0.kind(),
+            std::io::ErrorKind::NotFound
+                | std::io::ErrorKind::PermissionDenied
+                | std::io::ErrorKind::InvalidInput
+                | std::io::ErrorKind::InvalidData
+                | std::io::ErrorKind::Unsupported
+                | std::io::ErrorKind::IsADirectory
+                | std::io::ErrorKind::NotADirectory
+        )
+    }
+
+    fn is_permanent(&self) -> bool {
+        !self.is_transient()
+    }
+}
+
 impl Clone for IoError {
     fn clone(&self) -> Self {
         IoError(std::io::Error::new(self.0.kind(), self.0.to_string()))

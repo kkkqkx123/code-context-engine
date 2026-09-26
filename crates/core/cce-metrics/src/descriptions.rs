@@ -65,7 +65,15 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "candidate_reuse_rejected_total",
         "Resumed operations whose candidate was not reusable (fresh clone forced)",
     ),
+    (
+        "dead_letter_truncated_total",
+        "Total embedding chunks cut to the input budget by dead-letter retry",
+    ),
     ("embedding_batch_size", "Embedding batch size"),
+    (
+        "embedding_deferred_uncommitted_total",
+        "Total embedding batches left uncommitted after the deferred retry",
+    ),
     ("embedding_errors_total", "Total embedding request errors"),
     (
         "embedding_latency_ms",
@@ -78,7 +86,15 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "embedding_tokens_total",
         "Total tokens processed by embedding provider",
     ),
+    (
+        "empty_files_total",
+        "Total files indexed successfully but producing no entities or chunks",
+    ),
     ("entity_changes_total", "Total entity changes detected"),
+    (
+        "entity_mapping_miss_total",
+        "Total entity mapping lookups missing an epoch-scoped entity record",
+    ),
     (
         "file_processing_total_latency_ms",
         "File processing end-to-end latency in milliseconds",
@@ -428,6 +444,10 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
     (
         "retry_queue_processed_total",
         "Total retry queue entries processed",
+    ),
+    (
+        "scanner_files_error_total",
+        "Total files skipped with an error during the scan",
     ),
     (
         "scanner_files_filtered_total",

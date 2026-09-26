@@ -19,7 +19,7 @@ impl IndexOrchestrator {
         file_path: &std::path::Path,
     ) -> Result<ParsedFile, OrchestratorError> {
         let language_info =
-            cce_types::language::LanguageInfo::detect_from_path(file_path.to_str().unwrap_or(""));
+            cce_types::language::LanguageInfo::detect_from_path(&file_path.to_string_lossy());
 
         let file_entry = FileEntry::new(
             file_path.to_path_buf(),

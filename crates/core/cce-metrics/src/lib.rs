@@ -30,10 +30,10 @@ pub use config::{MetricsLabelConfig, MetricsMemoryConfig};
 pub use descriptions::metric_description;
 pub use domain::{
     BackgroundTaskMetrics, Bm25Metrics, EmbeddingMetrics, FileProcessingMetrics, HotUpdateMetrics,
-    HotUpdateStorageMetrics, HttpMetrics, LlmRetryMetrics, MetricsSystemMetrics, ParserMetrics,
-    PipelineStageMetrics, PluginMetrics, QdrantMetrics, QueryMetrics, QueueMetrics,
-    RelationMetrics, RerankMetrics, RuntimeMetrics, ScannerMetrics, SearchMetrics, SqliteMetrics,
-    SummaryMetrics, SystemMetrics, WatchMetrics,
+    HotUpdateStorageMetrics, HttpMetrics, IndexQualityMetrics, LlmRetryMetrics,
+    MetricsSystemMetrics, ParserMetrics, PipelineStageMetrics, PluginMetrics, QdrantMetrics,
+    QueryMetrics, QueueMetrics, RelationMetrics, RerankMetrics, RuntimeMetrics, ScannerMetrics,
+    SearchMetrics, SqliteMetrics, SummaryMetrics, SystemMetrics, WatchMetrics,
 };
 pub use labels::{Label, Labels, MetricKey};
 pub use serialization::{MetricData, MetricValue, MetricsSnapshot};

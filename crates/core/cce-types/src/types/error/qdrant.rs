@@ -137,10 +137,16 @@ impl QdrantError {
 
     /// Check if this is retryable
     ///
-    /// A retryable error is one that may succeed on a subsequent attempt:
+    /// A retryable error is one that may succeed on a subsequent attempt or
+    /// that signals a transient backend fault the caller should treat as such:
     /// - Connection-level failures (refused, timeout, DNS)
+    /// - Transport/request failures (client could not complete the round trip)
     /// - Circuit breaker open (indicating transient overload)
     /// - Operation timeout (server may recover)
+    ///
+    /// `Api` (HTTP status returned by the server) is deliberately excluded: the
+    /// type layer cannot distinguish a retryable 5xx from a deterministic 4xx,
+    /// so it is surfaced through `is_transient` instead.
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
@@ -149,6 +155,7 @@ impl QdrantError {
                 | Self::ConnectionTimeout(_)
                 | Self::OperationTimeout(_)
                 | Self::CircuitBreakerOpen(_)
+                | Self::Request(_)
         )
     }
 
@@ -190,11 +197,14 @@ impl ErrorClassify for QdrantError {
                 | Self::ConnectionTimeout(_)
                 | Self::OperationTimeout(_)
                 | Self::CircuitBreakerOpen(_)
+                | Self::Request(_)
         )
     }
 
     fn is_transient(&self) -> bool {
-        self.is_retryable() || matches!(self, Self::Api(_) | Self::Request(_))
+        // Api is transient-but-not-retryable: the server responded, but the
+        // type layer cannot tell a retryable 5xx from a deterministic 4xx.
+        self.is_retryable() || matches!(self, Self::Api(_))
     }
 
     fn is_permanent(&self) -> bool {
@@ -272,6 +282,12 @@ mod tests {
         // Api errors are transient at the backend level but not retryable
         // (they reflect a server-side rejection, not a recoverable outage).
         assert!(!err.is_retryable());
+        assert!(err.is_transient());
+
+        let err: StorageError = QdrantError::request("connection reset").into();
+        assert!(matches!(err, StorageError::Qdrant(QdrantError::Request(_))));
+        // Transport failures are both retried and counted by the circuit breaker.
+        assert!(err.is_retryable());
         assert!(err.is_transient());
 
         let err: StorageError = QdrantError::CollectionNotFound(NotFoundError::new("coll")).into();

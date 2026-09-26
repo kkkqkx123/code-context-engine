@@ -326,6 +326,47 @@ impl ModuleUpdateState {
     }
 }
 
+/// Error code identifying an embedding input that exceeded the provider
+/// token budget. It is the only failure kind the lossy truncate-retry pass
+/// repairs, so dead letters carry it to stay eligible for that pass.
+pub const TOKEN_LIMIT_ERROR_CODE: &str = "LLM_TOKEN_LIMIT_EXCEEDED_ERROR";
+
+/// A classified module failure handed to the state tracker.
+///
+/// The classification is evaluated once at the failure site, where the typed
+/// error is still available: `retryable` decides the retry-vs-dead-letter
+/// transition and `code` records the stable error code (when known) for
+/// downstream self-healing decisions.
+#[derive(Debug, Clone)]
+pub struct TrackerFailure {
+    /// Human-readable failure message.
+    pub message: String,
+    /// Stable error code of the underlying failure, when known.
+    pub code: Option<&'static str>,
+    /// Whether retrying the same work could succeed.
+    pub retryable: bool,
+}
+
+impl TrackerFailure {
+    /// An infrastructure/transport failure worth retrying.
+    pub fn transient(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            code: None,
+            retryable: true,
+        }
+    }
+
+    /// A deterministic failure: retrying identical input can never succeed.
+    pub fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            code: None,
+            retryable: false,
+        }
+    }
+}
+
 /// Single module update record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleUpdateRecord {
@@ -337,10 +378,12 @@ pub struct ModuleUpdateRecord {
     pub retry_count: u32,
     /// Error message (if failed)
     pub error_message: Option<String>,
+    /// Stable error code of the last failure (if a classified failure was
+    /// recorded)
+    pub error_code: Option<String>,
     /// Whether this module has already gone through a lossy truncate-retry.
     /// A dead-letter module that was truncated once is never truncated again,
     /// so a persistent deterministic failure cannot be shaved down repeatedly.
-    #[serde(default)]
     pub truncated: bool,
 }
 
@@ -351,6 +394,7 @@ impl Default for ModuleUpdateRecord {
             last_attempt: None,
             retry_count: 0,
             error_message: None,
+            error_code: None,
             truncated: false,
         }
     }
@@ -358,9 +402,13 @@ impl Default for ModuleUpdateRecord {
 
 impl ModuleUpdateRecord {
     /// Whether this record is eligible for a lossy truncate-retry: a dead
-    /// letter that has not been truncated before.
-    pub const fn is_truncate_candidate(&self) -> bool {
-        matches!(self.state, ModuleUpdateState::DeadLetter) && !self.truncated
+    /// letter that has not been truncated before and whose last failure was
+    /// the provider token budget being exceeded. Truncating any other failure
+    /// kind only destroys content while the real cause still fails the retry.
+    pub fn is_truncate_candidate(&self) -> bool {
+        matches!(self.state, ModuleUpdateState::DeadLetter)
+            && !self.truncated
+            && self.error_code.as_deref() == Some(TOKEN_LIMIT_ERROR_CODE)
     }
 }
 
@@ -532,13 +580,18 @@ impl FileUpdateState {
     }
 
     /// Mark module as failed (auto-increments retry count)
-    pub fn mark_module_failed(&mut self, module: ModuleType, error: String) {
+    ///
+    /// A non-retryable failure goes straight to the dead letter queue:
+    /// scheduling retries for a deterministic failure only delays the
+    /// unavoidable and burns the retry budget on identical input.
+    pub fn mark_module_failed(&mut self, module: ModuleType, failure: TrackerFailure) {
         if let Some(record) = self.module_states.get_mut(&module) {
             record.retry_count += 1;
-            record.error_message = Some(error);
+            record.error_message = Some(failure.message);
+            record.error_code = failure.code.map(str::to_string);
 
-            // Determine next state based on retry count
-            if record.retry_count >= MAX_RETRY_COUNT {
+            // Determine next state based on retryability and retry count
+            if !failure.retryable || record.retry_count >= MAX_RETRY_COUNT {
                 record.state = ModuleUpdateState::DeadLetter;
             } else {
                 let delay = calculate_retry_delay(record.retry_count);
@@ -720,6 +773,10 @@ pub enum StateTrackerError {
     #[error("State not found for file: {0}")]
     StateNotFound(String),
 
+    /// The durable database could not be bound to the tracker
+    #[error("Index state tracker database binding is busy")]
+    DatabaseBindBusy,
+
     /// Version mismatch (old update trying to overwrite newer one)
     #[error("Version mismatch for file {file}: expected {expected}, found {found}")]
     VersionMismatch {
@@ -841,7 +898,10 @@ mod tests {
         let mut state = FileUpdateState::new("test.rs".to_string(), 1, FileChangeType::Modified, 1);
 
         // First failure
-        state.mark_module_failed(ModuleType::Summary, "API timeout".to_string());
+        state.mark_module_failed(
+            ModuleType::Summary,
+            TrackerFailure::transient("API timeout"),
+        );
 
         let record = state.get_module_state(ModuleType::Summary);
         assert_eq!(record.retry_count, 1);
@@ -849,22 +909,50 @@ mod tests {
         assert_eq!(record.error_message.as_ref().unwrap(), "API timeout");
 
         // Second failure
-        state.mark_module_failed(ModuleType::Summary, "API timeout again".to_string());
+        state.mark_module_failed(
+            ModuleType::Summary,
+            TrackerFailure::transient("API timeout again"),
+        );
         let record = state.get_module_state(ModuleType::Summary);
         assert_eq!(record.retry_count, 2);
         assert!(matches!(record.state, ModuleUpdateState::Retrying { .. }));
 
         // Third failure - should enter dead letter
-        state.mark_module_failed(ModuleType::Summary, "API timeout third".to_string());
+        state.mark_module_failed(
+            ModuleType::Summary,
+            TrackerFailure::transient("API timeout third"),
+        );
         let record = state.get_module_state(ModuleType::Summary);
         assert_eq!(record.retry_count, 3);
         assert!(matches!(record.state, ModuleUpdateState::DeadLetter));
 
         // Fourth failure - should stay in dead letter
-        state.mark_module_failed(ModuleType::Summary, "API timeout fourth".to_string());
+        state.mark_module_failed(
+            ModuleType::Summary,
+            TrackerFailure::transient("API timeout fourth"),
+        );
         let record = state.get_module_state(ModuleType::Summary);
         assert_eq!(record.retry_count, 4);
         assert!(matches!(record.state, ModuleUpdateState::DeadLetter));
+    }
+
+    #[test]
+    fn test_permanent_failure_dead_letters_immediately() {
+        let mut state = FileUpdateState::new("test.rs".to_string(), 1, FileChangeType::Modified, 1);
+
+        state.mark_module_failed(
+            ModuleType::Embedding,
+            TrackerFailure {
+                message: "Token limit exceeded: 9000 > 8192".to_string(),
+                code: Some(TOKEN_LIMIT_ERROR_CODE),
+                retryable: false,
+            },
+        );
+
+        let record = state.get_module_state(ModuleType::Embedding);
+        assert_eq!(record.retry_count, 1);
+        assert!(matches!(record.state, ModuleUpdateState::DeadLetter));
+        assert_eq!(record.error_code.as_deref(), Some(TOKEN_LIMIT_ERROR_CODE));
     }
 
     #[test]
@@ -878,13 +966,32 @@ mod tests {
                 .is_truncate_candidate()
         );
 
-        // Drive the embedding module into dead letter
-        for _ in 0..MAX_RETRY_COUNT {
-            state.mark_module_failed(ModuleType::Embedding, "400 too long".to_string());
-        }
+        // A token-limit dead letter becomes a candidate
+        state.mark_module_failed(
+            ModuleType::Embedding,
+            TrackerFailure {
+                message: "Token limit exceeded: 9000 > 8192".to_string(),
+                code: Some(TOKEN_LIMIT_ERROR_CODE),
+                retryable: false,
+            },
+        );
         let record = state.get_module_state(ModuleType::Embedding);
         assert!(matches!(record.state, ModuleUpdateState::DeadLetter));
         assert!(record.is_truncate_candidate());
+
+        // A dead letter from any other failure kind is never truncated:
+        // it would destroy content without addressing the cause.
+        let mut other =
+            FileUpdateState::new("other.rs".to_string(), 1, FileChangeType::Modified, 1);
+        other.mark_module_failed(
+            ModuleType::Embedding,
+            TrackerFailure::permanent("Authentication failed"),
+        );
+        assert!(
+            !other
+                .get_module_state(ModuleType::Embedding)
+                .is_truncate_candidate()
+        );
 
         // After a truncate-retry attempt it is no longer a candidate
         state.set_module_truncated(ModuleType::Embedding);
@@ -894,10 +1001,12 @@ mod tests {
                 .is_truncate_candidate()
         );
 
-        // The marker survives serde round-trip (durable projection)
+        // The markers survive serde round-trip (durable projection)
         let json = serde_json::to_string(&state).expect("serialize");
         let restored: FileUpdateState = serde_json::from_str(&json).expect("deserialize");
-        assert!(restored.get_module_state(ModuleType::Embedding).truncated);
+        let record = restored.get_module_state(ModuleType::Embedding);
+        assert!(record.truncated);
+        assert_eq!(record.error_code.as_deref(), Some(TOKEN_LIMIT_ERROR_CODE));
     }
 
     #[test]
@@ -928,7 +1037,7 @@ mod tests {
 
         assert!(!state.has_failures());
 
-        state.mark_module_failed(ModuleType::Summary, "error".to_string());
+        state.mark_module_failed(ModuleType::Summary, TrackerFailure::transient("error"));
         assert!(state.has_failures());
     }
 
@@ -952,7 +1061,7 @@ mod tests {
         assert!(state.get_modules_to_retry().is_empty());
 
         // Mark as failed (should enter retrying state)
-        state.mark_module_failed(ModuleType::Summary, "error".to_string());
+        state.mark_module_failed(ModuleType::Summary, TrackerFailure::transient("error"));
 
         let retries = state.get_modules_to_retry();
         assert_eq!(retries.len(), 1);
