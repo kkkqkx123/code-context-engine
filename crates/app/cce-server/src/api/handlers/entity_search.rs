@@ -37,6 +37,17 @@ pub type EntitySearchApiResponse = ApiResult<EntitySearchResponse>;
 /// }
 /// ```
 #[axum::debug_handler]
+#[utoipa::path(
+    post, path = "/api/entities/search", tag = "Search",
+    request_body = EntitySearchRequest,
+    responses(
+        (status = 200, body = EntitySearchResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_entity_search(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<EntitySearchRequest>,

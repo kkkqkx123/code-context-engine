@@ -4,33 +4,46 @@
 //! - Start/stop watching
 //! - Watch status
 
-use axum::{Json, extract::Path, extract::State, http::StatusCode, response::IntoResponse};
-use serde_json::json;
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use std::path::PathBuf;
 
 use cce_api::models::{
-    ErrorResponse, StartWatchRequest, WatchStatus, WatchStatusResponse, error_codes,
+    ErrorResponse, StartWatchRequest, StartWatchResponse, StopWatchResponse, WatchStatus,
+    WatchStatusResponse, error_codes,
 };
+
+use crate::api::response::ApiResult;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
 
 /// Handle start watch request
 ///
 /// Starts file watching for the specified directory.
+#[utoipa::path(
+    post, path = "/api/project/{project_id}/watch/start", tag = "Watch",
+    params(("project_id" = i64, Path, description = "Project id")),
+    request_body = StartWatchRequest,
+    responses(
+        (status = 200, body = StartWatchResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_start_watch(
     State(state): State<crate::api::state::AppState>,
     Path(project_id): Path<i64>,
     Json(request): Json<StartWatchRequest>,
-) -> impl IntoResponse {
+) -> ApiResult<StartWatchResponse> {
     // Validate project_id
     if project_id <= 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "Invalid project_id"
-            ))),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "Invalid project_id",
+        ));
     }
 
     // Verify the watched path is within the project root directory
@@ -42,14 +55,11 @@ pub async fn handle_start_watch(
     {
         Ok(entry) => entry,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!(ErrorResponse::with_details(
-                    error_codes::ENTITY_NOT_FOUND,
-                    "Failed to load project",
-                    e.to_string(),
-                ))),
-            );
+            return ApiResult::Error(ErrorResponse::with_details(
+                error_codes::ENTITY_NOT_FOUND,
+                "Failed to load project",
+                e.to_string(),
+            ));
         }
     };
     let project_root = PathBuf::from(&project_entry.metadata.root_path);
@@ -61,56 +71,44 @@ pub async fn handle_start_watch(
     let canonical_root = match project_root.canonicalize() {
         Ok(root) => root,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!(ErrorResponse::with_details(
-                    error_codes::INVALID_REQUEST,
-                    "Project root is not accessible",
-                    format!("Failed to canonicalize project root: {error}"),
-                ))),
-            );
+            return ApiResult::Error(ErrorResponse::with_details(
+                error_codes::INVALID_REQUEST,
+                "Project root is not accessible",
+                format!("Failed to canonicalize project root: {error}"),
+            ));
         }
     };
     let canonical_watch = match watch_path.canonicalize() {
         Ok(path) => path,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!(ErrorResponse::with_details(
-                    error_codes::INVALID_REQUEST,
-                    "Watch path is not accessible",
-                    format!("Failed to canonicalize watch path: {error}"),
-                ))),
-            );
+            return ApiResult::Error(ErrorResponse::with_details(
+                error_codes::INVALID_REQUEST,
+                "Watch path is not accessible",
+                format!("Failed to canonicalize watch path: {error}"),
+            ));
         }
     };
     if !canonical_watch.starts_with(&canonical_root) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!(ErrorResponse::with_details(
-                error_codes::INVALID_REQUEST,
-                "Watch path is not within project root",
-                format!(
-                    "Watch path '{}' is not within project root '{}'",
-                    canonical_watch.display(),
-                    project_root.display()
-                ),
-            ))),
-        );
+        return ApiResult::Error(ErrorResponse::with_details(
+            error_codes::INVALID_REQUEST,
+            "Watch path is not within project root",
+            format!(
+                "Watch path '{}' is not within project root '{}'",
+                canonical_watch.display(),
+                project_root.display()
+            ),
+        ));
     }
 
     // Get hot update coordinator for this project
     let hot_update = match state.engine.get_hot_update_coordinator(project_id).await {
         Ok(coord) => coord,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!(ErrorResponse::with_details(
-                    error_codes::INTERNAL_ERROR,
-                    "Failed to get hot update coordinator",
-                    e.to_string(),
-                ))),
-            );
+            return ApiResult::Error(ErrorResponse::with_details(
+                error_codes::INTERNAL_ERROR,
+                "Failed to get hot update coordinator",
+                e.to_string(),
+            ));
         }
     };
 
@@ -119,14 +117,11 @@ pub async fn handle_start_watch(
 
     // Check if path exists
     if !canonical_watch.exists() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!(ErrorResponse::with_details(
-                error_codes::INVALID_REQUEST,
-                "Path does not exist",
-                request.path.clone(),
-            ))),
-        );
+        return ApiResult::Error(ErrorResponse::with_details(
+            error_codes::INVALID_REQUEST,
+            "Path does not exist",
+            request.path.clone(),
+        ));
     }
 
     // Start watching
@@ -153,69 +148,66 @@ pub async fn handle_start_watch(
                     tracker.start(&canonical_watch);
                     drop(status_map);
 
-                    (
-                        StatusCode::OK,
-                        Json(json!({
-                            "success": true,
-                            "message": "File watching started",
-                            "project_id": project_id,
-                            "path": canonical_watch.to_string_lossy(),
-                            "extensions": request.extensions,
-                            "debounce_ms": request.debounce_ms
-                        })),
-                    )
+                    return ApiResult::Success(StartWatchResponse {
+                        success: true,
+                        message: "File watching started".to_string(),
+                        project_id,
+                        path: canonical_watch.to_string_lossy().into_owned(),
+                        extensions: request.extensions,
+                        debounce_ms: request.debounce_ms,
+                    });
                 }
-                Err(e) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!(ErrorResponse::with_details(
+                Err(e) => {
+                    return ApiResult::Error(ErrorResponse::with_details(
                         error_codes::INTERNAL_ERROR,
                         "Failed to start event loop",
                         e.to_string(),
-                    ))),
-                ),
+                    ));
+                }
             }
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!(ErrorResponse::with_details(
-                error_codes::INTERNAL_ERROR,
-                "Failed to start watching",
-                e.to_string(),
-            ))),
-        ),
+        Err(e) => ApiResult::Error(ErrorResponse::with_details(
+            error_codes::INTERNAL_ERROR,
+            "Failed to start watching",
+            e.to_string(),
+        )),
     }
 }
 
 /// Handle stop watch request
 ///
 /// Stops file watching and cleans up resources.
+#[utoipa::path(
+    post, path = "/api/project/{project_id}/watch/stop", tag = "Watch",
+    params(("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = StopWatchResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_stop_watch(
     State(state): State<crate::api::state::AppState>,
     Path(project_id): Path<i64>,
-) -> impl IntoResponse {
+) -> ApiResult<StopWatchResponse> {
     // Validate project_id
     if project_id <= 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "Invalid project_id"
-            ))),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "Invalid project_id",
+        ));
     }
 
     // Get hot update coordinator for this project
     let hot_update = match state.engine.get_hot_update_coordinator(project_id).await {
         Ok(coord) => coord,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!(ErrorResponse::with_details(
-                    error_codes::INTERNAL_ERROR,
-                    "Failed to get hot update coordinator",
-                    e.to_string(),
-                ))),
-            );
+            return ApiResult::Error(ErrorResponse::with_details(
+                error_codes::INTERNAL_ERROR,
+                "Failed to get hot update coordinator",
+                e.to_string(),
+            ));
         }
     };
 
@@ -231,42 +223,43 @@ pub async fn handle_stop_watch(
                 tracker.stop();
             }
 
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "success": true,
-                    "message": "File watching stopped",
-                    "project_id": project_id
-                })),
-            )
+            ApiResult::Success(StopWatchResponse {
+                success: true,
+                message: "File watching stopped".to_string(),
+                project_id,
+            })
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!(ErrorResponse::with_details(
-                error_codes::INTERNAL_ERROR,
-                "Failed to stop watching",
-                e.to_string(),
-            ))),
-        ),
+        Err(e) => ApiResult::Error(ErrorResponse::with_details(
+            error_codes::INTERNAL_ERROR,
+            "Failed to stop watching",
+            e.to_string(),
+        )),
     }
 }
 
 /// Handle watch status request
 ///
 /// Returns the current status of file watching.
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/watch/status", tag = "Watch",
+    params(("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = WatchStatusResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_watch_status(
     State(state): State<crate::api::state::AppState>,
     Path(project_id): Path<i64>,
-) -> impl IntoResponse {
+) -> ApiResult<WatchStatusResponse> {
     // Validate project_id
     if project_id <= 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "Invalid project_id"
-            ))),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "Invalid project_id",
+        ));
     }
 
     let status_map = state.watch_status.read().await;
@@ -293,7 +286,7 @@ pub async fn handle_watch_status(
         status: watch_status,
     };
 
-    (StatusCode::OK, Json(json!(response)))
+    ApiResult::Success(response)
 }
 
 #[cfg(test)]

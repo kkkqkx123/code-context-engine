@@ -5,8 +5,7 @@
 //! - BM25 search
 //! - Hybrid search
 
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use serde::Serialize;
+use axum::{Json, extract::State};
 use std::sync::Arc;
 
 use crate::api::validation;
@@ -20,32 +19,24 @@ use cce_api::models::{
     error_codes,
 };
 
-/// Unified response enum for search handler
-#[derive(Serialize)]
-#[serde(untagged)]
-pub enum SearchApiResponse {
-    Error(ErrorResponse),
-    Success(SearchResponse),
-}
+use crate::api::response::ApiResult;
 
-impl IntoResponse for SearchApiResponse {
-    fn into_response(self) -> axum::response::Response {
-        match self {
-            SearchApiResponse::Error(err) => {
-                let status = if err.error.code == error_codes::INVALID_REQUEST {
-                    StatusCode::BAD_REQUEST
-                } else {
-                    StatusCode::INTERNAL_SERVER_ERROR
-                };
-                (status, Json(err)).into_response()
-            }
-            SearchApiResponse::Success(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        }
-    }
-}
+/// Unified response type for search handlers
+pub type SearchApiResponse = ApiResult<SearchResponse>;
 
 /// Handle search request
 #[axum::debug_handler]
+#[utoipa::path(
+    post, path = "/api/search", tag = "Search",
+    request_body = SearchRequest,
+    responses(
+        (status = 200, body = SearchResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_search(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<SearchRequest>,
@@ -234,6 +225,17 @@ pub async fn handle_search(
 }
 
 /// Handle aggregated search request (multi-query with parallel retrieval)
+#[utoipa::path(
+    post, path = "/api/search/aggregated", tag = "Search",
+    request_body = AggregatedSearchRequest,
+    responses(
+        (status = 200, body = SearchResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_aggregated_search(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<AggregatedSearchRequest>,
@@ -525,9 +527,6 @@ mod tests {
             exclude_patterns: vec![],
             include_patterns: vec![],
             exclude_content_types: vec![],
-            file_extensions: vec![],
-            entity_types: vec![],
-            languages: vec![],
             include_categories: vec![],
             exclude_categories: vec![],
             enable_rerank: None,

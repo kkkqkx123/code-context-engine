@@ -5,9 +5,7 @@ use clap::Parser;
 
 use crate::client::ApiClient;
 use crate::output::{format_duration, format_score, print_error, print_success, truncate};
-use cce_api::models::{
-    AggregatedSearchRequest, AggregatedSearchResponse, SearchResult, SubQueryRequest,
-};
+use cce_api::models::{AggregatedSearchRequest, SearchResponse, SearchResultItem, SubQueryRequest};
 
 /// Execute multi-query aggregated search
 #[derive(Parser, Debug)]
@@ -126,7 +124,7 @@ impl AggSearchCommand {
             }
         }
 
-        let response: AggregatedSearchResponse = client.search_aggregated(&request).await?;
+        let response: SearchResponse = client.search_aggregated(&request).await?;
 
         if response.success {
             print_success(&format!(
@@ -137,10 +135,10 @@ impl AggSearchCommand {
 
             println!();
 
-            if response.results.is_empty() {
+            if response.items.is_empty() {
                 println!("No results found");
             } else {
-                for (i, item) in response.results.iter().enumerate() {
+                for (i, item) in response.items.iter().enumerate() {
                     print_result_item(i + 1, item);
                 }
             }
@@ -152,7 +150,7 @@ impl AggSearchCommand {
     }
 }
 
-fn print_result_item(index: usize, item: &SearchResult) {
+fn print_result_item(index: usize, item: &SearchResultItem) {
     println!(
         "{}. {} [{}] {}:{}-{}",
         index,

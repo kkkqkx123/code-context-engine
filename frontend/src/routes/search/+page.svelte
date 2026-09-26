@@ -100,7 +100,7 @@
 		</Toolbar>
 
 			<div class="results-list">
-				{#each paginatedResults as result (result.entity_ids.join(','))}
+				{#each paginatedResults as result ((result.entity_ids ?? []).join(','))}
 					<ResultCard {result} onNavigate={handleNavigate} />
 				{/each}
 			</div>

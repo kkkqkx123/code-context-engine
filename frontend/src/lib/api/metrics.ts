@@ -1,32 +1,15 @@
 /**
  * Metrics API
- * Handles system metrics export
+ * Handles system metrics export.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from './client';
+import type { components } from './schema';
 
-export interface MetricsData {
-	[key: string]: any;
-}
-
-export interface AggregatedMetric {
-	timestamp: string;
-	metric_name: string;
-	labels_json?: string | null;
-	count: number;
-	avg?: number | null;
-	median?: number | null;
-	max?: number | null;
-	p90?: number | null;
-	p99?: number | null;
-	project_id?: number;
-	operation_type?: string;
-}
-
-export interface CleanupMetricsResponse {
-	success: boolean;
-	deleted_count: number;
-}
+export type MetricsData = Record<string, unknown>;
+export type AggregatedMetric = components['schemas']['AggregatedMetric'];
+export type CleanupMetricsResponse = components['schemas']['MetricsCleanupResponse'];
 
 export const metricsApi = {
 	// Get metrics in JSON format

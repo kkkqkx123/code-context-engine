@@ -9,7 +9,7 @@
 
 	let showConfirmDialog = $state(false);
 	let qdrantManaged = $state(false);
-	let qdrantStatus = $state<QdrantProcessStatus>('Idle');
+	let qdrantStatus = $state<QdrantProcessStatus>({ type: 'Idle' });
 	let qdrantLoading = $state(false);
 	let qdrantError = $state<string | null>(null);
 
@@ -43,17 +43,16 @@
 	}
 
 	function formatQdrantStatus(status: QdrantProcessStatus): string {
-		if (typeof status === 'string') return status;
-		if (status && typeof status === 'object' && 'Failed' in status) return `Failed: ${status.Failed}`;
-		return String(status);
+		if (status.type === 'Failed') return `Failed: ${status.message}`;
+		return status.type;
 	}
 
 	function qdrantIsRunning(): boolean {
-		return qdrantStatus === 'Running';
+		return qdrantStatus.type === 'Running';
 	}
 
 	function qdrantIsBusy(): boolean {
-		return qdrantStatus === 'Starting' || qdrantStatus === 'Stopping';
+		return qdrantStatus.type === 'Starting' || qdrantStatus.type === 'Stopping';
 	}
 
 	function handleClearIndex() {
@@ -135,21 +134,6 @@
 						{#if $storageState.status.relation_storage.item_count > 0}
 							<div class="spec-detail">
 								{$storageState.status.relation_storage.item_count} relations
-							</div>
-						{/if}
-					</div>
-
-					<div class="spec-item">
-						<div class="spec-label">Cache</div>
-						<div class="spec-value">
-							<Badge
-								label={$storageState.status.cache_storage.connected ? 'Connected' : 'Disconnected'}
-								variant={$storageState.status.cache_storage.connected ? 'active' : 'inactive'}
-							/>
-						</div>
-						{#if $storageState.status.cache_storage.item_count > 0}
-							<div class="spec-detail">
-								{$storageState.status.cache_storage.item_count} items
 							</div>
 						{/if}
 					</div>

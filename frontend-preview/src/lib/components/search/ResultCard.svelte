@@ -18,7 +18,7 @@
 	}
 
 	function handleNavigate() {
-		onNavigate(String(result.entity_ids[0] ?? ''));
+		onNavigate(String(result.entity_ids?.[0] ?? ''));
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -49,13 +49,6 @@
 	{#if result.code_chunk}
 		<div class="code-preview">
 			<CodeBlock code={result.code_chunk} language="text" />
-		</div>
-	{/if}
-
-	{#if result.call_chain && result.call_chain.length > 0}
-		<div class="call-chain-info">
-			<span class="label">Call Chain:</span>
-			<span class="value">{result.call_chain.length} nodes</span>
 		</div>
 	{/if}
 </div>
@@ -106,26 +99,5 @@
 
 	.code-preview {
 		margin-top: 1rem;
-	}
-
-	.call-chain-info {
-		margin-top: 1rem;
-		padding-top: 1rem;
-		border-top: 1px solid var(--gray-200);
-		display: flex;
-		gap: 0.5rem;
-		font-size: 0.85rem;
-	}
-
-	.label {
-		font-family: 'Space Mono', monospace;
-		text-transform: uppercase;
-		font-size: 0.65rem;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
-	}
-
-	.value {
-		font-weight: 700;
 	}
 </style>

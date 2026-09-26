@@ -6,6 +6,9 @@
 # Frontend
 **/node_modules
 
+# OpenAPI codegen intermediate output (checked-in copy lives in frontend/src/lib/api/)
+tools/openapi-codegen/schema.d.ts
+
 # Build artifacts
 **/target/
 **/*.rs.bk

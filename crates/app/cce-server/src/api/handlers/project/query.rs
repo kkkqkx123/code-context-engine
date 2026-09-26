@@ -2,33 +2,35 @@
 //!
 //! Handles read-only operations for project information.
 
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
-use serde_json::json;
+use axum::extract::{Path, State};
 
-use cce_api::models::ProjectConfig;
+use super::management::record_to_config;
+use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
-use cce_storage_sqlite::{ProjectRecord, ProjectRepository};
+use cce_api::models::{ErrorResponse, ProjectDetailResponse, ProjectListResponse};
+use cce_storage_sqlite::ProjectRepository;
 
 /// Handle list all projects request
+#[utoipa::path(
+    get, path = "/api/project", tag = "Project",
+    responses(
+        (status = 200, body = ProjectListResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_list_projects(
     State(state): State<crate::api::state::AppState>,
-) -> impl IntoResponse {
+) -> ApiResult<ProjectListResponse> {
     // Check if metadata store is available
     let metadata_store = match &state.metadata_store {
         Some(s) => s,
         None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    "Metadata store not initialized",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                "Metadata store not initialized",
+            ));
         }
     };
 
@@ -39,13 +41,10 @@ pub async fn handle_list_projects(
     {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to query project: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to query project: {}", e),
+            ));
         }
     };
 
@@ -62,45 +61,36 @@ pub async fn handle_list_projects(
 
     let total = projects.len();
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "success": true,
-            "projects": projects,
-            "total": total
-        })),
-    )
+    ApiResult::Success(ProjectListResponse {
+        success: true,
+        projects,
+        total,
+    })
 }
 
 /// Handle get single project request
+#[utoipa::path(
+    get, path = "/api/project/{id}", tag = "Project",
+    params(("id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = ProjectDetailResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_get_project(
     State(state): State<crate::api::state::AppState>,
-    Path(id_str): Path<String>,
-) -> impl IntoResponse {
+    Path(id): Path<i64>,
+) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available
     let metadata_store = match &state.metadata_store {
         Some(s) => s,
         None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    "Metadata store not initialized",
-                )),
-            );
-        }
-    };
-
-    let id: i64 = match id_str.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(
-                    error_codes::INVALID_INPUT,
-                    "Invalid project ID: must be a number",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                "Metadata store not initialized",
+            ));
         }
     };
 
@@ -110,22 +100,16 @@ pub async fn handle_get_project(
     {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(error_response(
-                    error_codes::ENTITY_NOT_FOUND,
-                    "Project does not exist",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::ENTITY_NOT_FOUND,
+                "Project does not exist",
+            ));
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to query project: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to query project: {}", e),
+            ));
         }
     };
 
@@ -133,47 +117,15 @@ pub async fn handle_get_project(
     let project = match record_to_config(&record) {
         Ok(p) => p,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to convert project data: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to convert project data: {}", e),
+            ));
         }
     };
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "success": true,
-            "project": project
-        })),
-    )
-}
-
-/// Create error response JSON
-fn error_response(code: &str, message: &str) -> serde_json::Value {
-    json!({
-        "success": false,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    })
-}
-
-/// Convert ProjectRecord to ProjectConfig
-fn record_to_config(record: &ProjectRecord) -> Result<ProjectConfig, serde_json::Error> {
-    Ok(ProjectConfig {
-        id: record.id.to_string(),
-        name: record.name.clone(),
-        root_path: record.root_path.clone(),
-        extensions: vec![],
-        exclude_dirs: vec![],
-        respect_gitignore: true,
-        ignore_patterns: vec![],
-        created_at: record.created_at.to_string(),
-        last_indexed: record.last_indexed.clone(),
+    ApiResult::Success(ProjectDetailResponse {
+        success: true,
+        project,
     })
 }

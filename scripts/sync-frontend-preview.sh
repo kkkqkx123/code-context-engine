@@ -45,6 +45,11 @@ echo "Syncing stores..."
 mkdir -p "$PREVIEW_DIR/src/lib/stores"
 cp "$FRONTEND_DIR/src/lib/stores/"*.ts "$PREVIEW_DIR/src/lib/stores/"
 
+# Sync shared utils (graph presentation model, formatters)
+echo "Syncing utils..."
+mkdir -p "$PREVIEW_DIR/src/lib/utils"
+cp "$FRONTEND_DIR/src/lib/utils/"*.ts "$PREVIEW_DIR/src/lib/utils/"
+
 # Sync API modules (but preserve mock-enabled client.ts)
 echo "Syncing API modules..."
 mkdir -p "$PREVIEW_DIR/src/lib/api"

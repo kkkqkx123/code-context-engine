@@ -15,7 +15,7 @@ import type { StorageStatusResponse } from '../api/storage';
 import type { MetricsData } from '../api/metrics';
 import type { WatchStatus } from '../api/watch';
 import type { ConfigInfoResponse, ConfigValidateResponse } from '../api/config';
-import type { CompressApiResponse, DiagnoseResponse, GetSymbolsResponse, ToolApiResponse } from '../api/tools';
+import type { CompressApiResponse, DiagnoseApiResponse, GetSymbolsResponse } from '../api/tools';
 import type { SummaryResponse } from '../api/summary';
 import type { QdrantProcessStatusResponse, QdrantActionResponse } from '../api/qdrant';
 
@@ -47,7 +47,7 @@ export const mockClient = {
 		if (endpoint.match(/\/api\/project\/\w+\/class\/\w+\/implementations$/)) return mockData.mockClassImplementations as T;
 		if (endpoint === '/api/storage/status') return mockData.mockStorageStatus as T;
 		if (endpoint === '/api/metrics/json') return mockData.mockMetricsData as T;
-		if (endpoint.match(/\/api\/project\/\w+\/watch\/status$/)) return mockData.mockWatchStatus as T;
+		if (endpoint.match(/\/api\/project\/\w+\/watch\/status$/)) return { success: true, status: mockData.mockWatchStatus } as T;
 		if (endpoint === '/api/config') return mockData.mockConfigInfo as T;
 		if (endpoint === '/api/config/validate') return mockData.mockConfigValidation as T;
 		if (endpoint === '/api/qdrant/process/status') return mockData.mockQdrantProcessStatus as T;
@@ -80,7 +80,7 @@ export const mockClient = {
 		if (endpoint === '/api/tools/symbols') return mockData.mockSymbolsResult as T;
 		if (endpoint === '/api/tools/references') return { success: true, result: {} } as T;
 		if (endpoint === '/api/tools/definition') return { success: true, result: {} } as T;
-		if (endpoint === '/api/tools/keyword-search') return { success: true, data: { query: '', total: 0, results: [] } } as T;
+		if (endpoint === '/api/tools/keyword-search') return { success: true, result: { query: '', total: 0, results: [] } } as T;
 		if (endpoint === '/api/summary') return mockData.mockSummaryResult as T;
 		if (endpoint === '/api/qdrant/process/start') return mockData.mockQdrantActionResponse as T;
 		if (endpoint === '/api/qdrant/process/stop') return mockData.mockQdrantActionResponse as T;

@@ -1,122 +1,47 @@
 /**
  * Index Management API
- * Handles project lifecycle and indexing operations
+ * Handles project lifecycle and indexing operations.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from "./client";
+import type { components } from "./schema";
 
-export interface Project {
-  id: string;
-  name: string;
-  root_path: string;
-  extensions?: string[];
-  exclude_dirs?: string[];
-  respect_gitignore?: boolean;
-  ignore_patterns?: string[];
-  created_at?: string;
-  last_indexed?: string;
-}
-
-export interface IndexRequest {
-  project_id: number;
-  path: string;
-  extensions?: string[];
-  exclude_dirs?: string[];
-  respect_gitignore?: boolean;
-  ignore_patterns?: string[];
-  custom_gitignore?: string;
-}
-
-export interface IncrementalIndexRequest {
-  project_id: number;
-  files_to_index?: string[];
-  files_to_remove?: string[];
-  force_reindex?: boolean;
-}
-
-export interface ParseResult {
-  entities: any[];
-  language: string;
-  file_path: string;
-}
-
-export interface ClearIndexRequest {
-  project_id: number;
-  vectors?: boolean;
-  bm25?: boolean;
-  relations?: boolean;
-  cache?: boolean;
-}
-
-export interface IndexStatsResponse {
-  success: boolean;
-  statistics: {
-    total_entities: number;
-    total_relations: number;
-    total_vectors: number;
-    total_bm25_documents: number;
-    total_files: number;
-  };
-  elapsed_ms: number;
-}
-
-export interface IndexResponse {
-  success: boolean;
-  files_scanned: number;
-  files_indexed: number;
-  failed_files: number;
-  total_entities: number;
-  total_relations: number;
-  total_vectors: number;
-  elapsed_ms: number;
-  message: string;
-  errors?: string[];
-}
-
-export interface DeleteFileResponse {
-  success: boolean;
-  message: string;
-  file_path: string;
-  vectors_deleted: number;
-  bm25_documents_deleted: number;
-  relations_deleted: number;
-  elapsed_ms: number;
-}
-
-export interface DeleteEntityResponse {
-  success: boolean;
-  message: string;
-  entity_id: number;
-  vectors_deleted: number;
-  bm25_documents_deleted: number;
-  relations_deleted: number;
-  elapsed_ms: number;
-}
-
-export interface BatchDeleteRequest {
-  file_paths: string[];
-  entity_ids: number[];
-}
-
-export interface BatchDeleteResponse {
-  success: boolean;
-  files_deleted: number;
-  entities_deleted: number;
-  errors: string[];
-  elapsed_ms: number;
-}
+export type Project = components["schemas"]["ProjectConfig"];
+export type IndexRequest = components["schemas"]["IndexRequest"];
+export type IndexResponse = components["schemas"]["IndexResponse"];
+export type IncrementalIndexRequest = components["schemas"]["IncrementalIndexRequest"];
+export type IncrementalIndexResponse = components["schemas"]["IncrementalIndexResponse"];
+export type ParseResult = components["schemas"]["ParseResponse"];
+export type ClearIndexRequest = components["schemas"]["ClearIndexRequest"];
+export type ClearIndexResponse = components["schemas"]["ClearIndexResponse"];
+export type IndexStatsResponse = components["schemas"]["IndexStatsResponse"];
+export type DeleteFileResponse = components["schemas"]["DeleteFileResponse"];
+export type DeleteEntityResponse = components["schemas"]["DeleteEntityResponse"];
+export type BatchDeleteRequest = components["schemas"]["BatchDeleteRequest"];
+export type BatchDeleteResponse = components["schemas"]["BatchDeleteResponse"];
+export type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
+export type UpdateProjectRequest = components["schemas"]["UpdateProjectRequest"];
+export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
+export type ProjectDetailResponse = components["schemas"]["ProjectDetailResponse"];
+export type ProjectDeleteResponse = components["schemas"]["ProjectDeleteResponse"];
+export type ProjectIndexResponse = components["schemas"]["ProjectIndexResponse"];
+export type ProjectConfigReloadResponse = components["schemas"]["ProjectConfigReloadResponse"];
+export type ProjectConfigUpdateRequest = components["schemas"]["ProjectConfigUpdateRequest"];
+export type ProjectConfigUpdateResponse = components["schemas"]["ProjectConfigUpdateResponse"];
 
 export const indexApi = {
   // Full directory indexing
-  runIndex: (data: IndexRequest) => apiClient.post("/api/index", data),
+  runIndex: (data: IndexRequest) =>
+    apiClient.post<IndexResponse>("/api/index", data),
 
   // Incremental indexing
   incrementalIndex: (data: IncrementalIndexRequest) =>
-    apiClient.post("/api/index/incremental", data),
+    apiClient.post<IncrementalIndexResponse>("/api/index/incremental", data),
 
-  // Single file parse
-  parseFile: (filePath: string, language?: string) =>
-    apiClient.post("/api/parse", { file_path: filePath, language }),
+  // Single file parse (language is auto-detected by the backend)
+  parseFile: (filePath: string) =>
+    apiClient.post<ParseResult>("/api/parse", { file_path: filePath }),
 
   // Get index statistics
   getStats: (projectId: number) =>
@@ -124,7 +49,7 @@ export const indexApi = {
 
   // Clear index
   clearIndex: (projectId: number) =>
-    apiClient.delete("/api/index", {
+    apiClient.delete<ClearIndexResponse>("/api/index", {
       body: JSON.stringify({ project_id: projectId } as ClearIndexRequest),
     }),
 
@@ -150,58 +75,35 @@ export const indexApi = {
 
 export const projectApi = {
   // List all projects
-  listProjects: () =>
-    apiClient.get<{ success: boolean; projects: Project[]; total: number }>(
-      "/api/project",
-    ),
+  listProjects: () => apiClient.get<ProjectListResponse>("/api/project"),
 
   // Get project details
   getProject: (id: string) =>
-    apiClient.get<{ success: boolean; project: Project }>(`/api/project/${id}`),
+    apiClient.get<ProjectDetailResponse>(`/api/project/${id}`),
 
   // Create new project
-  createProject: (data: {
-    root_path: string;
-    name?: string;
-    extensions?: string[];
-    exclude_dirs?: string[];
-    respect_gitignore?: boolean;
-    ignore_patterns?: string[];
-  }) =>
-    apiClient.post<{ success: boolean; project: Project }>(
-      "/api/project",
-      data,
-    ),
+  createProject: (data: CreateProjectRequest) =>
+    apiClient.post<ProjectDetailResponse>("/api/project", data),
 
   // Update project
-  updateProject: (
-    id: string,
-    data: {
-      name?: string;
-      extensions?: string[];
-      exclude_dirs?: string[];
-      respect_gitignore?: boolean;
-      ignore_patterns?: string[];
-    },
-  ) =>
-    apiClient.put<{ success: boolean; project: Project }>(
-      `/api/project/${id}`,
-      data,
-    ),
+  updateProject: (id: string, data: UpdateProjectRequest) =>
+    apiClient.put<ProjectDetailResponse>(`/api/project/${id}`, data),
 
   // Delete project
   deleteProject: (id: string) =>
-    apiClient.delete<{ success: boolean }>(`/api/project/${id}`),
+    apiClient.delete<ProjectDeleteResponse>(`/api/project/${id}`),
 
   // Trigger project indexing
   indexProject: (id: string) =>
-    apiClient.post<{ success: boolean }>(`/api/project/${id}/index`),
+    apiClient.post<ProjectIndexResponse>(`/api/project/${id}/index`),
 
   // Reload project configuration from file system
   reloadProject: (id: string) =>
-    apiClient.post<{ success: boolean }>(`/api/project/${id}/reload`),
+    apiClient.post<ProjectConfigReloadResponse>(`/api/project/${id}/reload`),
 
   // Update project configuration
   updateProjectConfig: (id: string, config: Record<string, unknown>) =>
-    apiClient.put<{ success: boolean }>(`/api/project/${id}/config`, { config }),
+    apiClient.put<ProjectConfigUpdateResponse>(`/api/project/${id}/config`, {
+      config,
+    } as ProjectConfigUpdateRequest),
 };

@@ -15,6 +15,16 @@ use crate::api::response::ApiResult;
 pub type ParseApiResponse = ApiResult<ParseResponse>;
 
 /// Handle parse request
+#[utoipa::path(
+    post, path = "/api/parse", tag = "Index",
+    request_body = ParseRequest,
+    responses(
+        (status = 200, body = ParseResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_parse(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<ParseRequest>,
@@ -113,7 +123,6 @@ mod tests {
     fn test_parse_request_validation() {
         let request = ParseRequest {
             file_path: "".to_string(),
-            language: None,
         };
 
         assert!(request.file_path.trim().is_empty());

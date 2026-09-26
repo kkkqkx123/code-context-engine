@@ -2,39 +2,13 @@
 //!
 //! This module provides handlers for full index execution.
 
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use serde::Deserialize;
+use axum::{Json, extract::State};
 use std::path::PathBuf;
 
-use cce_api::models::IndexResponse;
+use cce_api::models::{ErrorResponse, IndexRequest, IndexResponse, error_codes};
 use cce_orchestrator::{IndexOptions, IndexResult};
 
-/// Index query parameters
-#[derive(Debug, Deserialize)]
-pub struct IndexQuery {
-    /// Project ID for project-specific configuration
-    pub project_id: i64,
-    /// Root directory to index
-    pub path: String,
-    /// File extensions to include (e.g., ["rs", "py"])
-    #[serde(default)]
-    pub extensions: Vec<String>,
-    /// Directories to exclude (e.g., ["target", "node_modules"])
-    #[serde(default)]
-    pub exclude_dirs: Vec<String>,
-    /// Whether to respect .gitignore files
-    #[serde(default = "default_respect_gitignore")]
-    pub respect_gitignore: bool,
-    /// Additional ignore patterns (gitignore-style)
-    #[serde(default)]
-    pub ignore_patterns: Vec<String>,
-    /// Path to custom gitignore file
-    pub custom_gitignore: Option<String>,
-}
-
-fn default_respect_gitignore() -> bool {
-    true
-}
+use crate::api::response::ApiResult;
 
 fn index_response_from_result(result: IndexResult) -> IndexResponse {
     let has_errors = !result.errors().is_empty();
@@ -67,76 +41,42 @@ fn index_response_from_result(result: IndexResult) -> IndexResponse {
 
 /// Handle index request
 #[axum::debug_handler]
+#[utoipa::path(
+    post, path = "/api/index", tag = "Index",
+    request_body = IndexRequest,
+    responses(
+        (status = 200, body = IndexResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_index(
     State(state): State<crate::api::state::AppState>,
-    Json(query): Json<IndexQuery>,
-) -> impl IntoResponse {
-    let start = std::time::Instant::now();
-
+    Json(query): Json<IndexRequest>,
+) -> ApiResult<IndexResponse> {
     // Validate project_id
     if let Err(e) = crate::api::validation::validate_project_id(query.project_id) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(IndexResponse {
-                success: false,
-                files_scanned: 0,
-                files_indexed: 0,
-                failed_files: 0,
-                degraded_files: 0,
-                skipped_permanent: 0,
-                circuit_open: false,
-                total_entities: 0,
-                total_relations: 0,
-                total_vectors: 0,
-                elapsed_ms: 0,
-                message: format!("Invalid project_id: {}", e),
-                errors: vec![e.to_string()],
-            }),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("Invalid project_id: {}", e),
+        ));
     }
 
     // Validate root directory
     let root_dir = PathBuf::from(&query.path);
     if !root_dir.exists() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(IndexResponse {
-                success: false,
-                files_scanned: 0,
-                files_indexed: 0,
-                failed_files: 0,
-                degraded_files: 0,
-                skipped_permanent: 0,
-                circuit_open: false,
-                total_entities: 0,
-                total_relations: 0,
-                total_vectors: 0,
-                elapsed_ms: 0,
-                message: format!("Directory does not exist: {}", query.path),
-                errors: vec![format!("Directory does not exist: {}", query.path)],
-            }),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("Directory does not exist: {}", query.path),
+        ));
     }
 
     if !root_dir.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(IndexResponse {
-                success: false,
-                files_scanned: 0,
-                files_indexed: 0,
-                failed_files: 0,
-                degraded_files: 0,
-                skipped_permanent: 0,
-                circuit_open: false,
-                total_entities: 0,
-                total_relations: 0,
-                total_vectors: 0,
-                elapsed_ms: 0,
-                message: format!("The path is not a directory: {}", query.path),
-                errors: vec![format!("The path is not a directory: {}", query.path)],
-            }),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("The path is not a directory: {}", query.path),
+        ));
     }
 
     // Build index options
@@ -175,56 +115,20 @@ pub async fn handle_index(
     let result = match state.engine.index(query.project_id, options).await {
         Ok(r) => r,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(IndexResponse {
-                    success: false,
-                    files_scanned: 0,
-                    files_indexed: 0,
-                    failed_files: 0,
-                    degraded_files: 0,
-                    skipped_permanent: 0,
-                    circuit_open: false,
-                    total_entities: 0,
-                    total_relations: 0,
-                    total_vectors: 0,
-                    elapsed_ms: start.elapsed().as_millis() as u64,
-                    message: format!("Index failure: {}", e),
-                    errors: vec![e.to_string()],
-                }),
-            );
+            return ApiResult::Error(ErrorResponse::with_details(
+                error_codes::INTERNAL_ERROR,
+                "Index execution failed",
+                e.to_string(),
+            ));
         }
     };
 
-    let response = index_response_from_result(result);
-    let status_code = if response.success {
-        StatusCode::OK
-    } else {
-        StatusCode::PARTIAL_CONTENT
-    };
-
-    (status_code, Json(response))
+    ApiResult::Success(index_response_from_result(result))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_index_query_default() {
-        let query = IndexQuery {
-            project_id: 1,
-            path: "/test".to_string(),
-            extensions: vec![],
-            exclude_dirs: vec![],
-            respect_gitignore: true,
-            ignore_patterns: vec![],
-            custom_gitignore: None,
-        };
-
-        assert!(query.respect_gitignore); // default
-        assert!(query.extensions.is_empty());
-    }
 
     #[test]
     fn test_index_response_from_result() {

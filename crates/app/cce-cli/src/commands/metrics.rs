@@ -5,7 +5,7 @@ use chrono::{Duration, Utc};
 
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
-use cce_api::models::MetricsHistoryResponse;
+use cce_api::models::AggregatedMetric;
 
 pub enum MetricsFormat {
     Prometheus,
@@ -78,7 +78,7 @@ pub async fn execute_history(
         println!("Fetching metrics history from {} to {}...", from, to);
     }
 
-    let response: Vec<MetricsHistoryResponse> = client.get(&path).await?;
+    let response: Vec<AggregatedMetric> = client.get(&path).await?;
 
     if response.is_empty() {
         print_success("No historical records found");

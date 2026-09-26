@@ -5,30 +5,26 @@
 //! missing semicolons, etc.
 
 use axum::{Json, extract::State};
-use serde::Serialize;
 
-use cce_api::models::DiagnoseRequest;
-use cce_orchestrator::{DiagnosisRequest, DiagnosisResponse};
+use cce_api::models::{DiagnoseApiResponse, DiagnoseRequest, DiagnoseResult};
+use cce_orchestrator::DiagnosisRequest;
 use cce_types::language::Language;
 
+use super::to_api_model;
 use crate::api::AppState;
-
-/// AST diagnosis response
-#[derive(Debug, Serialize)]
-pub struct DiagnoseApiResponse {
-    /// Whether the operation succeeded
-    pub success: bool,
-    /// Diagnosis result (if successful)
-    pub result: Option<DiagnosisResponse>,
-    /// Error message (if failed)
-    pub error: Option<String>,
-}
 
 /// Handle AST diagnosis
 ///
 /// # Endpoint
 ///
 /// `POST /api/tools/diagnose`
+#[utoipa::path(
+    post, path = "/api/tools/diagnose", tag = "Tools",
+    request_body = DiagnoseRequest,
+    responses(
+        (status = 200, body = DiagnoseApiResponse, description = "Diagnosis result, errors reported in-band")
+    )
+)]
 pub async fn handle_diagnose(
     State(state): State<AppState>,
     Json(request): Json<DiagnoseRequest>,
@@ -50,11 +46,18 @@ pub async fn handle_diagnose(
     req = req.with_ast(request.include_ast);
 
     match diagnosis.diagnose(req) {
-        Ok(response) => Json(DiagnoseApiResponse {
-            success: true,
-            result: Some(response),
-            error: None,
-        }),
+        Ok(response) => match to_api_model::<_, DiagnoseResult>(response) {
+            Ok(result) => Json(DiagnoseApiResponse {
+                success: true,
+                result: Some(result),
+                error: None,
+            }),
+            Err(e) => Json(DiagnoseApiResponse {
+                success: false,
+                result: None,
+                error: Some(format!("Failed to serialize response: {}", e)),
+            }),
+        },
         Err(e) => Json(DiagnoseApiResponse {
             success: false,
             result: None,

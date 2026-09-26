@@ -6,8 +6,8 @@ use crate::cli::IndexCommands;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
-    DeadLetterRetryResponse, IncrementalIndexRequest, IncrementalIndexResponse, IndexResponse,
-    ParseRequest, ParseResponse,
+    DeadLetterRetryResponse, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
+    IndexResponse, ParseRequest, ParseResponse,
 };
 
 /// Index run parameters
@@ -48,9 +48,7 @@ pub async fn execute(cmd: &IndexCommands, server: &str, verbose: bool) -> Result
             remove,
             force,
         } => incremental_index(&client, *project_id, add, remove, *force, verbose).await,
-        IndexCommands::Parse { file, language } => {
-            parse_file(&client, file, language, verbose).await
-        }
+        IndexCommands::Parse { file } => parse_file(&client, file, verbose).await,
         IndexCommands::RetryDeadLetter { project_id } => {
             retry_dead_letter(&client, *project_id, verbose).await
         }
@@ -93,20 +91,21 @@ async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: boo
         .map(|s| s.trim().to_string())
         .collect();
 
-    let query = serde_json::json!({
-        "project_id": params.project_id,
-        "path": params.path,
-        "extensions": ext_list,
-        "exclude_dirs": exclude_list,
-        "respect_gitignore": params.gitignore,
-        "custom_gitignore": params.custom_gitignore,
-    });
+    let request = IndexRequest {
+        project_id: params.project_id,
+        path: params.path.to_string(),
+        extensions: ext_list,
+        exclude_dirs: exclude_list,
+        respect_gitignore: params.gitignore,
+        ignore_patterns: Vec::new(),
+        custom_gitignore: params.custom_gitignore.clone(),
+    };
 
     if verbose {
         println!("Indexing directory: {}", params.path);
     }
 
-    let response: IndexResponse = client.post("/api/index", &query).await?;
+    let response: IndexResponse = client.post("/api/index", &request).await?;
 
     if response.success {
         println!();
@@ -209,15 +208,9 @@ async fn incremental_index(
     Ok(())
 }
 
-async fn parse_file(
-    client: &ApiClient,
-    file: &str,
-    language: &Option<String>,
-    verbose: bool,
-) -> Result<()> {
+async fn parse_file(client: &ApiClient, file: &str, verbose: bool) -> Result<()> {
     let request = ParseRequest {
         file_path: file.to_string(),
-        language: language.clone(),
     };
 
     if verbose {

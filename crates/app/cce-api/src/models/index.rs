@@ -1,11 +1,12 @@
 //! Index management models
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// Index request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IndexRequest {
-    pub project_id: Option<i64>,
+    pub project_id: i64,
     pub path: String,
     #[serde(default)]
     pub extensions: Vec<String>,
@@ -13,12 +14,16 @@ pub struct IndexRequest {
     pub exclude_dirs: Vec<String>,
     #[serde(default = "default_true")]
     pub respect_gitignore: bool,
+    /// Additional ignore patterns (gitignore-style)
+    #[serde(default)]
+    pub ignore_patterns: Vec<String>,
+    /// Path to custom gitignore file
     #[serde(default)]
     pub custom_gitignore: Option<String>,
 }
 
 /// Index response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IndexResponse {
     pub success: bool,
     pub files_scanned: usize,
@@ -45,7 +50,7 @@ pub struct IndexResponse {
 }
 
 /// Incremental index request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IncrementalIndexRequest {
     pub project_id: i64,
     #[serde(default)]
@@ -57,7 +62,7 @@ pub struct IncrementalIndexRequest {
 }
 
 /// Incremental index response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IncrementalIndexResponse {
     pub success: bool,
     pub files_indexed: usize,
@@ -70,15 +75,13 @@ pub struct IncrementalIndexResponse {
 }
 
 /// Parse request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ParseRequest {
     pub file_path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<String>,
 }
 
 /// Parse response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ParseResponse {
     pub success: bool,
     pub file_path: String,
@@ -90,7 +93,7 @@ pub struct ParseResponse {
 }
 
 /// Entity info from parse
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EntityInfo {
     pub id: u64,
     pub kind: String,
@@ -104,7 +107,7 @@ pub struct EntityInfo {
 }
 
 /// Relation info from parse
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RelationInfo {
     pub caller_id: u64,
     pub callee_id: u64,
@@ -113,7 +116,7 @@ pub struct RelationInfo {
 }
 
 /// Index statistics response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IndexStatsResponse {
     pub success: bool,
     pub statistics: IndexStatistics,
@@ -121,7 +124,7 @@ pub struct IndexStatsResponse {
 }
 
 /// Index statistics
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct IndexStatistics {
     pub total_entities: usize,
     pub total_relations: usize,
@@ -131,7 +134,7 @@ pub struct IndexStatistics {
 }
 
 /// Clear index request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClearIndexRequest {
     pub project_id: i64,
     #[serde(default)]
@@ -145,7 +148,7 @@ pub struct ClearIndexRequest {
 }
 
 /// Clear index response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClearIndexResponse {
     pub success: bool,
     pub project_id: i64,
@@ -155,7 +158,7 @@ pub struct ClearIndexResponse {
 }
 
 /// Backend result info
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BackendResultInfo {
     pub backend: String,
     pub ok: bool,
@@ -163,10 +166,11 @@ pub struct BackendResultInfo {
 }
 
 /// Delete file response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DeleteFileResponse {
     pub success: bool,
     pub message: String,
+    pub file_path: String,
     pub vectors_deleted: usize,
     pub bm25_documents_deleted: usize,
     pub relations_deleted: usize,
@@ -174,7 +178,7 @@ pub struct DeleteFileResponse {
 }
 
 /// Delete entity response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DeleteEntityResponse {
     pub success: bool,
     pub message: String,
@@ -186,7 +190,7 @@ pub struct DeleteEntityResponse {
 }
 
 /// Batch delete request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BatchDeleteRequest {
     #[serde(default)]
     pub file_paths: Vec<String>,
@@ -195,7 +199,7 @@ pub struct BatchDeleteRequest {
 }
 
 /// Batch delete response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BatchDeleteResponse {
     pub success: bool,
     pub files_deleted: usize,
@@ -206,7 +210,7 @@ pub struct BatchDeleteResponse {
 }
 
 /// Summary request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SummaryRequest {
     #[serde(default)]
     pub file_paths: Vec<String>,
@@ -227,7 +231,7 @@ pub struct SummaryRequest {
 }
 
 /// Summary response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SummaryResponse {
     pub success: bool,
     pub total_files: usize,
@@ -240,7 +244,7 @@ pub struct SummaryResponse {
 }
 
 /// File summary item
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct FileSummaryItem {
     pub file_path: String,
     pub language: String,
@@ -257,16 +261,8 @@ pub struct FileSummaryItem {
     pub error: Option<String>,
 }
 
-fn default_true() -> bool {
-    true
-}
-
-fn default_max_files() -> usize {
-    100
-}
-
 /// Dead-letter truncate-retry response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DeadLetterRetryResponse {
     pub success: bool,
     /// Files re-chunked from disk and re-stored.
@@ -275,5 +271,15 @@ pub struct DeadLetterRetryResponse {
     pub succeeded: usize,
     /// Files retried that failed again; they stay in the dead letter state.
     pub still_failed: usize,
+    /// Chunks truncated during the retry.
+    pub truncated_chunks: usize,
     pub message: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_max_files() -> usize {
+    100
 }

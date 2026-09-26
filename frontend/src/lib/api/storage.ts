@@ -1,37 +1,16 @@
 /**
  * Storage API
- * Handles storage management and status queries
+ * Handles storage management and status queries.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from './client';
+import type { components } from './schema';
 
-export interface StorageComponentStatus {
-	connected: boolean;
-	item_count: number;
-	disk_usage_mb: number;
-	version?: string;
-	last_error?: string;
-}
-
-export interface QdrantProcessInfo {
-	managed: boolean;
-	status: string;
-	running: boolean;
-}
-
-export interface StorageStatusDetail {
-	vector_storage: StorageComponentStatus;
-	bm25_storage: StorageComponentStatus;
-	relation_storage: StorageComponentStatus;
-	cache_storage: StorageComponentStatus;
-	total_disk_usage_mb: number;
-	process_status?: QdrantProcessInfo;
-}
-
-export interface StorageStatusResponse {
-	success: boolean;
-	status: StorageStatusDetail;
-}
+export type StorageComponentStatus = components['schemas']['StorageComponentStatus'];
+export type QdrantProcessInfo = components['schemas']['QdrantProcessInfo'];
+export type StorageStatusDetail = components['schemas']['StorageStatus'];
+export type StorageStatusResponse = components['schemas']['StorageStatusResponse'];
 
 export const storageApi = {
 	// Get storage health status

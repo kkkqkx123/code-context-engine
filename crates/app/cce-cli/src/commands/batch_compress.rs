@@ -52,24 +52,16 @@ pub async fn execute(
             // Display successes
             if !response.successes.is_empty() {
                 println!("Successful:");
-                for (i, (file_path, result)) in response.successes.iter().enumerate() {
-                    println!("  {}. {}", i + 1, file_path);
-                    if result.success {
-                        let ratio = if result.original_size > 0 {
-                            (result.compressed_size as f64 / result.original_size as f64) * 100.0
-                        } else {
-                            0.0
-                        };
-                        println!("     Original size: {} bytes", result.original_size);
-                        println!("     Compressed size: {} bytes", result.compressed_size);
-                        println!("     Compression ratio: {:.1}%", ratio);
-                        println!();
-                        println!("     Compressed code:");
-                        for line in result.compressed.lines() {
-                            println!("     {}", line);
-                        }
-                    } else {
-                        print_error(&format!("     Failed: {}", result.compressed));
+                for (i, entry) in response.successes.iter().enumerate() {
+                    println!("  {}. {}", i + 1, entry.path);
+                    println!("     Language: {}", entry.result.language);
+                    if entry.result.from_cache {
+                        println!("     (served from cache)");
+                    }
+                    println!();
+                    println!("     Compressed text:");
+                    for line in entry.result.semantic_text.lines() {
+                        println!("     {}", line);
                     }
                 }
             }
@@ -80,8 +72,8 @@ pub async fn execute(
                     println!();
                 }
                 println!("Failed:");
-                for (i, (file_path, error)) in response.failures.iter().enumerate() {
-                    println!("  {}. {} - {}", i + 1, file_path, error);
+                for (i, entry) in response.failures.iter().enumerate() {
+                    println!("  {}. {} - {}", i + 1, entry.path, entry.error);
                 }
             }
         }

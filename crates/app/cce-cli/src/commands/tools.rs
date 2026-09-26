@@ -7,11 +7,11 @@ use crate::cli::ToolCommands;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{
-    CompressRequest, CompressResponse, DiagnoseApiResponse, DiagnoseRequest,
+    CompressApiResponse, CompressRequest, DiagnoseApiResponse, DiagnoseRequest,
     FindReferencesRequest as FindRefsRequest, FindReferencesResponse as FindRefsApiResponse,
     GetSymbolsRequest as GetSymsRequest, GetSymbolsResponse as GetSymsApiResponse,
     GotoDefinitionRequest as GotoDefRequest, GotoDefinitionResponse as GotoDefApiResponse,
-    KeywordSearchRequest, KeywordSearchResponse as KeyWordSearchResponse,
+    KeywordSearchApiResponse, KeywordSearchRequest, KeywordTermOperator,
 };
 
 pub(crate) struct LocationParams {
@@ -149,20 +149,33 @@ pub async fn execute_compress(
         println!("Compressing code...");
     }
 
-    let response: CompressResponse = client.post("/api/tools/compress", &request).await?;
+    let response: CompressApiResponse = client.post("/api/tools/compress", &request).await?;
 
-    if response.success {
-        print_success(&format!(
-            "Code compressed: {} -> {} bytes ({:.1}% reduction)",
-            response.original_size,
-            response.compressed_size,
-            (1.0 - response.ratio) * 100.0
-        ));
-        println!();
-        println!("Compressed code:");
-        println!("{}", response.compressed);
-    } else {
-        print_error("Failed to compress code");
+    match (response.success, response.result) {
+        (true, Some(result)) => {
+            print_success(&format!(
+                "Code compressed: {} ({}, {} entities requested)",
+                result.file_path,
+                result.language,
+                if result.entities.is_some() {
+                    "with"
+                } else {
+                    "without"
+                }
+            ));
+            if result.from_cache {
+                println!("(served from cache)");
+            }
+            println!();
+            println!("{}", result.semantic_text);
+        }
+        _ => {
+            let err = response
+                .error
+                .as_deref()
+                .unwrap_or("Failed to compress code");
+            print_error(err);
+        }
     }
 
     Ok(())
@@ -191,31 +204,22 @@ pub async fn execute_diagnose(
 
     let response: DiagnoseApiResponse = client.post("/api/tools/diagnose", &request).await?;
 
-    if response.success {
-        if response.issues.is_empty() {
-            print_success("No issues found");
+    if let (true, Some(result)) = (response.success, response.result) {
+        if result.diagnostics.is_empty() {
+            print_success(&format!("{}: no issues found", result.language));
         } else {
-            println!("Found {} issue(s):", response.issues.len());
+            println!("Found {} issue(s):", result.diagnostics.len());
             println!();
 
-            for issue in &response.issues {
-                let severity = match issue.severity.as_str() {
-                    "error" => "ERROR".red(),
-                    "warning" => "WARN".yellow(),
-                    "info" => "INFO".blue(),
-                    _ => issue.severity.normal(),
-                };
-
-                let location = issue
-                    .line
-                    .map(|l| format!(" (line {})", l))
-                    .unwrap_or_default();
-
-                println!("[{}] {}{}", severity, issue.message, location);
-
-                if let Some(ref suggestion) = issue.suggestion {
-                    println!("  Suggestion: {}", suggestion);
-                }
+            for diagnostic in &result.diagnostics {
+                println!(
+                    "[{}] {} (line {}, col {}) [{}]",
+                    diagnostic.kind.red(),
+                    diagnostic.message,
+                    diagnostic.position.row,
+                    diagnostic.position.column,
+                    diagnostic.precision,
+                );
             }
         }
     } else {
@@ -424,38 +428,35 @@ pub async fn execute_keyword_search(
         top_n,
         project_id,
         epoch: None,
+        term_operator: KeywordTermOperator::Or,
     };
 
     if verbose {
         println!("Keyword searching: {}", query);
     }
 
-    let response: KeyWordSearchResponse =
+    let response: KeywordSearchApiResponse =
         client.post("/api/tools/keyword-search", &request).await?;
 
-    if response.success {
-        if let Some(data) = &response.data {
-            print_success(&format!("Found {} results", data.total));
-            println!();
+    if let (true, Some(result)) = (response.success, response.result) {
+        print_success(&format!("Found {} results", result.total));
+        println!();
 
-            if data.results.is_empty() {
-                println!("No results found");
-            } else {
-                for (i, item) in data.results.iter().enumerate() {
-                    println!(
-                        "  {:>3}. {} (score: {:.4})",
-                        i + 1,
-                        item.file_path,
-                        item.score
-                    );
-                    println!(
-                        "       {} (L{}-L{})",
-                        item.title, item.start_line, item.end_line
-                    );
-                }
-            }
+        if result.results.is_empty() {
+            println!("No results found");
         } else {
-            println!("No data returned");
+            for (i, item) in result.results.iter().enumerate() {
+                println!(
+                    "  {:>3}. {} (score: {:.4})",
+                    i + 1,
+                    item.file_path,
+                    item.score
+                );
+                println!(
+                    "       {} (L{}-L{})",
+                    item.title, item.start_line, item.end_line
+                );
+            }
         }
     } else {
         let err = response.error.as_deref().unwrap_or("Unknown error");

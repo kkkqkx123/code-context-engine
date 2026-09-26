@@ -4,33 +4,18 @@
 //! classification (stdlib, external, dev, local) and classification statistics.
 
 use axum::extract::{Path, Query, State};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use cce_relation::index::snapshot_query::SnapshotRelationQueryOps;
 use cce_types::ExternalCallType;
 
-use cce_api::models::{ErrorResponse, error_codes};
+use cce_api::models::{
+    ClassificationQueryParams, ClassificationStatsResponse, ErrorResponse, error_codes,
+};
 
 use crate::api::response::ApiResult;
 use crate::runtime::PublishedSnapshot;
-
-/// Query parameters for classification filtering
-#[derive(Debug, Deserialize)]
-pub struct ClassificationQueryParams {
-    /// Maximum number of results (default 1000)
-    pub limit: Option<usize>,
-}
-
-/// Response for classification statistics
-#[derive(Debug, Serialize)]
-pub struct ClassificationStatsResponse {
-    /// Per-classification counts
-    pub stats: HashMap<String, usize>,
-    /// Total number of classified relations
-    pub total: usize,
-}
 
 /// Get a relation snapshot, or return an `ErrorResponse`.
 async fn get_snapshot_or_error(
@@ -118,6 +103,13 @@ fn matches_classification(
 ///
 /// Returns all resolved relations whose `external_type` matches the given
 /// classification category (stdlib, external, dev, local, unknown).
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/relations/classification/{classification}", tag = "Entity",
+    params(ClassificationQueryParams, ("project_id" = i64, Path, description = "Project id"), ("classification" = String, Path, description = "Relation classification")),
+    responses(
+        (status = 200, description = "Matched relations as untyped JSON array"), (status = 400, body = ErrorResponse, description = "Invalid request"), (status = 404, body = ErrorResponse, description = "Resource not found"), (status = 503, body = ErrorResponse, description = "Index unavailable"), (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn get_relations_by_classification(
     State(state): State<crate::api::state::AppState>,
     Path((project_id, classification)): Path<(i64, String)>,
@@ -151,6 +143,17 @@ pub async fn get_relations_by_classification(
 /// GET /api/project/{project_id}/relations/classification/stats
 ///
 /// Returns counts of resolved relations grouped by external call classification.
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/relations/classification/stats", tag = "Entity",
+    params(("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = ClassificationStatsResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn get_classification_stats(
     State(state): State<crate::api::state::AppState>,
     Path(project_id): Path<i64>,

@@ -1,9 +1,10 @@
 //! Entity query models
 
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 /// Function detail response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct FunctionDetailResponse {
     pub success: bool,
     pub function: FunctionInfo,
@@ -12,7 +13,7 @@ pub struct FunctionDetailResponse {
 }
 
 /// Function information
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct FunctionInfo {
     /// Stable symbol ID (string)
     pub id: String,
@@ -29,7 +30,7 @@ pub struct FunctionInfo {
 }
 
 /// Parameter information
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ParameterInfo {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -37,7 +38,7 @@ pub struct ParameterInfo {
 }
 
 /// Function calls response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct FunctionCallsResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -50,7 +51,7 @@ pub struct FunctionCallsResponse {
 }
 
 /// Function callers response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct FunctionCallersResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -63,7 +64,7 @@ pub struct FunctionCallersResponse {
 }
 
 /// Call chain node
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct CallChainNode {
     pub function_id: String,
     pub function_name: String,
@@ -75,7 +76,7 @@ pub struct CallChainNode {
 }
 
 /// Call chain response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CallChainResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -88,7 +89,8 @@ pub struct CallChainResponse {
 }
 
 /// Call path query parameters
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct CallPathQuery {
     pub start_id: String,
     pub end_id: String,
@@ -97,7 +99,7 @@ pub struct CallPathQuery {
 }
 
 /// Call path response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CallPathResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -112,7 +114,7 @@ pub struct CallPathResponse {
 }
 
 /// Class inheritance response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClassInheritanceResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -125,7 +127,7 @@ pub struct ClassInheritanceResponse {
 }
 
 /// Class relation
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClassRelation {
     pub class_id: String,
     pub class_name: String,
@@ -134,7 +136,7 @@ pub struct ClassRelation {
 }
 
 /// Class implementations response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ClassImplementationsResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -147,15 +149,90 @@ pub struct ClassImplementationsResponse {
 }
 
 /// Interface relation
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct InterfaceRelation {
     pub interface_id: String,
     pub interface_name: String,
     pub file_path: String,
 }
 
+/// File-scope filter parameters shared by relation query endpoints.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams, ToSchema)]
+pub struct RelationFilterParams {
+    /// Exclude entities located in test files
+    #[serde(default)]
+    pub exclude_tests: Option<bool>,
+    /// Keep only entities under this directory prefix
+    #[serde(default)]
+    pub directory_prefix: Option<String>,
+    /// Exact file paths to exclude
+    #[serde(default)]
+    pub excluded_files: Option<Vec<String>>,
+}
+
+/// Query parameters for callees/callers queries
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CallChainQueryParams {
+    #[serde(default = "default_query_max_depth")]
+    pub max_depth: usize,
+    #[serde(default)]
+    pub offset: Option<usize>,
+    #[serde(default = "default_query_limit")]
+    pub limit: usize,
+    /// Exclude entities located in test files
+    #[serde(default)]
+    pub exclude_tests: Option<bool>,
+    /// Keep only entities under this directory prefix
+    #[serde(default)]
+    pub directory_prefix: Option<String>,
+    /// Exact file paths to exclude
+    #[serde(default)]
+    pub excluded_files: Option<Vec<String>>,
+}
+
+/// Query parameters for call chain direction queries
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CallChainDirectionParams {
+    #[serde(default = "default_direction")]
+    pub direction: String,
+    #[serde(default = "default_query_max_depth")]
+    pub max_depth: usize,
+    #[serde(default)]
+    pub offset: Option<usize>,
+    #[serde(default = "default_query_limit")]
+    pub limit: usize,
+    /// Exclude entities located in test files
+    #[serde(default)]
+    pub exclude_tests: Option<bool>,
+    /// Keep only entities under this directory prefix
+    #[serde(default)]
+    pub directory_prefix: Option<String>,
+    /// Exact file paths to exclude
+    #[serde(default)]
+    pub excluded_files: Option<Vec<String>>,
+}
+
+/// Query parameters for classification filtering
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ClassificationQueryParams {
+    /// Maximum number of results (default 1000)
+    pub limit: Option<usize>,
+}
+
+/// Classification statistics response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ClassificationStatsResponse {
+    /// Per-classification counts
+    pub stats: std::collections::HashMap<String, usize>,
+    /// Total number of classified relations
+    pub total: usize,
+}
+
 /// Entity search request (FTS5)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EntitySearchRequest {
     /// Search query (supports FTS5 syntax)
     pub query: String,
@@ -174,7 +251,7 @@ pub struct EntitySearchRequest {
 }
 
 /// Entity search result
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EntitySearchResult {
     pub id: i64,
     pub name: String,
@@ -195,7 +272,7 @@ pub struct EntitySearchResult {
 }
 
 /// Entity search response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EntitySearchResponse {
     pub success: bool,
     pub total: usize,
@@ -205,6 +282,18 @@ pub struct EntitySearchResponse {
 
 fn default_max_depth() -> usize {
     10
+}
+
+fn default_query_max_depth() -> usize {
+    3
+}
+
+fn default_query_limit() -> usize {
+    20
+}
+
+fn default_direction() -> String {
+    "down".to_string()
 }
 
 fn default_entity_search_limit() -> i64 {

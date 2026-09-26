@@ -170,7 +170,7 @@
 							<ul class="issue-list">
 								{#each validateResult.dependency_warnings as dw}
 									<li class="issue-item warning">
-										<strong>{dw.module}:</strong> {dw.message}
+										<strong>{dw.field}:</strong> {dw.suggestion}
 									</li>
 								{/each}
 							</ul>

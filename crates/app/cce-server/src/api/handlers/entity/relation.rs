@@ -3,7 +3,6 @@
 //! Provides call chain queries, call path finding, and inheritance relations.
 
 use axum::extract::{Path, Query as QueryParams, State};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use cce_orchestrator::query::RelationQueryOptions;
@@ -11,64 +10,51 @@ use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbol
 use cce_types::EntityId;
 
 use cce_api::models::{
-    CallChainNode, CallChainResponse, CallPathQuery, CallPathResponse,
+    CallChainDirectionParams, CallChainNode, CallChainResponse, CallPathQuery, CallPathResponse,
     ClassImplementationsResponse, ClassInheritanceResponse, ErrorResponse, error_codes,
 };
 
 use crate::api::response::ApiResult;
 
-/// Success payload variants for relation queries
-#[derive(Serialize)]
-#[serde(untagged)]
-pub enum RelationSuccess {
-    CallChain(CallChainResponse),
-    CallPath(CallPathResponse),
-    ClassInheritance(ClassInheritanceResponse),
-    ClassImplementations(ClassImplementationsResponse),
-}
-
-/// Unified response type for relation handlers
-pub type RelationApiResponse = ApiResult<RelationSuccess>;
-
 /// Helper: get relation snapshot for a project
 pub(crate) async fn get_snapshot(
     state: &crate::api::state::AppState,
     project_id: i64,
-) -> Result<Arc<crate::runtime::PublishedSnapshot>, RelationApiResponse> {
+) -> Result<Arc<crate::runtime::PublishedSnapshot>, ErrorResponse> {
     if project_id <= 0 {
-        return Err(RelationApiResponse::Error(ErrorResponse::new(
+        return Err(ErrorResponse::new(
             error_codes::INVALID_REQUEST,
             "Invalid project_id".to_string(),
-        )));
+        ));
     }
 
     let runtime = match state.engine.get_relation_runtime(project_id).await {
         Ok(rt) => rt,
         Err(e) => {
-            return Err(RelationApiResponse::Error(ErrorResponse::new(
+            return Err(ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
                 format!("Failed to get relation runtime: {}", e),
-            )));
+            ));
         }
     };
 
     if !runtime.can_serve_queries().await {
         let info = runtime.get_capability_info().await;
-        return Err(RelationApiResponse::Error(ErrorResponse::new(
+        return Err(ErrorResponse::new(
             error_codes::SERVICE_UNAVAILABLE,
             format!(
                 "Relation index not available: {:?}, epoch: {}",
                 info.state, info.relation_epoch
             ),
-        )));
+        ));
     }
 
     match runtime.get_snapshot().await {
         Some(s) => Ok(s),
-        None => Err(RelationApiResponse::Error(ErrorResponse::new(
+        None => Err(ErrorResponse::new(
             error_codes::SERVICE_UNAVAILABLE,
             "No relation snapshot available".to_string(),
-        ))),
+        )),
     }
 }
 
@@ -88,7 +74,7 @@ async fn stale_relation_info(
 async fn relation_query_config(
     state: &crate::api::state::AppState,
     project_id: i64,
-) -> Result<cce_config::RelationConfig, RelationApiResponse> {
+) -> Result<cce_config::RelationConfig, ErrorResponse> {
     state
         .engine
         .project_registry()
@@ -96,38 +82,26 @@ async fn relation_query_config(
         .await
         .map(|entry| entry.config.relation.clone())
         .map_err(|error| {
-            RelationApiResponse::Error(ErrorResponse::new(
+            ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
                 format!("Failed to load relation configuration: {error}"),
-            ))
+            )
         })
 }
 
-/// Query parameters for call chain direction
-#[derive(Debug, Clone, Deserialize)]
-pub struct CallChainDirectionParams {
-    #[serde(default = "default_direction")]
-    pub direction: String,
-    #[serde(default = "default_max_depth")]
-    pub max_depth: usize,
-    #[serde(default)]
-    pub offset: Option<usize>,
-    #[serde(default = "default_limit")]
-    pub limit: usize,
-    #[serde(flatten)]
-    pub filter: super::calls::RelationFilterParams,
-}
-
-fn default_direction() -> String {
-    "down".to_string()
-}
-
-fn default_max_depth() -> usize {
-    3
-}
-
-fn default_limit() -> usize {
-    20
+/// Apply the HTTP filter parameters onto query options.
+fn apply_filters(
+    filter: cce_api::models::RelationFilterParams,
+    options: RelationQueryOptions,
+) -> RelationQueryOptions {
+    let mut options = options.with_exclude_tests(filter.exclude_tests.unwrap_or(false));
+    if let Some(prefix) = filter.directory_prefix {
+        options = options.with_directory_prefix(prefix);
+    }
+    if let Some(files) = filter.excluded_files {
+        options = options.with_excluded_files(files);
+    }
+    options
 }
 
 fn stable_id<I: SnapshotSymbolQueryOps>(index: &I, entity_id: EntityId) -> String {
@@ -138,21 +112,32 @@ fn stable_id<I: SnapshotSymbolQueryOps>(index: &I, entity_id: EntityId) -> Strin
 }
 
 /// Handle call chain request
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/call-chain/{id}", tag = "Entity",
+    params(CallChainDirectionParams, ("project_id" = i64, Path, description = "Project id"), ("id" = String, Path, description = "Entity id")),
+    responses(
+        (status = 200, body = CallChainResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_call_chain(
     State(state): State<crate::api::state::AppState>,
     Path((project_id, id)): Path<(i64, String)>,
     QueryParams(params): QueryParams<CallChainDirectionParams>,
-) -> RelationApiResponse {
+) -> ApiResult<CallChainResponse> {
     let snapshot = match get_snapshot(&state, project_id).await {
         Ok(s) => s,
-        Err(e) => return e,
+        Err(e) => return ApiResult::Error(e),
     };
     let relation_config = match relation_query_config(&state, project_id).await {
         Ok(config) => config,
-        Err(error) => return error,
+        Err(error) => return ApiResult::Error(error),
     };
     if !relation_config.index.resolve_call_chains {
-        return RelationApiResponse::Error(ErrorResponse::new(
+        return ApiResult::Error(ErrorResponse::new(
             error_codes::SERVICE_UNAVAILABLE,
             "Call chain resolution is disabled for this project".to_string(),
         ));
@@ -166,7 +151,7 @@ pub async fn handle_call_chain(
             if let Ok(numeric_id) = id.parse::<u64>() {
                 cce_types::EntityId(numeric_id)
             } else {
-                return RelationApiResponse::Error(ErrorResponse::new(
+                return ApiResult::Error(ErrorResponse::new(
                     error_codes::INVALID_REQUEST,
                     "Unknown stable symbol ID".to_string(),
                 ));
@@ -176,14 +161,19 @@ pub async fn handle_call_chain(
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
         Err(e) => {
-            return RelationApiResponse::Error(ErrorResponse::new(
+            return ApiResult::Error(ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
                 format!("Failed to get relation searcher: {}", e),
             ));
         }
     };
     let direction = params.direction.to_lowercase();
-    let options = params.filter.apply(
+    let options = apply_filters(
+        cce_api::models::RelationFilterParams {
+            exclude_tests: params.exclude_tests,
+            directory_prefix: params.directory_prefix,
+            excluded_files: params.excluded_files,
+        },
         RelationQueryOptions::new()
             .with_max_depth(max_depth)
             .with_offset(params.offset.unwrap_or(0))
@@ -193,7 +183,7 @@ pub async fn handle_call_chain(
         "down" | "forward" => searcher.query_forward_paginated(entity_id, &options),
         "up" | "backward" => searcher.query_backward_paginated(entity_id, &options),
         _ => {
-            return RelationApiResponse::Error(ErrorResponse::new(
+            return ApiResult::Error(ErrorResponse::new(
                 error_codes::INVALID_REQUEST,
                 "direction must be one of down, forward, up, or backward".to_string(),
             ));
@@ -212,7 +202,7 @@ pub async fn handle_call_chain(
             })
             .collect(),
         Err(error) => {
-            return RelationApiResponse::Error(ErrorResponse::new(
+            return ApiResult::Error(ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
                 error.to_string(),
             ));
@@ -228,25 +218,36 @@ pub async fn handle_call_chain(
         relation_info: stale_relation_info(&state, project_id).await,
     };
 
-    RelationApiResponse::Success(RelationSuccess::CallChain(response))
+    ApiResult::Success(response)
 }
 
 /// Handle call path request
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/call-path", tag = "Entity",
+    params(CallPathQuery, ("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = CallPathResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_call_path(
     State(state): State<crate::api::state::AppState>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<CallPathQuery>,
-) -> RelationApiResponse {
+) -> ApiResult<CallPathResponse> {
     let snapshot = match get_snapshot(&state, project_id).await {
         Ok(s) => s,
-        Err(e) => return e,
+        Err(e) => return ApiResult::Error(e),
     };
     let relation_config = match relation_query_config(&state, project_id).await {
         Ok(config) => config,
-        Err(error) => return error,
+        Err(error) => return ApiResult::Error(error),
     };
     if !relation_config.index.resolve_call_chains {
-        return RelationApiResponse::Error(ErrorResponse::new(
+        return ApiResult::Error(ErrorResponse::new(
             error_codes::SERVICE_UNAVAILABLE,
             "Call chain resolution is disabled for this project".to_string(),
         ));
@@ -262,7 +263,7 @@ pub async fn handle_call_path(
             if let Ok(numeric_id) = params.start_id.parse::<u64>() {
                 cce_types::EntityId(numeric_id)
             } else {
-                return RelationApiResponse::Error(ErrorResponse::new(
+                return ApiResult::Error(ErrorResponse::new(
                     error_codes::INVALID_REQUEST,
                     "Unknown start stable symbol ID".to_string(),
                 ));
@@ -278,7 +279,7 @@ pub async fn handle_call_path(
             if let Ok(numeric_id) = params.end_id.parse::<u64>() {
                 cce_types::EntityId(numeric_id)
             } else {
-                return RelationApiResponse::Error(ErrorResponse::new(
+                return ApiResult::Error(ErrorResponse::new(
                     error_codes::INVALID_REQUEST,
                     "Unknown end stable symbol ID".to_string(),
                 ));
@@ -288,7 +289,7 @@ pub async fn handle_call_path(
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
         Err(e) => {
-            return RelationApiResponse::Error(ErrorResponse::new(
+            return ApiResult::Error(ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
                 format!("Failed to get relation searcher: {}", e),
             ));
@@ -320,7 +321,7 @@ pub async fn handle_call_path(
                 path_length: call_chain_nodes.len(),
                 relation_info: stale_relation_info(&state, project_id).await,
             };
-            RelationApiResponse::Success(RelationSuccess::CallPath(response))
+            ApiResult::Success(response)
         }
         Ok(None) => {
             let response = CallPathResponse {
@@ -333,9 +334,9 @@ pub async fn handle_call_path(
                 path_length: 0,
                 relation_info: stale_relation_info(&state, project_id).await,
             };
-            RelationApiResponse::Success(RelationSuccess::CallPath(response))
+            ApiResult::Success(response)
         }
-        Err(e) => RelationApiResponse::Error(ErrorResponse::new(
+        Err(e) => ApiResult::Error(ErrorResponse::new(
             error_codes::INTERNAL_ERROR,
             e.to_string(),
         )),
@@ -343,13 +344,24 @@ pub async fn handle_call_path(
 }
 
 /// Handle class inheritance request
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/class/{id}/inheritance", tag = "Entity",
+    params(("project_id" = i64, Path, description = "Project id"), ("id" = String, Path, description = "Class id")),
+    responses(
+        (status = 200, body = ClassInheritanceResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_class_inheritance(
     State(state): State<crate::api::state::AppState>,
     Path((project_id, id)): Path<(i64, String)>,
-) -> RelationApiResponse {
+) -> ApiResult<ClassInheritanceResponse> {
     let snapshot = match get_snapshot(&state, project_id).await {
         Ok(s) => s,
-        Err(e) => return e,
+        Err(e) => return ApiResult::Error(e),
     };
 
     let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
@@ -359,7 +371,7 @@ pub async fn handle_class_inheritance(
             if let Ok(numeric_id) = id.parse::<u64>() {
                 cce_types::EntityId(numeric_id)
             } else {
-                return RelationApiResponse::Error(ErrorResponse::new(
+                return ApiResult::Error(ErrorResponse::new(
                     error_codes::INVALID_REQUEST,
                     "Unknown stable symbol ID".to_string(),
                 ));
@@ -369,7 +381,7 @@ pub async fn handle_class_inheritance(
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
         Err(e) => {
-            return RelationApiResponse::Error(ErrorResponse::new(
+            return ApiResult::Error(ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
                 format!("Failed to get relation searcher: {}", e),
             ));
@@ -441,17 +453,28 @@ pub async fn handle_class_inheritance(
         relation_info: stale_relation_info(&state, project_id).await,
     };
 
-    RelationApiResponse::Success(RelationSuccess::ClassInheritance(response))
+    ApiResult::Success(response)
 }
 
 /// Handle class implementations request
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/class/{id}/implementations", tag = "Entity",
+    params(("project_id" = i64, Path, description = "Project id"), ("id" = String, Path, description = "Class id")),
+    responses(
+        (status = 200, body = ClassImplementationsResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_class_implementations(
     State(state): State<crate::api::state::AppState>,
     Path((project_id, id)): Path<(i64, String)>,
-) -> RelationApiResponse {
+) -> ApiResult<ClassImplementationsResponse> {
     let snapshot = match get_snapshot(&state, project_id).await {
         Ok(s) => s,
-        Err(e) => return e,
+        Err(e) => return ApiResult::Error(e),
     };
 
     let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
@@ -461,7 +484,7 @@ pub async fn handle_class_implementations(
             if let Ok(numeric_id) = id.parse::<u64>() {
                 cce_types::EntityId(numeric_id)
             } else {
-                return RelationApiResponse::Error(ErrorResponse::new(
+                return ApiResult::Error(ErrorResponse::new(
                     error_codes::INVALID_REQUEST,
                     "Unknown stable symbol ID".to_string(),
                 ));
@@ -471,7 +494,7 @@ pub async fn handle_class_implementations(
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
         Err(e) => {
-            return RelationApiResponse::Error(ErrorResponse::new(
+            return ApiResult::Error(ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
                 format!("Failed to get relation searcher: {}", e),
             ));
@@ -542,15 +565,5 @@ pub async fn handle_class_implementations(
         relation_info: stale_relation_info(&state, project_id).await,
     };
 
-    RelationApiResponse::Success(RelationSuccess::ClassImplementations(response))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_direction() {
-        assert_eq!(default_direction(), "down");
-    }
+    ApiResult::Success(response)
 }

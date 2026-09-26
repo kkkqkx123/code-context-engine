@@ -17,10 +17,7 @@ struct SearchQueryParams<'a> {
     query_type: &'a str,
     limit: usize,
     min_score: Option<f32>,
-    extensions: &'a Option<String>,
     directory: &'a Option<String>,
-    entities: &'a Option<String>,
-    languages: &'a Option<String>,
     exclude_content_types: &'a Option<String>,
     exclude: &'a Option<String>,
     include: &'a Option<String>,
@@ -44,10 +41,7 @@ pub async fn execute(
             query_type,
             limit,
             min_score,
-            extensions,
             directory,
-            entities,
-            languages,
             exclude_content_types,
             exclude,
             include,
@@ -61,10 +55,7 @@ pub async fn execute(
                 query_type,
                 limit: *limit,
                 min_score: *min_score,
-                extensions,
                 directory,
-                entities,
-                languages,
                 exclude_content_types,
                 exclude,
                 include,
@@ -83,24 +74,6 @@ async fn search_query(
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
-    let file_extensions: Vec<String> = params
-        .extensions
-        .as_ref()
-        .map(|s| s.split(',').map(|e| e.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let entity_types: Vec<String> = params
-        .entities
-        .as_ref()
-        .map(|s| s.split(',').map(|e| e.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let language_list: Vec<String> = params
-        .languages
-        .as_ref()
-        .map(|s| s.split(',').map(|l| l.trim().to_string()).collect())
-        .unwrap_or_default();
-
     let exclude_patterns: Vec<String> = params
         .exclude
         .as_ref()
@@ -127,9 +100,6 @@ async fn search_query(
         limit: params.limit,
         min_score: params.min_score,
         directory_prefix: params.directory.clone(),
-        file_extensions,
-        entity_types,
-        languages: language_list,
         exclude_content_types,
         exclude_patterns,
         include_patterns,

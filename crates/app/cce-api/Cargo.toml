@@ -3,9 +3,9 @@ name = "cce-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Shared API models for CCE CLI and Server"
+description = "Shared API wire contract for CCE CLI, Server, and frontend codegen"
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
+utoipa = { workspace = true }

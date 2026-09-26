@@ -5,9 +5,10 @@
 //! orchestrator graph service.
 
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 /// A node in a returned subgraph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GraphNode {
     pub id: String,
     pub label: String,
@@ -17,7 +18,7 @@ pub struct GraphNode {
 }
 
 /// An edge in a returned subgraph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GraphEdge {
     pub source: String,
     pub target: String,
@@ -26,7 +27,8 @@ pub struct GraphEdge {
 }
 
 /// Ego neighborhood query parameters.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EgoQuery {
     pub entity_id: String,
     #[serde(default = "default_ego_depth")]
@@ -36,7 +38,8 @@ pub struct EgoQuery {
 }
 
 /// Two-point path query parameters.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct GraphPathQuery {
     pub start: String,
     pub end: String,
@@ -45,26 +48,29 @@ pub struct GraphPathQuery {
 }
 
 /// Explicit entity set query parameters (comma-separated stable ids).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SubgraphQuery {
     pub ids: String,
 }
 
 /// Full export query parameters.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ExportQuery {
     #[serde(default = "default_export_limit")]
     pub limit: usize,
 }
 
 /// File impact query parameters.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ImpactQuery {
     pub file: String,
 }
 
 /// Subgraph response (ego, subgraph, export).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GraphSubgraphResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -75,7 +81,7 @@ pub struct GraphSubgraphResponse {
 }
 
 /// Path response.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GraphPathResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -89,7 +95,7 @@ pub struct GraphPathResponse {
 }
 
 /// Connected components response (stable id groups).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GraphComponentsResponse {
     pub success: bool,
     pub relation_epoch: i64,
@@ -99,7 +105,7 @@ pub struct GraphComponentsResponse {
 }
 
 /// File impact response.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct GraphImpactResponse {
     pub success: bool,
     pub relation_epoch: i64,

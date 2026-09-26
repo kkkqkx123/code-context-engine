@@ -2,10 +2,10 @@
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { toolsApi } from '$lib/api/tools';
-	import type { CompressApiResponse } from '$lib/api/tools';
+	import type { CompressResult } from '$lib/api/tools';
 
 	let filePath = $state('');
-	let result: CompressApiResponse | null = $state(null);
+	let result: CompressResult | null = $state(null);
 	let loading = $state(false);
 	let error: string | null = $state(null);
 

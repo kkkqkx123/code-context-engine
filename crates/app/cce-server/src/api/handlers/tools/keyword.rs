@@ -1,33 +1,43 @@
 use axum::{Json, extract::State};
-use serde::Serialize;
 
-use cce_orchestrator::{KeywordSearchRequest, KeywordSearchResponse};
+use cce_api::models::{
+    KeywordSearchApiResponse, KeywordSearchRequest, KeywordSearchResult, KeywordTermOperator,
+};
+use cce_orchestrator::KeywordSearchRequest as OrchKeywordSearchRequest;
+use cce_storage_bm25::TermOperator;
 
+use super::to_api_model;
 use crate::api::AppState;
 
-#[derive(Debug, Serialize)]
-pub struct KeywordSearchApiResponse {
-    pub success: bool,
-    pub data: Option<KeywordSearchResponse>,
-    pub error: Option<String>,
-}
-
+#[utoipa::path(
+    post, path = "/api/tools/keyword-search", tag = "Tools",
+    request_body = KeywordSearchRequest,
+    responses(
+        (status = 200, body = KeywordSearchApiResponse, description = "Keyword search result, errors reported in-band")
+    )
+)]
 pub async fn handle_keyword_search(
     State(state): State<AppState>,
     Json(request): Json<KeywordSearchRequest>,
 ) -> Json<KeywordSearchApiResponse> {
-    let tool = match &state.keyword_search {
-        Some(t) => t,
-        None => {
-            return Json(KeywordSearchApiResponse {
-                success: false,
-                data: None,
-                error: Some("Keyword search tool not initialized".to_string()),
-            });
-        }
+    let Some(tool) = state.keyword_search.as_ref() else {
+        return Json(KeywordSearchApiResponse {
+            success: false,
+            result: None,
+            error: Some("Keyword search tool not initialized".to_string()),
+        });
     };
 
-    let mut request = request;
+    let mut request = OrchKeywordSearchRequest {
+        query: request.query,
+        top_n: request.top_n,
+        project_id: request.project_id,
+        epoch: request.epoch,
+        term_operator: match request.term_operator {
+            KeywordTermOperator::Or => TermOperator::Or,
+            KeywordTermOperator::And => TermOperator::And,
+        },
+    };
     if request.epoch.is_none()
         && let Some(sqlite) = &state.metadata_store
         && let Ok(project) = sqlite.for_project(request.project_id)
@@ -54,14 +64,21 @@ pub async fn handle_keyword_search(
     }
 
     match tool.search(request).await {
-        Ok(response) => Json(KeywordSearchApiResponse {
-            success: true,
-            data: Some(response),
-            error: None,
-        }),
+        Ok(response) => match to_api_model::<_, KeywordSearchResult>(response) {
+            Ok(result) => Json(KeywordSearchApiResponse {
+                success: true,
+                result: Some(result),
+                error: None,
+            }),
+            Err(e) => Json(KeywordSearchApiResponse {
+                success: false,
+                result: None,
+                error: Some(format!("Failed to serialize response: {}", e)),
+            }),
+        },
         Err(e) => Json(KeywordSearchApiResponse {
             success: false,
-            data: None,
+            result: None,
             error: Some(e.to_string()),
         }),
     }

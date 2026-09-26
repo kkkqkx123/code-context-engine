@@ -4,32 +4,25 @@
 //! for large monolithic files. This is an on-demand operation without side effects.
 
 use axum::{Json, extract::State};
-use serde::Serialize;
 
-use cce_api::models::{BatchCompressRequest, CompressRequest};
-use cce_orchestrator::{BatchCompressionRequest, CompressionRequest, CompressionResponse};
+use cce_api::models::{
+    BatchCompressFailure, BatchCompressRequest, BatchCompressResponse, BatchCompressSuccess,
+    CompressApiResponse, CompressRequest, CompressResult,
+};
+use cce_orchestrator::{BatchCompressionRequest, CompressionRequest};
 
 use crate::api::AppState;
 
-/// Single file compression response
-#[derive(Debug, Serialize)]
-pub struct CompressApiResponse {
-    /// Whether the operation succeeded
-    pub success: bool,
-    /// Compression result (if successful)
-    #[serde(flatten)]
-    pub data: Option<CompressionResponse>,
-    /// Error message (if failed)
-    pub error: Option<String>,
-}
-
-/// Batch compression response
-#[derive(Debug, Serialize)]
-pub struct CompressBatchApiResponse {
-    /// Successful compressions
-    pub successes: Vec<(String, CompressionResponse)>,
-    /// Failed compressions with error messages
-    pub failures: Vec<(String, String)>,
+fn to_compress_result(response: cce_orchestrator::CompressionResponse) -> CompressResult {
+    CompressResult {
+        file_path: response.file_path,
+        language: response.language,
+        file_hash: response.file_hash,
+        from_cache: response.from_cache,
+        entities: response.entities.and_then(|v| serde_json::to_value(v).ok()),
+        groups: response.groups.and_then(|v| serde_json::to_value(v).ok()),
+        semantic_text: response.semantic_text,
+    }
 }
 
 /// Handle single file compression
@@ -37,19 +30,23 @@ pub struct CompressBatchApiResponse {
 /// # Endpoint
 ///
 /// `POST /api/tools/compress`
+#[utoipa::path(
+    post, path = "/api/tools/compress", tag = "Tools",
+    request_body = CompressRequest,
+    responses(
+        (status = 200, body = CompressApiResponse, description = "Compression result, errors reported in-band")
+    )
+)]
 pub async fn handle_compress(
     State(state): State<AppState>,
     Json(request): Json<CompressRequest>,
 ) -> Json<CompressApiResponse> {
-    let retrieval = match &state.compression_retrieval {
-        Some(r) => r,
-        None => {
-            return Json(CompressApiResponse {
-                success: false,
-                data: None,
-                error: Some("Compression tool not initialized".to_string()),
-            });
-        }
+    let Some(retrieval) = state.compression_retrieval.as_ref() else {
+        return Json(CompressApiResponse {
+            success: false,
+            result: None,
+            error: Some("Compression tool not initialized".to_string()),
+        });
     };
 
     let req = CompressionRequest {
@@ -61,12 +58,12 @@ pub async fn handle_compress(
     match retrieval.compress(req).await {
         Ok(response) => Json(CompressApiResponse {
             success: true,
-            data: Some(response),
+            result: Some(to_compress_result(response)),
             error: None,
         }),
         Err(e) => Json(CompressApiResponse {
             success: false,
-            data: None,
+            result: None,
             error: Some(e.to_string()),
         }),
     }
@@ -77,22 +74,29 @@ pub async fn handle_compress(
 /// # Endpoint
 ///
 /// `POST /api/tools/compress/batch`
+#[utoipa::path(
+    post, path = "/api/tools/compress/batch", tag = "Tools",
+    request_body = BatchCompressRequest,
+    responses(
+        (status = 200, body = BatchCompressResponse, description = "Batch compression result, errors reported in-band")
+    )
+)]
 pub async fn handle_compress_batch(
     State(state): State<AppState>,
     Json(request): Json<BatchCompressRequest>,
-) -> Json<CompressBatchApiResponse> {
-    let retrieval = match &state.compression_retrieval {
-        Some(r) => r,
-        None => {
-            return Json(CompressBatchApiResponse {
-                successes: Vec::new(),
-                failures: request
-                    .file_paths
-                    .into_iter()
-                    .map(|p| (p, "Compression tool not initialized".to_string()))
-                    .collect(),
-            });
-        }
+) -> Json<BatchCompressResponse> {
+    let Some(retrieval) = state.compression_retrieval.as_ref() else {
+        return Json(BatchCompressResponse {
+            successes: Vec::new(),
+            failures: request
+                .file_paths
+                .into_iter()
+                .map(|path| BatchCompressFailure {
+                    path,
+                    error: "Compression tool not initialized".to_string(),
+                })
+                .collect(),
+        });
     };
 
     let req = BatchCompressionRequest {
@@ -104,12 +108,22 @@ pub async fn handle_compress_batch(
 
     let result = retrieval.compress_batch(req).await;
 
-    Json(CompressBatchApiResponse {
-        successes: result.successes,
+    Json(BatchCompressResponse {
+        successes: result
+            .successes
+            .into_iter()
+            .map(|(path, response)| BatchCompressSuccess {
+                path,
+                result: to_compress_result(response),
+            })
+            .collect(),
         failures: result
             .failures
             .into_iter()
-            .map(|(path, err)| (path, err.to_string()))
+            .map(|(path, err)| BatchCompressFailure {
+                path,
+                error: err.to_string(),
+            })
             .collect(),
     })
 }

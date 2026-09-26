@@ -1,0 +1,17 @@
+{
+  "name": "@cce/openapi-codegen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "On-demand TypeScript codegen from the committed cce-server OpenAPI snapshot",
+  "type": "module",
+  "scripts": {
+    "gen": "openapi-typescript ../../frontend/openapi.json -o schema.d.ts"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.4.4",
+    "typescript": "^5.9.3"
+  }
+}

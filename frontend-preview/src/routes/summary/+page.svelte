@@ -200,11 +200,11 @@
 					</div>
 				</div>
 
-				{#if result.warnings.length > 0}
+				{#if (result.warnings ?? []).length > 0}
 					<div class="warnings-section">
 						<h3 class="section-title">Warnings</h3>
 						<ul class="warnings-list">
-							{#each result.warnings as warn}
+							{#each result.warnings ?? [] as warn}
 								<li class="warning-item">{warn}</li>
 							{/each}
 						</ul>

@@ -9,15 +9,16 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
 };
 
+use crate::api::response::ApiResult;
 use crate::api::validation::validate_project_id;
 use crate::maintenance::ProjectIndexMaintenanceService;
 use cce_api::models::{
-    BatchDeleteRequest, ClearIndexRequest, QdrantProcessInfo, QdrantProcessStatus,
-    StorageComponentStatus, StorageQuery, StorageStatus, StorageStatusResponse,
+    BackendResultInfo, BatchDeleteRequest, BatchDeleteResponse, ClearIndexRequest,
+    ClearIndexResponse, DeleteEntityResponse, DeleteFileResponse, ErrorResponse, IndexStatistics,
+    IndexStatsResponse, QdrantProcessInfo, QdrantProcessStatus, StorageComponentStatus,
+    StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
 use cce_relation::index::entity_index::EntityIndexOps;
 use cce_relation::index::file_index::FileLevelOps;
@@ -32,20 +33,27 @@ use cce_relation::index::relation_query::RelationQueryOps;
 /// Uses ProjectIndexMaintenanceService to coordinate Qdrant, BM25, SQLite,
 /// relations, and cache cleanup. Returns per-backend results so partial
 /// failures are observable. Always idempotent.
+#[utoipa::path(
+    delete, path = "/api/index", tag = "Storage",
+    request_body = ClearIndexRequest,
+    responses(
+        (status = 200, body = ClearIndexResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_clear_index(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<ClearIndexRequest>,
-) -> impl IntoResponse {
+) -> ApiResult<ClearIndexResponse> {
     let start = std::time::Instant::now();
 
     if request.project_id <= 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "success": false,
-                "message": "project_id must be a positive integer"
-            })),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "project_id must be a positive integer",
+        ));
     }
 
     let maintenance = ProjectIndexMaintenanceService::new(
@@ -57,23 +65,27 @@ pub async fn handle_clear_index(
 
     let m_result = maintenance.clear_project_index(request.project_id).await;
 
-    let response = serde_json::json!({
-        "success": m_result.success,
-        "project_id": request.project_id,
-        "backends": m_result.backends.into_iter().map(|b| serde_json::json!({
-            "backend": b.backend,
-            "ok": b.ok,
-            "detail": b.detail,
-        })).collect::<Vec<_>>(),
-        "elapsed_ms": start.elapsed().as_millis() as u64,
-        "message": if m_result.success {
-            "Index clearance completed."
+    let response = ClearIndexResponse {
+        success: m_result.success,
+        project_id: request.project_id,
+        backends: m_result
+            .backends
+            .into_iter()
+            .map(|b| BackendResultInfo {
+                backend: b.backend.to_string(),
+                ok: b.ok,
+                detail: b.detail,
+            })
+            .collect(),
+        elapsed_ms: start.elapsed().as_millis() as u64,
+        message: if m_result.success {
+            "Index clearance completed.".to_string()
         } else {
-            "Index clearance completed with errors."
+            "Index clearance completed with errors.".to_string()
         },
-    });
+    };
 
-    (StatusCode::OK, Json(response))
+    ApiResult::Success(response)
 }
 
 // ============================================================================
@@ -84,23 +96,30 @@ pub async fn handle_clear_index(
 ///
 /// Removes all data associated with a file across all storage backends,
 /// scoped to the specified project.
+#[utoipa::path(
+    delete, path = "/api/index/file/{path}", tag = "Storage",
+    params(StorageQuery, ("path" = String, Path, description = "File path")),
+    responses(
+        (status = 200, body = DeleteFileResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_delete_file(
     State(state): State<crate::api::state::AppState>,
     Path(file_path): Path<String>,
     Query(query): Query<StorageQuery>,
-) -> impl IntoResponse {
+) -> ApiResult<DeleteFileResponse> {
     let start = std::time::Instant::now();
     let project_id = query.project_id;
 
     if let Err(e) = validate_project_id(project_id) {
         tracing::warn!(%project_id, "Invalid project_id in delete file request");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "success": false,
-                "message": format!("Invalid project_id: {}", e),
-            })),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("Invalid project_id: {}", e),
+        ));
     }
 
     let group_id = resolve_group_id(&state, project_id).await;
@@ -118,15 +137,11 @@ pub async fn handle_delete_file(
                 }
                 Err(e) => {
                     tracing::error!(file = %file_path, error = %e, "Failed to delete vectors from Qdrant");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({
-                            "success": false,
-                            "message": format!("Failed to delete vectors: {}", e),
-                            "file_path": file_path,
-                            "elapsed_ms": start.elapsed().as_millis() as u64
-                        })),
-                    );
+                    return ApiResult::Error(ErrorResponse::with_details(
+                        error_codes::STORAGE_ERROR,
+                        format!("Failed to delete vectors: {}", e),
+                        file_path,
+                    ));
                 }
             }
         }
@@ -147,15 +162,11 @@ pub async fn handle_delete_file(
             }
             Err(e) => {
                 tracing::error!(file = %file_path, error = %e, "Failed to delete from BM25");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "success": false,
-                        "message": format!("Failed to delete from BM25: {}", e),
-                        "file_path": file_path,
-                        "elapsed_ms": start.elapsed().as_millis() as u64
-                    })),
-                );
+                return ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::STORAGE_ERROR,
+                    format!("Failed to delete from BM25: {}", e),
+                    file_path,
+                ));
             }
         }
     }
@@ -200,15 +211,11 @@ pub async fn handle_delete_file(
             Ok(id_opt) => id_opt,
             Err(e) => {
                 tracing::error!(file = %file_path, error = %e, "Failed to query file_id");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "success": false,
-                        "message": format!("Failed to query file: {}", e),
-                        "file_path": file_path,
-                        "elapsed_ms": start.elapsed().as_millis() as u64
-                    })),
-                );
+                return ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::STORAGE_ERROR,
+                    format!("Failed to query file: {}", e),
+                    file_path,
+                ));
             }
         };
 
@@ -228,40 +235,47 @@ pub async fn handle_delete_file(
         }
     }
 
-    let response = serde_json::json!({
-        "success": true,
-        "message": format!("File deleted successfully: {}", file_path),
-        "file_path": file_path,
-        "vectors_deleted": vectors_deleted,
-        "bm25_documents_deleted": bm25_deleted,
-        "relations_deleted": relations_deleted,
-        "elapsed_ms": start.elapsed().as_millis() as u64
-    });
+    let response = DeleteFileResponse {
+        success: true,
+        message: format!("File deleted successfully: {}", file_path),
+        file_path,
+        vectors_deleted,
+        bm25_documents_deleted: bm25_deleted,
+        relations_deleted,
+        elapsed_ms: start.elapsed().as_millis() as u64,
+    };
 
-    (StatusCode::OK, Json(response))
+    ApiResult::Success(response)
 }
 
 /// Handle delete entity request
 ///
 /// Removes a specific entity and all its associated data
 /// across all storage backends, scoped to the specified project.
+#[utoipa::path(
+    delete, path = "/api/index/entity/{id}", tag = "Storage",
+    params(StorageQuery, ("id" = u64, Path, description = "Entity id")),
+    responses(
+        (status = 200, body = DeleteEntityResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_delete_entity(
     State(state): State<crate::api::state::AppState>,
     Path(entity_id): Path<u64>,
     Query(query): Query<StorageQuery>,
-) -> impl IntoResponse {
+) -> ApiResult<DeleteEntityResponse> {
     let start = std::time::Instant::now();
     let project_id = query.project_id;
 
     if let Err(e) = validate_project_id(project_id) {
         tracing::warn!(%project_id, "Invalid project_id in delete entity request");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "success": false,
-                "message": format!("Invalid project_id: {}", e),
-            })),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("Invalid project_id: {}", e),
+        ));
     }
 
     let group_id = resolve_group_id(&state, project_id).await;
@@ -354,40 +368,48 @@ pub async fn handle_delete_entity(
         });
     }
 
-    let response = serde_json::json!({
-        "success": true,
-        "message": format!("Entity deleted successfully: {}", entity_id),
-        "entity_id": entity_id,
-        "vectors_deleted": vectors_deleted,
-        "bm25_documents_deleted": bm25_deleted,
-        "relations_deleted": relations_deleted,
-        "elapsed_ms": start.elapsed().as_millis() as u64
-    });
+    let response = DeleteEntityResponse {
+        success: true,
+        message: format!("Entity deleted successfully: {}", entity_id),
+        entity_id,
+        vectors_deleted,
+        bm25_documents_deleted: bm25_deleted,
+        relations_deleted,
+        elapsed_ms: start.elapsed().as_millis() as u64,
+    };
 
-    (StatusCode::OK, Json(response))
+    ApiResult::Success(response)
 }
 
 /// Handle batch delete request
 ///
 /// Batch deletes files and entities from all storage backends,
 /// scoped to the specified project.
+#[utoipa::path(
+    delete, path = "/api/index/batch", tag = "Storage",
+    params(StorageQuery),
+    request_body = BatchDeleteRequest,
+    responses(
+        (status = 200, body = BatchDeleteResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_batch_delete(
     State(state): State<crate::api::state::AppState>,
     Query(query): Query<StorageQuery>,
     Json(request): Json<BatchDeleteRequest>,
-) -> impl IntoResponse {
+) -> ApiResult<BatchDeleteResponse> {
     let start = std::time::Instant::now();
     let project_id = query.project_id;
 
     if let Err(e) = validate_project_id(project_id) {
         tracing::warn!(%project_id, "Invalid project_id in batch delete request");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "success": false,
-                "message": format!("Invalid project_id: {}", e),
-            })),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("Invalid project_id: {}", e),
+        ));
     }
 
     let mut errors: Vec<String> = Vec::new();
@@ -518,15 +540,15 @@ pub async fn handle_batch_delete(
         }
     }
 
-    let response = serde_json::json!({
-        "success": errors.is_empty(),
-        "files_deleted": files_deleted,
-        "entities_deleted": entities_deleted,
-        "errors": errors,
-        "elapsed_ms": start.elapsed().as_millis() as u64,
-    });
+    let response = BatchDeleteResponse {
+        success: errors.is_empty(),
+        files_deleted,
+        entities_deleted,
+        errors,
+        elapsed_ms: start.elapsed().as_millis() as u64,
+    };
 
-    (StatusCode::OK, Json(response))
+    ApiResult::Success(response)
 }
 
 // ============================================================================
@@ -534,10 +556,20 @@ pub async fn handle_batch_delete(
 // ============================================================================
 
 /// Handle index stats request
+#[utoipa::path(
+    get, path = "/api/index/stats", tag = "Storage",
+    params(StorageQuery),
+    responses(
+        (status = 200, body = IndexStatsResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_index_stats(
     State(state): State<crate::api::state::AppState>,
     Query(query): Query<StorageQuery>,
-) -> impl IntoResponse {
+) -> ApiResult<IndexStatsResponse> {
     let start = std::time::Instant::now();
     let project_id = query.project_id;
 
@@ -590,28 +622,37 @@ pub async fn handle_index_stats(
         0
     };
 
-    let response = serde_json::json!({
-        "success": true,
-        "statistics": {
-            "total_entities": total_entities,
-            "total_relations": total_relations,
-            "total_vectors": vector_count,
-            "total_bm25_documents": bm25_doc_count,
-            "total_files": file_count,
+    let response = IndexStatsResponse {
+        success: true,
+        statistics: IndexStatistics {
+            total_entities,
+            total_relations,
+            total_vectors: vector_count,
+            total_bm25_documents: bm25_doc_count,
+            total_files: file_count,
         },
-        "elapsed_ms": start.elapsed().as_millis() as u64
-    });
+        elapsed_ms: start.elapsed().as_millis() as u64,
+    };
 
-    (StatusCode::OK, Json(response))
+    ApiResult::Success(response)
 }
 
 /// Handle storage status request
 ///
 /// Checks all storage components and returns their status.
 /// Uses Qdrant's diagnose() method for comprehensive health assessment.
+#[utoipa::path(
+    get, path = "/api/storage/status", tag = "Storage",
+    responses(
+        (status = 200, body = StorageStatusResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_storage_status(
     State(state): State<crate::api::state::AppState>,
-) -> impl IntoResponse {
+) -> ApiResult<StorageStatusResponse> {
     let mut vector_storage = StorageComponentStatus {
         connected: false,
         item_count: 0,
@@ -717,7 +758,7 @@ pub async fn handle_storage_status(
         status,
     };
 
-    (StatusCode::OK, Json(response))
+    ApiResult::Success(response)
 }
 
 /// Resolve the Qdrant group_id from a project_id using the project registry.

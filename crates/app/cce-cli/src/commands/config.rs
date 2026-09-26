@@ -112,11 +112,11 @@ pub async fn execute_validate(server: &str, verbose: bool) -> Result<()> {
             for dep_warning in &response.dependency_warnings {
                 let msg = format!(
                     "  [{}][{}] {}",
-                    dep_warning.level, dep_warning.module, dep_warning.message
+                    dep_warning.severity, dep_warning.field, dep_warning.suggestion
                 );
-                match dep_warning.level.as_str() {
-                    "error" => print_error(&msg),
-                    "warning" => print_warning(&msg),
+                match dep_warning.severity.as_str() {
+                    "Error" => print_error(&msg),
+                    "Warning" => print_warning(&msg),
                     _ => println!("  {}", msg),
                 }
             }

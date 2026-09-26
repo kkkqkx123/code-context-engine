@@ -1,32 +1,16 @@
 /**
  * Configuration Management API
- * Handles config inspection, reload, and validation
+ * Handles config inspection, reload, and validation.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from './client';
+import type { components } from './schema';
 
-export interface ConfigInfoResponse {
-	initialized: boolean;
-	database: Record<string, unknown>;
-	embedder: Record<string, unknown>;
-	project_count: number;
-}
-
-export interface ConfigReloadResponse {
-	success: boolean;
-	message: string;
-}
-
-export interface ConfigValidateResponse {
-	valid: boolean;
-	errors: string[];
-	warnings: string[];
-	dependency_warnings: Array<{
-		level: string;
-		message: string;
-		module: string;
-	}>;
-}
+export type ConfigInfoResponse = components['schemas']['ConfigInfoResponse'];
+export type ConfigReloadResponse = components['schemas']['ConfigReloadResponse'];
+export type ConfigValidateResponse = components['schemas']['ConfigValidateResponse'];
+export type ConfigWarningInfo = components['schemas']['ConfigWarningInfo'];
 
 export const configApi = {
 	/** GET /api/config — return current active configuration info */

@@ -1,36 +1,26 @@
 /**
  * Watch API
- * Handles file system watching operations
+ * Handles file system watching operations.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from './client';
+import type { components } from './schema';
 
-export interface WatchStartRequest {
-	path: string;
-	extensions?: string[];
-	debounce_ms?: number;
-}
-
-export interface WatchStatus {
-	active: boolean;
-	events_processed: number;
-	watched_dirs: string[];
-	started_at?: string;
-}
-
-export interface WatchStatusResponse {
-	success: boolean;
-	status: WatchStatus;
-}
+export type WatchStartRequest = components['schemas']['StartWatchRequest'];
+export type StartWatchResponse = components['schemas']['StartWatchResponse'];
+export type StopWatchResponse = components['schemas']['StopWatchResponse'];
+export type WatchStatus = components['schemas']['WatchStatus'];
+export type WatchStatusResponse = components['schemas']['WatchStatusResponse'];
 
 export const watchApi = {
 	// Start watching directory
 	startWatch: (projectId: number, data: WatchStartRequest) =>
-		apiClient.post(`/api/project/${projectId}/watch/start`, data),
+		apiClient.post<StartWatchResponse>(`/api/project/${projectId}/watch/start`, data),
 
 	// Stop watching
 	stopWatch: (projectId: number) =>
-		apiClient.post(`/api/project/${projectId}/watch/stop`),
+		apiClient.post<StopWatchResponse>(`/api/project/${projectId}/watch/stop`),
 
 	// Get watch status
 	getStatus: (projectId: number) =>

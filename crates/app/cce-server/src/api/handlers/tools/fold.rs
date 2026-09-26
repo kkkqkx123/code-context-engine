@@ -17,6 +17,13 @@ use crate::api::AppState;
 /// # Endpoint
 ///
 /// `POST /api/tools/fold`
+#[utoipa::path(
+    post, path = "/api/tools/fold", tag = "Tools",
+    request_body = FoldRequest,
+    responses(
+        (status = 200, body = FoldResponse, description = "Fold result, errors reported in-band")
+    )
+)]
 pub async fn handle_fold(
     State(state): State<AppState>,
     Json(request): Json<FoldRequest>,

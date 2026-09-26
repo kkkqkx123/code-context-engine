@@ -5,67 +5,66 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
 };
-use serde_json::json;
 use std::path::PathBuf;
 
+use crate::api::response::ApiResult;
 use crate::runtime::recovery::ProjectMeta;
 use cce_api::models::error_codes;
-use cce_api::models::{CreateProjectRequest, UpdateProjectRequest};
+use cce_api::models::{
+    CreateProjectRequest, ErrorResponse, ProjectConfig, ProjectDeleteResponse,
+    ProjectDetailResponse, UpdateProjectRequest,
+};
 use cce_storage_sqlite::{
     NewProjectRecord, ProjectRepository, ProjectUpdateRecord, generate_project_name,
 };
 
 /// Handle create project request
+#[utoipa::path(
+    post, path = "/api/project", tag = "Project",
+    request_body = CreateProjectRequest,
+    responses(
+        (status = 200, body = ProjectDetailResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_create_project(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<CreateProjectRequest>,
-) -> impl IntoResponse {
+) -> ApiResult<ProjectDetailResponse> {
     // Validate root_path is not empty
     if request.root_path.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(error_response(
-                error_codes::INVALID_REQUEST,
-                "Root path cannot be empty",
-            )),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "Root path cannot be empty",
+        ));
     }
 
     // Validate root_path exists and is a directory
     let root_path = PathBuf::from(&request.root_path);
     if !root_path.exists() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(error_response(
-                error_codes::INVALID_REQUEST,
-                "Root path does not exist",
-            )),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "Root path does not exist",
+        ));
     }
     if !root_path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(error_response(
-                error_codes::INVALID_REQUEST,
-                "Root path is not a directory",
-            )),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "Root path is not a directory",
+        ));
     }
 
     // Get canonical path
     let canonical_path = match root_path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(
-                    error_codes::INVALID_REQUEST,
-                    &format!("Failed to resolve path: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                format!("Failed to resolve path: {}", e),
+            ));
         }
     };
     let root_path_str = canonical_path.to_string_lossy().to_string();
@@ -74,54 +73,28 @@ pub async fn handle_create_project(
     let metadata_store = match &state.metadata_store {
         Some(s) => s,
         None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    "Metadata store not initialized",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                "Metadata store not initialized",
+            ));
         }
     };
 
     // Check if path already exists
-    let path_exists = metadata_store
-        .as_ref()
-        .with_transaction(|tx| ProjectRepository::path_exists(tx, &root_path_str))
-        .unwrap_or(false);
-
-    if path_exists {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(error_response(
-                error_codes::INVALID_REQUEST,
-                "Project already exists at this path",
-            )),
-        );
-    }
-
-    // Check if path exists (this check is redundant, keeping for safety)
     let client = metadata_store.as_ref();
-
     match client.with_transaction(|tx| ProjectRepository::path_exists(tx, &root_path_str)) {
         Ok(false) => {}
         Ok(true) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(
-                    error_codes::INVALID_REQUEST,
-                    "Project already exists at this path",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::CONFLICT,
+                "Project already exists at this path",
+            ));
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to check path: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to check path: {}", e),
+            ));
         }
     }
 
@@ -155,21 +128,15 @@ pub async fn handle_create_project(
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("UNIQUE constraint failed") {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(error_response(
-                        error_codes::INVALID_REQUEST,
-                        "Project with this name or root path already exists",
-                    )),
-                );
+                return ApiResult::Error(ErrorResponse::new(
+                    error_codes::CONFLICT,
+                    "Project with this name or root path already exists",
+                ));
             }
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to create project: {}", msg),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to create project: {}", msg),
+            ));
         }
     };
 
@@ -183,42 +150,47 @@ pub async fn handle_create_project(
     }
 
     // Build response
-    (
-        StatusCode::CREATED,
-        Json(json!({
-            "success": true,
-            "project": {
-                "id": project_id.to_string(),
-                "name": name,
-                "root_path": root_path_str,
-                "extensions": request.extensions,
-                "exclude_dirs": request.exclude_dirs,
-                "respect_gitignore": request.respect_gitignore,
-                "ignore_patterns": request.ignore_patterns,
-                "created_at": chrono::Utc::now().timestamp(),
-                "last_indexed": null
-            }
-        })),
-    )
+    ApiResult::Success(ProjectDetailResponse {
+        success: true,
+        project: ProjectConfig {
+            id: project_id.to_string(),
+            name,
+            root_path: root_path_str,
+            extensions: request.extensions,
+            exclude_dirs: request.exclude_dirs,
+            respect_gitignore: request.respect_gitignore,
+            ignore_patterns: request.ignore_patterns,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            last_indexed: None,
+        },
+    })
 }
 
 /// Handle update project metadata request
+#[utoipa::path(
+    put, path = "/api/project/{id}", tag = "Project",
+    params(("id" = String, Path, description = "Project id or path")),
+    request_body = UpdateProjectRequest,
+    responses(
+        (status = 200, body = ProjectDetailResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_update_project(
     State(state): State<crate::api::state::AppState>,
     Path(id_str): Path<String>,
     Json(request): Json<UpdateProjectRequest>,
-) -> impl IntoResponse {
+) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available
     let metadata_store = match &state.metadata_store {
         Some(s) => s,
         None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    "Metadata store not initialized",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                "Metadata store not initialized",
+            ));
         }
     };
 
@@ -226,38 +198,29 @@ pub async fn handle_update_project(
     let id: i64 = match id_str.parse() {
         Ok(id) => id,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(
-                    error_codes::INVALID_INPUT,
-                    "Invalid project ID: must be a number",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_INPUT,
+                "Invalid project ID: must be a number",
+            ));
         }
     };
 
-    let _exists = match metadata_store
+    match metadata_store
         .as_ref()
         .with_transaction(|tx| ProjectRepository::get_by_id(tx, id))
     {
-        Ok(Some(_)) => true,
+        Ok(Some(_)) => {}
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(error_response(
-                    error_codes::ENTITY_NOT_FOUND,
-                    "Project does not exist",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::ENTITY_NOT_FOUND,
+                "Project does not exist",
+            ));
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to check project: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to check project: {}", e),
+            ));
         }
     };
 
@@ -286,35 +249,26 @@ pub async fn handle_update_project(
     // Use update method instead of delete-insert
     let client = metadata_store.as_ref();
     if let Err(e) = client.with_transaction(|tx| ProjectRepository::update(tx, id, &updates)) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(error_response(
-                error_codes::STORAGE_ERROR,
-                &format!("Failed to update project: {}", e),
-            )),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::STORAGE_ERROR,
+            format!("Failed to update project: {}", e),
+        ));
     }
 
     // Get updated project
     let record = match client.with_transaction(|tx| ProjectRepository::get_by_id(tx, id)) {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(error_response(
-                    error_codes::ENTITY_NOT_FOUND,
-                    "Project does not exist",
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::ENTITY_NOT_FOUND,
+                "Project does not exist",
+            ));
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to query updated project: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to query updated project: {}", e),
+            ));
         }
     };
 
@@ -322,44 +276,34 @@ pub async fn handle_update_project(
     let project = match record_to_config(&record) {
         Ok(p) => p,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    error_codes::STORAGE_ERROR,
-                    &format!("Failed to convert project data: {}", e),
-                )),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to convert project data: {}", e),
+            ));
         }
     };
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "success": true,
-            "project": project
-        })),
-    )
+    ApiResult::Success(ProjectDetailResponse {
+        success: true,
+        project,
+    })
 }
 
 /// Handle delete project request
+#[utoipa::path(
+    delete, path = "/api/project/{id}", tag = "Project",
+    params(("id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = ProjectDeleteResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_delete_project(
     State(state): State<crate::api::state::AppState>,
-    Path(id_str): Path<String>,
-) -> impl IntoResponse {
-    // Parse project ID
-    let id: i64 = match id_str.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(
-                    error_codes::INVALID_INPUT,
-                    "Invalid project ID: must be a number",
-                )),
-            );
-        }
-    };
-
+    Path(id): Path<i64>,
+) -> ApiResult<ProjectDeleteResponse> {
     // 1. Stop watch if running (handler-specific: maintenance service doesn't manage watchers)
     if let Some(tracker) = state.watch_status.write().await.remove(&id) {
         if tracker.active {
@@ -385,13 +329,10 @@ pub async fn handle_delete_project(
             .map(|b| format!("{}: {}", b.backend, b.detail))
             .collect::<Vec<_>>()
             .join("; ");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(error_response(
-                error_codes::STORAGE_ERROR,
-                &format!("Project deletion failed: {}", error_detail),
-            )),
-        );
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::STORAGE_ERROR,
+            format!("Project deletion failed: {}", error_detail),
+        ));
     }
 
     // Evict per-project metrics (gauges/counters/histograms carrying the
@@ -409,29 +350,15 @@ pub async fn handle_delete_project(
         );
     }
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "success": true,
-            "message": "Project deleted successfully",
-            "project_id": id_str
-        })),
-    )
-}
-
-/// Create error response JSON
-fn error_response(code: &str, message: &str) -> serde_json::Value {
-    json!({
-        "success": false,
-        "error": {
-            "code": code,
-            "message": message
-        }
+    ApiResult::Success(ProjectDeleteResponse {
+        success: true,
+        message: "Project deleted successfully".to_string(),
+        project_id: id,
     })
 }
 
 /// Convert ProjectRecord to ProjectConfig
-fn record_to_config(
+pub(crate) fn record_to_config(
     record: &cce_storage_sqlite::ProjectRecord,
 ) -> Result<cce_api::models::ProjectConfig, serde_json::Error> {
     use cce_api::models::ProjectConfig;

@@ -1,9 +1,10 @@
 //! Common API response and error types shared between CLI and Server
 
 use serde::Serialize;
+use utoipa::ToSchema;
 
 /// Common error response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
     pub success: bool,
     pub error: ErrorDetail,
@@ -38,7 +39,7 @@ impl ErrorResponse {
 }
 
 /// Error detail structure
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorDetail {
     pub code: String,
     pub message: String,
@@ -57,4 +58,6 @@ pub mod error_codes {
     pub const QUERY_ERROR: &str = "QUERY_ERROR";
     pub const INTERNAL_ERROR: &str = "INTERNAL_ERROR";
     pub const SERVICE_UNAVAILABLE: &str = "SERVICE_UNAVAILABLE";
+    pub const CONFLICT: &str = "CONFLICT";
+    pub const NOT_IMPLEMENTED: &str = "NOT_IMPLEMENTED";
 }

@@ -5,13 +5,7 @@
 //! - Inspecting current active configuration
 //! - Validating configuration files
 
-use axum::{
-    Json,
-    extract::{Query, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
-use serde::Deserialize;
+use axum::{extract::Query, extract::State};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,16 +16,12 @@ use cce_config::{
 use cce_orchestrator::hot_update::processors::ProcessorCollection;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
 
-use cce_api::models::ConfigInfoResponse;
+use cce_api::models::{
+    ConfigInfoResponse, ConfigReloadQuery, ConfigReloadResponse, ConfigValidateResponse,
+    ConfigWarningInfo, ErrorResponse, error_codes,
+};
 
-use cce_api::models::error_codes;
-
-/// Query parameters for config reload
-#[derive(Debug, Deserialize)]
-pub struct ConfigReloadQuery {
-    /// Project ID to reload (optional, uses cached projects if not specified)
-    pub project_id: Option<i64>,
-}
+use crate::api::response::ApiResult;
 
 /// Handle config reload request
 ///
@@ -40,35 +30,39 @@ pub struct ConfigReloadQuery {
 ///
 /// This endpoint requires a `project_id` query parameter. For per-project config reload,
 /// use `/api/project/{id}/reload` instead.
+#[utoipa::path(
+    post, path = "/api/config/reload", tag = "Config",
+    params(ConfigReloadQuery),
+    responses(
+        (status = 200, body = ConfigReloadResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_config_reload(
     State(state): State<crate::api::state::AppState>,
     Query(query): Query<ConfigReloadQuery>,
-) -> impl IntoResponse {
+) -> ApiResult<ConfigReloadResponse> {
     // Get project_id from query param, or return error
     let project_id = match query.project_id {
         Some(id) => id,
         None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!(cce_api::models::ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "project_id query parameter is required. Use /api/project/{id}/reload for per-project reload."
-                ))),
-            );
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                "project_id query parameter is required. Use /api/project/{id}/reload for per-project reload.",
+            ));
         }
     };
 
     // Use engine to reload project config (clears all component caches)
     let engine = &state.engine;
     if let Err(e) = engine.reload_project_config(project_id).await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!(cce_api::models::ErrorResponse::with_details(
-                error_codes::INTERNAL_ERROR,
-                "Failed to reload project config",
-                e.to_string(),
-            ))),
-        );
+        return ApiResult::Error(ErrorResponse::with_details(
+            error_codes::INTERNAL_ERROR,
+            "Failed to reload project config",
+            e.to_string(),
+        ));
     }
 
     // Attempt hot-update coordinator reload if available
@@ -181,13 +175,13 @@ pub async fn handle_config_reload(
                         error = %error,
                         "Failed to rebuild processors during config reload; keeping the previous set"
                     );
-                    return (
-                        StatusCode::OK,
-                        Json(json!({
-                            "success": true,
-                            "message": format!("Configuration reloaded for project {} (processors kept unchanged)", project_id)
-                        })),
-                    );
+                    return ApiResult::Success(ConfigReloadResponse {
+                        success: true,
+                        message: format!(
+                            "Configuration reloaded for project {} (processors kept unchanged)",
+                            project_id
+                        ),
+                    });
                 }
             };
             let processor_refs: Vec<
@@ -210,22 +204,28 @@ pub async fn handle_config_reload(
         }
     }
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "success": true,
-            "message": format!("Configuration reloaded for project {}", project_id)
-        })),
-    )
+    ApiResult::Success(ConfigReloadResponse {
+        success: true,
+        message: format!("Configuration reloaded for project {}", project_id),
+    })
 }
 
 /// GET /api/config
 ///
 /// Return the current active configuration information.
 /// Useful for verifying that the correct configuration has been loaded.
+#[utoipa::path(
+    get, path = "/api/config", tag = "Config",
+    responses(
+        (status = 200, body = ConfigInfoResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_config_info(
     State(state): State<crate::api::state::AppState>,
-) -> Json<ConfigInfoResponse> {
+) -> ApiResult<ConfigInfoResponse> {
     let initialized = Settings::is_initialized();
     let (database, embedder, project_count) = if initialized {
         match Settings::global() {
@@ -241,7 +241,7 @@ pub async fn handle_config_info(
         (json!(null), json!(null), 0)
     };
 
-    Json(ConfigInfoResponse {
+    ApiResult::Success(ConfigInfoResponse {
         initialized,
         database,
         embedder,
@@ -253,18 +253,28 @@ pub async fn handle_config_info(
 ///
 /// Validate the current configuration and return any warnings or errors.
 /// This is a read-only check that does not reload or modify any state.
-pub async fn handle_config_validate() -> Json<serde_json::Value> {
+#[utoipa::path(
+    get, path = "/api/config/validate", tag = "Config",
+    responses(
+        (status = 200, body = ConfigValidateResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_config_validate() -> ApiResult<ConfigValidateResponse> {
     let mut warnings: Vec<String> = Vec::new();
     let mut dep_warnings: Vec<ConfigWarning> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
     if !Settings::is_initialized() {
         errors.push("Configuration has not been initialized".into());
-        return Json(json!({
-            "valid": false,
-            "errors": errors,
-            "warnings": warnings,
-        }));
+        return ApiResult::Success(ConfigValidateResponse {
+            valid: false,
+            errors,
+            warnings,
+            dependency_warnings: Vec::new(),
+        });
     }
 
     match Settings::global() {
@@ -299,12 +309,20 @@ pub async fn handle_config_validate() -> Json<serde_json::Value> {
         }
     }
 
-    Json(json!({
-        "valid": errors.is_empty(),
-        "errors": errors,
-        "warnings": warnings,
-        "dependency_warnings": dep_warnings,
-    }))
+    ApiResult::Success(ConfigValidateResponse {
+        valid: errors.is_empty(),
+        errors,
+        warnings,
+        dependency_warnings: dep_warnings
+            .into_iter()
+            .map(|w| ConfigWarningInfo {
+                severity: format!("{:?}", w.severity),
+                field: w.field,
+                depends_on: w.depends_on,
+                suggestion: w.suggestion,
+            })
+            .collect(),
+    })
 }
 
 /// Perform basic validation of the configuration.

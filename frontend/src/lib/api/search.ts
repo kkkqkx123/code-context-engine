@@ -1,113 +1,31 @@
 /**
  * Search API
- * Handles code search operations with multiple query types
+ * Handles code search operations with multiple query types.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from './client';
+import type { components } from './schema';
 
 export type QueryType = 'vector' | 'bm25' | 'hybrid' | 'summary' | 'hierarchical' | 'semantic_with_relations';
 
-export interface SearchRequest {
-	project_id?: number;
-	project_path?: string;
-	query: string;
-	query_type?: QueryType;
-	limit?: number;
-	min_score?: number;
-	directory_prefix?: string;
-	exclude_patterns?: string[];
-	include_patterns?: string[];
-	exclude_content_types?: string[];
-	include_categories?: string[];
-	exclude_categories?: string[];
-	call_chain_depth?: number;
-	include_call_chain?: boolean;
-	enable_rerank?: boolean;
-	rerank_max_candidates?: number;
-}
-
-// Aggregated Search Types
-export interface SubQuery {
-	text: string;
-	query_type?: QueryType;
-	weight?: number;
-}
-
-export interface AggregatedSearchRequest {
-	project_id?: number;
-	project_path?: string;
-	sub_queries: SubQuery[];
-	limit?: number;
-	min_score?: number;
-	directory_prefix?: string;
-	exclude_content_types?: string[];
-	exclude_patterns?: string[];
-	include_patterns?: string[];
-	include_categories?: string[];
-	exclude_categories?: string[];
-	enable_rerank?: boolean;
-	rerank_max_candidates?: number;
-}
-
-export interface CallChainNode {
-	function_id: string;
-	function_name: string;
-	file_path: string;
-	depth: number;
-	relation_type: string;
-	call_line?: number;
-}
-
-export interface SearchResultItem {
-	entity_ids: number[];
-	score: number;
-	file_path: string;
-	code_chunk: string;
-	start_line: number;
-	end_line: number;
-	entity_type?: string;
-	source: string;
-	call_chain?: CallChainNode[];
-}
-
-export interface SearchResponse {
-	success: boolean;
-	total: number;
-	items: SearchResultItem[];
-	elapsed_ms: number;
-	sources_used: string[];
-}
-
-export interface AggregatedSearchResponse {
-	success: boolean;
-	total: number;
-	items: SearchResultItem[];
-	elapsed_ms: number;
-	sub_queries_count: number;
-	sources_used: string[];
-}
-
-export interface EntitySearchResultItem {
-	id: number;
-	name: string;
-	kind: string;
-	file_id: number;
-	signature?: string;
-	span_start_row?: number;
-	span_end_row?: number;
-	depth?: number;
-	parent_id?: number;
-	project_id: number;
-	rank: number;
-}
+export type SearchRequest = components['schemas']['SearchRequest'];
+export type SubQuery = components['schemas']['SubQueryRequest'];
+export type AggregatedSearchRequest = components['schemas']['AggregatedSearchRequest'];
+export type CallChainNode = components['schemas']['CallChainNode'];
+export type SearchResultItem = components['schemas']['SearchResultItem'];
+export type SearchResponse = components['schemas']['SearchResponse'];
+export type EntitySearchResultItem = components['schemas']['EntitySearchResult'];
+export type EntitySearchRequest = components['schemas']['EntitySearchRequest'];
+export type EntitySearchResponse = components['schemas']['EntitySearchResponse'];
 
 export const searchApi = {
 	search: (request: SearchRequest) =>
 		apiClient.post<SearchResponse>('/api/search', request),
 
 	aggregatedSearch: (request: AggregatedSearchRequest) =>
-		apiClient.post<AggregatedSearchResponse>('/api/search/aggregated', request),
+		apiClient.post<SearchResponse>('/api/search/aggregated', request),
 
-	entitySearch: (request: { query: string; project_id?: number; project_path?: string; limit?: number; kind_filter?: string }) =>
-		apiClient.post<{ success: boolean; total: number; items: EntitySearchResultItem[]; elapsed_ms: number }>('/api/entities/search', request),
+	entitySearch: (request: EntitySearchRequest) =>
+		apiClient.post<EntitySearchResponse>('/api/entities/search', request),
 };

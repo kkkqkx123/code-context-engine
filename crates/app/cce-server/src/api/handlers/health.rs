@@ -5,20 +5,30 @@
 //! - Per-service detailed diagnostics
 //! - Retry queue inspection and manual processing
 
-use axum::{Json, extract::State, http::StatusCode};
+use axum::extract::State;
 
+use crate::api::response::ApiResult;
 use crate::api::state::AppState;
 use cce_api::models::{
-    Bm25HealthResponse, EmbeddingHealthResponse, HealthStatus, QdrantDiagnostic,
-    QdrantHealthResponse, RetryQueueStatusResponse, ServiceStatus,
+    Bm25HealthResponse, EmbeddingHealthResponse, ErrorResponse, HealthStatus, QdrantDiagnostic,
+    QdrantHealthResponse, RetryQueueClearResponse, RetryQueueProcessResponse,
+    RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
 
 // --- Handlers ---
 
 /// GET /api/health — Aggregate health of all external services
-pub async fn handle_health(
-    State(state): State<AppState>,
-) -> Result<Json<HealthStatus>, (StatusCode, Json<serde_json::Value>)> {
+#[utoipa::path(
+    get, path = "/api/health", tag = "Health",
+    responses(
+        (status = 200, body = HealthStatus, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_health(State(state): State<AppState>) -> ApiResult<HealthStatus> {
     let qdrant_health = check_qdrant(&state).await;
     let bm25_health = check_bm25(&state).await;
     let embedding_health = check_embedding(&state);
@@ -26,18 +36,28 @@ pub async fn handle_health(
     let all_healthy =
         qdrant_health.reachable && bm25_health.reachable && embedding_health.reachable;
 
-    Ok(Json(HealthStatus {
+    ApiResult::Success(HealthStatus {
         healthy: all_healthy,
         qdrant: qdrant_health,
         bm25: bm25_health,
         embedding: embedding_health,
-    }))
+    })
 }
 
 /// GET /api/health/qdrant — Qdrant detailed diagnostic
+#[utoipa::path(
+    get, path = "/api/health/qdrant", tag = "Health",
+    responses(
+        (status = 200, body = QdrantHealthResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_qdrant_health(
     State(state): State<AppState>,
-) -> Result<Json<QdrantHealthResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<QdrantHealthResponse> {
     let circuit_breaker = state
         .qdrant
         .as_ref()
@@ -73,17 +93,27 @@ pub async fn handle_qdrant_health(
 
     let healthy = diagnostic.reachable;
 
-    Ok(Json(QdrantHealthResponse {
+    ApiResult::Success(QdrantHealthResponse {
         healthy,
         circuit_breaker,
         diagnostic,
-    }))
+    })
 }
 
 /// GET /api/health/embedding — Embedding service health
+#[utoipa::path(
+    get, path = "/api/health/embedding", tag = "Health",
+    responses(
+        (status = 200, body = EmbeddingHealthResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_embedding_health(
     State(state): State<AppState>,
-) -> Json<EmbeddingHealthResponse> {
+) -> ApiResult<EmbeddingHealthResponse> {
     let (healthy, model_name, message) = if let Some(embedder) = &state.embedder {
         let healthy = embedder.is_healthy();
         let model_name = Some(embedder.model_name().to_string());
@@ -100,7 +130,7 @@ pub async fn handle_embedding_health(
         (false, None, "Embedding provider not configured".to_string())
     };
 
-    Json(EmbeddingHealthResponse {
+    ApiResult::Success(EmbeddingHealthResponse {
         healthy,
         model_name,
         message,
@@ -108,7 +138,17 @@ pub async fn handle_embedding_health(
 }
 
 /// GET /api/health/bm25 — BM25 index health
-pub async fn handle_bm25_health(State(state): State<AppState>) -> Json<Bm25HealthResponse> {
+#[utoipa::path(
+    get, path = "/api/health/bm25", tag = "Health",
+    responses(
+        (status = 200, body = Bm25HealthResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25HealthResponse> {
     let (enabled, connected, index_path) = if let Some(bm25) = &state.bm25 {
         let bm25 = bm25.lock().await;
         (
@@ -120,7 +160,7 @@ pub async fn handle_bm25_health(State(state): State<AppState>) -> Json<Bm25Healt
         (false, false, None)
     };
 
-    Json(Bm25HealthResponse {
+    ApiResult::Success(Bm25HealthResponse {
         enabled,
         connected,
         index_path,
@@ -128,11 +168,20 @@ pub async fn handle_bm25_health(State(state): State<AppState>) -> Json<Bm25Healt
 }
 
 /// GET /api/retry-queue — View retry queue status (aggregated across all projects)
+#[utoipa::path(
+    get, path = "/api/retry-queue", tag = "Health",
+    responses(
+        (status = 200, body = RetryQueueStatusResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_retry_queue_status(
     State(state): State<AppState>,
-) -> Json<RetryQueueStatusResponse> {
+) -> ApiResult<RetryQueueStatusResponse> {
     let pending_count = state.engine.retry_queue_total_len().await;
-    Json(RetryQueueStatusResponse {
+    ApiResult::Success(RetryQueueStatusResponse {
         pending_count,
         is_empty: pending_count == 0,
     })
@@ -142,31 +191,55 @@ pub async fn handle_retry_queue_status(
 ///
 /// Drains all queries that are ready for retry (cooldown expired)
 /// and re-executes them. Returns the number of queries re-attempted.
+#[utoipa::path(
+    post, path = "/api/retry-queue/process", tag = "Health",
+    responses(
+        (status = 200, body = RetryQueueProcessResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_retry_queue_process(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let count = state.engine.process_retry_queue(1).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": format!("Failed to process retry queue: {}", e)
-            })),
-        )
-    })?;
-    Ok(Json(serde_json::json!({
-        "processed": count,
-        "message": format!("Retry queue processing complete, {} queries re-attempted", count)
-    })))
+) -> ApiResult<RetryQueueProcessResponse> {
+    let count = match state.engine.process_retry_queue(1).await {
+        Ok(count) => count,
+        Err(e) => {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INTERNAL_ERROR,
+                format!("Failed to process retry queue: {}", e),
+            ));
+        }
+    };
+    ApiResult::Success(RetryQueueProcessResponse {
+        processed: count,
+        message: format!(
+            "Retry queue processing complete, {} queries re-attempted",
+            count
+        ),
+    })
 }
 
 /// DELETE /api/retry-queue — Clear all retry queues across all projects
-pub async fn handle_retry_queue_clear(State(state): State<AppState>) -> Json<serde_json::Value> {
+#[utoipa::path(
+    delete, path = "/api/retry-queue", tag = "Health",
+    responses(
+        (status = 200, body = RetryQueueClearResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_retry_queue_clear(
+    State(state): State<AppState>,
+) -> ApiResult<RetryQueueClearResponse> {
     let pending = state.engine.retry_queue_total_len().await;
     state.engine.clear_all_retry_queues().await;
-    Json(serde_json::json!({
-        "cleared": pending,
-        "message": format!("Retry queue cleared, {} queries discarded", pending)
-    }))
+    ApiResult::Success(RetryQueueClearResponse {
+        cleared: pending,
+        message: format!("Retry queue cleared, {} queries discarded", pending),
+    })
 }
 
 // --- Internal helpers ---

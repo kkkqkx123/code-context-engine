@@ -1,107 +1,23 @@
 /**
  * Entity API
- * Handles entity queries and relationship exploration
+ * Handles entity queries and relationship exploration.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from './client';
-import type { CallChainNode } from './search';
+import type { components } from './schema';
 
-export interface ParameterInfo {
-	name: string;
-	type_name?: string;
-}
-
-export interface FunctionInfo {
-	id: string;
-	name: string;
-	signature: string;
-	parameters: ParameterInfo[];
-	return_type?: string;
-	file_path: string;
-	start_line: number;
-	end_line: number;
-	doc_comment?: string;
-}
-
-export interface FunctionDetailResponse {
-	success: boolean;
-	function: FunctionInfo;
-	relation_info?: Record<string, unknown>;
-}
-
-export interface FunctionCallsResponse {
-	success: boolean;
-	relation_epoch: number;
-	function_id: string;
-	function_name: string;
-	callees: CallChainNode[];
-	total_callees: number;
-	relation_info?: Record<string, unknown>;
-}
-
-export interface FunctionCallersResponse {
-	success: boolean;
-	relation_epoch: number;
-	function_id: string;
-	function_name: string;
-	callers: CallChainNode[];
-	total_callers: number;
-	relation_info?: Record<string, unknown>;
-}
-
-export interface CallChainResponse {
-	success: boolean;
-	relation_epoch: number;
-	function_id: string;
-	function_name: string;
-	direction: string;
-	call_chain: CallChainNode[];
-	relation_info?: Record<string, unknown>;
-}
-
-export interface CallPathResponse {
-	success: boolean;
-	relation_epoch: number;
-	start_function_id: string;
-	end_function_id: string;
-	path_found: boolean;
-	path: CallChainNode[];
-	path_length: number;
-	relation_info?: Record<string, unknown>;
-}
-
-export interface ClassRelation {
-	class_id: string;
-	class_name: string;
-	file_path: string;
-	depth: number;
-}
-
-export interface ClassInheritanceResponse {
-	success: boolean;
-	relation_epoch: number;
-	class_id: string;
-	class_name: string;
-	base_classes: ClassRelation[];
-	derived_classes: ClassRelation[];
-	relation_info?: Record<string, unknown>;
-}
-
-export interface InterfaceRelation {
-	interface_id: string;
-	interface_name: string;
-	file_path: string;
-}
-
-export interface ClassImplementationsResponse {
-	success: boolean;
-	relation_epoch: number;
-	class_id: string;
-	class_name: string;
-	implemented_interfaces: InterfaceRelation[];
-	implementing_classes: ClassRelation[];
-	relation_info?: Record<string, unknown>;
-}
+export type ParameterInfo = components['schemas']['ParameterInfo'];
+export type FunctionInfo = components['schemas']['FunctionInfo'];
+export type FunctionDetailResponse = components['schemas']['FunctionDetailResponse'];
+export type FunctionCallsResponse = components['schemas']['FunctionCallsResponse'];
+export type FunctionCallersResponse = components['schemas']['FunctionCallersResponse'];
+export type CallChainResponse = components['schemas']['CallChainResponse'];
+export type CallPathResponse = components['schemas']['CallPathResponse'];
+export type ClassRelation = components['schemas']['ClassRelation'];
+export type ClassInheritanceResponse = components['schemas']['ClassInheritanceResponse'];
+export type InterfaceRelation = components['schemas']['InterfaceRelation'];
+export type ClassImplementationsResponse = components['schemas']['ClassImplementationsResponse'];
 
 export const entityApi = {
 	// Function details

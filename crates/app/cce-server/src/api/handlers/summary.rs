@@ -24,6 +24,16 @@ pub type SummaryApiResponse = ApiResult<SummaryResponse>;
 ///
 /// Generates temporary file summaries without storing them.
 /// Supports single files, multiple files, and directory scanning.
+#[utoipa::path(
+    post, path = "/api/summary", tag = "Summary",
+    request_body = SummaryRequest,
+    responses(
+        (status = 200, body = SummaryResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_summary(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<SummaryRequest>,

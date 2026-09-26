@@ -40,6 +40,8 @@ fn status_for_code(code: &str) -> StatusCode {
         error_codes::INVALID_REQUEST | error_codes::INVALID_INPUT => StatusCode::BAD_REQUEST,
         error_codes::ENTITY_NOT_FOUND => StatusCode::NOT_FOUND,
         error_codes::SERVICE_UNAVAILABLE => StatusCode::SERVICE_UNAVAILABLE,
+        error_codes::CONFLICT => StatusCode::CONFLICT,
+        error_codes::NOT_IMPLEMENTED => StatusCode::NOT_IMPLEMENTED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

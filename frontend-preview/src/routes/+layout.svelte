@@ -214,7 +214,6 @@
 						<span class="hdot" class:ok={s.vector_storage.connected} title="Vector DB"></span>
 						<span class="hdot" class:ok={s.bm25_storage.connected} title="BM25"></span>
 						<span class="hdot" class:ok={s.relation_storage.connected} title="Relations"></span>
-						<span class="hdot" class:ok={s.cache_storage.connected} title="Cache"></span>
 					{:else}
 						<span class="hdot idle"></span>
 						<span class="hdot idle"></span>

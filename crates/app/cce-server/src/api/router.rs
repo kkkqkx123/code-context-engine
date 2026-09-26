@@ -9,15 +9,21 @@ use axum::{
 
 use super::handlers;
 use super::middleware::metrics_middleware;
+use super::openapi::openapi_json;
 use super::state::AppState;
 use cce_metrics::HttpMetrics;
+
+/// Serve the OpenAPI document (debug builds only).
+async fn serve_openapi() -> ([(&'static str, &'static str); 1], String) {
+    ([("Content-Type", "application/json")], openapi_json())
+}
 
 /// Create API router with all routes
 pub fn create_router(state: AppState) -> Router {
     // Create HTTP metrics wrapper for middleware
     let http_metrics = HttpMetrics::new(state.engine.metrics_registry());
 
-    Router::new()
+    let mut router = Router::new()
         // Index operations
         .route("/api/index", post(handlers::index::handle_index))
         .route(
@@ -272,5 +278,13 @@ pub fn create_router(state: AppState) -> Router {
         // Inject state
         .with_state(state)
         // Apply metrics middleware to all routes
-        .layer(middleware::from_fn(metrics_middleware(http_metrics)))
+        .layer(middleware::from_fn(metrics_middleware(http_metrics)));
+
+    // Debug-only self-hosted OpenAPI document; excluded from the contract tests.
+    #[cfg(debug_assertions)]
+    {
+        router = router.route("/api-docs/openapi.json", get(serve_openapi));
+    }
+
+    router
 }

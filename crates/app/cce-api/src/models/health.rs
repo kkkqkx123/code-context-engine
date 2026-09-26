@@ -1,9 +1,10 @@
 //! Health check models
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// Health status response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct HealthStatus {
     /// Overall health
     pub healthy: bool,
@@ -16,7 +17,7 @@ pub struct HealthStatus {
 }
 
 /// Service status
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ServiceStatus {
     /// Whether the service is reachable
     pub reachable: bool,
@@ -25,7 +26,7 @@ pub struct ServiceStatus {
 }
 
 /// Qdrant health response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct QdrantHealthResponse {
     pub healthy: bool,
     pub circuit_breaker: String,
@@ -33,7 +34,7 @@ pub struct QdrantHealthResponse {
 }
 
 /// Qdrant diagnostic
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct QdrantDiagnostic {
     #[serde(default)]
     pub reachable: bool,
@@ -48,7 +49,7 @@ pub struct QdrantDiagnostic {
 }
 
 /// Embedding health response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EmbeddingHealthResponse {
     pub healthy: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,7 +58,7 @@ pub struct EmbeddingHealthResponse {
 }
 
 /// BM25 health response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct Bm25HealthResponse {
     pub enabled: bool,
     pub connected: bool,
@@ -66,21 +67,21 @@ pub struct Bm25HealthResponse {
 }
 
 /// Retry queue status response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RetryQueueStatusResponse {
     pub pending_count: usize,
     pub is_empty: bool,
 }
 
 /// Retry queue process response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RetryQueueProcessResponse {
     pub processed: usize,
     pub message: String,
 }
 
 /// Retry queue clear response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct RetryQueueClearResponse {
     pub cleared: usize,
     pub message: String,

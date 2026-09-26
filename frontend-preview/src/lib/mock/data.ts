@@ -330,7 +330,7 @@ export const mockConfigValidation = {
 	errors: [],
 	warnings: [],
 	dependency_warnings: [
-		{ level: 'info', message: 'Qdrant version 1.8.0 detected', module: 'storage' }
+		{ field: 'storage.qdrant', depends_on: 'storage.backend = "qdrant"', severity: 'Info', suggestion: 'Qdrant version 1.8.0 detected' }
 	]
 };
 
@@ -338,19 +338,23 @@ export const mockConfigValidation = {
 
 export const mockCompressResult = {
 	success: true,
-	file_path: 'crates/cce-parser/src/grouper.rs',
-	language: 'rust',
-	file_hash: 'abc123def456',
-	from_cache: false,
-	semantic_text: 'Module for grouping related code entities into logical clusters. Implements proximity-based and semantic similarity grouping algorithms.'
+	result: {
+		file_path: 'crates/cce-parser/src/grouper.rs',
+		language: 'rust',
+		file_hash: 'abc123def456',
+		from_cache: false,
+		semantic_text: 'Module for grouping related code entities into logical clusters. Implements proximity-based and semantic similarity grouping algorithms.'
+	}
 };
 
 export const mockDiagnoseResult = {
 	success: true,
 	result: {
-		issues: [
-			{ severity: 'warning', message: 'Function `group_entities` is too long (23 lines)', suggestion: 'Consider extracting helper functions', line: 45, column: 0 },
-			{ severity: 'info', message: 'Doc comment could be more detailed', line: 44, column: 0 }
+		language: 'rust',
+		is_valid: false,
+		diagnostics: [
+			{ kind: 'TooLongFunction', message: 'Function `group_entities` is too long (23 lines)', position: { row: 45, column: 0 }, precision: 'Medium' },
+			{ kind: 'MissingDocs', message: 'Doc comment could be more detailed', position: { row: 44, column: 0 }, precision: 'Low' }
 		]
 	}
 };
@@ -376,9 +380,9 @@ export const mockSymbolsResult = {
 				success: true,
 				symbol_count: 3,
 				symbols: [
-					{ name: 'group_entities', type: 'function', line_start: 45, line_end: 68 },
-					{ name: 'EntityGroup', type: 'struct', line_start: 12, line_end: 18 },
-					{ name: 'calculate_proximity', type: 'function', line_start: 72, line_end: 85 }
+					{ name: 'group_entities', kind: 'function', line: 45, end_line: 68 },
+					{ name: 'EntityGroup', kind: 'struct', line: 12, end_line: 18 },
+					{ name: 'calculate_proximity', kind: 'function', line: 72, end_line: 85 }
 				]
 			}
 		],
@@ -434,11 +438,11 @@ export const mockSummaryResult = {
 
 export const mockQdrantProcessStatus = {
 	managed: true,
-	status: 'Running'
+	status: { type: 'Running' }
 };
 
 export const mockQdrantActionResponse = {
 	success: true,
 	message: 'Qdrant process restarted successfully',
-	status: 'Running'
+	status: { type: 'Running' }
 };

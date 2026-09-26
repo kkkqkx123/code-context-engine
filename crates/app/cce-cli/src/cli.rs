@@ -190,10 +190,6 @@ pub enum IndexCommands {
         /// File path to parse
         #[arg(short, long)]
         file: String,
-
-        /// Language hint (optional)
-        #[arg(short, long)]
-        language: Option<String>,
     },
 
     /// Run a truncate-retry pass over the Embedding dead letter queue
@@ -233,21 +229,9 @@ pub enum SearchCommands {
         #[arg(long)]
         min_score: Option<f32>,
 
-        /// Filter by file extensions (comma-separated)
-        #[arg(long)]
-        extensions: Option<String>,
-
         /// Filter by directory prefix
         #[arg(long)]
         directory: Option<String>,
-
-        /// Filter by entity types (comma-separated)
-        #[arg(long)]
-        entities: Option<String>,
-
-        /// Filter by languages (comma-separated)
-        #[arg(long)]
-        languages: Option<String>,
 
         /// Content types to exclude (comma-separated): test, generated, vendor
         #[arg(long)]

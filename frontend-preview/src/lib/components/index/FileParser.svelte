@@ -7,7 +7,6 @@
 	import Badge from '../ui/Badge.svelte';
 
 	let filePath = $state('');
-	let language = $state('');
 	let isLoading = $state(false);
 	let parseResult = $state<ParseResult | null>(null);
 	let error = $state<string | null>(null);
@@ -23,8 +22,8 @@
 		parseResult = null;
 
 		try {
-			const result = await indexApi.parseFile(filePath, language || undefined);
-			parseResult = result as ParseResult;
+			const result = await indexApi.parseFile(filePath);
+			parseResult = result;
 		} catch (err: any) {
 			error = err.message || 'Failed to parse file';
 		} finally {
@@ -34,7 +33,6 @@
 
 	function resetForm() {
 		filePath = '';
-		language = '';
 		parseResult = null;
 		error = null;
 	}
@@ -49,13 +47,6 @@
 				bind:value={filePath}
 				required={true}
 				placeholder="/path/to/file.rs"
-			/>
-
-			<Input
-				label="Language (optional)"
-				type="text"
-				bind:value={language}
-				placeholder="rust, typescript, python"
 			/>
 
 			<div class="form-actions">
@@ -103,12 +94,12 @@
 					{#each parseResult.entities as entity, index}
 						<div class="entity-item">
 							<div class="entity-header">
-								<span class="entity-type">{entity.type || 'Unknown'}</span>
+								<span class="entity-type">{entity.kind || 'Unknown'}</span>
 								<span class="entity-name">{entity.name || 'Unnamed'}</span>
 							</div>
-							{#if entity.description || entity.nl_description}
+							{#if entity.signature}
 								<p class="entity-description">
-									{entity.description || entity.nl_description}
+									{entity.signature}
 								</p>
 							{/if}
 							{#if entity.start_line != null}

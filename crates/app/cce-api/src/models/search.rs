@@ -1,9 +1,10 @@
 //! Search models
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// Search request
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, ToSchema)]
 pub struct SearchRequest {
     /// Project ID for scoping the query (optional if project_path is provided)
     #[serde(default)]
@@ -28,15 +29,6 @@ pub struct SearchRequest {
     /// Content types to exclude (e.g., "test", "generated", "vendor")
     #[serde(default)]
     pub exclude_content_types: Vec<String>,
-    /// File extensions filter
-    #[serde(default)]
-    pub file_extensions: Vec<String>,
-    /// Entity types filter
-    #[serde(default)]
-    pub entity_types: Vec<String>,
-    /// Languages filter
-    #[serde(default)]
-    pub languages: Vec<String>,
     /// Include only specific category values (e.g., ["test", "config"])
     #[serde(default)]
     pub include_categories: Vec<String>,
@@ -51,8 +43,8 @@ pub struct SearchRequest {
     pub rerank_max_candidates: Option<usize>,
 }
 
-/// Search response
-#[derive(Debug, Serialize, Deserialize)]
+/// Search response shared by single and aggregated search endpoints
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SearchResponse {
     pub success: bool,
     pub total: usize,
@@ -67,7 +59,7 @@ pub struct SearchResponse {
 }
 
 /// Search result item
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SearchResultItem {
     pub score: f32,
     pub file_path: String,
@@ -82,7 +74,7 @@ pub struct SearchResultItem {
 }
 
 /// Sub-query definition for aggregated search
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SubQueryRequest {
     /// Query text
     pub text: String,
@@ -95,7 +87,7 @@ pub struct SubQueryRequest {
 }
 
 /// Aggregated search request
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AggregatedSearchRequest {
     /// Project ID for scoping the query (optional if project_path is provided)
     #[serde(default)]
@@ -133,34 +125,6 @@ pub struct AggregatedSearchRequest {
     /// Per-request rerank max candidates override
     #[serde(default)]
     pub rerank_max_candidates: Option<usize>,
-}
-
-/// Aggregated search response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AggregatedSearchResponse {
-    pub success: bool,
-    pub results: Vec<SearchResult>,
-    pub total: usize,
-    pub elapsed_ms: u64,
-    pub sub_queries_count: usize,
-    #[serde(default)]
-    pub sources_used: Vec<String>,
-    /// Sub-query texts that failed during aggregation (empty when all succeeded)
-    #[serde(default)]
-    pub failed_sub_queries: Vec<String>,
-}
-
-/// Search result used in aggregated search response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchResult {
-    pub score: f32,
-    pub file_path: String,
-    pub code_chunk: String,
-    pub start_line: u32,
-    pub end_line: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entity_type: Option<String>,
-    pub source: String,
 }
 
 fn default_query_type() -> String {

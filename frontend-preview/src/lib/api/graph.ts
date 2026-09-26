@@ -6,65 +6,18 @@
  * All endpoints are project-scoped and return node-link structures that map
  * directly onto a graph renderer's element model. Responses carry a
  * `relation_epoch` version marker which callers should use for cache
- * invalidation.
+ * invalidation. Wire types come from the generated OpenAPI contract.
  */
 
 import { apiClient } from './client';
+import type { components } from './schema';
 
-/** A node in a returned subgraph. */
-export interface GraphNode {
-	id: string;
-	label: string;
-	kind: string;
-	source_file: string;
-	source_location: string;
-}
-
-/** An edge in a returned subgraph. */
-export interface GraphEdge {
-	source: string;
-	target: string;
-	relation: string;
-	confidence: string;
-}
-
-/** Subgraph response shared by ego, subgraph and export queries. */
-export interface GraphSubgraphResponse {
-	success: boolean;
-	relation_epoch: number;
-	nodes: GraphNode[];
-	edges: GraphEdge[];
-	relation_info?: Record<string, unknown>;
-}
-
-/** Two-point path response. */
-export interface GraphPathResponse {
-	success: boolean;
-	relation_epoch: number;
-	path_found: boolean;
-	nodes: GraphNode[];
-	edges: GraphEdge[];
-	relation_info?: Record<string, unknown>;
-}
-
-/** Connected components response (stable id groups). */
-export interface GraphComponentsResponse {
-	success: boolean;
-	relation_epoch: number;
-	components: string[][];
-	relation_info?: Record<string, unknown>;
-}
-
-/** File impact response. */
-export interface GraphImpactResponse {
-	success: boolean;
-	relation_epoch: number;
-	changed_file: string;
-	direct_dependents: string[];
-	transitive_dependents: string[];
-	impact_score: number;
-	relation_info?: Record<string, unknown>;
-}
+export type GraphNode = components['schemas']['GraphNode'];
+export type GraphEdge = components['schemas']['GraphEdge'];
+export type GraphSubgraphResponse = components['schemas']['GraphSubgraphResponse'];
+export type GraphPathResponse = components['schemas']['GraphPathResponse'];
+export type GraphComponentsResponse = components['schemas']['GraphComponentsResponse'];
+export type GraphImpactResponse = components['schemas']['GraphImpactResponse'];
 
 /** Traversal direction for ego queries. */
 export type GraphDirection = 'in' | 'out' | 'both';

@@ -145,25 +145,7 @@ impl ApiClient {
     pub async fn search_aggregated(
         &self,
         request: &cce_api::models::AggregatedSearchRequest,
-    ) -> Result<cce_api::models::AggregatedSearchResponse> {
-        let url = format!("{}/api/search/aggregated", self.base_url);
-
-        let response = self
-            .client
-            .post(&url)
-            .json(request)
-            .send()
-            .await
-            .context(format!("Failed to POST {}", url))?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            anyhow::bail!("Aggregated search failed: {}", error_text);
-        }
-
-        response
-            .json()
-            .await
-            .context("Failed to parse aggregated search response JSON")
+    ) -> Result<cce_api::models::SearchResponse> {
+        self.post("/api/search/aggregated", request).await
     }
 }

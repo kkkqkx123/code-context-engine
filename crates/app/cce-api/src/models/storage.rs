@@ -1,18 +1,19 @@
 //! Storage management models
 
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use super::qdrant::QdrantProcessStatus;
 
 /// Storage status response
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct StorageStatusResponse {
     pub success: bool,
     pub status: StorageStatus,
 }
 
 /// Storage status
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct StorageStatus {
     /// Vector storage status
     pub vector_storage: StorageComponentStatus,
@@ -28,7 +29,7 @@ pub struct StorageStatus {
 }
 
 /// Qdrant subprocess information
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct QdrantProcessInfo {
     /// Whether subprocess management is enabled
     pub managed: bool,
@@ -39,7 +40,7 @@ pub struct QdrantProcessInfo {
 }
 
 /// Storage component status
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct StorageComponentStatus {
     /// Whether the storage is connected
     pub connected: bool,
@@ -56,7 +57,8 @@ pub struct StorageComponentStatus {
 }
 
 /// Storage query parameters
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct StorageQuery {
     /// Project ID for scoped storage operations
     pub project_id: i64,

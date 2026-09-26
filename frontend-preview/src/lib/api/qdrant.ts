@@ -1,30 +1,15 @@
 /**
  * Qdrant Process Management API
- * Handles Qdrant subprocess lifecycle operations
+ * Handles Qdrant subprocess lifecycle operations.
+ * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
 import { apiClient } from './client';
+import type { components } from './schema';
 
-/** Mirrors cce_infrastructure::storage::qdrant::QdrantProcessStatus */
-export type QdrantProcessStatus =
-	| 'Idle'
-	| 'Starting'
-	| 'Running'
-	| 'Stopping'
-	| 'Crashed'
-	| 'Stopped'
-	| { Failed: string };
-
-export interface QdrantProcessStatusResponse {
-	managed: boolean;
-	status: QdrantProcessStatus;
-}
-
-export interface QdrantActionResponse {
-	success: boolean;
-	message: string;
-	status: QdrantProcessStatus;
-}
+export type QdrantProcessStatus = components['schemas']['QdrantProcessStatus'];
+export type QdrantProcessStatusResponse = components['schemas']['QdrantProcessStatusResponse'];
+export type QdrantActionResponse = components['schemas']['QdrantActionResponse'];
 
 export const qdrantApi = {
 	/** GET /api/qdrant/process/status */

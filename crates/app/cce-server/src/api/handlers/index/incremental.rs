@@ -7,9 +7,19 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use std::path::PathBuf;
 
-use cce_api::models::{IncrementalIndexRequest, IncrementalIndexResponse};
+use cce_api::models::{ErrorResponse, IncrementalIndexRequest, IncrementalIndexResponse};
 
 /// Handle an explicit incremental index request.
+#[utoipa::path(
+    post, path = "/api/index/incremental", tag = "Index",
+    request_body = IncrementalIndexRequest,
+    responses(
+        (status = 200, body = IncrementalIndexResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
 pub async fn handle_incremental(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<IncrementalIndexRequest>,

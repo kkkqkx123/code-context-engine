@@ -10,8 +10,8 @@
 //! capability state, keeping the response shape consistent with the frontend.
 
 use axum::{Json, extract::State};
-use serde::{Serialize, de::DeserializeOwned};
 
+use super::to_api_model;
 use cce_orchestrator::{
     FindReferencesResponse as OrchFindReferencesResponse, FindReferencesTool,
     GetSymbolsResponse as OrchGetSymbolsResponse, GetSymbolsTool,
@@ -19,16 +19,6 @@ use cce_orchestrator::{
 };
 
 use crate::api::AppState;
-
-/// Convert an orchestrator response into the shared cce-api wire model.
-///
-/// The orchestrator and cce-api shapes mirror each other; the only
-/// differences are `SymbolKind` (enum) -> `String` and `EntityId` -> `u64`,
-/// which serde handles transparently.
-fn to_api_model<T: Serialize, R: DeserializeOwned>(value: T) -> Result<R, String> {
-    serde_json::from_value(serde_json::to_value(value).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
-}
 
 // ============================================================================
 // Find References
@@ -39,6 +29,13 @@ fn to_api_model<T: Serialize, R: DeserializeOwned>(value: T) -> Result<R, String
 /// # Endpoint
 ///
 /// `POST /api/tools/references`
+#[utoipa::path(
+    post, path = "/api/tools/references", tag = "Tools",
+    request_body = cce_api::models::FindReferencesRequest,
+    responses(
+        (status = 200, body = cce_api::models::FindReferencesResponse, description = "References result, errors reported in-band")
+    )
+)]
 pub async fn handle_find_references(
     State(state): State<AppState>,
     Json(request): Json<cce_api::models::FindReferencesRequest>,
@@ -148,6 +145,13 @@ pub async fn handle_find_references(
 /// # Endpoint
 ///
 /// `POST /api/tools/symbols`
+#[utoipa::path(
+    post, path = "/api/tools/symbols", tag = "Tools",
+    request_body = cce_api::models::GetSymbolsRequest,
+    responses(
+        (status = 200, body = cce_api::models::GetSymbolsResponse, description = "Symbols result, errors reported in-band")
+    )
+)]
 pub async fn handle_get_symbols(
     State(state): State<AppState>,
     Json(request): Json<cce_api::models::GetSymbolsRequest>,
@@ -246,6 +250,13 @@ pub async fn handle_get_symbols(
 /// # Endpoint
 ///
 /// `POST /api/tools/definition`
+#[utoipa::path(
+    post, path = "/api/tools/definition", tag = "Tools",
+    request_body = cce_api::models::GotoDefinitionRequest,
+    responses(
+        (status = 200, body = cce_api::models::GotoDefinitionResponse, description = "Definition result, errors reported in-band")
+    )
+)]
 pub async fn handle_goto_definition(
     State(state): State<AppState>,
     Json(request): Json<cce_api::models::GotoDefinitionRequest>,
