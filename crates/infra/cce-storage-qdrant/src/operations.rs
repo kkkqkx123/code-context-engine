@@ -316,7 +316,7 @@ const POINT_RETRY_DEADLINE: Duration = Duration::from_secs(2);
 /// Random jitter ratio added on top of each computed backoff.
 const POINT_RETRY_JITTER_RATIO: f64 = 0.3;
 
-fn serialize_point(p: &VectorPoint) -> serde_json::Value {
+fn serialize_point(p: &VectorPoint) -> Result<serde_json::Value, QdrantError> {
     let qdrant_id = to_qdrant_point_id(&p.id);
 
     let mut payload = p.payload.clone();
@@ -326,25 +326,14 @@ fn serialize_point(p: &VectorPoint) -> serde_json::Value {
     if payload.r#type.is_none() {
         payload.r#type = Some(PointKind::Chunk);
     }
-    let payload = match serde_json::to_value(payload) {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "Failed to serialize payload, writing minimal payload"
-            );
-            json!({
-                "source_id": p.payload.source_id,
-                "file_path": p.payload.file_path,
-                "type": PointKind::Chunk.as_u8(),
-            })
-        }
-    };
-    json!({
+    let payload = serde_json::to_value(payload).map_err(|e| {
+        QdrantError::ResponseParse(format!("failed to serialize point payload: {e}"))
+    })?;
+    Ok(json!({
         "id": qdrant_id,
         "vector": p.vector,
         "payload": payload
-    })
+    }))
 }
 
 impl PointOperations {
@@ -370,7 +359,10 @@ impl PointOperations {
             self.base_url, self.collection_name
         );
 
-        let points_json: Vec<serde_json::Value> = points.iter().map(serialize_point).collect();
+        let points_json: Vec<serde_json::Value> = points
+            .iter()
+            .map(serialize_point)
+            .collect::<Result<Vec<_>, _>>()?;
 
         let body = json!({
             "points": points_json
@@ -1015,7 +1007,7 @@ mod tests {
             .with_test_source(TestSource::Ast);
 
         let point = VectorPoint::new("group_1_emb_0".to_string(), vec![0.1, 0.2], payload);
-        let json = serialize_point(&point);
+        let json = serialize_point(&point).expect("valid payload must serialize");
 
         let p = &json["payload"];
         assert_eq!(p["source_id"], "group_1_emb_0");
@@ -1035,7 +1027,7 @@ mod tests {
     fn test_serialize_point_falls_back_to_point_id_and_chunk_type() {
         let payload = Payload::new("src/lib.rs");
         let point = VectorPoint::new("legacy_point".to_string(), vec![0.5], payload);
-        let json = serialize_point(&point);
+        let json = serialize_point(&point).expect("valid payload must serialize");
 
         assert_eq!(json["payload"]["source_id"], "legacy_point");
         assert_eq!(json["payload"]["type"], PointKind::Chunk.as_u8());
@@ -1045,7 +1037,7 @@ mod tests {
     fn test_serialize_point_omits_unset_optional_fields() {
         let payload = Payload::new("src/lib.rs");
         let point = VectorPoint::new("p1".to_string(), vec![0.5], payload);
-        let json = serialize_point(&point);
+        let json = serialize_point(&point).expect("valid payload must serialize");
 
         assert!(json["payload"].get("entity_ids").is_none());
         assert!(json["payload"].get("segment_id").is_none());

@@ -173,7 +173,8 @@ impl IndexOrchestrator {
     /// Validate content hashes for all completed batches.
     ///
     /// When a content hash mismatches, the recovery boundary is moved backwards
-    /// so those batches get re-processed.
+    /// so those batches get re-processed. The move reason is summarized in a
+    /// single log line so cache damage stays attributable instead of silent.
     pub(super) async fn validate_recovered_hashes(
         &self,
         file_indexer: &FileIndexer,
@@ -182,6 +183,8 @@ impl IndexOrchestrator {
         start_batch: usize,
     ) -> Result<usize, OrchestratorError> {
         let mut start_batch = start_batch;
+        let claimed = start_batch;
+        let mut rework_reason: Option<String> = None;
         if start_batch > 0 {
             if let Some(cm) = self.checkpoint_manager.as_ref() {
                 'completed_batches: for batch_idx in 0..start_batch {
@@ -207,10 +210,16 @@ impl IndexOrchestrator {
 
                         let path = entry.path.to_string_lossy();
                         let Some(record) = checkpoints.get(path.as_ref()) else {
+                            rework_reason = Some(format!(
+                                "missing file checkpoint for {path} in batch {batch_idx}"
+                            ));
                             start_batch = batch_idx;
                             break 'completed_batches;
                         };
                         if record.content_hash != entry.content_hash {
+                            rework_reason = Some(format!(
+                                "content hash drift for {path} in batch {batch_idx}"
+                            ));
                             start_batch = batch_idx;
                             break 'completed_batches;
                         }
@@ -218,6 +227,9 @@ impl IndexOrchestrator {
                         // Only recover parsed data for code files when relation building is needed
                         if options.build_relations && is_code {
                             let Some(parsed_data) = record.parsed_data.as_deref() else {
+                                rework_reason = Some(format!(
+                                    "missing parsed data for {path} in batch {batch_idx}"
+                                ));
                                 start_batch = batch_idx;
                                 break 'completed_batches;
                             };
@@ -227,6 +239,9 @@ impl IndexOrchestrator {
                                 Some(payload) => {
                                     if !payload.is_compatible() {
                                         tracing::warn!(file = %path, "Incompatible parsed checkpoint version, re-parsing");
+                                        rework_reason = Some(format!(
+                                            "incompatible parsed checkpoint for {path} in batch {batch_idx}"
+                                        ));
                                         start_batch = batch_idx;
                                         break 'completed_batches;
                                     }
@@ -234,12 +249,18 @@ impl IndexOrchestrator {
                                         // Full-index checkpoints never write
                                         // tombstones; treat one as drift and
                                         // re-process the batch.
+                                        rework_reason = Some(format!(
+                                            "unexpected tombstone for {path} in batch {batch_idx}"
+                                        ));
                                         start_batch = batch_idx;
                                         break 'completed_batches;
                                     }
                                 }
                                 None => {
                                     tracing::warn!(file = %path, "Invalid parsed checkpoint");
+                                    rework_reason = Some(format!(
+                                        "undecodable parsed checkpoint for {path} in batch {batch_idx}"
+                                    ));
                                     start_batch = batch_idx;
                                     break 'completed_batches;
                                 }
@@ -248,6 +269,14 @@ impl IndexOrchestrator {
                     }
                 }
             }
+        }
+        if start_batch != claimed {
+            tracing::warn!(
+                claimed,
+                start_batch,
+                reason = rework_reason.as_deref().unwrap_or("unspecified"),
+                "Checkpoint recovery moved the start boundary backwards; affected batches will be re-processed"
+            );
         }
         Ok(start_batch)
     }

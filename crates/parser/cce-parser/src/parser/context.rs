@@ -52,6 +52,10 @@ pub struct ParseContext {
     pub local_symbols: std::collections::HashMap<String, Vec<cce_types::EntityId>>,
     /// Import table extracted from AST
     pub import_table: Option<ImportTable>,
+    /// Tree-sitter reported syntax errors while parsing.
+    /// Entities inside error regions may be missing, so index results
+    /// for this file are partial even though parsing succeeded.
+    pub has_syntax_errors: bool,
 }
 
 impl ParseContext {
@@ -73,6 +77,7 @@ impl ParseContext {
             block_relations: Vec::new(),
             local_symbols: std::collections::HashMap::new(),
             import_table: None,
+            has_syntax_errors: false,
         }
     }
 

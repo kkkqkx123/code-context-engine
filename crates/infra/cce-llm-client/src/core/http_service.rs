@@ -258,6 +258,14 @@ impl HttpRequestService {
 
         if status == 429 {
             let retry_after_ms = parse_retry_after_ms(response.headers());
+            let body = response.text().await.unwrap_or_default();
+            let body_preview: String = body.chars().take(1000).collect();
+            if is_quota_exhausted_signal(&body_preview) {
+                warn!("LLM quota exhausted; retries cannot succeed until billing is resolved");
+                return Err(LlmError::quota_exhausted(format!(
+                    "Quota exhausted: {body_preview}"
+                )));
+            }
             warn!(retry_after_ms, "LLM rate limit exceeded");
             self.rate_limiter.on_rate_limit(retry_after_ms).await;
             return Err(LlmError::rate_limit_exceeded(retry_after_ms));
@@ -267,6 +275,13 @@ impl HttpRequestService {
             let body = response.text().await.unwrap_or_default();
             let body_preview: String = body.chars().take(1000).collect();
             warn!(status = %status, response_length = body.len(), "LLM API error");
+
+            if status.as_u16() == 402 || is_quota_exhausted_signal(&body_preview) {
+                return Err(LlmError::quota_exhausted(format!(
+                    "Quota exhausted (HTTP {}): {body_preview}",
+                    status.as_u16()
+                )));
+            }
 
             return Err(match status.as_u16() {
                 401 => LlmError::auth(format!("Authentication failed: {body_preview}")),
@@ -300,6 +315,21 @@ impl HttpRequestService {
     pub(crate) fn max_retries(&self) -> u32 {
         self.retry_policy.max_retries()
     }
+}
+
+/// Billing/quota exhaustion never resolves by waiting, so it must not be
+/// retried as ordinary throttling. Matches provider-agnostic signals in the
+/// response body (quota, billing, insufficient credit/balance, payment).
+fn is_quota_exhausted_signal(body: &str) -> bool {
+    let lowered = body.to_lowercase();
+    lowered.contains("quota")
+        || lowered.contains("billing")
+        || lowered.contains("insufficient")
+        || lowered.contains("credit balance")
+        || lowered.contains("out of credit")
+        || lowered.contains("payment required")
+        || lowered.contains("top up")
+        || lowered.contains("topup")
 }
 
 /// Parse a `Retry-After` header value into milliseconds (default 5s).

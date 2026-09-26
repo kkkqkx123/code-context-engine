@@ -40,6 +40,11 @@ impl IndexOrchestrator {
     }
 
     /// Remove a file from the index
+    ///
+    /// Best-effort across backends: every stage runs even when an earlier
+    /// one failed, and failures are aggregated instead of short-circuiting.
+    /// A retry therefore converges (completed stages are idempotent) instead
+    /// of leaving residue behind the failure point while skipping the rest.
     pub async fn remove_file(&self, file_path: &std::path::Path) -> Result<(), OrchestratorError> {
         // Remove from relation index first
         if let Some(ref builder) = self.relation_builder {
@@ -47,16 +52,34 @@ impl IndexOrchestrator {
             builder.index().remove_file(&file_id);
         }
 
+        let mut backend_errors: Vec<String> = Vec::new();
+
         // Remove from storage backends
-        self.storage.remove_file(file_path).await?;
+        if let Err(error) = self.storage.remove_file(file_path).await {
+            backend_errors.push(format!("storage: {error}"));
+        }
 
         // Remove from summary index
-        self.storage.remove_file_from_summary(file_path).await?;
+        if let Err(error) = self.storage.remove_file_from_summary(file_path).await {
+            backend_errors.push(format!("summary: {error}"));
+        }
 
-        // Remove from state tracker
+        // State tracking is in-memory and infallible: always clean it so a
+        // retry observes no stale state for this file.
         self.state_tracker.remove_state(file_path).await;
 
-        Ok(())
+        if backend_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(OrchestratorError::index(
+                "remove_file",
+                format!(
+                    "partial failure removing {} (completed stages are safe to retry): {}",
+                    file_path.display(),
+                    backend_errors.join("; ")
+                ),
+            ))
+        }
     }
 }
 

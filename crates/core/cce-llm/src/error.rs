@@ -124,6 +124,11 @@ pub enum LlmError {
     #[error("Rate limit exceeded, retry after {0}ms")]
     RateLimitExceeded(u64),
 
+    /// Quota or billing exhausted: retries cannot succeed until the account
+    /// is topped up, so this is permanent and distinct from throttling.
+    #[error("Quota exhausted: {0}")]
+    QuotaExhausted(String),
+
     /// Request timeout - uses common TimeoutError
     #[error("{0}")]
     Timeout(#[from] TimeoutError),
@@ -188,6 +193,11 @@ impl LlmError {
         Self::RateLimitExceeded(retry_after_ms)
     }
 
+    /// Create a quota exhausted error
+    pub fn quota_exhausted(reason: impl Into<String>) -> Self {
+        Self::QuotaExhausted(reason.into())
+    }
+
     /// Create an invalid response error
     pub fn invalid_response(reason: impl Into<String>) -> Self {
         Self::InvalidResponse(reason.into())
@@ -223,6 +233,7 @@ impl LlmError {
             Self::Config(_) => "LLM_CONFIG_ERROR",
             Self::InvalidInput(_) => "LLM_INVALID_INPUT_ERROR",
             Self::RateLimitExceeded(_) => "LLM_RATE_LIMIT_EXCEEDED_ERROR",
+            Self::QuotaExhausted(_) => "LLM_QUOTA_EXHAUSTED_ERROR",
             Self::Timeout(_) => "LLM_TIMEOUT_ERROR",
             Self::InvalidResponse(_) => "LLM_INVALID_RESPONSE_ERROR",
             Self::TokenLimitExceeded(_, _) => "LLM_TOKEN_LIMIT_EXCEEDED_ERROR",
@@ -254,6 +265,7 @@ impl cce_types::error::common::ErrorClassify for LlmError {
             Self::Config(_)
             | Self::InvalidInput(_)
             | Self::TokenLimitExceeded(_, _)
+            | Self::QuotaExhausted(_)
             | Self::Auth(_)
             | Self::ModelNotFound(_)
             | Self::Internal(_) => true,

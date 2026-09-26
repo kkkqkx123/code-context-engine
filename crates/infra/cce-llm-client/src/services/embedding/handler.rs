@@ -175,17 +175,22 @@ fn validate_embedding_data(
                 item.index
             )));
         }
+        if item.embedding.is_empty() {
+            return Err(LlmError::invalid_input(format!(
+                "Embedding at index {expected_index} is empty; check the embedder dimension configuration",
+            )));
+        }
         if let Some(expected_dimension) = expected_dimension
             && expected_dimension > 0
             && item.embedding.len() != expected_dimension
         {
-            return Err(LlmError::invalid_response(format!(
+            return Err(LlmError::invalid_input(format!(
                 "Embedding dimension mismatch at index {expected_index}: expected {expected_dimension}, received {}",
                 item.embedding.len()
             )));
         }
         if item.embedding.iter().any(|value| !value.is_finite()) {
-            return Err(LlmError::invalid_response(format!(
+            return Err(LlmError::invalid_input(format!(
                 "Embedding at index {expected_index} contains a non-finite value"
             )));
         }

@@ -101,6 +101,10 @@ pub struct CompleteFileProcessResult {
     pub dropped_blank_segments: usize,
     /// Structured document pipeline degraded to plain text.
     pub document_degraded: bool,
+    /// Tree-sitter reported syntax errors while parsing.
+    /// Entities inside error regions may be missing, so the file counts
+    /// as degraded even when entities and chunks are non-empty.
+    pub has_syntax_errors: bool,
 }
 
 /// Chunk cache statistics
@@ -266,8 +270,12 @@ impl FileProcessor {
             );
             return Ok(None);
         }
-        let content = cce_utils::file::decode_bytes_to_utf8(&bytes, read_path)
-            .map_err(|e| OrchestratorError::index("read file", e))?;
+        let content = cce_utils::file::decode_bytes_to_utf8(&bytes, read_path).map_err(|e| {
+            OrchestratorError::Parse(ParseError::encoding(format!(
+                "{}: {e}",
+                read_path.display()
+            )))
+        })?;
 
         // Route like `process_file`: code files run the AST pipeline, while
         // document/config/text files belong to the document pipeline.
@@ -699,6 +707,7 @@ impl FileProcessor {
             doc_summary,
             dropped_blank_segments: 0,
             document_degraded,
+            has_syntax_errors: false,
         })
     }
 
@@ -872,11 +881,11 @@ impl FileProcessor {
         })?;
 
         // Step 1: Parse file with pre-detected language info
-        let parsed = {
+        let (parsed, has_syntax_errors) = {
             let mut coordinator = self.coordinator.lock().map_err(|_| {
                 OrchestratorError::index("parse", "parser coordinator lock poisoned")
             })?;
-            coordinator.parse_with_language_info(
+            coordinator.parse_with_language_info_detailed(
                 &file_entry.relative_path.to_string_lossy(),
                 content,
                 language_info,
@@ -973,6 +982,7 @@ impl FileProcessor {
             doc_summary: None,
             dropped_blank_segments,
             document_degraded: false,
+            has_syntax_errors,
         })
     }
 
@@ -1175,6 +1185,7 @@ impl FileProcessor {
             doc_summary: None,
             dropped_blank_segments,
             document_degraded: false,
+            has_syntax_errors: false,
         })
     }
 

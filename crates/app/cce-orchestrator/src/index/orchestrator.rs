@@ -703,7 +703,7 @@ impl IndexOrchestrator {
             self.export_nl_documents(&mut ctx).await?;
         }
 
-        self.finalize_manifest(&ctx).await?;
+        self.finalize_manifest(&mut ctx).await?;
 
         if let Some(ref search_metrics) = self.search_metrics {
             search_metrics.record_index(ctx.total_vectors);

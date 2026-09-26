@@ -45,7 +45,6 @@ pub mod noise;
 // Internal implementation modules (crate-only access)
 pub mod chunker;
 pub(crate) mod common;
-pub(crate) mod error;
 pub(crate) mod options;
 
 // Note: converter is now a directory module (converter/mod.rs)
@@ -62,7 +61,6 @@ pub const PIPELINE_VERSION: &str = "1";
 // Re-export main types
 pub use code_form_converter::{CodeFormContext, CodeFormConverter, CodeFormEntity, CodeFormGroup};
 pub use converter::AstToNlConverter;
-pub use error::{AstToNlError, ConversionContext};
 
 // Re-export internal types
 pub use cce_types::ast_to_nl::EntityMetadata;

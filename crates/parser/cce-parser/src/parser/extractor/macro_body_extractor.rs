@@ -62,18 +62,14 @@ impl MacroBodyExtractor {
             }
 
             // Find the macro name from the identifier child
-            let macro_name = find_macro_name(node, source);
-            if macro_name.is_none() {
+            let Some(macro_name) = find_macro_name(node, source) else {
                 continue;
-            }
-            let macro_name = macro_name.unwrap();
+            };
 
             // Find the macro entity by name
-            let entity_id = entity_index.find_by_name(&macro_name);
-            if entity_id.is_none() {
+            let Some(entity_id) = entity_index.find_by_name(&macro_name) else {
                 continue;
-            }
-            let entity_id = entity_id.unwrap();
+            };
 
             // Iterate over children to find all macro_rule nodes
             let mut rule_cursor = node.walk();

@@ -60,6 +60,11 @@ pub enum OrchestratorError {
     HotUpdate { operation: String, reason: String },
 }
 
+/// Identifier for an embedding stage that exceeded its wall-clock
+/// deadline. Kept here so the module-failure projection can preserve
+/// it instead of collapsing to the generic index error code.
+pub(crate) const EMBEDDING_STAGE_TIMEOUT_CODE: &str = "EMBEDDING_STAGE_TIMEOUT";
+
 impl OrchestratorError {
     /// Create an index error
     pub fn index(operation: impl Into<String>, reason: impl Into<String>) -> Self {
@@ -140,6 +145,9 @@ impl OrchestratorError {
                 Self::Config(err) => Some(err.error_code().to_string()),
                 Self::NotFound(_) => Some("ORCH_NOT_FOUND_ERROR".to_string()),
                 Self::Timeout(_) => Some("ORCH_TIMEOUT_ERROR".to_string()),
+                Self::Index { operation, .. } if operation == EMBEDDING_STAGE_TIMEOUT_CODE => {
+                    Some(EMBEDDING_STAGE_TIMEOUT_CODE.to_string())
+                }
                 Self::Index { .. } => Some("ORCH_INDEX_ERROR".to_string()),
                 Self::Cache { .. } => Some("ORCH_CACHE_ERROR".to_string()),
                 Self::HotUpdate { .. } => Some("ORCH_HOT_UPDATE_ERROR".to_string()),

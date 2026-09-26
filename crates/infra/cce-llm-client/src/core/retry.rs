@@ -240,6 +240,7 @@ impl RetryPolicy {
             LlmError::CircuitBreakerOpen(_) => false,
             LlmError::InvalidResponse(_) => true,
             LlmError::TokenLimitExceeded(_, _) => false,
+            LlmError::QuotaExhausted(_) => false,
             LlmError::Timeout(_) => true,
             LlmError::Internal(_) => false,
         }

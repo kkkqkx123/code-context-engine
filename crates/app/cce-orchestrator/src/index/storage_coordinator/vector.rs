@@ -28,7 +28,9 @@ use super::mapping::{
 
 /// Identifiable error code for an embedding stage that exceeded its
 /// wall-clock deadline (kept uncommitted for resume).
-pub(crate) const EMBEDDING_STAGE_TIMEOUT_CODE: &str = "EMBEDDING_STAGE_TIMEOUT";
+/// The canonical value lives with the error type so failure projections
+/// preserve it; re-exported here for sibling and test use.
+pub(crate) use crate::error::EMBEDDING_STAGE_TIMEOUT_CODE;
 
 /// Per-microbatch wall-clock budget used to derive the embedding stage
 /// deadline when none is configured: the single-request HTTP timeout (30s)
@@ -109,28 +111,9 @@ impl StorageCoordinator {
         batch_size: usize,
         batch_delay_ms: u64,
     ) -> Result<usize, OrchestratorError> {
-        // When embedder is missing, store chunk records only (no vector embedding).
-        // This supports benchmark data generation without requiring an embedder.
-        let embedder = match &self.embedder {
-            Some(e) => e,
-            None => {
-                tracing::trace!("Embedder not configured; storing chunk records only");
-                self.store_chunk_records_only(chunks)?;
-                return Ok(0);
-            }
-        };
-
-        let qdrant = match &self.qdrant {
-            Some(q) => q,
-            None => {
-                tracing::trace!("Qdrant not configured; storing chunk records only");
-                self.store_chunk_records_only(chunks)?;
-                return Ok(0);
-            }
-        };
-        self.ensure_project_group_id()?;
-
-        // Filter to only Embedding-path chunks
+        // Filter to only Embedding-path chunks first: empty work succeeds
+        // regardless of backend configuration, while missing backends with
+        // pending work surface as errors instead of silent zero counts.
         let embedding_chunks: Vec<&ChunkedResult> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
@@ -139,6 +122,27 @@ impl StorageCoordinator {
         if embedding_chunks.is_empty() {
             return Ok(0);
         }
+
+        let embedder = match &self.embedder {
+            Some(e) => e,
+            None => {
+                return Err(OrchestratorError::index(
+                    "vector_store",
+                    "embedder is not configured but embedding chunks are pending",
+                ));
+            }
+        };
+
+        let qdrant = match &self.qdrant {
+            Some(q) => q,
+            None => {
+                return Err(OrchestratorError::index(
+                    "vector_store",
+                    "vector store is not configured but embedding chunks are pending",
+                ));
+            }
+        };
+        self.ensure_project_group_id()?;
 
         let mut total_stored = 0;
         let total_chunks = embedding_chunks.len();
@@ -301,6 +305,13 @@ impl StorageCoordinator {
     /// Persist already-generated embeddings for one batch: builds Qdrant
     /// points and SQLite records, stores them, and commits the work unit
     /// checkpoint.
+    ///
+    /// The three writes are ordered but not atomic: when a later write
+    /// fails, earlier Qdrant points may already exist without SQLite links.
+    /// Such orphans are invisible to entity-linked queries and converge on
+    /// resume: point IDs are deterministic, so replaying the uncommitted
+    /// work unit overwrites them and completes the missing links instead
+    /// of duplicating data.
     async fn persist_embedding_batch(
         &self,
         batch: &[&ChunkedResult],
@@ -620,13 +631,26 @@ impl StorageCoordinator {
         records: &[(ChunkRecord, u8)],
         batch_size: usize,
     ) -> Result<usize, OrchestratorError> {
+        if records.is_empty() {
+            return Ok(0);
+        }
         let embedder = match &self.embedder {
             Some(e) => e,
-            None => return Ok(0),
+            None => {
+                return Err(OrchestratorError::index(
+                    "reembed_vectors",
+                    "embedder is not configured but records are pending",
+                ));
+            }
         };
         let qdrant = match &self.qdrant {
             Some(q) => q,
-            None => return Ok(0),
+            None => {
+                return Err(OrchestratorError::index(
+                    "reembed_vectors",
+                    "vector store is not configured but records are pending",
+                ));
+            }
         };
         self.ensure_project_group_id()?;
 

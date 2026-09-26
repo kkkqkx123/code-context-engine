@@ -105,6 +105,44 @@ pub struct ScanReport {
     pub failures: Vec<ScanFailure>,
 }
 
+/// Streaming scan result: the file count plus every path that was skipped
+/// with an error during the walk.
+#[derive(Debug, Default)]
+pub struct StreamingScanReport {
+    pub files_scanned: usize,
+    pub failures: Vec<ScanFailure>,
+}
+
+/// Filter-configuration failures that drift the scanned set.
+///
+/// Dropped include patterns narrow the set, dropped excludes and broken
+/// ignore files widen it, and never-matching ignore entries silently keep
+/// files that should be excluded. Each is recorded against the scan root
+/// so the loss is visible in the report instead of warn-only.
+fn pattern_config_failures(matcher: &PatternMatcher, root: &Path) -> Vec<ScanFailure> {
+    let mut failures = Vec::new();
+    for dropped in matcher.dropped_globs() {
+        failures.push(ScanFailure {
+            path: root.to_path_buf(),
+            reason: format!("invalid glob pattern dropped: {dropped}"),
+        });
+    }
+    if let Some(error) = matcher.ignore_load_error() {
+        failures.push(ScanFailure {
+            path: root.to_path_buf(),
+            reason: error.to_string(),
+        });
+    }
+    let invalid = matcher.invalid_gitignore_patterns();
+    if invalid > 0 {
+        failures.push(ScanFailure {
+            path: root.to_path_buf(),
+            reason: format!("{invalid} ignore patterns never match and were kept as no-ops"),
+        });
+    }
+    failures
+}
+
 /// File system scanner implementation
 ///
 /// Uses composition to delegate pattern matching and file processing
@@ -203,6 +241,24 @@ impl FSScanner {
     where
         F: FnMut(&mut Vec<FileEntry>),
     {
+        let report = self.scan_streaming_report(opts, batch_size, &mut callback)?;
+        Ok(report.files_scanned)
+    }
+
+    /// Streaming scan that also reports every path skipped with an error.
+    ///
+    /// The callback shape is unchanged; failures are collected during the
+    /// walk and returned in the report so streaming callers get the same
+    /// loss visibility as [`Self::scan_report`].
+    pub fn scan_streaming_report<F>(
+        &mut self,
+        opts: &ScanOptions,
+        batch_size: usize,
+        mut callback: F,
+    ) -> Result<StreamingScanReport>
+    where
+        F: FnMut(&mut Vec<FileEntry>),
+    {
         let abs_root = Self::prepare_root_path(&opts.root_path)?;
 
         debug!(
@@ -253,6 +309,8 @@ impl FSScanner {
         }
 
         let dirs_count = walker.dirs_count();
+        let mut failures = walker.into_failures();
+        failures.extend(pattern_config_failures(&pattern_matcher, &abs_root));
 
         result?;
 
@@ -260,9 +318,13 @@ impl FSScanner {
             total_files = total_count,
             directories_scanned = dirs_count,
             batches_processed = batch_num,
+            scan_failures = failures.len(),
             "Streaming scan completed successfully"
         );
-        Ok(total_count)
+        Ok(StreamingScanReport {
+            files_scanned: total_count,
+            failures,
+        })
     }
 
     /// Scan a directory and return all file entries
@@ -341,7 +403,8 @@ impl FSScanner {
         });
 
         let dirs_count = walker.dirs_count();
-        let failures = walker.into_failures();
+        let mut failures = walker.into_failures();
+        failures.extend(pattern_config_failures(&pattern_matcher, &abs_root));
 
         result?;
 
@@ -496,7 +559,6 @@ impl<'a> DirectoryWalker<'a> {
         }
 
         let mut decision: Option<bool> = None;
-        let mut plugin_failures: Vec<String> = Vec::new();
         for plugin in above {
             let plugin_id = plugin.metadata().id.clone();
             let plugin = plugin.clone();
@@ -518,18 +580,19 @@ impl<'a> DirectoryWalker<'a> {
                 }
                 Ok(Some(cce_types::FileFilterDecision::Neutral)) | Ok(None) => {}
                 Err(e) => {
+                    // A failing plugin never blocks the scan: the built-in
+                    // matcher below always produces a decision, so the walk
+                    // stays complete. The failure stays warn-only on purpose:
+                    // recording it as a scan failure would mark the whole
+                    // run incomplete even though filtering fell back cleanly.
                     tracing::warn!(
                         plugin = %plugin_id,
                         path = %path.display(),
                         error = %e,
                         "filter_file failed, deferring to built-in matcher"
                     );
-                    plugin_failures.push(format!("plugin FileFilter {plugin_id} failed: {e}"));
                 }
             }
-        }
-        for reason in plugin_failures {
-            self.record_failure(path, reason);
         }
 
         if is_directory {
@@ -563,7 +626,7 @@ impl<'a> DirectoryWalker<'a> {
         if below.is_empty() {
             return None;
         }
-        let mut plugin_failures: Vec<String> = Vec::new();
+        let mut plugin_failed = false;
         for plugin in below {
             let plugin_id = plugin.metadata().id.clone();
             let plugin = plugin.clone();
@@ -582,20 +645,23 @@ impl<'a> DirectoryWalker<'a> {
                 | Ok(Some(cce_types::FileFilterDecision::Neutral))
                 | Ok(None) => {}
                 Err(e) => {
+                    // Same warn-only rationale as the override tier: the
+                    // built-in inclusion stands, so the walk stays complete.
+                    plugin_failed = true;
                     tracing::warn!(
                         plugin = %plugin_id,
                         path = %path.display(),
                         error = %e,
                         "fallback filter_file failed, keeping built-in decision"
                     );
-                    plugin_failures.push(format!(
-                        "plugin fallback FileFilter {plugin_id} failed: {e}"
-                    ));
                 }
             }
         }
-        for reason in plugin_failures {
-            self.record_failure(path, reason);
+        if plugin_failed {
+            tracing::debug!(
+                path = %path.display(),
+                "fallback FileFilter tier partially failed; built-in decision kept"
+            );
         }
         None
     }
@@ -620,6 +686,7 @@ impl<'a> DirectoryWalker<'a> {
         // Symlink cycle detection
         if self.path_tracker.is_visited(dir) {
             warn!(path = %dir.display(), "Detected symlink cycle, skipping");
+            self.record_failure(dir, "skipped symlink cycle to prevent infinite traversal");
             return Ok(());
         }
         self.path_tracker.mark_visited(dir.to_path_buf());
@@ -820,6 +887,13 @@ impl<'a> DirectoryWalker<'a> {
                         target = %target_path.display(),
                         reason = "cycle_detected",
                         "Symlink target already visited, skipping to prevent cycle"
+                    );
+                    self.record_failure(
+                        path,
+                        format!(
+                            "skipped symlink cycle: {} already visited",
+                            target_path.display()
+                        ),
                     );
                     return Ok(());
                 }

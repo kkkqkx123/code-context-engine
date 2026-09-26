@@ -223,6 +223,12 @@ pub fn extract_imports(
 pub fn extract_reexports(tree: &Tree, source: &str, language: &Language) -> Vec<ReexportRecord> {
     let language_str = language.to_string();
     let Some(extractor) = create_extractor_with_registry(*language, None, "", &language_str) else {
+        if matches!(language, Language::Custom(_)) {
+            tracing::warn!(
+                language = %language,
+                "Re-export extraction skipped; no extractor available, cross-file re-exports will be incomplete"
+            );
+        }
         return Vec::new();
     };
     extractor

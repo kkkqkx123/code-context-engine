@@ -689,6 +689,14 @@ Folded code representation:
                     "Authentication failed - please check LLM API key configuration"
                 );
             }
+            LlmError::QuotaExhausted(msg) => {
+                tracing::error!(
+                    file = %file_path,
+                    strategy = %strategy,
+                    error = %msg,
+                    "LLM quota exhausted - top up billing; summary module marked failed"
+                );
+            }
             LlmError::Config(msg) => {
                 tracing::error!(
                     file = %file_path,

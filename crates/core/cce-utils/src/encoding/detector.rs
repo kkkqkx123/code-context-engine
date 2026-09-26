@@ -107,6 +107,14 @@ impl Detector {
             return Ok(EncodingResult::new("UTF-8", 1.0));
         }
 
+        // NUL-containing UTF-8 is technically valid, so a BOM-less UTF-16
+        // file would otherwise be claimed as UTF-8 with mojibake. Check the
+        // alternating-NUL shape before the UTF-8 fast path so the decoder
+        // and the scanner pre-check agree on wide text.
+        if let Some(wide) = Self::detect_utf16_without_bom(data) {
+            return Ok(EncodingResult::new(wide, 0.85));
+        }
+
         if self.is_valid_utf8(data) {
             let confidence = if self.has_high_ascii(data) {
                 0.90
@@ -158,7 +166,11 @@ impl Detector {
         }
 
         if candidates.is_empty() {
-            return Ok(EncodingResult::new("UTF-8", 0.3));
+            // No multi-byte encoding matched: remaining high-byte text is
+            // most likely a single-byte Western encoding. WINDOWS-1252
+            // decodes every byte, so label it honestly at low confidence
+            // instead of mislabeling the bytes as UTF-8.
+            return Ok(EncodingResult::new("WINDOWS-1252", 0.3));
         }
 
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -172,8 +184,83 @@ impl Detector {
             EncodingType::GBK | EncodingType::GB18030 => self.detect_gbk(data),
             EncodingType::Big5 => self.detect_big5(data),
             EncodingType::ShiftJIS => self.detect_shift_jis(data),
+            EncodingType::Windows1252 => Self::detect_windows1252(data),
             _ => None,
         }
+    }
+
+    /// BOM-less UTF-16 shape: alternating NUL bytes with printable ASCII on
+    /// the other parity. Conservative thresholds keep binary files out: NULs
+    /// must be frequent and strongly aligned to one parity.
+    fn detect_utf16_without_bom(data: &[u8]) -> Option<&'static str> {
+        if data.len() < 4 || data.len() % 2 != 0 {
+            return None;
+        }
+        let mut nul_even = 0usize;
+        let mut nul_odd = 0usize;
+        let mut printable_other = 0usize;
+        let mut checked = 0usize;
+        for pair in data.chunks_exact(2) {
+            let (a, b) = (pair[0], pair[1]);
+            if a == 0 {
+                nul_even += 1;
+            } else if matches!(a, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
+                printable_other += 1;
+            }
+            if b == 0 {
+                nul_odd += 1;
+            } else if matches!(b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
+                printable_other += 1;
+            }
+            checked += 1;
+            if checked >= 4096 {
+                break;
+            }
+        }
+        let nul_total = nul_even + nul_odd;
+        if checked == 0 || nul_total * 10 < checked * 4 {
+            return None;
+        }
+        let aligned = nul_even.max(nul_odd);
+        if aligned * 10 < nul_total * 9 {
+            return None;
+        }
+        if printable_other * 2 < checked {
+            return None;
+        }
+        if nul_odd >= nul_even {
+            Some("UTF-16LE")
+        } else {
+            Some("UTF-16BE")
+        }
+    }
+
+    /// Single-byte Western text: high bytes outside CJK lead ranges with a
+    /// dense printable share. Capped below structured-encoding confidence
+    /// so CJK-looking data keeps its prior claim.
+    fn detect_windows1252(data: &[u8]) -> Option<f64> {
+        if data.is_empty() {
+            return None;
+        }
+        let mut printable = 0usize;
+        let mut high = 0usize;
+        for &b in data.iter().take(8192) {
+            if matches!(b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E | 0xA0..=0xFF) {
+                printable += 1;
+            }
+            if b >= 0x80 {
+                high += 1;
+            }
+        }
+        let len = data.len().min(8192) as f64;
+        if high == 0 {
+            return None;
+        }
+        let ratio = printable as f64 / len;
+        if ratio < 0.7 {
+            return None;
+        }
+        Some((0.55 + 0.25 * ratio).min(0.8))
     }
 
     fn detect_gbk(&self, data: &[u8]) -> Option<f64> {
@@ -287,7 +374,7 @@ mod tests {
     fn test_detector_default() {
         let detector = Detector::with_default_config();
         assert_eq!(detector.config.min_confidence, 0.7);
-        assert_eq!(detector.config.detect_encodings.len(), 4);
+        assert_eq!(detector.config.detect_encodings.len(), 5);
     }
 
     #[test]

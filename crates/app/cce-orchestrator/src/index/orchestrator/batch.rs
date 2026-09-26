@@ -713,6 +713,21 @@ impl IndexOrchestrator {
 
                 let result = async {
                     let mut content_lossy = false;
+                    // Entries without a scan-phase content hash are oversized
+                    // files skipped by the scanner: fail fast with a distinct
+                    // permanent reason instead of reading the full content
+                    // only to report a misleading missing-language error.
+                    if recovered.is_none() && file_entry_clone.content_hash.is_none() {
+                        return Err((
+                            path_str.clone(),
+                            OrchestratorError::Parse(ParseError::unsupported_language(
+                                format!(
+                                    "skipped oversized file without content hash: {path_str} (size {} bytes)",
+                                    file_entry_clone.size
+                                ),
+                            )),
+                        ));
+                    }
                     let process_result = if let Some(parsed) = recovered {
                         let content_route = cce_types::ContentRoute::detect_from_path(&path_str);
                         processor
@@ -855,6 +870,12 @@ impl IndexOrchestrator {
                         tracing::warn!(
                             file = %pf.path,
                             "Structured document degraded to plain text; indexed content is incomplete"
+                        );
+                        batch_result.degraded_files += 1;
+                    } else if process_result.has_syntax_errors {
+                        tracing::warn!(
+                            file = %pf.path,
+                            "Parsed with syntax errors; entities inside error regions may be missing"
                         );
                         batch_result.degraded_files += 1;
                     }

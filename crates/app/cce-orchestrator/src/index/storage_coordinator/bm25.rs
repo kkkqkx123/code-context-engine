@@ -20,15 +20,9 @@ impl StorageCoordinator {
         chunks: &[ChunkedResult],
         batch_size: usize,
     ) -> Result<(), OrchestratorError> {
-        let bm25 = match &self.bm25 {
-            Some(b) => b,
-            None => {
-                tracing::warn!("BM25 client not configured, skipping BM25 storage");
-                return Ok(());
-            }
-        };
-
-        // Filter to only BM25-path chunks
+        // Filter to only BM25-path chunks first: empty work succeeds
+        // regardless of backend configuration, while a missing client with
+        // pending work surfaces as an error instead of silent success.
         let bm25_chunks: Vec<&ChunkedResult> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
@@ -37,6 +31,16 @@ impl StorageCoordinator {
         if bm25_chunks.is_empty() {
             return Ok(());
         }
+
+        let bm25 = match &self.bm25 {
+            Some(b) => b,
+            None => {
+                return Err(OrchestratorError::index(
+                    "bm25_store",
+                    "BM25 client is not configured but BM25 chunks are pending",
+                ));
+            }
+        };
 
         let wk_cm = self.checkpoint_manager.clone();
         let wk_op = self.operation_id.clone();

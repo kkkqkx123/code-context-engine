@@ -531,6 +531,10 @@ impl IndexOrchestrator {
                     error = %error,
                     "Failed to remove stale NL documents after full index"
                 );
+                ctx.errors.push(format!(
+                    "Failed to remove stale NL documents after full index: {error}"
+                ));
+                ctx.all_batches_completed = false;
             }
         }
         Ok(())
@@ -539,7 +543,7 @@ impl IndexOrchestrator {
     /// either completed or aborted, then GC stale generations.
     pub(super) async fn finalize_manifest(
         &self,
-        ctx: &FullIndexContext,
+        ctx: &mut FullIndexContext,
     ) -> Result<(), OrchestratorError> {
         if ctx.all_batches_completed {
             let relation_epoch = match ctx.published_relation_epoch {
@@ -583,6 +587,10 @@ impl IndexOrchestrator {
                     error = %error,
                     "Generation GC after full-index publication failed"
                 );
+                ctx.errors.push(format!(
+                    "Generation GC after full-index publication failed: {error}"
+                ));
+                ctx.all_batches_completed = false;
             }
         } else if let Err(error) = self.storage.fail_project_manifest(
             &ctx.operation_id,
@@ -609,6 +617,7 @@ async fn remove_stale_documents(
     collect_export_documents(&output_dir, &mut files).await?;
 
     let mut removed = 0usize;
+    let mut failed = 0usize;
     for path in files {
         let Some(rel) = path.strip_prefix(&output_dir).ok() else {
             continue;
@@ -625,6 +634,7 @@ async fn remove_stale_documents(
                 removed += 1;
             }
             Err(error) => {
+                failed += 1;
                 tracing::warn!(
                     path = %path.display(),
                     error = %error,
@@ -632,6 +642,12 @@ async fn remove_stale_documents(
                 );
             }
         }
+    }
+    if failed > 0 {
+        return Err(OrchestratorError::index(
+            "export_stale_cleanup",
+            format!("failed to remove {failed} stale NL documents"),
+        ));
     }
     Ok(removed)
 }

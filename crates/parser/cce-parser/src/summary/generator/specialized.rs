@@ -284,7 +284,11 @@ pub fn generate_specialized_summary(parsed_file: &ParsedFile) -> FileSummary {
                 if FileCategory::is_generated_file(&parsed_file.path, &parsed_file.source) {
                     generate_generated_file_summary(parsed_file)
                 } else {
-                    panic!("Code files should not use specialized summary generation")
+                    debug_assert!(
+                        false,
+                        "non-generated code files are handled by the rule-based summary path"
+                    );
+                    generate_other_file_summary(parsed_file)
                 }
             }
         }

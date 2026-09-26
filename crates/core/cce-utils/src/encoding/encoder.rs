@@ -35,7 +35,16 @@ impl Encoder {
         }
 
         let encoding = encoding_type.to_encoding_rs();
-        let (text, _, _) = encoding.decode(data);
+        let (text, _, had_errors) = encoding.decode(data);
+
+        // A lossy decode without errors is impossible to spot downstream
+        // (no replacement characters to count), so malformed sequences
+        // always fail instead of silently mistranslating the file.
+        if had_errors {
+            return Err(Error::invalid_data(
+                "Invalid character sequence for the detected encoding",
+            ));
+        }
 
         if text.contains('\u{FFFD}') && self.config.strict_mode {
             return Err(Error::invalid_data(

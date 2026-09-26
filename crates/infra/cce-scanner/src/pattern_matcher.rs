@@ -37,12 +37,21 @@ pub struct PatternMatcher {
     exclude_patterns: Vec<Glob>,
     /// Gitignore matcher (optional)
     gitignore: Option<IgnoreMatcher>,
+    /// Glob patterns that failed to compile and were dropped.
+    /// Dropped excludes widen the indexed set, dropped includes narrow
+    /// it: either way the scanned set drifts, so callers surface these.
+    dropped_globs: Vec<String>,
+    /// Ignore-file load failure, if the configured ignore file could not
+    /// be applied at all.
+    ignore_load_error: Option<String>,
 }
 
 impl PatternMatcher {
     /// Compile glob patterns, warning about (and skipping) invalid ones.
-    fn compile_globs(patterns: Vec<String>, kind: &str) -> Vec<Glob> {
-        patterns
+    /// Returns the compiled globs plus the raw patterns that were dropped.
+    fn compile_globs(patterns: Vec<String>, kind: &str) -> (Vec<Glob>, Vec<String>) {
+        let mut dropped = Vec::new();
+        let compiled = patterns
             .into_iter()
             .filter_map(|p| match Glob::new(&p) {
                 Ok(glob) => Some(glob),
@@ -53,10 +62,12 @@ impl PatternMatcher {
                         error = %e,
                         "Invalid glob pattern skipped"
                     );
+                    dropped.push(format!("{kind}:{p}"));
                     None
                 }
             })
-            .collect()
+            .collect();
+        (compiled, dropped)
     }
 
     /// Create a new pattern matcher
@@ -70,10 +81,16 @@ impl PatternMatcher {
         exclude_patterns: Vec<String>,
         gitignore: Option<IgnoreMatcher>,
     ) -> Self {
+        let (include_patterns, mut dropped) = Self::compile_globs(include_patterns, "include");
+        let (exclude_patterns, mut dropped_exclude) =
+            Self::compile_globs(exclude_patterns, "exclude");
+        dropped.append(&mut dropped_exclude);
         Self {
-            include_patterns: Self::compile_globs(include_patterns, "include"),
-            exclude_patterns: Self::compile_globs(exclude_patterns, "exclude"),
+            include_patterns,
+            exclude_patterns,
             gitignore,
+            dropped_globs: dropped,
+            ignore_load_error: None,
         }
     }
 
@@ -81,21 +98,27 @@ impl PatternMatcher {
     ///
     /// This method handles loading .gitignore files and merging custom patterns.
     pub fn from_options(opts: &PatternLoadOptions, root_path: &Path) -> Self {
-        let gitignore = Self::load_ignore(opts, root_path);
-        Self::with_gitignore(
+        let (gitignore, ignore_load_error) = Self::load_ignore(opts, root_path);
+        let mut matcher = Self::with_gitignore(
             opts.include_patterns.clone(),
             opts.exclude_patterns.clone(),
             gitignore,
-        )
+        );
+        matcher.ignore_load_error = ignore_load_error;
+        matcher
     }
 
     /// Load ignore matcher from options
-    fn load_ignore(opts: &PatternLoadOptions, root_path: &Path) -> Option<IgnoreMatcher> {
+    fn load_ignore(
+        opts: &PatternLoadOptions,
+        root_path: &Path,
+    ) -> (Option<IgnoreMatcher>, Option<String>) {
         if !opts.respect_gitignore && opts.gitignore_patterns.is_empty() {
-            return None;
+            return (None, None);
         }
 
         let mut matcher = None;
+        let mut load_error = None;
 
         if opts.respect_gitignore {
             let ignore_path = if let Some(ref path) = opts.gitignore_path {
@@ -122,6 +145,8 @@ impl PatternMatcher {
                             error = %e,
                             "Failed to load ignore file; its patterns are not applied"
                         );
+                        load_error =
+                            Some(format!("failed to load ignore file {path_display}: {e}"));
                     }
                 }
             } else {
@@ -141,7 +166,7 @@ impl PatternMatcher {
             }
         }
 
-        matcher
+        (matcher, load_error)
     }
 
     /// Check if a file should be included based on patterns
@@ -228,6 +253,24 @@ impl PatternMatcher {
         self.gitignore
             .as_ref()
             .map(|m| m.pattern_count())
+            .unwrap_or(0)
+    }
+
+    /// Raw glob patterns that failed to compile and were dropped.
+    pub fn dropped_globs(&self) -> &[String] {
+        &self.dropped_globs
+    }
+
+    /// Ignore-file load failure, if the configured ignore file was skipped.
+    pub fn ignore_load_error(&self) -> Option<&str> {
+        self.ignore_load_error.as_deref()
+    }
+
+    /// Invalid gitignore patterns that compile to never-match entries.
+    pub fn invalid_gitignore_patterns(&self) -> usize {
+        self.gitignore
+            .as_ref()
+            .map(|m| m.invalid_pattern_count())
             .unwrap_or(0)
     }
 }

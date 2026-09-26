@@ -470,7 +470,21 @@ fn file_size_or_zero(path: &Path) -> Result<u64, StorageError> {
     }
 }
 
+fn sqlite_primary_code(error: &rusqlite::Error) -> Option<std::os::raw::c_int> {
+    if let rusqlite::Error::SqliteFailure(err, _) = error {
+        Some(err.extended_code & 0xFF)
+    } else {
+        None
+    }
+}
+
 fn map_sqlite_error(error: rusqlite::Error) -> StorageError {
+    // Prefer the structured SQLite result code over message text: disk-full
+    // has primary code 13 (SQLITE_FULL) in the low byte of the extended
+    // code, which survives message rewording across SQLite versions.
+    if sqlite_primary_code(&error) == Some(13) {
+        return StorageError::storage_full(error.to_string());
+    }
     let message = error.to_string();
     if message.to_lowercase().contains("no space")
         || message.to_lowercase().contains("disk full")

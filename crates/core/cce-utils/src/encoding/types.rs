@@ -37,6 +37,7 @@ impl Default for DetectorConfig {
                 "GBK".to_string(),
                 "Big5".to_string(),
                 "Shift_JIS".to_string(),
+                "WINDOWS-1252".to_string(),
             ],
             min_confidence: 0.7,
         }
@@ -67,6 +68,7 @@ pub enum EncodingType {
     Big5,
     ShiftJIS,
     GB18030,
+    Windows1252,
 }
 
 impl EncodingType {
@@ -80,6 +82,9 @@ impl EncodingType {
             "BIG5" => Some(Self::Big5),
             "SHIFT_JIS" | "SHIFTJIS" => Some(Self::ShiftJIS),
             "GB18030" => Some(Self::GB18030),
+            "WINDOWS-1252" | "WINDOWS1252" | "LATIN1" | "LATIN-1" | "ISO-8859-1" => {
+                Some(Self::Windows1252)
+            }
             _ => None,
         }
     }
@@ -93,6 +98,7 @@ impl EncodingType {
             Self::Big5 => "Big5",
             Self::ShiftJIS => "Shift_JIS",
             Self::GB18030 => "GB18030",
+            Self::Windows1252 => "WINDOWS-1252",
         }
     }
 
@@ -104,6 +110,7 @@ impl EncodingType {
             Self::GBK | Self::GB18030 => encoding_rs::GBK,
             Self::Big5 => encoding_rs::BIG5,
             Self::ShiftJIS => encoding_rs::SHIFT_JIS,
+            Self::Windows1252 => encoding_rs::WINDOWS_1252,
         }
     }
 }
@@ -139,8 +146,13 @@ mod tests {
     fn test_detector_config_default() {
         let config = DetectorConfig::default();
         assert_eq!(config.min_confidence, 0.7);
-        assert_eq!(config.detect_encodings.len(), 4);
+        assert_eq!(config.detect_encodings.len(), 5);
         assert!(config.detect_encodings.contains(&"UTF-8".to_string()));
+        assert!(
+            config
+                .detect_encodings
+                .contains(&"WINDOWS-1252".to_string())
+        );
     }
 
     #[test]
@@ -165,6 +177,14 @@ mod tests {
             Some(EncodingType::ShiftJIS)
         );
         assert_eq!(EncodingType::parse("GB18030"), Some(EncodingType::GB18030));
+        assert_eq!(
+            EncodingType::parse("WINDOWS-1252"),
+            Some(EncodingType::Windows1252)
+        );
+        assert_eq!(
+            EncodingType::parse("latin1"),
+            Some(EncodingType::Windows1252)
+        );
         assert_eq!(EncodingType::parse("UNKNOWN"), None);
     }
 
@@ -182,6 +202,7 @@ mod tests {
         assert_eq!(EncodingType::GBK.as_str(), "GBK");
         assert_eq!(EncodingType::Big5.as_str(), "Big5");
         assert_eq!(EncodingType::ShiftJIS.as_str(), "Shift_JIS");
+        assert_eq!(EncodingType::Windows1252.as_str(), "WINDOWS-1252");
     }
 
     #[test]

@@ -54,10 +54,15 @@ impl<'a> SummaryStorage<'a> {
 
     /// Store summary vectors to Qdrant
     async fn store_vectors(&self, summaries: &[FileSummary]) -> Result<(), OrchestratorError> {
+        if summaries.is_empty() {
+            return Ok(());
+        }
         let (Some(qdrant), Some(embedder)) = (&self.coordinator.qdrant, &self.coordinator.embedder)
         else {
-            tracing::trace!("Qdrant summary embedding unavailable; skipping vector storage");
-            return Ok(());
+            return Err(OrchestratorError::index(
+                "summary_vector_store",
+                "vector store or embedder is not configured but summaries are pending",
+            ));
         };
 
         self.coordinator.ensure_project_group_id()?;
@@ -97,84 +102,69 @@ impl<'a> SummaryStorage<'a> {
 
     /// Store summary metadata to SQLite
     async fn store_metadata(&self, summaries: &[FileSummary]) -> Result<(), OrchestratorError> {
-        let Some(ref db) = self.coordinator.metadata_store else {
+        if summaries.is_empty() {
             return Ok(());
+        }
+        let Some(ref db) = self.coordinator.metadata_store else {
+            return Err(OrchestratorError::index(
+                "summary_metadata_store",
+                "metadata store is not configured but summaries are pending",
+            ));
         };
 
-        match db.write_connection() {
-            Ok(conn) => {
-                match conn.unchecked_transaction() {
-                    Ok(tx) => {
-                        for summary in summaries {
-                            let file_path_str = &summary.file_path;
-                            let project_id = self.coordinator.project_id;
-
-                            match cce_storage_sqlite::FileRepository::get_by_path_and_project_at_epoch(
-                                &tx,
-                                file_path_str,
-                                project_id,
-                                self.coordinator.epoch(),
-                            ) {
-                                Ok(Some(file_record)) => {
-                                    let file_id = file_record.id;
-                                    match serde_json::to_string(summary) {
-                                        Ok(summary_json) => {
-                                            if let Err(e) = cce_storage_sqlite::FileSummaryRepository::upsert_with_epoch(
-                                                &tx,
-                                                file_id,
-                                                self.coordinator.epoch(),
-                                                &summary_json,
-                                            ) {
-                                                tracing::warn!(
-                                                    file = %file_path_str,
-                                                    error = %e,
-                                                    "Failed to persist summary to SQLite"
-                                                );
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                file = %file_path_str,
-                                                error = %e,
-                                                "Failed to serialize summary for SQLite persistence"
-                                            );
-                                        }
-                                    }
-                                }
-                                Ok(None) => {
-                                    // File not found in database, skip
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        file = %file_path_str,
-                                        error = %e,
-                                        "Failed to lookup file_id for summary persistence"
-                                    );
-                                }
-                            }
-                        }
-
-                        if let Err(e) = tx.commit() {
-                            tracing::warn!(error = %e, "Failed to commit summary persistence");
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to start transaction for summary persistence");
-                    }
-                }
+        let project_id = self.coordinator.project_id;
+        let epoch = self.coordinator.epoch();
+        let rows: Vec<(String, i64, String)> = summaries
+            .iter()
+            .map(|summary| {
+                let summary_json = serde_json::to_string(summary).map_err(|e| {
+                    OrchestratorError::index(
+                        "summary_metadata_store",
+                        format!("failed to serialize summary for {}: {e}", summary.file_path),
+                    )
+                })?;
+                Ok((summary.file_path.clone(), project_id, summary_json))
+            })
+            .collect::<Result<Vec<_>, OrchestratorError>>()?;
+        db.with_transaction(|tx| {
+            for (file_path_str, project_id, summary_json) in &rows {
+                let file_record =
+                    cce_storage_sqlite::FileRepository::get_by_path_and_project_at_epoch(
+                        tx,
+                        file_path_str,
+                        *project_id,
+                        epoch,
+                    )
+                    .map_err(|e| cce_types::StorageError::sqlite(e.to_string()))?
+                    .ok_or_else(|| {
+                        cce_types::StorageError::not_found(format!(
+                            "file record missing for summary {file_path_str}"
+                        ))
+                    })?;
+                cce_storage_sqlite::FileSummaryRepository::upsert_with_epoch(
+                    tx,
+                    file_record.id,
+                    epoch,
+                    summary_json,
+                )
+                .map_err(|e| cce_types::StorageError::sqlite(e.to_string()))?;
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to get database connection for summary persistence");
-            }
-        }
-
+            Ok(())
+        })
+        .map_err(OrchestratorError::Storage)?;
         Ok(())
     }
 
     /// Store summary documents to BM25 index
     async fn store_bm25(&self, summaries: &[FileSummary]) -> Result<(), OrchestratorError> {
-        let Some(ref bm25) = self.coordinator.bm25 else {
+        if summaries.is_empty() {
             return Ok(());
+        }
+        let Some(ref bm25) = self.coordinator.bm25 else {
+            return Err(OrchestratorError::index(
+                "summary_bm25_store",
+                "BM25 client is not configured but summaries are pending",
+            ));
         };
 
         let project_id_str = self.coordinator.project_id.to_string();
@@ -207,20 +197,12 @@ impl<'a> SummaryStorage<'a> {
             .collect();
 
         if !bm25_documents.is_empty() {
-            match bm25
-                .lock()
+            bm25.lock()
                 .await
                 .batch_index("default", &bm25_documents)
-                .await
-            {
-                Ok(_count) => {
-                    // Update bm25_doc_id in SQLite
-                    self.update_bm25_doc_ids(summaries, &bm25_documents).await?;
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to index summaries in BM25, continuing");
-                }
-            }
+                .await?;
+            // Update bm25_doc_id in SQLite
+            self.update_bm25_doc_ids(summaries, &bm25_documents).await?;
         }
 
         Ok(())
@@ -232,8 +214,14 @@ impl<'a> SummaryStorage<'a> {
         summaries: &[FileSummary],
         bm25_documents: &[Bm25Document],
     ) -> Result<(), OrchestratorError> {
-        let Some(ref db) = self.coordinator.metadata_store else {
+        if summaries.is_empty() || bm25_documents.is_empty() {
             return Ok(());
+        }
+        let Some(ref db) = self.coordinator.metadata_store else {
+            return Err(OrchestratorError::index(
+                "summary_bm25_mapping",
+                "metadata store is not configured but summary BM25 mappings are pending",
+            ));
         };
 
         let project_id = self.coordinator.project_id;
@@ -248,7 +236,10 @@ impl<'a> SummaryStorage<'a> {
                         epoch,
                     )?
                 else {
-                    continue;
+                    return Err(cce_types::StorageError::not_found(format!(
+                        "file record missing for summary {}",
+                        summary.file_path
+                    )));
                 };
                 cce_storage_sqlite::FileSummaryRepository::update_bm25_doc_id_at_epoch(
                     tx,
@@ -285,10 +276,16 @@ impl StorageCoordinator {
         batch_size: usize,
     ) -> Result<usize, OrchestratorError> {
         let (Some(qdrant), Some(embedder)) = (&self.qdrant, &self.embedder) else {
-            return Ok(0);
+            return Err(OrchestratorError::index(
+                "summary_reembed",
+                "vector store or embedder is not configured for summary re-embed",
+            ));
         };
         let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) else {
-            return Ok(0);
+            return Err(OrchestratorError::index(
+                "summary_reembed",
+                "metadata store is not configured for summary re-embed",
+            ));
         };
 
         // The sweep always targets the active generation: inherited summaries
@@ -387,41 +384,26 @@ impl StorageCoordinator {
 
         // Step 2: Remove summary from BM25 index
         if let Some(ref bm25) = self.bm25 {
-            match bm25
-                .lock()
+            bm25.lock()
                 .await
                 .delete_by_file_path_scoped("default", &file_id, self.project_id)
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(
-                        file = %file_id,
-                        error = %e,
-                        "Failed to remove summary from BM25, continuing"
-                    );
-                }
-            }
+                .await?;
         }
 
         // Step 3: Remove summary records from SQLite (all epochs)
         if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| {
-                use rusqlite::params;
-                tx.execute(
-                    "DELETE FROM file_summaries WHERE file_id IN \
-                     (SELECT id FROM files WHERE path = ?1 AND project_id = ?2)",
-                    params![&file_id, self.project_id],
-                )
-                .ok(); // Ignore errors if record doesn't exist
-                Ok(())
-            });
-
-            if let Err(e) = result {
-                tracing::warn!(file = %file_id, error = %e, "Failed to remove summary from SQLite");
-                // Don't fail the whole operation if SQLite cleanup fails
-                // (Qdrant is the primary index)
-            }
+            client
+                .with_transaction(|tx| {
+                    use rusqlite::params;
+                    tx.execute(
+                        "DELETE FROM file_summaries WHERE file_id IN \
+                         (SELECT id FROM files WHERE path = ?1 AND project_id = ?2)",
+                        params![&file_id, self.project_id],
+                    )
+                    .map_err(|e| cce_types::StorageError::Sqlite(e.to_string()))?;
+                    Ok(())
+                })
+                .map_err(OrchestratorError::Storage)?;
         }
 
         Ok(())

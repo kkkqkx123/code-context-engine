@@ -113,6 +113,20 @@ impl ParseCoordinator {
     /// This is the main entry point for parsing. It creates a parse context,
     /// executes the pipeline, and builds the final result.
     pub fn parse(&mut self, file_path: &str, content: &str) -> Result<ParsedFile, ParseError> {
+        self.parse_detailed(file_path, content)
+            .map(|(parsed, _)| parsed)
+    }
+
+    /// Parse a file and report whether the syntax tree contained errors.
+    ///
+    /// The flag is true when tree-sitter produced a partial tree: parsing
+    /// succeeded but entities inside error regions may be missing, so the
+    /// caller should mark the file degraded.
+    pub fn parse_detailed(
+        &mut self,
+        file_path: &str,
+        content: &str,
+    ) -> Result<(ParsedFile, bool), ParseError> {
         let start = std::time::Instant::now();
 
         // Create context
@@ -132,8 +146,9 @@ impl ParseCoordinator {
         match result {
             Ok(()) => {
                 // Build result
+                let has_syntax_errors = context.has_syntax_errors;
                 let parsed = self.build_result(context, start)?;
-                Ok(parsed)
+                Ok((parsed, has_syntax_errors))
             }
             Err(e) => Err(e),
         }
@@ -146,6 +161,20 @@ impl ParseCoordinator {
         content: &str,
         language_info: &LanguageInfo,
     ) -> Result<ParsedFile, ParseError> {
+        self.parse_with_language_info_detailed(file_path, content, language_info)
+            .map(|(parsed, _)| parsed)
+    }
+
+    /// Parse with pre-detected language info and report syntax errors.
+    ///
+    /// The flag mirrors [`ParseCoordinator::parse_detailed`]: a partial
+    /// tree-sitter result whose error regions may hide entities.
+    pub fn parse_with_language_info_detailed(
+        &mut self,
+        file_path: &str,
+        content: &str,
+        language_info: &LanguageInfo,
+    ) -> Result<(ParsedFile, bool), ParseError> {
         let start = std::time::Instant::now();
 
         // Create context with pre-detected language
@@ -166,8 +195,9 @@ impl ParseCoordinator {
         match result {
             Ok(()) => {
                 // Build result
+                let has_syntax_errors = context.has_syntax_errors;
                 let parsed = self.build_result(context, start)?;
-                Ok(parsed)
+                Ok((parsed, has_syntax_errors))
             }
             Err(e) => Err(e),
         }

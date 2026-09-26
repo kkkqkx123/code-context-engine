@@ -73,6 +73,7 @@ fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Resul
     // entities inside ERROR regions are silently lost, so surface the fact
     // that this file's index result is degraded.
     if tree.root_node().has_error() {
+        context.has_syntax_errors = true;
         tracing::warn!(
             file = %context.file_path,
             language = %language,

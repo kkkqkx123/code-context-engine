@@ -231,6 +231,13 @@ impl IgnoreMatcher {
     pub fn pattern_count(&self) -> usize {
         self.patterns.len()
     }
+
+    /// Patterns that failed to compile and never match.
+    /// Such entries leave files indexed that the ignore file meant to
+    /// exclude, so callers surface the count instead of staying silent.
+    pub fn invalid_pattern_count(&self) -> usize {
+        self.patterns.iter().filter(|p| p.glob.is_none()).count()
+    }
 }
 
 #[cfg(test)]
