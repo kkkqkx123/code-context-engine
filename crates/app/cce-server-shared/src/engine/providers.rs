@@ -108,6 +108,7 @@ impl super::CodeContextEngine {
                 summary_generator,
                 Some(&project_entry.config.ast_to_nl),
                 &project_entry.config.grouper,
+                &project_entry.config.license_header,
                 Some(&project_entry.config.summary),
                 &processor_config,
                 self.load_plugin_registry(project_id, &project_entry).await,
@@ -138,7 +139,8 @@ impl super::CodeContextEngine {
             .with_watch_metrics(WatchMetrics::new(&self.metrics_registry, project_id))
             .with_heartbeat_interval(std::time::Duration::from_secs(
                 project_entry.config.orchestrator.heartbeat_interval_secs,
-            )),
+            ))
+            .with_license_config(project_entry.config.license_header.clone()),
         ));
 
         // Double-check: another task may have inserted while we were building
@@ -211,7 +213,11 @@ impl super::CodeContextEngine {
                 .with_checkpoint_manager(operation_coordinator.checkpoint_manager())
                 .with_progress_tracker(project_progress_tracker)
                 // Apply project-specific grouper (pre-processor) and ast_to_nl configs
-                .with_file_processor_configs(config.grouper.clone(), &config.ast_to_nl)
+                .with_file_processor_configs(
+                    config.grouper.clone(),
+                    &config.ast_to_nl,
+                    &config.license_header,
+                )
                 // Apply chunk cache capacity from orchestrator config
                 .with_chunk_cache_size(config.orchestrator.cache.chunk_cache_size)
                 // Apply project-specific summary config

@@ -188,7 +188,8 @@ impl HotUpdateOperationRuntime {
 
     /// Create a file processor whose parser seeds the raw entity ID counter.
     pub(crate) fn new_file_processor(&self) -> FileProcessor {
-        let processor = FileProcessor::with_entity_id_seed(self.entity_id_seed());
+        let processor = FileProcessor::with_entity_id_seed(self.entity_id_seed())
+            .with_license_config(self.license_header.clone());
         match &self.parse_probe {
             Some(probe) => processor.with_parse_counter(probe.clone()),
             None => processor,

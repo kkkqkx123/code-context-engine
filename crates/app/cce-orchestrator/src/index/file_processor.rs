@@ -9,7 +9,7 @@
 //! The cache size is configurable and defaults to 100 entries.
 
 use cce_config::NestProcessorConfig;
-use cce_config::{AstToNlConfig, ChunkingConfig, Settings};
+use cce_config::{AstToNlConfig, ChunkingConfig, LicenseHeaderConfig, Settings};
 use cce_metrics::{FileProcessingMetrics, ParserMetrics, PipelineStageMetrics};
 use cce_parser::ast_to_nl::chunker::{ChunkedResult, GroupChunker};
 use cce_parser::ast_to_nl::{AstToNlConverter, ConversionRequest};
@@ -145,6 +145,8 @@ pub struct FileProcessor {
     file_processing_metrics: Option<Arc<FileProcessingMetrics>>,
     /// Project ID for cache key isolation
     project_id: i64,
+    /// License header filtering configuration applied to the parser
+    license_header: LicenseHeaderConfig,
 }
 
 impl Default for FileProcessor {
@@ -292,7 +294,20 @@ impl FileProcessor {
     /// Returns an error if Settings has not been initialized.
     pub fn from_settings() -> Result<Self, cce_types::error::ConfigError> {
         let config = Settings::ast_to_nl()?;
-        Ok(Self::with_config(&config))
+        Ok(Self::with_config(&config).with_license_config(Settings::license_header()?))
+    }
+
+    /// Apply the license header filtering configuration to the parser
+    /// components and remember it for coordinator rebuilds.
+    pub fn with_license_config(mut self, config: LicenseHeaderConfig) -> Self {
+        self.license_header = config.clone();
+        let mut coordinator = self
+            .coordinator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        coordinator.set_license_config(config);
+        drop(coordinator);
+        self
     }
 
     /// Create with custom configuration
@@ -316,6 +331,7 @@ impl FileProcessor {
             chunker_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
+            license_header: LicenseHeaderConfig::default(),
         }
     }
 
@@ -341,6 +357,7 @@ impl FileProcessor {
             chunker_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
+            license_header: LicenseHeaderConfig::default(),
         }
     }
 
@@ -366,6 +383,7 @@ impl FileProcessor {
             chunker_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
+            license_header: LicenseHeaderConfig::default(),
         }
     }
 
@@ -390,6 +408,7 @@ impl FileProcessor {
             chunker_metrics: None,
             file_processing_metrics: None,
             project_id: 0,
+            license_header: LicenseHeaderConfig::default(),
         }
     }
 
@@ -423,7 +442,8 @@ impl FileProcessor {
     /// Set plugin registry for NL template generation
     pub fn with_plugin_registry(mut self, plugin_registry: Arc<PluginRegistry>) -> Self {
         // Create new components with plugin registry
-        let new_coordinator = ParseCoordinator::with_plugin_registry(plugin_registry.clone());
+        let new_coordinator = ParseCoordinator::with_plugin_registry(plugin_registry.clone())
+            .with_license_config(self.license_header.clone());
         self.coordinator = Arc::new(Mutex::new(new_coordinator));
 
         self.pre_processor =

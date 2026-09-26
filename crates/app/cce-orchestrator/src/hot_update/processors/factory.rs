@@ -223,6 +223,7 @@ impl ProcessorFactory {
         summary_generator: Option<Arc<dyn SummaryGenerator>>,
         ast_to_nl_config: Option<&cce_config::AstToNlConfig>,
         grouper_config: &NestProcessorConfig,
+        license_config: &cce_config::LicenseHeaderConfig,
         summary_config: Option<&cce_config::SummaryConfig>,
         config: &ProcessorConfig,
         plugin_registry: Option<Arc<PluginRegistry>>,
@@ -313,6 +314,7 @@ impl ProcessorFactory {
         let mut context = ProcessorContext::new_with_project(
             storage_coordinator.clone(),
             pre_processor_config,
+            license_config.clone(),
             project_id,
         );
         if let Some(cm) = &checkpoint_manager {
@@ -358,6 +360,7 @@ impl ProcessorFactory {
             };
             relation_processor.set_project_id(project_id);
             relation_processor.set_relation_config(relation_config);
+            relation_processor.set_license_config(license_config);
             if let Some(publisher) = relation_publisher {
                 relation_processor = relation_processor.with_publisher(publisher);
             } else {

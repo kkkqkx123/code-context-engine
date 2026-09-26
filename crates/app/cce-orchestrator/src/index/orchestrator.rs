@@ -270,8 +270,10 @@ impl IndexOrchestrator {
         mut self,
         pre_config: NestProcessorConfig,
         ast_to_nl_config: &AstToNlConfig,
+        license_config: &cce_config::LicenseHeaderConfig,
     ) -> Self {
         self.file_processor = FileProcessor::with_configs(pre_config, ast_to_nl_config)
+            .with_license_config(license_config.clone())
             .with_project_id(self.project_id);
         self
     }

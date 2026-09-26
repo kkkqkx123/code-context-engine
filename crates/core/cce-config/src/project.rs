@@ -29,7 +29,8 @@ use crate::validation::{Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
 
 use super::modules::{
-    AstToNlConfig, IndexerConfig, NestProcessorConfig, RelationConfig, ScannerConfig, SummaryConfig,
+    AstToNlConfig, IndexerConfig, LicenseHeaderConfig, NestProcessorConfig, RelationConfig,
+    ScannerConfig, SummaryConfig,
 };
 
 // Re-use shared default value functions
@@ -85,6 +86,10 @@ pub struct ProjectAppConfig {
     /// AST to NL configuration (chunking, conversion)
     #[serde(default)]
     pub ast_to_nl: Option<AstToNlConfig>,
+
+    /// License header filtering configuration
+    #[serde(default)]
+    pub license_header: Option<LicenseHeaderConfig>,
 
     /// Summary configuration
     #[serde(default)]

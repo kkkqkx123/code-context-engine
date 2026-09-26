@@ -52,6 +52,12 @@ impl RelationUpdateProcessor {
         }
     }
 
+    /// Apply the project's license header filtering configuration so
+    /// reparse-driven graph rebuilds honour the same header rules as indexing.
+    pub fn set_license_config(&mut self, config: &cce_config::LicenseHeaderConfig) {
+        self.license_header = config.clone();
+    }
+
     /// Apply construction policy from shared parameters.
     ///
     /// This method uses `RelationBuilderParams` as the single source of

@@ -69,6 +69,9 @@ pub struct HotUpdateOperationRuntime {
     stored_processors: Vec<Arc<dyn UpdateProcessor>>,
     /// Monitoring metrics (optional).
     metrics: Option<Arc<HotUpdateMetrics>>,
+    /// License header filtering configuration applied to file processors
+    /// created for this project's operations.
+    license_header: cce_config::LicenseHeaderConfig,
     /// Heartbeat interval for long-running operations.
     ///
     /// The runtime periodically refreshes `checkpoint.last_heartbeat` while an
@@ -117,6 +120,7 @@ impl HotUpdateOperationRuntime {
             config_change_pending: Arc::new(Mutex::new(Vec::new())),
             stored_processors: Vec::new(),
             metrics: None,
+            license_header: cce_config::LicenseHeaderConfig::default(),
             heartbeat_interval: Duration::from_secs(60),
         }
     }
@@ -189,6 +193,10 @@ impl HotUpdateOperationRuntime {
 
     pub fn set_metrics(&mut self, metrics: Arc<HotUpdateMetrics>) {
         self.metrics = Some(metrics);
+    }
+
+    pub fn set_license_config(&mut self, config: cce_config::LicenseHeaderConfig) {
+        self.license_header = config;
     }
 
     pub fn metrics(&self) -> Option<&Arc<HotUpdateMetrics>> {

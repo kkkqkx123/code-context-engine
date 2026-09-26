@@ -91,6 +91,18 @@ impl ParseCoordinator {
         self
     }
 
+    /// Apply the license header filtering configuration to the parse
+    /// components.
+    pub fn with_license_config(mut self, config: cce_config::LicenseHeaderConfig) -> Self {
+        self.components.set_license_config(config);
+        self
+    }
+
+    /// Replace the license header filtering configuration after construction.
+    pub fn set_license_config(&mut self, config: cce_config::LicenseHeaderConfig) {
+        self.components.set_license_config(config);
+    }
+
     /// Set monitoring metrics after construction
     pub fn set_metrics(&mut self, metrics: Arc<ParserMetrics>) {
         self.metrics = Some(metrics);

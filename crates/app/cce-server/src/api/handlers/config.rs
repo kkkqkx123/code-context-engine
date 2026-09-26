@@ -163,6 +163,7 @@ pub async fn handle_config_reload(
                 summary_generator,
                 Some(&project_config.ast_to_nl),
                 &project_config.grouper,
+                &project_config.license_header,
                 Some(&project_config.summary),
                 &processor_config,
                 engine.get_plugin_registry(project_id).await,

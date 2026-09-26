@@ -276,6 +276,14 @@ impl HotUpdateCoordinator {
         self
     }
 
+    /// Apply the project's license header filtering configuration to the
+    /// operation runtime and the coordinator parser.
+    pub fn with_license_config(mut self, config: cce_config::LicenseHeaderConfig) -> Self {
+        self.runtime_builder().set_license_config(config.clone());
+        self.parser.set_license_config(config);
+        self
+    }
+
     /// Set configuration
     pub fn with_config(mut self, config: HotUpdateConfig) -> Self {
         let scan_options = ScanOptions::from(config.scanner.clone().unwrap_or_default());
@@ -337,6 +345,14 @@ impl HotUpdateCoordinator {
             // Apply hot update configuration
             self.apply_hot_update_config(&project_entry.config.orchestrator.hot_update)
                 .await;
+
+            // Keep license header filtering in sync with the project config.
+            let license_config = project_entry.config.license_header.clone();
+            self.parser.set_license_config(license_config.clone());
+            self.operation
+                .lock()
+                .await
+                .set_license_config(license_config);
 
             tracing::info!(
                 project_id = project_id,

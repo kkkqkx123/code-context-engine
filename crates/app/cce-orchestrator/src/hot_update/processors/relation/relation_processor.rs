@@ -94,6 +94,8 @@ pub struct RelationUpdateProcessor {
     pub(crate) safe_mode: bool,
     /// Relation pipeline metrics (unbounded edge-dropped counter).
     pub(crate) relation_metrics: Option<Arc<RelationMetrics>>,
+    /// License header filtering configuration applied to reparsed files.
+    pub(crate) license_header: cce_config::LicenseHeaderConfig,
 }
 
 impl Default for RelationUpdateProcessor {
@@ -129,6 +131,7 @@ impl RelationUpdateProcessor {
             base_cache: RelationBaseCache::new(),
             safe_mode: true,
             relation_metrics: None,
+            license_header: cce_config::LicenseHeaderConfig::default(),
         }
     }
 
@@ -158,6 +161,7 @@ impl RelationUpdateProcessor {
             base_cache: RelationBaseCache::new(),
             safe_mode: true,
             relation_metrics: None,
+            license_header: cce_config::LicenseHeaderConfig::default(),
         }
     }
 
@@ -192,6 +196,7 @@ impl RelationUpdateProcessor {
             base_cache: RelationBaseCache::new(),
             safe_mode: false,
             relation_metrics: None,
+            license_header: cce_config::LicenseHeaderConfig::default(),
         }
     }
 
@@ -230,6 +235,7 @@ impl RelationUpdateProcessor {
             base_cache: RelationBaseCache::new(),
             safe_mode: true,
             relation_metrics: None,
+            license_header: cce_config::LicenseHeaderConfig::default(),
         }
     }
 
@@ -455,7 +461,10 @@ impl RelationUpdateProcessor {
                 .iter()
                 .map(|file| normalize_project_path(&file.path))
                 .collect();
-            let file_processor = Arc::new(crate::hot_update::file_processor::FileProcessor::new());
+            let file_processor = Arc::new(
+                crate::hot_update::file_processor::FileProcessor::new()
+                    .with_license_config(self.license_header.clone()),
+            );
             let mut sorted_dependents: Vec<_> = dependents.iter().cloned().collect();
             sorted_dependents.sort();
             let pending_dependents: Vec<String> = sorted_dependents
@@ -851,7 +860,8 @@ impl RelationUpdateProcessor {
 
         // Step 3: Parse all affected files before replacing any old relation
         // data. This keeps the previous graph queryable if parsing fails.
-        let file_processor = crate::hot_update::file_processor::FileProcessor::new();
+        let file_processor = crate::hot_update::file_processor::FileProcessor::new()
+            .with_license_config(self.license_header.clone());
         let mut rebuild_batch = BatchChangeResult::new();
         for file_path in &affected_files {
             // Storage identity stays project-relative even though the file is

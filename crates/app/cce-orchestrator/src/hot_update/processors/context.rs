@@ -54,12 +54,14 @@ impl ProcessorContext {
     pub fn new_with_project(
         storage: Arc<StorageCoordinator>,
         pre_processor_config: NestProcessorConfig,
+        license_config: cce_config::LicenseHeaderConfig,
         project_id: i64,
     ) -> Self {
         Self {
             storage,
             file_processor: Arc::new(TokioMutex::new(
                 FileProcessor::with_pre_processor_config(pre_processor_config)
+                    .with_license_config(license_config)
                     .with_project_id(project_id),
             )),
             checkpoint_manager: None,

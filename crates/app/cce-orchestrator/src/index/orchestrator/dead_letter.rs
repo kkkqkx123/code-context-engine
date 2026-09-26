@@ -389,7 +389,11 @@ mod tests {
             .expect("valid project")
             .with_metadata_store(database.clone())
             .with_embedder(Arc::new(StubEmbedder))
-            .with_file_processor_configs(NestProcessorConfig::default(), &AstToNlConfig::both())
+            .with_file_processor_configs(
+                NestProcessorConfig::default(),
+                &AstToNlConfig::both(),
+                &cce_config::LicenseHeaderConfig::default(),
+            )
             .with_dead_letter_config(true, 8);
 
         // Drive Embedding into the dead letter queue for the recorded file

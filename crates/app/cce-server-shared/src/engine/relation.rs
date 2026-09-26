@@ -330,6 +330,7 @@ impl super::CodeContextEngine {
             processor = processor.with_plugin_registry(registry);
         }
         processor.set_relation_config(&project.config.relation);
+        processor.set_license_config(&project.config.license_header);
         let result = match processor
             .with_storage(storage.clone())
             .publish_batch(operation_id, batch_result)

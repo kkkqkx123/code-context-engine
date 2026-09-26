@@ -29,9 +29,9 @@ pub use sqlite::{SqliteConfig, SqliteSyncMode};
 use serde::{Deserialize, Serialize};
 
 use crate::modules::{
-    AstToNlConfig, EmbedderConfig, ExportModuleConfig, GlobalCacheConfig, McpConfig,
-    NestProcessorConfig, OrchestratorConfig, ProviderConfig, RelationConfig, RerankConfig,
-    ScannerConfig, SearchModuleConfig, SummaryConfig, SymbolResolutionConfig,
+    AstToNlConfig, EmbedderConfig, ExportModuleConfig, GlobalCacheConfig, LicenseHeaderConfig,
+    McpConfig, NestProcessorConfig, OrchestratorConfig, ProviderConfig, RelationConfig,
+    RerankConfig, ScannerConfig, SearchModuleConfig, SummaryConfig, SymbolResolutionConfig,
 };
 use crate::modules::{Bm25Config, QdrantConfig};
 use crate::modules::{ChatModelConfig, EmbeddingModelConfig, RerankModelConfig};
@@ -87,6 +87,9 @@ pub struct AppConfig {
     /// AST to NL configuration
     #[serde(default)]
     pub ast_to_nl: AstToNlConfig,
+    /// License header filtering configuration
+    #[serde(default)]
+    pub license_header: LicenseHeaderConfig,
     /// Summary configuration
     #[serde(default)]
     pub summary: SummaryConfig,
@@ -251,6 +254,9 @@ impl Validate for AppConfig {
             errors.push(e);
         }
         if let Err(e) = self.symbol_resolution.validate_structured() {
+            errors.push(e);
+        }
+        if let Err(e) = self.license_header.validate_structured() {
             errors.push(e);
         }
 

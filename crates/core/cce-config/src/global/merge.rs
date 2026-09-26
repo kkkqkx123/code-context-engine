@@ -12,7 +12,7 @@ impl AppConfig {
     ///
     /// # Design Principles
     ///
-    /// - Project config can override: scanner, grouper, orchestrator, relation, ast_to_nl, summary, embedder (model only), llm (chat/rerank models)
+    /// - Project config can override: scanner, grouper, orchestrator, relation, ast_to_nl, license_header, summary, embedder (model only), llm (chat/rerank models)
     /// - Project config CANNOT override: server, database, logger, export
     /// - Embedder override is limited to model selection and preprocessing; API keys and base_url remain from global
     /// - LLM override allows projects to specify different chat/rerank models while keeping provider credentials global
@@ -51,6 +51,9 @@ impl AppConfig {
         }
         if let Some(ref ast_to_nl) = project.ast_to_nl {
             merged.ast_to_nl = ast_to_nl.clone();
+        }
+        if let Some(ref license_header) = project.license_header {
+            merged.license_header = license_header.clone();
         }
         if let Some(ref summary) = project.summary {
             merged.summary = summary.clone();

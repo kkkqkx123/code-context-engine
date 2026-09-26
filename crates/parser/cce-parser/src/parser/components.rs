@@ -109,6 +109,14 @@ impl Components {
             embedded_parser: EmbeddedParser::new(),
         }
     }
+
+    /// Apply the license header filtering configuration to every component
+    /// that strips header comments (the shared comment processor and the
+    /// entity extractor's own processor).
+    pub fn set_license_config(&mut self, config: cce_config::LicenseHeaderConfig) {
+        self.comment_processor.set_license_config(config.clone());
+        self.entity_extractor.set_license_config(config);
+    }
 }
 
 impl Default for Components {

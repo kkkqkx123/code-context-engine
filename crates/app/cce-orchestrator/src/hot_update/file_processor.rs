@@ -26,6 +26,9 @@ use cce_types::{LanguageInfo, ParsedFile};
 pub struct FileProcessor {
     parser: ParseCoordinator,
     entity_id_seed: u64,
+    /// License header filtering configuration, re-applied whenever the
+    /// parser is rebuilt for a fresh entity-ID seed.
+    license_header: cce_config::LicenseHeaderConfig,
     /// Test-only parse counter. When set, every tree-sitter parse triggered by
     /// this processor increments it, giving recovery tests a durable proof of
     /// whether a file was re-parsed or reused from its checkpoint envelope.
@@ -48,8 +51,17 @@ impl FileProcessor {
         Self {
             parser: ParseCoordinator::with_entity_id_seed(entity_id_seed),
             entity_id_seed,
+            license_header: cce_config::LicenseHeaderConfig::default(),
             parse_counter: None,
         }
+    }
+
+    /// Apply the project's license header filtering configuration to the
+    /// parser and remember it for parser rebuilds.
+    pub fn with_license_config(mut self, config: cce_config::LicenseHeaderConfig) -> Self {
+        self.license_header = config.clone();
+        self.parser.set_license_config(config);
+        self
     }
 
     /// Attach a test-only counter that is incremented on every parse.
@@ -232,7 +244,8 @@ impl FileProcessor {
             ));
         }
 
-        let mut parser = ParseCoordinator::with_entity_id_seed(self.entity_id_seed);
+        let mut parser = ParseCoordinator::with_entity_id_seed(self.entity_id_seed)
+            .with_license_config(self.license_header.clone());
         let parsed_file = parser
             .parse(parse_path, &content)
             .map_err(|e| HotUpdateError::parse(parse_path.to_string(), e.to_string()))?;

@@ -201,6 +201,13 @@ impl Settings {
         Ok(Self::global()?.ast_to_nl)
     }
 
+    /// Get license header filtering configuration
+    ///
+    /// Returns an error if configuration has not been initialized.
+    pub fn license_header() -> Result<super::modules::LicenseHeaderConfig, ConfigError> {
+        Ok(Self::global()?.license_header)
+    }
+
     /// Get summary configuration
     ///
     /// Returns an error if configuration has not been initialized.

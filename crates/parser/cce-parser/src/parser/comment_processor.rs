@@ -21,6 +21,7 @@
 
 use crate::tree_sitter_query::error::Result;
 use crate::tree_sitter_query::executor::QueryExecutor;
+use cce_config::LicenseHeaderConfig;
 use cce_types::language::Language;
 use cce_types::{
     BehaviorFact, BehaviorFactKind, BehaviorStore, Entity, FILE_DOC_SENTINEL_ID, Span,
@@ -40,7 +41,7 @@ use associator::{
 use classifier::{
     CommentClass, classify_comment, dedup_same_row_comments, merge_top_level_line_comments,
 };
-use license_detector::find_license_block_end;
+use license_detector::{find_license_blocks, is_license_span};
 
 /// Comment entry with text and position
 #[derive(Debug, Clone)]
@@ -66,6 +67,8 @@ pub struct FileDocComment {
 pub struct CommentProcessor {
     /// Query executor
     query_executor: Arc<QueryExecutor>,
+    /// License header filtering configuration
+    license_config: LicenseHeaderConfig,
 }
 
 impl CommentProcessor {
@@ -73,6 +76,7 @@ impl CommentProcessor {
     pub fn new() -> Self {
         Self {
             query_executor: Arc::new(QueryExecutor::new()),
+            license_config: LicenseHeaderConfig::default(),
         }
     }
 
@@ -80,7 +84,19 @@ impl CommentProcessor {
     pub fn with_executor(executor: Arc<QueryExecutor>) -> Self {
         Self {
             query_executor: executor,
+            license_config: LicenseHeaderConfig::default(),
         }
+    }
+
+    /// Set the license header filtering configuration
+    pub fn with_license_config(mut self, config: LicenseHeaderConfig) -> Self {
+        self.license_config = config;
+        self
+    }
+
+    /// Replace the license header filtering configuration in place
+    pub fn set_license_config(&mut self, config: LicenseHeaderConfig) {
+        self.license_config = config;
     }
 
     /// Extract and classify comments from source code.
@@ -181,14 +197,17 @@ impl CommentProcessor {
         let comments = self.extract_comments(tree, source, language)?;
 
         let first_entity_start = entities.iter().map(|e| e.span.start_byte).min();
-        let license_end = find_license_block_end(&comments, entities);
+        let license_blocks = find_license_blocks(&comments, entities, &self.license_config);
+        // Drop matched comments before any merging so a non-license comment
+        // that happens to be contiguous with the header block survives.
+        let comments: Vec<Comment> = comments
+            .iter()
+            .filter(|c| !is_license_span(&c.span, &license_blocks))
+            .cloned()
+            .collect();
 
         // Channel 1: plain comments become behavior fragments.
         for block in merge_plain_comment_blocks(&comments) {
-            if block.span.end_byte <= license_end {
-                continue;
-            }
-
             let is_file_header =
                 first_entity_start.is_none_or(|start| block.span.end_byte <= start);
             let target = if is_file_header {
@@ -215,10 +234,6 @@ impl CommentProcessor {
         // Channel 2: documentation comments fill doc slots only.
         let mut file_doc: Option<FileDocComment> = None;
         for comment in &comments {
-            if comment.span.end_byte <= license_end {
-                continue;
-            }
-
             match classify_comment(comment) {
                 CommentClass::Plain => {}
                 CommentClass::InnerDoc => {

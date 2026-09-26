@@ -107,6 +107,18 @@ impl EntityExtractor {
         self
     }
 
+    /// Set the license header filtering configuration on the embedded
+    /// comment processor.
+    pub fn with_license_config(mut self, config: cce_config::LicenseHeaderConfig) -> Self {
+        self.comment_processor.set_license_config(config);
+        self
+    }
+
+    /// Replace the license header filtering configuration in place.
+    pub fn set_license_config(&mut self, config: cce_config::LicenseHeaderConfig) {
+        self.comment_processor.set_license_config(config);
+    }
+
     /// Configure the shared entity ID counter to start at `seed`.
     ///
     /// Hot-update parses reuse the raw `EntityId` space of the previously
