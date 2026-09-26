@@ -181,7 +181,10 @@ pub mod mock {
             _operation_id: &str,
             _config_fingerprint: &str,
         ) -> Result<i64, String> {
-            let mut map = self.next_epoch.lock().expect("lock");
+            let mut map = self
+                .next_epoch
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             let e = map.entry(project_id).or_insert(1);
             let epoch = *e;
             *e += 1;
@@ -198,7 +201,7 @@ pub mod mock {
         ) -> Result<(), String> {
             self.snapshots
                 .lock()
-                .expect("lock")
+                .unwrap_or_else(|poison| poison.into_inner())
                 .insert((project_id, epoch), snapshot.clone());
             Ok(())
         }
@@ -211,7 +214,7 @@ pub mod mock {
         ) -> Result<(), String> {
             self.deltas
                 .lock()
-                .expect("lock")
+                .unwrap_or_else(|poison| poison.into_inner())
                 .insert((project_id, epoch), delta.clone());
             Ok(())
         }
@@ -230,7 +233,10 @@ pub mod mock {
             after_epoch: i64,
             up_to_epoch: i64,
         ) -> Result<Vec<SnapshotDelta>, String> {
-            let deltas = self.deltas.lock().expect("lock");
+            let deltas = self
+                .deltas
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             let mut out = Vec::new();
             for epoch in (after_epoch + 1)..=up_to_epoch {
                 if let Some(d) = deltas.get(&(project_id, epoch)) {

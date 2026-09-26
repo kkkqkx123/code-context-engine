@@ -135,6 +135,27 @@ impl QdrantError {
         matches!(self, Self::CollectionNotFound(_))
     }
 
+    /// Whether the failure is caused by exhausted storage space.
+    pub fn is_storage_full(&self) -> bool {
+        match self {
+            Self::Io(err) => err.is_storage_full(),
+            Self::Api(message)
+            | Self::Request(message)
+            | Self::ResponseParse(message)
+            | Self::Payload(message)
+            | Self::Index(message)
+            | Self::Connection(message)
+            | Self::ConnectionTimeout(message) => {
+                let lowered = message.to_lowercase();
+                lowered.contains("no space")
+                    || lowered.contains("storage full")
+                    || lowered.contains("enospc")
+                    || lowered.contains("disk full")
+            }
+            _ => false,
+        }
+    }
+
     /// Get error code for programmatic error handling
     pub fn error_code(&self) -> &'static str {
         match self {
@@ -166,6 +187,9 @@ impl QdrantError {
 
 impl ErrorClassify for QdrantError {
     fn is_retryable(&self) -> bool {
+        if self.is_storage_full() {
+            return false;
+        }
         matches!(
             self,
             Self::Connection(_)
@@ -178,12 +202,18 @@ impl ErrorClassify for QdrantError {
     }
 
     fn is_transient(&self) -> bool {
+        if self.is_storage_full() {
+            return false;
+        }
         // Api is transient-but-not-retryable: the server responded, but the
         // type layer cannot tell a retryable 5xx from a deterministic 4xx.
         self.is_retryable() || matches!(self, Self::Api(_))
     }
 
     fn is_permanent(&self) -> bool {
+        if self.is_storage_full() {
+            return true;
+        }
         matches!(
             self,
             Self::CollectionNotFound(_)

@@ -113,11 +113,17 @@ impl IndexOrchestrator {
                 {
                     Ok(files) => files,
                     Err(e) => {
+                        let reason = format!(
+                            "Failed to generate synthetic config files for {}: spawn_blocking task failed: {e}",
+                            project_root.display()
+                        );
                         tracing::error!(
                             error = %e,
                             root = %project_root.display(),
                             "Failed to generate synthetic config files: spawn_blocking task failed"
                         );
+                        ctx.errors.push(reason);
+                        ctx.all_batches_completed = false;
                         Vec::new()
                     }
                 }
@@ -414,7 +420,31 @@ impl IndexOrchestrator {
         let mut export_failed = 0usize;
         let mut exported_paths: Vec<std::path::PathBuf> = Vec::new();
         for file_path in spool.file_paths() {
-            let chunks = spool.load_chunks(&file_path)?;
+            let chunks = match spool.load_chunks(&file_path) {
+                Ok(chunks) => chunks,
+                Err(error) => {
+                    export_failed += 1;
+                    tracing::warn!(
+                        path = %file_path,
+                        error = %error,
+                        "Failed to load export chunks; skipping file without aborting export"
+                    );
+                    self.state_tracker
+                        .mark_failed(
+                            &std::path::PathBuf::from(&file_path),
+                            ModuleType::Export,
+                            crate::index_state::TrackerFailure::transient(error.to_string()),
+                        )
+                        .await
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, "State tracking operation failed");
+                        });
+                    ctx.errors.push(format!(
+                        "NL document export skipped corrupt spool entry {file_path}: {error}"
+                    ));
+                    continue;
+                }
+            };
             self.state_tracker
                 .update_module_state(
                     &std::path::PathBuf::from(&file_path),

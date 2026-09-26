@@ -22,14 +22,33 @@ pub const MODULE_SUMMARY: &str = "summary";
 /// Parse the persisted module progress JSON into a map.
 pub fn read_module_progress(json: Option<&str>) -> HashMap<String, String> {
     match json {
-        Some(raw) => serde_json::from_str(raw).unwrap_or_default(),
+        Some(raw) => match serde_json::from_str(raw) {
+            Ok(progress) => progress,
+            Err(error) => {
+                tracing::warn!(error = %error, "Corrupt module progress; resetting to empty");
+                HashMap::new()
+            }
+        },
         None => HashMap::new(),
+    }
+}
+
+/// Strict variant that surfaces corruption instead of resetting.
+pub fn read_module_progress_strict(
+    json: Option<&str>,
+) -> std::result::Result<HashMap<String, String>, serde_json::Error> {
+    match json {
+        Some(raw) => serde_json::from_str(raw),
+        None => Ok(HashMap::new()),
     }
 }
 
 /// Serialize the module progress map to JSON.
 pub fn write_module_progress(progress: &HashMap<String, String>) -> String {
-    serde_json::to_string(progress).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(progress).unwrap_or_else(|error| {
+        tracing::warn!(error = %error, "Failed to serialize module progress; storing empty map");
+        "{}".to_string()
+    })
 }
 
 /// Compute the module input fingerprint persisted in a progress marker.

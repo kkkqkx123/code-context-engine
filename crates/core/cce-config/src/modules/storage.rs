@@ -685,6 +685,9 @@ pub struct Bm25Config {
     pub algorithm: Bm25AlgorithmConfig,
     /// Index manager configuration
     pub index_manager: IndexManagerConfig,
+    /// Maximum on-disk index size in bytes before writes fail fast.
+    /// Zero means unlimited.
+    pub max_index_bytes: u64,
 }
 
 impl Default for Bm25Config {
@@ -698,6 +701,7 @@ impl Default for Bm25Config {
             retry_delay_ms: 100,
             algorithm: Bm25AlgorithmConfig::default(),
             index_manager: IndexManagerConfig::default(),
+            max_index_bytes: 0,
         }
     }
 }
@@ -730,6 +734,11 @@ impl Bm25Config {
 
     pub fn with_max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
+        self
+    }
+
+    pub fn with_max_index_bytes(mut self, max_index_bytes: u64) -> Self {
+        self.max_index_bytes = max_index_bytes;
         self
     }
 }

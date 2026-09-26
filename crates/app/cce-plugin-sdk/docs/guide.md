@@ -289,6 +289,8 @@ declare_plugin!(MyPlugin, MyPlugin::new()); // 自定义初始化
 
 宏会生成一个 `std::sync::LazyLock<MyPlugin>` 静态单例，并确保所有导出函数不会把 panic 展开到 C ABI 边界（`catch_unwind` 防护）。插件内 panic 会以 `{"result":"error",...,"error_type":"execution_failed"}` 形式回报给宿主。
 
+超时调用在独立线程上执行并受取消令牌保护，但线程无法被强制终止：超时的原生调用会驻留至其自然返回。频繁超时的插件会堆积线程，反复挂起的原生插件不可恢复，需要重启工作进程。生产环境应对同一插件限制并发并在连续超时后禁用该插件。
+
 ---
 
 ## ABI 协议

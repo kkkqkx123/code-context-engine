@@ -158,6 +158,15 @@ impl Bm25Client {
         if documents.is_empty() {
             return Ok(0);
         }
+        if self.config.max_index_bytes > 0 {
+            let size = Self::dir_size(&self.index_dir());
+            if size >= self.config.max_index_bytes {
+                return Err(Bm25Error::Index(format!(
+                    "BM25 index disk usage {size} bytes reached the configured limit of {} bytes: storage full",
+                    self.config.max_index_bytes
+                )));
+            }
+        }
 
         let start_time = Instant::now();
         let result = self.batch_index_inner(index_name, documents).await;

@@ -132,7 +132,19 @@ impl AstParser {
         let end_byte = node.end_byte();
         let start_pos = node.start_position();
         let end_pos = node.end_position();
-        let text = node.utf8_text(source.as_bytes()).unwrap_or("").to_string();
+        let text = match node.utf8_text(source.as_bytes()) {
+            Ok(text) => text.to_string(),
+            Err(error) => {
+                warn!(
+                    kind = %kind,
+                    start_byte,
+                    end_byte,
+                    error = %error,
+                    "AST node text is not valid UTF-8; storing empty text for this node"
+                );
+                String::new()
+            }
+        };
         let children: Vec<AstNode> = node
             .children(&mut node.walk())
             .map(|child| self.convert_node(child, source))

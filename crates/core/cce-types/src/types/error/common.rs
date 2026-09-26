@@ -52,6 +52,17 @@ impl IoError {
     pub fn inner(&self) -> &std::io::Error {
         &self.0
     }
+
+    /// Whether the failure is caused by exhausted storage space.
+    ///
+    /// Retrying cannot succeed until an operator frees disk space, so
+    /// callers must treat this as permanent and surface an alert.
+    pub fn is_storage_full(&self) -> bool {
+        if self.0.kind() == std::io::ErrorKind::StorageFull {
+            return true;
+        }
+        matches!(self.0.raw_os_error(), Some(28))
+    }
 }
 
 impl ErrorClassify for IoError {
@@ -60,6 +71,9 @@ impl ErrorClassify for IoError {
     }
 
     fn is_transient(&self) -> bool {
+        if self.is_storage_full() {
+            return false;
+        }
         // Deterministic local failures (missing file, permissions, invalid
         // data, wrong path type) never succeed on retry; interruptions,
         // resource pressure and connection faults may.

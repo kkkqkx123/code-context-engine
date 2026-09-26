@@ -159,9 +159,11 @@ impl RetryPolicy {
             }
         }
 
-        // Unreachable: every Err outcome returns through the should_retry or
-        // retry-budget checks before the loop can complete.
-        unreachable!("retry loop always terminates via a return")
+        // Defensive terminal: the loop returns on every outcome above, so
+        // reaching here means the retry budget accounting is inconsistent.
+        Err(LlmError::internal(
+            "Retry loop exited without a terminal result",
+        ))
     }
 
     /// Execute a function with retry and custom error handler
@@ -205,9 +207,11 @@ impl RetryPolicy {
             }
         }
 
-        // Unreachable: every Err outcome returns through the should_retry or
-        // retry-budget checks before the loop can complete.
-        unreachable!("retry loop always terminates via a return")
+        // Defensive terminal: the loop returns on every outcome above, so
+        // reaching here means the retry budget accounting is inconsistent.
+        Err(LlmError::internal(
+            "Fixed interval retry loop exited without a terminal result",
+        ))
     }
 
     fn retry_budget(&self, error: &LlmError) -> u32 {

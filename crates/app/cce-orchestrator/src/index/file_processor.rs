@@ -99,6 +99,8 @@ pub struct CompleteFileProcessResult {
     /// Non-zero means indexed content is incomplete: the file must be
     /// reported as degraded even though processing succeeded.
     pub dropped_blank_segments: usize,
+    /// Structured document pipeline degraded to plain text.
+    pub document_degraded: bool,
 }
 
 /// Chunk cache statistics
@@ -277,7 +279,7 @@ impl FileProcessor {
                 .document_chunking_config
                 .as_ref()
                 .unwrap_or(&self.chunking_config);
-            let (chunks, _) =
+            let (chunks, _, _) =
                 self.process_doc(&content, relative_path, output_mode, chunking_config)?;
             Ok(Some(chunks))
         } else {
@@ -304,10 +306,10 @@ impl FileProcessor {
     /// components and remember it for coordinator rebuilds.
     pub fn with_license_config(mut self, config: LicenseHeaderConfig) -> Self {
         self.license_header = config.clone();
-        let mut coordinator = self
-            .coordinator
-            .lock()
-            .expect("parser coordinator lock poisoned; refusing to mutate poisoned state");
+        let mut coordinator = self.coordinator.lock().unwrap_or_else(|poison| {
+            tracing::warn!("Parser coordinator mutex was poisoned; recovering guard");
+            poison.into_inner()
+        });
         coordinator.set_license_config(config);
         drop(coordinator);
         self
@@ -366,7 +368,8 @@ impl FileProcessor {
 
     /// Create with custom pre-processor and AST to NL configuration
     pub fn with_configs(pre_config: NestProcessorConfig, ast_to_nl_config: &AstToNlConfig) -> Self {
-        let cache_size = NonZeroUsize::new(Self::DEFAULT_CACHE_SIZE).unwrap();
+        let cache_size = NonZeroUsize::new(Self::DEFAULT_CACHE_SIZE)
+            .expect("DEFAULT_CACHE_SIZE must be non-zero");
         Self {
             coordinator: Arc::new(Mutex::new(ParseCoordinator::new())),
             pre_processor: Arc::new(PreprocessingPipeline::with_config(pre_config)),
@@ -393,7 +396,8 @@ impl FileProcessor {
     /// Create with custom cache size
     pub fn with_cache_size(cache_size: usize) -> Self {
         let config = AstToNlConfig::default();
-        let cache_size = NonZeroUsize::new(cache_size.max(1)).unwrap();
+        let cache_size =
+            NonZeroUsize::new(cache_size.max(1)).expect("cache_size must be non-zero after max(1)");
         Self {
             coordinator: Arc::new(Mutex::new(ParseCoordinator::new())),
             pre_processor: Arc::new(PreprocessingPipeline::new()),
@@ -469,7 +473,10 @@ impl FileProcessor {
         if let Some(ref metrics) = self.parser_metrics {
             self.coordinator
                 .lock()
-                .expect("parser coordinator lock poisoned; refusing to skip metrics injection")
+                .unwrap_or_else(|poison| {
+                    tracing::warn!("Parser coordinator mutex was poisoned; recovering guard");
+                    poison.into_inner()
+                })
                 .set_metrics(metrics.clone());
         }
 
@@ -480,7 +487,10 @@ impl FileProcessor {
     pub fn with_parser_metrics(mut self, metrics: Arc<ParserMetrics>) -> Self {
         self.coordinator
             .lock()
-            .expect("parser coordinator lock poisoned; refusing to skip metrics injection")
+            .unwrap_or_else(|poison| {
+                tracing::warn!("Parser coordinator mutex was poisoned; recovering guard");
+                poison.into_inner()
+            })
             .set_metrics(metrics.clone());
         self.parser_metrics = Some(metrics);
         self
@@ -586,19 +596,28 @@ impl FileProcessor {
         file_path: &str,
         output_mode: OutputMode,
         chunking_config: &ChunkingConfig,
-    ) -> Result<(Vec<ChunkedResult>, Option<cce_parser::document::DocSummary>), OrchestratorError>
-    {
+    ) -> Result<
+        (
+            Vec<ChunkedResult>,
+            Option<cce_parser::document::DocSummary>,
+            bool,
+        ),
+        OrchestratorError,
+    > {
         let result = match &self.plugin_registry {
-            Some(registry) => self.doc_pipeline.process_with_plugins(
+            Some(registry) => self.doc_pipeline.process_with_plugins_degraded_flag(
                 content,
                 file_path,
                 chunking_config,
                 output_mode,
                 registry,
             ),
-            None => self
-                .doc_pipeline
-                .process(content, file_path, chunking_config, output_mode),
+            None => self.doc_pipeline.process_with_degraded_flag(
+                content,
+                file_path,
+                chunking_config,
+                output_mode,
+            ),
         };
         // The document pipeline already reports typed ParseError variants
         // (Json/Yaml/Xml/... parsing); propagate instead of stringifying.
@@ -622,7 +641,7 @@ impl FileProcessor {
             .unwrap_or(&self.chunking_config);
 
         // Use document pipeline for processing
-        let (chunks, _summary) =
+        let (chunks, _summary, _) =
             self.process_doc(content, &file_path, output_mode, chunking_config)?;
 
         // Generate a placeholder ParsedFile so downstream storage can handle
@@ -658,7 +677,7 @@ impl FileProcessor {
             .unwrap_or(&self.chunking_config);
 
         // Use document pipeline for processing
-        let (chunks, doc_summary) =
+        let (chunks, doc_summary, document_degraded) =
             self.process_doc(content, &file_path, output_mode, chunking_config)?;
 
         let language_info = file_entry
@@ -679,6 +698,7 @@ impl FileProcessor {
             processing_result: None,
             doc_summary,
             dropped_blank_segments: 0,
+            document_degraded,
         })
     }
 
@@ -952,6 +972,7 @@ impl FileProcessor {
             processing_result: Some(processing_result),
             doc_summary: None,
             dropped_blank_segments,
+            document_degraded: false,
         })
     }
 
@@ -999,7 +1020,13 @@ impl FileProcessor {
             .as_ref()
             .unwrap_or(&self.chunking_config);
 
-        let (chunks, _) = self.process_doc(source, path, output_mode, chunking_config)?;
+        let (chunks, _, degraded) = self.process_doc(source, path, output_mode, chunking_config)?;
+        if degraded {
+            tracing::warn!(
+                path,
+                "Document pipeline degraded to plain text; content is incomplete"
+            );
+        }
         let mut cache = self.chunk_cache.write().await;
         cache.put(cache_key, (chunks.clone(), 0));
         Ok(chunks)
@@ -1147,6 +1174,7 @@ impl FileProcessor {
             processing_result: Some(processing_result),
             doc_summary: None,
             dropped_blank_segments,
+            document_degraded: false,
         })
     }
 

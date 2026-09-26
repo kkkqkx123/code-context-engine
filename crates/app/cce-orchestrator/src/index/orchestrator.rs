@@ -654,7 +654,8 @@ impl IndexOrchestrator {
 
         // Paths the scanner skipped with errors (unreadable directories,
         // unprocessable files) are silent data loss: surface every one of
-        // them in the index result instead of only logging a warning.
+        // them in the index result and keep the manifest unactivated so
+        // downstream readers never mistake a partial scan for a complete one.
         for failure in ctx.file_indexer.scan_failures() {
             tracing::warn!(
                 path = %failure.path.display(),
@@ -666,6 +667,7 @@ impl IndexOrchestrator {
                 failure.path.display(),
                 failure.reason
             ));
+            ctx.all_batches_completed = false;
         }
 
         // On resume, accumulate the chunks of batches completed in the previous

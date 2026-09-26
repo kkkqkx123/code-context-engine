@@ -1061,25 +1061,54 @@ impl super::AstToNlConverter {
         }
 
         let header = group.header.as_ref()?;
+        let needs_both = matches!(mode, OutputMode::Both);
 
-        let bm25_text = bm25_text
-            .map(|text| self.bm25_cleaner.clean(&text))
-            .unwrap_or_default();
-        let embedding_text = embedding_text
-            .map(|text| self.embedding_cleaner.clean(&text))
-            .unwrap_or_default();
-
-        let result = ConversionResult::new(
-            header.id,
-            header.kind,
-            header.name.clone(),
-            file_path.to_string(),
-            bm25_text,
-            embedding_text,
-            Vec::new(),
-        );
-
-        Some(vec![result])
+        match (bm25_text, embedding_text) {
+            (Some(bm25), Some(embedding)) => {
+                let result = ConversionResult::new(
+                    header.id,
+                    header.kind,
+                    header.name.clone(),
+                    file_path.to_string(),
+                    self.bm25_cleaner.clean(&bm25),
+                    self.embedding_cleaner.clean(&embedding),
+                    Vec::new(),
+                );
+                Some(vec![result])
+            }
+            (Some(bm25), None) => {
+                if needs_both {
+                    tracing::warn!(
+                        group_id = %group.group_id,
+                        "Plugin produced BM25 text but no embedding text; indexing BM25 side only"
+                    );
+                }
+                Some(vec![ConversionResult::bm25_only(
+                    header.id,
+                    header.kind,
+                    header.name.clone(),
+                    file_path.to_string(),
+                    self.bm25_cleaner.clean(&bm25),
+                    Vec::new(),
+                )])
+            }
+            (None, Some(embedding)) => {
+                if needs_both {
+                    tracing::warn!(
+                        group_id = %group.group_id,
+                        "Plugin produced embedding text but no BM25 text; indexing embedding side only"
+                    );
+                }
+                Some(vec![ConversionResult::embedding_only(
+                    header.id,
+                    header.kind,
+                    header.name.clone(),
+                    file_path.to_string(),
+                    self.embedding_cleaner.clean(&embedding),
+                )])
+            }
+            (None, None) => None,
+        }
     }
 
     /// Batch convert multiple entity groups using plugins (optimized for reduced boundary calls)

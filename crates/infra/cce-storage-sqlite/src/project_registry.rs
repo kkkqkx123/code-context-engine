@@ -286,9 +286,18 @@ fn parse_string_list(value: Option<String>) -> Option<Vec<String>> {
 }
 
 fn timestamp_to_rfc3339(timestamp: i64) -> String {
-    chrono::DateTime::<Utc>::from_timestamp(timestamp, 0)
-        .unwrap_or_else(Utc::now)
-        .to_rfc3339()
+    match chrono::DateTime::<Utc>::from_timestamp(timestamp, 0) {
+        Some(valid) => valid.to_rfc3339(),
+        None => {
+            tracing::warn!(
+                timestamp,
+                "Invalid project timestamp; falling back to epoch"
+            );
+            chrono::DateTime::<Utc>::from_timestamp(0, 0)
+                .expect("Unix epoch must be a valid timestamp")
+                .to_rfc3339()
+        }
+    }
 }
 
 #[cfg(test)]

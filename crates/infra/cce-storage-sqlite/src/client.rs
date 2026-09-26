@@ -253,24 +253,36 @@ impl SqliteClient {
 
         let mut conn = self.write_conn.lock();
 
-        let tx = conn.transaction().map_err(|e| {
-            error!(path = %self.config.path, error = %e, "Failed to start transaction");
-            StorageError::Transaction(format!("Failed to start transaction: {}", e))
+        // A single begin attempt: the connection already sets busy_timeout,
+        // and a busy failure stays transient so the batch stops and a resume
+        // retries it. Retrying the begin inline would require holding the
+        // transaction borrow across loop iterations.
+        let tx = conn.transaction().map_err(map_sqlite_error).map_err(|e| {
+            if is_busy_error(&e) {
+                warn!(
+                    path = %self.config.path,
+                    error = %e,
+                    "SQLite busy on transaction begin; failing transiently for resume retry"
+                );
+            } else {
+                error!(path = %self.config.path, error = %e, "Failed to start transaction");
+            }
+            StorageError::Transaction(format!("Failed to start transaction: {e}"))
         })?;
 
         let result = match f(&tx) {
             Ok(result) => {
-                tx.commit().map_err(|e| {
+                tx.commit().map_err(map_sqlite_error).map_err(|e| {
                     error!(path = %self.config.path, error = %e, "Failed to commit transaction");
-                    StorageError::Transaction(format!("Failed to commit transaction: {}", e))
+                    StorageError::Transaction(format!("Failed to commit transaction: {e}"))
                 })?;
                 Ok(result)
             }
             Err(e) => {
                 warn!(path = %self.config.path, error = %e, "Transaction failed, rolling back");
-                tx.rollback().map_err(|err| {
+                tx.rollback().map_err(map_sqlite_error).map_err(|err| {
                     error!(path = %self.config.path, error = %err, "Failed to rollback transaction");
-                    StorageError::Transaction(format!("Failed to rollback transaction: {}", err))
+                    StorageError::Transaction(format!("Failed to rollback transaction: {err}"))
                 })?;
                 Err(e)
             }
@@ -455,6 +467,30 @@ fn file_size_or_zero(path: &Path) -> Result<u64, StorageError> {
         Ok(metadata) => Ok(metadata.len()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
         Err(error) => Err(StorageError::from(error)),
+    }
+}
+
+fn map_sqlite_error(error: rusqlite::Error) -> StorageError {
+    let message = error.to_string();
+    if message.to_lowercase().contains("no space")
+        || message.to_lowercase().contains("disk full")
+        || message.to_lowercase().contains("enospc")
+    {
+        return StorageError::storage_full(message);
+    }
+    StorageError::Sqlite(message)
+}
+
+fn is_busy_error(error: &StorageError) -> bool {
+    match error {
+        StorageError::Sqlite(message) | StorageError::Transaction(message) => {
+            let lowered = message.to_lowercase();
+            lowered.contains("busy")
+                || lowered.contains("locked")
+                || lowered.contains("database is locked")
+                || lowered.contains("database table is locked")
+        }
+        _ => false,
     }
 }
 

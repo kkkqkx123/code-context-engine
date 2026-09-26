@@ -64,6 +64,32 @@ impl Bm25Error {
     pub fn config<S: Into<String>>(msg: S) -> Self {
         Self::Config(ConfigError::Other(msg.into()))
     }
+
+    /// Whether the failure is caused by exhausted storage space.
+    pub fn is_storage_full(&self) -> bool {
+        match self {
+            Self::Io(err) => err.is_storage_full(),
+            Self::Index(message)
+            | Self::Search(message)
+            | Self::Schema(message)
+            | Self::Document(message)
+            | Self::Writer(message) => {
+                let lowered = message.to_lowercase();
+                lowered.contains("no space")
+                    || lowered.contains("storage full")
+                    || lowered.contains("enospc")
+                    || lowered.contains("disk full")
+            }
+            Self::Tantivy(err) => {
+                let lowered = err.to_string().to_lowercase();
+                lowered.contains("no space")
+                    || lowered.contains("storage full")
+                    || lowered.contains("enospc")
+                    || lowered.contains("disk full")
+            }
+            _ => false,
+        }
+    }
 }
 
 // Implement From<std::io::Error> for Bm25Error via IoError
@@ -75,6 +101,9 @@ impl From<std::io::Error> for Bm25Error {
 
 impl ErrorClassify for Bm25Error {
     fn is_retryable(&self) -> bool {
+        if self.is_storage_full() {
+            return false;
+        }
         // Tantivy/I/O failures and writer-level issues are transient; a retry
         // after the index recovers may succeed.
         matches!(
@@ -89,10 +118,16 @@ impl ErrorClassify for Bm25Error {
     }
 
     fn is_transient(&self) -> bool {
+        if self.is_storage_full() {
+            return false;
+        }
         self.is_retryable()
     }
 
     fn is_permanent(&self) -> bool {
+        if self.is_storage_full() {
+            return true;
+        }
         matches!(self, Self::Config(_) | Self::Disabled | Self::Schema(_))
     }
 }

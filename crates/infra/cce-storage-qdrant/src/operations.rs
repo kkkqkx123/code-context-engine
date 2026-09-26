@@ -14,6 +14,26 @@ use crate::types::{
     to_qdrant_point_id,
 };
 
+async fn read_error_body(response: reqwest::Response) -> String {
+    match response.text().await {
+        Ok(body) if !body.is_empty() => body,
+        Ok(_) => "<empty error body>".to_string(),
+        Err(error) => format!("<error body unavailable: {error}>"),
+    }
+}
+
+fn parse_count(payload: &serde_json::Value, context: &str) -> Result<usize, QdrantError> {
+    payload
+        .pointer("/result/count")
+        .and_then(|value| value.as_u64())
+        .map(|count| count as usize)
+        .ok_or_else(|| {
+            QdrantError::ResponseParse(format!(
+                "{context} response is missing result.count: {payload}"
+            ))
+        })
+}
+
 /// Collection-level operations (create, info, delete)
 pub struct CollectionOperations {
     http_client: Client,
@@ -49,7 +69,7 @@ impl CollectionOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             if status == reqwest::StatusCode::NOT_FOUND {
                 return Err(QdrantError::CollectionNotFound(
                     cce_types::error::NotFoundError::new(&self.collection_name),
@@ -199,7 +219,7 @@ impl CollectionOperations {
 
         let status = response.status();
         if status != reqwest::StatusCode::OK && status != reqwest::StatusCode::CREATED {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             return Err(QdrantError::api(format!(
                 "Failed to create collection: {} - {}",
                 status, error_text
@@ -221,7 +241,7 @@ impl CollectionOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             return Err(QdrantError::api(format!(
                 "Failed to delete collection: {} - {}",
                 status, error_text
@@ -251,7 +271,7 @@ impl CollectionOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             return Err(QdrantError::api(format!(
                 "Failed to clear collection: {} - {}",
                 status, error_text
@@ -409,7 +429,7 @@ impl PointOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             let error = QdrantError::api(format!(
                 "Failed to upsert {} points: {} - {}",
                 point_count, status, error_text
@@ -532,7 +552,7 @@ impl PointOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             return Err(QdrantError::api(format!(
                 "Failed to count all points: {} - {}",
                 status, error_text
@@ -544,7 +564,7 @@ impl PointOperations {
             .await
             .map_err(|e| QdrantError::request(format!("Failed to parse count response: {}", e)))?;
 
-        let count = resp_json["result"]["count"].as_u64().unwrap_or(0) as usize;
+        let count = parse_count(&resp_json, "Count all points")?;
         Ok(count)
     }
 
@@ -574,7 +594,7 @@ impl PointOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             return Err(QdrantError::api(format!(
                 "Failed to count points by group: {} - {}",
                 status, error_text
@@ -586,7 +606,7 @@ impl PointOperations {
             .await
             .map_err(|e| QdrantError::request(format!("Failed to parse count response: {}", e)))?;
 
-        let count = resp_json["result"]["count"].as_u64().unwrap_or(0) as usize;
+        let count = parse_count(&resp_json, "Count points by group")?;
         Ok(count)
     }
 
@@ -660,7 +680,7 @@ impl PointOperations {
 
             let status = response.status();
             if !status.is_success() {
-                let error_text = response.text().await.unwrap_or_default();
+                let error_text = read_error_body(response).await;
                 return Err(QdrantError::api(format!(
                     "Failed to scroll points: {} - {}",
                     status, error_text
@@ -768,7 +788,7 @@ impl PointOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             let error = QdrantError::api(format!(
                 "Failed to delete points: {} - {}",
                 status, error_text
@@ -859,7 +879,7 @@ impl SearchOperations {
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let error_text = read_error_body(response).await;
             return Err(QdrantError::api(format!(
                 "Search failed: {} - {}",
                 status, error_text
@@ -871,25 +891,25 @@ impl SearchOperations {
             .await
             .map_err(|e| QdrantError::ResponseParse(e.to_string()))?;
 
-        let results: Vec<SearchResult> = json
-            .get("result")
-            .and_then(|r| r.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|item| {
-                        let score = item.get("score")?.as_f64()? as f32;
-                        let payload: Payload =
-                            serde_json::from_value(item.get("payload")?.clone()).ok()?;
-                        let id = if !payload.source_id.is_empty() {
-                            payload.source_id.clone()
-                        } else {
-                            item.get("id")?.as_str()?.to_string()
-                        };
-                        Some(SearchResult::new(id, score, payload))
-                    })
-                    .collect()
+        let result_array = json.get("result").ok_or_else(|| {
+            QdrantError::ResponseParse(format!("Search response is missing result field: {json}"))
+        })?;
+        let result_array = result_array.as_array().ok_or_else(|| {
+            QdrantError::ResponseParse(format!("Search response result is not an array: {json}"))
+        })?;
+        let results: Vec<SearchResult> = result_array
+            .iter()
+            .filter_map(|item| {
+                let score = item.get("score")?.as_f64()? as f32;
+                let payload: Payload = serde_json::from_value(item.get("payload")?.clone()).ok()?;
+                let id = if !payload.source_id.is_empty() {
+                    payload.source_id.clone()
+                } else {
+                    item.get("id")?.as_str()?.to_string()
+                };
+                Some(SearchResult::new(id, score, payload))
             })
-            .unwrap_or_default();
+            .collect();
 
         Ok(results)
     }

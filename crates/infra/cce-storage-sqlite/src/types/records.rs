@@ -218,25 +218,50 @@ impl EntityDetailMapping {
     }
 
     pub fn with_qdrant_point_ids(mut self, point_ids: &[String]) -> Self {
-        self.qdrant_point_ids =
-            serde_json::to_string(point_ids).unwrap_or_else(|_| "[]".to_string());
+        self.qdrant_point_ids = serde_json::to_string(point_ids).unwrap_or_else(|error| {
+            tracing::warn!(error = %error, "Failed to serialize qdrant point ids; storing empty list");
+            "[]".to_string()
+        });
         self.chunk_count = point_ids.len() as i64;
         self.updated_at = chrono::Utc::now().timestamp();
         self
     }
 
     pub fn with_bm25_doc_ids(mut self, doc_ids: &[String]) -> Self {
-        self.bm25_doc_ids = serde_json::to_string(doc_ids).unwrap_or_else(|_| "[]".to_string());
+        self.bm25_doc_ids = serde_json::to_string(doc_ids).unwrap_or_else(|error| {
+            tracing::warn!(error = %error, "Failed to serialize bm25 doc ids; storing empty list");
+            "[]".to_string()
+        });
         self.updated_at = chrono::Utc::now().timestamp();
         self
     }
 
     pub fn get_qdrant_point_ids(&self) -> Vec<String> {
-        serde_json::from_str(&self.qdrant_point_ids).unwrap_or_default()
+        match serde_json::from_str(&self.qdrant_point_ids) {
+            Ok(ids) => ids,
+            Err(error) => {
+                tracing::warn!(error = %error, "Corrupt qdrant point ids; returning empty list");
+                Vec::new()
+            }
+        }
+    }
+
+    pub fn try_get_qdrant_point_ids(&self) -> Result<Vec<String>, serde_json::Error> {
+        serde_json::from_str(&self.qdrant_point_ids)
     }
 
     pub fn get_bm25_doc_ids(&self) -> Vec<String> {
-        serde_json::from_str(&self.bm25_doc_ids).unwrap_or_default()
+        match serde_json::from_str(&self.bm25_doc_ids) {
+            Ok(ids) => ids,
+            Err(error) => {
+                tracing::warn!(error = %error, "Corrupt bm25 doc ids; returning empty list");
+                Vec::new()
+            }
+        }
+    }
+
+    pub fn try_get_bm25_doc_ids(&self) -> Result<Vec<String>, serde_json::Error> {
+        serde_json::from_str(&self.bm25_doc_ids)
     }
 }
 
@@ -311,7 +336,10 @@ impl ChunkRecord {
     }
 
     pub fn with_entity_ids(mut self, entity_ids: &[i64]) -> Self {
-        self.entity_ids = serde_json::to_string(entity_ids).unwrap_or_else(|_| "[]".to_string());
+        self.entity_ids = serde_json::to_string(entity_ids).unwrap_or_else(|error| {
+            tracing::warn!(error = %error, "Failed to serialize entity ids; storing empty list");
+            "[]".to_string()
+        });
         self.updated_at = chrono::Utc::now().timestamp();
         self
     }
@@ -323,8 +351,10 @@ impl ChunkRecord {
     }
 
     pub fn with_entity_names(mut self, entity_names: &[String]) -> Self {
-        self.entity_names =
-            serde_json::to_string(entity_names).unwrap_or_else(|_| "[]".to_string());
+        self.entity_names = serde_json::to_string(entity_names).unwrap_or_else(|error| {
+            tracing::warn!(error = %error, "Failed to serialize entity names; storing empty list");
+            "[]".to_string()
+        });
         self.updated_at = chrono::Utc::now().timestamp();
         self
     }
@@ -378,11 +408,31 @@ impl ChunkRecord {
     }
 
     pub fn get_entity_ids(&self) -> Vec<i64> {
-        serde_json::from_str(&self.entity_ids).unwrap_or_default()
+        match serde_json::from_str(&self.entity_ids) {
+            Ok(ids) => ids,
+            Err(error) => {
+                tracing::warn!(error = %error, "Corrupt entity ids; returning empty list");
+                Vec::new()
+            }
+        }
+    }
+
+    pub fn try_get_entity_ids(&self) -> Result<Vec<i64>, serde_json::Error> {
+        serde_json::from_str(&self.entity_ids)
     }
 
     pub fn get_entity_names(&self) -> Vec<String> {
-        serde_json::from_str(&self.entity_names).unwrap_or_default()
+        match serde_json::from_str(&self.entity_names) {
+            Ok(names) => names,
+            Err(error) => {
+                tracing::warn!(error = %error, "Corrupt entity names; returning empty list");
+                Vec::new()
+            }
+        }
+    }
+
+    pub fn try_get_entity_names(&self) -> Result<Vec<String>, serde_json::Error> {
+        serde_json::from_str(&self.entity_names)
     }
 
     pub fn has_entity_id(&self, entity_id: i64) -> bool {

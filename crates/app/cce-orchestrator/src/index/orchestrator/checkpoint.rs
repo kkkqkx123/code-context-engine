@@ -64,7 +64,7 @@ impl IndexOrchestrator {
                                 next_batch
                             } else {
                                 tracing::warn!(
-                                    "Checkpoint batch_index {} is at or beyond total_batches {}, starting fresh",
+                                    "Checkpoint batch_index {} is at or beyond total_batches {} (file set shrank or boundary drifted); discarding checkpoint and restarting as a fresh full index",
                                     indexer.checkpoint().current_batch_index,
                                     indexer.total_batches()
                                 );
@@ -358,6 +358,7 @@ impl IndexOrchestrator {
             )
         })?;
 
+        let mut skipped_recovered = 0usize;
         for batch_idx in 0..ctx.start_batch {
             let checkpoint_files = checkpoint_manager
                 .get_batch_files(&ctx.operation_id, batch_idx as u32)
@@ -370,6 +371,12 @@ impl IndexOrchestrator {
                 })?;
             for record in checkpoint_files {
                 if record.content_hash.is_none() {
+                    tracing::warn!(
+                        file = %record.file_path,
+                        batch = batch_idx,
+                        "Skipping recovered export entry without content hash"
+                    );
+                    skipped_recovered += 1;
                     continue;
                 }
                 let envelope = match record.parsed_data.as_deref() {
@@ -377,14 +384,36 @@ impl IndexOrchestrator {
                         match crate::operation::checkpoint::decode_parsed_checkpoint(bytes) {
                             Some(payload) if payload.is_compatible() => {
                                 let ParsedCheckpointPayload::Parsed(envelope) = payload else {
+                                    tracing::warn!(
+                                        file = %record.file_path,
+                                        batch = batch_idx,
+                                        "Skipping recovered export entry with non-parsed payload"
+                                    );
+                                    skipped_recovered += 1;
                                     continue;
                                 };
                                 envelope
                             }
-                            _ => continue,
+                            _ => {
+                                tracing::warn!(
+                                    file = %record.file_path,
+                                    batch = batch_idx,
+                                    "Skipping recovered export entry with corrupt or incompatible checkpoint"
+                                );
+                                skipped_recovered += 1;
+                                continue;
+                            }
                         }
                     }
-                    None => continue,
+                    None => {
+                        tracing::warn!(
+                            file = %record.file_path,
+                            batch = batch_idx,
+                            "Skipping recovered export entry without parsed data"
+                        );
+                        skipped_recovered += 1;
+                        continue;
+                    }
                 };
                 let path_str = envelope.parsed_file.path.clone();
                 // Reuse the summary persisted for a completed batch so the
@@ -433,9 +462,15 @@ impl IndexOrchestrator {
                             error = %error,
                             "Failed to rebuild chunks for recovered file export"
                         );
+                        skipped_recovered += 1;
                     }
                 }
             }
+        }
+        if skipped_recovered > 0 {
+            ctx.errors.push(format!(
+                "Skipped {skipped_recovered} recovered export entries with corrupt or missing checkpoints"
+            ));
         }
         Ok(())
     }

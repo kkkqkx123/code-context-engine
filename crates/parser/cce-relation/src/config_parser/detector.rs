@@ -336,11 +336,22 @@ impl BuildConfigParser {
         use rayon::prelude::*;
         let hashes: Vec<(String, String)> = pending
             .par_iter()
-            .map(|rel| {
+            .filter_map(|rel| {
                 let path = project_root.join(rel);
-                let content = std::fs::read(&path).unwrap_or_default();
-                let hash = cce_utils::hash::calculate_hash(&content);
-                (rel.clone(), hash)
+                match std::fs::read(&path) {
+                    Ok(content) => {
+                        let hash = cce_utils::hash::calculate_hash(&content);
+                        Some((rel.clone(), hash))
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %error,
+                            "Failed to read config file for hashing; leaving it unhashed"
+                        );
+                        None
+                    }
+                }
             })
             .collect();
         for (rel, hash) in hashes {

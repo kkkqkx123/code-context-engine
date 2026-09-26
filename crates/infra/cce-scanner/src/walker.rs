@@ -479,15 +479,16 @@ impl<'a> DirectoryWalker<'a> {
         is_directory: bool,
         size: u64,
     ) -> Option<bool> {
-        let registry = self.plugin_registry.as_ref()?;
+        let registry = self.plugin_registry.clone()?;
 
         if let Some(decision) = self.cached_filter_decision(path) {
             return Some(decision);
         }
 
+        let path_lossy = path.to_string_lossy().to_string();
         let (above, _) = registry.get_override_plugins(
             cce_plugin::PluginCapability::FileFilter,
-            Some(&path.to_string_lossy()),
+            Some(&path_lossy),
             None,
         );
         if above.is_empty() {
@@ -495,6 +496,7 @@ impl<'a> DirectoryWalker<'a> {
         }
 
         let mut decision: Option<bool> = None;
+        let mut plugin_failures: Vec<String> = Vec::new();
         for plugin in above {
             let plugin_id = plugin.metadata().id.clone();
             let plugin = plugin.clone();
@@ -522,8 +524,12 @@ impl<'a> DirectoryWalker<'a> {
                         error = %e,
                         "filter_file failed, deferring to built-in matcher"
                     );
+                    plugin_failures.push(format!("plugin FileFilter {plugin_id} failed: {e}"));
                 }
             }
+        }
+        for reason in plugin_failures {
+            self.record_failure(path, reason);
         }
 
         if is_directory {
@@ -547,15 +553,17 @@ impl<'a> DirectoryWalker<'a> {
         is_directory: bool,
         size: u64,
     ) -> Option<bool> {
-        let registry = self.plugin_registry.as_ref()?;
+        let registry = self.plugin_registry.clone()?;
+        let path_lossy = path.to_string_lossy().to_string();
         let (_, below) = registry.get_override_plugins(
             cce_plugin::PluginCapability::FileFilter,
-            Some(&path.to_string_lossy()),
+            Some(&path_lossy),
             None,
         );
         if below.is_empty() {
             return None;
         }
+        let mut plugin_failures: Vec<String> = Vec::new();
         for plugin in below {
             let plugin_id = plugin.metadata().id.clone();
             let plugin = plugin.clone();
@@ -580,8 +588,14 @@ impl<'a> DirectoryWalker<'a> {
                         error = %e,
                         "fallback filter_file failed, keeping built-in decision"
                     );
+                    plugin_failures.push(format!(
+                        "plugin fallback FileFilter {plugin_id} failed: {e}"
+                    ));
                 }
             }
+        }
+        for reason in plugin_failures {
+            self.record_failure(path, reason);
         }
         None
     }
@@ -643,6 +657,10 @@ impl<'a> DirectoryWalker<'a> {
                     path = %path.to_string_lossy(),
                     "Skipping path with non-UTF-8 components (cannot be indexed losslessly)"
                 );
+                self.record_failure(
+                    &path,
+                    "skipped non-UTF-8 path that cannot be indexed losslessly",
+                );
                 continue;
             }
 
@@ -696,7 +714,21 @@ impl<'a> DirectoryWalker<'a> {
     {
         let start = Instant::now();
 
-        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let size = match std::fs::metadata(path) {
+            Ok(metadata) => metadata.len(),
+            Err(error) => {
+                warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "Failed to stat file for plugin filtering, skipping"
+                );
+                self.record_failure(path, format!("failed to stat file: {error}"));
+                if let Some(ref metrics) = self.scanner_metrics {
+                    metrics.record_scan(start.elapsed().as_secs_f64() * 1000.0, true, false);
+                }
+                return Ok(());
+            }
+        };
         if let Some(include) = self.plugin_filter_decision(path, false, size) {
             if !include {
                 let elapsed = start.elapsed().as_secs_f64() * 1000.0;
@@ -871,6 +903,12 @@ impl<'a> DirectoryWalker<'a> {
         // Check if file exceeds maximum size limit
         if let Some(max_size) = self.opts.max_file_size {
             if file_size > max_size {
+                tracing::warn!(
+                    path = %path.display(),
+                    file_size,
+                    max_size,
+                    "Skipping oversized file without content hash"
+                );
                 let modified = metadata.modified().map_err(|e| {
                     warn!(
                         path = %path.display(),

@@ -19,10 +19,10 @@ pub struct LlmRateLimiterRegistry {
 impl LlmRateLimiterRegistry {
     /// Get (or create) the rate limiter for an upstream base URL.
     pub fn limiter_for(&self, base_url: &str, rate_limit: u32) -> Arc<ConfigurableRateLimiter> {
-        let mut guard = self
-            .limiters
-            .lock()
-            .expect("rate limiter registry mutex poisoned");
+        let mut guard = self.limiters.lock().unwrap_or_else(|poison| {
+            tracing::warn!("Rate limiter registry mutex was poisoned; recovering guard");
+            poison.into_inner()
+        });
         if let Some(existing) = guard.get(base_url) {
             let current = existing.rate_limit_per_minute();
             let effective = match (current, rate_limit) {
@@ -53,10 +53,10 @@ impl LlmRateLimiterRegistry {
             return None;
         }
 
-        let mut guard = self
-            .circuit_breakers
-            .lock()
-            .expect("circuit breaker registry mutex poisoned");
+        let mut guard = self.circuit_breakers.lock().unwrap_or_else(|poison| {
+            tracing::warn!("Circuit breaker registry mutex was poisoned; recovering guard");
+            poison.into_inner()
+        });
         if let Some((existing, existing_config)) = guard.get(base_url) {
             if existing_config.failure_threshold != config.failure_threshold
                 || existing_config.recovery_timeout_secs != config.recovery_timeout_secs

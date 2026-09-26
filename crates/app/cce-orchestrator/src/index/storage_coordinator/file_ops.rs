@@ -15,21 +15,32 @@ impl StorageCoordinator {
     /// Delete a file from all storage backends
     pub async fn remove_file(&self, file_path: &std::path::Path) -> Result<(), OrchestratorError> {
         let file_id = normalize_project_path(&file_path.to_string_lossy());
+        let mut backend_errors: Vec<String> = Vec::new();
 
         // Remove from Qdrant (project-scoped)
         if let Some(ref qdrant) = self.qdrant {
-            self.ensure_project_group_id()?;
-            qdrant
+            if let Err(error) = self.ensure_project_group_id() {
+                tracing::warn!(path = %file_id, error = %error, "Failed to resolve project group for vector removal");
+                backend_errors.push(format!("qdrant group: {error}"));
+            } else if let Err(error) = qdrant
                 .delete_by_file_path_scoped(&file_id, &self.project_group_id, None)
-                .await?;
+                .await
+            {
+                tracing::warn!(path = %file_id, error = %error, "Failed to remove file from vector store");
+                backend_errors.push(format!("qdrant: {error}"));
+            }
         }
 
         // Remove from BM25 (scoped to project)
         if let Some(ref bm25) = self.bm25 {
             let mut client = bm25.lock().await;
-            client
+            if let Err(error) = client
                 .delete_by_file_path_scoped("default", &file_id, self.project_id)
-                .await?;
+                .await
+            {
+                tracing::warn!(path = %file_id, error = %error, "Failed to remove file from BM25");
+                backend_errors.push(format!("bm25: {error}"));
+            }
         }
 
         // Remove entity detail mappings, file summaries, and file records via FK cascade.
@@ -45,7 +56,10 @@ impl StorageCoordinator {
                 Ok(())
             });
 
-            result.map_err(OrchestratorError::Storage)?;
+            if let Err(error) = result.map_err(OrchestratorError::Storage) {
+                tracing::warn!(path = %file_id, error = %error, "Failed to remove file records");
+                backend_errors.push(format!("sqlite files: {error}"));
+            }
         }
 
         // Remove chunk records from SQLite
@@ -54,10 +68,24 @@ impl StorageCoordinator {
                 ChunkRepository::delete_by_file_path(tx, &file_id, self.project_id)
             });
 
-            result.map_err(OrchestratorError::Storage)?;
+            if let Err(error) = result.map_err(OrchestratorError::Storage) {
+                tracing::warn!(path = %file_id, error = %error, "Failed to remove chunk records");
+                backend_errors.push(format!("sqlite chunks: {error}"));
+            }
         }
 
-        Ok(())
+        if backend_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(OrchestratorError::index(
+                "remove_file",
+                format!(
+                    "Partial failure removing {}: {}",
+                    file_id,
+                    backend_errors.join("; ")
+                ),
+            ))
+        }
     }
 
     /// Hot update: store new data first, then remove old data for a file.
@@ -132,11 +160,18 @@ impl StorageCoordinator {
     ) -> Result<(), OrchestratorError> {
         let file_path_str = normalize_project_path(&file_path.to_string_lossy());
 
-        // Step 1: Remove old vectors from Qdrant (project-scoped)
+        // Candidate-epoch scoped cleanup before the write: the published
+        // generation is never addressed, so a failed store leaves previously
+        // queryable data intact. This matches the prepare_hot_update_embedding
+        // ordering and avoids the legacy unscoped delete-then-write hole.
         if let Some(ref qdrant) = self.qdrant {
             self.ensure_project_group_id()?;
             qdrant
-                .delete_by_file_path_scoped(&file_path_str, &self.project_group_id, None)
+                .delete_by_file_path_scoped_epoch(
+                    &file_path_str,
+                    &self.project_group_id,
+                    self.epoch(),
+                )
                 .await?;
         }
 

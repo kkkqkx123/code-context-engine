@@ -55,9 +55,35 @@ pub async fn handle_start_watch(
     let project_root = PathBuf::from(&project_entry.metadata.root_path);
     let watch_path = PathBuf::from(&request.path);
     // Canonicalize both sides so symlinked roots do not produce false
-    // negatives for the containment check.
-    let canonical_root = project_root.canonicalize().unwrap_or(project_root.clone());
-    let canonical_watch = watch_path.canonicalize().unwrap_or(watch_path.clone());
+    // negatives for the containment check. A failed canonicalization means
+    // the path is missing or unreadable, so fail closed instead of falling
+    // back to the raw path and risking a wrong containment decision.
+    let canonical_root = match project_root.canonicalize() {
+        Ok(root) => root,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!(ErrorResponse::with_details(
+                    error_codes::INVALID_REQUEST,
+                    "Project root is not accessible",
+                    format!("Failed to canonicalize project root: {error}"),
+                ))),
+            );
+        }
+    };
+    let canonical_watch = match watch_path.canonicalize() {
+        Ok(path) => path,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!(ErrorResponse::with_details(
+                    error_codes::INVALID_REQUEST,
+                    "Watch path is not accessible",
+                    format!("Failed to canonicalize watch path: {error}"),
+                ))),
+            );
+        }
+    };
     if !canonical_watch.starts_with(&canonical_root) {
         return (
             StatusCode::BAD_REQUEST,

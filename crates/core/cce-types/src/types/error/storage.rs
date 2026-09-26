@@ -54,6 +54,11 @@ pub enum StorageError {
     #[error("SQLite error: {0}")]
     Sqlite(String),
 
+    /// Storage space exhausted. Retrying cannot succeed until an operator
+    /// frees disk space, so this is permanent and must alert.
+    #[error("Storage full: {0}")]
+    StorageFull(String),
+
     /// Epoch conflict — CAS check failed during publish.
     #[error("Epoch conflict: active_epoch={active} != base_epoch={base}")]
     EpochConflict {
@@ -124,7 +129,27 @@ impl StorageError {
 
     /// Create a sqlite error
     pub fn sqlite(reason: impl Into<String>) -> Self {
-        Self::Sqlite(reason.into())
+        let reason = reason.into();
+        if is_storage_full_message(&reason) {
+            return Self::StorageFull(reason);
+        }
+        Self::Sqlite(reason)
+    }
+
+    /// Create a storage-full error
+    pub fn storage_full(reason: impl Into<String>) -> Self {
+        Self::StorageFull(reason.into())
+    }
+
+    /// Whether the failure is caused by exhausted storage space.
+    pub fn is_storage_full(&self) -> bool {
+        match self {
+            Self::StorageFull(_) => true,
+            Self::Io(err) => err.is_storage_full(),
+            Self::Qdrant(err) => err.is_storage_full(),
+            Self::Bm25(err) => err.is_storage_full(),
+            _ => false,
+        }
     }
 
     /// Create an epoch conflict error
@@ -151,6 +176,7 @@ impl StorageError {
             Self::NotFound(_) => "STORAGE_NOT_FOUND_ERROR",
             Self::Io(_) => "STORAGE_IO_ERROR",
             Self::Sqlite(_) => "STORAGE_SQLITE_ERROR",
+            Self::StorageFull(_) => "STORAGE_STORAGE_FULL_ERROR",
             Self::EpochConflict { .. } => "STORAGE_EPOCH_CONFLICT",
             Self::Qdrant(_) => "STORAGE_QDRANT_ERROR",
             Self::Bm25(_) => "STORAGE_BM25_ERROR",
@@ -161,12 +187,27 @@ impl StorageError {
 // Implement From<std::io::Error> for StorageError via IoError
 impl From<std::io::Error> for StorageError {
     fn from(err: std::io::Error) -> Self {
-        Self::Io(IoError::from(err))
+        let wrapped = IoError::from(err);
+        if wrapped.is_storage_full() {
+            return Self::StorageFull(wrapped.to_string());
+        }
+        Self::Io(wrapped)
     }
+}
+
+fn is_storage_full_message(message: &str) -> bool {
+    let lowered = message.to_lowercase();
+    lowered.contains("no space")
+        || lowered.contains("storage full")
+        || lowered.contains("enospc")
+        || lowered.contains("disk full")
 }
 
 impl super::common::ErrorClassify for StorageError {
     fn is_retryable(&self) -> bool {
+        if self.is_storage_full() {
+            return false;
+        }
         // Backend errors delegate to their own classification; the remaining
         // variants are retryable when they are connection failures, query-time
         // failures, sqlite runtime faults (busy/locked), or write conflicts
@@ -176,6 +217,7 @@ impl super::common::ErrorClassify for StorageError {
             Self::Qdrant(err) => err.is_retryable(),
             Self::Bm25(err) => err.is_retryable(),
             Self::Io(err) => err.is_retryable(),
+            Self::StorageFull(_) => false,
             _ => matches!(
                 self,
                 Self::Connection(_)
@@ -190,6 +232,9 @@ impl super::common::ErrorClassify for StorageError {
     }
 
     fn is_transient(&self) -> bool {
+        if self.is_storage_full() {
+            return false;
+        }
         match self {
             Self::Qdrant(err) => err.is_transient(),
             Self::Bm25(err) => err.is_transient(),
@@ -199,6 +244,9 @@ impl super::common::ErrorClassify for StorageError {
     }
 
     fn is_permanent(&self) -> bool {
+        if self.is_storage_full() {
+            return true;
+        }
         // Sqlite runtime failures (busy/locked/IO) are excluded: they can
         // succeed once the database frees up.
         match self {
@@ -206,7 +254,11 @@ impl super::common::ErrorClassify for StorageError {
             Self::Bm25(err) => err.is_permanent(),
             _ => matches!(
                 self,
-                Self::NotFound(_) | Self::Table(_) | Self::Delete { .. } | Self::Validation(_)
+                Self::NotFound(_)
+                    | Self::Table(_)
+                    | Self::Delete { .. }
+                    | Self::Validation(_)
+                    | Self::StorageFull(_)
             ),
         }
     }

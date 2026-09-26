@@ -595,6 +595,31 @@ impl StorageCoordinator {
         if records.is_empty() {
             return Ok(0);
         }
+        let num_microbatches = records.len().div_ceil(batch_size.max(1)) as u64;
+        let timeout_secs = if self.embedding_stage_timeout_secs > 0 {
+            self.embedding_stage_timeout_secs
+        } else {
+            num_microbatches.saturating_mul(EMBEDDING_MICROBATCH_BUDGET_SECS)
+        };
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            self.reembed_vectors_from_records_impl(records, batch_size),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(OrchestratorError::index(
+                EMBEDDING_STAGE_TIMEOUT_CODE,
+                format!("reembed stage exceeded its {timeout_secs}s deadline; retry on resume"),
+            )),
+        }
+    }
+
+    async fn reembed_vectors_from_records_impl(
+        &self,
+        records: &[(ChunkRecord, u8)],
+        batch_size: usize,
+    ) -> Result<usize, OrchestratorError> {
         let embedder = match &self.embedder {
             Some(e) => e,
             None => return Ok(0),
@@ -606,14 +631,46 @@ impl StorageCoordinator {
         self.ensure_project_group_id()?;
 
         let mut stored = 0;
+        let mut deferred: Vec<&[(ChunkRecord, u8)]> = Vec::new();
         for batch in records.chunks(batch_size.max(1)) {
+            let texts: Vec<&str> = batch.iter().map(|(r, _)| r.content.as_str()).collect();
+            let embeddings = match embedder.embed(&texts).await {
+                Ok(embeddings) => embeddings,
+                Err(error) if is_retryable_llm_error(&error) => {
+                    tracing::warn!(
+                        error = %error,
+                        chunks = batch.len(),
+                        "Reembed batch failed transiently; deferring one retry to the end"
+                    );
+                    deferred.push(batch);
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            if embeddings.embeddings.len() != batch.len() {
+                return Err(OrchestratorError::index(
+                    "reembed_vectors",
+                    format!(
+                        "embedder returned {} vectors for {} chunks",
+                        embeddings.embeddings.len(),
+                        batch.len()
+                    ),
+                ));
+            }
+            let vectors: Vec<Vec<f32>> = embeddings.embeddings.clone();
+            let points =
+                build_reembed_points(batch.iter().zip(vectors.iter()), &self.project_group_id);
+            stored += points.len();
+            qdrant.upsert_points(&points).await?;
+        }
+        for batch in deferred {
             let texts: Vec<&str> = batch.iter().map(|(r, _)| r.content.as_str()).collect();
             let embeddings = embedder.embed(&texts).await?;
             if embeddings.embeddings.len() != batch.len() {
                 return Err(OrchestratorError::index(
                     "reembed_vectors",
                     format!(
-                        "embedder returned {} vectors for {} chunks",
+                        "embedder returned {} vectors for {} chunks on deferred retry",
                         embeddings.embeddings.len(),
                         batch.len()
                     ),

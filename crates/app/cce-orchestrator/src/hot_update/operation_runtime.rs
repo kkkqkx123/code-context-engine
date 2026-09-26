@@ -376,10 +376,11 @@ impl HotUpdateOperationRuntime {
                 .await;
         }
         if self.has_pending_config_changes().await {
-            let config_path = self
-                .take_one_config_change()
-                .await
-                .expect("pending config changes checked non-empty");
+            let Some(config_path) = self.take_one_config_change().await else {
+                return Err(HotUpdateError::hot_update(
+                    "Pending config change vanished before it could be applied".to_string(),
+                ));
+            };
             ctx.operation_type = OperationType::ConfigChange;
             ctx.config_path = Some(config_path.clone());
             return self
@@ -632,19 +633,20 @@ impl HotUpdateOperationRuntime {
                         }
                         Err(e) => {
                             processor_failed = true;
-                            for file_path in &all_file_paths {
-                                all_failures.push(ModuleFailure {
-                                    file_path: file_path.clone(),
-                                    module_name: processor.name().to_string(),
-                                    error: e.to_string(),
-                                    retry_count: 0,
-                                    next_retry_time: None,
-                                });
-                            }
+                            all_failures.push(ModuleFailure {
+                                file_path: String::new(),
+                                module_name: processor.name().to_string(),
+                                error: format!(
+                                    "Processor {} failed without per-file detail: {e}",
+                                    processor.name()
+                                ),
+                                retry_count: 0,
+                                next_retry_time: None,
+                            });
                             tracing::error!(
                                 processor = processor.name(),
                                 error = %e,
-                                "Processor failed"
+                                "Processor failed without per-file detail; recorded once for manual triage"
                             );
                         }
                     }

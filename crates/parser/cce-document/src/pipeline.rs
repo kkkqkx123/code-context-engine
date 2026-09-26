@@ -274,6 +274,23 @@ impl PipelineRouter {
         config: &ChunkingConfig,
         output_mode: OutputMode,
     ) -> Result<(Vec<ChunkedResult>, Option<DocSummary>), ParseError> {
+        let (chunks, summary, _) =
+            self.process_with_degraded_flag(content, file_path, config, output_mode)?;
+        Ok((chunks, summary))
+    }
+
+    /// Process document and report whether a structured pipeline degraded to plain text.
+    ///
+    /// The degraded flag is true when the selected structured pipeline failed
+    /// and the plain-text fallback succeeded. Callers must count such files as
+    /// degraded so malformed documents stay visible instead of looking clean.
+    pub fn process_with_degraded_flag(
+        &self,
+        content: &str,
+        file_path: &str,
+        config: &ChunkingConfig,
+        output_mode: OutputMode,
+    ) -> Result<(Vec<ChunkedResult>, Option<DocSummary>, bool), ParseError> {
         let doc_type = Self::get_doc_type(file_path);
 
         let result = match doc_type {
@@ -315,9 +332,11 @@ impl PipelineRouter {
                     error = %e,
                     "Document processing failed; falling back to plain-text pipeline"
                 );
-                self.plain.process(content, file_path, config, output_mode)
+                self.plain
+                    .process(content, file_path, config, output_mode)
+                    .map(|(chunks, summary)| (chunks, summary, true))
             }
-            other => other,
+            other => other.map(|(chunks, summary)| (chunks, summary, false)),
         }
     }
 
@@ -346,6 +365,25 @@ impl PipelineRouter {
         output_mode: OutputMode,
         registry: &cce_plugin::PluginRegistry,
     ) -> Result<(Vec<ChunkedResult>, Option<DocSummary>), ParseError> {
+        let (chunks, summary, _) = self.process_with_plugins_degraded_flag(
+            content,
+            file_path,
+            config,
+            output_mode,
+            registry,
+        )?;
+        Ok((chunks, summary))
+    }
+
+    /// Plugin-aware variant that also reports structured-to-plain degradation.
+    pub fn process_with_plugins_degraded_flag(
+        &self,
+        content: &str,
+        file_path: &str,
+        config: &ChunkingConfig,
+        output_mode: OutputMode,
+        registry: &cce_plugin::PluginRegistry,
+    ) -> Result<(Vec<ChunkedResult>, Option<DocSummary>, bool), ParseError> {
         // Documents carry no language; plugins are filtered by file pattern only.
         let (above, below) = registry.get_override_plugins(
             cce_plugin::PluginCapability::FormatParse,
@@ -356,19 +394,20 @@ impl PipelineRouter {
         if let Some(parsed) =
             self.process_with_plugin_list(content, file_path, config, output_mode, &above)
         {
-            return Ok(parsed);
+            return Ok((parsed.0, parsed.1, false));
         }
 
-        let builtin = self.process(content, file_path, config, output_mode)?;
+        let (chunks, summary, degraded) =
+            self.process_with_degraded_flag(content, file_path, config, output_mode)?;
 
-        if builtin.0.is_empty() {
+        if chunks.is_empty() {
             if let Some(parsed) =
                 self.process_with_plugin_list(content, file_path, config, output_mode, &below)
             {
-                return Ok(parsed);
+                return Ok((parsed.0, parsed.1, degraded));
             }
         }
-        Ok(builtin)
+        Ok((chunks, summary, degraded))
     }
 
     /// Run a pre-filtered `FormatParse` plugin list; returns `None` when no

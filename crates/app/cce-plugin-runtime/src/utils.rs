@@ -43,7 +43,11 @@ impl CancellationToken {
 /// should inspect the token and bail out promptly.
 ///
 /// Note: the thread cannot be forcefully terminated; on timeout it
-/// lingers until the FFI call returns naturally.
+/// lingers until the FFI call returns naturally. A hung native plugin
+/// therefore leaks one thread per timeout and cannot be recovered
+/// without restarting the worker. Callers should bound per-plugin
+/// concurrency and treat repeated timeouts as a signal to disable the
+/// plugin.
 pub fn execute_with_timeout_blocking<F, T>(
     f: F,
     timeout_ms: u64,

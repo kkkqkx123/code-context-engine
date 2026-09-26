@@ -204,17 +204,18 @@ impl IndexOrchestrator {
 
             self.progress.set_total(ctx.total_files);
 
-            // Store results immediately. Entity persistence failures are
-            // recorded as batch errors without stopping the batch: the batch
-            // still proceeds to vector/BM25 stages, and the uncommitted work
-            // is replayed on resume with entity records reconciled via
-            // ensure_file_records.
+            // Store results immediately. Entity rows must commit before any
+            // derived write: vectors and BM25 resolve their entity links from
+            // these rows, so continuing after an entity failure only amplifies
+            // one fault into entity-mapping errors downstream.
+            let mut entity_store_ok = true;
             if !batch_result.parsed_files.is_empty() {
                 if let Err(error) = self.storage.store_parsed_files(&batch_result.parsed_files) {
+                    entity_store_ok = false;
                     tracing::error!(
                         error = %error,
                         batch = batch_num,
-                        "Failed to persist ordinary entity generation"
+                        "Failed to persist ordinary entity generation; skipping vector/BM25 for this batch"
                     );
                     ctx.errors.push(format!(
                         "Entity storage failed for batch {}: {}",
@@ -223,7 +224,7 @@ impl IndexOrchestrator {
                 }
             }
 
-            if !batch_result.chunks.is_empty() {
+            if !batch_result.chunks.is_empty() && entity_store_ok {
                 let mut embedding_store_ok = true;
                 let mut bm25_store_ok = true;
 
@@ -374,8 +375,11 @@ impl IndexOrchestrator {
             let mut file_summary_map: HashMap<String, cce_parser::summary::FileSummary> =
                 HashMap::new();
 
-            // Store summaries for this batch
-            if options.store_summaries && !batch_result.parsed_files.is_empty() {
+            // Store summaries for this batch. Skipped when entity rows did
+            // not commit: the batch stops below and a resume replays it, so
+            // spending LLM calls on summaries that cannot be linked yet only
+            // wastes budget.
+            if options.store_summaries && entity_store_ok && !batch_result.parsed_files.is_empty() {
                 // Mark phase as SummaryGenerating
                 self.state_tracker
                     .mark_phase_complete(&success_paths, IndexPhase::SummaryGenerating)
@@ -523,7 +527,8 @@ impl IndexOrchestrator {
             }
 
             // Store document summaries for document files
-            if options.store_summaries && !batch_result.doc_summaries.is_empty() {
+            if options.store_summaries && entity_store_ok && !batch_result.doc_summaries.is_empty()
+            {
                 // Convert DocSummary to FileSummary for storage
                 let doc_file_summaries: Vec<cce_parser::summary::FileSummary> = batch_result
                     .doc_summaries
@@ -844,6 +849,12 @@ impl IndexOrchestrator {
                             file = %pf.path,
                             dropped = process_result.dropped_blank_segments,
                             "Chunker dropped blank segments; indexed content is incomplete"
+                        );
+                        batch_result.degraded_files += 1;
+                    } else if process_result.document_degraded {
+                        tracing::warn!(
+                            file = %pf.path,
+                            "Structured document degraded to plain text; indexed content is incomplete"
                         );
                         batch_result.degraded_files += 1;
                     }
