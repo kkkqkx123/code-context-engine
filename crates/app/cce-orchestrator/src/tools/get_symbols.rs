@@ -9,7 +9,7 @@ use cce_relation::index::LayeredSnapshotIndex;
 use cce_relation::index::snapshot_query::SnapshotFileQueryOps;
 use cce_types::{Entity, EntityId};
 
-use super::types::{
+use crate::tools::symbol_lookup_types::{
     FileSymbolResult, GetSymbolsRequest, GetSymbolsResponse, SymbolInfo, SymbolLookupError,
 };
 

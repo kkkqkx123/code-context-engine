@@ -93,6 +93,17 @@ export const searchActions = {
 			searchState.update(s => ({ ...s, isSearching: false }));
 		}
 	},
+	/** Load results produced outside the standard search flow (aggregated search). */
+	setExternalResults(response: { items: SearchResultItem[]; total: number }) {
+		searchState.update(state => ({
+			...state,
+			results: response.items,
+			total: response.total,
+			isSearching: false,
+			pagination: { ...state.pagination, page: 1 },
+		}));
+	},
+
 	setPage(page: number) {
 		searchState.update(state => ({
 			...state,

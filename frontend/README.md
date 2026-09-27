@@ -73,12 +73,15 @@ frontend/
 
 - **Dashboard**: System health monitoring and metrics
 - **Index Management**: Project lifecycle and indexing control
-- **Search Interface**: Multi-modal code search (Vector, BM25, Hybrid)
-- **Entity Explorer**: Browse functions, classes, and relationships
+- **Search Interface**: Multi-modal code search (Vector, BM25, Hybrid, Summary, Hierarchical, Semantic-with-Relations), aggregated BM25+Vector search, result sorting
+- **Entity Explorer**: Full-text entity search plus function/class details, call chains and two-point call paths
+- **Graph Explorer**: Ego neighborhoods, project overview and two-point shortest path seeding
+- **Health Monitoring**: Unified service health, Qdrant diagnostics and retry-queue management (`/health`)
+- **Metrics**: Metric history queries, Prometheus export and retention cleanup (`/metrics`)
 - **Storage Management**: Monitor and clean up indexes
 - **File Watching**: Real-time file system monitoring
-- **Developer Tools**: Code compression, diagnosis, symbol lookup
-- **Configuration**: TOML config editor and hot reload
+- **Developer Tools**: Code compression, batch compression, diagnosis, symbol lookup, find references, goto definition, keyword search
+- **Configuration**: TOML config editor, project config JSON editor with pre-save validation and hot reload
 
 ## API Configuration
 

@@ -41,6 +41,8 @@
 			title: 'System',
 			items: [
 				{ href: '/storage', label: 'Storage' },
+				{ href: '/health', label: 'Health' },
+				{ href: '/metrics', label: 'Metrics' },
 				{ href: '/tools', label: 'Tools' },
 				{ href: '/config', label: 'Config' },
 			],

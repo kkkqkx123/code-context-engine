@@ -5,14 +5,82 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { configApi, type ConfigInfoResponse, type ConfigValidateResponse } from '$lib/api/config';
+	import { projectApi, type ProjectConfigUpdateResponse } from '$lib/api';
 	import { currentProjectId } from '$lib/stores/project';
 
-	let activeTab = $state<'info' | 'validate' | 'reload'>('info');
+	let activeTab = $state<'info' | 'validate' | 'reload' | 'project'>('info');
 	let configInfo = $state<ConfigInfoResponse | null>(null);
 	let validateResult = $state<ConfigValidateResponse | null>(null);
 	let reloadResult = $state<{ success: boolean; message: string } | null>(null);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+
+	// ─── Project config editor state ─────────────────────────────
+	let projectConfigText = $state('');
+	let projectConfigLoaded = $state(false);
+	let projectConfigLoading = $state(false);
+	let projectConfigError = $state<string | null>(null);
+	let projectConfigResult = $state<ProjectConfigUpdateResponse | null>(null);
+	let projectConfigSaving = $state(false);
+	let validateBeforeSave = $state(true);
+
+	async function loadProjectConfig() {
+		projectConfigLoading = true;
+		projectConfigError = null;
+		try {
+			const detail = await projectApi.getProject(String($currentProjectId));
+			const project = detail.project;
+			// Only expose user-editable fields; identity and bookkeeping fields
+			// are managed by the backend.
+			const editable = {
+				name: project.name,
+				root_path: project.root_path,
+				extensions: project.extensions ?? [],
+				exclude_dirs: project.exclude_dirs ?? [],
+				ignore_patterns: project.ignore_patterns ?? [],
+				respect_gitignore: project.respect_gitignore ?? true
+			};
+			projectConfigText = JSON.stringify(editable, null, 2);
+			projectConfigLoaded = true;
+			projectConfigResult = null;
+		} catch (e: any) {
+			projectConfigError = e.message || 'Failed to load project config';
+		} finally {
+			projectConfigLoading = false;
+		}
+	}
+
+	async function saveProjectConfig() {
+		projectConfigError = null;
+		projectConfigResult = null;
+
+		let parsed: Record<string, unknown>;
+		try {
+			parsed = JSON.parse(projectConfigText);
+		} catch {
+			projectConfigError = 'Invalid JSON: fix syntax errors before saving';
+			return;
+		}
+
+		projectConfigSaving = true;
+		try {
+			if (validateBeforeSave) {
+				const validation = await configApi.validate();
+				if (!validation.valid) {
+					projectConfigError = `Global config validation failed: ${validation.errors.join('; ') || 'unknown errors'}`;
+					return;
+				}
+			}
+			projectConfigResult = await projectApi.updateProjectConfig(
+				String($currentProjectId),
+				parsed
+			);
+		} catch (e: any) {
+			projectConfigError = e.message || 'Failed to update project config';
+		} finally {
+			projectConfigSaving = false;
+		}
+	}
 
 	onMount(async () => {
 		await loadInfo();
@@ -92,6 +160,16 @@
 				onclick={() => activeTab = 'reload'}
 			>
 				Reload
+			</button>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'project'}
+				onclick={() => {
+					activeTab = 'project';
+					if (!projectConfigLoaded && !projectConfigLoading) loadProjectConfig();
+				}}
+			>
+				Project Config
 			</button>
 		</div>
 
@@ -208,6 +286,54 @@
 						/>
 						<span class="reload-message">{reloadResult.message}</span>
 					</div>
+				{/if}
+			</Card>
+		{/if}
+		<!-- Project Config Tab -->
+		{#if activeTab === 'project'}
+			<Card title="Project Configuration" subtitle="Edit and hot-reload the current project config">
+				{#if projectConfigLoading}
+					<p class="placeholder-text">Loading project config...</p>
+				{:else}
+					<p class="reload-description">
+						Edit the JSON below and save. The backend applies hot-reloadable fields immediately.
+						Project id: <code>#{$currentProjectId}</code>
+					</p>
+					<textarea
+						class="config-editor"
+						bind:value={projectConfigText}
+						spellcheck="false"
+						aria-label="Project configuration JSON"
+					></textarea>
+
+					<label class="validate-check">
+						<input type="checkbox" bind:checked={validateBeforeSave} />
+						<span>Validate global config before saving</span>
+					</label>
+
+					<div class="reload-actions">
+						<Button onclick={saveProjectConfig} disabled={projectConfigSaving || projectConfigLoading}>
+							{#if projectConfigSaving}Saving...{:else}Save Config{/if}
+						</Button>
+					</div>
+
+					{#if projectConfigError}
+						<div class="editor-error">{projectConfigError}</div>
+					{/if}
+
+					{#if projectConfigResult}
+						<div class="reload-result">
+							<Badge
+								label={projectConfigResult.success ? 'Success' : 'Failed'}
+								variant={projectConfigResult.success ? 'active' : 'inactive'}
+							/>
+							<Badge
+								label={projectConfigResult.hot_reload_applied ? 'Hot Reload' : 'Restart Needed'}
+								variant={projectConfigResult.hot_reload_applied ? 'success' : 'warning'}
+							/>
+							<span class="reload-message">{projectConfigResult.message}</span>
+						</div>
+					{/if}
 				{/if}
 			</Card>
 		{/if}
@@ -398,5 +524,44 @@
 	.reload-message {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.85rem;
+	}
+
+	.config-editor {
+		width: 100%;
+		min-height: 320px;
+		padding: 1rem;
+		background: var(--gray-50);
+		border: 1px solid var(--gray-300);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.8rem;
+		line-height: 1.6;
+		color: var(--black);
+		resize: vertical;
+	}
+
+	.config-editor:focus {
+		outline: none;
+		border-color: var(--accent);
+	}
+
+	.validate-check {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-top: 0.75rem;
+		font-size: 0.85rem;
+		color: var(--gray-600);
+	}
+
+	.editor-error {
+		margin-top: 1rem;
+		padding: 0.75rem 1rem;
+		border: 1px solid var(--danger);
+		color: var(--danger);
+		background: var(--danger-bg, #fff5f5);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+		line-height: 1.5;
+		overflow-wrap: anywhere;
 	}
 </style>

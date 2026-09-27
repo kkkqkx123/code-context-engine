@@ -30,7 +30,7 @@
 			<div class="filter-section">
 				<span class="section-label" id="query-type-label">Query Type</span>
 				<div class="query-type-tabs" role="group" aria-labelledby="query-type-label">
-					{#each ['vector', 'bm25', 'hybrid'] as type}
+					{#each ['vector', 'bm25', 'hybrid', 'summary', 'hierarchical', 'semantic_with_relations'] as type}
 						<button
 							class="tab"
 							class:active={$searchState.queryType === type}

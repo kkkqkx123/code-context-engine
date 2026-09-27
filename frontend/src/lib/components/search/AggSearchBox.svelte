@@ -65,7 +65,7 @@
 			onSearch(response);
 		} catch (err) {
 			console.error('Search failed:', err);
-			error = err instanceof Error ? err.message : '搜索失败';
+			error = err instanceof Error ? err.message : 'Search failed';
 		} finally {
 			isSearching = false;
 		}
@@ -81,10 +81,10 @@
 			onkeydown={(e) => e.key === 'Enter' && handleSearch()}
 		/>
 		<button onclick={handleSearch} disabled={!originalQuery.trim() || isSearching}>
-			{#if isSearching}搜索中...{:else}搜索{/if}
+			{#if isSearching}Searching...{:else}Search{/if}
 		</button>
 		<button class="toggle-advanced" onclick={() => showAdvanced = !showAdvanced}>
-			{showAdvanced ? '▲' : '▼'} 高级选项
+			{showAdvanced ? '▲' : '▼'} Advanced
 		</button>
 	</div>
 
@@ -96,33 +96,33 @@
 		<div class="advanced-options">
 			<div class="query-section">
 				<label>
-					BM25 关键词（精确匹配）
+					BM25 Keywords (exact match)
 					<input
 						type="text"
 						bind:value={bm25Query}
-						placeholder="例如: authenticate login verify"
+						placeholder="e.g. authenticate login verify"
 					/>
 				</label>
 
 				<label>
-					Vector 语义（理解意图）
+					Vector Semantics (intent match)
 					<input
 						type="text"
 						bind:value={vectorQuery}
-						placeholder="例如: user authentication identity"
+						placeholder="e.g. user authentication flow"
 					/>
 				</label>
 			</div>
 
 			<div class="options-row">
 				<label>
-					结果数量
+					Result limit
 					<input type="number" bind:value={limit} min="1" max="50" />
 				</label>
 			</div>
 
 			<div class="tips">
-				💡 提示：留空将自动使用原始查询进行 BM25 + Vector 搜索
+				Tip: leave the sub-queries empty to automatically run BM25 + Vector on the original query
 			</div>
 		</div>
 	{/if}

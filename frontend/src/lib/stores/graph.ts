@@ -14,7 +14,8 @@ import {
 	type GraphDirection,
 	type GraphEdge,
 	type GraphImpactResponse,
-	type GraphNode
+	type GraphNode,
+	type GraphPathResponse
 } from '../api/graph';
 import {
 	edgeElementId,
@@ -213,6 +214,39 @@ export const graphActions = {
 		} catch (error) {
 			graphState.update((state) => ({ ...state, loading: false, error: errorMessage(error) }));
 			return 0;
+		} finally {
+			graphState.update((state) => ({ ...state, loading: false }));
+		}
+	},
+
+	/**
+	 * Replace the working set with the shortest relation path between two
+	 * entities. When no path exists the working set is left untouched and the
+	 * error field explains why, while the full response is still returned so
+	 * callers can distinguish "no path" from "request failed".
+	 */
+	async loadPath(
+		start: string,
+		end: string,
+		maxDepth = 10,
+		projectId?: number
+	): Promise<GraphPathResponse | null> {
+		const pid = projectId ?? get(currentProjectId);
+		graphState.update((state) => ({ ...state, projectId: pid, loading: true, error: null }));
+		try {
+			const response = await graphApi.getPath(pid, { start, end, maxDepth });
+			if (response.path_found) {
+				replaceGraph(response.nodes ?? [], response.edges ?? [], response.relation_epoch, start);
+			} else {
+				graphState.update((state) => ({
+					...state,
+					error: 'No path found between the given entities'
+				}));
+			}
+			return response;
+		} catch (error) {
+			graphState.update((state) => ({ ...state, loading: false, error: errorMessage(error) }));
+			return null;
 		} finally {
 			graphState.update((state) => ({ ...state, loading: false }));
 		}

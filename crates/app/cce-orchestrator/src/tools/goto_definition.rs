@@ -13,7 +13,7 @@ use cce_storage_sqlite::SqliteClient;
 use cce_storage_sqlite::{ChunkRepository, EntityDetailMappingRepository};
 use cce_types::{Entity, EntityId};
 
-use super::types::{
+use crate::tools::symbol_lookup_types::{
     DefinitionCode, DefinitionLocation, GotoDefinitionRequest, GotoDefinitionResponse,
     SymbolLookupError,
 };

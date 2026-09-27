@@ -16,7 +16,7 @@ use cce_storage_sqlite::repo::EntityRepository;
 use cce_types::{Entity, EntityId};
 use parking_lot::RwLock;
 
-use super::types::{
+use crate::tools::symbol_lookup_types::{
     CallerEntityInfo, FindReferencesRequest, FindReferencesResponse, GroupedReferences,
     ReferenceLocation, SymbolKind, SymbolLookupError,
 };

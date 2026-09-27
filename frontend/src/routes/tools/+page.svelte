@@ -3,13 +3,19 @@
 	import Card from '$lib/components/ui/Card.svelte';
 
 	// Tab state
-	let activeTab = $state<'compress' | 'diagnose' | 'fold' | 'symbols'>('compress');
+	let activeTab = $state<
+		'compress' | 'diagnose' | 'fold' | 'symbols' | 'references' | 'definition' | 'keyword' | 'batch'
+	>('compress');
 
 	// Lazy loaded components
 	let CompressionTool: any = $state(null);
 	let DiagnosisTool: any = $state(null);
 	let FoldTool: any = $state(null);
 	let SymbolLookupTool: any = $state(null);
+	let ReferencesTool: any = $state(null);
+	let DefinitionTool: any = $state(null);
+	let KeywordSearchTool: any = $state(null);
+	let BatchCompressTool: any = $state(null);
 
 	// Component props
 	let compressLanguage = $state('typescript');
@@ -47,6 +53,34 @@
 		}
 	}
 
+	async function loadReferencesTool() {
+		if (!ReferencesTool) {
+			const module = await import('$lib/components/tools/ReferencesTool.svelte');
+			ReferencesTool = module.default;
+		}
+	}
+
+	async function loadDefinitionTool() {
+		if (!DefinitionTool) {
+			const module = await import('$lib/components/tools/DefinitionTool.svelte');
+			DefinitionTool = module.default;
+		}
+	}
+
+	async function loadKeywordSearchTool() {
+		if (!KeywordSearchTool) {
+			const module = await import('$lib/components/tools/KeywordSearchTool.svelte');
+			KeywordSearchTool = module.default;
+		}
+	}
+
+	async function loadBatchCompressTool() {
+		if (!BatchCompressTool) {
+			const module = await import('$lib/components/tools/BatchCompressTool.svelte');
+			BatchCompressTool = module.default;
+		}
+	}
+
 	// Watch for tab changes and load components
 	$effect(() => {
 		if (activeTab === 'compress') {
@@ -57,6 +91,14 @@
 			loadFoldTool();
 		} else if (activeTab === 'symbols') {
 			loadSymbolLookupTool();
+		} else if (activeTab === 'references') {
+			loadReferencesTool();
+		} else if (activeTab === 'definition') {
+			loadDefinitionTool();
+		} else if (activeTab === 'keyword') {
+			loadKeywordSearchTool();
+		} else if (activeTab === 'batch') {
+			loadBatchCompressTool();
 		}
 	});
 </script>
@@ -94,6 +136,34 @@
 				onclick={() => activeTab = 'symbols'}
 			>
 				Symbol Lookup
+			</button>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'references'}
+				onclick={() => activeTab = 'references'}
+			>
+				References
+			</button>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'definition'}
+				onclick={() => activeTab = 'definition'}
+			>
+				Definition
+			</button>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'keyword'}
+				onclick={() => activeTab = 'keyword'}
+			>
+				Keyword Search
+			</button>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'batch'}
+				onclick={() => activeTab = 'batch'}
+			>
+				Batch Compress
 			</button>
 		</div>
 
@@ -140,6 +210,50 @@
 					/>
 				{:else}
 					<div class="loading-placeholder">Loading symbol lookup tool...</div>
+				{/if}
+			</Card>
+		{/if}
+
+		<!-- References Tool -->
+		{#if activeTab === 'references'}
+			<Card title="Find References" subtitle="Position-based reference lookup across the project">
+				{#if ReferencesTool}
+					<ReferencesTool />
+				{:else}
+					<div class="loading-placeholder">Loading references tool...</div>
+				{/if}
+			</Card>
+		{/if}
+
+		<!-- Definition Tool -->
+		{#if activeTab === 'definition'}
+			<Card title="Goto Definition" subtitle="Resolve the symbol under a position">
+				{#if DefinitionTool}
+					<DefinitionTool />
+				{:else}
+					<div class="loading-placeholder">Loading definition tool...</div>
+				{/if}
+			</Card>
+		{/if}
+
+		<!-- Keyword Search Tool -->
+		{#if activeTab === 'keyword'}
+			<Card title="Keyword Search" subtitle="BM25 keyword search over indexed chunks">
+				{#if KeywordSearchTool}
+					<KeywordSearchTool />
+				{:else}
+					<div class="loading-placeholder">Loading keyword search tool...</div>
+				{/if}
+			</Card>
+		{/if}
+
+		<!-- Batch Compress Tool -->
+		{#if activeTab === 'batch'}
+			<Card title="Batch Compress" subtitle="Compress multiple files in one request">
+				{#if BatchCompressTool}
+					<BatchCompressTool />
+				{:else}
+					<div class="loading-placeholder">Loading batch compress tool...</div>
 				{/if}
 			</Card>
 		{/if}

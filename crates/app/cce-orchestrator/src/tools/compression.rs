@@ -4,13 +4,13 @@
 //! for large monolithic files. This module is designed for on-demand processing
 //! without side effects (no embedding, no caching, no storage).
 
-mod types;
+mod compression_types;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub use types::{
+pub use compression_types::{
     BatchCompressionRequest, BatchCompressionResponse, CompressionError, CompressionRequest,
     CompressionResponse, Result,
 };
@@ -139,9 +139,8 @@ impl CompressionRetrieval {
 
     /// Execute batch compression on multiple files
     ///
-    /// This method processes multiple files sequentially.
-    /// For concurrent processing, consider using multiple CompressionRetrieval instances
-    /// or implementing a concurrent version with Arc<Mutex<CompressionRetrieval>>.
+    /// This method processes multiple files sequentially. For processing in parallel,
+    /// use a semaphore or tokio::spawn to manage concurrency.
     pub async fn compress_batch(
         &self,
         request: BatchCompressionRequest,

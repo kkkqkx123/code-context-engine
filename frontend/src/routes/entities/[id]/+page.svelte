@@ -56,6 +56,17 @@
 		}
 	}
 
+	let pathFrom = $state('');
+	let pathTo = $state('');
+
+	/** Query the shortest call path between the given function ids. */
+	function runCallPath() {
+		const from = pathFrom.trim();
+		const to = pathTo.trim();
+		if (!from || !to) return;
+		entityActions.loadCallPath(from, to);
+	}
+
 	function handleChainKeydown(event: KeyboardEvent, id: string) {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
@@ -140,6 +151,15 @@
 				>
 					Call Chain
 				</button>
+				<button
+					class="tab"
+					class:active={currentTab === 'call-path'}
+					onclick={() => {
+						currentTab = 'call-path';
+					}}
+				>
+					Call Path
+				</button>
 			</div>
 
 			<!-- Tab Content -->
@@ -213,6 +233,64 @@
 						</div>
 					{:else}
 						<p class="placeholder-text">No call chain data available</p>
+					{/if}
+				</Card>
+			{:else if currentTab === 'call-path'}
+				<Card title="Two-point Call Path" subtitle="Shortest call path between two functions">
+					<div class="path-form">
+						<input
+							class="path-input"
+							type="text"
+							placeholder="From function id…"
+							bind:value={pathFrom}
+							aria-label="Path start function id"
+						/>
+						<span class="path-arrow" aria-hidden="true">→</span>
+						<input
+							class="path-input"
+							type="text"
+							placeholder="To function id…"
+							bind:value={pathTo}
+							aria-label="Path end function id"
+						/>
+						<button
+							type="button"
+							class="graph-action-btn"
+							onclick={runCallPath}
+							disabled={$entityState.isLoading}
+						>
+							{$entityState.isLoading ? 'Searching...' : 'Find Path'}
+						</button>
+					</div>
+
+					{#if $entityState.error}
+						<p class="path-error">{$entityState.error}</p>
+					{/if}
+
+					{#if $entityState.callPath.length > 0}
+						<div class="call-chain-list">
+							{#each $entityState.callPath as node, i}
+								<div
+									class="chain-item"
+									role="button"
+									tabindex="0"
+									onclick={() => handleNavigate(String(node.function_id))}
+									onkeydown={(e) => handleChainKeydown(e, node.function_id)}
+								>
+									<span class="chain-number">{i + 1}</span>
+									<div class="chain-content">
+										<h4 class="chain-name">{node.function_name}</h4>
+										<p class="chain-location">{node.file_path}{#if node.call_line}:{node.call_line}{/if}</p>
+									</div>
+									<Badge variant={node.relation_type === 'caller' ? 'default' : 'active'}>
+										{node.relation_type === 'caller' ? 'CALLER' : 'CALLEE'}
+									</Badge>
+								</div>
+							{/each}
+						</div>
+						<p class="path-meta">{$entityState.callPathLength} hop(s)</p>
+					{:else if !$entityState.callPathFound && !$entityState.isLoading}
+						<p class="placeholder-text">No call path found between the two functions.</p>
 					{/if}
 				</Card>
 			{/if}
@@ -383,5 +461,46 @@
 		border-color: var(--accent);
 		color: var(--black);
 		background: var(--gray-50);
+	}
+	.path-form {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.path-input {
+		height: 32px;
+		min-width: 200px;
+		padding: 0 0.5rem;
+		border: 1px solid var(--gray-300);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+	}
+
+	.path-input:focus {
+		outline: none;
+		border-color: var(--black);
+	}
+
+	.path-arrow {
+		color: var(--gray-500);
+	}
+
+	.path-error {
+		color: var(--danger);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.72rem;
+		margin: 0.5rem 0;
+	}
+
+	.path-meta {
+		margin: 0.75rem 0 0;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.68rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-500);
 	}
 </style>

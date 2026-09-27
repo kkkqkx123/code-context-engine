@@ -24,7 +24,7 @@
 		relationLabel
 	} from '$lib/utils/graph-style';
 
-	type SeedMode = 'focus' | 'overview';
+	type SeedMode = 'focus' | 'overview' | 'path';
 
 	let canvas: GraphCanvas | null = $state(null);
 	let layout: GraphLayoutName = $state('cose');
@@ -32,6 +32,8 @@
 	let seedId = $state('');
 	let selectedId: string | null = $state(null);
 	let impactFile = $state('');
+	let pathStart = $state('');
+	let pathEnd = $state('');
 
 	// The query string may carry an entity to focus on, which is how the entity
 	// detail page hands off to the explorer.
@@ -79,6 +81,11 @@
 			if (!id) return;
 			selectedId = id;
 			await graphActions.loadEgo(id, 2, 'both');
+		} else if (seedMode === 'path') {
+			const start = pathStart.trim();
+			const end = pathEnd.trim();
+			if (!start || !end) return;
+			await graphActions.loadPath(start, end);
 		} else {
 			await graphActions.loadOverview(400);
 		}
@@ -163,6 +170,14 @@
 				>
 					Project overview
 				</button>
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={seedMode === 'path'}
+					onclick={() => (seedMode = 'path')}
+				>
+					Find path
+				</button>
 			</div>
 
 			{#if seedMode === 'focus'}
@@ -173,6 +188,24 @@
 					bind:value={seedId}
 					onkeydown={handleSeedKeydown}
 					aria-label="Entity id to focus on"
+				/>
+			{:else if seedMode === 'path'}
+				<input
+					class="seed-input"
+					type="text"
+					placeholder="Start entity id…"
+					bind:value={pathStart}
+					onkeydown={handleSeedKeydown}
+					aria-label="Path start entity id"
+				/>
+				<span class="path-arrow" aria-hidden="true">→</span>
+				<input
+					class="seed-input"
+					type="text"
+					placeholder="End entity id…"
+					bind:value={pathEnd}
+					onkeydown={handleSeedKeydown}
+					aria-label="Path end entity id"
 				/>
 			{/if}
 
@@ -387,6 +420,11 @@
 
 	.file-input {
 		min-width: 200px;
+	}
+
+	.path-arrow {
+		font-family: 'Space Mono', monospace;
+		color: var(--gray-500);
 	}
 
 	.seed-spacer {
