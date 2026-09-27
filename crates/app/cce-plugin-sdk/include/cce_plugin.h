@@ -212,7 +212,7 @@ bool cce_plugin_has_result_filter(void);
 bool cce_plugin_has_file_filter(void);
 
 /*
- * ── Optional exports: capability entry points ─────────────────────────────
+ * ── Additional FFI entry points ───────────────────────────────────────────
  *
  * All functions follow the FFI result protocol and memory rules below.
  * Returning `{"result":"none"}` declines the capability for this call.
@@ -287,7 +287,7 @@ char *cce_plugin_chunk(void *ctx, const char *conversions_json, const char *file
 char *cce_plugin_rerank(void *ctx, const char *query, const char *candidates_json);
 
 /*
- * ── Optional exports: phase-2 capability entry points ────────────────────
+ * ── Additional capability entry points ─────────────────────────────────────
  *
  * Same FFI result protocol and memory rules as the capability entry points.
  */

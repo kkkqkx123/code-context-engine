@@ -24,9 +24,7 @@ use super::to_api_model;
         (status = 200, body = DiagnoseApiResponse, description = "Diagnosis result, errors reported in-band")
     )
 )]
-pub async fn handle_diagnose(
-    Json(request): Json<DiagnoseRequest>,
-) -> Json<DiagnoseApiResponse> {
+pub async fn handle_diagnose(Json(request): Json<DiagnoseRequest>) -> Json<DiagnoseApiResponse> {
     let mut diagnosis = AstDiagnosis::new();
 
     let mut req = DiagnosisRequest::new(&request.code);

@@ -27,9 +27,7 @@ pub type ParseApiResponse = ApiResult<ParseResponse>;
         (status = 500, body = ErrorResponse, description = "Internal error")
     )
 )]
-pub async fn handle_parse(
-    Json(request): Json<ParseRequest>,
-) -> ParseApiResponse {
+pub async fn handle_parse(Json(request): Json<ParseRequest>) -> ParseApiResponse {
     let start = std::time::Instant::now();
 
     // Validate file path

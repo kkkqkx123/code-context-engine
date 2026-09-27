@@ -11,36 +11,11 @@ use serde::{Deserialize, Serialize};
 /// Configuration for BM25 text cleaner
 ///
 /// Allows customization of lexical cleaning rules for BM25 text.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Bm25TextCleanerConfig {
     /// Redundant word patterns to remove (exact phrase matches, case-insensitive)
     pub redundant_patterns: Vec<String>,
-}
-
-impl Default for Bm25TextCleanerConfig {
-    fn default() -> Self {
-        Self {
-            redundant_patterns: vec![
-                // Natural language redundant phrases (safe to remove)
-                "that does the".into(),
-                "that does".into(),
-                "that is".into(),
-                "with parameters".into(),
-                "that returns".into(),
-                "defined in file".into(),
-                "defined in".into(),
-                "within module".into(),
-                "in file".into(),
-                "of class".into(),
-                "of type".into(),
-                "as method of".into(),
-                // Code-specific redundant words (safe to remove)
-                "normalized".into(),
-                "keywords".into(),
-            ],
-        }
-    }
 }
 
 /// BM25 text cleaner
@@ -86,7 +61,7 @@ impl Bm25TextCleaner {
     ///
     /// 1. Remove quotes (single/double/backtick)
     /// 2. Normalize whitespace
-    /// 3. Remove redundant natural-language phrases
+    /// 3. Remove configured redundant phrases when present
     /// 4. Final whitespace normalization and empty check
     pub fn clean(&self, text: &str) -> String {
         if text.is_empty() {
@@ -149,9 +124,9 @@ mod tests {
         let cleaner = Bm25TextCleaner::new();
         let text = "Function test that does something with parameters x that returns y";
         let cleaned = cleaner.clean(text);
-        assert!(!cleaned.contains("that does"));
-        assert!(!cleaned.contains("with parameters"));
-        assert!(!cleaned.contains("that returns"));
+        assert!(cleaned.contains("that does"));
+        assert!(cleaned.contains("with parameters"));
+        assert!(cleaned.contains("that returns"));
         assert!(cleaned.contains("test"));
         assert!(cleaned.contains("something"));
         assert!(cleaned.contains("x"));
@@ -163,7 +138,7 @@ mod tests {
         let cleaner = Bm25TextCleaner::new();
         let text = "Function   test  that  does  something";
         let cleaned = cleaner.clean(text);
-        assert_eq!(cleaned, "Function test something");
+        assert_eq!(cleaned, "Function test that does something");
     }
 
     #[test]
@@ -179,11 +154,11 @@ mod tests {
         let cleaned = cleaner.clean(text);
 
         assert!(!cleaned.contains('\''));
-        assert!(!cleaned.contains("that does"));
-        assert!(!cleaned.contains("with parameters"));
-        assert!(!cleaned.contains("that returns"));
-        assert!(!cleaned.contains("defined in file"));
-        assert!(!cleaned.contains("within module"));
+        assert!(cleaned.contains("that does"));
+        assert!(cleaned.contains("with parameters"));
+        assert!(cleaned.contains("that returns"));
+        assert!(cleaned.contains("defined in file"));
+        assert!(cleaned.contains("within module"));
 
         // Quotes removed, identifiers preserved as-is
         assert!(cleaned.contains("calculate_total"));
@@ -205,7 +180,7 @@ mod tests {
 
         let text = "within module";
         let cleaned = cleaner.clean(text);
-        assert!(!cleaned.contains("within"));
+        assert!(cleaned.contains("within module"));
     }
 
     #[test]
@@ -214,7 +189,7 @@ mod tests {
 
         let text = "Function THAT DOES something";
         let cleaned = cleaner.clean(text);
-        assert!(!cleaned.contains("that does"));
+        assert!(cleaned.contains("THAT DOES"));
         assert!(cleaned.contains("something"));
     }
 
@@ -224,7 +199,7 @@ mod tests {
 
         let text = "that does that is";
         let cleaned = cleaner.clean(text);
-        assert_eq!(cleaned, "");
+        assert_eq!(cleaned, "that does that is");
     }
 
     #[test]
@@ -243,8 +218,8 @@ mod tests {
 
         assert!(cleaned.contains("read_data"));
 
-        assert!(!cleaned.contains("that returns"));
-        assert!(!cleaned.contains("with parameters"));
+        assert!(cleaned.contains("that returns"));
+        assert!(cleaned.contains("with parameters"));
     }
 
     #[test]

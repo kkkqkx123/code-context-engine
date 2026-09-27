@@ -48,7 +48,6 @@ use super::index_enrichment::IndexTextEnricher;
 /// Collected child summary data used to enrich a parent group's description
 struct ParentEnrichment {
     parent_idx: usize,
-    child_names: Vec<String>,
     child_doc_lines: Vec<String>,
     stdlib_names: Vec<String>,
 }
@@ -254,13 +253,13 @@ impl super::AstToNlConverter {
         let parent_enrichments: Vec<ParentEnrichment> = parent_to_children
             .iter()
             .filter_map(|(&parent_idx, child_indices)| {
-                let mut child_names: Vec<String> = Vec::new();
                 let mut child_doc_lines: Vec<String> = Vec::new();
                 let mut stdlib_names: Vec<String> = Vec::new();
+                let mut has_child = false;
 
                 for &child_idx in child_indices {
                     if let Some(ref child_conv) = group_conversions[child_idx].header_conversion {
-                        child_names.push(child_conv.name.clone());
+                        has_child = true;
                         // Collect stdlib child names for compact summary
                         if group_conversions[child_idx]
                             .group
@@ -286,12 +285,11 @@ impl super::AstToNlConverter {
                     }
                 }
 
-                if child_names.is_empty() {
+                if !has_child {
                     None
                 } else {
                     Some(ParentEnrichment {
                         parent_idx,
-                        child_names,
                         child_doc_lines,
                         stdlib_names,
                     })
@@ -302,25 +300,11 @@ impl super::AstToNlConverter {
         // Apply parent enrichments
         for ParentEnrichment {
             parent_idx,
-            child_names,
             child_doc_lines,
             stdlib_names,
         } in parent_enrichments
         {
             if let Some(ref mut header) = group_conversions[parent_idx].header_conversion {
-                let parent_name = group_conversions[parent_idx].group.name.to_string();
-                if let Some(ref mut bm25_text) = header.bm25_text {
-                    bm25_text.push_str(" children:");
-                    bm25_text.push_str(&child_names.join(" "));
-                }
-                for child_name in &child_names {
-                    // Skip if child name is a substring of parent name (avoid keyword dilution)
-                    if !parent_name.contains(child_name.as_str())
-                        && !header.keywords.contains(child_name)
-                    {
-                        header.keywords.push(child_name.clone());
-                    }
-                }
                 if let Some(ref mut emb_text) = header.embedding_text {
                     if !emb_text.is_empty() {
                         // Append stdlib summary as a natural-language "Implements" line
@@ -382,10 +366,10 @@ impl super::AstToNlConverter {
         // Apply child enrichments — inject parent context as a prefix for embedding path
         for (child_idx, parent_name, parent_kind) in child_enrichments {
             if let Some(ref mut header) = group_conversions[child_idx].header_conversion {
-                if let Some(ref mut bm25_text) = header.bm25_text {
-                    bm25_text.push_str(&format!(" belongs_to:{}", parent_name));
-                }
-                if !header.keywords.contains(&parent_name) {
+                if !parent_kind.is_module_like()
+                    && !header.keywords.contains(&parent_name)
+                    && header.name != parent_name
+                {
                     header.keywords.push(parent_name.clone());
                 }
                 if let Some(ref mut emb_text) = header.embedding_text {
@@ -501,8 +485,11 @@ impl super::AstToNlConverter {
                         *emb_text = new_text;
                     }
                 }
-                if let Some(ref mut bm25_text) = member.bm25_text {
-                    bm25_text.push_str(&format!(" belongs_to:{}", parent_name));
+                if !member.keywords.contains(&parent_name)
+                    && member.name != parent_name
+                    && !parent_name.is_empty()
+                {
+                    member.keywords.push(parent_name.clone());
                 }
             }
         }
@@ -970,17 +957,6 @@ impl super::AstToNlConverter {
 
         if let Some(header) = &group.header {
             for keyword in self.bm25_generator.extract_keywords(header) {
-                if seen.insert(keyword.clone()) {
-                    keywords.push(keyword);
-                }
-            }
-        }
-
-        for member in &group.members {
-            if member.is_stdlib {
-                continue;
-            }
-            for keyword in self.bm25_generator.extract_keywords(member) {
                 if seen.insert(keyword.clone()) {
                     keywords.push(keyword);
                 }

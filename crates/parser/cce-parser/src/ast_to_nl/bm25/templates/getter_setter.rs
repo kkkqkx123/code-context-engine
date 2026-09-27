@@ -5,7 +5,7 @@
 //! their class and summarized here. Framework/design patterns are delegated
 //! to the plugin system.
 
-use super::group_trait::{GroupTemplate, helpers};
+use super::group_trait::GroupTemplate;
 use crate::ast_to_nl::common::GroupTemplateBase;
 use crate::grouper::types::{EntityGroup, GetterSetterSummary};
 
@@ -35,26 +35,10 @@ impl GroupTemplate for GetterSetterTemplate {
 impl super::group_trait::PatternGroupTemplate<GetterSetterSummary> for GetterSetterTemplate {
     fn generate_with_pattern(&self, group: &EntityGroup, summary: &GetterSetterSummary) -> String {
         let name = group.name.as_str();
-        let properties = summary.properties.join(" ");
-        let keywords: Vec<String> = helpers::extract_keywords(name)
-            .into_iter()
-            .chain(
-                summary
-                    .properties
-                    .iter()
-                    .flat_map(|p| helpers::extract_keywords(p)),
-            )
-            .collect();
-        let normalized_name = helpers::normalize_name(name);
-        let keywords_str = keywords.join(" ");
-
-        helpers::combine_text(&[
-            name,
-            &normalized_name,
-            "data",
-            "class",
-            &properties,
-            &keywords_str,
-        ])
+        if summary.properties.is_empty() {
+            format!("{} data class.", name)
+        } else {
+            format!("{} data class {}.", name, summary.properties.join(" "))
+        }
     }
 }

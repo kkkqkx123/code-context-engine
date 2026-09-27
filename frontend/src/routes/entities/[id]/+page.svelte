@@ -188,8 +188,9 @@
 						</button>
 					</div>
 					{#if CallGraph}
-						<CallGraph 
+						<CallGraph
 							nodes={$entityState.callChain}
+							focusId={String(entityId)}
 							onNavigate={handleNavigate}
 						/>
 					{:else}
@@ -199,9 +200,11 @@
 			{:else if currentTab === 'inheritance'}
 				<Card title="Inheritance Tree" subtitle="Class hierarchy">
 					{#if InheritanceTree}
-						<InheritanceTree 
+						<InheritanceTree
 							inheritance={$entityState.inheritance}
 							implementations={$entityState.implementations}
+							focusId={String(entityId)}
+							fallbackName={$entityState.currentEntity?.name ?? null}
 							onNavigate={handleNavigate}
 						/>
 					{:else}

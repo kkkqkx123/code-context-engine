@@ -7,12 +7,18 @@
 	 * entity oriented load, an explicit subgraph, a path search or a bounded
 	 * project overview) while the store owns accumulation and cache
 	 * invalidation.
+	 *
+	 * The Cytoscape Core instance is owned directly by this page via bind:cy.
+	 * All imperative viewport operations (zoom/fit/relayout/export) call
+	 * Cytoscape methods directly on `cy` rather than going through wrapper
+	 * functions on the canvas component.
 	 */
 	import { onMount } from 'svelte';
+	import type { Core } from 'cytoscape';
 	import { page } from '$app/state';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import GraphCanvas, { type GraphLayoutName } from '$lib/components/graph/GraphCanvas.svelte';
+	import GraphCanvas, { layoutOptions, type GraphLayoutName } from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
 	import GraphFilterPanel from '$lib/components/graph/GraphFilterPanel.svelte';
 	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
@@ -28,7 +34,7 @@
 
 	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
 
-	let canvas: GraphCanvas | null = $state(null);
+	let cy = $state<Core | null>(null);
 	let layout: GraphLayoutName = $state('cose-bilkent');
 	let seedMode: SeedMode = $state('focus');
 	let seedId = $state('');
@@ -115,7 +121,7 @@
 	/** Double click on a node pulls in its immediate neighborhood. */
 	async function handleNodeActivate(nodeId: string) {
 		await graphActions.expand(nodeId, 1, egoDirection);
-		canvas?.relayout();
+		cy?.layout(layoutOptions(layout)).run();
 	}
 
 	function handleNodeSelect(nodeId: string) {
@@ -163,16 +169,45 @@
 
 	async function loadCommunity(ids: string[]) {
 		await graphActions.loadSubgraph(ids);
-		canvas?.relayout();
+		cy?.layout(layoutOptions(layout)).run();
 	}
 
 	function exportPng() {
-		const png = canvas?.exportPng();
-		if (!png) return;
+		if (!cy) return;
+		const png = cy.png({ full: true, scale: 2, bg: '#ffffff' });
 		const link = document.createElement('a');
 		link.href = png;
 		link.download = 'graph.png';
 		link.click();
+	}
+
+	function fitViewport() {
+		cy?.fit(undefined, 40);
+	}
+
+	function zoomViewport(delta: number) {
+		if (!cy) return;
+		cy.zoom({
+			level: Math.min(3, Math.max(0.15, cy.zoom() + delta)),
+			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+		});
+	}
+
+	function resetViewport() {
+		if (!cy) return;
+		cy.zoom(1);
+		cy.center();
+	}
+
+	function relayout() {
+		cy?.layout(layoutOptions(layout)).run();
+	}
+
+	function centerOn(nodeId: string) {
+		if (!cy) return;
+		const node = cy.getElementById(nodeId);
+		if (node.length === 0) return;
+		cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1) }, { duration: 250 });
 	}
 
 	$effect(() => {
@@ -311,7 +346,7 @@
 
 		{#if store.error}
 			<div class="error-banner">
-				<span>{store.error}</span>
+				<span>{store.error.message}</span>
 			</div>
 		{/if}
 
@@ -330,7 +365,7 @@
 				{showEdgeLabels}
 				onToggleDomain={(domain) => {
 					graphActions.toggleDomain(domain);
-					canvas?.relayout();
+					relayout();
 				}}
 				onSearch={(value) => graphActions.setSearch(value)}
 				onToggleAmbiguous={toggleAmbiguous}
@@ -343,16 +378,16 @@
 					edgeCount={visibleEdges.length}
 					{layout}
 					loading={store.loading}
-					onZoomIn={() => canvas?.zoomBy(0.2)}
-					onZoomOut={() => canvas?.zoomBy(-0.2)}
-					onFit={() => canvas?.fit()}
-					onReset={() => canvas?.resetView()}
-					onRelayout={() => canvas?.relayout()}
+					onZoomIn={() => zoomViewport(0.2)}
+					onZoomOut={() => zoomViewport(-0.2)}
+					onFit={fitViewport}
+					onReset={resetViewport}
+					onRelayout={relayout}
 					onLayoutChange={(value) => (layout = value)}
 					onExportPng={exportPng}
 				/>
 				<GraphCanvas
-					bind:this={canvas}
+					bind:cy={cy}
 					elements={$graphState.elements}
 					{layout}
 					focusId={store.meta.focusId}
@@ -395,7 +430,7 @@
 						<button
 							type="button"
 							class="ghost-btn"
-							onclick={() => canvas?.centerOn(selectedNode.id)}
+							onclick={() => centerOn(selectedNode.id)}
 						>
 							Center
 						</button>

@@ -127,7 +127,9 @@ impl AppState {
     }
 
     /// Get a clone of the project registry
-    pub fn project_registry_clone(&self) -> Arc<cce_storage_sqlite::project_registry::ProjectRegistry> {
+    pub fn project_registry_clone(
+        &self,
+    ) -> Arc<cce_storage_sqlite::project_registry::ProjectRegistry> {
         self.engine.project_registry_clone()
     }
 }

@@ -423,7 +423,7 @@ pub async fn handle_batch_delete(
     for file_path in &request.file_paths {
         // Delete from Qdrant
         {
-        let qdrant = state.engine.qdrant();
+            let qdrant = state.engine.qdrant();
             if let Some(ref gid) = group_id {
                 let result = qdrant
                     .delete_by_file_path_scoped(file_path, gid, None)
@@ -483,7 +483,7 @@ pub async fn handle_batch_delete(
 
         if let Some(ref fp) = file_path {
             {
-        let qdrant = state.engine.qdrant();
+                let qdrant = state.engine.qdrant();
                 if let Some(ref gid) = group_id {
                     let result = qdrant.delete_by_file_path_scoped(fp, gid, None).await;
                     if let Err(e) = result {

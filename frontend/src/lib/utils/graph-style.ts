@@ -10,6 +10,7 @@
  * example "call.direct", "dependency.import.named" or "inheritance".
  */
 
+import type { StylesheetStyle } from 'cytoscape';
 import type { GraphEdge, GraphNode } from '$lib/api/graph';
 
 /** Supported entity kinds in the codebase. */
@@ -31,6 +32,41 @@ export interface RelationDomainMeta {
 	/** Stroke color used for edges of this domain. */
 	color: string;
 }
+
+/** Presentational metadata for every relation domain. A single source of truth
+ *  shared by the stylesheet generator, the legend and the filter panel. */
+export const RELATION_DOMAINS: Record<RelationDomain, RelationDomainMeta> = {
+	call: {
+		domain: 'call',
+		label: 'Call',
+		description: 'Function / method / constructor invocation',
+		color: '#2563eb'
+	},
+	dependency: {
+		domain: 'dependency',
+		label: 'Dependency',
+		description: 'Import / include / module dependency',
+		color: '#737373'
+	},
+	structural: {
+		domain: 'structural',
+		label: 'Structural',
+		description: 'Inheritance / implementation / containment',
+		color: '#8b5cf6'
+	},
+	reference: {
+		domain: 'reference',
+		label: 'Reference',
+		description: 'Type reference / field access / template binding',
+		color: '#0d9488'
+	},
+	other: {
+		domain: 'other',
+		label: 'Other',
+		description: 'Any unclassified relation',
+		color: '#475569'
+	}
+};
 
 export interface NodeKindMeta {
 	kind: NodeKind;
@@ -116,13 +152,16 @@ export function relationLineStyle(domain: RelationDomain): 'solid' | 'dashed' | 
 
 /**
  * Confidence values mirror the extraction pipeline. Ambiguous relations are
- * rendered as a warning because they are expected to be reviewed by a human.
+ * rendered as a warning because they are expected to be reviewed by a human;
+ * external relations point outside the project into a dependency manifest.
  */
-export type EdgeConfidence = 'extracted' | 'inferred' | 'ambiguous' | 'unknown';
+export type EdgeConfidence = 'extracted' | 'inferred' | 'ambiguous' | 'external' | 'unknown';
 
 export function edgeConfidence(confidence: string): EdgeConfidence {
 	const value = (confidence ?? '').trim().toLowerCase();
-	if (value === 'extracted' || value === 'inferred' || value === 'ambiguous') return value;
+	if (value === 'extracted' || value === 'inferred' || value === 'ambiguous' || value === 'external') {
+		return value;
+	}
 	return 'unknown';
 }
 
@@ -155,6 +194,13 @@ export const CONFIDENCE_META: Record<EdgeConfidence, ConfidenceMeta> = {
 		description: 'Relationship is uncertain and flagged for review',
 		opacity: 0.85,
 		color: '#8a6d00'
+	},
+	external: {
+		confidence: 'external',
+		label: 'External',
+		description: 'Relationship points outside the project into a dependency',
+		opacity: 0.6,
+		color: '#6b7280'
 	},
 	unknown: {
 		confidence: 'unknown',
@@ -254,11 +300,15 @@ export function isNodeElement(element: GraphElement): element is GraphElementNod
 /**
  * Renderer stylesheet rules.
  *
- * Colors reference the shared design tokens so the canvas follows the console
- * theme automatically. Rules are ordered from specific to general so later
- * selectors only act as fallbacks.
+ * Typed as `StylesheetStyle[]` so every entry's `style` block is validated
+ * against Cytoscape's Css.Node / Css.Edge / Css.Core union — typos in property
+ * names like `'line-colour'` or mis-keyed values surface at compile time.
+ *
+ * Colors reference the shared RELATION_DOMAINS metadata so the canvas follows
+ * the configured palette automatically. Rules are ordered from specific to
+ * general so later selectors only act as fallbacks.
  */
-export const graphStylesheet: Array<Record<string, unknown>> = [
+export const graphStylesheet: StylesheetStyle[] = [
 	{
 		selector: 'node',
 		style: {
@@ -311,7 +361,7 @@ export const graphStylesheet: Array<Record<string, unknown>> = [
 	{ selector: 'edge[domain = "structural"]', style: { 'line-color': RELATION_DOMAINS.structural.color, 'target-arrow-color': RELATION_DOMAINS.structural.color, 'width': 2.2 } },
 	{ selector: 'edge[domain = "reference"]', style: { 'line-color': RELATION_DOMAINS.reference.color, 'target-arrow-color': RELATION_DOMAINS.reference.color, 'line-style': 'dotted' } },
 	{ selector: 'edge[confidence = "inferred"]', style: { 'opacity': CONFIDENCE_META.inferred.opacity } },
-	{ selector: 'edge[confidence = "ambiguous"]', style: { 'opacity': CONFIDENCE_META.ambiguous.opacity, 'line-color': CONFIDENCE_META.ambiguous.color, 'target-arrow-color': CONFIDENCE_META.ambiguous.color } },
+	{ selector: 'edge[confidence = "ambiguous"]', style: { 'opacity': CONFIDENCE_META.ambiguous.opacity, 'line-color': CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color, 'target-arrow-color': CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color } },
 	{
 		selector: 'node.focus',
 		style: { 'border-width': 3, 'border-color': '#e63600', 'background-color': '#fef2f0' }

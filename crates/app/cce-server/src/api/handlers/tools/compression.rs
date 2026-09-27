@@ -35,9 +35,7 @@ fn to_compress_result(response: cce_orchestrator::CompressionResponse) -> Compre
         (status = 200, body = CompressApiResponse, description = "Compression result, errors reported in-band")
     )
 )]
-pub async fn handle_compress(
-    Json(request): Json<CompressRequest>,
-) -> Json<CompressApiResponse> {
+pub async fn handle_compress(Json(request): Json<CompressRequest>) -> Json<CompressApiResponse> {
     let retrieval = CompressionRetrieval::new();
 
     let req = CompressionRequest {

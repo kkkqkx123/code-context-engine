@@ -58,11 +58,7 @@ pub async fn handle_health(State(state): State<AppState>) -> ApiResult<HealthSta
 pub async fn handle_qdrant_health(
     State(state): State<AppState>,
 ) -> ApiResult<QdrantHealthResponse> {
-    let circuit_breaker = state
-        .engine
-        .qdrant()
-        .circuit_breaker_state()
-        .to_string();
+    let circuit_breaker = state.engine.qdrant().circuit_breaker_state().to_string();
 
     let diagnostic = {
         let qdrant = state.engine.qdrant();

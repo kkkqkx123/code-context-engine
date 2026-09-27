@@ -44,7 +44,7 @@ async fn relation_max_depth(
         })
 }
 
-fn convert_subgraph(graph: &SubGraph) -> (Vec<GraphNode>, Vec<GraphEdge>) {
+fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>), ErrorResponse> {
     let nodes = graph
         .nodes
         .iter()
@@ -55,7 +55,7 @@ fn convert_subgraph(graph: &SubGraph) -> (Vec<GraphNode>, Vec<GraphEdge>) {
             source_file: node.source_file.clone(),
             source_location: node.source_location.clone(),
         })
-        .collect();
+        .collect::<Vec<_>>();
     let edges = graph
         .edges
         .iter()
@@ -65,18 +65,30 @@ fn convert_subgraph(graph: &SubGraph) -> (Vec<GraphNode>, Vec<GraphEdge>) {
             relation: edge.relation.clone(),
             confidence: edge.confidence.to_string(),
         })
-        .collect();
-    (nodes, edges)
+        .collect::<Vec<_>>();
+
+    // Validate every node and edge before shipping it. A malformed entry
+    // should bubble up as an internal error rather than silently corrupting
+    // the client-side graph store.
+    for node in &nodes {
+        node.validate()
+            .map_err(|msg| ErrorResponse::new(error_codes::INTERNAL_ERROR, msg))?;
+    }
+    for edge in &edges {
+        edge.validate()
+            .map_err(|msg| ErrorResponse::new(error_codes::INTERNAL_ERROR, msg))?;
+    }
+    Ok((nodes, edges))
 }
 
 fn parse_direction(raw: &str) -> Result<GraphDirection, ErrorResponse> {
     match raw.to_lowercase().as_str() {
-        "forward" | "down" => Ok(GraphDirection::Forward),
-        "backward" | "up" => Ok(GraphDirection::Backward),
+        "in" | "backward" | "up" => Ok(GraphDirection::Backward),
+        "out" | "forward" | "down" => Ok(GraphDirection::Forward),
         "both" | "bidirectional" => Ok(GraphDirection::Both),
         _ => Err(ErrorResponse::new(
             error_codes::INVALID_REQUEST,
-            "direction must be one of forward, backward, or both".to_string(),
+            "direction must be one of in, out, or both".to_string(),
         )),
     }
 }
@@ -197,7 +209,10 @@ pub async fn handle_graph_ego(
             ));
         }
     };
-    let (nodes, edges) = convert_subgraph(&graph);
+    let (nodes, edges) = match convert_subgraph(&graph) {
+        Ok(v) => v,
+        Err(e) => return ApiResult::Error(e),
+    };
     ApiResult::Success(GraphSubgraphResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
@@ -250,7 +265,13 @@ pub async fn handle_graph_path(
             ));
         }
     };
-    let (nodes, edges) = path.as_ref().map(convert_subgraph).unwrap_or_default();
+    let (nodes, edges) = match path.as_ref() {
+        Some(p) => match convert_subgraph(p) {
+            Ok(v) => v,
+            Err(e) => return ApiResult::Error(e),
+        },
+        None => Default::default(),
+    };
     ApiResult::Success(GraphPathResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
@@ -313,7 +334,10 @@ pub async fn handle_graph_subgraph(
             ));
         }
     };
-    let (nodes, edges) = convert_subgraph(&graph);
+    let (nodes, edges) = match convert_subgraph(&graph) {
+        Ok(v) => v,
+        Err(e) => return ApiResult::Error(e),
+    };
     ApiResult::Success(GraphSubgraphResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
@@ -414,7 +438,10 @@ pub async fn handle_graph_export(
             ));
         }
     };
-    let (nodes, edges) = convert_subgraph(&graph);
+    let (nodes, edges) = match convert_subgraph(&graph) {
+        Ok(v) => v,
+        Err(e) => return ApiResult::Error(e),
+    };
     ApiResult::Success(GraphSubgraphResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,

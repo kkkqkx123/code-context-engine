@@ -10,8 +10,8 @@ use tracing::{debug, info};
 use cce_api::models::{
     ErrorResponse, FileSummaryItem, SummaryRequest, SummaryResponse, error_codes,
 };
-use cce_parser::parser::ParseCoordinator;
 use cce_parser::grouper::PreprocessingPipeline;
+use cce_parser::parser::ParseCoordinator;
 use cce_parser::summary::RuleBasedGenerator;
 use cce_scanner::{FSScanner, ScanOptions};
 use cce_utils::file::read_file_to_utf8_async;
@@ -35,9 +35,7 @@ pub type SummaryApiResponse = ApiResult<SummaryResponse>;
         (status = 500, body = ErrorResponse, description = "Internal error")
     )
 )]
-pub async fn handle_summary(
-    Json(request): Json<SummaryRequest>,
-) -> SummaryApiResponse {
+pub async fn handle_summary(Json(request): Json<SummaryRequest>) -> SummaryApiResponse {
     let start = std::time::Instant::now();
 
     // Validate request

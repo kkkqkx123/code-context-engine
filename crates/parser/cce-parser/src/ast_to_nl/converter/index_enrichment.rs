@@ -48,7 +48,9 @@ impl IndexTextEnricher {
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by
-    /// byte offset. Overlapping ranges are deduplicated. No label headers.
+    /// byte offset. Overlapping ranges are deduplicated. Uncovered body gaps
+    /// inside the entity span are filled from de-commented source so the full
+    /// function body stays searchable. No label headers.
     fn build_extra_text(
         &self,
         entity_id: EntityId,
@@ -114,13 +116,21 @@ impl IndexTextEnricher {
             }
         }
 
+        let entity_span = find_entity_span(processing_result, entity_id);
+
         if all_fragments.is_empty() {
+            if let Some((span_start, span_end)) = entity_span {
+                let body = extract_body_without_signature(source, span_start, span_end);
+                if !body.trim().is_empty() {
+                    return Some(body);
+                }
+            }
             return None;
         }
 
         all_fragments.sort_by_key(|(s, _, _)| *s);
 
-        let mut merged: Vec<String> = Vec::new();
+        let mut merged: Vec<(usize, usize, String)> = Vec::new();
         let mut last_end: Option<usize> = None;
         for (start, end, text) in &all_fragments {
             if let Some(prev_end) = last_end {
@@ -128,11 +138,43 @@ impl IndexTextEnricher {
                     continue;
                 }
             }
-            merged.push(text.clone());
+            merged.push((*start, *end, text.clone()));
             last_end = Some(*end);
         }
 
-        Some(merged.join("\n"))
+        if let Some((span_start, span_end)) = entity_span {
+            let mut gap_texts: Vec<(usize, String)> = Vec::new();
+            for window in merged.windows(2) {
+                let gap_start = window[0].1;
+                let gap_end = window[1].0;
+                if gap_end > gap_start {
+                    let gap = extract_clean_source(source, gap_start, gap_end);
+                    if is_meaningful_code(&gap) {
+                        gap_texts.push((gap_start, gap));
+                    }
+                }
+            }
+            if let Some((_, last_end_byte, _)) = merged.last() {
+                if span_end > *last_end_byte {
+                    let tail = extract_clean_source(source, *last_end_byte, span_end);
+                    let tail = strip_trailing_closers(&tail);
+                    if is_meaningful_code(&tail) {
+                        gap_texts.push((*last_end_byte, tail));
+                    }
+                }
+            }
+            let _ = span_start;
+            for (gap_start, gap) in gap_texts {
+                let pos = merged
+                    .iter()
+                    .position(|(s, _, _)| *s > gap_start)
+                    .unwrap_or(merged.len());
+                merged.insert(pos, (gap_start, gap_start, gap));
+            }
+        }
+
+        let texts: Vec<String> = merged.into_iter().map(|(_, _, t)| t).collect();
+        Some(texts.join("\n"))
     }
 }
 
@@ -304,6 +346,73 @@ fn extract_clean_source(source: &str, start_byte: usize, end_byte: usize) -> Str
         .collect::<Vec<_>>()
         .join("\n");
     deindent(&cleaned)
+}
+
+fn find_entity_span(
+    processing_result: &ProcessingResult,
+    entity_id: EntityId,
+) -> Option<(usize, usize)> {
+    for group in &processing_result.groups {
+        if let Some(span) = group.entity_spans.get(&entity_id) {
+            if span.end_byte > span.start_byte {
+                return Some((span.start_byte, span.end_byte));
+            }
+        }
+    }
+    None
+}
+
+fn extract_body_without_signature(source: &str, start_byte: usize, end_byte: usize) -> String {
+    let full = extract_clean_source(source, start_byte, end_byte);
+    if full.trim().is_empty() {
+        return String::new();
+    }
+    let mut lines = full.lines();
+    let first = lines.next().unwrap_or("");
+    if is_docstring_statement(first.trim_start()) {
+        let rest: Vec<&str> = lines.collect();
+        let joined = rest.join("\n");
+        if is_meaningful_code(&joined) {
+            return joined.trim().to_string();
+        }
+        return String::new();
+    }
+    let rest: Vec<&str> = lines.collect();
+    if rest.is_empty() {
+        return String::new();
+    }
+    let joined = rest.join("\n");
+    let stripped = strip_trailing_closers(&joined);
+    if is_meaningful_code(&stripped) {
+        stripped.trim().to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn is_meaningful_code(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed
+        .chars()
+        .all(|c| matches!(c, '{' | '}' | '(' | ')' | ';' | ',' | ':'))
+    {
+        return false;
+    }
+    trimmed.chars().any(|c| c.is_alphanumeric())
+}
+
+fn strip_trailing_closers(text: &str) -> String {
+    let mut lines: Vec<&str> = text.lines().collect();
+    while lines.last().is_some_and(|l| {
+        let t = l.trim();
+        t.is_empty() || t == "}" || t == "};" || t == "});" || t == "})"
+    }) {
+        lines.pop();
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]

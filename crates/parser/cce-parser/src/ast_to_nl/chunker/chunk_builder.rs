@@ -83,6 +83,72 @@ impl ChunkBuilder {
         Self
     }
 
+    fn entity_name_by_id(group: &EntityGroup, id: EntityId) -> Option<String> {
+        if let Some(header) = &group.header {
+            if header.id == id {
+                return Some(header.name.clone());
+            }
+        }
+        group
+            .members
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.name.clone())
+    }
+
+    fn sorted_content_ids(group: &EntityGroup, ids: &[EntityId]) -> Vec<EntityId> {
+        let mut sorted = ids.to_vec();
+        sorted.sort_by_key(|id| {
+            group
+                .entity_spans
+                .get(id)
+                .map(|s| s.start_byte)
+                .unwrap_or(usize::MAX)
+        });
+        sorted
+    }
+
+    fn bm25_title_for_ids(group: &EntityGroup, content_ids: &[EntityId]) -> String {
+        let sorted = Self::sorted_content_ids(group, content_ids);
+        if let Some(first) = sorted.first() {
+            if let Some(name) = Self::entity_name_by_id(group, *first) {
+                if Some(*first) != group.header_id
+                    && !group.name.is_empty()
+                    && name != group.name.as_str()
+                {
+                    return format!("{}.{}", group.name, name);
+                }
+                return name;
+            }
+        }
+        group.name.to_string()
+    }
+
+    fn bm25_keywords_for_ids(group: &EntityGroup, content_ids: &[EntityId]) -> Vec<String> {
+        let sorted = Self::sorted_content_ids(group, content_ids);
+        let mut seen = std::collections::HashSet::new();
+        let mut result = Vec::new();
+        for id in &sorted {
+            if let Some(name) = Self::entity_name_by_id(group, *id) {
+                let lower = name.to_lowercase();
+                if lower.len() >= 2
+                    && !lower.chars().all(|c| c.is_ascii_digit())
+                    && seen.insert(lower.clone())
+                {
+                    result.push(lower);
+                }
+            }
+        }
+        let has_member = sorted.iter().any(|id| Some(*id) != group.header_id);
+        if has_member && group.group_type.is_container() && !group.name.is_empty() {
+            let parent = group.name.to_lowercase().to_string();
+            if parent.len() >= 2 && seen.insert(parent.clone()) {
+                result.push(parent);
+            }
+        }
+        result
+    }
+
     fn prepend_identity_if_needed(text: &mut String, name: &str, kind: EntityKind) {
         // Import-like groups produce a bulky structured identity line
         // (e.g. `std::{...} (import).`) that adds no retrieval value.
@@ -123,8 +189,14 @@ impl ChunkBuilder {
                 SourceSpanKind::ExactEntities,
             );
 
-        let title = Some(ctx.group.name.to_string());
-        let keywords = ctx.keywords.to_vec();
+        let (title, keywords) = if ctx.path == ChunkPath::Bm25 {
+            (
+                Some(Self::bm25_title_for_ids(ctx.group, &content_entity_ids)),
+                Self::bm25_keywords_for_ids(ctx.group, &content_entity_ids),
+            )
+        } else {
+            (Some(ctx.group.name.to_string()), ctx.keywords.to_vec())
+        };
         let text_len = text.len();
         let word_count = text.split_whitespace().filter(|w| !w.is_empty()).count();
         let token_count = cost(&text, ctx.path);
@@ -191,8 +263,6 @@ impl ChunkBuilder {
         let total = segments.len();
         let is_fragment = total > 1;
         let original_entity_id = group.header_id;
-        let bm25_title = Some(group.name.to_string());
-        let bm25_keywords = keywords.to_vec();
         let related_groups = tracker.get_related_groups(&group.group_id);
 
         segments
@@ -304,6 +374,20 @@ impl ChunkBuilder {
                     )
                     .is_some_and(|id| entity_has_own_descriptor(group, id));
 
+                let (bm25_title, bm25_keywords) = if path == ChunkPath::Bm25 {
+                    let effective_ids = if content_entity_ids.is_empty() {
+                        group.all_entity_ids()
+                    } else {
+                        content_entity_ids.clone()
+                    };
+                    (
+                        Some(Self::bm25_title_for_ids(group, &effective_ids)),
+                        Self::bm25_keywords_for_ids(group, &effective_ids),
+                    )
+                } else {
+                    (Some(group.name.to_string()), keywords.to_vec())
+                };
+
                 ChunkedResult {
                     chunk_id,
                     source_group_id: group.group_id.to_string(),
@@ -312,8 +396,8 @@ impl ChunkBuilder {
                     chunk_index: index,
                     total_chunks: total,
                     text: segment_text,
-                    bm25_title: bm25_title.clone(),
-                    bm25_keywords: bm25_keywords.clone(),
+                    bm25_title,
+                    bm25_keywords,
                     token_count,
                     start_byte: segment.boundary.start_byte,
                     end_byte: segment.boundary.end_byte,
@@ -389,6 +473,20 @@ impl ChunkBuilder {
             && first_content_entity_id(content_entity_ids.iter(), ctx.group.header_id)
                 .is_some_and(|id| entity_has_own_descriptor(ctx.group, id));
 
+        let (bm25_title, bm25_keywords) = if ctx.path == ChunkPath::Bm25 {
+            let effective_ids = if content_entity_ids.is_empty() {
+                ctx.group.all_entity_ids()
+            } else {
+                content_entity_ids.clone()
+            };
+            (
+                Some(Self::bm25_title_for_ids(ctx.group, &effective_ids)),
+                Self::bm25_keywords_for_ids(ctx.group, &effective_ids),
+            )
+        } else {
+            (Some(ctx.group.name.to_string()), ctx.keywords)
+        };
+
         ChunkedResult {
             chunk_id: ctx.chunk_id,
             source_group_id: ctx.group.group_id.to_string(),
@@ -397,8 +495,8 @@ impl ChunkBuilder {
             chunk_index: ctx.chunk_index,
             total_chunks: ctx.total_chunks,
             text,
-            bm25_title: Some(ctx.group.name.to_string()),
-            bm25_keywords: ctx.keywords,
+            bm25_title,
+            bm25_keywords,
             token_count,
             start_byte: 0,
             end_byte: ctx.end_byte,

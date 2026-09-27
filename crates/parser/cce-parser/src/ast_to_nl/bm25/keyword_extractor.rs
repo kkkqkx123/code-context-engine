@@ -1,14 +1,15 @@
 //! Keyword extractor for BM25 indexing
 //!
 //! Extracts keywords from code entities for BM25 indexing.
-//! Produces two kinds of keywords:
+//! Produces the exact declaration name only:
 //! 1. Original form (lowered): `get_or_init`, `once_cell`
-//! 2. Type words: parameter/return type tokens (`gitignore`, `builder`)
 //!
 //! Split forms (`get`, `or`, `init`) are deliberately NOT stored here: the
 //! `title` and `content` fields already produce them via the shared tokenizer,
 //! so re-storing them in `keywords` would double/triple-count their tf across
-//! fields. `keywords` is now a "exact name + type word" complement to `title`.
+//! fields. Parameter types, return types, and call targets live in `content`
+//! only; promoting them to the boosted `keywords` field lets callers outrank
+//! callees and dilutes the identity signal.
 
 use cce_types::GroupedEntity;
 
@@ -21,11 +22,10 @@ impl KeywordExtractor {
         Self
     }
 
-    /// Extract keywords from an entity name and its type information.
+    /// Extract keywords from an entity name.
     ///
-    /// Produces two kinds of bounded keywords:
-    /// - Original form: the entity name as-is, lowered
-    /// - Type words: tokens from parameter/return types (structured AST fields)
+    /// Returns the lowered declaration name only. Type information and call
+    /// targets stay in `content` where the tokenizer splits them.
     ///
     /// Split forms are intentionally excluded (the tokenizer already emits them
     /// for `title`/`content`).
@@ -36,28 +36,7 @@ impl KeywordExtractor {
         }
 
         let lowered = name.to_lowercase();
-        let mut keywords = Vec::new();
-
-        // 1. Original form (lowered)
-        keywords.push(lowered.clone());
-
-        // 2. Parameter type keywords (structured AST field, not string-matched)
-        for (_, param_type) in &entity.parameters {
-            if let Some(ty) = param_type {
-                for keyword in Self::extract_type_keywords(ty) {
-                    keywords.push(keyword);
-                }
-            }
-        }
-
-        // 3. Return type keywords (structured AST field)
-        if let Some(return_type) = &entity.return_type {
-            for keyword in Self::extract_type_keywords(return_type) {
-                keywords.push(keyword);
-            }
-        }
-
-        self.deduplicate(keywords)
+        self.deduplicate(vec![lowered])
     }
 
     /// Split a name into component words at `_`, `-`, and camelCase boundaries.
@@ -67,31 +46,9 @@ impl KeywordExtractor {
     /// - `OnceCell` → `["once", "cell"]`
     /// - `XMLParser` → `["xml", "parser"]`
     /// - `calculate_total_price` → `["calculate", "total", "price"]`
+    #[allow(dead_code)]
     fn split_name_parts(ident: &str) -> Vec<String> {
         cce_utils::text::split_identifier(ident)
-    }
-
-    /// Split a word on camelCase/PascalCase boundaries.
-    /// Words are output in lowered form.
-    /// Extract keywords from a type annotation string.
-    ///
-    /// Splits on generic/tuple/pointer separators and extracts meaningful words.
-    /// E.g., `Option<Vec<PathBuf>>` → `["option", "vec", "pathbuf"]`
-    fn extract_type_keywords(type_text: &str) -> Vec<String> {
-        let mut keywords = Vec::new();
-        for segment in type_text
-            .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-            .filter(|s| !s.is_empty())
-        {
-            keywords.push(segment.to_lowercase());
-            for word in Self::split_name_parts(segment) {
-                let lower = word.to_lowercase();
-                if lower != segment.to_lowercase() && lower.len() >= 2 {
-                    keywords.push(lower);
-                }
-            }
-        }
-        keywords
     }
 
     /// Deduplicate keywords while preserving order
@@ -174,14 +131,16 @@ mod tests {
             keywords
         );
 
-        // Parameter types are now extracted (structured AST fields)
+        // Parameter and return types stay in content only.
         assert!(
-            keywords.contains(&"f64".to_string()),
-            "f64 from parameter type"
+            !keywords.contains(&"f64".to_string()),
+            "f64 must not be a keyword: {:?}",
+            keywords
         );
         assert!(
-            keywords.contains(&"i32".to_string()),
-            "i32 from parameter type"
+            !keywords.contains(&"i32".to_string()),
+            "i32 must not be a keyword: {:?}",
+            keywords
         );
 
         // Docstring words should NOT be keywords
@@ -355,22 +314,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_type_keywords_simple() {
-        let keywords = KeywordExtractor::extract_type_keywords("GitignoreBuilder");
-        assert!(keywords.iter().any(|k| k == "gitignorebuilder"));
-        assert!(keywords.iter().any(|k| k == "gitignore"));
-        assert!(keywords.iter().any(|k| k == "builder"));
-    }
-
-    #[test]
-    fn test_extract_type_keywords_generic() {
-        let keywords = KeywordExtractor::extract_type_keywords("Option<Vec<PathBuf>>");
-        assert!(keywords.iter().any(|k| k == "option"));
-        assert!(keywords.iter().any(|k| k == "vec"));
-        assert!(keywords.iter().any(|k| k == "pathbuf"));
-    }
-
-    #[test]
     fn test_extract_type_keywords_from_entity() {
         let extractor = KeywordExtractor::new();
         let entity = GroupedEntity {
@@ -392,17 +335,21 @@ mod tests {
             !keywords.iter().any(|k| k == "line"),
             "split word should not be in keywords"
         );
-        assert!(keywords.iter().any(|k| k == "pathbuf"), "from param type");
-        assert!(keywords.iter().any(|k| k == "str"), "line param type");
-        assert!(keywords.iter().any(|k| k == "result"), "return type");
         assert!(
-            keywords.iter().any(|k| k == "gitignorebuilder"),
-            "return type inner"
+            !keywords.iter().any(|k| k == "pathbuf"),
+            "param types stay in content"
         );
         assert!(
-            keywords.iter().any(|k| k == "gitignore"),
-            "return type split"
+            !keywords.iter().any(|k| k == "str"),
+            "param types stay in content"
         );
-        assert!(keywords.iter().any(|k| k == "builder"), "return type split");
+        assert!(
+            !keywords.iter().any(|k| k == "result"),
+            "return types stay in content"
+        );
+        assert!(
+            !keywords.iter().any(|k| k == "gitignorebuilder"),
+            "return types stay in content"
+        );
     }
 }

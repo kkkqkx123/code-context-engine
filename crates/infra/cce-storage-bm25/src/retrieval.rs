@@ -51,6 +51,7 @@ impl Bm25Retrieval {
             query_text,
             schema,
             manager.index(),
+            &searcher,
             &options.field_weights,
             options.term_operator,
         )?;
@@ -262,6 +263,7 @@ impl Bm25Retrieval {
         query_text: &str,
         schema: &IndexSchema,
         index: &tantivy::Index,
+        searcher: &tantivy::Searcher,
         field_weights: &HashMap<String, f32>,
         operator: TermOperator,
     ) -> Result<Box<dyn tantivy::query::Query>, Bm25Error> {
@@ -282,6 +284,7 @@ impl Bm25Retrieval {
             query_text,
             schema,
             tokenizer.clone(),
+            searcher,
             title_weight * 1.5,
             content_weight * 0.5,
             keywords_weight * 1.5,
@@ -294,6 +297,7 @@ impl Bm25Retrieval {
                 &cleaned,
                 schema,
                 tokenizer,
+                searcher,
                 title_weight,
                 content_weight,
                 keywords_weight,
@@ -307,10 +311,12 @@ impl Bm25Retrieval {
     }
 
     /// Build a single query form from `query_text`.
+    #[allow(clippy::too_many_arguments)]
     fn build_query(
         query_text: &str,
         schema: &IndexSchema,
         mut tokenizer: TextAnalyzer,
+        searcher: &tantivy::Searcher,
         title_weight: f32,
         content_weight: f32,
         keywords_weight: f32,
@@ -327,10 +333,15 @@ impl Bm25Retrieval {
         }
 
         let tokens = collect_tokens(&mut tokenizer, &remaining);
-        for token in tokens {
-            let Some(clause) =
-                build_token_query(token, schema, title_weight, content_weight, keywords_weight)
-            else {
+        for (token, scale) in expand_query_tokens(&tokens, schema, searcher) {
+            let Some(clause) = build_token_query_with_scale(
+                token,
+                schema,
+                title_weight,
+                content_weight,
+                keywords_weight,
+                scale,
+            ) else {
                 continue;
             };
             clauses.push((occur_for(operator), clause));
@@ -473,19 +484,17 @@ fn build_phrase_query(
     Some(Box::new(tantivy::query::BooleanQuery::new(field_queries)))
 }
 
-/// Build a field-level BooleanQuery for a single token.
-fn build_token_query(
+fn build_token_query_with_scale(
     token: MixedToken,
     schema: &IndexSchema,
     title_weight: f32,
     content_weight: f32,
     keywords_weight: f32,
+    scale: f32,
 ) -> Option<Box<dyn tantivy::query::Query>> {
     if token.text.is_empty() {
         return None;
     }
-
-    let scale = if token.position_length == 0 { 0.5 } else { 1.0 };
 
     let mut clauses: Vec<(tantivy::query::Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
 
@@ -526,4 +535,75 @@ fn build_token_query(
     ));
 
     Some(Box::new(tantivy::query::BooleanQuery::new(clauses)))
+}
+
+fn is_query_stopword(text: &str) -> bool {
+    matches!(text, "method" | "on" | "in" | "constructor" | "function")
+}
+
+fn whole_term_doc_freq(searcher: &tantivy::Searcher, schema: &IndexSchema, text: &str) -> u64 {
+    let mut total = 0u64;
+    for field in [schema.title, schema.content, schema.keywords] {
+        let term = tantivy::Term::from_field_text(field, text);
+        total += searcher.doc_freq(&term).unwrap_or(0);
+    }
+    total
+}
+
+fn expand_query_tokens(
+    tokens: &[MixedToken],
+    schema: &IndexSchema,
+    searcher: &tantivy::Searcher,
+) -> Vec<(MixedToken, f32)> {
+    use std::collections::BTreeMap;
+
+    let mut by_position: BTreeMap<u32, Vec<&MixedToken>> = BTreeMap::new();
+    for token in tokens {
+        if token.text.is_empty() {
+            continue;
+        }
+        by_position.entry(token.position).or_default().push(token);
+    }
+
+    let mut expanded = Vec::new();
+    for (_, group) in by_position {
+        let whole = group.iter().find(|t| t.position_length == 1).copied();
+        let splits: Vec<&MixedToken> = group
+            .iter()
+            .filter(|t| t.position_length == 0)
+            .copied()
+            .collect();
+
+        if let Some(whole_token) = whole {
+            if is_query_stopword(whole_token.text.as_str()) {
+                continue;
+            }
+            if whole_term_doc_freq(searcher, schema, whole_token.text.as_str()) == 0
+                && !splits.is_empty()
+            {
+                for split in splits {
+                    if split.text.is_empty() || is_query_stopword(split.text.as_str()) {
+                        continue;
+                    }
+                    expanded.push(((*split).clone(), 1.0));
+                }
+                continue;
+            }
+            expanded.push(((*whole_token).clone(), 1.0));
+            for split in splits {
+                if split.text.is_empty() || is_query_stopword(split.text.as_str()) {
+                    continue;
+                }
+                expanded.push(((*split).clone(), 0.5));
+            }
+        } else {
+            for split in splits {
+                if split.text.is_empty() || is_query_stopword(split.text.as_str()) {
+                    continue;
+                }
+                expanded.push(((*split).clone(), 0.5));
+            }
+        }
+    }
+    expanded
 }

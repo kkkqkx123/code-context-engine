@@ -157,13 +157,11 @@ pub async fn handle_start_watch(
                         debounce_ms: request.debounce_ms,
                     })
                 }
-                Err(e) => {
-                    ApiResult::Error(ErrorResponse::with_details(
-                        error_codes::INTERNAL_ERROR,
-                        "Failed to start event loop",
-                        e.to_string(),
-                    ))
-                }
+                Err(e) => ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::INTERNAL_ERROR,
+                    "Failed to start event loop",
+                    e.to_string(),
+                )),
             }
         }
         Err(e) => ApiResult::Error(ErrorResponse::with_details(

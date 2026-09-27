@@ -23,9 +23,7 @@ use cce_types::language::Language;
         (status = 200, body = FoldResponse, description = "Fold result, errors reported in-band")
     )
 )]
-pub async fn handle_fold(
-    Json(request): Json<FoldRequest>,
-) -> Json<FoldResponse> {
+pub async fn handle_fold(Json(request): Json<FoldRequest>) -> Json<FoldResponse> {
     let language = request.language.as_deref().and_then(Language::from_name);
     let mode = request
         .mode
