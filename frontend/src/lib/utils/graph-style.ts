@@ -12,6 +12,15 @@
 
 import type { GraphEdge, GraphNode } from '$lib/api/graph';
 
+/** Supported entity kinds in the codebase. */
+export type NodeKind = 
+	| 'function' | 'method' | 'constructor'
+	| 'class' | 'struct' | 'enum'
+	| 'interface' | 'trait'
+	| 'variable' | 'constant'
+	| 'module' | 'package'
+	| 'unknown';
+
 /** Coarse grouping of the backend relation taxonomy. */
 export type RelationDomain = 'call' | 'dependency' | 'structural' | 'reference' | 'other';
 
@@ -23,38 +32,34 @@ export interface RelationDomainMeta {
 	color: string;
 }
 
-export const RELATION_DOMAINS: Record<RelationDomain, RelationDomainMeta> = {
-	call: {
-		domain: 'call',
-		label: 'Call',
-		description: 'Function and method invocation',
-		color: '#2563eb'
-	},
-	dependency: {
-		domain: 'dependency',
-		label: 'Dependency',
-		description: 'Imports, includes and module references',
-		color: '#737373'
-	},
-	structural: {
-		domain: 'structural',
-		label: 'Structural',
-		description: 'Inheritance, implementation and containment',
-		color: '#8b5cf6'
-	},
-	reference: {
-		domain: 'reference',
-		label: 'Reference',
-		description: 'Type, field and template references',
-		color: '#0d9488'
-	},
-	other: {
-		domain: 'other',
-		label: 'Other',
-		description: 'Unclassified relation',
-		color: '#d4d4d4'
-	}
+export interface NodeKindMeta {
+	kind: NodeKind;
+	shape: 'round-rectangle' | 'rectangle' | 'diamond' | 'hexagon';
+	description: string;
+}
+
+export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
+	function: { kind: 'function', shape: 'round-rectangle', description: 'Free function' },
+	method: { kind: 'method', shape: 'round-rectangle', description: 'Method or member function' },
+	constructor: { kind: 'constructor', shape: 'round-rectangle', description: 'Constructor or initializer' },
+	class: { kind: 'class', shape: 'rectangle', description: 'Class definition' },
+	struct: { kind: 'struct', shape: 'rectangle', description: 'Structure definition' },
+	enum: { kind: 'enum', shape: 'rectangle', description: 'Enumeration' },
+	interface: { kind: 'interface', shape: 'hexagon', description: 'Interface or protocol' },
+	trait: { kind: 'trait', shape: 'hexagon', description: 'Trait or mixin' },
+	variable: { kind: 'variable', shape: 'diamond', description: 'Variable or field' },
+	constant: { kind: 'constant', shape: 'diamond', description: 'Constant or macro' },
+	module: { kind: 'module', shape: 'diamond', description: 'Module or namespace' },
+	package: { kind: 'package', shape: 'diamond', description: 'Package or workspace' },
+	unknown: { kind: 'unknown', shape: 'diamond', description: 'Unknown entity type' }
 };
+
+/** Map a backend kind string to a known NodeKind, fallback to unknown. */
+export function normalizeNodeKind(kind?: string | null): NodeKind {
+	const value = (kind ?? '').trim().toLowerCase();
+	if (!value) return 'unknown';
+	return NODE_KINDS[value as NodeKind] ? value as NodeKind : 'unknown';
+}
 
 /** Exact structural relation values (these carry no dotted prefix). */
 const STRUCTURAL_RELATIONS = new Set([
@@ -291,7 +296,14 @@ export const graphStylesheet: Array<Record<string, unknown>> = [
 			'arrow-scale': 0.8,
 			'curve-style': 'bezier',
 			'opacity': 0.8,
-			'overlay-opacity': 0
+			'overlay-opacity': 0,
+			'font-family': 'Space Mono, monospace',
+			'font-size': 8,
+			'color': '#475569',
+			'text-background-color': '#ffffff',
+			'text-background-opacity': 0.85,
+			'text-background-padding': '1px',
+			'text-rotation': 'autorotate'
 		}
 	},
 	{ selector: 'edge[domain = "call"]', style: { 'line-color': RELATION_DOMAINS.call.color, 'target-arrow-color': RELATION_DOMAINS.call.color, 'width': 1.8 } },

@@ -15,7 +15,12 @@
 		type RelationDomain
 	} from '$lib/utils/graph-style';
 
-	export type GraphLayoutName = 'cose' | 'breadthfirst' | 'concentric' | 'grid';
+	export type GraphLayoutName =
+		| 'cose-bilkent'
+		| 'cose'
+		| 'breadthfirst'
+		| 'concentric'
+		| 'grid';
 
 	interface Props {
 		elements?: GraphElement[];
@@ -31,6 +36,8 @@
 		impactTransitive?: string[];
 		/** Case-insensitive substring used to highlight matching nodes. */
 		search?: string;
+		/** Whether to render the relation label on each edge. */
+		showEdgeLabels?: boolean;
 		onNodeSelect?: (nodeId: string) => void;
 		/** Fired on double click, used to expand the neighborhood of a node. */
 		onNodeActivate?: (nodeId: string) => void;
@@ -40,12 +47,13 @@
 
 	let {
 		elements = [],
-		layout = 'cose',
+		layout = 'cose-bilkent',
 		focusId = null,
 		visibleDomains = ['call', 'dependency', 'structural', 'reference', 'other'],
 		impactDirect = [],
 		impactTransitive = [],
 		search = '',
+		showEdgeLabels = false,
 		onNodeSelect = () => {},
 		onNodeActivate = () => {},
 		cy = $bindable(null),
@@ -54,6 +62,7 @@
 
 	let container: HTMLDivElement | null = null;
 	let lastElementCount = $state(0);
+	let bilkentRegistered = false;
 
 	function layoutOptions(name: GraphLayoutName): LayoutOptions {
 		switch (name) {
@@ -73,6 +82,25 @@
 				} as unknown as LayoutOptions;
 			case 'grid':
 				return { name: 'grid', avoidOverlap: true, animate: false } as unknown as LayoutOptions;
+			case 'cose-bilkent':
+				if (!bilkentRegistered) return layoutOptions('cose');
+				return {
+					name: 'cose-bilkent',
+					animate: 'end',
+					animationDuration: 400,
+					randomize: true,
+					idealEdgeLength: 100,
+					nodeRepulsion: 4500,
+					nodeSeparation: 75,
+					edgeElasticity: 0.45,
+					nestingFactor: 0.1,
+					gravity: 0.25,
+					numIter: 2250,
+					tile: true,
+					tilingPaddingVertical: 10,
+					tilingPaddingHorizontal: 10,
+					packComponents: true
+				} as unknown as LayoutOptions;
 			case 'cose':
 			default:
 				return {
@@ -124,39 +152,60 @@
 		});
 	}
 
+	function createInstance(cytoscape: typeof import('cytoscape')) {
+		if (!container) return;
+		const instance = cytoscape({
+			container,
+			elements: elements as unknown as ElementDefinition[],
+			style: graphStylesheet as unknown as StylesheetCSS[],
+			layout: layoutOptions(layout),
+			wheelSensitivity: 0.25,
+			boxSelectionEnabled: false,
+			selectionType: 'single'
+		});
+		cy = instance;
+
+		containerElement = container;
+		lastElementCount = elements.length;
+
+		instance.on('tap', 'node', (event) => {
+			onNodeSelect(event.target.id());
+		});
+		instance.on('dbltap', 'node', (event) => {
+			onNodeActivate(event.target.id());
+		});
+
+		applyDomainFilter();
+		applyDecorations();
+	}
+
 	onMount(() => {
 		if (!container) return;
 
 		let mounted = true;
-		// The renderer touches the DOM at import time, so it is loaded lazily and
-		// only inside the browser lifecycle to keep server rendering untouched.
-		import('cytoscape').then((module) => {
-			if (!mounted || !container) return;
-			const cytoscape = module.default;
-
-			cy = cytoscape({
-				container,
-				elements: elements as unknown as ElementDefinition[],
-				style: graphStylesheet as unknown as StylesheetCSS[],
-				layout: layoutOptions(layout),
-				wheelSensitivity: 0.25,
-				boxSelectionEnabled: false,
-				selectionType: 'single'
+		// The renderer and the layout extension touch the DOM at import time, so
+		// they are loaded lazily and only inside the browser lifecycle to keep
+		// server rendering untouched.
+		Promise.all([import('cytoscape'), import('cytoscape-cose-bilkent')])
+			.then(([cyModule, bilkentModule]) => {
+				if (!mounted || !container) return;
+				const cytoscape = cyModule.default;
+				try {
+					cytoscape.use(bilkentModule.default);
+					bilkentRegistered = true;
+				} catch {
+					bilkentRegistered = false;
+				}
+				createInstance(cytoscape);
+			})
+			.catch(() => {
+				// If the layout extension fails to load, fall back to plain cytoscape.
+				if (!mounted || !container) return;
+				import('cytoscape').then((module) => {
+					if (!mounted || !container) return;
+					createInstance(module.default);
+				});
 			});
-
-			containerElement = container;
-			lastElementCount = elements.length;
-
-			cy.on('tap', 'node', (event) => {
-				onNodeSelect(event.target.id());
-			});
-			cy.on('dbltap', 'node', (event) => {
-				onNodeActivate(event.target.id());
-			});
-
-			applyDomainFilter();
-			applyDecorations();
-		});
 
 		return () => {
 			mounted = false;
@@ -216,6 +265,13 @@
 		}
 	});
 
+	// Toggle edge relation labels without rebuilding the instance.
+	$effect(() => {
+		if (!cy) return;
+		void showEdgeLabels;
+		cy.edges().style('label', showEdgeLabels ? 'data(relationLabel)' : '');
+	});
+
 	export function fit() {
 		cy?.fit(undefined, 40);
 	}
@@ -240,6 +296,11 @@
 
 	export function relayout() {
 		cy?.layout(layoutOptions(layout)).run();
+	}
+
+	export function exportPng(): string {
+		if (!cy) return '';
+		return cy.png({ full: true, scale: 2, bg: '#ffffff' });
 	}
 </script>
 

@@ -4,8 +4,9 @@
 	 *
 	 * Composes the canvas, viewport toolbar, filter panel and node inspector
 	 * over a single shared graph store. The page owns the seed strategy (an
-	 * entity oriented load or a bounded project overview) while the store owns
-	 * accumulation and cache invalidation.
+	 * entity oriented load, an explicit subgraph, a path search or a bounded
+	 * project overview) while the store owns accumulation and cache
+	 * invalidation.
 	 */
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
@@ -16,6 +17,7 @@
 	import GraphFilterPanel from '$lib/components/graph/GraphFilterPanel.svelte';
 	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
 	import { currentProjectId } from '$lib/stores/project';
+	import type { GraphDirection } from '$lib/api/graph';
 	import {
 		CONFIDENCE_META,
 		RELATION_DOMAINS,
@@ -24,16 +26,20 @@
 		relationLabel
 	} from '$lib/utils/graph-style';
 
-	type SeedMode = 'focus' | 'overview' | 'path';
+	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
 
 	let canvas: GraphCanvas | null = $state(null);
-	let layout: GraphLayoutName = $state('cose');
+	let layout: GraphLayoutName = $state('cose-bilkent');
 	let seedMode: SeedMode = $state('focus');
 	let seedId = $state('');
 	let selectedId: string | null = $state(null);
 	let impactFile = $state('');
 	let pathStart = $state('');
 	let pathEnd = $state('');
+	let subgraphIds = $state('');
+	let egoDepth = $state(2);
+	let egoDirection = $state<GraphDirection>('both');
+	let showEdgeLabels = $state(false);
 
 	// The query string may carry an entity to focus on, which is how the entity
 	// detail page hands off to the explorer.
@@ -63,7 +69,7 @@
 		if (queryEntity) {
 			seedMode = 'focus';
 			seedId = queryEntity;
-			await graphActions.loadEgo(queryEntity, 2, 'both');
+			await graphActions.loadEgo(queryEntity, egoDepth, egoDirection);
 			selectedId = queryEntity;
 		} else {
 			await graphActions.loadOverview(400);
@@ -80,12 +86,19 @@
 		if (seedMode === 'focus') {
 			if (!id) return;
 			selectedId = id;
-			await graphActions.loadEgo(id, 2, 'both');
+			await graphActions.loadEgo(id, egoDepth, egoDirection);
 		} else if (seedMode === 'path') {
 			const start = pathStart.trim();
 			const end = pathEnd.trim();
 			if (!start || !end) return;
 			await graphActions.loadPath(start, end);
+		} else if (seedMode === 'subgraph') {
+			const ids = subgraphIds
+				.split(',')
+				.map((s) => s.trim())
+				.filter(Boolean);
+			if (ids.length === 0) return;
+			await graphActions.loadSubgraph(ids);
 		} else {
 			await graphActions.loadOverview(400);
 		}
@@ -101,7 +114,7 @@
 
 	/** Double click on a node pulls in its immediate neighborhood. */
 	async function handleNodeActivate(nodeId: string) {
-		await graphActions.expand(nodeId, 1, 'both');
+		await graphActions.expand(nodeId, 1, egoDirection);
 		canvas?.relayout();
 	}
 
@@ -133,6 +146,33 @@
 
 	function domainLabel(relation: string) {
 		return RELATION_DOMAINS[relationDomain(relation)].label;
+	}
+
+	let communities = $derived.by(() => {
+		const map = store.meta.communities;
+		const groups = new Map<number, string[]>();
+		for (const node of nodes) {
+			const c = map[node.id];
+			if (c === undefined) continue;
+			const arr = groups.get(c) ?? [];
+			arr.push(node.id);
+			groups.set(c, arr);
+		}
+		return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+	});
+
+	async function loadCommunity(ids: string[]) {
+		await graphActions.loadSubgraph(ids);
+		canvas?.relayout();
+	}
+
+	function exportPng() {
+		const png = canvas?.exportPng();
+		if (!png) return;
+		const link = document.createElement('a');
+		link.href = png;
+		link.download = 'graph.png';
+		link.click();
 	}
 
 	$effect(() => {
@@ -178,6 +218,14 @@
 				>
 					Find path
 				</button>
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={seedMode === 'subgraph'}
+					onclick={() => (seedMode = 'subgraph')}
+				>
+					Subgraph
+				</button>
 			</div>
 
 			{#if seedMode === 'focus'}
@@ -189,6 +237,29 @@
 					onkeydown={handleSeedKeydown}
 					aria-label="Entity id to focus on"
 				/>
+				<label class="inline-field">
+					<span class="inline-label">Depth</span>
+					<input
+						class="seed-input narrow"
+						type="number"
+						min="1"
+						max="4"
+						bind:value={egoDepth}
+						aria-label="Neighborhood depth"
+					/>
+				</label>
+				<label class="inline-field">
+					<span class="inline-label">Dir</span>
+					<select
+						class="seed-input narrow"
+						bind:value={egoDirection}
+						aria-label="Traversal direction"
+					>
+						<option value="both">both</option>
+						<option value="out">out</option>
+						<option value="in">in</option>
+					</select>
+				</label>
 			{:else if seedMode === 'path'}
 				<input
 					class="seed-input"
@@ -206,6 +277,15 @@
 					bind:value={pathEnd}
 					onkeydown={handleSeedKeydown}
 					aria-label="Path end entity id"
+				/>
+			{:else if seedMode === 'subgraph'}
+				<input
+					class="seed-input wide-input"
+					type="text"
+					placeholder="Comma-separated entity ids…"
+					bind:value={subgraphIds}
+					onkeydown={handleSeedKeydown}
+					aria-label="Entity ids for induced subgraph"
 				/>
 			{/if}
 
@@ -247,12 +327,14 @@
 				{availableDomains}
 				search={store.filters.search}
 				hideAmbiguous={store.filters.hideAmbiguous}
+				{showEdgeLabels}
 				onToggleDomain={(domain) => {
 					graphActions.toggleDomain(domain);
 					canvas?.relayout();
 				}}
 				onSearch={(value) => graphActions.setSearch(value)}
 				onToggleAmbiguous={toggleAmbiguous}
+				onToggleEdgeLabels={() => (showEdgeLabels = !showEdgeLabels)}
 			/>
 
 			<div class="canvas-column">
@@ -267,6 +349,7 @@
 					onReset={() => canvas?.resetView()}
 					onRelayout={() => canvas?.relayout()}
 					onLayoutChange={(value) => (layout = value)}
+					onExportPng={exportPng}
 				/>
 				<GraphCanvas
 					bind:this={canvas}
@@ -277,6 +360,7 @@
 					search={store.filters.search}
 					impactDirect={store.meta.impactDirect}
 					impactTransitive={store.meta.impactTransitive}
+					{showEdgeLabels}
 					onNodeSelect={handleNodeSelect}
 					onNodeActivate={handleNodeActivate}
 				/>
@@ -351,6 +435,28 @@
 			</aside>
 		</div>
 
+		{#if communities.length > 0}
+			<section class="communities" aria-label="Connected components">
+				<h4 class="communities-title">Communities ({communities.length})</h4>
+				<p class="communities-hint">
+					Click a community to load its members as an induced subgraph.
+				</p>
+				<ul class="community-list">
+					{#each communities as [index, ids] (index)}
+						<li>
+							<button type="button" class="community-btn" onclick={() => loadCommunity(ids)}>
+								<span class="community-index">#{index}</span>
+								<span class="community-size">{ids.length}</span>
+								<span class="community-preview mono">
+									{ids.slice(0, 3).join(', ')}{ids.length > 3 ? ' …' : ''}
+								</span>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
 		<div class="legend">
 			{#each Object.values(RELATION_DOMAINS) as domain (domain.domain)}
 				<div class="legend-item">
@@ -418,6 +524,15 @@
 		border-color: var(--black);
 	}
 
+	.seed-input.narrow {
+		min-width: 70px;
+		width: 70px;
+	}
+
+	.seed-input.wide-input {
+		min-width: 320px;
+	}
+
 	.file-input {
 		min-width: 200px;
 	}
@@ -429,6 +544,20 @@
 
 	.seed-spacer {
 		flex: 1;
+	}
+
+	.inline-field {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.inline-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-500);
 	}
 
 	.primary-btn,
@@ -639,6 +768,72 @@
 		letter-spacing: 0.1em;
 		color: var(--gray-500);
 		font-style: normal;
+	}
+
+	.communities {
+		margin-top: 1rem;
+		padding: 1rem;
+		border: 1px solid var(--black);
+	}
+
+	.communities-title {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-600);
+		margin: 0 0 0.25rem;
+	}
+
+	.communities-hint {
+		font-size: 0.7rem;
+		color: var(--gray-400);
+		margin: 0 0 0.75rem;
+	}
+
+	.community-list {
+		list-style: none;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0;
+	}
+
+	.community-btn {
+		display: grid;
+		grid-template-columns: auto auto 1fr;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.35rem 0.5rem;
+		background: var(--white);
+		border: 1px solid var(--gray-300);
+		cursor: pointer;
+		text-align: left;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+		color: var(--gray-600);
+		transition: all 0.15s;
+	}
+
+	.community-btn:hover {
+		border-color: var(--black);
+		background: var(--gray-100);
+	}
+
+	.community-index {
+		color: var(--black);
+	}
+
+	.community-size {
+		color: var(--gray-500);
+	}
+
+	.community-preview {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.legend {

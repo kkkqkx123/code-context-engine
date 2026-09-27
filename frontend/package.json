@@ -22,6 +22,7 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"cytoscape": "^3.34.3"
+		"cytoscape": "^3.34.3",
+		"cytoscape-cose-bilkent": "^4.1.0"
 	}
 }
