@@ -39,18 +39,6 @@ impl KeywordExtractor {
         self.deduplicate(vec![lowered])
     }
 
-    /// Split a name into component words at `_`, `-`, and camelCase boundaries.
-    ///
-    /// Examples:
-    /// - `get_or_init` → `["get", "or", "init"]`
-    /// - `OnceCell` → `["once", "cell"]`
-    /// - `XMLParser` → `["xml", "parser"]`
-    /// - `calculate_total_price` → `["calculate", "total", "price"]`
-    #[allow(dead_code)]
-    fn split_name_parts(ident: &str) -> Vec<String> {
-        cce_utils::text::split_identifier(ident)
-    }
-
     /// Deduplicate keywords while preserving order
     fn deduplicate(&self, keywords: Vec<String>) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
@@ -273,25 +261,25 @@ mod tests {
 
     #[test]
     fn test_split_name_parts_snake_case() {
-        let result = KeywordExtractor::split_name_parts("get_or_init");
+        let result = cce_utils::text::split_identifier("get_or_init");
         assert_eq!(result, vec!["get", "or", "init"]);
     }
 
     #[test]
     fn test_split_name_parts_camel_case() {
-        let result = KeywordExtractor::split_name_parts("OnceCell");
+        let result = cce_utils::text::split_identifier("OnceCell");
         assert_eq!(result, vec!["once", "cell"]);
     }
 
     #[test]
     fn test_split_name_parts_mixed() {
-        let result = KeywordExtractor::split_name_parts("processUserData");
+        let result = cce_utils::text::split_identifier("processUserData");
         assert_eq!(result, vec!["process", "user", "data"]);
     }
 
     #[test]
     fn test_split_name_parts_with_acronym() {
-        let result = KeywordExtractor::split_name_parts("XMLParser");
+        let result = cce_utils::text::split_identifier("XMLParser");
         assert_eq!(result, vec!["xml", "parser"]);
     }
 

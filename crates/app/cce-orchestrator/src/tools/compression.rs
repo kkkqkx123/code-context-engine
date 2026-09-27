@@ -4,13 +4,11 @@
 //! for large monolithic files. This module is designed for on-demand processing
 //! without side effects (no embedding, no caching, no storage).
 
-mod compression_types;
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub use compression_types::{
+pub use crate::tools::compression_types::{
     BatchCompressionRequest, BatchCompressionResponse, CompressionError, CompressionRequest,
     CompressionResponse, Result,
 };

@@ -24,8 +24,6 @@
 //! let response = tool.search(request).await?;
 //! ```
 
-mod keyword_search_types;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -35,7 +33,7 @@ use cce_storage_sqlite::SqliteClient;
 
 use crate::query::filter::QueryFilter;
 
-pub use keyword_search_types::{
+pub use crate::tools::keyword_search_types::{
     KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
 };
 

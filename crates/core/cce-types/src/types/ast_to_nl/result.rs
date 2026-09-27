@@ -122,20 +122,6 @@ pub struct ConversionResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entity_end_lines: Vec<usize>,
 
-    /// Brief BM25 header text for continuation chunks when a group is split.
-    ///
-    /// This is a condensed version of the BM25 header that includes only:
-    /// - Group name/type (e.g., "once cell inherent_impl")
-    /// - Member names without signatures or return values
-    ///
-    /// Used by the chunker to provide group-level context in continuation
-    /// chunks without the redundancy of repeating the full header.
-    ///
-    /// Example:
-    /// "once cell inherent_impl. Methods: new, with_value, is_initialized, initialize."
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bm25_brief_header: Option<String>,
-
     /// Brief Embedding header text for continuation chunks when a group is split.
     ///
     /// This is a condensed version of the Embedding header that includes only:
@@ -168,7 +154,6 @@ impl Default for ConversionResult {
             source_span: Span::default(),
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
-            bm25_brief_header: None,
             embedding_brief_header: None,
         }
     }
@@ -204,7 +189,6 @@ impl ConversionResult {
             source_span: Span::default(),
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
-            bm25_brief_header: None,
             embedding_brief_header: None,
         }
     }
@@ -234,7 +218,6 @@ impl ConversionResult {
             source_span: Span::default(),
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
-            bm25_brief_header: None,
             embedding_brief_header: None,
         }
     }
@@ -265,7 +248,6 @@ impl ConversionResult {
             source_span: Span::default(),
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
-            bm25_brief_header: None,
             embedding_brief_header: None,
         }
     }
@@ -289,22 +271,6 @@ impl ConversionResult {
     pub fn with_entity_metadata(mut self, metadata: EntityMetadata) -> Self {
         self.entity_metadata = metadata;
         self
-    }
-
-    /// Append index-only context text to both output paths.
-    ///
-    /// Append raw code context text (like Control Flow or Behavior fragments)
-    /// without any symbol transformation.
-    ///
-    /// This method is used for code snippets extracted from source, which should
-    /// preserve their original operators and symbols (e.g., &, *, &&) to maintain
-    /// code correctness. These symbols are critical to understanding code logic
-    /// and should not be converted to natural language.
-    ///
-    /// The text is appended as-is to both BM25 and embedding outputs.
-    /// Metrics (word count and token count) are updated accordingly.
-    pub fn append_index_context_raw(&mut self, extra_text: &str) {
-        self.append_index_context_raw_separate(extra_text, extra_text);
     }
 
     /// Append code context text with separate content for BM25 and embedding.
@@ -647,7 +613,7 @@ mod tests {
         // Code fragment with operators that should NOT be transformed
         let code_fragment =
             "Behavior:\nlet slot: *mut T = self.value.get();\nif (state & MASK) != 0 { }";
-        result.append_index_context_raw(code_fragment);
+        result.append_index_context_raw_separate(code_fragment, code_fragment);
 
         let bm25_text = result.bm25_text.as_ref().expect("bm25 text should exist");
         let embedding_text = result

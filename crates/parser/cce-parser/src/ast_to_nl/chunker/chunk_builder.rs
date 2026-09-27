@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::grouper::EntityGroup;
 use cce_types::ConversionResult;
 use cce_types::entity::{EntityId, EntityKind};
@@ -14,6 +16,8 @@ pub struct SingleChunkContext<'a> {
     pub file_path: &'a str,
     pub path: ChunkPath,
     pub text: &'a str,
+    /// Embedding-path keywords. The BM25 path recomputes keywords from
+    /// content entity ids and ignores this field.
     pub keywords: &'a [String],
 }
 
@@ -29,7 +33,13 @@ pub struct UnsplitContext<'a> {
     pub end_byte: usize,
     pub content_entity_ids: Vec<cce_types::entity::EntityId>,
     pub context_entity_ids: Vec<cce_types::entity::EntityId>,
+    /// Embedding-path keywords. The BM25 path recomputes keywords from
+    /// content entity ids and ignores this field.
     pub keywords: Vec<String>,
+    /// Cross-group parent name for BM25 title and keyword qualification.
+    /// Resolved by the caller from the group tracker; `None` leaves
+    /// parent-less groups and module-level items to the file-stem rule.
+    pub parent_qualifier: Option<String>,
     pub split_reason: SplitReason,
     pub related_groups: Vec<super::result::GroupRelation>,
 }
@@ -108,7 +118,78 @@ impl ChunkBuilder {
         sorted
     }
 
-    fn bm25_title_for_ids(group: &EntityGroup, content_ids: &[EntityId]) -> String {
+    /// Cross-group parent name for a standalone child group.
+    ///
+    /// Resolves `parent_group_id` against previously recorded groups. Module-like
+    /// parents are skipped: a file module is not an ownership qualifier.
+    pub(crate) fn cross_group_parent(
+        group: &EntityGroup,
+        tracker: &GroupTracker,
+    ) -> Option<String> {
+        let parent_id = group.parent_group_id.as_ref()?;
+        let (parent_name, parent_kind) = tracker.lookup_identity(parent_id.as_str())?;
+        if parent_kind.is_module_like() || parent_name.is_empty() || parent_name == group.name {
+            return None;
+        }
+        Some(parent_name)
+    }
+
+    /// File module stem used to qualify module-level free functions.
+    fn module_stem(file_path: &str) -> Option<String> {
+        let stem = Path::new(file_path).file_stem()?.to_string_lossy();
+        if stem.is_empty() {
+            return None;
+        }
+        Some(stem.to_string())
+    }
+
+    /// Qualify a bare BM25 title that carries no ownership information.
+    ///
+    /// Container members are already qualified via the group name. Remaining
+    /// bare titles are cross-group children (qualified by the recorded parent
+    /// name) or module-level free functions (qualified by the file stem).
+    /// Titles that already carry a qualifier are returned unchanged, as are
+    /// non-function groups without a recorded parent.
+    fn qualify_bm25_title(
+        title: String,
+        group: &EntityGroup,
+        parent: Option<&str>,
+        file_path: &str,
+    ) -> String {
+        if title.contains('.') {
+            return title;
+        }
+        if let Some(parent_name) = parent.filter(|p| !p.is_empty()) {
+            return format!("{}.{}", parent_name, title);
+        }
+        if group.kind == EntityKind::Function
+            && let Some(stem) = Self::module_stem(file_path)
+        {
+            return format!("{}.{}", stem, title);
+        }
+        title
+    }
+
+    fn push_keyword_part(
+        result: &mut Vec<String>,
+        seen: &mut std::collections::HashSet<String>,
+        part: &str,
+    ) {
+        let lower = part.to_lowercase();
+        if lower.len() >= 2
+            && !lower.chars().all(|c| c.is_ascii_digit())
+            && seen.insert(lower.clone())
+        {
+            result.push(lower);
+        }
+    }
+
+    fn bm25_title_for_ids(
+        group: &EntityGroup,
+        content_ids: &[EntityId],
+        parent: Option<&str>,
+        file_path: &str,
+    ) -> String {
         let sorted = Self::sorted_content_ids(group, content_ids);
         if let Some(first) = sorted.first() {
             if let Some(name) = Self::entity_name_by_id(group, *first) {
@@ -118,33 +199,36 @@ impl ChunkBuilder {
                 {
                     return format!("{}.{}", group.name, name);
                 }
-                return name;
+                return Self::qualify_bm25_title(name, group, parent, file_path);
             }
         }
-        group.name.to_string()
+        Self::qualify_bm25_title(group.name.to_string(), group, parent, file_path)
     }
 
-    fn bm25_keywords_for_ids(group: &EntityGroup, content_ids: &[EntityId]) -> Vec<String> {
+    fn bm25_keywords_for_ids(
+        group: &EntityGroup,
+        content_ids: &[EntityId],
+        parent: Option<&str>,
+        file_path: &str,
+    ) -> Vec<String> {
         let sorted = Self::sorted_content_ids(group, content_ids);
         let mut seen = std::collections::HashSet::new();
         let mut result = Vec::new();
         for id in &sorted {
             if let Some(name) = Self::entity_name_by_id(group, *id) {
-                let lower = name.to_lowercase();
-                if lower.len() >= 2
-                    && !lower.chars().all(|c| c.is_ascii_digit())
-                    && seen.insert(lower.clone())
-                {
-                    result.push(lower);
-                }
+                Self::push_keyword_part(&mut result, &mut seen, &name);
             }
         }
         let has_member = sorted.iter().any(|id| Some(*id) != group.header_id);
         if has_member && group.group_type.is_container() && !group.name.is_empty() {
-            let parent = group.name.to_lowercase().to_string();
-            if parent.len() >= 2 && seen.insert(parent.clone()) {
-                result.push(parent);
-            }
+            Self::push_keyword_part(&mut result, &mut seen, &group.name);
+        }
+        if let Some(parent_name) = parent.filter(|p| !p.is_empty()) {
+            Self::push_keyword_part(&mut result, &mut seen, parent_name);
+        } else if group.kind == EntityKind::Function
+            && let Some(stem) = Self::module_stem(file_path)
+        {
+            Self::push_keyword_part(&mut result, &mut seen, &stem);
         }
         result
     }
@@ -190,9 +274,20 @@ impl ChunkBuilder {
             );
 
         let (title, keywords) = if ctx.path == ChunkPath::Bm25 {
+            let parent = Self::cross_group_parent(ctx.group, tracker);
             (
-                Some(Self::bm25_title_for_ids(ctx.group, &content_entity_ids)),
-                Self::bm25_keywords_for_ids(ctx.group, &content_entity_ids),
+                Some(Self::bm25_title_for_ids(
+                    ctx.group,
+                    &content_entity_ids,
+                    parent.as_deref(),
+                    ctx.file_path,
+                )),
+                Self::bm25_keywords_for_ids(
+                    ctx.group,
+                    &content_entity_ids,
+                    parent.as_deref(),
+                    ctx.file_path,
+                ),
             )
         } else {
             (Some(ctx.group.name.to_string()), ctx.keywords.to_vec())
@@ -380,9 +475,20 @@ impl ChunkBuilder {
                     } else {
                         content_entity_ids.clone()
                     };
+                    let parent = Self::cross_group_parent(group, tracker);
                     (
-                        Some(Self::bm25_title_for_ids(group, &effective_ids)),
-                        Self::bm25_keywords_for_ids(group, &effective_ids),
+                        Some(Self::bm25_title_for_ids(
+                            group,
+                            &effective_ids,
+                            parent.as_deref(),
+                            file_path,
+                        )),
+                        Self::bm25_keywords_for_ids(
+                            group,
+                            &effective_ids,
+                            parent.as_deref(),
+                            file_path,
+                        ),
                     )
                 } else {
                     (Some(group.name.to_string()), keywords.to_vec())
@@ -480,8 +586,18 @@ impl ChunkBuilder {
                 content_entity_ids.clone()
             };
             (
-                Some(Self::bm25_title_for_ids(ctx.group, &effective_ids)),
-                Self::bm25_keywords_for_ids(ctx.group, &effective_ids),
+                Some(Self::bm25_title_for_ids(
+                    ctx.group,
+                    &effective_ids,
+                    ctx.parent_qualifier.as_deref(),
+                    ctx.file_path,
+                )),
+                Self::bm25_keywords_for_ids(
+                    ctx.group,
+                    &effective_ids,
+                    ctx.parent_qualifier.as_deref(),
+                    ctx.file_path,
+                ),
             )
         } else {
             (Some(ctx.group.name.to_string()), ctx.keywords)
@@ -546,7 +662,11 @@ impl ChunkBuilder {
         }
     }
 
-    pub fn aggregate_keywords(members: &[ConversionResult]) -> Vec<String> {
+    /// Aggregate member keywords for the embedding path.
+    ///
+    /// The BM25 path recomputes titles and keywords per chunk from content
+    /// entity ids and never uses this helper.
+    pub fn aggregate_embedding_keywords(members: &[ConversionResult]) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
         let mut result = Vec::new();
         for member in members {

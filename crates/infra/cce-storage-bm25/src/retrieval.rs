@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::Bm25Error;
-use cce_text::{Bm25TextCleaner, MixedToken};
+use cce_text::MixedToken;
 use tantivy::schema::Value;
 use tantivy::tokenizer::{TextAnalyzer, Token, TokenStream};
 
@@ -258,7 +258,11 @@ impl Bm25Retrieval {
         Ok(search_results)
     }
 
-    /// Parse query text into a dual-form tantivy query
+    /// Parse query text into a single-form tantivy query.
+    ///
+    /// Field weights come straight from the search options: with the default
+    /// cleaner configuration the raw and cleaned query forms are nearly
+    /// identical, so merging both only double-counts the same terms.
     fn parse_query(
         query_text: &str,
         schema: &IndexSchema,
@@ -280,34 +284,16 @@ impl Bm25Retrieval {
             .get("mixed")
             .ok_or_else(|| Bm25Error::Search("mixed tokenizer not registered".to_string()))?;
 
-        let raw = Self::build_query(
+        Ok(Self::build_query(
             query_text,
             schema,
-            tokenizer.clone(),
+            tokenizer,
             searcher,
-            title_weight * 1.5,
-            content_weight * 0.5,
-            keywords_weight * 1.5,
+            title_weight,
+            content_weight,
+            keywords_weight,
             operator,
-        );
-
-        let cleaned = Bm25TextCleaner::new().clean(query_text);
-        let clean = if !cleaned.is_empty() && cleaned != query_text {
-            Some(Self::build_query(
-                &cleaned,
-                schema,
-                tokenizer,
-                searcher,
-                title_weight,
-                content_weight,
-                keywords_weight,
-                operator,
-            ))
-        } else {
-            None
-        };
-
-        Self::merge_dual_form(raw, clean)
+        ))
     }
 
     /// Build a single query form from `query_text`.
@@ -326,7 +312,7 @@ impl Bm25Retrieval {
         let mut clauses: Vec<(tantivy::query::Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
 
         for phrase in phrase_segments {
-            let phrase_query = build_phrase_query(&phrase, schema, &mut tokenizer);
+            let phrase_query = build_phrase_query(&phrase, schema, &mut tokenizer, searcher);
             if let Some(q) = phrase_query {
                 clauses.push((occur_for(operator), q));
             }
@@ -359,20 +345,6 @@ impl Bm25Retrieval {
                 })
         } else {
             Box::new(tantivy::query::BooleanQuery::new(clauses))
-        }
-    }
-
-    /// Merge two query forms (raw + clean) with OR.
-    fn merge_dual_form(
-        raw: Box<dyn tantivy::query::Query>,
-        clean: Option<Box<dyn tantivy::query::Query>>,
-    ) -> Result<Box<dyn tantivy::query::Query>, Bm25Error> {
-        match clean {
-            Some(clean_q) => Ok(Box::new(tantivy::query::BooleanQuery::new(vec![
-                (tantivy::query::Occur::Should, raw),
-                (tantivy::query::Occur::Should, clean_q),
-            ]))),
-            None => Ok(raw),
         }
     }
 
@@ -453,26 +425,29 @@ fn extract_phrases(text: &str) -> (Vec<String>, String) {
 }
 
 /// Build a phrase query for a quoted segment.
+///
+/// Applies the same stopword and zero-document-frequency expansion as plain
+/// terms so quoted and unquoted queries behave consistently.
 fn build_phrase_query(
     phrase: &str,
     schema: &IndexSchema,
     tokenizer: &mut TextAnalyzer,
+    searcher: &tantivy::Searcher,
 ) -> Option<Box<dyn tantivy::query::Query>> {
     let tokens = collect_tokens(tokenizer, phrase);
-    let original_terms: Vec<String> = tokens
+    let expanded_terms: Vec<String> = expand_query_tokens(&tokens, schema, searcher)
         .into_iter()
-        .filter(|t| t.position_length == 1)
-        .map(|t| t.text)
+        .map(|(token, _)| token.text)
         .collect();
 
-    if original_terms.is_empty() {
+    if expanded_terms.is_empty() {
         return None;
     }
 
     let mut field_queries: Vec<(tantivy::query::Occur, Box<dyn tantivy::query::Query>)> =
         Vec::new();
     for field in [schema.title, schema.content, schema.keywords] {
-        let terms: Vec<tantivy::Term> = original_terms
+        let terms: Vec<tantivy::Term> = expanded_terms
             .iter()
             .map(|t| tantivy::Term::from_field_text(field, t))
             .collect();

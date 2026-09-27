@@ -45,6 +45,21 @@ impl BoundaryLevel {
         }
     }
 
+    /// Path-aware descent: the BM25 path skips sentence, line, and paragraph
+    /// levels and falls straight through to the hard token cut, so over-limit
+    /// text is only ever subdivided at declaration boundaries or by truncation.
+    fn next_for_path(self, path: ChunkPath) -> Self {
+        if path != ChunkPath::Bm25 {
+            return self.next();
+        }
+        match self {
+            Self::NestedGroups => Self::Entities,
+            Self::Entities | Self::Sentences | Self::Lines | Self::Paragraphs | Self::Tokens => {
+                Self::Tokens
+            }
+        }
+    }
+
     /// Boundary source that best sub-divides an oversized piece produced by
     /// `self`: sentence-end positions inside entity/nested-group text,
     /// newlines inside sentence/paragraph text, hard token cut for lines.
@@ -54,6 +69,15 @@ impl BoundaryLevel {
             Self::Sentences | Self::Paragraphs => Self::Lines,
             Self::Lines | Self::Tokens => Self::Tokens,
         }
+    }
+
+    /// Path-aware subdivision: the BM25 path never subdivides into sentences
+    /// or lines; oversized declaration pieces go straight to the hard cut.
+    fn subdivide_for_path(self, path: ChunkPath) -> Self {
+        if path != ChunkPath::Bm25 {
+            return self.subdivide();
+        }
+        Self::Tokens
     }
 
     fn from_strategy(strategy: SplitStrategy) -> Self {
@@ -187,7 +211,7 @@ impl TextSplitter {
                 path,
                 nl_boundaries,
                 range,
-                level.next(),
+                level.next_for_path(path),
                 inherit_entity_ids,
             );
         }
@@ -223,7 +247,7 @@ impl TextSplitter {
                         path,
                         nl_boundaries,
                         b.start_byte..b.end_byte,
-                        level.subdivide(),
+                        level.subdivide_for_path(path),
                         &piece_ids,
                     ));
                 }
@@ -641,14 +665,14 @@ mod tests {
     }
 
     #[test]
-    fn test_split_range_oversized_paragraph_subdivides_by_lines() {
+    fn test_split_range_oversized_paragraph_subdivides_by_hard_cut_on_bm25() {
         let config = ChunkingConfig {
             max_bm25_words: 3,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
-        // Oversized paragraphs (bounded by blank lines) with internal newlines:
-        // the recursion must subdivide each paragraph at the lines level.
+        // The BM25 path never subdivides into sentences or lines: oversized
+        // paragraphs go straight to the hard token cut.
         let text = "word1 word2 word3 word4 word5\nword6 word7\n\nword8 word9 word10 word11 word12\nword13 word14";
         let boundaries = splitter.split_range(
             text,
@@ -663,8 +687,8 @@ mod tests {
         assert!(
             boundaries
                 .iter()
-                .any(|b| b.split_reason == SplitReason::LineBoundary),
-            "oversized paragraph should be subdivided by lines"
+                .all(|b| b.split_reason == SplitReason::HardLimit),
+            "BM25 oversized paragraphs must be subdivided by hard cut only"
         );
         for b in &boundaries {
             let words = text[b.start_byte..b.end_byte].split_whitespace().count();

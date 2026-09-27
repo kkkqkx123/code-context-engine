@@ -374,7 +374,6 @@ mod tests {
             source_span: Span::default(),
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
-            bm25_brief_header: None,
             embedding_brief_header: None,
         }
     }
@@ -429,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cross_group_merge_multiple_small_groups_bm25() {
+    fn test_cross_group_no_merge_bm25_chunks_stay_independent() {
         let config = ChunkingConfig {
             min_chunk_bm25_words: 80,
             max_bm25_words: 150,
@@ -459,8 +458,16 @@ mod tests {
             .filter(|c| c.path == ChunkPath::Bm25)
             .collect();
 
-        assert_eq!(bm25_chunks.len(), 1, "Should merge all BM25 chunks into 1");
+        assert_eq!(
+            bm25_chunks.len(),
+            2,
+            "BM25 chunks must not be merged across groups"
+        );
         assert_eq!(bm25_chunks[0].path, ChunkPath::Bm25);
+        assert_ne!(
+            bm25_chunks[0].source_group_id, bm25_chunks[1].source_group_id,
+            "each BM25 chunk keeps its own group"
+        );
     }
 
     #[test]
@@ -631,20 +638,16 @@ mod tests {
             );
         }
 
+        // BM25 chunks are never merged across groups: each group yields
+        // independent chunks carrying per-group indices.
         let bm25_chunks: Vec<_> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
             .collect();
-        for (i, chunk) in bm25_chunks.iter().enumerate() {
-            assert_eq!(
-                chunk.chunk_index, i,
-                "bm25 chunk_index should be normalized"
-            );
-            assert_eq!(
-                chunk.total_chunks,
-                bm25_chunks.len(),
-                "bm25 total_chunks should match path count"
-            );
+        assert_eq!(bm25_chunks.len(), 2);
+        for chunk in &bm25_chunks {
+            assert_eq!(chunk.chunk_index, 0);
+            assert_eq!(chunk.total_chunks, 1);
         }
     }
 
@@ -700,7 +703,6 @@ mod tests {
             source_span: Span::default(),
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
-            bm25_brief_header: None,
             embedding_brief_header: None,
         }
     }
@@ -768,7 +770,6 @@ mod tests {
             source_span: Span::default(),
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
-            bm25_brief_header: None,
             embedding_brief_header: None,
         };
 

@@ -61,7 +61,7 @@ pub fn chunk_group_with_conversions(
                     keywords: &header.keywords,
                     path: ChunkPath::Bm25,
                     strategy: if nl_boundaries.is_empty() {
-                        SplitStrategy::for_group_type(group.group_type)
+                        SplitStrategy::for_bm25_group_type(group.group_type)
                     } else {
                         SplitStrategy::ByNlEntityBoundaries
                     },
@@ -137,10 +137,6 @@ fn smart_chunk_with_header(
         .cloned()
         .unwrap_or_default();
 
-    let brief_bm25 = header_conv
-        .and_then(|c| c.bm25_brief_header.as_ref())
-        .cloned()
-        .unwrap_or_default();
     let brief_embedding = header_conv
         .and_then(|c| c.embedding_brief_header.as_ref())
         .cloned()
@@ -149,9 +145,13 @@ fn smart_chunk_with_header(
     let mut all_chunks = ChunkOutput::default();
 
     if !header_bm25.is_empty() || member_convs.iter().any(|c| c.bm25_text.is_some()) {
+        // Continuation chunks carry member text only. Repeating the class
+        // header in every BM25 continuation dilutes each chunk's topic and
+        // violates the one-entity-one-block shape; titles and keywords
+        // already identify the owner per chunk.
         let texts = HeaderTexts {
-            first: helper.compact_header(&header_bm25, &brief_bm25, ChunkPath::Bm25),
-            continuation: helper.compact_header(&brief_bm25, &brief_bm25, ChunkPath::Bm25),
+            first: helper.compact_header(&header_bm25, "", ChunkPath::Bm25),
+            continuation: String::new(),
         };
         let path_input = PathInput {
             header_conv,
@@ -254,15 +254,26 @@ fn process_path(
         );
         let (combined_text, member_entity_ids) =
             assemble_combined_text(header_text, &members, input.path);
+        // The BM25 path recomputes keywords per chunk from content entity
+        // ids; the aggregate is only consumed by embedding chunks.
+        let member_keywords = if input.path == ChunkPath::Embedding {
+            ChunkBuilder::aggregate_embedding_keywords(&members)
+        } else {
+            Vec::new()
+        };
         let chunk_input = super::chunker::ChunkInput {
             infra: ctx.infra,
             group: ctx.group,
             text: &combined_text,
             file_path: ctx.file_path,
-            keywords: &ChunkBuilder::aggregate_keywords(&members),
+            keywords: &member_keywords,
             path: input.path,
             strategy: if nl_boundaries.is_empty() {
-                SplitStrategy::for_group_type(ctx.group.group_type)
+                if input.path == ChunkPath::Bm25 {
+                    SplitStrategy::for_bm25_group_type(ctx.group.group_type)
+                } else {
+                    SplitStrategy::for_group_type(ctx.group.group_type)
+                }
             } else {
                 SplitStrategy::ByNlEntityBoundaries
             },

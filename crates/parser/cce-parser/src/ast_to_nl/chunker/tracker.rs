@@ -5,6 +5,8 @@
 use compact_str::CompactString;
 use std::collections::HashMap;
 
+use cce_types::entity::EntityKind;
+
 use crate::grouper::EntityGroup;
 
 use super::result::{GroupRelation, GroupRelationType};
@@ -17,6 +19,8 @@ pub struct GroupTracker {
     relation_graph: HashMap<CompactString, Vec<GroupRelation>>,
     /// Current group index
     current_index: usize,
+    /// Group id to (name, kind) for cross-group parent qualification
+    identities: HashMap<CompactString, (CompactString, EntityKind)>,
 }
 
 impl GroupTracker {
@@ -26,12 +30,16 @@ impl GroupTracker {
             group_sequence: Vec::new(),
             relation_graph: HashMap::new(),
             current_index: 0,
+            identities: HashMap::new(),
         }
     }
 
     /// Record group processing
     pub fn record_group(&mut self, group: &EntityGroup) {
         let group_id = group.group_id.clone();
+        self.identities
+            .entry(group_id.clone())
+            .or_insert_with(|| (group.name.clone(), group.kind));
 
         // Establish relation with previous group
         if let Some(prev_id) = self.group_sequence.last().cloned() {
@@ -110,6 +118,17 @@ impl GroupTracker {
         relations
     }
 
+    /// Look up a previously recorded group's (name, kind) by id.
+    ///
+    /// Used to qualify cross-group children (`Parent.member`) when the
+    /// parent was processed as an independent group. Returns `None` when
+    /// the parent has not been recorded yet.
+    pub fn lookup_identity(&self, group_id: &str) -> Option<(String, EntityKind)> {
+        self.identities
+            .get(group_id)
+            .map(|(name, kind)| (name.to_string(), *kind))
+    }
+
     /// Get current group ID
     pub fn current_group_id(&self) -> Option<&CompactString> {
         if self.current_index > 0 {
@@ -133,6 +152,7 @@ impl GroupTracker {
         self.group_sequence.clear();
         self.relation_graph.clear();
         self.current_index = 0;
+        self.identities.clear();
     }
 
     /// Get total tracked groups

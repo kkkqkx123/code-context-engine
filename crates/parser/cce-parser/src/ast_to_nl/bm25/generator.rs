@@ -6,7 +6,7 @@
 use crate::ast_to_nl::bm25::keyword_extractor::KeywordExtractor;
 use crate::ast_to_nl::bm25::templates::GroupTemplateDispatcher;
 use crate::ast_to_nl::common::create_standalone_group;
-use crate::grouper::types::{EntityGroup, GroupType};
+use crate::grouper::types::EntityGroup;
 use cce_config::Bm25GeneratorConfig;
 use cce_text::Bm25TextCleaner;
 use cce_types::GroupedEntity;
@@ -41,27 +41,12 @@ impl Bm25Generator {
     /// Generate BM25 text for an entity group
     ///
     /// Returns a single text description optimized for BM25 keyword matching.
-    /// Nested groups are recursively processed and included with their parent.
+    /// Nested groups are handled as independent groups by the grouping pipeline
+    /// and are not merged into the parent text here.
     pub fn generate_for_group(&self, group: &EntityGroup) -> String {
-        let mut parts = Vec::new();
-
         let text = self.template_dispatcher.dispatch(group);
 
-        // Clean for BM25 (remove redundant words)
-        let cleaned = self.bm25_text_cleaner.clean(&text);
-        if !cleaned.is_empty() {
-            parts.push(cleaned);
-        }
-
-        // Recursively process nested groups (e.g., inner classes, nested structs)
-        for nested in group.nested_groups.iter() {
-            let nested_text = self.generate_for_group(nested);
-            if !nested_text.is_empty() {
-                parts.push(nested_text);
-            }
-        }
-
-        parts.join(" | ")
+        self.bm25_text_cleaner.clean(&text)
     }
 
     /// Generate BM25 text for a single entity
@@ -72,40 +57,6 @@ impl Bm25Generator {
         // Create a standalone group from the entity
         let group = create_standalone_group(entity);
         self.generate_for_group(&group)
-    }
-
-    /// Generate a brief header for continuation chunks when a group is split.
-    ///
-    /// Returns a condensed description containing only:
-    /// - Group name/type (e.g., "once cell inherent_impl")
-    ///
-    /// This provides group-level context without the redundancy of
-    /// repeating the full header in every chunk.
-    ///
-    /// For merged fragment groups, returns a non-content fallback brief
-    /// to avoid repeating entity descriptions in every continuation chunk.
-    pub fn generate_brief_for_group(&self, group: &EntityGroup) -> String {
-        if matches!(group.group_type, GroupType::MergedFragments) {
-            return self.fallback_brief(group);
-        }
-        let text = self.template_dispatcher.dispatch(group);
-        let group_desc = text
-            .split(" | ")
-            .next()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| self.fallback_brief(group));
-
-        let normalized = group_desc.trim_end_matches('.');
-        format!("{}.", normalized)
-    }
-
-    /// Fallback brief description when template dispatcher doesn't produce output
-    fn fallback_brief(&self, group: &EntityGroup) -> String {
-        let kind_name = format!("{:?}", group.kind).to_lowercase();
-        let group_name = group.name.as_str();
-        format!("{} {}", group_name, kind_name)
     }
 
     /// Extract keywords for BM25 indexing

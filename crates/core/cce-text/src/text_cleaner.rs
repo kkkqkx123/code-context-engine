@@ -150,24 +150,17 @@ mod tests {
     #[test]
     fn test_clean_complex_example() {
         let cleaner = Bm25TextCleaner::new();
-        let text = "Function 'calculate_total' (normalized: 'calculate total') that does 'Calculates the total price' with parameters 'price: f64, quantity: i32' that returns 'f64', defined in file 'calculator.rs' within module 'math'. Keywords: calculate, total, price.";
+        let text = "math.calculate_total (function).\nfn calculate_total(price: f64, quantity: i32) -> f64 {\nprice * quantity\n}";
         let cleaned = cleaner.clean(text);
 
-        assert!(!cleaned.contains('\''));
-        assert!(cleaned.contains("that does"));
-        assert!(cleaned.contains("with parameters"));
-        assert!(cleaned.contains("that returns"));
-        assert!(cleaned.contains("defined in file"));
-        assert!(cleaned.contains("within module"));
-
-        // Quotes removed, identifiers preserved as-is
+        // Identity line and source body pass through; only quotes and
+        // whitespace are normalized.
+        assert!(cleaned.contains("math.calculate_total"));
         assert!(cleaned.contains("calculate_total"));
         assert!(cleaned.contains("price"));
         assert!(cleaned.contains("f64"));
         assert!(cleaned.contains("quantity"));
         assert!(cleaned.contains("i32"));
-        assert!(cleaned.contains("calculator.rs"));
-        assert!(cleaned.contains("math"));
     }
 
     #[test]

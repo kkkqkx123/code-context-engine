@@ -115,42 +115,9 @@ pub struct Bm25SearchOptions {
     pub term_operator: TermOperator,
 }
 
-/// Conversion from ConversionResult to Bm25Document
-impl From<&cce_types::ConversionResult> for Bm25Document {
-    fn from(result: &cce_types::ConversionResult) -> Self {
-        let mut fields = HashMap::new();
-
-        // Title field (high weight) - entity/function name for ranking
-        fields.insert("title".to_string(), result.name.clone());
-
-        // Content field (normal weight) - BM25 text
-        if let Some(ref bm25_text) = result.bm25_text {
-            fields.insert("content".to_string(), bm25_text.clone());
-        }
-
-        // Keywords field (for keyword search boosting)
-        if !result.keywords.is_empty() {
-            fields.insert("keywords".to_string(), result.keywords.join(" "));
-        }
-
-        // File path field (for path-based filtering)
-        fields.insert("file_path".to_string(), result.file_path.clone());
-
-        // Document ID: kind:name format (legacy, for backward compatibility)
-        let document_id = format!("{}:{}", result.kind, result.name);
-
-        Self {
-            document_id,
-            fields,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_types::ConversionResult;
-    use cce_types::{EntityId, EntityKind};
 
     #[test]
     fn test_bm25_document_builder() {
@@ -165,23 +132,27 @@ mod tests {
     }
 
     #[test]
-    fn test_conversion_result_to_bm25_document() {
-        let result = ConversionResult {
-            entity_id: EntityId(1),
-            kind: EntityKind::Function,
-            name: "test_func".to_string(),
-            file_path: "test.rs".to_string(),
-            bm25_text: Some("test content".to_string()),
-            embedding_text: None,
-            keywords: vec!["test".to_string(), "func".to_string()],
-            ..Default::default()
-        };
+    fn test_bm25_document_chunk_shape() {
+        // Production documents are built from chunked results (see the storage
+        // coordinator mapping): per-chunk title, content text, and keywords.
+        let doc = Bm25Document::new("1::1::group_1_bm25_0")
+            .with_field("chunk_id", "group_1_bm25_0")
+            .with_field("title", "calculator.calculate_total")
+            .with_field(
+                "content",
+                "calculator.calculate_total (function).\nfn calculate_total()",
+            )
+            .with_field("keywords", "calculate_total calculator")
+            .with_field("file_path", "calculator.rs");
 
-        let doc = Bm25Document::from(&result);
-        assert_eq!(doc.document_id, "function:test_func");
-        // Title field is stored for ranking (high weight in BM25 search)
-        assert_eq!(doc.fields.get("title"), Some(&"test_func".to_string()));
-        assert_eq!(doc.fields.get("content"), Some(&"test content".to_string()));
-        assert_eq!(doc.fields.get("keywords"), Some(&"test func".to_string()));
+        assert_eq!(
+            doc.get_field("title"),
+            Some(&"calculator.calculate_total".to_string())
+        );
+        assert_eq!(
+            doc.get_field("keywords"),
+            Some(&"calculate_total calculator".to_string())
+        );
+        assert!(doc.has_field("content"));
     }
 }

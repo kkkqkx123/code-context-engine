@@ -93,7 +93,11 @@ mod tests {
         let dispatcher = GroupTemplateDispatcher::new();
         let text = dispatcher.dispatch(&group);
 
-        assert!(text.contains("data"));
+        assert!(text.contains("User"));
         assert!(text.contains("name"));
+        assert!(
+            !text.contains("data class"),
+            "short template keeps the identity line only: {text}"
+        );
     }
 }

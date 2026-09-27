@@ -58,7 +58,13 @@ pub mod ast_diagnosis;
 pub mod compression;
 pub mod file_fold;
 pub mod keyword_search;
-pub mod symbol_lookup;
+
+pub(crate) mod compression_types;
+pub(crate) mod find_references;
+pub(crate) mod get_symbols;
+pub(crate) mod goto_definition;
+pub(crate) mod keyword_search_types;
+pub(crate) mod symbol_lookup_types;
 
 pub use ast_diagnosis::{
     AstDiagnosis, DiagnosisError, DiagnosisRequest, DiagnosisResponse, Diagnostic, DiagnosticKind,
@@ -69,14 +75,16 @@ pub use compression::{
     CompressionResponse, CompressionRetrieval,
 };
 pub use file_fold::{FileFoldMode, FileFoldRequest, FileFoldResponse, FileFoldTool};
+pub use find_references::{FindReferencesConfig, FindReferencesTool};
+pub use get_symbols::GetSymbolsTool;
+pub use goto_definition::GotoDefinitionTool;
 pub use keyword_search::{
     KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
     KeywordSearchTool,
 };
-pub use symbol_lookup::{
-    DefinitionCode, DefinitionLocation, FileSymbolResult, FindReferencesConfig,
-    FindReferencesRequest, FindReferencesResponse, FindReferencesTool, GetSymbolsRequest,
-    GetSymbolsResponse, GetSymbolsTool, GotoDefinitionRequest, GotoDefinitionResponse,
-    GotoDefinitionTool, GroupedReferences, ReferenceLocation, SymbolInfo, SymbolKind,
+pub use symbol_lookup_types::{
+    DefinitionCode, DefinitionLocation, FileSymbolResult, FindReferencesRequest,
+    FindReferencesResponse, GetSymbolsRequest, GetSymbolsResponse, GotoDefinitionRequest,
+    GotoDefinitionResponse, GroupedReferences, ReferenceLocation, SymbolInfo, SymbolKind,
     SymbolLookupError,
 };

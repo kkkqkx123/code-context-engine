@@ -20,6 +20,19 @@ pub enum SplitStrategy {
 }
 
 impl SplitStrategy {
+    /// Split strategy for the BM25 path.
+    ///
+    /// Only declaration boundaries and the hard token cut are allowed:
+    /// sentence, paragraph, and line fallbacks would slice module text into
+    /// topic-less fragments and dilute rare terms.
+    pub fn for_bm25_group_type(group_type: GroupType) -> Self {
+        match group_type {
+            GroupType::ClassWithNestedClasses => SplitStrategy::ByNestedGroups,
+            GroupType::StructWithNestedStructs => SplitStrategy::ByNestedGroups,
+            _ => SplitStrategy::ByMembers,
+        }
+    }
+
     /// Get default strategy for group type
     pub fn for_group_type(group_type: GroupType) -> Self {
         match group_type {
@@ -74,6 +87,22 @@ mod tests {
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::FunctionWithLogicalBlocks),
             SplitStrategy::BySentences
+        );
+        assert_eq!(
+            SplitStrategy::for_bm25_group_type(GroupType::FunctionWithLogicalBlocks),
+            SplitStrategy::ByMembers
+        );
+        assert_eq!(
+            SplitStrategy::for_bm25_group_type(GroupType::Standalone),
+            SplitStrategy::ByMembers
+        );
+        assert_eq!(
+            SplitStrategy::for_bm25_group_type(GroupType::MergedFragments),
+            SplitStrategy::ByMembers
+        );
+        assert_eq!(
+            SplitStrategy::for_bm25_group_type(GroupType::ClassWithNestedClasses),
+            SplitStrategy::ByNestedGroups
         );
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::MergedFragments),

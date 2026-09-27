@@ -1,17 +1,20 @@
-//! BM25 hybrid enhanced text generation
+//! BM25 index text generation
 //!
-//! This module generates BM25-optimized text that preserves key entities
-//! (function names, types, file paths) while adding natural language descriptions.
+//! This module generates BM25-optimized text that keeps source identifiers
+//! verbatim so the shared tokenizer can produce whole-identifier and split
+//! forms for exact-spelling and fuzzy recall.
 //!
 //! # Output Format
 //!
-//! BM25 text includes:
-//! - Original function/class names (preserved so the tokenizer can produce
-//!   whole-identifier tokens for spelling-accurate recall)
-//! - Normalized names (for fuzzy matching)
-//! - Parameters and types (for API documentation)
-//! - File path and module context (for navigation)
-//! - Keywords (for keyword search)
+//! BM25 text for an entity is an identity line plus real content:
+//! - Identity: signature (or `name (kind).`) with the declaration name written
+//!   once, qualified as `parent.member` by the converter
+//! - Doc comment: original sentences with comment markers stripped
+//! - Behavior facts and uncovered body: de-commented source text appended by
+//!   the index enrichment pass (never a natural-language restatement)
+//!
+//! Parameters, return types, and call targets appear only in this content,
+//! never in the boosted keyword field.
 
 pub mod generator;
 pub mod keyword_extractor;

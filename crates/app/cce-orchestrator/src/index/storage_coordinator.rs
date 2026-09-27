@@ -139,7 +139,7 @@ impl StorageCoordinator {
     }
 
     /// Set the embedding stage wall-clock deadline in seconds (0 = no deadline).
-    pub(crate) fn set_embedding_stage_timeout(&mut self, secs: u64) {
+    pub fn set_embedding_stage_timeout(&mut self, secs: u64) {
         self.embedding_stage_timeout_secs = secs;
     }
 

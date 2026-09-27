@@ -28,7 +28,7 @@ impl GroupTemplateBase for GetterSetterTemplate {}
 
 impl GroupTemplate for GetterSetterTemplate {
     fn generate(&self, group: &EntityGroup) -> String {
-        format!("{} data class", group.name)
+        format!("{} (getter/setter).", group.name)
     }
 }
 
@@ -36,9 +36,9 @@ impl super::group_trait::PatternGroupTemplate<GetterSetterSummary> for GetterSet
     fn generate_with_pattern(&self, group: &EntityGroup, summary: &GetterSetterSummary) -> String {
         let name = group.name.as_str();
         if summary.properties.is_empty() {
-            format!("{} data class.", name)
+            format!("{} (getter/setter).", name)
         } else {
-            format!("{} data class {}.", name, summary.properties.join(" "))
+            format!("{} (getter/setter) {}.", name, summary.properties.join(" "))
         }
     }
 }

@@ -126,7 +126,6 @@ impl GroupChunker {
         let embedding_text = conversion.embedding_text.clone().unwrap_or_default();
 
         let mut all_chunks = ChunkOutput::default();
-        let strategy = SplitStrategy::for_group_type(group.group_type);
 
         let infra = ChunkInfrastructure {
             config: &self.config,
@@ -142,7 +141,7 @@ impl GroupChunker {
                 file_path,
                 keywords: &conversion.keywords,
                 path: ChunkPath::Bm25,
-                strategy,
+                strategy: SplitStrategy::for_bm25_group_type(group.group_type),
                 nl_boundaries: None,
                 header_mode: None,
             };
@@ -165,7 +164,7 @@ impl GroupChunker {
                 file_path,
                 keywords: &conversion.keywords,
                 path: ChunkPath::Embedding,
-                strategy,
+                strategy: SplitStrategy::for_group_type(group.group_type),
                 nl_boundaries: None,
                 header_mode: None,
             };
@@ -173,10 +172,6 @@ impl GroupChunker {
         }
 
         let total = all_chunks.chunks.len();
-        if bm25_count > 0 {
-            self.overlap_manager
-                .apply_overlap(&mut all_chunks.chunks[..bm25_count], ChunkPath::Bm25);
-        }
         if bm25_count < total {
             self.overlap_manager
                 .apply_overlap(&mut all_chunks.chunks[bm25_count..], ChunkPath::Embedding);
@@ -301,7 +296,7 @@ impl GroupChunker {
             .filter(|c| c.path == ChunkPath::Embedding)
             .cloned()
             .collect();
-        let mut bm25_chunks: Vec<ChunkedResult> = all_chunks
+        let bm25_chunks: Vec<ChunkedResult> = all_chunks
             .chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
@@ -309,15 +304,14 @@ impl GroupChunker {
             .collect();
         let dropped_blank_segments = all_chunks.dropped_blank_segments;
 
+        // Cross-group merging and word overlap stay on the embedding path only.
+        // Merging BM25 chunks across groups would mix independent entities
+        // into one block, and overlap would repeat content across blocks.
         emb_chunks =
             super::merge::merge_small_chunks_cross_group(emb_chunks, &group_spans, &self.config);
-        bm25_chunks =
-            super::merge::merge_small_chunks_cross_group(bm25_chunks, &group_spans, &self.config);
 
         self.overlap_manager
             .apply_overlap(&mut emb_chunks, ChunkPath::Embedding);
-        self.overlap_manager
-            .apply_overlap(&mut bm25_chunks, ChunkPath::Bm25);
 
         let total_chunks = emb_chunks.len() + bm25_chunks.len();
 
@@ -596,6 +590,7 @@ fn build_unsplit_header_chunk(
         content_entity_ids,
         context_entity_ids,
         keywords: keywords.to_vec(),
+        parent_qualifier: ChunkBuilder::cross_group_parent(group, tracker),
         split_reason,
         related_groups: tracker.get_related_groups(&group.group_id),
     })

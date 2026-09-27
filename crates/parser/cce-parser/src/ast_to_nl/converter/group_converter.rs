@@ -363,15 +363,11 @@ impl super::AstToNlConverter {
             })
             .collect();
 
-        // Apply child enrichments — inject parent context as a prefix for embedding path
+        // Apply child enrichments — inject parent context as a prefix for embedding path.
+        // Keywords stay as the entity's own declaration name; the BM25 path
+        // recomputes titles and keywords per chunk in the chunk builder.
         for (child_idx, parent_name, parent_kind) in child_enrichments {
             if let Some(ref mut header) = group_conversions[child_idx].header_conversion {
-                if !parent_kind.is_module_like()
-                    && !header.keywords.contains(&parent_name)
-                    && header.name != parent_name
-                {
-                    header.keywords.push(parent_name.clone());
-                }
                 if let Some(ref mut emb_text) = header.embedding_text {
                     if !emb_text.is_empty() {
                         // Determine the context prefix format based on entity kind.
@@ -484,12 +480,6 @@ impl super::AstToNlConverter {
                         new_text.push_str(emb_text);
                         *emb_text = new_text;
                     }
-                }
-                if !member.keywords.contains(&parent_name)
-                    && member.name != parent_name
-                    && !parent_name.is_empty()
-                {
-                    member.keywords.push(parent_name.clone());
                 }
             }
         }
@@ -696,23 +686,15 @@ impl super::AstToNlConverter {
                 Vec::new()
             };
 
-            let (bm25_brief, embedding_brief) = if group.members.is_empty() {
-                (None, None)
+            let embedding_brief = if group.members.is_empty() {
+                None
+            } else if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
+                let brief = self.embedding_generator.generate_brief_for_group(group);
+                Some(super::entity_converter::qualify_group_function_heads(
+                    group, file_path, &brief,
+                ))
             } else {
-                let bm25_brief = if matches!(mode, OutputMode::Bm25 | OutputMode::Both) {
-                    Some(self.bm25_generator.generate_brief_for_group(group))
-                } else {
-                    None
-                };
-                let embedding_brief = if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
-                    let brief = self.embedding_generator.generate_brief_for_group(group);
-                    Some(super::entity_converter::qualify_group_function_heads(
-                        group, file_path, &brief,
-                    ))
-                } else {
-                    None
-                };
-                (bm25_brief, embedding_brief)
+                None
             };
 
             let mut header_result = match mode {
@@ -764,7 +746,6 @@ impl super::AstToNlConverter {
                 }
             }
 
-            header_result.bm25_brief_header = bm25_brief;
             header_result.embedding_brief_header = embedding_brief;
 
             results.push(header_result);
