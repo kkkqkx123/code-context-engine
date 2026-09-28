@@ -40,6 +40,15 @@ pub fn instantiate_type_shape(
             inner: Box::new(instantiate_type_shape(inner, bindings)),
             mutable: *mutable,
         },
+        TypeShape::Function { params, ret } => TypeShape::Function {
+            params: params
+                .iter()
+                .map(|p| instantiate_type_shape(p, bindings))
+                .collect(),
+            ret: ret
+                .as_ref()
+                .map(|r| Box::new(instantiate_type_shape(r, bindings))),
+        },
         TypeShape::Named(_) | TypeShape::Wildcard { .. } => shape.clone(),
     }
 }
@@ -66,6 +75,16 @@ pub enum TypeShape {
     Param(String),
     /// Wildcard type argument (e.g., `?`, `? extends Number`)
     Wildcard { bound: Option<String> },
+    /// Function type (e.g., Rust `Fn(T) -> R` / `fn(T) -> R`,
+    /// TypeScript `(a: T) => R`, Go `func(T) R`).
+    ///
+    /// Only produced by the per-language whitelisted syntax in
+    /// [`parse_type_shape`]; every other spelling stays `Named`/`Generic`
+    /// so callers never guess a function shape.
+    Function {
+        params: Vec<TypeShape>,
+        ret: Option<Box<TypeShape>>,
+    },
 }
 
 impl TypeShape {
@@ -108,6 +127,17 @@ pub fn type_shape_to_string(shape: &TypeShape) -> String {
         TypeShape::Param(p) => p.clone(),
         TypeShape::Wildcard { bound: Some(b) } => format!("? extends {}", b),
         TypeShape::Wildcard { bound: None } => "?".to_string(),
+        TypeShape::Function { params, ret } => {
+            let params_str = params
+                .iter()
+                .map(type_shape_to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            match ret {
+                Some(r) => format!("fn({}) -> {}", params_str, type_shape_to_string(r)),
+                None => format!("fn({})", params_str),
+            }
+        }
     }
 }
 
@@ -383,6 +413,8 @@ pub fn shape_members(shape: &TypeShape) -> Vec<String> {
         TypeShape::Param(p) => vec![p.clone()],
         TypeShape::Wildcard { bound: Some(b), .. } => vec![b.clone()],
         TypeShape::Wildcard { bound: None, .. } => vec!["?".to_string()],
+        // A function type carries no named member to narrow on.
+        TypeShape::Function { .. } => Vec::new(),
     }
 }
 

@@ -809,6 +809,7 @@ pub fn is_falsy_type(shape: &TypeShape, language: Language) -> bool {
         TypeShape::Reference { inner, .. } => is_falsy_type(inner, language),
         TypeShape::Param(_) => false,
         TypeShape::Wildcard { .. } => false,
+        TypeShape::Function { .. } => false,
     }
 }
 

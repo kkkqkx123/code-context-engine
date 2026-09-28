@@ -15,6 +15,7 @@ use crate::symbol_table::type_index::TypeMemberIndex;
 use crate::type_inference::TypeInferenceContext;
 use crate::type_inference::cross_file::CrossFilePropagator;
 use crate::type_inference::overload::{OverloadCandidate, OverloadSet};
+use crate::type_inference::types::binding::TypeBinding;
 use crate::type_inference::types::{TypeShape, parse_type_shape};
 use cce_metrics::domain::pipeline::RelationMetrics;
 use cce_types::entity::EntityId;
@@ -603,6 +604,28 @@ impl ProjectSymbolTable {
     /// Clear all inference cache
     pub fn clear_inference_cache(&self) {
         self.inference_cache.clear();
+    }
+
+    /// Look up the declared parameter types of a function-like entity.
+    ///
+    /// Reads the per-file type inference context for `file_path` and returns
+    /// the parameter bindings recorded for `entity_id`. Empty when the file
+    /// has no type context or the entity records no parameters.
+    ///
+    /// Used by the resolver's type-driven callback binding: a call-site
+    /// argument may only be bound as a callback when the corresponding
+    /// formal parameter parses to a `TypeShape::Function`. This keeps the
+    /// binding type-driven instead of name-driven.
+    pub fn parameter_types_for_entity(
+        &self,
+        file_path: &str,
+        entity_id: EntityId,
+    ) -> Vec<TypeBinding> {
+        let normalized = normalize_project_path(file_path);
+        self.type_inference_contexts
+            .get(&normalized)
+            .and_then(|ctx| ctx.get_parameter_types(entity_id).map(|b| b.to_vec()))
+            .unwrap_or_default()
     }
 
     /// Load parameter and return types for an overload candidate.

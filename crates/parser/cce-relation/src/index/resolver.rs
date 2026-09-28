@@ -511,9 +511,18 @@ impl RelationResolver {
             .is_some_and(|t| matches!(t, ExternalCallType::Unknown { .. }))
         {
             if let Some(metrics) = &self.metrics {
-                metrics.record_unresolved(
-                    cce_types::relation::UnresolvedReason::SymbolNotFound.as_str(),
-                );
+                // Placeholder callees (`<closure>` / `<func_literal>`) are
+                // anonymous syntax, not resolution failures: count them
+                // under their own reason instead of `SymbolNotFound`.
+                let is_literal_callee = raw_data.dst_name.len() > 2
+                    && raw_data.dst_name.starts_with('<')
+                    && raw_data.dst_name.ends_with('>');
+                let reason = if is_literal_callee {
+                    "closure_literal"
+                } else {
+                    cce_types::relation::UnresolvedReason::SymbolNotFound.as_str()
+                };
+                metrics.record_unresolved(reason);
             }
         }
 
@@ -970,18 +979,164 @@ impl RelationResolver {
         // Build the scope map once per file instead of per relation.
         let entity_map: HashMap<EntityId, &Entity> =
             parsed.entities.iter().map(|e| (e.id, e)).collect();
-        raw_relations
-            .iter()
-            .filter_map(|raw_data| {
-                self.resolve_with_scope_map(
+        let mut out: Vec<ResolvedRelation> = Vec::new();
+        for raw_data in raw_relations {
+            if let Some(resolved) = self.resolve_with_scope_map(
+                raw_data,
+                parsed,
+                symbol_table,
+                entity_index,
+                &entity_map,
+            ) {
+                out.push(resolved);
+                // Type-driven callback binding rides on the resolved edge.
+                // Synthesized edges carry a global caller (the HOF id), so
+                // they must never go through any local caller remap.
+                let last = out.len() - 1;
+                out.extend(self.synthesize_hof_callback_edges(
                     raw_data,
                     parsed,
                     symbol_table,
                     entity_index,
                     &entity_map,
-                )
+                    &out[last],
+                ));
+            }
+        }
+        out
+    }
+
+    /// Synthesize type-driven callback edges for one resolved HOF call.
+    ///
+    /// For `arr.map(cb)` the primary edge is `caller -> map`; the callback
+    /// definition itself is otherwise unreachable from the HOF. This pass
+    /// adds `map -> cb` when — and only when — every gate is type- or
+    /// syntax-driven:
+    ///   1. the relation is a `HigherOrderCall` or `EventCallback` resolved
+    ///      to an internal HOF;
+    ///   2. the HOF's declared parameter list is available and the
+    ///      corresponding formal parameter parses to `TypeShape::Function`;
+    ///   3. the argument is a bare identifier (no literals, chains, or
+    ///      inline closures);
+    ///   4. the identifier resolves to an internal entity via the strict
+    ///      candidate path;
+    ///   5. the resolved target is not the HOF itself.
+    ///
+    /// Without the function-typed parameter the edge is simply not
+    /// produced: no name-shape or convention heuristics participate. Every
+    /// gate fails closed, so the pass needs no runtime toggle — disabling
+    /// it would only preserve a known call-graph gap. The returned edges
+    /// carry a global `caller` (the resolved HOF id), so callers must NOT
+    /// run them through the per-file local caller remap.
+    pub fn synthesize_hof_callback_edges(
+        &self,
+        raw_data: &RawRelationData,
+        parsed: &ParsedFile,
+        symbol_table: &ProjectSymbolTable,
+        entity_index: &RelationIndex,
+        entity_map: &HashMap<EntityId, &Entity>,
+        resolved: &ResolvedRelation,
+    ) -> Vec<ResolvedRelation> {
+        // Gate 1: an HOF/event-binding call site resolved to an internal
+        // entity. Library receivers (e.g. `Array.prototype.map`) never
+        // resolve internally and fail closed here.
+        if !matches!(
+            raw_data.relation_type,
+            cce_types::relation::RelationType::HigherOrderCall
+                | cce_types::relation::RelationType::EventCallback
+        ) {
+            return Vec::new();
+        }
+        let Some(hof_id) = resolved.callee_id else {
+            return Vec::new();
+        };
+
+        // Gate 2: the formal parameter must be a declared function type.
+        let param_bindings = symbol_table.parameter_types_for_entity(&parsed.path, hof_id);
+        if param_bindings.is_empty() {
+            return Vec::new();
+        }
+        let param_shapes: Vec<TypeShape> = param_bindings
+            .iter()
+            .map(|binding| {
+                binding
+                    .shape
+                    .clone()
+                    .or_else(|| parse_type_shape(&binding.type_name, parsed.language))
+                    .unwrap_or(TypeShape::Named("unknown".to_string()))
             })
-            .collect()
+            .collect();
+
+        let Some(args) = extract_call_arguments(parsed.source.as_ref(), raw_data.span) else {
+            return Vec::new();
+        };
+        if args.is_empty() {
+            return Vec::new();
+        }
+
+        let scope_chain = Self::build_scope_chain_from_map_with_limit(
+            raw_data.src,
+            entity_map,
+            symbol_table.max_scope_chain_depth(),
+        );
+        let resolution_context = ResolutionContext {
+            file_path: parsed.path.clone(),
+            module_path: Vec::new(),
+            scope_chain,
+        };
+        let file_remap =
+            entity_index.entity_id_remap_for(&cce_types::normalize_project_path(&parsed.path));
+        let candidate_ctx = NameCandidateContext {
+            parsed,
+            symbol_table,
+            entity_index,
+            resolution_context: &resolution_context,
+            file_remap: file_remap.as_ref(),
+            overload_ctx: None,
+        };
+
+        let mut out = Vec::new();
+        for (idx, arg) in args.iter().enumerate() {
+            let Some(param_shape) = param_shapes.get(idx) else {
+                break;
+            };
+            if !matches!(param_shape, TypeShape::Function { .. }) {
+                continue;
+            }
+            // Gate 3: bare identifier only.
+            let trimmed = arg.trim();
+            if !is_bare_identifier(trimmed) {
+                continue;
+            }
+            // Gate 4: strict internal resolution of the argument name.
+            let (_, Some(arg_id)) = self.resolve_name_candidate(trimmed, false, &candidate_ctx)
+            else {
+                continue;
+            };
+            // Gate 5: never synthesize a self-loop.
+            if arg_id == hof_id {
+                continue;
+            }
+            let callee_name = entity_index
+                .get_function_by_entity_id(arg_id)
+                .map(|entity| entity.name.clone())
+                .unwrap_or_else(|| trimmed.to_string());
+            out.push(ResolvedRelation {
+                caller: hof_id,
+                callee_id: Some(arg_id),
+                callee_name,
+                relation_type: cce_types::relation::RelationType::CallbackCall,
+                span: raw_data.span,
+                is_external: false,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: CallContext::Direct,
+                overload_signature: None,
+            });
+        }
+        out
     }
 
     fn extract_argument_types(
@@ -1280,6 +1435,15 @@ fn infer_literal_type_shape(text: &str, language: Language) -> Option<TypeShape>
         ));
     }
     None
+}
+
+/// Whether the text is a bare ASCII identifier (no dots, colons, brackets,
+/// or quotes). Used by the callback-binding gates so only plain named
+/// references — never literals, chains, or inline closures — are bound.
+fn is_bare_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn extract_call_arguments(source: &str, span: cce_types::Span) -> Option<Vec<String>> {

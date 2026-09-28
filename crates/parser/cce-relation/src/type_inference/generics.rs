@@ -252,6 +252,10 @@ pub fn shape_contains_param(shape: &TypeShape) -> bool {
         }
         TypeShape::Reference { inner, .. } => shape_contains_param(inner),
         TypeShape::Named(_) | TypeShape::Wildcard { .. } => false,
+        TypeShape::Function { params, ret } => {
+            params.iter().any(shape_contains_param)
+                || ret.as_ref().is_some_and(|r| shape_contains_param(r))
+        }
     }
 }
 

@@ -24,6 +24,9 @@
 //! let response = tool.search(request).await?;
 //! ```
 
+#[path = "keyword_search_types.rs"]
+mod keyword_search_types;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

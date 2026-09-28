@@ -57,14 +57,15 @@
 pub mod ast_diagnosis;
 pub mod compression;
 pub mod file_fold;
+pub mod find_references;
+pub mod get_symbols;
+pub mod goto_definition;
 pub mod keyword_search;
+pub mod symbol_lookup;
+pub mod symbol_lookup_types;
 
 pub(crate) mod compression_types;
-pub(crate) mod find_references;
-pub(crate) mod get_symbols;
-pub(crate) mod goto_definition;
 pub(crate) mod keyword_search_types;
-pub(crate) mod symbol_lookup_types;
 
 pub use ast_diagnosis::{
     AstDiagnosis, DiagnosisError, DiagnosisRequest, DiagnosisResponse, Diagnostic, DiagnosticKind,

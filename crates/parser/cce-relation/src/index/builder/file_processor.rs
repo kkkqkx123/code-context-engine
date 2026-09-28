@@ -341,7 +341,21 @@ impl<'a> FileProcessor<'a> {
                 self.index,
                 &entity_map,
             ) {
+                let extra_edges = resolver.synthesize_hof_callback_edges(
+                    raw_data,
+                    file,
+                    project_symbols,
+                    self.index,
+                    &entity_map,
+                    &resolved,
+                );
                 resolved_raw.push(remap_resolved(resolved));
+                // Synthesized edges carry a global caller (the HOF's
+                // resolved entity id); they must NOT go through the local
+                // caller remap — re-remapping a global id corrupts the edge
+                // when it numerically collides with a parsed-local id (see
+                // the remap_resolved comment above).
+                resolved_raw.extend(extra_edges);
             }
         }
 

@@ -535,6 +535,9 @@ pub fn compute_specificity(shape: &TypeShape) -> u32 {
         TypeShape::Intersection(members) => 3 + members.len() as u32,
         TypeShape::Array(inner) => 5 + compute_specificity(inner),
         TypeShape::Reference { inner, .. } => compute_specificity(inner),
+        TypeShape::Function { params, .. } => {
+            5 + params.iter().map(compute_specificity).sum::<u32>()
+        }
     }
 }
 

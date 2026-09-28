@@ -214,6 +214,37 @@ pub fn is_assignable_with_shapes(
                 false
             }
         }
+        // Function × Function: arity must match, parameters are checked in
+        // both directions (accepting both co- and contravariance across
+        // language conventions), and return types must be compatible when
+        // both sides carry one. Anything stricter would reject valid
+        // callback conformance due to per-language variance differences.
+        (
+            TypeShape::Function {
+                params: actual_params,
+                ret: actual_ret,
+            },
+            TypeShape::Function {
+                params: expected_params,
+                ret: expected_ret,
+            },
+        ) => {
+            actual_params.len() == expected_params.len()
+                && actual_params
+                    .iter()
+                    .zip(expected_params.iter())
+                    .all(|(a, e)| {
+                        is_assignable_with_shapes(a, e, type_params)
+                            || is_assignable_with_shapes(e, a, type_params)
+                    })
+                && match (actual_ret, expected_ret) {
+                    (Some(a), Some(e)) => {
+                        is_assignable_with_shapes(a, e, type_params)
+                            || is_assignable_with_shapes(e, a, type_params)
+                    }
+                    _ => true,
+                }
+        }
         _ => false,
     }
 }

@@ -167,6 +167,15 @@ pub(crate) fn build_full_callee_name(
         }
     }
 
+    // Inline anonymous closures (`(|| {})()` captured as `.closure`) have no
+    // symbol to resolve. Use the same placeholder convention as Go function
+    // literals so the resolver can classify them deterministically instead
+    // of carrying the raw closure text as a callee name. Kept after every
+    // named path so it can only fire when no named callee was captured.
+    if utils::find_capture_by_name(&mat.captures, |name| name.ends_with(".closure")).is_some() {
+        return Some("<closure>".to_string());
+    }
+
     // Method-style calls: `<receiver>.<method>`. The receiver may itself be
     // a chained expression (`a.b.method()` -> `a.b`), which is kept as-is so
     // the chain prefix survives in the call graph.
