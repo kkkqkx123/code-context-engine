@@ -118,6 +118,63 @@ impl ChunkBuilder {
         sorted
     }
 
+    fn entity_name_and_kind(group: &EntityGroup, id: EntityId) -> Option<(String, EntityKind)> {
+        if let Some(header) = &group.header {
+            if header.id == id {
+                return Some((header.name.clone(), header.kind));
+            }
+        }
+        group
+            .members
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| (m.name.clone(), m.kind))
+    }
+
+    /// Identity prefix for a continuation segment.
+    ///
+    /// Continuation segments start mid-entity, so they repeat the identity
+    /// of the entities they actually cover (kind plus owner-qualified name)
+    /// instead of anonymous fragment counters. Fragment numbers and
+    /// continuation markers describe split history, not content, and carry
+    /// no retrieval signal, so they are not emitted. Parts whose qualified
+    /// name already opens the segment are skipped: a split that falls
+    /// exactly on an entity boundary needs no repeated identity.
+    fn continuation_identity(
+        group: &EntityGroup,
+        entity_ids: &[EntityId],
+        segment_text: &str,
+    ) -> Option<String> {
+        let first_line = segment_text.lines().next().unwrap_or_default();
+        let mut seen = std::collections::HashSet::new();
+        let mut parts = Vec::new();
+        for id in Self::sorted_content_ids(group, entity_ids) {
+            if !seen.insert(id) {
+                continue;
+            }
+            let (name, kind) = Self::entity_name_and_kind(group, id)?;
+            if name.is_empty() {
+                continue;
+            }
+            let qualified = if group.name.is_empty()
+                || name == group.name.as_str()
+                || name.starts_with(&format!("{}.", group.name))
+            {
+                name
+            } else {
+                format!("{}.{}", group.name, name)
+            };
+            if first_line.contains(&qualified) {
+                continue;
+            }
+            parts.push(format!("{} {}.", kind.kind_label(), qualified));
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        Some(parts.join("\n") + "\n\n")
+    }
+
     /// Cross-group parent name for a standalone child group.
     ///
     /// Resolves `parent_group_id` against previously recorded groups. Module-like
@@ -366,26 +423,13 @@ impl ChunkBuilder {
             .map(|(index, segment)| {
                 let chunk_id = format!("{}_{}_{}", group.group_id, path, index);
                 let mut segment_text = segment.text.clone();
-                if path == ChunkPath::Embedding {
-                    if index > 0 && total > 1 {
-                        // Fragment continuation: inject a structured identity
-                        // header so the fragment is self-describing even when
-                        // its first byte falls mid-text.
-                        let prefix = format!(
-                            "{} ({} continuation, fragment {}/{})\n\n",
-                            group.name,
-                            group.kind.kind_label(),
-                            index + 1,
-                            total
-                        );
-                        segment_text = prefix + &segment_text;
-                    } else {
-                        Self::prepend_identity_if_needed(
-                            &mut segment_text,
-                            group.name.as_str(),
-                            group.kind,
-                        );
-                    }
+                let is_continuation = index > 0 && total > 1;
+                if path == ChunkPath::Embedding && !is_continuation {
+                    Self::prepend_identity_if_needed(
+                        &mut segment_text,
+                        group.name.as_str(),
+                        group.kind,
+                    );
                 }
                 // Strategies without entity boundaries (paragraphs, tokens,
                 // lines) produce segments with no entity ids. Attribute the
@@ -417,6 +461,28 @@ impl ChunkBuilder {
                 } else {
                     raw_entity_ids
                 };
+                if path == ChunkPath::Embedding && is_continuation {
+                    // Continuation segments repeat the identity of the
+                    // entities they cover (see `continuation_identity`).
+                    // Segments with no attributable entity fall back to the
+                    // group identity line.
+                    let fallback_ids;
+                    let ids = if content_entity_ids.is_empty() {
+                        fallback_ids = group.all_entity_ids();
+                        &fallback_ids
+                    } else {
+                        &content_entity_ids
+                    };
+                    if let Some(prefix) = Self::continuation_identity(group, ids, &segment_text) {
+                        segment_text = prefix + &segment_text;
+                    } else {
+                        Self::prepend_identity_if_needed(
+                            &mut segment_text,
+                            group.name.as_str(),
+                            group.kind,
+                        );
+                    }
+                }
                 let source_kind = if matches!(
                     segment.boundary.split_reason,
                     SplitReason::TokenLimit | SplitReason::HardLimit

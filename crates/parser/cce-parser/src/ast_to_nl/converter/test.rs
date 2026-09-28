@@ -288,6 +288,60 @@ mod tests {
     }
 
     #[test]
+    fn test_bare_field_member_skips_owner_prefix_when_qualified() {
+        let config = AstToNlConfig::both();
+        let converter = AstToNlConverter::with_config(&config);
+        let header = create_test_header(1, "LogFormatterParams", EntityKind::Struct, None);
+        let member = create_test_member(2, "StatusCode", EntityKind::Field, None);
+
+        let group = EntityGroup {
+            group_id: CompactString::from("group_1"),
+            group_type: GroupType::ClassWithMethods,
+            header: Some(header),
+            header_id: Some(EntityId(1)),
+            members: smallvec::smallvec![member],
+            member_ids: smallvec::smallvec![EntityId(2)],
+            entity_spans: Default::default(),
+            combined_source: None,
+            combined_source_lazy: Default::default(),
+            span: Default::default(),
+            kind: EntityKind::Struct,
+            name: CompactString::from("LogFormatterParams"),
+            language: Language::Go,
+            pattern_info: Default::default(),
+            member_roles: Default::default(),
+            nested_groups: Box::new([]),
+            parent_group_id: None,
+            has_significant_nested: false,
+            metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
+            nesting_level: 0,
+        };
+
+        let groups = vec![group];
+        let results = converter.convert_entity_groups(&groups, "logger.go", None, None, None);
+
+        assert_eq!(results.len(), 1);
+        let group_conv = &results[0];
+        assert_eq!(group_conv.member_conversions.len(), 1);
+
+        let member_text = group_conv.member_conversions[0]
+            .embedding_text
+            .as_deref()
+            .expect("field member should produce embedding text");
+        assert!(
+            member_text.contains("LogFormatterParams.StatusCode"),
+            "owner-qualified field name must survive, got {:?}",
+            member_text
+        );
+        assert!(
+            !member_text.contains("Field of LogFormatterParams:"),
+            "ownership prefix duplicates the qualified name, got {:?}",
+            member_text
+        );
+    }
+
+    #[test]
     fn test_convert_multiple_groups() {
         let converter = AstToNlConverter::new();
         let header1 =

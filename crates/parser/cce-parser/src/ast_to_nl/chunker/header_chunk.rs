@@ -237,8 +237,7 @@ fn process_path(
                 } else {
                     owner
                 };
-                continuation_for_block =
-                    format!("{} {} (continuation).", first.kind.kind_label(), display);
+                continuation_for_block = format!("{} {}.", first.kind.kind_label(), display);
                 &continuation_for_block
             } else {
                 &input.texts.continuation
@@ -769,6 +768,91 @@ mod tests {
                 include_header_in_first_coverage: true,
             }),
         )
+    }
+
+    fn method_group() -> EntityGroup {
+        let mut group = test_group();
+        group.name = CompactString::from("Engine");
+        group.kind = EntityKind::Struct;
+        group.header = Some(GroupedEntity::new(
+            EntityId(0),
+            EntityKind::Struct,
+            "Engine".to_string(),
+            "Engine".to_string(),
+        ));
+        let member = GroupedEntity::new(
+            EntityId(1),
+            EntityKind::Method,
+            "handleHTTPRequest".to_string(),
+            "handleHTTPRequest".to_string(),
+        );
+        group.members = [member].into_iter().collect();
+        group.member_ids = [EntityId(1)].into_iter().collect();
+        group
+    }
+
+    #[test]
+    fn test_continuation_segment_repeats_entity_identity() {
+        let group = method_group();
+        let tracker = GroupTracker::new();
+        let nlb: [NlEntityBoundary; 0] = [];
+        let segs = vec![
+            ChunkSegment::new(
+                ChunkBoundary::new(0, 50, SplitReason::MemberBoundary)
+                    .with_entity_ids(vec![EntityId(1)]),
+                "method Engine.handleHTTPRequest.\n\nfirst half of the handler body".to_string(),
+            ),
+            ChunkSegment::new(
+                ChunkBoundary::new(50, 100, SplitReason::SentenceBoundary)
+                    .with_entity_ids(vec![EntityId(1)]),
+                "second half of the handler body".to_string(),
+            ),
+        ];
+        let results = from_segments_for_test(&tracker, segs, &group, ChunkPath::Embedding, &nlb);
+        assert_eq!(results.len(), 2);
+        assert!(
+            results[1]
+                .text
+                .starts_with("method Engine.handleHTTPRequest.\n\n"),
+            "continuation must repeat the covered entity identity, got {:?}",
+            results[1].text
+        );
+        assert!(
+            !results[1].text.contains("fragment"),
+            "fragment counters carry no retrieval signal, got {:?}",
+            results[1].text
+        );
+        assert!(
+            !results[1].text.contains("continuation"),
+            "continuation markers carry no retrieval signal, got {:?}",
+            results[1].text
+        );
+    }
+
+    #[test]
+    fn test_continuation_segment_skips_identity_on_entity_boundary() {
+        let group = method_group();
+        let tracker = GroupTracker::new();
+        let nlb: [NlEntityBoundary; 0] = [];
+        let aligned = "Engine.handleHTTPRequest(). method Engine.handleHTTPRequest (c: *Context).\n\ntail body";
+        let segs = vec![
+            ChunkSegment::new(
+                ChunkBoundary::new(0, 50, SplitReason::MemberBoundary)
+                    .with_entity_ids(vec![EntityId(1)]),
+                "method Engine.handleHTTPRequest.\n\nfirst half of the handler body".to_string(),
+            ),
+            ChunkSegment::new(
+                ChunkBoundary::new(50, 100, SplitReason::MemberBoundary)
+                    .with_entity_ids(vec![EntityId(1)]),
+                aligned.to_string(),
+            ),
+        ];
+        let results = from_segments_for_test(&tracker, segs, &group, ChunkPath::Embedding, &nlb);
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[1].text, aligned,
+            "boundary-aligned segments need no repeated identity"
+        );
     }
 
     #[test]

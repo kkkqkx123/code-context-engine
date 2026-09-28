@@ -274,7 +274,16 @@ impl RegularGroupTemplate {
         }
 
         if let Some(relation) = Self::variable_relation_description(member) {
-            if !member_desc.contains(&relation) {
+            // The full assignment is appended below whenever the signature
+            // carries `=` or `.`; a relation line restating an identifier
+            // already present there only dilutes the text.
+            let signature = member.signature.trim();
+            let signature_emitted =
+                !signature.is_empty() && (signature.contains('=') || signature.contains('.'));
+            if !member_desc.contains(&relation)
+                && !(signature_emitted
+                    && Self::is_redundant_relation(&relation, &member_desc, signature))
+            {
                 member_desc.push('\n');
                 member_desc.push_str(&relation);
             }
@@ -302,6 +311,26 @@ impl RegularGroupTemplate {
         }
 
         member_desc
+    }
+
+    /// Whether a variable relation line restates information already present.
+    ///
+    /// Assignment and type relations whose core identifier already occurs in
+    /// the description or the emitted signature add retrieval noise without
+    /// new signal (e.g. `assigned from len(c).` next to `length := len(c).`).
+    /// Loop iteration markers are always kept: they carry behavioral signal
+    /// about how the variable is produced.
+    fn is_redundant_relation(relation: &str, member_desc: &str, signature: &str) -> bool {
+        let core = relation.trim_end_matches('.');
+        let core = core
+            .strip_prefix("assigned from ")
+            .or_else(|| core.strip_prefix("of type "))
+            .unwrap_or(core);
+        let core = core.strip_suffix("()").unwrap_or(core).trim();
+        if core.is_empty() {
+            return false;
+        }
+        member_desc.contains(core) || signature.contains(core)
     }
 
     fn variable_relation_description(member: &cce_types::entity::GroupedEntity) -> Option<String> {
@@ -875,6 +904,107 @@ mod tests {
             !group_desc.contains("RefUnwindSafe"),
             "group description should not contain RefUnwindSafe trait metadata, got: {}",
             group_desc
+        );
+    }
+
+    #[test]
+    fn test_variable_relation_skipped_when_signature_covers_call() {
+        let group = EntityGroup {
+            name: "HandlersChain".into(),
+            kind: EntityKind::Struct,
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(1),
+                name: "length".to_string(),
+                kind: EntityKind::Variable,
+                signature: "length := len(c).".to_string(),
+                metadata: [("call_target".to_string(), "len(c)".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        let member_desc = results
+            .iter()
+            .find(|r| r.contains("HandlersChain.length"))
+            .expect("member description should be emitted");
+        assert!(
+            !member_desc.contains("assigned from"),
+            "relation restating the signature should be skipped, got: {}",
+            member_desc
+        );
+        assert!(
+            member_desc.contains("len(c)"),
+            "call identifier must survive via the signature, got: {}",
+            member_desc
+        );
+    }
+
+    #[test]
+    fn test_variable_loop_iteration_marker_preserved() {
+        let group = EntityGroup {
+            name: "Engine".into(),
+            kind: EntityKind::Struct,
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(1),
+                name: "node".to_string(),
+                kind: EntityKind::Variable,
+                subtype: Some("loop variable".to_string()),
+                metadata: [("source_type".to_string(), "Params".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        let member_desc = results
+            .iter()
+            .find(|r| r.contains("Engine.node"))
+            .expect("member description should be emitted");
+        assert!(
+            member_desc.contains("(loop iteration)"),
+            "loop iteration marker carries behavioral signal, got: {}",
+            member_desc
+        );
+    }
+
+    #[test]
+    fn test_variable_relation_kept_when_signature_not_emitted() {
+        let group = EntityGroup {
+            name: "Engine".into(),
+            kind: EntityKind::Struct,
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(1),
+                name: "count".to_string(),
+                kind: EntityKind::Variable,
+                signature: "count: i32".to_string(),
+                metadata: [("literal_type".to_string(), "i32".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        let member_desc = results
+            .iter()
+            .find(|r| r.contains("Engine.count"))
+            .expect("member description should be emitted");
+        assert!(
+            member_desc.contains("of type i32."),
+            "type info must be kept when the signature is not emitted, got: {}",
+            member_desc
         );
     }
 }

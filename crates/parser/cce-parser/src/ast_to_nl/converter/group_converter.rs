@@ -378,6 +378,17 @@ impl super::AstToNlConverter {
                             EntityKind::Function | EntityKind::Method | EntityKind::Constructor
                         ) {
                             format!("{}.{}(). ", parent_name, header.name)
+                        } else if matches!(header.kind, EntityKind::Field | EntityKind::Property)
+                            && Self::carries_owner_qualification(
+                                emb_text,
+                                &parent_name,
+                                &header.name,
+                            )
+                        {
+                            // The field text already carries the
+                            // owner-qualified name; repeating the ownership
+                            // prefix only duplicates it.
+                            String::new()
                         } else if matches!(header.kind, EntityKind::Field | EntityKind::Property) {
                             format!("Field of {}: ", parent_name)
                         } else if matches!(header.kind, EntityKind::TraitImpl) {
@@ -471,6 +482,17 @@ impl super::AstToNlConverter {
                             EntityKind::Function | EntityKind::Method | EntityKind::Constructor
                         ) {
                             format!("{}.{}(). ", parent_name, member.name)
+                        } else if matches!(member.kind, EntityKind::Field | EntityKind::Property)
+                            && Self::carries_owner_qualification(
+                                emb_text,
+                                &parent_name,
+                                &member.name,
+                            )
+                        {
+                            // The field text already carries the
+                            // owner-qualified name; repeating the ownership
+                            // prefix only duplicates it.
+                            String::new()
                         } else if matches!(member.kind, EntityKind::Field | EntityKind::Property) {
                             format!("Field of {}: ", parent_name)
                         } else {
@@ -483,6 +505,19 @@ impl super::AstToNlConverter {
                 }
             }
         }
+    }
+
+    /// Whether a member text already carries its owner qualification.
+    ///
+    /// Field descriptions embed the owner-qualified name themselves
+    /// (`field LogFormatterParams.StatusCode.`); stacking another ownership
+    /// prefix on top only duplicates it.
+    fn carries_owner_qualification(text: &str, parent_name: &str, name: &str) -> bool {
+        if parent_name.is_empty() || name.is_empty() {
+            return false;
+        }
+        text.contains(&format!("{}.{}", parent_name, name))
+            || (name.starts_with(&format!("{}.", parent_name)) && text.contains(name))
     }
 
     /// Get a human-readable label for an entity kind.

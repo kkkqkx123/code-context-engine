@@ -1093,3 +1093,53 @@ fn test_merge_combines_related_groups() {
         "b has no relations, a's must survive"
     );
 }
+
+fn make_small_self_contained_chunk(
+    id: &str,
+    group_id: &str,
+    content_entity_ids: Vec<EntityId>,
+) -> ChunkedResult {
+    let mut chunk = make_test_chunk_with_code_meta(
+        id,
+        group_id,
+        ChunkPath::Embedding,
+        &"hello world foo bar baz qux ".repeat(11),
+        75,
+        content_entity_ids,
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        Span::new(0, 10, 0, 0, 0, 0),
+        false,
+        None,
+        None,
+    );
+    chunk.self_contained = true;
+    chunk
+}
+
+#[test]
+fn test_mixed_topic_small_chunk_does_not_veto_merge() {
+    let config = ChunkingConfig::default();
+    let mixed =
+        make_small_self_contained_chunk("mixed_emb_0", "g1", vec![EntityId(1), EntityId(2)]);
+    let mut neighbor = make_small_self_contained_chunk("next_emb_0", "g2", vec![EntityId(3)]);
+    neighbor.self_contained = false;
+    assert!(
+        merge_strategy::should_merge(&mixed, &neighbor, ChunkPath::Embedding, &config),
+        "a below-min chunk with several content entities is already mixed-topic and must merge"
+    );
+}
+
+#[test]
+fn test_single_topic_small_chunk_keeps_veto() {
+    let config = ChunkingConfig::default();
+    let pure = make_small_self_contained_chunk("pure_emb_0", "g1", vec![EntityId(1)]);
+    let mut neighbor = make_small_self_contained_chunk("next_emb_0", "g2", vec![EntityId(3)]);
+    neighbor.self_contained = false;
+    assert!(
+        !merge_strategy::should_merge(&pure, &neighbor, ChunkPath::Embedding, &config),
+        "a below-min single-entity self-contained chunk keeps its pure topic"
+    );
+}

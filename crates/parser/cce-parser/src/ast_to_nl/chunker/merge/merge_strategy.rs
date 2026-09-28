@@ -27,14 +27,16 @@ pub(crate) fn combined_cost(a: &ChunkedResult, b: &ChunkedResult, path: ChunkPat
 /// Whether `prev` should absorb `next` according to merge policy.
 ///
 /// Combines three checks:
-/// 1. Self-contained exemption (Embedding-only): an entity-aligned chunk
+/// 1. Self-contained exemption (Embedding-only): a single-topic chunk
 ///    marked `self_contained` (own docstring/behavior) keeps its pure topic
 ///    and never merges with neighbors on the Embedding path — but only
 ///    while the self-contained side itself is still below the path's min
 ///    threshold. An already-large self-contained chunk must not strand a
 ///    tiny neighbor fragment (bare fields, header-only residue), and a
 ///    sub-entity fragment (sentence/line/token split) never claims topic
-///    purity in the first place. Once every self-contained side is an
+///    purity in the first place. A chunk carrying several content entities
+///    is already mixed-topic, so merging it cannot dilute a pure topic and
+///    it never vetoes either. Once every self-contained side is an
 ///    above-min topic unit, size-based merging applies.
 ///    This overrides the size threshold.
 /// 2. Test-boundary guard: a test chunk must never merge with a
@@ -73,12 +75,17 @@ pub(crate) fn should_merge(
 
 /// Whether a chunk is an entity-aligned unit that may claim topic purity.
 ///
-/// Sub-entity fragments (sentence/line/token splits of a larger member)
+/// A chunk with several content entities is already mixed-topic: merging it
+/// with a neighbor cannot dilute a pure topic, so it never vetoes a rescue
+/// merge. Sub-entity fragments (sentence/line/token splits of a larger member)
 /// carry their parent's descriptor by reference only — the documented
 /// entity they describe lives in another chunk. Letting such a fragment
 /// veto merges strands neighboring residues (bare fields, header-only
 /// tails) that can never merge anywhere else.
 fn is_topic_unit(chunk: &ChunkedResult) -> bool {
+    if chunk.metadata.content_entity_ids().len() > 1 {
+        return false;
+    }
     match chunk.metadata.as_code() {
         Some(code) => matches!(
             code.split_reason,
