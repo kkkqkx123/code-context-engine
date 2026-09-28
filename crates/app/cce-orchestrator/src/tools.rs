@@ -64,9 +64,6 @@ pub mod keyword_search;
 pub mod symbol_lookup;
 pub mod symbol_lookup_types;
 
-pub(crate) mod compression_types;
-pub(crate) mod keyword_search_types;
-
 pub use ast_diagnosis::{
     AstDiagnosis, DiagnosisError, DiagnosisRequest, DiagnosisResponse, Diagnostic, DiagnosticKind,
     DiagnosticPrecision,
