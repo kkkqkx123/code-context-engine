@@ -638,6 +638,7 @@ mod tests {
             max_overlap_ratio: 2.0,
             min_chunk_tokens: 0,
             min_chunk_bm25_words: 0,
+            bm25_large_group_split_threshold: 0,
             cross_group_merge_threshold: 0,
             respect_boundaries: true,
         };

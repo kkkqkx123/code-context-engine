@@ -173,6 +173,13 @@ pub struct ChunkingConfig {
     pub min_chunk_bm25_words: usize,
     /// Whether to respect entity boundaries when splitting (default: true)
     pub respect_boundaries: bool,
+    /// Member count that forces per-member BM25 chunks for large groups
+    /// (default: 12). Groups with more members emit one BM25 chunk per member
+    /// instead of packing members up to `max_bm25_words`, keeping term
+    /// concentration high for deep-recall queries. 0 disables the split.
+    /// The embedding path is unaffected.
+    #[serde(default = "default_bm25_large_group_split_threshold")]
+    pub bm25_large_group_split_threshold: usize,
     /// Shared merge ceiling for both intra-group and cross-group merging
     /// (0 = use per-path max limit).
     ///
@@ -195,6 +202,7 @@ impl Default for ChunkingConfig {
             min_chunk_tokens: 150,
             min_chunk_bm25_words: 80,
             respect_boundaries: true,
+            bm25_large_group_split_threshold: default_bm25_large_group_split_threshold(),
             cross_group_merge_threshold: 0,
         }
     }
@@ -306,6 +314,10 @@ fn default_max_bm25_words() -> usize {
     150
 }
 
+fn default_bm25_large_group_split_threshold() -> usize {
+    12
+}
+
 fn default_overlap_bm25_words() -> usize {
     5
 }
@@ -325,6 +337,7 @@ mod tests {
         assert_eq!(config.chunking.overlap_bm25_words, 5);
         assert_eq!(config.chunking.min_chunk_tokens, 150);
         assert_eq!(config.chunking.min_chunk_bm25_words, 80);
+        assert_eq!(config.chunking.bm25_large_group_split_threshold, 12);
     }
 
     #[test]

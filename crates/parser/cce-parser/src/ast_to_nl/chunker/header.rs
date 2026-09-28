@@ -111,6 +111,13 @@ impl<'a> HeaderHelper<'a> {
     /// their own docstring/behavior description) are always placed in a
     /// single-member group, so their topic is never diluted by adjacent
     /// members. The BM25 path is unaffected.
+    ///
+    /// On the BM25 path, groups with more members than
+    /// `bm25_large_group_split_threshold` skip budget packing entirely: each
+    /// member becomes its own chunk. Packing dozens of small members into one
+    /// `max_bm25_words` block dilutes term frequency and triggers length
+    /// normalization, which collapses deep recall for large classes. Small
+    /// groups keep the packing behavior so tiny functions stay merged.
     pub fn group_members_by_header_budget(
         &self,
         members: &[ConversionResult],
@@ -121,6 +128,13 @@ impl<'a> HeaderHelper<'a> {
     ) -> Vec<Vec<ConversionResult>> {
         if first_budget == usize::MAX {
             return vec![members.to_vec()];
+        }
+
+        if path == ChunkPath::Bm25
+            && self.config.bm25_large_group_split_threshold > 0
+            && members.len() > self.config.bm25_large_group_split_threshold
+        {
+            return members.iter().map(|m| vec![m.clone()]).collect();
         }
 
         let min_cost = match path {
@@ -239,5 +253,85 @@ mod tests {
             let result = helper.compact_header(long, "", ChunkPath::Bm25);
             assert_eq!(result, "foo.bar baz qux quux corge");
         });
+    }
+
+    fn member_conversions(n: usize) -> Vec<ConversionResult> {
+        (0..n)
+            .map(|i| ConversionResult {
+                entity_id: cce_types::entity::EntityId(i as u64),
+                bm25_text: Some(format!("fn member_{i}()")),
+                embedding_text: Some(format!("member {i} does things")),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    fn default_helper<R>(f: impl FnOnce(&HeaderHelper) -> R) -> R {
+        let cfg = ChunkingConfig::default();
+        let helper = HeaderHelper::new(&cfg);
+        f(&helper)
+    }
+
+    #[test]
+    fn test_bm25_large_group_splits_per_member() {
+        default_helper(|helper| {
+            let members = member_conversions(13);
+            let flags = vec![false; members.len()];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Bm25,
+                &flags,
+            );
+            assert_eq!(groups.len(), 13);
+            assert!(groups.iter().all(|g| g.len() == 1));
+        });
+    }
+
+    #[test]
+    fn test_bm25_small_group_keeps_packing() {
+        default_helper(|helper| {
+            let members = member_conversions(3);
+            let flags = vec![false; members.len()];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Bm25,
+                &flags,
+            );
+            assert_eq!(groups.len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_embedding_path_ignores_large_group_split() {
+        default_helper(|helper| {
+            let members = member_conversions(13);
+            let flags = vec![false; members.len()];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Embedding,
+                &flags,
+            );
+            assert_eq!(groups.len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_bm25_large_group_split_disabled_by_zero_threshold() {
+        let cfg = ChunkingConfig {
+            bm25_large_group_split_threshold: 0,
+            ..Default::default()
+        };
+        let helper = HeaderHelper::new(&cfg);
+        let members = member_conversions(13);
+        let flags = vec![false; members.len()];
+        let groups =
+            helper.group_members_by_header_budget(&members, 1000, 1000, ChunkPath::Bm25, &flags);
+        assert_eq!(groups.len(), 1);
     }
 }

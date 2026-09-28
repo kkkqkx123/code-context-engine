@@ -1,8 +1,10 @@
 //! Keyword extractor for BM25 indexing
 //!
 //! Extracts keywords from code entities for BM25 indexing.
-//! Produces the exact declaration name only:
+//! Produces the exact declaration name plus its separator-normalized form:
 //! 1. Original form (lowered): `get_or_init`, `once_cell`
+//! 2. Separator-normalized form: `find_at` for `findAt`, `once_cell` for
+//!    `OnceCell` (camelCase/kebab-case spellings of the same identifier)
 //!
 //! Split forms (`get`, `or`, `init`) are deliberately NOT stored here: the
 //! `title` and `content` fields already produce them via the shared tokenizer,
@@ -24,8 +26,10 @@ impl KeywordExtractor {
 
     /// Extract keywords from an entity name.
     ///
-    /// Returns the lowered declaration name only. Type information and call
-    /// targets stay in `content` where the tokenizer splits them.
+    /// Returns the lowered declaration name plus its separator-normalized
+    /// form (`find_at` for `findAt`) so cross-convention spellings of the
+    /// same identifier meet in the boosted `keywords` field. Type information
+    /// and call targets stay in `content` where the tokenizer splits them.
     ///
     /// Split forms are intentionally excluded (the tokenizer already emits them
     /// for `title`/`content`).
@@ -36,7 +40,15 @@ impl KeywordExtractor {
         }
 
         let lowered = name.to_lowercase();
-        self.deduplicate(vec![lowered])
+        let mut keywords = vec![lowered.clone()];
+        let parts = cce_utils::text::split_identifier(name);
+        if parts.len() > 1 {
+            let snake = parts.join("_");
+            if snake != lowered {
+                keywords.push(snake);
+            }
+        }
+        self.deduplicate(keywords)
     }
 
     /// Deduplicate keywords while preserving order
@@ -185,6 +197,37 @@ mod tests {
         assert!(
             keywords.contains(&"oncecell".to_string()),
             "should contain original form 'oncecell'"
+        );
+        assert!(
+            keywords.contains(&"once_cell".to_string()),
+            "should contain separator-normalized 'once_cell', got: {:?}",
+            keywords
+        );
+    }
+
+    #[test]
+    fn test_extract_keywords_naming_variant() {
+        let extractor = KeywordExtractor::new();
+
+        let entity = GroupedEntity {
+            name: "findAt".to_string(),
+            ..Default::default()
+        };
+        let keywords = extractor.extract(&entity);
+        assert!(
+            keywords.contains(&"findat".to_string()),
+            "should contain original form, got: {:?}",
+            keywords
+        );
+        assert!(
+            keywords.contains(&"find_at".to_string()),
+            "should contain separator-normalized form, got: {:?}",
+            keywords
+        );
+        assert!(
+            !keywords.contains(&"find".to_string()),
+            "split word should not be in keywords: {:?}",
+            keywords
         );
     }
 

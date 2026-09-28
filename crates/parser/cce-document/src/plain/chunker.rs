@@ -262,7 +262,7 @@ pub(crate) fn line_start(content: &str, line_idx: usize) -> usize {
 pub(crate) fn line_end(content: &str, line_idx: usize) -> usize {
     let start = line_start(content, line_idx);
     let rest = &content[start..];
-    let line_len = rest.find('\n').map_or(rest.len(), |i| i);
+    let line_len = rest.find('\n').unwrap_or(rest.len());
     start + line_len
 }
 
