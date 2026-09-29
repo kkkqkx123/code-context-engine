@@ -35,8 +35,8 @@ mod classifier;
 mod license_detector;
 
 use associator::{
-    attach_doc_comment, forward_adjacent_entity, merge_plain_comment_blocks,
-    smallest_containing_entity,
+    attach_doc_comment, attach_go_doc_comments, forward_adjacent_entity,
+    merge_plain_comment_blocks, smallest_containing_entity,
 };
 use classifier::{
     CommentClass, classify_comment, dedup_same_row_comments, merge_top_level_line_comments,
@@ -186,6 +186,8 @@ impl CommentProcessor {
     /// containing entity (module docstrings without a container become
     /// file-level docs); outer docs (`///`, block comments) attach forward
     /// only when the gap is blank/attribute-only; ownerless docs are dropped.
+    /// Go `//` runs directly above a declaration (godoc convention, no blank
+    /// line) attach first and are withheld from the plain-comment channel.
     pub fn process_with_span(
         &self,
         tree: &Tree,
@@ -200,11 +202,31 @@ impl CommentProcessor {
         let license_blocks = find_license_blocks(&comments, entities, &self.license_config);
         // Drop matched comments before any merging so a non-license comment
         // that happens to be contiguous with the header block survives.
-        let comments: Vec<Comment> = comments
+        let mut comments: Vec<Comment> = comments
             .iter()
             .filter(|c| !is_license_span(&c.span, &license_blocks))
             .cloned()
             .collect();
+
+        // Go documentation: `//` runs immediately above a declaration follow
+        // the godoc convention and fill doc slots. They are consumed here so
+        // the plain-comment channel below does not duplicate them as behavior
+        // facts. Other languages keep marker-based classification only.
+        if matches!(language, Language::Go) {
+            let consumed: std::collections::HashSet<usize> =
+                attach_go_doc_comments(&comments, entities)
+                    .into_iter()
+                    .collect();
+            if !consumed.is_empty() {
+                let mut kept = Vec::with_capacity(comments.len() - consumed.len());
+                for (idx, comment) in comments.into_iter().enumerate() {
+                    if !consumed.contains(&idx) {
+                        kept.push(comment);
+                    }
+                }
+                comments = kept;
+            }
+        }
 
         // Channel 1: plain comments become behavior fragments.
         for block in merge_plain_comment_blocks(&comments) {
