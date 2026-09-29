@@ -143,6 +143,7 @@ impl GroupChunker {
                 path: ChunkPath::Bm25,
                 strategy: SplitStrategy::for_bm25_group_type(group.group_type),
                 nl_boundaries: None,
+                tracker: &self.tracker,
                 header_mode: None,
             };
             all_chunks.absorb(chunk_single_path(input)?);
@@ -166,6 +167,7 @@ impl GroupChunker {
                 path: ChunkPath::Embedding,
                 strategy: SplitStrategy::for_group_type(group.group_type),
                 nl_boundaries: None,
+                tracker: &self.tracker,
                 header_mode: None,
             };
             all_chunks.absorb(chunk_single_path(input)?);
@@ -279,6 +281,13 @@ impl GroupChunker {
             .iter()
             .map(|gc| gc.group.clone())
             .collect();
+
+        // Pre-register every group identity before chunking: parent
+        // qualification must not depend on the accidental processing order
+        // of sibling groups. Registration alone creates no relations.
+        for group in &groups {
+            self.tracker.register_identity(group);
+        }
 
         for gc in group_conversions {
             let chunks = self.chunk_group_with_conversions(&gc.group, gc, file_path)?;
@@ -396,6 +405,10 @@ pub struct ChunkInput<'a> {
     pub path: ChunkPath,
     pub strategy: SplitStrategy,
     pub nl_boundaries: Option<&'a [NlEntityBoundary]>,
+    /// File-level group history for cross-group parent qualification.
+    /// The plain single-path flow must use the caller-owned tracker, never
+    /// a fresh empty one, or standalone child groups lose their parent.
+    pub tracker: &'a GroupTracker,
     /// Header-specific parameters; `None` for the plain single-path flow.
     pub header_mode: Option<HeaderPathParams<'a>>,
 }
@@ -431,6 +444,7 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
         path,
         strategy,
         nl_boundaries,
+        tracker,
         header_mode,
     } = input;
     let word_count = text.split_whitespace().filter(|w| !w.is_empty()).count();
@@ -438,17 +452,19 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
     let needs_split = infra.config.exceeds_limit(text, path);
 
     if !needs_split {
-        let fresh_tracker = GroupTracker::new();
-        let tracker: &GroupTracker = header_mode.as_ref().map_or(&fresh_tracker, |h| h.tracker);
+        // The plain path shares the file-level tracker; the header path
+        // shares the tracker carried by its header parameters.
+        let plain_tracker: &GroupTracker = tracker;
+        let active: &GroupTracker = header_mode.as_ref().map_or(plain_tracker, |h| h.tracker);
         let builder = ChunkBuilder::new();
         return Ok(ChunkOutput::with_chunks(
             if let Some(header) = &header_mode {
                 vec![build_unsplit_header_chunk(
-                    &builder, tracker, header, group, file_path, path, text, word_count, keywords,
+                    &builder, active, header, group, file_path, path, text, word_count, keywords,
                 )]
             } else {
                 vec![builder.from_single_text(
-                    tracker,
+                    active,
                     SingleChunkContext {
                         group,
                         file_path,
@@ -517,8 +533,7 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
         });
     }
 
-    let fresh_tracker = GroupTracker::new();
-    let tracker: &GroupTracker = header_mode.as_ref().map_or(&fresh_tracker, |h| h.tracker);
+    let active: &GroupTracker = header_mode.as_ref().map_or(tracker, |h| h.tracker);
     let builder = ChunkBuilder::new();
 
     let header_ctx = header_mode.as_ref().map(|h| SegmentHeaderContext {
@@ -528,7 +543,7 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
 
     Ok(ChunkOutput {
         chunks: builder.from_segments(
-            tracker,
+            active,
             &segments,
             path,
             group,

@@ -34,12 +34,21 @@ impl GroupTracker {
         }
     }
 
+    /// Record a group's identity without creating sequence relations.
+    ///
+    /// Used to pre-register every group of a file before chunking starts,
+    /// so parent lookups resolve regardless of processing order. Calling
+    /// `record_group` afterwards only adds the sequence relations.
+    pub fn register_identity(&mut self, group: &EntityGroup) {
+        self.identities
+            .entry(group.group_id.clone())
+            .or_insert_with(|| (group.name.clone(), group.kind));
+    }
+
     /// Record group processing
     pub fn record_group(&mut self, group: &EntityGroup) {
         let group_id = group.group_id.clone();
-        self.identities
-            .entry(group_id.clone())
-            .or_insert_with(|| (group.name.clone(), group.kind));
+        self.register_identity(group);
 
         // Establish relation with previous group
         if let Some(prev_id) = self.group_sequence.last().cloned() {
@@ -118,11 +127,12 @@ impl GroupTracker {
         relations
     }
 
-    /// Look up a previously recorded group's (name, kind) by id.
+    /// Look up a recorded group's (name, kind) by id.
     ///
-    /// Used to qualify cross-group children (`Parent.member`) when the
-    /// parent was processed as an independent group. Returns `None` when
-    /// the parent has not been recorded yet.
+    /// Used to qualify cross-group children (`Parent.member`). Returns
+    /// `None` when the group was never registered. Identity registration
+    /// carries no sequence relations, so pre-registering a whole file does
+    /// not affect predecessor/successor navigation.
     pub fn lookup_identity(&self, group_id: &str) -> Option<(String, EntityKind)> {
         self.identities
             .get(group_id)
@@ -244,6 +254,29 @@ mod tests {
         assert!(relations.iter().any(|r| {
             r.group_id == "group_3" && r.relation_type == GroupRelationType::Successor
         }));
+    }
+
+    #[test]
+    fn test_register_identity_resolves_before_processing() {
+        let mut tracker = GroupTracker::new();
+        let parent = create_test_group("group_parent");
+        let child = create_test_group("group_child");
+
+        tracker.register_identity(&parent);
+        tracker.register_identity(&child);
+        assert_eq!(tracker.tracked_count(), 0);
+        assert!(tracker.get_related_groups("group_child").is_empty());
+
+        let (name, _) = tracker
+            .lookup_identity("group_parent")
+            .expect("pre-registered parent resolves");
+        assert_eq!(name, "test");
+
+        tracker.record_group(&child);
+        let (name, _) = tracker
+            .lookup_identity("group_parent")
+            .expect("parent still resolves after child processing");
+        assert_eq!(name, "test");
     }
 
     #[test]

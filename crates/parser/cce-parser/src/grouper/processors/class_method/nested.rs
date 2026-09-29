@@ -1,5 +1,3 @@
-use compact_str::CompactString;
-
 use super::processor::ClassMethodProcessor;
 use super::types::NestedExtractionContext;
 use crate::grouper::types::EntityGroup;
@@ -97,7 +95,7 @@ impl ClassMethodProcessor {
                 let mut group = EntityGroup::from_entity(child_entity.clone(), *ctx.language);
                 group.nested_groups = deeper_nested.into_boxed_slice();
                 group.nesting_level = ctx.max_depth;
-                group.parent_group_id = Some(CompactString::from(parent_entity.name.as_str()));
+                group.parent_group_id = Some(EntityGroup::group_id_for_entity(parent_entity.id));
                 group.has_significant_nested = !group.nested_groups.is_empty();
                 group.pattern_info = pattern_result.pattern_info;
                 group.member_roles = pattern_result.member_roles;

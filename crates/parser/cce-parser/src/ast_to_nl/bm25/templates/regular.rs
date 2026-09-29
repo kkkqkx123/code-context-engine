@@ -43,8 +43,12 @@ impl GroupTemplate for RegularGroupTemplate {
 
         Self::push_member_signals(&mut all_parts, group);
 
+        // Parts stay on separate lines: the BM25 cleaner preserves line
+        // breaks so the chunker can split oversized groups at line
+        // boundaries instead of forcing mid-code hard cuts. Member-name and
+        // member-type tables remain single-line signals inside their part.
         let refs: Vec<&str> = all_parts.iter().map(|s| s.as_str()).collect();
-        refs.join(" ")
+        refs.join("\n")
     }
 }
 

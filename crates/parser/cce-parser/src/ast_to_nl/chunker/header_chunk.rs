@@ -66,6 +66,7 @@ pub fn chunk_group_with_conversions(
                         SplitStrategy::ByNlEntityBoundaries
                     },
                     nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
+                    tracker: &*tracker,
                     header_mode: None,
                 };
                 all_chunks.absorb(super::chunker::chunk_single_path(input)?);
@@ -87,6 +88,7 @@ pub fn chunk_group_with_conversions(
                         SplitStrategy::ByNlEntityBoundaries
                     },
                     nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
+                    tracker: &*tracker,
                     header_mode: None,
                 };
                 all_chunks.absorb(super::chunker::chunk_single_path(input)?);
@@ -277,6 +279,7 @@ fn process_path(
                 SplitStrategy::ByNlEntityBoundaries
             },
             nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
+            tracker: &*tracker,
             header_mode: Some(super::chunker::HeaderPathParams {
                 tracker,
                 header_entity_id: ctx.group.header_id,
@@ -424,6 +427,7 @@ mod tests {
                 SplitStrategy::ByNlEntityBoundaries
             },
             nl_boundaries: (!nlb.is_empty()).then_some(nlb),
+            tracker,
             header_mode: Some(super::super::chunker::HeaderPathParams {
                 tracker,
                 header_entity_id: group.header_id,

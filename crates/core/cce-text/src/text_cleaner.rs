@@ -4,7 +4,7 @@
 //! It removes redundant words and formatting that don't contribute
 //! to search relevance, while preserving the essential information for code search.
 
-use cce_utils::text::{normalize_whitespace, remove_quotes};
+use cce_utils::text::{normalize_whitespace_preserving_newlines, remove_quotes};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -60,9 +60,14 @@ impl Bm25TextCleaner {
     /// removing low-value textual noise that the tokenizer cannot detect:
     ///
     /// 1. Remove quotes (single/double/backtick)
-    /// 2. Normalize whitespace
+    /// 2. Normalize whitespace within each line, preserving line breaks
     /// 3. Remove configured redundant phrases when present
     /// 4. Final whitespace normalization and empty check
+    ///
+    /// Line breaks are preserved (not collapsed to spaces) so the chunker
+    /// can split oversized groups at line boundaries instead of forcing
+    /// mid-code hard cuts. The tokenizer treats newlines as separators,
+    /// so the indexed token stream is unchanged.
     pub fn clean(&self, text: &str) -> String {
         if text.is_empty() {
             return String::new();
@@ -71,7 +76,7 @@ impl Bm25TextCleaner {
         let mut result = text.to_string();
 
         result = remove_quotes(&result);
-        result = normalize_whitespace(&result);
+        result = normalize_whitespace_preserving_newlines(&result);
         result = self.remove_redundant_words(&result);
         result = self.clean_up_empty(&result);
 
@@ -91,7 +96,7 @@ impl Bm25TextCleaner {
 
     /// Clean up empty or whitespace-only text
     fn clean_up_empty(&self, text: &str) -> String {
-        let normalized = normalize_whitespace(text);
+        let normalized = normalize_whitespace_preserving_newlines(text);
         if normalized.trim().is_empty() {
             String::new()
         } else {
@@ -139,6 +144,16 @@ mod tests {
         let text = "Function   test  that  does  something";
         let cleaned = cleaner.clean(text);
         assert_eq!(cleaned, "Function test that does something");
+    }
+
+    #[test]
+    fn test_clean_preserves_line_breaks_for_chunking() {
+        let cleaner = Bm25TextCleaner::new();
+        let text = "class Foo.\nint field_one;\nint field_two;";
+        let cleaned = cleaner.clean(text);
+        assert!(cleaned.contains('\n'), "line breaks kept: {cleaned:?}");
+        assert!(cleaned.contains("field_one"));
+        assert!(cleaned.contains("field_two"));
     }
 
     #[test]

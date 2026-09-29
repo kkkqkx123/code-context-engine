@@ -144,8 +144,10 @@ impl ChunkBuilder {
         group: &EntityGroup,
         entity_ids: &[EntityId],
         segment_text: &str,
+        parent: Option<&str>,
     ) -> Option<String> {
         let first_line = segment_text.lines().next().unwrap_or_default();
+        let owner = Self::resolve_owner(group, parent);
         let mut seen = std::collections::HashSet::new();
         let mut parts = Vec::new();
         for id in Self::sorted_content_ids(group, entity_ids) {
@@ -156,13 +158,14 @@ impl ChunkBuilder {
             if name.is_empty() {
                 continue;
             }
-            let qualified = if group.name.is_empty()
-                || name == group.name.as_str()
-                || name.starts_with(&format!("{}.", group.name))
-            {
-                name
-            } else {
-                format!("{}.{}", group.name, name)
+            let qualified = match owner {
+                Some(prefix)
+                    if name != prefix
+                        && !name.starts_with(&format!("{prefix}.")) =>
+                {
+                    format!("{prefix}.{name}")
+                }
+                _ => name,
             };
             if first_line.contains(&qualified) {
                 continue;
@@ -189,6 +192,26 @@ impl ChunkBuilder {
             return None;
         }
         Some(parent_name)
+    }
+
+    /// Ownership qualifier shared by BM25 titles, keywords, and identities.
+    ///
+    /// A recorded cross-group parent wins over the current group name: for
+    /// standalone child groups (and merged groups named after one member)
+    /// the parent is the real owner. Container groups keep their own name,
+    /// which already qualifies their members. Without a parent the group
+    /// name stays the qualifier, preserving the previous behavior.
+    fn resolve_owner<'a>(group: &'a EntityGroup, parent: Option<&'a str>) -> Option<&'a str> {
+        if group.group_type.is_container() && !group.name.is_empty() {
+            return Some(group.name.as_str());
+        }
+        if let Some(name) = parent.filter(|p| !p.is_empty()) {
+            return Some(name);
+        }
+        if group.name.is_empty() {
+            return None;
+        }
+        Some(group.name.as_str())
     }
 
     /// File module stem used to qualify module-level free functions.
@@ -254,6 +277,11 @@ impl ChunkBuilder {
                     && !group.name.is_empty()
                     && name != group.name.as_str()
                 {
+                    // A recorded parent is the real owner for standalone and
+                    // merged groups; only container members use the group name.
+                    if let Some(owner) = Self::resolve_owner(group, parent) {
+                        return format!("{owner}.{name}");
+                    }
                     return format!("{}.{}", group.name, name);
                 }
                 return Self::qualify_bm25_title(name, group, parent, file_path);
@@ -424,6 +452,13 @@ impl ChunkBuilder {
                 let chunk_id = format!("{}_{}_{}", group.group_id, path, index);
                 let mut segment_text = segment.text.clone();
                 let is_continuation = index > 0 && total > 1;
+                // Resolved once per chunk: titles, keywords, and continuation
+                // identities share the same owner.
+                let parent = if path == ChunkPath::Bm25 {
+                    Self::cross_group_parent(group, tracker)
+                } else {
+                    None
+                };
                 if path == ChunkPath::Embedding && !is_continuation {
                     Self::prepend_identity_if_needed(
                         &mut segment_text,
@@ -461,11 +496,13 @@ impl ChunkBuilder {
                 } else {
                     raw_entity_ids
                 };
-                if path == ChunkPath::Embedding && is_continuation {
+                if is_continuation {
                     // Continuation segments repeat the identity of the
-                    // entities they cover (see `continuation_identity`).
-                    // Segments with no attributable entity fall back to the
-                    // group identity line.
+                    // entities they cover (see `continuation_identity`) on
+                    // both paths: a BM25 fragment starting mid-method would
+                    // otherwise lose the `Class.method` co-occurrence that
+                    // qualified queries depend on. Segments with no
+                    // attributable entity fall back to the group identity line.
                     let fallback_ids;
                     let ids = if content_entity_ids.is_empty() {
                         fallback_ids = group.all_entity_ids();
@@ -473,7 +510,9 @@ impl ChunkBuilder {
                     } else {
                         &content_entity_ids
                     };
-                    if let Some(prefix) = Self::continuation_identity(group, ids, &segment_text) {
+                    if let Some(prefix) =
+                        Self::continuation_identity(group, ids, &segment_text, parent.as_deref())
+                    {
                         segment_text = prefix + &segment_text;
                     } else {
                         Self::prepend_identity_if_needed(
@@ -541,7 +580,6 @@ impl ChunkBuilder {
                     } else {
                         content_entity_ids.clone()
                     };
-                    let parent = Self::cross_group_parent(group, tracker);
                     (
                         Some(Self::bm25_title_for_ids(
                             group,
@@ -743,5 +781,170 @@ impl ChunkBuilder {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grouper::types::GroupType;
+    use cce_types::entity::GroupedEntity;
+    use cce_types::language::Language;
+    use compact_str::CompactString;
+    use smallvec::SmallVec;
+    use std::collections::HashMap;
+
+    fn method_group() -> EntityGroup {
+        EntityGroup {
+            group_id: CompactString::from("group_2"),
+            group_type: GroupType::Standalone,
+            header: Some(GroupedEntity::new(
+                EntityId(2),
+                EntityKind::Method,
+                "findName".to_string(),
+                "findName(int hash)".to_string(),
+            )),
+            header_id: Some(EntityId(2)),
+            members: SmallVec::new(),
+            member_ids: SmallVec::new(),
+            entity_spans: HashMap::new(),
+            combined_source: None,
+            combined_source_lazy: std::sync::OnceLock::new(),
+            span: cce_types::Span::default(),
+            kind: EntityKind::Method,
+            name: CompactString::from("findName"),
+            language: Language::Java,
+            pattern_info: crate::grouper::types::PatternInfo::None,
+            member_roles: SmallVec::new(),
+            nested_groups: Box::new([]),
+            nesting_level: 0,
+            parent_group_id: Some(CompactString::from("group_1")),
+            has_significant_nested: false,
+            metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
+        }
+    }
+
+    fn tracker_with_class_parent() -> GroupTracker {
+        let mut tracker = GroupTracker::new();
+        let parent = EntityGroup {
+            group_id: CompactString::from("group_1"),
+            name: CompactString::from("Processor"),
+            kind: EntityKind::Class,
+            ..method_group()
+        };
+        tracker.register_identity(&parent);
+        tracker
+    }
+
+    #[test]
+    fn test_standalone_method_title_uses_recorded_parent() {
+        let group = method_group();
+        let tracker = tracker_with_class_parent();
+        let builder = ChunkBuilder::new();
+        let text = "method Processor.findName.\nfindName(int hash)";
+        let chunk = builder.from_single_text(
+            &tracker,
+            SingleChunkContext {
+                group: &group,
+                file_path: "Processor.java",
+                path: ChunkPath::Bm25,
+                text,
+                keywords: &[],
+            },
+        );
+        assert_eq!(chunk.bm25_title.as_deref(), Some("Processor.findName"));
+        assert!(chunk.bm25_keywords.contains(&"findname".to_string()));
+        assert!(chunk.bm25_keywords.contains(&"processor".to_string()));
+    }
+
+    #[test]
+    fn test_standalone_method_title_falls_back_without_parent() {
+        let mut group = method_group();
+        group.parent_group_id = None;
+        let tracker = GroupTracker::new();
+        let builder = ChunkBuilder::new();
+        let chunk = builder.from_single_text(
+            &tracker,
+            SingleChunkContext {
+                group: &group,
+                file_path: "Processor.java",
+                path: ChunkPath::Bm25,
+                text: "method findName.\nfindName(int hash)",
+                keywords: &[],
+            },
+        );
+        assert_eq!(chunk.bm25_title.as_deref(), Some("findName"));
+    }
+
+    #[test]
+    fn test_module_parent_is_not_an_owner() {
+        let group = method_group();
+        let mut tracker = GroupTracker::new();
+        let parent = EntityGroup {
+            group_id: CompactString::from("group_1"),
+            name: CompactString::from("tools.jackson.core.sym"),
+            kind: EntityKind::Package,
+            ..method_group()
+        };
+        tracker.register_identity(&parent);
+        assert_eq!(ChunkBuilder::cross_group_parent(&group, &tracker), None);
+    }
+
+    #[test]
+    fn test_continuation_identity_uses_parent_qualifier() {
+        let group = method_group();
+        let identity = ChunkBuilder::continuation_identity(
+            &group,
+            &[EntityId(2)],
+            "body fragment without the signature line",
+            Some("Processor"),
+        )
+        .expect("covered method repeats its identity");
+        assert!(
+            identity.contains("method Processor.findName."),
+            "unexpected identity: {identity}"
+        );
+    }
+
+    #[test]
+    fn test_merged_group_prefers_parent_over_group_name() {
+        let member = GroupedEntity::new(
+            EntityId(3),
+            EntityKind::Method,
+            "helper".to_string(),
+            "helper()".to_string(),
+        );
+        let group = EntityGroup {
+            group_id: CompactString::from("group_9"),
+            group_type: GroupType::MergedFragments,
+            header: None,
+            header_id: None,
+            members: smallvec::smallvec![member],
+            member_ids: smallvec::smallvec![EntityId(3)],
+            entity_spans: HashMap::new(),
+            combined_source: None,
+            combined_source_lazy: std::sync::OnceLock::new(),
+            span: cce_types::Span::default(),
+            kind: EntityKind::Method,
+            name: CompactString::from("Utils"),
+            language: Language::Java,
+            pattern_info: crate::grouper::types::PatternInfo::None,
+            member_roles: SmallVec::new(),
+            nested_groups: Box::new([]),
+            nesting_level: 0,
+            parent_group_id: Some(CompactString::from("group_1")),
+            has_significant_nested: false,
+            metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
+        };
+        let tracker = tracker_with_class_parent();
+        let title = ChunkBuilder::bm25_title_for_ids(
+            &group,
+            &[EntityId(3)],
+            ChunkBuilder::cross_group_parent(&group, &tracker).as_deref(),
+            "U.java",
+        );
+        assert_eq!(title, "Processor.helper");
     }
 }

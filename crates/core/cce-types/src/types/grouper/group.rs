@@ -281,6 +281,14 @@ impl EntityGroup {
         }
     }
 
+    /// Canonical group identifier for a standalone entity group.
+    ///
+    /// `parent_group_id` and every other group-id reference must use this
+    /// rule so tracker lookups resolve. Entity names are never group ids.
+    pub fn group_id_for_entity(id: EntityId) -> CompactString {
+        CompactString::from(format!("group_{}", id.0))
+    }
+
     pub fn from_entity(entity: Entity, language: crate::types::language::Language) -> Self {
         let name = CompactString::from(entity.name.as_str());
         let kind = entity.kind;
@@ -291,7 +299,7 @@ impl EntityGroup {
         entity_spans.insert(entity_id, span);
 
         Self {
-            group_id: CompactString::from(format!("group_{}", entity_id.0)),
+            group_id: Self::group_id_for_entity(entity_id),
             group_type: GroupType::Standalone,
             header: Some(GroupedEntity::from_entity(&entity)),
             header_id: Some(entity_id),
@@ -347,7 +355,7 @@ impl EntityGroup {
         let combined_span = Self::calculate_span_from_map(&entity_spans);
 
         Self {
-            group_id: CompactString::from(format!("group_{}", class_id.0)),
+            group_id: Self::group_id_for_entity(class_id),
             group_type: GroupType::ClassWithMethods,
             header: Some(GroupedEntity::from_entity(&class)),
             header_id: Some(class_id),
@@ -397,7 +405,7 @@ impl EntityGroup {
         let combined_span = Self::calculate_span_from_map(&entity_spans);
 
         Self {
-            group_id: CompactString::from(format!("group_{}", class_id.0)),
+            group_id: Self::group_id_for_entity(class_id),
             group_type: GroupType::ClassWithMethods,
             header: Some(GroupedEntity::from_entity(&class)),
             header_id: Some(class_id),
@@ -452,7 +460,7 @@ impl EntityGroup {
         let combined_span = Self::calculate_span_from_map(&entity_spans);
 
         Self {
-            group_id: CompactString::from(format!("group_{}", impl_id.0)),
+            group_id: Self::group_id_for_entity(impl_id),
             group_type: GroupType::ClassWithMethods,
             header: Some(GroupedEntity::from_entity(&impl_entity)),
             header_id: Some(impl_id),

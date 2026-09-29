@@ -351,10 +351,19 @@ impl PreprocessingPipeline {
                             if typealias_names.contains(entity.name.as_str()) {
                                 // TypeAlias target: each method gets its own group
                                 // so the converter produces per-method chunks.
+                                // The parent link must be the alias group id,
+                                // not the alias name, so tracker lookups resolve.
+                                let alias_id = entities
+                                    .iter()
+                                    .find(|e| {
+                                        e.kind == EntityKind::TypeAlias
+                                            && e.name == entity.name
+                                    })
+                                    .map(|e| e.id);
                                 for method in methods {
                                     let mut group = EntityGroup::from_entity(method, language);
-                                    group.parent_group_id =
-                                        Some(CompactString::from(entity.name.as_str()));
+                                    group.parent_group_id = alias_id
+                                        .map(EntityGroup::group_id_for_entity);
                                     groups.push(group);
                                 }
                             } else {

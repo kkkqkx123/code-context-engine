@@ -22,9 +22,10 @@ pub enum SplitStrategy {
 impl SplitStrategy {
     /// Split strategy for the BM25 path.
     ///
-    /// Only declaration boundaries and the hard token cut are allowed:
-    /// sentence, paragraph, and line fallbacks would slice module text into
-    /// topic-less fragments and dilute rare terms.
+    /// Declaration boundaries first; oversized declarations fall back to
+    /// line boundaries before the hard token cut so method signatures stay
+    /// intact. Sentence and paragraph fallbacks would slice module text
+    /// into topic-less fragments and dilute rare terms.
     pub fn for_bm25_group_type(group_type: GroupType) -> Self {
         match group_type {
             GroupType::ClassWithNestedClasses => SplitStrategy::ByNestedGroups,

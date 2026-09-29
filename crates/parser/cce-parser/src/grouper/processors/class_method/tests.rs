@@ -468,8 +468,8 @@ fn test_nested_entity_group_extraction() {
     assert_eq!(nested.nesting_level, 2);
     assert_eq!(
         nested.parent_group_id,
-        Some(compact_str::CompactString::from("OuterClass")),
-        "Should have parent group ID"
+        Some(compact_str::CompactString::from("group_0")),
+        "parent link must be the parent group id, not the parent name"
     );
 }
 

@@ -45,18 +45,18 @@ impl BoundaryLevel {
         }
     }
 
-    /// Path-aware descent: the BM25 path skips sentence, line, and paragraph
-    /// levels and falls straight through to the hard token cut, so over-limit
-    /// text is only ever subdivided at declaration boundaries or by truncation.
+    /// Path-aware descent: the BM25 path skips sentence and paragraph
+    /// levels and falls through to line boundaries before the hard token
+    /// cut, so over-limit declaration text is subdivided at newline
+    /// boundaries instead of mid-expression truncation.
     fn next_for_path(self, path: ChunkPath) -> Self {
         if path != ChunkPath::Bm25 {
             return self.next();
         }
         match self {
             Self::NestedGroups => Self::Entities,
-            Self::Entities | Self::Sentences | Self::Lines | Self::Paragraphs | Self::Tokens => {
-                Self::Tokens
-            }
+            Self::Entities => Self::Lines,
+            Self::Sentences | Self::Lines | Self::Paragraphs | Self::Tokens => Self::Tokens,
         }
     }
 
@@ -71,13 +71,17 @@ impl BoundaryLevel {
         }
     }
 
-    /// Path-aware subdivision: the BM25 path never subdivides into sentences
-    /// or lines; oversized declaration pieces go straight to the hard cut.
+    /// Path-aware subdivision: the BM25 path subdivides oversized
+    /// declarations at line boundaries; only line-oversize pieces go to
+    /// the hard cut.
     fn subdivide_for_path(self, path: ChunkPath) -> Self {
         if path != ChunkPath::Bm25 {
             return self.subdivide();
         }
-        Self::Tokens
+        match self {
+            Self::Lines | Self::Tokens => Self::Tokens,
+            _ => Self::Lines,
+        }
     }
 
     fn from_strategy(strategy: SplitStrategy) -> Self {
@@ -671,8 +675,9 @@ mod tests {
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
-        // The BM25 path never subdivides into sentences or lines: oversized
-        // paragraphs go straight to the hard token cut.
+        // The BM25 path subdivides oversized paragraphs at line boundaries
+        // before the hard token cut so method signatures stay intact; only
+        // line-oversize pieces use the hard cut.
         let text = "word1 word2 word3 word4 word5\nword6 word7\n\nword8 word9 word10 word11 word12\nword13 word14";
         let boundaries = splitter.split_range(
             text,
@@ -687,8 +692,8 @@ mod tests {
         assert!(
             boundaries
                 .iter()
-                .all(|b| b.split_reason == SplitReason::HardLimit),
-            "BM25 oversized paragraphs must be subdivided by hard cut only"
+                .all(|b| b.split_reason != SplitReason::SentenceBoundary),
+            "BM25 must not subdivide into sentences"
         );
         for b in &boundaries {
             let words = text[b.start_byte..b.end_byte].split_whitespace().count();

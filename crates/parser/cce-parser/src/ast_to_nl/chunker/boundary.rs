@@ -285,20 +285,74 @@ pub fn locate_entities_in_nl_text(text: &str, group: &EntityGroup) -> Vec<NlEnti
 
     let lower_text = text.to_lowercase();
 
+    // Group entity ids by normalized name so overloads sharing one name
+    // (e.g. `findName` x4 in `ByteQuadsCanonicalizer`) split the discovered
+    // occurrences round-robin instead of collapsing onto the first hit.
+    // First-occurrence-only mapping leaves the remaining overloads without
+    // member data; the splitter then falls through to the hard token cut
+    // and slices mid-method.
+    {
+        use std::collections::HashMap;
+        let mut ids_by_name: HashMap<String, Vec<EntityId>> = HashMap::new();
+        let mut name_len_by_key: HashMap<String, usize> = HashMap::new();
+        for (id, name) in &all_entities {
+            let key = name.to_lowercase();
+            if key.len() < 2 {
+                continue;
+            }
+            ids_by_name.entry(key.clone()).or_default().push(*id);
+            name_len_by_key.entry(key).or_insert(name.len());
+        }
+        let mut keys: Vec<String> = ids_by_name.keys().cloned().collect();
+        keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+        let mut claimed: Vec<bool> = vec![false; text.len()];
+        for key in &keys {
+            let ids = &ids_by_name[key];
+            let name_len = name_len_by_key[key];
+            let mut occurrences = Vec::new();
+            let mut search_from = 0usize;
+            while search_from + key.len() <= lower_text.len() {
+                let Some(rel) = lower_text[search_from..].find(key.as_str()) else {
+                    break;
+                };
+                let pos = search_from + rel;
+                if claimed[pos..pos + key.len().min(text.len() - pos)]
+                    .iter()
+                    .any(|c| *c)
+                {
+                    search_from = pos + 1;
+                    continue;
+                }
+                occurrences.push(pos);
+                search_from = pos + key.len().max(1);
+            }
+            if occurrences.is_empty() {
+                continue;
+            }
+            for (pos, id) in occurrences
+                .iter()
+                .zip(ids.iter().cycle())
+                .map(|(pos, id)| (*pos, *id))
+            {
+                boundaries.push(NlEntityBoundary {
+                    entity_id: id,
+                    start_byte: pos,
+                    end_byte: pos + name_len,
+                });
+                for c in &mut claimed[pos..pos + key.len().min(text.len() - pos)] {
+                    *c = true;
+                }
+            }
+        }
+    }
     for (id, name) in &all_entities {
-        let lower_name = name.to_lowercase();
-        // Try exact match first
-        if let Some(pos) = lower_text.find(&lower_name) {
-            boundaries.push(NlEntityBoundary {
-                entity_id: *id,
-                start_byte: pos,
-                end_byte: pos + name.len(),
-            });
+        if boundaries.iter().any(|b| b.entity_id == *id) {
             continue;
         }
         // Try semantic name (camelCase split)
         let semantic = split_camel_case(name);
         let lower_semantic = semantic.to_lowercase();
+        let lower_name = name.to_lowercase();
         if !lower_semantic.is_empty() && lower_semantic != lower_name {
             if let Some(pos) = lower_text.find(&lower_semantic) {
                 boundaries.push(NlEntityBoundary {
