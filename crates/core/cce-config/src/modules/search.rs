@@ -379,8 +379,14 @@ pub enum DedupStrategy {
 pub struct SPSRGraphConfig {
     /// Enable SPSR-Graph assembly
     pub enable_assembly: bool,
-    /// Maximum assembled content in tokens (using TokenEstimator)
+    /// Maximum assembled content per result in tokens (using TokenEstimator)
     pub max_assembled_length: usize,
+    /// Maximum tokens for a single segment. An oversized segment is
+    /// downgraded to a path-and-range reference without affecting others.
+    pub max_segment_tokens: usize,
+    /// Maximum total tokens across one assembled batch. Once exceeded,
+    /// low-score results are downgraded wholesale to references.
+    pub max_batch_tokens: usize,
     /// Include file boundary markers
     pub include_file_markers: bool,
     /// Deduplication strategy
@@ -391,10 +397,6 @@ pub struct SPSRGraphConfig {
     pub enable_segment_merge: bool,
     /// Maximum gap between segments to merge (in lines)
     pub segment_merge_gap: u32,
-    /// Enable file coverage threshold check
-    pub enable_file_coverage_threshold: bool,
-    /// File coverage threshold (0.0-1.0), return whole file if exceeded
-    pub file_coverage_threshold: f32,
     /// Enable relation expansion: attach pre-resolved call-graph neighbours
     /// (callees/callers) supplied by the caller to each assembled result.
     pub expansion_enabled: bool,
@@ -403,23 +405,39 @@ pub struct SPSRGraphConfig {
     pub max_expanded_units: usize,
     /// Include caller-side (backward) expansion units.
     pub expansion_include_callers: bool,
+    /// Also attach non-call edges (inheritance, implementation, imports).
+    /// Off by default: structural edges fan out and drown the budget.
+    pub allow_structural_edges: bool,
+    /// Drop standard-library targets during expansion (defense in depth; the
+    /// caller filters first so dropped units never occupy budget).
+    pub filter_stdlib: bool,
+    /// Drop external targets without workspace source during expansion.
+    pub filter_external: bool,
+    /// Workspace root for file existence checks. Relative segment paths
+    /// resolve against it; absolute paths are checked directly. Missing files
+    /// are downgraded to references. `None` skips the check entirely.
+    pub workspace_root: Option<std::path::PathBuf>,
 }
 
 impl Default for SPSRGraphConfig {
     fn default() -> Self {
         Self {
             enable_assembly: false,
-            max_assembled_length: 2500,
+            max_assembled_length: 8000,
+            max_segment_tokens: 4000,
+            max_batch_tokens: 24000,
             include_file_markers: true,
             dedup_strategy: DedupStrategy::ByEntityId,
             assembly_top_n: 3,
             enable_segment_merge: true,
             segment_merge_gap: 2,
-            enable_file_coverage_threshold: true,
-            file_coverage_threshold: 0.6,
             expansion_enabled: false,
             max_expanded_units: 4,
             expansion_include_callers: true,
+            allow_structural_edges: false,
+            filter_stdlib: true,
+            filter_external: true,
+            workspace_root: None,
         }
     }
 }
@@ -464,6 +482,42 @@ impl SPSRGraphConfig {
         self
     }
 
+    /// Set the maximum tokens for a single segment (builder pattern).
+    pub fn with_max_segment_tokens(mut self, tokens: usize) -> Self {
+        self.max_segment_tokens = tokens;
+        self
+    }
+
+    /// Set the maximum total tokens across one assembled batch (builder pattern).
+    pub fn with_max_batch_tokens(mut self, tokens: usize) -> Self {
+        self.max_batch_tokens = tokens;
+        self
+    }
+
+    /// Allow or forbid non-call (structural) expansion edges (builder pattern).
+    pub fn with_structural_edges(mut self, allow: bool) -> Self {
+        self.allow_structural_edges = allow;
+        self
+    }
+
+    /// Enable or disable standard-library filtering during expansion (builder pattern).
+    pub fn with_stdlib_filter(mut self, filter: bool) -> Self {
+        self.filter_stdlib = filter;
+        self
+    }
+
+    /// Enable or disable external-target filtering during expansion (builder pattern).
+    pub fn with_external_filter(mut self, filter: bool) -> Self {
+        self.filter_external = filter;
+        self
+    }
+
+    /// Set the workspace root for file existence checks (builder pattern).
+    pub fn with_workspace_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
+        self.workspace_root = Some(root.into());
+        self
+    }
+
     /// Returns the maximum assembled content length in tokens.
     pub fn get_max_length(&self) -> usize {
         self.max_assembled_length
@@ -491,12 +545,21 @@ impl Validate for SPSRGraphConfig {
                 "must be greater than 0",
             ));
         }
-        if self.file_coverage_threshold <= 0.0 || self.file_coverage_threshold > 1.0 {
-            errors.push(ConfigValidationError::out_of_range(
-                "file_coverage_threshold",
-                self.file_coverage_threshold.to_string(),
-                "0.0",
-                "1.0",
+        if self.max_segment_tokens == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_segment_tokens",
+                "must be greater than 0",
+            ));
+        } else if self.max_segment_tokens > self.max_assembled_length {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_segment_tokens",
+                "must not exceed max_assembled_length",
+            ));
+        }
+        if self.max_batch_tokens == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_batch_tokens",
+                "must be greater than 0",
             ));
         }
         if self.expansion_enabled && self.max_expanded_units == 0 {
@@ -519,7 +582,7 @@ impl SPSRGraphConfig {
     pub fn conservative() -> Self {
         Self {
             enable_assembly: true,
-            max_assembled_length: 1500,
+            max_assembled_length: 4000,
             ..Self::default()
         }
     }
@@ -528,7 +591,7 @@ impl SPSRGraphConfig {
     pub fn aggressive() -> Self {
         Self {
             enable_assembly: true,
-            max_assembled_length: 5000,
+            max_assembled_length: 16000,
             ..Self::default()
         }
     }

@@ -62,7 +62,14 @@
 //! The caller owns path/visibility policy: expansion units must be filtered
 //! against the query's exclusion rules (path filters, epoch view) *before*
 //! reaching `assemble_single`, so excluded neighbours never occupy an
-//! expansion budget slot. The assembler itself never filters by path.
+//! expansion budget slot. The assembler additionally applies a defensive
+//! second filter (stdlib, external, and non-call edges), orders each
+//! direction by score with forward units filling the shared cap first, and
+//! downgrades vanished files to references when a workspace root is
+//! configured.
+//!
+//! Batch input must arrive sorted by score descending: the batch total budget
+//! downgrades from the tail up and the assembler never reorders the input.
 //!
 //! The `#[allow(dead_code)]` below suppresses the resulting unused warnings
 //! and MUST be removed together with the final resolution.
@@ -84,6 +91,7 @@ pub use assembler::SPSRGraphAssembler;
 pub use concatenator::StructureConcatenator;
 pub use error::{AssemblyError, Result};
 pub use types::{
-    AssembledResult, AssemblyMetadata, DedupStrategy, ExpandedUnit, ExpansionOrigin, FileInfo,
-    SPSRGraphConfig, SearchResultInput, SemanticUnitType, TruncationStrategy, UnitDeduplicator,
+    AssembledResult, AssemblyMetadata, DedupStrategy, DowngradeReason, ExpandedUnit,
+    ExpansionOrigin, FileInfo, SPSRGraphConfig, SearchResultInput, SemanticUnitType,
+    TruncationStrategy, UnitDeduplicator, reference_content,
 };

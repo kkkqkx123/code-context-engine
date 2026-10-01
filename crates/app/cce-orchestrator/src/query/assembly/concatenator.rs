@@ -3,9 +3,14 @@
 //! Concatenates code units with structure-aware formatting.
 //! Uses unit-level boundaries (from AST parsing) rather than text pattern matching.
 
+use std::path::Path;
+
+use cce_utils::token_estimation::TokenEstimator;
+
 use super::aggregator::{AggregatedSegment, SegmentAggregator};
-use super::types::{ExpandedUnit, ExpansionOrigin, FileInfo, SPSRGraphConfig};
-use cce_utils::file::read_file_to_utf8_async;
+use super::types::{
+    DowngradeReason, ExpandedUnit, ExpansionOrigin, FileInfo, SPSRGraphConfig, reference_content,
+};
 
 /// Structure-aware concatenator
 ///
@@ -25,10 +30,10 @@ impl StructureConcatenator {
 
     /// Concatenate units into a single string
     ///
-    /// The primary unit goes through position-based aggregation and file
-    /// coverage replacement; expansion units are appended after it in
-    /// forward-then-backward order, each rendered with its relation marker
-    /// and kept as an indivisible unit under the token budget.
+    /// Pipeline: aggregate primary segments, attach expansion units with
+    /// relation markers, downgrade missing files to references, downgrade
+    /// oversized segments to references, select by score with the primary
+    /// pinned, then render the survivors in structural (file, line) order.
     ///
     /// # Arguments
     ///
@@ -45,15 +50,10 @@ impl StructureConcatenator {
         forward: &[ExpandedUnit],
         backward: &[ExpandedUnit],
     ) -> (String, Vec<FileInfo>) {
-        // Aggregate segments from the primary unit
-        let units = vec![primary.clone()];
+        // Aggregate position-mergeable primary segments.
         let aggregator = SegmentAggregator::new(self.config.clone());
-        let mut segments = aggregator.aggregate(units);
-
-        // Integrate file coverage check
-        if self.config.enable_file_coverage_threshold {
-            self.apply_coverage_replacement(&mut segments).await;
-        }
+        let mut segments = aggregator.aggregate(vec![primary.clone()]);
+        let primary_count = segments.len();
 
         // Expansion units keep explicit relation ordering; position-based
         // merging must not fold them into primary segments.
@@ -63,8 +63,14 @@ impl StructureConcatenator {
             segments.push(segment);
         }
 
-        // Always use semantic boundary strategy (respect unit boundaries)
-        self.concatenate_respect_unit_boundaries(&segments)
+        // Files that vanished under the workspace root become references.
+        self.apply_existence_check(&mut segments).await;
+
+        // Oversized bodies become references without spending others' budget.
+        self.apply_segment_budget(&mut segments);
+
+        // Score selection (primary pinned) then structural-order rendering.
+        self.select_and_render(segments, primary_count)
     }
 
     /// Build the relation marker line for an expansion unit
@@ -89,33 +95,109 @@ impl StructureConcatenator {
         ))
     }
 
-    /// Respect unit boundaries - never split a semantic unit
-    fn concatenate_respect_unit_boundaries(
+    /// Downgrade segments whose source file no longer exists to references.
+    ///
+    /// Relative paths resolve against the configured workspace root, absolute
+    /// paths are checked directly. Without a workspace root the check is
+    /// skipped entirely and nothing is asserted about freshness.
+    async fn apply_existence_check(&self, segments: &mut [AggregatedSegment]) {
+        let Some(root) = self.config.workspace_root.clone() else {
+            return;
+        };
+        for segment in segments.iter_mut() {
+            if segment.is_reference() {
+                continue;
+            }
+            let path = Path::new(&segment.file_path);
+            let resolved = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                root.join(path)
+            };
+            if tokio::fs::metadata(&resolved).await.is_err() {
+                segment.downgrade_to_reference(DowngradeReason::FileMissing);
+            }
+        }
+    }
+
+    /// Downgrade oversized segment bodies to references.
+    ///
+    /// Each segment has an independent limit (`max_segment_tokens`); a single
+    /// huge span degrades alone instead of crowding out the other spans.
+    fn apply_segment_budget(&self, segments: &mut [AggregatedSegment]) {
+        for segment in segments.iter_mut() {
+            if segment.is_reference() {
+                continue;
+            }
+            if self.standalone_cost(segment) > self.config.max_segment_tokens {
+                segment.downgrade_to_reference(DowngradeReason::OverLimit);
+            }
+        }
+    }
+
+    /// Select segments by score with the primary pinned, then render the
+    /// survivors in structural order: primary first, remaining expansions
+    /// grouped by file and line for readability.
+    fn select_and_render(
         &self,
-        segments: &[AggregatedSegment],
+        segments: Vec<AggregatedSegment>,
+        primary_count: usize,
     ) -> (String, Vec<FileInfo>) {
         let max_length = self.config.get_max_length();
+        let primary_count = primary_count.min(segments.len());
+
+        // The primary is always kept; an oversized primary already shrank to
+        // a small reference above, so pinning cannot blow the budget.
+        let mut total: usize = segments[..primary_count]
+            .iter()
+            .map(|segment| self.selection_cost(segment))
+            .sum();
+        let mut picked = vec![false; segments.len()];
+        for slot in picked.iter_mut().take(primary_count) {
+            *slot = true;
+        }
+
+        // Remaining expansions enter by score, highest first (stable: ties
+        // keep caller order). Whole units are kept or dropped; a unit is
+        // never split to fit.
+        let mut rest: Vec<usize> = (primary_count..segments.len()).collect();
+        rest.sort_by(|a, b| segments[*b].score.total_cmp(&segments[*a].score));
+        let mut omitted_count = 0;
+        let mut omitted_size = 0;
+        for index in rest {
+            let cost = self.selection_cost(&segments[index]);
+            if total + cost <= max_length {
+                picked[index] = true;
+                total += cost;
+            } else {
+                omitted_count += 1;
+                omitted_size += cost;
+            }
+        }
+
+        let mut order: Vec<usize> = (0..primary_count).collect();
+        let mut picked_rest: Vec<usize> = (primary_count..segments.len())
+            .filter(|index| picked[*index])
+            .collect();
+        picked_rest.sort_by(|a, b| {
+            segments[*a]
+                .file_path
+                .cmp(&segments[*b].file_path)
+                .then(segments[*a].start_line.cmp(&segments[*b].start_line))
+        });
+        order.extend(picked_rest);
+
         let mut result = String::new();
         let mut current_file: Option<String> = None;
         let mut file_info_map: std::collections::HashMap<String, FileInfo> =
             std::collections::HashMap::new();
-        let mut added_any = false;
-        let mut omitted_count = 0;
-        let mut omitted_size = 0;
-
-        for segment in segments {
-            let actual_size = self.calculate_actual_segment_size(segment, &current_file);
-
-            // Only add if it fits within limit (respect unit boundary)
-            let current_size = self.config.estimate_content_tokens(&result);
-            if current_size + actual_size <= max_length || !added_any {
-                self.render_segment(&mut result, &mut current_file, &mut file_info_map, segment);
-                added_any = true;
-            } else {
-                // Can't fit this unit, track it as omitted
-                omitted_count += 1;
-                omitted_size += self.config.estimate_content_tokens(&segment.code);
-            }
+        for index in order {
+            self.render_segment(
+                &mut result,
+                &mut current_file,
+                &mut file_info_map,
+                &segments[index],
+            );
         }
 
         // Add informative truncation marker if we stopped early
@@ -160,9 +242,21 @@ impl StructureConcatenator {
             result.push('\n');
         }
 
-        // Add the code
-        result.push_str(&segment.code);
-        result.push('\n');
+        // Reference segments render only the path-and-range line.
+        if let Some(reason) = segment.reference {
+            result.push_str(&reference_content(
+                &segment.file_path,
+                segment.start_line,
+                segment.end_line,
+                segment.body_tokens,
+                reason,
+            ));
+            result.push('\n');
+        } else {
+            // Add the code
+            result.push_str(&segment.code);
+            result.push('\n');
+        }
 
         // Update file info
         if let Some(file_info) = file_info_map.get_mut(&segment.file_path) {
@@ -171,129 +265,52 @@ impl StructureConcatenator {
         }
     }
 
-    /// Calculate actual size contribution of a segment (code + markers) using token count
-    fn calculate_actual_segment_size(
-        &self,
-        segment: &AggregatedSegment,
-        current_file: &Option<String>,
-    ) -> usize {
-        use cce_utils::token_estimation::TokenEstimator;
-
-        let mut token_count = TokenEstimator::estimate(&segment.code) + 1; // Code tokens + newline
+    /// Standalone token cost of a segment body: code plus its own markers.
+    ///
+    /// The file marker is always counted so selection stays order-independent
+    /// (rendering may elide a repeated file marker, so actual output is at
+    /// most this estimate).
+    fn standalone_cost(&self, segment: &AggregatedSegment) -> usize {
+        let mut cost = TokenEstimator::estimate(&segment.code) + 1; // Code + newline
 
         if let Some(marker) = &segment.marker {
-            token_count += TokenEstimator::estimate(marker) + 1; // Marker + newline
+            cost += TokenEstimator::estimate(marker) + 1; // Marker + newline
         }
 
-        // Calculate actual file marker size (only if entering new file)
-        if self.config.include_file_markers && *current_file != Some(segment.file_path.clone()) {
-            let marker = self.format_file_marker(&segment.file_path);
-            token_count += TokenEstimator::estimate(&marker) + 1; // Marker + newline
+        if self.config.include_file_markers {
+            cost += TokenEstimator::estimate(&self.format_file_marker(&segment.file_path)) + 1;
         }
 
-        token_count
+        cost
     }
 
-    /// Apply file coverage replacement logic
-    async fn apply_coverage_replacement(&self, segments: &mut Vec<AggregatedSegment>) {
-        use std::collections::HashMap;
-
-        // Group segments by file
-        let mut file_segments: HashMap<String, Vec<usize>> = HashMap::new();
-        for (idx, seg) in segments.iter().enumerate() {
-            file_segments
-                .entry(seg.file_path.clone())
-                .or_default()
-                .push(idx);
-        }
-
-        let mut replacements: Vec<(String, String, u32)> = Vec::new(); // (path, content, total_lines)
-
-        for (file_path, indices) in &file_segments {
-            // Get segments for this file
-            let file_segs: Vec<AggregatedSegment> =
-                indices.iter().map(|&i| segments[i].clone()).collect();
-
-            // Read file to get actual line count
-            if let Ok(content) = read_file_to_utf8_async(std::path::Path::new(file_path)).await {
-                let total_lines = content.lines().count() as u32;
-                if total_lines == 0 {
-                    continue;
-                }
-
-                let (_, _, ratio) = SegmentAggregator::new(self.config.clone()).calculate_coverage(
-                    &file_segs,
-                    file_path,
-                    total_lines,
-                );
-
-                if SegmentAggregator::new(self.config.clone()).should_return_whole_file(ratio) {
-                    replacements.push((file_path.clone(), content, total_lines));
-                }
+    /// Token cost used for budget selection: body cost, or the reference
+    /// line cost for downgraded segments.
+    fn selection_cost(&self, segment: &AggregatedSegment) -> usize {
+        if let Some(reason) = segment.reference {
+            let line = reference_content(
+                &segment.file_path,
+                segment.start_line,
+                segment.end_line,
+                segment.body_tokens,
+                reason,
+            );
+            let mut cost = TokenEstimator::estimate(&line) + 1;
+            if let Some(marker) = &segment.marker {
+                cost += TokenEstimator::estimate(marker) + 1;
             }
+            if self.config.include_file_markers {
+                cost += TokenEstimator::estimate(&self.format_file_marker(&segment.file_path)) + 1;
+            }
+            cost
+        } else {
+            self.standalone_cost(segment)
         }
-
-        // Apply replacements
-        for (path, content, total_lines) in replacements {
-            // Remove old segments for this file
-            segments.retain(|s| s.file_path != path);
-
-            // Add a new "whole file" segment
-            let whole_file_seg = AggregatedSegment {
-                file_path: path.clone(),
-                start_line: 1,
-                end_line: total_lines,
-                code: content,
-                source_units: Vec::new(),
-                is_whole_file: true,
-                marker: None,
-            };
-            segments.push(whole_file_seg);
-        }
-
-        // Re-sort segments to maintain order
-        segments.sort_by(|a, b| {
-            a.file_path
-                .cmp(&b.file_path)
-                .then(a.start_line.cmp(&b.start_line))
-        });
     }
 
     /// Format a file marker
     fn format_file_marker(&self, file_path: &str) -> String {
         format!("// ===== File: {} =====", file_path)
-    }
-
-    /// Simple concatenation without markers
-    pub fn concatenate_simple(
-        &self,
-        primary: &ExpandedUnit,
-        forward: &[ExpandedUnit],
-        backward: &[ExpandedUnit],
-    ) -> String {
-        let max_length = self.config.get_max_length();
-        let mut result = String::new();
-
-        result.push_str(&primary.code);
-        result.push('\n');
-
-        for unit in forward {
-            if result.len() + unit.code.len() + 1 > max_length && !result.is_empty() {
-                break;
-            }
-            result.push_str(&unit.code);
-            result.push('\n');
-        }
-
-        for unit in backward {
-            if result.len() + unit.code.len() + 1 > max_length && !result.is_empty() {
-                break;
-            }
-            result.push_str(&unit.code);
-            result.push('\n');
-        }
-
-        result
     }
 
     /// Get the configuration
@@ -341,24 +358,6 @@ mod tests {
     }
 
     #[test]
-    fn test_concatenate_simple() {
-        let config = SPSRGraphConfig::default();
-        let concat = StructureConcatenator::new(config);
-
-        let primary = ExpandedUnit::new(
-            "fn foo() {}".to_string(),
-            "src/a.rs".to_string(),
-            1,
-            1,
-            "foo".to_string(),
-        );
-
-        let result = concat.concatenate_simple(&primary, &[], &[]);
-
-        assert_eq!(result, "fn foo() {}\n");
-    }
-
-    #[test]
     fn test_format_file_marker() {
         let config = SPSRGraphConfig::default();
         let concat = StructureConcatenator::new(config);
@@ -386,10 +385,9 @@ mod tests {
 
         let (result, _) = concat.concatenate(&primary, &[], &[]).await;
 
-        // Should include the complete unit or nothing (never split mid-function)
-        assert!(result.contains("large_function") || result.is_empty());
-        // Should NOT contain partial function
-        assert!(!result.contains("let x = 1") || result.contains("fn large_function"));
+        // The pinned primary is always kept whole (never split mid-function).
+        assert!(result.contains("fn large_function"));
+        assert!(result.contains("let x = 1"));
     }
 
     #[tokio::test]
@@ -466,5 +464,163 @@ mod tests {
 
         // This demonstrates that we're now using character counting
         assert!(char_count <= byte_count);
+    }
+
+    fn expansion_unit(name: &str, path: &str, code: &str, score: f32) -> ExpandedUnit {
+        ExpandedUnit::new(code.to_string(), path.to_string(), 1, 3, name.to_string())
+            .with_expansion(ExpansionOrigin::Forward, "calls")
+            .with_score(score)
+    }
+
+    /// Standalone selection cost mirror: code + relation marker + file marker.
+    fn standalone_cost(code: &str, marker: Option<&str>, path: &str) -> usize {
+        let mut cost = TokenEstimator::estimate(code) + 1;
+        if let Some(marker) = marker {
+            cost += TokenEstimator::estimate(marker) + 1;
+        }
+        cost += TokenEstimator::estimate(&format!("// ===== File: {} =====", path)) + 1;
+        cost
+    }
+
+    #[tokio::test]
+    async fn test_missing_file_becomes_reference() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = SPSRGraphConfig::new()
+            .enable(true)
+            .with_workspace_root(dir.path());
+        let concat = StructureConcatenator::new(config);
+
+        let primary = ExpandedUnit::new(
+            "fn ghost() {}".to_string(),
+            "src/missing.rs".to_string(),
+            1,
+            3,
+            "ghost".to_string(),
+        );
+
+        let (result, files) = concat.concatenate(&primary, &[], &[]).await;
+
+        assert!(result.contains("// ===== File: src/missing.rs ====="));
+        assert!(result.contains("[reference] src/missing.rs:1-3"));
+        assert!(result.contains("not found"));
+        assert!(!result.contains("fn ghost"));
+        assert_eq!(files.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_no_workspace_root_skips_existence_check() {
+        let config = SPSRGraphConfig::new().enable(true);
+        let concat = StructureConcatenator::new(config);
+
+        let primary = ExpandedUnit::new(
+            "fn ghost() {}".to_string(),
+            "src/missing.rs".to_string(),
+            1,
+            3,
+            "ghost".to_string(),
+        );
+
+        let (result, _) = concat.concatenate(&primary, &[], &[]).await;
+
+        assert!(result.contains("fn ghost"));
+        assert!(!result.contains("[reference]"));
+    }
+
+    #[tokio::test]
+    async fn test_oversized_segment_becomes_reference() {
+        // The limit fits the tiny expansion exactly; the huge primary must
+        // exceed it.
+        let tiny_code = "fn tiny() {}";
+        let tiny_marker = "// --> calls: tiny (src/tiny.rs:1-3)";
+        let limit = standalone_cost(tiny_code, Some(tiny_marker), "src/tiny.rs");
+        let config = SPSRGraphConfig {
+            max_segment_tokens: limit,
+            ..SPSRGraphConfig::new().enable(true)
+        };
+        let concat = StructureConcatenator::new(config);
+
+        let primary = ExpandedUnit::new(
+            "fn huge() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n    a + b + c\n}"
+                .to_string(),
+            "src/huge.rs".to_string(),
+            1,
+            6,
+            "huge".to_string(),
+        );
+        let tiny = expansion_unit("tiny", "src/tiny.rs", tiny_code, 0.9);
+
+        let (result, _) = concat.concatenate(&primary, &[tiny], &[]).await;
+
+        // The pinned primary degrades to a reference instead of crowding out
+        // the small expansion.
+        assert!(result.contains("[reference] src/huge.rs:1-6"));
+        assert!(result.contains("over budget"));
+        assert!(!result.contains("let a = 1"));
+        assert!(result.contains("fn tiny() {}"));
+    }
+
+    #[tokio::test]
+    async fn test_score_selection_prefers_high_score() {
+        let primary_code = "fn main() {}";
+        let high_code = "fn high() {\n    work();\n}";
+        let low_code = "fn low() {\n    rest();\n}";
+        let high_marker = "// --> calls: high (src/high.rs:1-3)";
+
+        let budget = standalone_cost(primary_code, None, "src/main.rs")
+            + standalone_cost(high_code, Some(high_marker), "src/high.rs")
+            + 5;
+        let config = SPSRGraphConfig {
+            max_assembled_length: budget,
+            ..SPSRGraphConfig::new().enable(true)
+        };
+        let concat = StructureConcatenator::new(config);
+
+        let primary = ExpandedUnit::new(
+            primary_code.to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let high = expansion_unit("high", "src/high.rs", high_code, 0.9);
+        let low = expansion_unit("low", "src/low.rs", low_code, 0.1);
+
+        let (result, _) = concat.concatenate(&primary, &[low, high], &[]).await;
+
+        // Arrival order is low-then-high; selection must follow score.
+        assert!(result.contains("fn main"));
+        assert!(result.contains("fn high"));
+        assert!(!result.contains("fn low"));
+        assert!(result.contains("omitted"));
+    }
+
+    #[tokio::test]
+    async fn test_omitted_size_counts_markers() {
+        let low_code = "fn low() {}";
+        let budget = standalone_cost("fn main() {}", None, "src/main.rs") + 1;
+        let config = SPSRGraphConfig {
+            max_assembled_length: budget,
+            ..SPSRGraphConfig::new().enable(true)
+        };
+        let concat = StructureConcatenator::new(config);
+
+        let primary = ExpandedUnit::new(
+            "fn main() {}".to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let low = expansion_unit("low", "src/low.rs", low_code, 0.1);
+
+        let (result, _) = concat.concatenate(&primary, &[low], &[]).await;
+
+        assert!(result.contains("omitted"));
+        let start = result.find("(~").expect("omitted magnitude");
+        let tail = &result[start + 2..];
+        let end = tail.find(" tokens)").expect("magnitude unit");
+        let omitted: usize = tail[..end].trim().parse().expect("magnitude number");
+        // The reported magnitude covers code plus file and relation markers.
+        assert!(omitted > TokenEstimator::estimate(low_code));
     }
 }

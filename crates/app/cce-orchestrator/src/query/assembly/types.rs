@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use cce_types::EntityId;
+use cce_types::{EntityId, RelationType};
 
 /// Search result input for assembly
 ///
@@ -123,7 +123,22 @@ pub struct ExpandedUnit {
     pub origin: ExpansionOrigin,
     /// Relation label rendered in the expansion marker (e.g. "calls")
     pub edge_label: String,
-    /// Depth in the expansion tree
+    /// Relation type of the edge that produced this unit, when known.
+    /// Primary units carry `None`. A `None` on an expansion unit means the
+    /// caller did not classify the edge; it is treated as call-domain so
+    /// legacy call-only inputs keep working.
+    pub relation_type: Option<RelationType>,
+    /// Relevance score. Primary units inherit the search hit score; expansion
+    /// units carry caller-resolved scores used for direction-internal ordering
+    /// and budget selection.
+    pub score: f32,
+    /// True when the target is a standard-library symbol.
+    pub is_stdlib: bool,
+    /// True when the target has no in-workspace source.
+    pub is_external: bool,
+    /// Depth in the expansion tree. Expansion is single-hop only, so this is
+    /// always zero today; the field documents the position for a future
+    /// multi-hop design.
     pub depth: u32,
 }
 
@@ -146,6 +161,10 @@ impl ExpandedUnit {
             unit_type: SemanticUnitType::Unknown,
             origin: ExpansionOrigin::Primary,
             edge_label: String::new(),
+            relation_type: None,
+            score: 0.0,
+            is_stdlib: false,
+            is_external: false,
             depth: 0,
         }
     }
@@ -173,20 +192,99 @@ impl ExpandedUnit {
         self
     }
 
+    /// Set relevance score
+    pub fn with_score(mut self, score: f32) -> Self {
+        self.score = score;
+        self
+    }
+
+    /// Set the relation type of the producing edge
+    pub fn with_relation_type(mut self, relation_type: RelationType) -> Self {
+        self.relation_type = Some(relation_type);
+        self
+    }
+
+    /// Mark the target as a standard-library symbol (or not)
+    pub fn with_stdlib(mut self, is_stdlib: bool) -> Self {
+        self.is_stdlib = is_stdlib;
+        self
+    }
+
+    /// Mark the target as external to the workspace (or not)
+    pub fn with_external(mut self, is_external: bool) -> Self {
+        self.is_external = is_external;
+        self
+    }
+
+    /// Whether this unit belongs to the call domain and may be auto-attached.
+    /// Units with an unknown edge (`None`) count as call-domain so legacy
+    /// call-only inputs keep working; only a known non-call edge is rejected.
+    pub fn is_call_domain(&self) -> bool {
+        self.relation_type.as_ref().is_none_or(|t| t.is_call())
+    }
+
     /// Get content hash for deduplication
     pub fn content_hash(&self) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        self.code.hash(&mut hasher);
-        hasher.finish()
+        // Stable FNV-1a over identity plus body so equal units hash equally
+        // across runs. Covers file path and line range, not just the text.
+        let mut hash: u64 = 0xcbf29ce484222325;
+        let mut mix = |bytes: &[u8]| {
+            for byte in bytes {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x100_0000_01b3);
+            }
+        };
+        mix(self.file_path.as_bytes());
+        mix(&self.start_line.to_le_bytes());
+        mix(&self.end_line.to_le_bytes());
+        mix(self.code.as_bytes());
+        hash
     }
 
     /// Check if this unit is from the same file as another
     pub fn is_same_file(&self, other: &ExpandedUnit) -> bool {
         self.file_path == other.file_path
     }
+}
+
+/// Why a segment or result was downgraded to a path-and-range reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DowngradeReason {
+    /// The body exceeded its token budget (per-segment or batch total).
+    OverLimit,
+    /// The source file no longer exists under the workspace root.
+    FileMissing,
+}
+
+impl DowngradeReason {
+    /// Short human-readable note rendered after the reference line.
+    pub fn note(self) -> &'static str {
+        match self {
+            Self::OverLimit => "omitted: over budget; read the file range on demand",
+            Self::FileMissing => "file not found; path may be stale, adjust or skip",
+        }
+    }
+}
+
+/// Render a file-path-plus-range reference line for a downgraded segment.
+///
+/// The line carries the location, a token-magnitude estimate of the dropped
+/// body, and the downgrade reason so the model can decide whether to read on.
+pub fn reference_content(
+    file_path: &str,
+    start_line: u32,
+    end_line: u32,
+    body_tokens: usize,
+    reason: DowngradeReason,
+) -> String {
+    format!(
+        "// [reference] {}:{}-{} (~{} tokens, {})",
+        file_path,
+        start_line,
+        end_line,
+        body_tokens,
+        reason.note()
+    )
 }
 
 /// File information
@@ -268,6 +366,10 @@ pub struct AssembledResult {
     pub end_line: u32,
     /// Assembled content
     pub assembled_content: String,
+    /// Whether the whole result was downgraded to a path-and-range reference
+    /// because the batch total budget ran out. The content then holds only the
+    /// reference rendering, never source text.
+    pub downgraded_to_reference: bool,
     /// Involved files
     pub involved_files: Vec<FileInfo>,
     /// Assembly metadata
@@ -290,6 +392,7 @@ impl AssembledResult {
             start_line: unit.start_line,
             end_line: unit.end_line,
             assembled_content: unit.code.clone(),
+            downgraded_to_reference: false,
             involved_files: vec![FileInfo::new(unit.file_path)],
             metadata: AssemblyMetadata {
                 expanded: false,
@@ -303,6 +406,38 @@ impl AssembledResult {
             },
             original_content: unit.code,
         }
+    }
+
+    /// Downgrade the whole result to a path-and-range reference in place.
+    ///
+    /// Used when the batch total budget runs out: low-score results keep
+    /// their slot but lose their body text. Expansion bookkeeping is reset
+    /// because the reference only points at the primary location.
+    pub fn downgrade_to_reference(&mut self, reason: DowngradeReason) {
+        use cce_utils::token_estimation::TokenEstimator;
+
+        let body_tokens = TokenEstimator::estimate(&self.assembled_content);
+        let marker = format!("// ===== File: {} =====", self.file_path);
+        self.assembled_content = format!(
+            "{}\n{}",
+            marker,
+            reference_content(
+                &self.file_path,
+                self.start_line,
+                self.end_line,
+                body_tokens,
+                reason
+            )
+        );
+        self.downgraded_to_reference = true;
+        self.involved_files = vec![FileInfo::new(self.file_path.clone())];
+        self.metadata.expanded = false;
+        self.metadata.expanded_nodes = 0;
+        self.metadata.forward_nodes = 0;
+        self.metadata.backward_nodes = 0;
+        self.metadata.file_count = 1;
+        self.metadata.assembled_length = self.assembled_content.len();
+        self.metadata.truncated = false;
     }
 
     /// Check if assembly was performed
@@ -359,7 +494,7 @@ mod tests {
     fn test_spsr_graph_config_default() {
         let config = SPSRGraphConfig::default();
         assert!(!config.enable_assembly);
-        assert_eq!(config.max_assembled_length, 2500);
+        assert_eq!(config.max_assembled_length, 8000);
     }
 
     #[test]

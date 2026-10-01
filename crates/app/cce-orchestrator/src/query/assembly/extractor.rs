@@ -92,6 +92,10 @@ impl SemanticUnitExtractor {
             unit_type,
             origin: super::types::ExpansionOrigin::Primary,
             edge_label: String::new(),
+            relation_type: None,
+            score: 0.0,
+            is_stdlib: false,
+            is_external: false,
             depth: 0,
         })
     }
@@ -148,6 +152,10 @@ impl SemanticUnitExtractor {
             unit_type,
             origin: super::types::ExpansionOrigin::Primary,
             edge_label: String::new(),
+            relation_type: None,
+            score: 0.0,
+            is_stdlib: false,
+            is_external: false,
             depth: 0,
         })
     }

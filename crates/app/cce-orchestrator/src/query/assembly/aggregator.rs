@@ -1,8 +1,12 @@
 //! Segment aggregator
 //!
-//! Aggregates code segments based on position and file coverage.
+//! Merges adjacent unmarked same-file primary segments and reports gaps with
+//! omission markers. Expansion segments (relation-marked) and reference
+//! segments never position-merge.
 
-use super::types::{ExpandedUnit, SPSRGraphConfig};
+use cce_utils::token_estimation::TokenEstimator;
+
+use super::types::{DowngradeReason, ExpandedUnit, ExpansionOrigin, SPSRGraphConfig};
 
 /// Aggregated segment representing merged units
 #[derive(Debug, Clone)]
@@ -13,12 +17,19 @@ pub struct AggregatedSegment {
     pub start_line: u32,
     /// End line
     pub end_line: u32,
-    /// Merged code content
+    /// Merged code content (empty for reference segments)
     pub code: String,
     /// Original units that were merged
     pub source_units: Vec<ExpandedUnit>,
-    /// Whether this is a whole file
-    pub is_whole_file: bool,
+    /// Highest score across the source units; single-unit segments inherit
+    /// their unit's score so large merged spans are not penalized in budget
+    /// selection.
+    pub score: f32,
+    /// Token estimate of the dropped body; only meaningful on references.
+    pub body_tokens: usize,
+    /// Set when the segment was downgraded to a path-and-range reference.
+    /// Reference segments carry no body text and never merge.
+    pub reference: Option<DowngradeReason>,
     /// Optional relation marker rendered above the segment code
     pub marker: Option<String>,
 }
@@ -26,28 +37,59 @@ pub struct AggregatedSegment {
 impl AggregatedSegment {
     /// Create a new aggregated segment
     pub fn new(file_path: String, start_line: u32, end_line: u32, code: String) -> Self {
+        let body_tokens = TokenEstimator::estimate(&code);
         Self {
             file_path,
             start_line,
             end_line,
             code,
             source_units: Vec::new(),
-            is_whole_file: false,
+            score: 0.0,
+            body_tokens,
+            reference: None,
             marker: None,
         }
     }
 
-    /// Create from a single unit
+    /// Create from a single unit, inheriting its score
     pub fn from_unit(unit: ExpandedUnit) -> Self {
+        let body_tokens = TokenEstimator::estimate(&unit.code);
         Self {
             file_path: unit.file_path.clone(),
             start_line: unit.start_line,
             end_line: unit.end_line,
             code: unit.code.clone(),
+            score: unit.score,
             source_units: vec![unit],
-            is_whole_file: false,
+            body_tokens,
+            reference: None,
             marker: None,
         }
+    }
+
+    /// Whether this segment is a downgraded reference without body text
+    pub fn is_reference(&self) -> bool {
+        self.reference.is_some()
+    }
+
+    /// Whether this segment carries an expansion relation and must keep its
+    /// own rendering. Any relation-marked source unit (non-primary origin)
+    /// or an explicit marker opts the segment out of position merging.
+    pub fn has_relation(&self) -> bool {
+        self.marker.is_some()
+            || self
+                .source_units
+                .iter()
+                .any(|unit| unit.origin != ExpansionOrigin::Primary)
+    }
+
+    /// Downgrade the segment to a path-and-range reference in place,
+    /// recording the body magnitude for the reference line.
+    pub fn downgrade_to_reference(&mut self, reason: DowngradeReason) {
+        self.body_tokens = TokenEstimator::estimate(&self.code);
+        self.code.clear();
+        self.source_units.clear();
+        self.reference = Some(reason);
     }
 
     /// Get line count
@@ -83,7 +125,10 @@ impl SegmentAggregator {
     /// This function:
     /// 1. Groups units by file (using BTreeMap for sorted order)
     /// 2. Sorts by line number within each file
-    /// 3. Merges adjacent segments (gap <= config.segment_merge_gap)
+    /// 3. Merges adjacent unmarked primary segments (gap <=
+    ///    config.segment_merge_gap), keeping the highest source score and
+    ///    reporting gaps with omission markers. Relation-marked expansion
+    ///    units and reference segments are never merged.
     pub fn aggregate(&self, units: Vec<ExpandedUnit>) -> Vec<AggregatedSegment> {
         if !self.config.enable_segment_merge {
             // Return as-is if merging is disabled
@@ -135,10 +180,25 @@ impl SegmentAggregator {
                 0
             };
 
-            if gap <= self.config.segment_merge_gap {
+            // Only unmarked primary segments merge; expansion and reference
+            // segments always keep their own rendering.
+            let mergeable = current.reference.is_none()
+                && !current.has_relation()
+                && unit.origin == ExpansionOrigin::Primary;
+            if mergeable && gap <= self.config.segment_merge_gap {
                 // Merge: extend current segment
+                let omitted_start = current.end_line + 1;
+                let omitted_end = unit.start_line.saturating_sub(1);
                 current.end_line = current.end_line.max(unit.end_line);
-                current.code = Self::merge_code_efficient(&current.code, &unit.code, gap);
+                current.code = Self::merge_code_with_omission(
+                    &current.code,
+                    &unit.code,
+                    gap,
+                    omitted_start,
+                    omitted_end,
+                );
+                current.score = current.score.max(unit.score);
+                current.body_tokens = TokenEstimator::estimate(&current.code);
 
                 // Optimization: Clear unit code to save memory as it's now in current.code
                 let mut slim_unit = unit;
@@ -157,66 +217,30 @@ impl SegmentAggregator {
         result
     }
 
-    /// Efficiently merge two code strings with gap handling
-    /// Pre-allocates capacity to avoid multiple reallocations
-    fn merge_code_efficient(code1: &str, code2: &str, gap: u32) -> String {
-        // Pre-calculate total capacity needed
-        let total_capacity = code1.len() + code2.len() + (gap as usize) + 1;
+    /// Merge two code strings, reporting unknown gap lines with an omission
+    /// marker that names the omitted line interval instead of faking
+    /// continuity with blank lines.
+    fn merge_code_with_omission(
+        code1: &str,
+        code2: &str,
+        gap: u32,
+        omitted_start: u32,
+        omitted_end: u32,
+    ) -> String {
+        let marker = if gap > 0 {
+            format!("// ... omitted {gap} line(s) [{omitted_start}-{omitted_end}] ...\n")
+        } else {
+            String::new()
+        };
+        let total_capacity = code1.len() + marker.len() + code2.len() + 2;
         let mut result = String::with_capacity(total_capacity);
 
         result.push_str(code1);
-
-        // Efficiently add gap newlines using repeat
-        if gap > 0 {
-            result.push_str(&"\n".repeat(gap as usize));
-        }
-
         result.push('\n');
+        result.push_str(&marker);
         result.push_str(code2);
 
         result
-    }
-
-    /// Calculate file coverage for a set of segments
-    ///
-    /// Returns (covered_lines, total_lines, coverage_ratio)
-    pub fn calculate_coverage(
-        &self,
-        segments: &[AggregatedSegment],
-        file_path: &str,
-        total_lines: u32,
-    ) -> (u32, u32, f32) {
-        let file_segments: Vec<&AggregatedSegment> = segments
-            .iter()
-            .filter(|s| s.file_path == file_path)
-            .collect();
-
-        if file_segments.is_empty() || total_lines == 0 {
-            return (0, total_lines, 0.0);
-        }
-
-        // Calculate covered lines (avoid double-counting overlaps)
-        let mut covered_lines = 0u32;
-        let mut last_end = 0u32;
-
-        for segment in file_segments {
-            if segment.start_line > last_end {
-                covered_lines += segment.end_line - segment.start_line + 1;
-                last_end = segment.end_line;
-            } else if segment.end_line > last_end {
-                covered_lines += segment.end_line - last_end;
-                last_end = segment.end_line;
-            }
-        }
-
-        let coverage_ratio = covered_lines as f32 / total_lines as f32;
-        (covered_lines, total_lines, coverage_ratio)
-    }
-
-    /// Check if file coverage exceeds threshold
-    pub fn should_return_whole_file(&self, coverage_ratio: f32) -> bool {
-        self.config.enable_file_coverage_threshold
-            && coverage_ratio >= self.config.file_coverage_threshold
     }
 
     /// Get the configuration
@@ -242,6 +266,7 @@ mod tests {
             end_line,
             name.to_string(),
         )
+        .with_score(0.5)
     }
 
     #[test]
@@ -280,6 +305,48 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].start_line, 1);
         assert_eq!(result[0].end_line, 8);
+        // Gap lines are reported with an omission marker, not blank-filled.
+        assert!(
+            result[0]
+                .code
+                .contains("// ... omitted 2 line(s) [4-5] ...")
+        );
+        assert!(result[0].code.contains("fn foo()"));
+        assert!(result[0].code.contains("fn bar()"));
+    }
+
+    #[test]
+    fn test_merge_keeps_highest_score() {
+        let config = SPSRGraphConfig {
+            enable_segment_merge: true,
+            segment_merge_gap: 2,
+            ..Default::default()
+        };
+        let aggregator = SegmentAggregator::new(config);
+
+        let low = create_test_unit("src/a.rs", 1, 3, "foo").with_score(0.2);
+        let high = create_test_unit("src/a.rs", 6, 8, "bar").with_score(0.9);
+
+        let result = aggregator.aggregate(vec![low, high]);
+        assert_eq!(result.len(), 1);
+        assert!((result[0].score - 0.9).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_expansion_units_never_merge() {
+        let config = SPSRGraphConfig {
+            enable_segment_merge: true,
+            segment_merge_gap: 2,
+            ..Default::default()
+        };
+        let aggregator = SegmentAggregator::new(config);
+
+        let primary = create_test_unit("src/a.rs", 1, 3, "foo");
+        let expansion = create_test_unit("src/a.rs", 6, 8, "bar")
+            .with_expansion(ExpansionOrigin::Forward, "calls");
+
+        let result = aggregator.aggregate(vec![primary, expansion]);
+        assert_eq!(result.len(), 2);
     }
 
     #[test]
@@ -325,36 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_coverage() {
-        let config = SPSRGraphConfig::default();
-        let aggregator = SegmentAggregator::new(config);
-
-        let segments = vec![
-            AggregatedSegment::new("src/a.rs".to_string(), 1, 10, "code1".to_string()),
-            AggregatedSegment::new("src/a.rs".to_string(), 20, 30, "code2".to_string()),
-        ];
-
-        let (covered, total, ratio) = aggregator.calculate_coverage(&segments, "src/a.rs", 100);
-        assert_eq!(covered, 21); // 10 + 11
-        assert_eq!(total, 100);
-        assert!((ratio - 0.21).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_should_return_whole_file() {
-        let config = SPSRGraphConfig {
-            enable_file_coverage_threshold: true,
-            file_coverage_threshold: 0.6,
-            ..Default::default()
-        };
-        let aggregator = SegmentAggregator::new(config);
-
-        assert!(aggregator.should_return_whole_file(0.7));
-        assert!(aggregator.should_return_whole_file(0.6));
-        assert!(!aggregator.should_return_whole_file(0.5));
-    }
-
-    #[test]
     fn test_aggregated_segment_from_unit() {
         let unit = create_test_unit("src/a.rs", 1, 3, "foo");
         let segment = AggregatedSegment::from_unit(unit);
@@ -363,6 +400,24 @@ mod tests {
         assert_eq!(segment.start_line, 1);
         assert_eq!(segment.end_line, 3);
         assert_eq!(segment.source_units.len(), 1);
-        assert!(!segment.is_whole_file);
+        assert!(!segment.is_reference());
+        assert!(!segment.has_relation());
+        // Single-unit segments inherit the unit score.
+        assert!((segment.score - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_reference_segment_never_merges() {
+        let mut segment = AggregatedSegment::from_unit(create_test_unit("src/a.rs", 1, 3, "foo"));
+        segment.downgrade_to_reference(DowngradeReason::FileMissing);
+
+        assert!(segment.is_reference());
+        assert!(segment.code.is_empty());
+        assert!(segment.body_tokens > 0);
+
+        // A marked expansion segment also opts out of merging.
+        let mut marked = AggregatedSegment::from_unit(create_test_unit("src/a.rs", 6, 8, "bar"));
+        marked.marker = Some("// --> calls: bar".to_string());
+        assert!(marked.has_relation());
     }
 }
