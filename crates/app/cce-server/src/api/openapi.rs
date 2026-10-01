@@ -121,89 +121,392 @@ pub fn openapi_json() -> String {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    // ---- contract configuration (repo-specific) ----
 
     const SNAPSHOT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../frontend/openapi.json"
     );
+    const REFRESH_ENV: &str = "CCE_REFRESH_OPENAPI";
+
+    fn source_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+    }
+
+    /// Mount prefix for `.route()` registrations in the file at `rel`
+    /// (relative to the crate `src` root); `None` skips the file for route
+    /// collection. The CCE router registers every endpoint with its final
+    /// absolute `/api/...` path.
+    fn route_prefix(rel: &str) -> Option<String> {
+        (rel == "api/router.rs").then(String::new)
+    }
+
+    /// Dev-only documentation endpoint, not part of the contract.
+    fn is_ignored_path(path: &str) -> bool {
+        path.starts_with("/api-docs")
+    }
+
+    fn feature_enabled(name: &str) -> bool {
+        panic!("unexpected feature gate in scanned route sources: {name}")
+    }
 
     #[test]
     fn openapi_snapshot_matches() {
         let doc = openapi_json();
-        if std::env::var("CCE_REFRESH_OPENAPI").as_deref() == Ok("1") {
-            std::fs::write(SNAPSHOT, &doc).expect("snapshot must be writable");
+        if std::env::var_os(REFRESH_ENV).is_some() {
+            std::fs::write(SNAPSHOT, format!("{doc}\n")).expect("snapshot must be writable");
             return;
         }
         let expected = std::fs::read_to_string(SNAPSHOT).expect("openapi snapshot must exist");
-        assert_eq!(doc.trim_end(), expected.trim_end());
+        assert_eq!(
+            doc.trim_end(),
+            expected.trim_end(),
+            "snapshot drifted; refresh with {REFRESH_ENV}=1"
+        );
     }
 
     #[test]
     fn routes_match_openapi_paths() {
-        fn first_quoted(line: &str) -> Option<String> {
-            let start = line.find('"')? + 1;
-            let end = line[start..].find('"')? + start;
-            Some(line[start..end].to_string())
+        let routed = collect_routed();
+        let annotated = collect_annotated();
+        let documented = collect_documented();
+
+        assert_sets_equal(
+            &routed,
+            &annotated,
+            "router registrations vs #[utoipa::path] annotations",
+        );
+        assert_sets_equal(
+            &annotated,
+            &documented,
+            "#[utoipa::path] annotations vs ApiDoc registration",
+        );
+        assert!(!routed.is_empty(), "expected a non-empty route set");
+    }
+
+    // ---- unified guard engine (shared across repos; keep verbatim) ----
+
+    const HTTP_METHODS: [&str; 8] = [
+        "get", "put", "post", "patch", "delete", "head", "options", "trace",
+    ];
+
+    fn assert_sets_equal(
+        left: &BTreeSet<(String, String)>,
+        right: &BTreeSet<(String, String)>,
+        label: &str,
+    ) {
+        let only_left: Vec<_> = left.difference(right).collect();
+        let only_right: Vec<_> = right.difference(left).collect();
+        assert!(
+            only_left.is_empty() && only_right.is_empty(),
+            "{label} drift\nonly on the left: {only_left:?}\nonly on the right: {only_right:?}"
+        );
+    }
+
+    fn walk_rs(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).expect("read source dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                out.extend(walk_rs(&path));
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
         }
-        fn find_method(line: &str) -> Option<String> {
-            for method in ["get", "post", "put", "delete"] {
-                if line.contains(&format!("{method}(")) {
-                    return Some(method.to_uppercase());
+        out
+    }
+
+    fn source_files() -> Vec<(String, String)> {
+        let root = source_root();
+        walk_rs(&root)
+            .into_iter()
+            .map(|path| {
+                let rel = path
+                    .strip_prefix(&root)
+                    .expect("source under src root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let text = std::fs::read_to_string(&path).expect("read source file");
+                (rel, text)
+            })
+            .collect()
+    }
+
+    fn collect_routed() -> BTreeSet<(String, String)> {
+        let mut out = BTreeSet::new();
+        for (rel, text) in source_files() {
+            let Some(prefix) = route_prefix(&rel) else {
+                continue;
+            };
+            for (method, path) in parse_route_registrations(&text) {
+                let full = format!("{prefix}{path}");
+                if !is_ignored_path(&full) {
+                    out.insert((method, full));
                 }
             }
-            None
         }
+        out
+    }
 
-        let router_src = include_str!("router.rs");
-        let mut routed: BTreeSet<(String, String)> = BTreeSet::new();
-        let mut in_route = false;
-        let mut path: Option<String> = None;
-        for line in router_src.lines() {
-            let line = line.trim();
-            if line.starts_with(".route(") {
-                in_route = true;
-                path = first_quoted(line);
-                if let (Some(p), Some(m)) = (path.clone(), find_method(line)) {
-                    routed.insert((m, p));
-                    in_route = false;
-                    path = None;
-                }
-                continue;
-            }
-            if !in_route {
-                continue;
-            }
-            if path.is_none() {
-                path = first_quoted(line);
-                continue;
-            }
-            if let Some(m) = find_method(line) {
-                routed.insert((m, path.take().expect("path captured above")));
-                in_route = false;
-            } else if line == ")" || line.starts_with(".") {
-                in_route = false;
-                path = None;
+    fn collect_annotated() -> BTreeSet<(String, String)> {
+        let mut out = BTreeSet::new();
+        for (_rel, text) in source_files() {
+            for (method, path) in parse_utoipa_annotations(&text) {
+                out.insert((method, path));
             }
         }
+        out
+    }
 
+    fn collect_documented() -> BTreeSet<(String, String)> {
         let doc: serde_json::Value =
             serde_json::from_str(&openapi_json()).expect("document must parse");
-        let mut documented: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut out = BTreeSet::new();
         if let Some(paths) = doc.get("paths").and_then(|p| p.as_object()) {
             for (path, item) in paths {
                 if let Some(ops) = item.as_object() {
                     for method in ops.keys() {
-                        documented.insert((method.to_uppercase(), path.clone()));
+                        out.insert((method.to_uppercase(), path.clone()));
                     }
                 }
             }
         }
+        out
+    }
 
-        let routed_only: Vec<_> = routed.difference(&documented).collect();
-        let documented_only: Vec<_> = documented.difference(&routed).collect();
-        assert!(
-            routed_only.is_empty() && documented_only.is_empty(),
-            "router/document drift: routed-but-undocumented={routed_only:?} documented-but-unrouted={documented_only:?}"
-        );
+    /// Parse `#[utoipa::path(...)]` attributes into (method, full path).
+    fn parse_utoipa_annotations(text: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut lines = text.lines().peekable();
+        let mut buf: Vec<String> = Vec::new();
+        while let Some(line) = lines.next() {
+            let trimmed = line.trim();
+            if let Some(tail) = trimmed.strip_prefix("#[utoipa::path(") {
+                buf.clear();
+                if tail != "(" {
+                    buf.push(tail.to_string());
+                }
+                for line in lines.by_ref().take(60) {
+                    let trimmed = line.trim();
+                    if let Some(closer) = trimmed.strip_prefix(")]") {
+                        buf.push(trimmed.to_string());
+                        let _ = closer;
+                        break;
+                    }
+                    buf.push(trimmed.to_string());
+                }
+                if let Some((method, path)) = annotation_head(&buf) {
+                    out.push((method, path));
+                }
+            }
+        }
+        out
+    }
+
+    fn annotation_head(buf: &[String]) -> Option<(String, String)> {
+        let method = buf.iter().find_map(|line| {
+            HTTP_METHODS
+                .iter()
+                .find(|m| line.starts_with(&format!("{m},")))
+                .map(|m| m.to_uppercase())
+        })?;
+        let path = buf
+            .iter()
+            .find_map(|line| line.find("path = \"").map(|i| &line[i + "path = \"".len()..]))
+            .and_then(|rest| rest.split('"').next())
+            .map(str::to_string)?;
+        Some((method, path))
+    }
+
+    /// Parse axum `.route("<path>", get(..).post(..))` registrations into
+    /// (method, path) pairs. Line-based: rustfmt keeps these tables stable.
+    /// Top-level `#[cfg(...)]` attributes gate whole functions so
+    /// feature-disabled route bodies are ignored.
+    fn parse_route_registrations(text: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut pending_attr: Option<String> = None;
+        let mut fn_active = true;
+        let mut entry: Option<(Option<String>, Vec<String>)> = None;
+
+        let flush = |out: &mut Vec<(String, String)>,
+                     entry: &mut Option<(Option<String>, Vec<String>)>| {
+            if let Some((Some(path), methods)) = entry.take() {
+                for method in methods {
+                    out.push((method, path.clone()));
+                }
+            } else {
+                entry.take();
+            }
+        };
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            let top_level = !trimmed.is_empty() && !line.starts_with(char::is_whitespace);
+            if top_level {
+                if let Some(expr) = trimmed
+                    .strip_prefix("#[cfg(")
+                    .and_then(|rest| rest.strip_suffix(")]"))
+                {
+                    pending_attr = Some(expr.to_string());
+                    continue;
+                }
+                if trimmed.starts_with("#[") || trimmed.starts_with("//") {
+                    continue;
+                }
+                let is_fn = trimmed.starts_with("fn ")
+                    || trimmed.starts_with("pub fn ")
+                    || trimmed.starts_with("pub(crate) fn ")
+                    || trimmed.starts_with("async fn ")
+                    || trimmed.starts_with("pub async fn ")
+                    || trimmed.starts_with("pub(crate) async fn ");
+                if is_fn {
+                    fn_active = pending_attr
+                        .take()
+                        .map_or(true, |expr| eval_cfg(&expr));
+                    entry = None;
+                    continue;
+                }
+                pending_attr = None;
+            }
+            if !fn_active {
+                continue;
+            }
+
+            if let Some(pos) = line.find(".route(") {
+                flush(&mut out, &mut entry);
+                let tail = &line[pos + ".route(".len()..];
+                entry = Some((first_string_literal(tail), method_tokens(tail)));
+            } else if let Some((path, methods)) = entry.as_mut() {
+                if path.is_none() {
+                    *path = first_string_literal(trimmed);
+                }
+                methods.extend(method_tokens(trimmed));
+            }
+
+            let ends_entry = trimmed.starts_with(".nest(")
+                || trimmed.starts_with(".layer(")
+                || trimmed.starts_with(".route_layer(")
+                || trimmed.starts_with(".merge(")
+                || trimmed.starts_with(".fallback(")
+                || trimmed.starts_with(".with_state(")
+                || trimmed == ")"
+                || trimmed == "),"
+                || trimmed.ends_with(");");
+            if ends_entry {
+                flush(&mut out, &mut entry);
+            }
+        }
+        flush(&mut out, &mut entry);
+        out
+    }
+
+    fn first_string_literal(s: &str) -> Option<String> {
+        let start = s.find('"')?;
+        let rest = &s[start + 1..];
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
+    }
+
+    fn method_tokens(line: &str) -> Vec<String> {
+        let cleaned = strip_string_literals(line);
+        let b = cleaned.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < b.len() {
+            if !(b[i].is_ascii_alphabetic() || b[i] == b'_') {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            let word = &cleaned[start..i];
+            let mut j = i;
+            while j < b.len() && (b[j] as char).is_whitespace() {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'(' && HTTP_METHODS.contains(&word) {
+                out.push(word.to_uppercase());
+            }
+        }
+        out
+    }
+
+    fn strip_string_literals(line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let mut in_string = false;
+        for c in line.chars() {
+            if c == '"' {
+                in_string = !in_string;
+                out.push(' ');
+            } else if in_string {
+                out.push(' ');
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn eval_cfg(expr: &str) -> bool {
+        let expr = expr.trim();
+        if let Some(inner) = expr
+            .strip_prefix("not(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            return !eval_cfg(inner);
+        }
+        if let Some(inner) = expr
+            .strip_prefix("all(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            return split_cfg_items(inner).iter().all(|item| eval_cfg(item));
+        }
+        if let Some(inner) = expr
+            .strip_prefix("any(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            return split_cfg_items(inner).iter().any(|item| eval_cfg(item));
+        }
+        match expr {
+            "debug_assertions" => cfg!(debug_assertions),
+            "test" => true,
+            other => {
+                if let Some(name) = other
+                    .strip_prefix("feature")
+                    .and_then(|s| s.trim().strip_prefix('='))
+                    .and_then(|s| s.trim().split('"').nth(1))
+                {
+                    feature_enabled(name)
+                } else {
+                    panic!("unsupported cfg predicate: {expr}")
+                }
+            }
+        }
+    }
+
+    fn split_cfg_items(expr: &str) -> Vec<&str> {
+        let mut depth = 0usize;
+        let mut items = Vec::new();
+        let mut start = 0;
+        for (i, c) in expr.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ',' if depth == 0 => {
+                    items.push(expr[start..i].trim());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        let last = expr[start..].trim();
+        if !last.is_empty() {
+            items.push(last);
+        }
+        items
     }
 }

@@ -6,10 +6,12 @@
 	let ProjectList: any = $state(null);
 	let IndexControl: any = $state(null);
 	let FileParser: any = $state(null);
+	let IndexMaintenance: any = $state(null);
 
 	let projectListLoaded = $state(false);
 	let indexControlLoaded = $state(false);
 	let fileParserLoaded = $state(false);
+	let indexMaintenanceLoaded = $state(false);
 
 	onMount(async () => {
 		// Load ProjectList and IndexControl in parallel after initial render
@@ -26,6 +28,10 @@
 		const parserModule = await import('$lib/components/index/FileParser.svelte');
 		FileParser = parserModule.default;
 		fileParserLoaded = true;
+
+		const maintenanceModule = await import('$lib/components/index/IndexMaintenance.svelte');
+		IndexMaintenance = maintenanceModule.default;
+		indexMaintenanceLoaded = true;
 	});
 </script>
 
@@ -58,6 +64,14 @@
 				<div class="loading-placeholder">Loading file parser...</div>
 			{/if}
 		</div>
+
+		<div class="maintenance-section">
+			{#if indexMaintenanceLoaded && IndexMaintenance}
+				<IndexMaintenance />
+			{:else}
+				<div class="loading-placeholder">Loading index maintenance...</div>
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -70,6 +84,10 @@
 	}
 
 	.parser-section {
+		margin-top: 2rem;
+	}
+
+	.maintenance-section {
 		margin-top: 2rem;
 	}
 

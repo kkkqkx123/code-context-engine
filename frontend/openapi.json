@@ -1556,7 +1556,7 @@
         "operationId": "handle_update_project_config",
         "parameters": [
           {
-            "name": "project_id",
+            "name": "id",
             "in": "path",
             "description": "Project id",
             "required": true,
@@ -5318,10 +5318,6 @@
         ],
         "properties": {
           "entities": {
-            "type": [
-              "object",
-              "null"
-            ],
             "description": "Entity list (free-form parser entities, present when requested)"
           },
           "file_hash": {
@@ -5336,10 +5332,6 @@
             "description": "Whether the result came from cache"
           },
           "groups": {
-            "type": [
-              "object",
-              "null"
-            ],
             "description": "Entity group list (free-form grouper groups, present when requested)"
           },
           "language": {
@@ -5362,11 +5354,9 @@
         ],
         "properties": {
           "database": {
-            "type": "object",
             "description": "Active database configuration (free-form)"
           },
           "embedder": {
-            "type": "object",
             "description": "Active embedder configuration (free-form)"
           },
           "initialized": {
@@ -6251,10 +6241,6 @@
             ]
           },
           "relation_info": {
-            "type": [
-              "object",
-              "null"
-            ],
             "description": "Relation capability state when the index is degraded"
           },
           "result": {
@@ -6571,10 +6557,6 @@
             ]
           },
           "relation_info": {
-            "type": [
-              "object",
-              "null"
-            ],
             "description": "Relation capability state when the index is degraded"
           },
           "result": {
@@ -6672,10 +6654,6 @@
             ]
           },
           "relation_info": {
-            "type": [
-              "object",
-              "null"
-            ],
             "description": "Relation capability state when the index is degraded"
           },
           "result": {
@@ -7575,7 +7553,6 @@
         ],
         "properties": {
           "config": {
-            "type": "object",
             "description": "Project-level configuration (partial config, free-form)"
           }
         }

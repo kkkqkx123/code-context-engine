@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { apiClient } from './client';
+import { call, client } from './client';
 import type { components } from './schema';
 
 export type ConfigInfoResponse = components['schemas']['ConfigInfoResponse'];
@@ -14,14 +14,16 @@ export type ConfigWarningInfo = components['schemas']['ConfigWarningInfo'];
 
 export const configApi = {
 	/** GET /api/config — return current active configuration info */
-	getInfo: () =>
-		apiClient.get<ConfigInfoResponse>('/api/config'),
+	getInfo: (): Promise<ConfigInfoResponse> => call(client.GET('/api/config')),
 
 	/** POST /api/config/reload?project_id=N — reload configuration */
-	reload: (projectId: number) =>
-		apiClient.post<ConfigReloadResponse>(`/api/config/reload?project_id=${projectId}`),
+	reload: (projectId: number): Promise<ConfigReloadResponse> =>
+		call(
+			client.POST('/api/config/reload', {
+				params: { query: { project_id: projectId } }
+			})
+		),
 
 	/** GET /api/config/validate — validate current configuration */
-	validate: () =>
-		apiClient.get<ConfigValidateResponse>('/api/config/validate'),
+	validate: (): Promise<ConfigValidateResponse> => call(client.GET('/api/config/validate'))
 };

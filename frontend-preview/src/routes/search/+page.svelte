@@ -4,6 +4,8 @@
 	import { onMount } from 'svelte';
 	import { searchState, searchActions } from '$lib/stores/search';
 	import SearchInput from '$lib/components/search/SearchInput.svelte';
+	import AggSearchBox from '$lib/components/search/AggSearchBox.svelte';
+	import type { SearchResultItem } from '$lib/api/search';
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -22,6 +24,12 @@
 
 	function handleSearch() {
 		searchActions.executeSearch();
+	}
+
+	let sortBy = $state<'relevance' | 'file_path' | 'entity_type'>('relevance');
+
+	function handleAggSearch(response: { items: SearchResultItem[]; total: number }) {
+		searchActions.setExternalResults(response);
 	}
 
 	function toggleFilterPanel() {
@@ -49,6 +57,15 @@
 
 	// Get paginated results for display
 	let paginatedResults = $derived(searchActions.getPaginatedResults());
+	let sortedResults = $derived.by(() => {
+		if (sortBy === 'relevance') return paginatedResults;
+		const key = sortBy;
+		return [...paginatedResults].sort((a, b) => {
+			const av = (a[key] ?? '') as string;
+			const bv = (b[key] ?? '') as string;
+			return av.localeCompare(bv);
+		});
+	});
 	let displayedTotal = $derived(paginatedResults.length);
 </script>
 
@@ -61,6 +78,14 @@
 		<PageHeader title="Code Search" subtitle="Semantic and keyword-based code search across indexed projects" />
 
 		<SearchInput onSearch={handleSearch} />
+
+		<div class="agg-search">
+			<h2 class="agg-title">Aggregated Search</h2>
+			<p class="agg-hint">
+				Run BM25 and Vector sub-queries in a single call and merge the ranked results.
+			</p>
+			<AggSearchBox onSearch={handleAggSearch} />
+		</div>
 
 		<div class="filter-toggle">
 			<button
@@ -90,7 +115,7 @@
 			{#snippet actions()}
 				<div class="sort-controls">
 					<label class="sort-label" for="sort-select">Sort by:</label>
-					<select id="sort-select">
+					<select id="sort-select" bind:value={sortBy}>
 						<option value="relevance">Relevance</option>
 						<option value="file_path">File Path</option>
 						<option value="entity_type">Entity Type</option>
@@ -100,7 +125,7 @@
 		</Toolbar>
 
 			<div class="results-list">
-				{#each paginatedResults as result ((result.entity_ids ?? []).join(','))}
+				{#each sortedResults as result ((result.entity_ids ?? []).join(','))}
 					<ResultCard {result} onNavigate={handleNavigate} />
 				{/each}
 			</div>
@@ -136,6 +161,25 @@
 </div>
 
 <style>
+	.agg-search {
+		margin-bottom: 1.5rem;
+		padding: 1.25rem;
+		border: 1px dashed var(--gray-300);
+	}
+
+	.agg-title {
+		font-size: 1rem;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		margin-bottom: 0.25rem;
+	}
+
+	.agg-hint {
+		font-size: 0.85rem;
+		color: var(--gray-600);
+		margin-bottom: 1rem;
+	}
+
 	.filter-toggle {
 		margin-bottom: 1.5rem;
 	}

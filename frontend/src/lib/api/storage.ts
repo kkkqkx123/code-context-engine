@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { apiClient } from './client';
+import { call, client } from './client';
 import type { components } from './schema';
 
 export type StorageComponentStatus = components['schemas']['StorageComponentStatus'];
@@ -14,6 +14,5 @@ export type StorageStatusResponse = components['schemas']['StorageStatusResponse
 
 export const storageApi = {
 	// Get storage health status
-	getStatus: () =>
-		apiClient.get<StorageStatusResponse>('/api/storage/status'),
+	getStatus: (): Promise<StorageStatusResponse> => call(client.GET('/api/storage/status'))
 };

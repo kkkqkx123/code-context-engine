@@ -13,6 +13,12 @@ export interface EntityState {
 	calls: FunctionCallsResponse | null;
 	callers: FunctionCallersResponse | null;
 	callChain: CallChainNode[];
+	/** Whether the most recent two-point call-path query found a path. */
+	callPathFound: boolean;
+	/** Chain of nodes on the found call path (empty when none found). */
+	callPath: CallChainNode[];
+	/** Number of hops on the found call path. */
+	callPathLength: number;
 	inheritance: ClassInheritanceResponse | null;
 	implementations: ClassImplementationsResponse | null;
 	isLoading: boolean;
@@ -24,6 +30,9 @@ export const entityState = writable<EntityState>({
 	calls: null,
 	callers: null,
 	callChain: [],
+	callPathFound: false,
+	callPath: [],
+	callPathLength: 0,
 	inheritance: null,
 	implementations: null,
 	isLoading: false,
@@ -106,6 +115,40 @@ export const entityActions = {
 		}
 	},
 
+	/**
+	 * Query the shortest call path between two functions. `path_found` is
+	 * stored so the UI can distinguish "no path exists" from "request failed";
+	 * a previous path is cleared either way.
+	 */
+	async loadCallPath(fromId: string, toId: string, maxDepth = 10, projectId?: number) {
+		entityState.update(s => ({ ...s, isLoading: true, error: null, callPath: [], callPathFound: false, callPathLength: 0 }));
+
+		try {
+			let pid: number;
+			currentProjectId.subscribe(v => pid = v)();
+			const projId = projectId ?? pid!;
+
+			const response = await entityApi.getCallPath(projId, fromId, toId, maxDepth);
+			entityState.update(s => ({
+				...s,
+				callPathFound: response.path_found,
+				callPath: response.path ?? [],
+				callPathLength: response.path_length ?? 0,
+				isLoading: false,
+				error: response.path_found ? null : 'No call path found between the given functions',
+			}));
+			return response;
+		} catch (error) {
+			console.error('Failed to load call path:', error);
+			entityState.update(s => ({
+				...s,
+				isLoading: false,
+				error: 'Failed to load call path',
+			}));
+			return null;
+		}
+	},
+
 	clear() {
 		entityState.update(s => ({
 			...s,
@@ -113,6 +156,9 @@ export const entityActions = {
 			calls: null,
 			callers: null,
 			callChain: [],
+			callPathFound: false,
+			callPath: [],
+			callPathLength: 0,
 			inheritance: null,
 			implementations: null,
 			error: null,

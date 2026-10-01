@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { apiClient } from "./client";
+import { call, client } from "./client";
 import type { components } from "./schema";
 
 export type Project = components["schemas"]["ProjectConfig"];
@@ -12,6 +12,7 @@ export type IndexRequest = components["schemas"]["IndexRequest"];
 export type IndexResponse = components["schemas"]["IndexResponse"];
 export type IncrementalIndexRequest = components["schemas"]["IncrementalIndexRequest"];
 export type IncrementalIndexResponse = components["schemas"]["IncrementalIndexResponse"];
+export type ParseRequest = components["schemas"]["ParseRequest"];
 export type ParseResult = components["schemas"]["ParseResponse"];
 export type ClearIndexRequest = components["schemas"]["ClearIndexRequest"];
 export type ClearIndexResponse = components["schemas"]["ClearIndexResponse"];
@@ -32,78 +33,123 @@ export type ProjectConfigUpdateResponse = components["schemas"]["ProjectConfigUp
 
 export const indexApi = {
   // Full directory indexing
-  runIndex: (data: IndexRequest) =>
-    apiClient.post<IndexResponse>("/api/index", data),
+  runIndex: (data: IndexRequest): Promise<IndexResponse> =>
+    call(client.POST("/api/index", { body: data })),
 
   // Incremental indexing
-  incrementalIndex: (data: IncrementalIndexRequest) =>
-    apiClient.post<IncrementalIndexResponse>("/api/index/incremental", data),
+  incrementalIndex: (data: IncrementalIndexRequest): Promise<IncrementalIndexResponse> =>
+    call(client.POST("/api/index/incremental", { body: data })),
 
   // Single file parse (language is auto-detected by the backend)
-  parseFile: (filePath: string) =>
-    apiClient.post<ParseResult>("/api/parse", { file_path: filePath }),
+  parseFile: (filePath: string): Promise<ParseResult> =>
+    call(client.POST("/api/parse", { body: { file_path: filePath } })),
 
   // Get index statistics
-  getStats: (projectId: number) =>
-    apiClient.get<IndexStatsResponse>(`/api/index/stats?project_id=${projectId}`),
+  getStats: (projectId: number): Promise<IndexStatsResponse> =>
+    call(
+      client.GET("/api/index/stats", {
+        params: { query: { project_id: projectId } },
+      }),
+    ),
 
   // Clear index
-  clearIndex: (projectId: number) =>
-    apiClient.delete<ClearIndexResponse>("/api/index", {
-      body: JSON.stringify({ project_id: projectId } as ClearIndexRequest),
-    }),
+  clearIndex: (projectId: number): Promise<ClearIndexResponse> =>
+    call(
+      client.DELETE("/api/index", {
+        body: { project_id: projectId },
+      }),
+    ),
 
   // Delete file from all backends
-  deleteFile: (filePath: string, projectId: number) =>
-    apiClient.delete<DeleteFileResponse>(
-      `/api/index/file/${encodeURIComponent(filePath)}?project_id=${projectId}`,
+  deleteFile: (filePath: string, projectId: number): Promise<DeleteFileResponse> =>
+    call(
+      client.DELETE("/api/index/file/{path}", {
+        params: {
+          path: { path: filePath },
+          query: { project_id: projectId },
+        },
+      }),
     ),
 
   // Delete entity from all backends
-  deleteEntity: (entityId: number, projectId: number) =>
-    apiClient.delete<DeleteEntityResponse>(
-      `/api/index/entity/${entityId}?project_id=${projectId}`,
+  deleteEntity: (entityId: number, projectId: number): Promise<DeleteEntityResponse> =>
+    call(
+      client.DELETE("/api/index/entity/{id}", {
+        params: {
+          path: { id: entityId },
+          query: { project_id: projectId },
+        },
+      }),
     ),
 
   // Batch delete files and entities
-  batchDelete: (projectId: number, data: BatchDeleteRequest) =>
-    apiClient.delete<BatchDeleteResponse>(
-      `/api/index/batch?project_id=${projectId}`,
-      { body: JSON.stringify(data) },
+  batchDelete: (projectId: number, data: BatchDeleteRequest): Promise<BatchDeleteResponse> =>
+    call(
+      client.DELETE("/api/index/batch", {
+        params: { query: { project_id: projectId } },
+        body: data,
+      }),
     ),
 };
 
 export const projectApi = {
   // List all projects
-  listProjects: () => apiClient.get<ProjectListResponse>("/api/project"),
+  listProjects: (): Promise<ProjectListResponse> => call(client.GET("/api/project")),
 
   // Get project details
-  getProject: (id: string) =>
-    apiClient.get<ProjectDetailResponse>(`/api/project/${id}`),
+  getProject: (id: string): Promise<ProjectDetailResponse> =>
+    call(
+      client.GET("/api/project/{id}", {
+        params: { path: { id } },
+      }),
+    ),
 
   // Create new project
-  createProject: (data: CreateProjectRequest) =>
-    apiClient.post<ProjectDetailResponse>("/api/project", data),
+  createProject: (data: CreateProjectRequest): Promise<ProjectDetailResponse> =>
+    call(client.POST("/api/project", { body: data })),
 
   // Update project
-  updateProject: (id: string, data: UpdateProjectRequest) =>
-    apiClient.put<ProjectDetailResponse>(`/api/project/${id}`, data),
+  updateProject: (id: string, data: UpdateProjectRequest): Promise<ProjectDetailResponse> =>
+    call(
+      client.PUT("/api/project/{id}", {
+        params: { path: { id } },
+        body: data,
+      }),
+    ),
 
   // Delete project
-  deleteProject: (id: string) =>
-    apiClient.delete<ProjectDeleteResponse>(`/api/project/${id}`),
+  deleteProject: (id: string): Promise<ProjectDeleteResponse> =>
+    call(
+      client.DELETE("/api/project/{id}", {
+        params: { path: { id } },
+      }),
+    ),
 
   // Trigger project indexing
-  indexProject: (id: string) =>
-    apiClient.post<ProjectIndexResponse>(`/api/project/${id}/index`),
+  indexProject: (id: string): Promise<ProjectIndexResponse> =>
+    call(
+      client.POST("/api/project/{id}/index", {
+        params: { path: { id } },
+      }),
+    ),
 
   // Reload project configuration from file system
-  reloadProject: (id: string) =>
-    apiClient.post<ProjectConfigReloadResponse>(`/api/project/${id}/reload`),
+  reloadProject: (id: string): Promise<ProjectConfigReloadResponse> =>
+    call(
+      client.POST("/api/project/{id}/reload", {
+        params: { path: { id } },
+      }),
+    ),
 
   // Update project configuration
-  updateProjectConfig: (id: string, config: Record<string, unknown>) =>
-    apiClient.put<ProjectConfigUpdateResponse>(`/api/project/${id}/config`, {
-      config,
-    } as ProjectConfigUpdateRequest),
+  updateProjectConfig: (
+    id: string,
+    config: Record<string, unknown>,
+  ): Promise<ProjectConfigUpdateResponse> =>
+    call(
+      client.PUT("/api/project/{id}/config", {
+        params: { path: { id } },
+        body: { config },
+      }),
+    ),
 };

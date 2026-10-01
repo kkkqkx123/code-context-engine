@@ -32,11 +32,9 @@ pub struct CompressResult {
     pub from_cache: bool,
     /// Entity list (free-form parser entities, present when requested)
     #[serde(default)]
-    #[schema(value_type = Option<Object>)]
     pub entities: Option<serde_json::Value>,
     /// Entity group list (free-form grouper groups, present when requested)
     #[serde(default)]
-    #[schema(value_type = Option<Object>)]
     pub groups: Option<serde_json::Value>,
     /// Semantic summary for human/LLM consumption
     pub semantic_text: String,
@@ -346,7 +344,6 @@ pub struct GetSymbolsResponse {
     pub error: Option<String>,
     /// Relation capability state when the index is degraded
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<Object>)]
     pub relation_info: Option<serde_json::Value>,
 }
 
@@ -444,7 +441,6 @@ pub struct FindReferencesResponse {
     pub error: Option<String>,
     /// Relation capability state when the index is degraded
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<Object>)]
     pub relation_info: Option<serde_json::Value>,
 }
 
@@ -510,7 +506,6 @@ pub struct GotoDefinitionResponse {
     pub error: Option<String>,
     /// Relation capability state when the index is degraded
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<Object>)]
     pub relation_info: Option<serde_json::Value>,
 }
 

@@ -19,7 +19,7 @@ use cce_config::project_registry::RegistryError;
 /// Handle update project config request
 #[utoipa::path(
     put, path = "/api/project/{id}/config", tag = "Project",
-    params(("project_id" = i64, Path, description = "Project id")),
+    params(("id" = i64, Path, description = "Project id")),
     request_body = ProjectConfigUpdateRequest,
     responses(
         (status = 200, body = ProjectConfigUpdateResponse, description = "Success"),

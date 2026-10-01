@@ -1,187 +1,120 @@
 /**
- * API Client - Fetch wrapper with base URL configuration
- * Uses native Fetch API with error handling and type safety
- * Supports mock mode when VITE_USE_MOCK=true
+ * Preview API client: same typed surface as the main app (`client` with
+ * GET/POST/PUT/DELETE plus `call`/`ApiError`/`BASE_URL`).
+ *
+ * In mock mode (VITE_USE_MOCK=true) requests are answered from the static
+ * payloads in `../mock/client`; otherwise they delegate to the real
+ * openapi-fetch client. This file is preview-only and is never overwritten
+ * by `scripts/sync-frontend-preview.sh`.
  */
 
-import { isMockMode } from '../mock/data';
+import createClient from 'openapi-fetch';
+import type { paths } from './schema';
+import { isMockMode, mockDelay } from '../mock/data';
 import { mockClient } from '../mock/client';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
 
-export interface ApiError {
-	message: string;
+export class ApiError extends Error {
 	status: number;
-}
 
-/** Response shape with a success field used by many API endpoints */
-export interface ApiSuccessResponse<T = unknown> {
-	success: boolean;
-	result?: T;
-	error?: string;
-}
-
-/**
- * Unwrap a response that has { success, result, error } shape.
- * If success is false, throws an ApiError with the error message.
- * Otherwise returns the full response (caller can access .result).
- */
-export function unwrapResponse<T>(response: ApiSuccessResponse<T>): ApiSuccessResponse<T> {
-	if (!response.success) {
-		throw {
-			message: response.error || 'Request failed',
-			status: 0,
-		} as ApiError;
+	constructor(message: string, status: number) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = status;
 	}
-	return response;
+}
+
+/** Error payload returned by the backend on failure. */
+interface BackendError {
+	error?: {
+		code?: string;
+		message?: string;
+	};
+	message?: string;
+}
+
+function errorMessage(error: unknown, status: number): string {
+	if (error && typeof error === 'object') {
+		const body = error as BackendError;
+		if (typeof body.error?.message === 'string' && body.error.message) {
+			return body.error.message;
+		}
+		if (typeof body.message === 'string' && body.message) {
+			return body.message;
+		}
+	}
+	return `HTTP ${status}`;
 }
 
 /**
- * Fetch with retry logic using exponential backoff
- * @param url - The URL to fetch
- * @param options - Fetch options
- * @param retries - Number of retry attempts (default: 3)
- * @param backoffMs - Initial backoff in milliseconds (default: 1000)
+ * Await an openapi-fetch call: throw ApiError on transport or backend
+ * failure, otherwise return the bare success payload.
  */
-async function fetchWithRetry<T>(
-	url: string,
-	options: RequestInit = {},
-	retries = 3,
-	backoffMs = 1000
+export async function call<T>(
+	promise: Promise<{
+		data?: unknown;
+		error?: unknown;
+		response?: Response;
+	}>
 ): Promise<T> {
-	let lastError: any;
-
-	for (let i = 0; i < retries; i++) {
-		try {
-			const response = await fetch(url, options);
-
-			if (!response.ok) {
-				const errorData = await response.json().catch(() => ({}));
-				throw {
-					message: errorData.message || `HTTP ${response.status}: ${response.statusText}`,
-					status: response.status,
-				} as ApiError;
-			}
-
-			// Handle empty responses
-			const contentType = response.headers.get('content-type');
-			if (contentType && contentType.includes('application/json')) {
-				return await response.json();
-			}
-
-			return {} as T;
-		} catch (error: any) {
-			lastError = error;
-
-			// Don't retry on client errors (4xx)
-			if (error.status >= 400 && error.status < 500) {
-				throw error;
-			}
-
-			// Retry on server errors (5xx) or network errors
-			if (i < retries - 1) {
-				const delay = backoffMs * Math.pow(2, i); // Exponential backoff
-				await new Promise(resolve => setTimeout(resolve, delay));
-			}
-		}
+	const res = await promise;
+	if (res.error !== undefined && res.error !== null) {
+		throw new ApiError(errorMessage(res.error, res.response?.status ?? 0), res.response?.status ?? 0);
 	}
-
-	throw lastError!;
+	return res.data as T;
 }
 
-export class ApiClient {
-	private baseUrl: string;
+const realClient = createClient<paths>({
+	baseUrl: BASE_URL,
+	headers: { 'Content-Type': 'application/json' }
+});
 
-	constructor(baseUrl: string = BASE_URL) {
-		this.baseUrl = baseUrl;
+interface CallOptions {
+	params?: {
+		path?: Record<string, string | number>;
+		query?: Record<string, unknown>;
+	};
+	body?: unknown;
+}
+
+/** Fill a `{param}` path template with concrete values. */
+function concretePath(template: string, pathParams?: Record<string, string | number>): string {
+	let out = template;
+	for (const [key, value] of Object.entries(pathParams ?? {})) {
+		out = out.replace(`{${key}}`, encodeURIComponent(String(value)));
 	}
-
-	private async request<T>(
-		endpoint: string,
-		options: RequestInit = {}
-	): Promise<T> {
-		const url = `${this.baseUrl}${endpoint}`;
-
-		const config: RequestInit = {
-			headers: {
-				'Content-Type': 'application/json',
-				...options.headers,
-			},
-			...options,
-		};
-
-		try {
-			return await fetchWithRetry<T>(url, config);
-		} catch (error) {
-			if ((error as ApiError).status) {
-				throw error;
-			}
-			throw {
-				message: error instanceof Error ? error.message : 'Network error occurred',
-				status: 0,
-			} as ApiError;
-		}
-	}
-
-	async get<T>(endpoint: string, options?: RequestInit): Promise<T> {
-		return this.request<T>(endpoint, { ...options, method: 'GET' });
-	}
-
-	async post<T>(endpoint: string, data?: any, options?: RequestInit): Promise<T> {
-		return this.request<T>(endpoint, {
-			...options,
-			method: 'POST',
-			body: data ? JSON.stringify(data) : undefined,
-		});
-	}
-
-	async put<T>(endpoint: string, data?: any, options?: RequestInit): Promise<T> {
-		return this.request<T>(endpoint, {
-			...options,
-			method: 'PUT',
-			body: data ? JSON.stringify(data) : undefined,
-		});
-	}
-
-	async delete<T>(endpoint: string, options?: RequestInit): Promise<T> {
-		return this.request<T>(endpoint, { ...options, method: 'DELETE' });
-	}
+	return out;
 }
 
 /**
- * Mock-aware API client wrapper
- * Intercepts all requests when VITE_USE_MOCK=true
+ * Dispatch one call: mock data in mock mode, real backend otherwise.
+ * Mock handlers ignore query values and return static payloads.
  */
-class MockAwareApiClient {
-	private realClient: ApiClient;
-
-	/** Base URL, exposed for callers that build raw URLs (e.g. Prometheus text endpoint) */
-	private baseUrl: string = BASE_URL;
-
-	constructor() {
-		this.realClient = new ApiClient();
+async function dispatch(
+	method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+	path: string,
+	opts?: CallOptions
+): Promise<{ data?: unknown; error?: unknown }> {
+	const real = (realClient as unknown as Record<string, (p: string, o?: object) => Promise<unknown>>)[method];
+	if (!isMockMode) {
+		return (await real(path, opts ?? {})) as { data?: unknown; error?: unknown };
 	}
-
-	private get client() {
-		return isMockMode ? mockClient : this.realClient;
-	}
-
-	async get<T>(endpoint: string, options?: RequestInit): Promise<T> {
-		return this.client.get<T>(endpoint, options);
-	}
-
-	async post<T>(endpoint: string, data?: any, options?: RequestInit): Promise<T> {
-		return this.client.post<T>(endpoint, data, options);
-	}
-
-	async put<T>(endpoint: string, data?: any, options?: RequestInit): Promise<T> {
-		return this.client.put<T>(endpoint, data, options);
-	}
-
-	async delete<T>(endpoint: string, options?: RequestInit): Promise<T> {
-		return this.client.delete<T>(endpoint, options);
-	}
+	await mockDelay();
+	const endpoint = concretePath(path, opts?.params?.path);
+	const mock = mockClient as unknown as Record<string, (e: string, b?: unknown) => Promise<unknown>>;
+	const handler = mock[method.toLowerCase()] ?? mock.get;
+	const data = await handler.call(mockClient, endpoint, opts?.body);
+	return { data };
 }
 
-// Export singleton instance with mock support
-export const apiClient = new MockAwareApiClient();
+export const client = {
+	GET: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('GET', path, opts),
+	POST: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('POST', path, opts),
+	PUT: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('PUT', path, opts),
+	DELETE: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('DELETE', path, opts)
+};

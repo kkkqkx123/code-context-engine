@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { apiClient } from './client';
+import { call, client } from './client';
 import type { components } from './schema';
 
 export type SummaryRequest = components['schemas']['SummaryRequest'];
@@ -13,6 +13,6 @@ export type SummaryResponse = components['schemas']['SummaryResponse'];
 
 export const summaryApi = {
 	/** POST /api/summary — generate file summaries */
-	generate: (request: SummaryRequest) =>
-		apiClient.post<SummaryResponse>('/api/summary', request),
+	generate: (request: SummaryRequest): Promise<SummaryResponse> =>
+		call(client.POST('/api/summary', { body: request }))
 };

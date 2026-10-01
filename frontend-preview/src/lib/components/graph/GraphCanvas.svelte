@@ -1,21 +1,94 @@
+<script module lang="ts">
+	import type { LayoutOptions } from 'cytoscape';
+
+	export type GraphLayoutName =
+		| 'cose-bilkent'
+		| 'cose'
+		| 'breadthfirst'
+		| 'concentric'
+		| 'grid';
+
+	/**
+	 * Produce Cytoscape layout options for the given name.
+	 * Imported by parent components that hold a Core instance via bind:cy
+	 * so they can drive relayout without duplicating the configuration.
+	 *
+	 * The returned options are pure configuration. Callers that select
+	 * 'cose-bilkent' but have not registered the extension should fall
+	 * back to 'cose' before invoking cy.layout(...).
+	 */
+	export function layoutOptions(name: GraphLayoutName): LayoutOptions {
+		switch (name) {
+			case 'breadthfirst':
+				return {
+					name: 'breadthfirst',
+					directed: true,
+					spacingFactor: 1.1,
+					animate: false
+				} as unknown as LayoutOptions;
+			case 'concentric':
+				return {
+					name: 'concentric',
+					minNodeSpacing: 24,
+					animate: false
+				} as unknown as LayoutOptions;
+			case 'grid':
+				return { name: 'grid', avoidOverlap: true, animate: false } as unknown as LayoutOptions;
+			case 'cose-bilkent':
+				return {
+					name: 'cose-bilkent',
+					animate: 'end',
+					animationDuration: 400,
+					randomize: true,
+					idealEdgeLength: 100,
+					nodeRepulsion: 4500,
+					nodeSeparation: 75,
+					edgeElasticity: 0.45,
+					nestingFactor: 0.1,
+					gravity: 0.25,
+					numIter: 2250,
+					tile: true,
+					tilingPaddingVertical: 10,
+					tilingPaddingHorizontal: 10,
+					packComponents: true
+				} as unknown as LayoutOptions;
+			case 'cose':
+			default:
+				return {
+					name: 'cose',
+					animate: false,
+					nodeRepulsion: 4000,
+					idealEdgeLength: 90,
+					nodeOverlap: 12,
+					numIter: 700
+				} as unknown as LayoutOptions;
+		}
+	}
+</script>
+
 <script lang="ts">
 	/**
 	 * Cytoscape canvas wrapper.
 	 *
-	 * Owns the renderer instance, keeps it in sync with the element array, and
-	 * forwards interaction intents to the parent. Layout selection and element
-	 * styling come from the shared presentation model so the canvas, legend and
-	 * filters never disagree.
+	 * Creates the renderer instance, keeps it in sync with the element array,
+	 * and exposes the instance via bindable `cy` so the parent drives all
+	 * imperative Cytoscape calls directly. Interaction intents bubble up as
+	 * callbacks; layout selection and element styling come from the shared
+	 * presentation model so the canvas, legend and filters never disagree.
+	 *
+	 * The component intentionally does NOT export imperative functions
+	 * (fit/zoomBy/centerOn/relayout/exportPng). The parent owns the `cy`
+	 * instance and calls Cytoscape methods directly via bind:cy.
 	 */
-	import { onMount, onDestroy } from 'svelte';
-	import type { Core, ElementDefinition, LayoutOptions, StylesheetCSS } from 'cytoscape';
+	import { onMount } from 'svelte';
+	import type { Core, ElementDefinition, StylesheetStyle } from 'cytoscape';
 	import {
 		graphStylesheet,
 		type GraphElement,
 		type RelationDomain
 	} from '$lib/utils/graph-style';
 
-	export type GraphLayoutName = 'cose' | 'breadthfirst' | 'concentric' | 'grid';
+	// GraphLayoutName and layoutOptions are exported from <script module> above.
 
 	interface Props {
 		elements?: GraphElement[];
@@ -31,21 +104,29 @@
 		impactTransitive?: string[];
 		/** Case-insensitive substring used to highlight matching nodes. */
 		search?: string;
+		/** Whether to render the relation label on each edge. */
+		showEdgeLabels?: boolean;
+		/** Minimum canvas height in pixels; entity tabs use a compact value. */
+		minHeight?: number;
 		onNodeSelect?: (nodeId: string) => void;
 		/** Fired on double click, used to expand the neighborhood of a node. */
 		onNodeActivate?: (nodeId: string) => void;
+		/** The Cytoscape Core instance, bound back to the parent for direct use. */
 		cy?: Core | null;
+		/** The container div, bound back for measurement. */
 		containerElement?: HTMLDivElement | null;
 	}
 
 	let {
 		elements = [],
-		layout = 'cose',
+		layout = 'cose-bilkent',
 		focusId = null,
 		visibleDomains = ['call', 'dependency', 'structural', 'reference', 'other'],
 		impactDirect = [],
 		impactTransitive = [],
 		search = '',
+		showEdgeLabels = false,
+		minHeight = 520,
 		onNodeSelect = () => {},
 		onNodeActivate = () => {},
 		cy = $bindable(null),
@@ -54,36 +135,15 @@
 
 	let container: HTMLDivElement | null = null;
 	let lastElementCount = $state(0);
+	let bilkentRegistered = false;
+	const ALL_RELATION_DOMAINS: RelationDomain[] = ['call', 'dependency', 'structural', 'reference', 'other'];
 
-	function layoutOptions(name: GraphLayoutName): LayoutOptions {
-		switch (name) {
-			case 'breadthfirst':
-				return {
-					name: 'breadthfirst',
-					directed: true,
-					spacingFactor: 1.1,
-					animate: false
-				} as unknown as LayoutOptions;
-			case 'concentric':
-				// Rank by degree so hubs land in the center ring.
-				return {
-					name: 'concentric',
-					minNodeSpacing: 24,
-					animate: false
-				} as unknown as LayoutOptions;
-			case 'grid':
-				return { name: 'grid', avoidOverlap: true, animate: false } as unknown as LayoutOptions;
-			case 'cose':
-			default:
-				return {
-					name: 'cose',
-					animate: false,
-					nodeRepulsion: 4000,
-					idealEdgeLength: 90,
-					nodeOverlap: 12,
-					numIter: 700
-				} as unknown as LayoutOptions;
-		}
+	/** Resolve the requested layout to a registered one. Falls back to plain `cose`
+	 *  when the CoseBilkent extension did not load, so cy.layout() never receives a
+	 *  name Cytoscape cannot satisfy. */
+	function effectiveLayoutName(name: GraphLayoutName): GraphLayoutName {
+		if (name === 'cose-bilkent' && !bilkentRegistered) return 'cose';
+		return name;
 	}
 
 	/** Apply epoch-independent visual state derived from props. */
@@ -112,51 +172,76 @@
 		});
 	}
 
-	/** Show or hide edges by relation domain. */
+	/** Show or hide edges by relation domain using selector batch operations. */
 	function applyDomainFilter() {
 		if (!cy) return;
 		const allowed = new Set(visibleDomains);
+		const hideSelector = ALL_RELATION_DOMAINS
+			.filter((d) => !allowed.has(d))
+			.map((d) => `edge[domain = "${d}"]`)
+			.join(', ');
 		cy.batch(() => {
-			cy!.edges().forEach((edge) => {
-				const domain = edge.data('domain') as RelationDomain;
-				edge.style('display', allowed.has(domain) ? 'element' : 'none');
-			});
+			cy!.edges().style('display', 'element');
+			if (hideSelector) {
+				cy!.elements(hideSelector).style('display', 'none');
+			}
 		});
+	}
+
+	function createInstance(cytoscape: typeof import('cytoscape')) {
+		if (!container) return;
+		const instance = cytoscape({
+			container,
+			elements: elements as unknown as ElementDefinition[],
+			style: graphStylesheet as StylesheetStyle[],
+			layout: layoutOptions(effectiveLayoutName(layout)),
+			wheelSensitivity: 0.25,
+			boxSelectionEnabled: false,
+			selectionType: 'single'
+		});
+		cy = instance;
+
+		containerElement = container;
+		lastElementCount = elements.length;
+
+		instance.on('tap', 'node', (event) => {
+			onNodeSelect(event.target.id());
+		});
+		instance.on('dbltap', 'node', (event) => {
+			onNodeActivate(event.target.id());
+		});
+
+		applyDomainFilter();
+		applyDecorations();
 	}
 
 	onMount(() => {
 		if (!container) return;
 
 		let mounted = true;
-		// The renderer touches the DOM at import time, so it is loaded lazily and
-		// only inside the browser lifecycle to keep server rendering untouched.
-		import('cytoscape').then((module) => {
-			if (!mounted || !container) return;
-			const cytoscape = module.default;
-
-			cy = cytoscape({
-				container,
-				elements: elements as unknown as ElementDefinition[],
-				style: graphStylesheet as unknown as StylesheetCSS[],
-				layout: layoutOptions(layout),
-				wheelSensitivity: 0.25,
-				boxSelectionEnabled: false,
-				selectionType: 'single'
+		// The renderer and the layout extension touch the DOM at import time, so
+		// they are loaded lazily and only inside the browser lifecycle to keep
+		// server rendering untouched.
+		Promise.all([import('cytoscape'), import('cytoscape-cose-bilkent')])
+			.then(([cyModule, bilkentModule]) => {
+				if (!mounted || !container) return;
+				const cytoscape = cyModule.default;
+				try {
+					cytoscape.use(bilkentModule.default);
+					bilkentRegistered = true;
+				} catch {
+					bilkentRegistered = false;
+				}
+				createInstance(cytoscape);
+			})
+			.catch(() => {
+				// If the layout extension fails to load, fall back to plain cytoscape.
+				if (!mounted || !container) return;
+				import('cytoscape').then((module) => {
+					if (!mounted || !container) return;
+					createInstance(module.default);
+				});
 			});
-
-			containerElement = container;
-			lastElementCount = elements.length;
-
-			cy.on('tap', 'node', (event) => {
-				onNodeSelect(event.target.id());
-			});
-			cy.on('dbltap', 'node', (event) => {
-				onNodeActivate(event.target.id());
-			});
-
-			applyDomainFilter();
-			applyDecorations();
-		});
 
 		return () => {
 			mounted = false;
@@ -189,7 +274,7 @@
 		});
 
 		if (mutated) {
-			cy.layout(layoutOptions(layout)).run();
+			cy.layout(layoutOptions(effectiveLayoutName(layout))).run();
 		}
 		lastElementCount = incoming.length;
 		applyDomainFilter();
@@ -200,7 +285,7 @@
 	$effect(() => {
 		const name = layout;
 		if (!cy) return;
-		cy.layout(layoutOptions(name)).run();
+		cy.layout(layoutOptions(effectiveLayoutName(name))).run();
 	});
 
 	$effect(() => {
@@ -216,34 +301,15 @@
 		}
 	});
 
-	export function fit() {
-		cy?.fit(undefined, 40);
-	}
-
-	export function zoomBy(delta: number) {
+	$effect(() => {
+		// Toggle edge relation labels without rebuilding the instance.
 		if (!cy) return;
-		cy.zoom({ level: Math.min(3, Math.max(0.15, cy.zoom() + delta)), renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
-	}
-
-	export function resetView() {
-		if (!cy) return;
-		cy.zoom(1);
-		cy.center();
-	}
-
-	export function centerOn(nodeId: string) {
-		if (!cy) return;
-		const node = cy.getElementById(nodeId);
-		if (node.length === 0) return;
-		cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1) }, { duration: 250 });
-	}
-
-	export function relayout() {
-		cy?.layout(layoutOptions(layout)).run();
-	}
+		void showEdgeLabels;
+		cy.edges().style('label', showEdgeLabels ? 'data(relationLabel)' : '');
+	});
 </script>
 
-<div class="graph-canvas" bind:this={container} role="application" aria-label="Relation graph canvas">
+<div class="graph-canvas" bind:this={container} role="application" aria-label="Relation graph canvas" style="min-height: {minHeight}px">
 	{#if elements.length === 0}
 		<div class="canvas-empty">
 			<p>No graph data</p>

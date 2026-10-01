@@ -7,10 +7,8 @@ This package is intentionally isolated from the frontend dependency tree:
 ## Usage
 
 ```sh
-# regenerate from the committed snapshot
+# regenerate from the committed snapshot directly into the frontend tree
 npm run gen
-# copy the result into the frontend source tree (checked in)
-cp schema.d.ts ../../frontend/src/lib/api/schema.d.ts
 ```
 
 `node_modules` is not checked in. The generated `schema.d.ts` in the

@@ -6,7 +6,7 @@
  * so each call unwraps the envelope and throws on failure.
  */
 
-import { apiClient, type ApiError } from './client';
+import { ApiError, call, client } from './client';
 import type { components } from './schema';
 
 export type CompressRequest = components['schemas']['CompressRequest'];
@@ -39,6 +39,7 @@ export type KeywordSearchItem = components['schemas']['KeywordSearchItem'];
 export type KeywordSearchResult = components['schemas']['KeywordSearchResult'];
 export type KeywordSearchApiResponse = components['schemas']['KeywordSearchApiResponse'];
 
+/** In-band tool result shape shared by the generated `*ApiResponse` schemas. */
 interface InBand<T> {
 	success: boolean;
 	result?: T | null;
@@ -47,7 +48,7 @@ interface InBand<T> {
 
 function unwrapInBand<T>(response: InBand<T>): T {
 	if (!response.success || response.result == null) {
-		throw { message: response.error || 'Tool request failed', status: 0 } as ApiError;
+		throw new ApiError(response.error || 'Tool request failed', 0);
 	}
 	return response.result;
 }
@@ -55,44 +56,57 @@ function unwrapInBand<T>(response: InBand<T>): T {
 export const toolsApi = {
 	// Compress code file
 	compress: async (data: CompressRequest): Promise<CompressResult> => {
-		const response = await apiClient.post<CompressApiResponse>('/api/tools/compress', data);
+		const response = await call<CompressApiResponse>(
+			client.POST('/api/tools/compress', { body: data })
+		);
 		return unwrapInBand(response);
 	},
 
 	// Batch compress
-	batchCompress: (data: BatchCompressRequest) =>
-		apiClient.post<BatchCompressResponse>('/api/tools/compress/batch', data),
+	batchCompress: (data: BatchCompressRequest): Promise<BatchCompressResponse> =>
+		call(client.POST('/api/tools/compress/batch', { body: data })),
 
 	// Diagnose code
 	diagnose: async (data: DiagnoseRequest): Promise<DiagnoseResult> => {
-		const response = await apiClient.post<DiagnoseApiResponse>('/api/tools/diagnose', data);
+		const response = await call<DiagnoseApiResponse>(
+			client.POST('/api/tools/diagnose', { body: data })
+		);
 		return unwrapInBand(response);
 	},
 
 	// Fold raw text into a symbol skeleton (stateless)
-	fold: (data: FoldRequest) => apiClient.post<FoldResponse>('/api/tools/fold', data),
+	fold: (data: FoldRequest): Promise<FoldResponse> =>
+		call(client.POST('/api/tools/fold', { body: data })),
 
 	// Extract symbols from files (project-scoped)
 	getSymbols: async (data: GetSymsRequest): Promise<GetSymbolsResult> => {
-		const response = await apiClient.post<GetSymbolsResponse>('/api/tools/symbols', data);
+		const response = await call<GetSymbolsResponse>(
+			client.POST('/api/tools/symbols', { body: data })
+		);
 		return unwrapInBand(response);
 	},
 
 	// Find symbol references (project-scoped, position-based)
 	findReferences: async (data: FindRefsRequest): Promise<FindReferencesResult> => {
-		const response = await apiClient.post<FindReferencesResponse>('/api/tools/references', data);
+		const response = await call<FindReferencesResponse>(
+			client.POST('/api/tools/references', { body: data })
+		);
 		return unwrapInBand(response);
 	},
 
 	// Go to definition (project-scoped, position-based)
 	getDefinition: async (data: GotoDefRequest): Promise<GotoDefinitionResult> => {
-		const response = await apiClient.post<GotoDefinitionResponse>('/api/tools/definition', data);
+		const response = await call<GotoDefinitionResponse>(
+			client.POST('/api/tools/definition', { body: data })
+		);
 		return unwrapInBand(response);
 	},
 
 	// Keyword search (BM25-based)
 	keywordSearch: async (data: KeywordSearchRequest): Promise<KeywordSearchResult> => {
-		const response = await apiClient.post<KeywordSearchApiResponse>('/api/tools/keyword-search', data);
+		const response = await call<KeywordSearchApiResponse>(
+			client.POST('/api/tools/keyword-search', { body: data })
+		);
 		return unwrapInBand(response);
-	},
+	}
 };

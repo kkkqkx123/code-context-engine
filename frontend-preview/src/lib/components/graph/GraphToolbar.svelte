@@ -19,23 +19,26 @@
 		onReset?: () => void;
 		onRelayout?: () => void;
 		onLayoutChange?: (layout: GraphLayoutName) => void;
+		onExportPng?: () => void;
 	}
 
 	let {
 		nodeCount = 0,
 		edgeCount = 0,
-		layout = $bindable('cose' as GraphLayoutName),
+		layout = $bindable('cose-bilkent' as GraphLayoutName),
 		loading = false,
 		onZoomIn = () => {},
 		onZoomOut = () => {},
 		onFit = () => {},
 		onReset = () => {},
 		onRelayout = () => {},
-		onLayoutChange = () => {}
+		onLayoutChange = () => {},
+		onExportPng = () => {}
 	}: Props = $props();
 
 	const layouts: Array<{ value: GraphLayoutName; label: string }> = [
-		{ value: 'cose', label: 'Force' },
+		{ value: 'cose-bilkent', label: 'Force' },
+		{ value: 'cose', label: 'Force (basic)' },
 		{ value: 'breadthfirst', label: 'Hierarchy' },
 		{ value: 'concentric', label: 'Concentric' },
 		{ value: 'grid', label: 'Grid' }
@@ -65,6 +68,9 @@
 		</select>
 		<button type="button" class="tool-btn wide" onclick={onRelayout} title="Re-run the current layout">
 			Re-layout
+		</button>
+		<button type="button" class="tool-btn wide" onclick={onExportPng} title="Export the current view as PNG">
+			Export PNG
 		</button>
 	</div>
 

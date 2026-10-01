@@ -61,15 +61,20 @@ for file in "$FRONTEND_DIR/src/lib/api/"*.ts; do
     fi
 done
 
+# Sync ambient type declarations (e.g. third-party module shims)
+echo "Syncing types..."
+mkdir -p "$PREVIEW_DIR/src/types"
+cp "$FRONTEND_DIR/src/types/"*.d.ts "$PREVIEW_DIR/src/types/"
+
 # Sync routes (but NOT the preview-specific mock files)
 echo "Syncing routes..."
 mkdir -p "$PREVIEW_DIR/src/routes"
 cp -r "$FRONTEND_DIR/src/routes/"* "$PREVIEW_DIR/src/routes/"
 
-# Sync package.json devDependencies (preserve preview name and mock .env)
-echo "Syncing devDependencies..."
+# Sync package.json dependencies (preserve preview name and mock .env)
+echo "Syncing dependencies..."
 PREVIEW_NAME=$(jq -r '.name' "$PREVIEW_DIR/package.json")
-jq -s '.[0] * { devDependencies: .[1].devDependencies }' "$PREVIEW_DIR/package.json" "$FRONTEND_DIR/package.json" > "$PREVIEW_DIR/package.json.tmp"
+jq -s '.[0] * { dependencies: .[1].dependencies, devDependencies: .[1].devDependencies }' "$PREVIEW_DIR/package.json" "$FRONTEND_DIR/package.json" > "$PREVIEW_DIR/package.json.tmp"
 jq --arg name "$PREVIEW_NAME" '.name = $name' "$PREVIEW_DIR/package.json.tmp" > "$PREVIEW_DIR/package.json"
 rm "$PREVIEW_DIR/package.json.tmp"
 
@@ -81,8 +86,9 @@ echo "  - src/app.html, src/app.css"
 echo "  - src/lib/components/**/* (all components)"
 echo "  - src/lib/stores/*.ts (all stores)"
 echo "  - src/lib/api/*.ts (except client.ts - mock-enabled)"
+echo "  - src/types/*.d.ts (ambient declarations)"
 echo "  - src/routes/**/* (all routes)"
-echo "  - devDependencies from package.json"
+echo "  - dependencies and devDependencies from package.json"
 echo ""
 echo "Preserved files (not overwritten):"
 echo "  - src/lib/api/client.ts (mock-enabled version)"

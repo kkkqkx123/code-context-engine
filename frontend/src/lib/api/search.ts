@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { apiClient } from './client';
+import { call, client } from './client';
 import type { components } from './schema';
 
 export type QueryType = 'vector' | 'bm25' | 'hybrid' | 'summary' | 'hierarchical' | 'semantic_with_relations';
@@ -20,12 +20,12 @@ export type EntitySearchRequest = components['schemas']['EntitySearchRequest'];
 export type EntitySearchResponse = components['schemas']['EntitySearchResponse'];
 
 export const searchApi = {
-	search: (request: SearchRequest) =>
-		apiClient.post<SearchResponse>('/api/search', request),
+	search: (request: SearchRequest): Promise<SearchResponse> =>
+		call(client.POST('/api/search', { body: request })),
 
-	aggregatedSearch: (request: AggregatedSearchRequest) =>
-		apiClient.post<SearchResponse>('/api/search/aggregated', request),
+	aggregatedSearch: (request: AggregatedSearchRequest): Promise<SearchResponse> =>
+		call(client.POST('/api/search/aggregated', { body: request })),
 
-	entitySearch: (request: EntitySearchRequest) =>
-		apiClient.post<EntitySearchResponse>('/api/entities/search', request),
+	entitySearch: (request: EntitySearchRequest): Promise<EntitySearchResponse> =>
+		call(client.POST('/api/entities/search', { body: request }))
 };

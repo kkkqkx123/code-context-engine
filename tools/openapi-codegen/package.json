@@ -5,7 +5,7 @@
   "description": "On-demand TypeScript codegen from the committed cce-server OpenAPI snapshot",
   "type": "module",
   "scripts": {
-    "gen": "openapi-typescript ../../frontend/openapi.json -o schema.d.ts"
+    "gen": "openapi-typescript ../../frontend/openapi.json -o ../../frontend/src/lib/api/schema.d.ts"
   },
   "engines": {
     "node": ">=22.0.0"

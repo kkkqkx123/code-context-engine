@@ -23,6 +23,7 @@
 	"type": "module",
 	"dependencies": {
 		"cytoscape": "^3.34.3",
-		"cytoscape-cose-bilkent": "^4.1.0"
+		"cytoscape-cose-bilkent": "^4.1.0",
+		"openapi-fetch": "^0.17.0"
 	}
 }

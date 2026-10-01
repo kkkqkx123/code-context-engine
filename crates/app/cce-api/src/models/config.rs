@@ -23,10 +23,8 @@ pub struct ConfigReloadResponse {
 pub struct ConfigInfoResponse {
     pub initialized: bool,
     /// Active database configuration (free-form)
-    #[schema(value_type = Object)]
     pub database: serde_json::Value,
     /// Active embedder configuration (free-form)
-    #[schema(value_type = Object)]
     pub embedder: serde_json::Value,
     pub project_count: usize,
 }
@@ -57,7 +55,6 @@ pub struct ConfigWarningInfo {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ProjectConfigUpdateRequest {
     /// Project-level configuration (partial config, free-form)
-    #[schema(value_type = Object)]
     pub config: serde_json::Value,
 }
 

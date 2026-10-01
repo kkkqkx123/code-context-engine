@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { apiClient } from './client';
+import { call, client } from './client';
 import type { components } from './schema';
 
 export type ServiceStatus = components['schemas']['ServiceStatus'];
@@ -19,25 +19,28 @@ export type RetryQueueClearResponse = components['schemas']['RetryQueueClearResp
 
 export const healthApi = {
 	// Unified health check
-	getHealth: () => apiClient.get<HealthStatus>('/api/health'),
+	getHealth: (): Promise<HealthStatus> => call(client.GET('/api/health')),
 
 	// Qdrant detailed diagnostics
-	getQdrantHealth: () => apiClient.get<QdrantHealthStatus>('/api/health/qdrant'),
+	getQdrantHealth: (): Promise<QdrantHealthStatus> =>
+		call(client.GET('/api/health/qdrant')),
 
 	// Embedding service health
-	getEmbeddingHealth: () => apiClient.get<EmbeddingHealthStatus>('/api/health/embedding'),
+	getEmbeddingHealth: (): Promise<EmbeddingHealthStatus> =>
+		call(client.GET('/api/health/embedding')),
 
 	// BM25 index health
-	getBm25Health: () => apiClient.get<Bm25HealthStatus>('/api/health/bm25'),
+	getBm25Health: (): Promise<Bm25HealthStatus> => call(client.GET('/api/health/bm25')),
 
 	// Retry queue status
-	getRetryQueueStatus: () => apiClient.get<RetryQueueStatus>('/api/retry-queue'),
+	getRetryQueueStatus: (): Promise<RetryQueueStatus> =>
+		call(client.GET('/api/retry-queue')),
 
 	// Manually trigger retry queue processing
-	processRetryQueue: () =>
-		apiClient.post<RetryQueueProcessResponse>('/api/retry-queue/process', {}),
+	processRetryQueue: (): Promise<RetryQueueProcessResponse> =>
+		call(client.POST('/api/retry-queue/process')),
 
 	// Clear retry queue
-	clearRetryQueue: () =>
-		apiClient.delete<RetryQueueClearResponse>('/api/retry-queue'),
+	clearRetryQueue: (): Promise<RetryQueueClearResponse> =>
+		call(client.DELETE('/api/retry-queue'))
 };

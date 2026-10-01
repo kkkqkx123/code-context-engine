@@ -19,9 +19,11 @@
 		availableDomains?: RelationDomain[];
 		search?: string;
 		hideAmbiguous?: boolean;
+		showEdgeLabels?: boolean;
 		onToggleDomain?: (domain: RelationDomain) => void;
 		onSearch?: (value: string) => void;
 		onToggleAmbiguous?: () => void;
+		onToggleEdgeLabels?: () => void;
 	}
 
 	let {
@@ -29,9 +31,11 @@
 		availableDomains = ['call', 'dependency', 'structural', 'reference', 'other'],
 		search = $bindable(''),
 		hideAmbiguous = $bindable(false),
+		showEdgeLabels = $bindable(false),
 		onToggleDomain = () => {},
 		onSearch = () => {},
-		onToggleAmbiguous = () => {}
+		onToggleAmbiguous = () => {},
+		onToggleEdgeLabels = () => {}
 	}: Props = $props();
 
 	let available = $derived(new Set(availableDomains));
@@ -94,6 +98,15 @@
 			<span>Hide ambiguous relations</span>
 		</label>
 		<p class="hint">{CONFIDENCE_META.ambiguous.description}</p>
+	</div>
+
+	<div class="panel-section">
+		<h4 class="panel-title">Labels</h4>
+		<label class="checkbox-row">
+			<input type="checkbox" checked={showEdgeLabels} onchange={() => onToggleEdgeLabels()} />
+			<span>Show edge labels</span>
+		</label>
+		<p class="hint">Render the relation type on each edge. Disable on large graphs to reduce clutter.</p>
 	</div>
 </aside>
 

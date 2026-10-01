@@ -1145,6 +1145,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tools/fold/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Handle stateless batch file folding
+         * @description # Endpoint
+         *
+         *     `POST /api/tools/fold/batch`
+         */
+        post: operations["handle_fold_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tools/keyword-search": {
         parameters: {
             query?: never;
@@ -1317,6 +1339,62 @@ export interface components {
             files_deleted: number;
             success: boolean;
         };
+        /**
+         * @description One entry of a batch fold request
+         *
+         *     Explicit entry values take precedence over the batch global defaults.
+         */
+        BatchFoldItem: {
+            file_name?: string | null;
+            /** @description Caller-provided stable identifier, echoed verbatim in the result. */
+            id: string;
+            language?: string | null;
+            max_tokens?: number | null;
+            mode?: string | null;
+            text: string;
+        };
+        /**
+         * @description Batch file fold request
+         *
+         *     Entries inherit the global defaults when their own fields are missing.
+         *     `max_concurrency` is reserved for forward compatibility and ignored:
+         *     the first version always folds sequentially.
+         */
+        BatchFoldRequest: {
+            items: components["schemas"]["BatchFoldItem"][];
+            language?: string | null;
+            max_concurrency?: number | null;
+            max_tokens?: number | null;
+            mode?: string | null;
+        };
+        /**
+         * @description Batch file fold response
+         *
+         *     `results` always has the same length and order as the request `items`.
+         *     Entry-level issues degrade in-band with `structure_known=false`.
+         */
+        BatchFoldResponse: {
+            results: components["schemas"]["BatchFoldResultItem"][];
+            stats: components["schemas"]["BatchFoldStats"];
+        };
+        /** @description One entry of a batch fold response */
+        BatchFoldResultItem: {
+            dropped_sections: number;
+            folded_text: string;
+            folded_tokens: number;
+            /** @description Echo of the caller-provided identifier. */
+            id: string;
+            kept_sections: number;
+            language: string;
+            original_tokens: number;
+            structure_known: boolean;
+        };
+        /** @description Aggregate accounting over a batch fold response */
+        BatchFoldStats: {
+            structure_known_count: number;
+            total_folded_tokens: number;
+            total_original_tokens: number;
+        };
         /** @description BM25 health response */
         Bm25HealthResponse: {
             connected: boolean;
@@ -1439,14 +1517,14 @@ export interface components {
         /** @description Semantic compression result */
         CompressResult: {
             /** @description Entity list (free-form parser entities, present when requested) */
-            entities?: Record<string, never> | null;
+            entities?: unknown;
             /** @description File hash (SHA-256) */
             file_hash: string;
             file_path: string;
             /** @description Whether the result came from cache */
             from_cache: boolean;
             /** @description Entity group list (free-form grouper groups, present when requested) */
-            groups?: Record<string, never> | null;
+            groups?: unknown;
             language: string;
             /** @description Semantic summary for human/LLM consumption */
             semantic_text: string;
@@ -1454,9 +1532,9 @@ export interface components {
         /** @description Config info response */
         ConfigInfoResponse: {
             /** @description Active database configuration (free-form) */
-            database: Record<string, never>;
+            database: unknown;
             /** @description Active embedder configuration (free-form) */
-            embedder: Record<string, never>;
+            embedder: unknown;
             initialized: boolean;
             project_count: number;
         };
@@ -1721,7 +1799,7 @@ export interface components {
         FindReferencesResponse: {
             error?: string | null;
             /** @description Relation capability state when the index is degraded */
-            relation_info?: Record<string, never> | null;
+            relation_info?: unknown;
             result?: null | components["schemas"]["FindReferencesResult"];
             success: boolean;
         };
@@ -1820,7 +1898,7 @@ export interface components {
         GetSymbolsResponse: {
             error?: string | null;
             /** @description Relation capability state when the index is degraded */
-            relation_info?: Record<string, never> | null;
+            relation_info?: unknown;
             result?: null | components["schemas"]["GetSymbolsResult"];
             success: boolean;
         };
@@ -1847,7 +1925,7 @@ export interface components {
         GotoDefinitionResponse: {
             error?: string | null;
             /** @description Relation capability state when the index is degraded */
-            relation_info?: Record<string, never> | null;
+            relation_info?: unknown;
             result?: null | components["schemas"]["GotoDefinitionResult"];
             success: boolean;
         };
@@ -1866,7 +1944,12 @@ export interface components {
             relation_info?: unknown;
             success: boolean;
         };
-        /** @description An edge in a returned subgraph. */
+        /**
+         * @description An edge in a returned subgraph.
+         *
+         *     `confidence` mirrors `cce_orchestrator::query::Confidence` serialized as
+         *     lowercase snake_case (`"extracted"`, `"inferred"`, `"external"`).
+         */
         GraphEdge: {
             confidence: string;
             relation: string;
@@ -1885,7 +1968,14 @@ export interface components {
             success: boolean;
             transitive_dependents: string[];
         };
-        /** @description A node in a returned subgraph. */
+        /**
+         * @description A node in a returned subgraph.
+         *
+         *     `kind` is the serde-serialized value of `cce_types::EntityKind`
+         *     (e.g. `"function"`, `"class"`, `"interface"`). It is validated against
+         *     the known kind set before being sent over the wire so callers never
+         *     encounter arbitrary strings for this field.
+         */
         GraphNode: {
             id: string;
             kind: string;
@@ -2139,7 +2229,7 @@ export interface components {
         /** @description Request body for updating project config */
         ProjectConfigUpdateRequest: {
             /** @description Project-level configuration (partial config, free-form) */
-            config: Record<string, never>;
+            config: unknown;
         };
         /** @description Response for updating project config */
         ProjectConfigUpdateResponse: {
@@ -3765,7 +3855,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Project id */
-                project_id: number;
+                id: number;
             };
             cookie?: never;
         };
@@ -5729,6 +5819,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FoldResponse"];
+                };
+            };
+        };
+    };
+    handle_fold_batch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchFoldRequest"];
+            };
+        };
+        responses: {
+            /** @description Batch fold result, entry errors reported in-band */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchFoldResponse"];
+                };
+            };
+            /** @description Invalid batch request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

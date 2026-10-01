@@ -14,7 +14,8 @@ import {
 	type GraphDirection,
 	type GraphEdge,
 	type GraphImpactResponse,
-	type GraphNode
+	type GraphNode,
+	type GraphPathResponse
 } from '../api/graph';
 import {
 	edgeElementId,
@@ -28,6 +29,28 @@ import { currentProjectId } from './project';
 
 /** Maximum number of nodes held in memory before expansion is refused. */
 export const MAX_RENDERED_NODES = 800;
+
+/** Structured error attached to GraphActionResult when a graph action fails. */
+export interface GraphError {
+	/** Stable machine-readable code for UI branching and metrics. */
+	code: string;
+	/** Human-readable message suitable for end-user display. Preserves the
+	 *  original backend message instead of collapsing everything to a generic
+	 *  string. */
+	message: string;
+	/** Optional structured detail such as HTTP status or the underlying thrown
+	 *  value, for debugging and for callers that need to react precisely. */
+	details?: unknown;
+}
+
+/**
+ * Uniform result type returned by every graph action. Callers can branch on
+ * `ok` without guesswork about whether null, 0 or an empty array means
+ * "not found" vs "request failed".
+ */
+export type GraphActionResult<T> =
+	| { ok: true; value: T }
+	| { ok: false; error: GraphError };
 
 export interface GraphMeta {
 	/** Relation epoch reported by the most recent successful response. */
@@ -57,7 +80,7 @@ export interface GraphState {
 	edges: GraphEdge[];
 	elements: GraphElement[];
 	loading: boolean;
-	error: string | null;
+	error: GraphError | null;
 	truncated: boolean;
 	filters: GraphFilters;
 	meta: GraphMeta;
@@ -91,11 +114,32 @@ const initialState: GraphState = {
 
 export const graphState = writable<GraphState>(initialState);
 
-function errorMessage(error: unknown): string {
-	if (error && typeof error === 'object' && 'message' in error) {
-		return String((error as { message: unknown }).message);
+function toGraphError(error: unknown, fallback = 'Graph request failed'): GraphError {
+	// Preserve structured shape from fetch helpers.
+	if (error && typeof error === 'object') {
+		const obj = error as Record<string, unknown>;
+		if ('message' in obj && typeof obj.message === 'string') {
+			if ('status' in obj && typeof obj.status === 'number') {
+				return {
+					code: statusToCode(obj.status as number),
+					message: obj.message,
+					details: { status: obj.status, url: obj.url }
+				};
+			}
+			return { code: 'UNKNOWN', message: obj.message, details: error };
+		}
+		if ('code' in obj && typeof obj.code === 'string') {
+			return { code: obj.code, message: fallback, details: error };
+		}
 	}
-	return 'Graph request failed';
+	return { code: 'UNKNOWN', message: fallback, details: error };
+}
+
+function statusToCode(status: number): string {
+	if (status === 404) return 'NOT_FOUND';
+	if (status >= 400 && status < 500) return 'INVALID_ARGUMENT';
+	if (status >= 500) return 'SERVER_ERROR';
+	return 'NETWORK';
 }
 
 /**
@@ -165,16 +209,22 @@ function mergeGraph(
 
 export const graphActions = {
 	/** Load the neighborhood of an entity and replace the working set. */
-	async loadEgo(entityId: string, depth = 2, direction: GraphDirection = 'both', projectId?: number) {
+	async loadEgo(
+		entityId: string,
+		depth = 2,
+		direction: GraphDirection = 'both',
+		projectId?: number
+	): Promise<GraphActionResult<number>> {
 		const pid = projectId ?? get(currentProjectId);
 		graphState.update((state) => ({ ...state, projectId: pid, loading: true, error: null }));
 		try {
 			const response = await graphApi.getEgo(pid, { entityId, depth, direction });
 			replaceGraph(response.nodes, response.edges, response.relation_epoch, entityId);
-			return response.nodes.length;
+			return { ok: true, value: response.nodes.length };
 		} catch (error) {
-			graphState.update((state) => ({ ...state, loading: false, error: errorMessage(error) }));
-			return 0;
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			return { ok: false, error: ge };
 		} finally {
 			graphState.update((state) => ({ ...state, loading: false }));
 		}
@@ -184,51 +234,104 @@ export const graphActions = {
 	 * Expand the graph by one hop around an entity, merging the result into the
 	 * existing working set. Returns the number of newly added nodes.
 	 */
-	async expand(entityId: string, depth = 1, direction: GraphDirection = 'both') {
+	async expand(
+		entityId: string,
+		depth = 1,
+		direction: GraphDirection = 'both'
+	): Promise<GraphActionResult<number>> {
 		const state = get(graphState);
 		if (state.nodes.length >= MAX_RENDERED_NODES) {
 			graphState.update((current) => ({ ...current, truncated: true }));
-			return 0;
+			const ge: GraphError = {
+				code: 'LIMIT_EXCEEDED',
+				message: `Render limit of ${MAX_RENDERED_NODES} nodes reached. Reload a smaller seed to expand further.`
+			};
+			return { ok: false, error: ge };
 		}
 		graphState.update((current) => ({ ...current, loading: true }));
 		try {
 			const response = await graphApi.getEgo(state.projectId, { entityId, depth, direction });
-			return mergeGraph(response.nodes, response.edges, response.relation_epoch, entityId);
+			return {
+				ok: true,
+				value: mergeGraph(response.nodes, response.edges, response.relation_epoch, entityId)
+			};
 		} catch (error) {
-			graphState.update((current) => ({ ...current, error: errorMessage(error) }));
-			return 0;
+			const ge = toGraphError(error);
+			graphState.update((current) => ({ ...current, error: ge }));
+			return { ok: false, error: ge };
 		} finally {
 			graphState.update((current) => ({ ...current, loading: false }));
 		}
 	},
 
 	/** Replace the working set with an explicit subgraph. */
-	async loadSubgraph(ids: string[], projectId?: number) {
+	async loadSubgraph(ids: string[], projectId?: number): Promise<GraphActionResult<number>> {
 		const pid = projectId ?? get(currentProjectId);
 		graphState.update((state) => ({ ...state, projectId: pid, loading: true, error: null }));
 		try {
 			const response = await graphApi.getSubgraph(pid, ids);
 			replaceGraph(response.nodes, response.edges, response.relation_epoch, null);
-			return response.nodes.length;
+			return { ok: true, value: response.nodes.length };
 		} catch (error) {
-			graphState.update((state) => ({ ...state, loading: false, error: errorMessage(error) }));
-			return 0;
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			return { ok: false, error: ge };
+		} finally {
+			graphState.update((state) => ({ ...state, loading: false }));
+		}
+	},
+
+	/**
+	 * Replace the working set with the shortest relation path between two
+	 * entities. When no path exists the working set is left untouched and the
+	 * error field carries a NO_PATH GraphError, distinguishable from an
+	 * actual transport failure.
+	 */
+	async loadPath(
+		start: string,
+		end: string,
+		maxDepth = 10,
+		projectId?: number
+	): Promise<GraphActionResult<GraphPathResponse>> {
+		const pid = projectId ?? get(currentProjectId);
+		graphState.update((state) => ({ ...state, projectId: pid, loading: true, error: null }));
+		try {
+			const response = await graphApi.getPath(pid, { start, end, maxDepth });
+			if (response.path_found) {
+				replaceGraph(response.nodes ?? [], response.edges ?? [], response.relation_epoch, start);
+			} else {
+				const ge: GraphError = {
+					code: 'NO_PATH',
+					message: `No relation path found between '${start}' and '${end}' within depth ${maxDepth}.`
+				};
+				graphState.update((state) => ({ ...state, error: ge }));
+				return { ok: false, error: ge };
+			}
+			return { ok: true, value: response };
+		} catch (error) {
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			return { ok: false, error: ge };
 		} finally {
 			graphState.update((state) => ({ ...state, loading: false }));
 		}
 	},
 
 	/** Load a bounded slice of the project graph. */
-	async loadOverview(limit?: number, projectId?: number) {
+	async loadOverview(
+		limit?: number,
+		projectId?: number
+	): Promise<GraphActionResult<number>> {
 		const pid = projectId ?? get(currentProjectId);
 		graphState.update((state) => ({ ...state, projectId: pid, loading: true, error: null }));
 		try {
 			const response = await graphApi.exportGraph(pid, limit);
 			replaceGraph(response.nodes, response.edges, response.relation_epoch, null);
-			return response.nodes.length;
+			return { ok: true, value: response.nodes.length };
 		} catch (error) {
-			graphState.update((state) => ({ ...state, loading: false, error: errorMessage(error) }));
-			return 0;
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, loading: false, error: ge }));
+			return { ok: false, error: ge };
 		} finally {
 			graphState.update((state) => ({ ...state, loading: false }));
 		}
@@ -239,7 +342,9 @@ export const graphActions = {
 	 * Components describe communities, which the canvas uses for grouping and
 	 * the details panel uses for context.
 	 */
-	async loadComponents(projectId?: number): Promise<GraphComponentsResponse | null> {
+	async loadComponents(
+		projectId?: number
+	): Promise<GraphActionResult<GraphComponentsResponse>> {
 		const pid = projectId ?? get(currentProjectId);
 		try {
 			const response = await graphApi.getComponents(pid);
@@ -253,15 +358,19 @@ export const graphActions = {
 				...state,
 				meta: { ...state.meta, communities }
 			}));
-			return response;
+			return { ok: true, value: response };
 		} catch (error) {
-			graphState.update((state) => ({ ...state, error: errorMessage(error) }));
-			return null;
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, error: ge }));
+			return { ok: false, error: ge };
 		}
 	},
 
 	/** Run impact analysis for a changed file and record the result. */
-	async loadImpact(file: string, projectId?: number): Promise<GraphImpactResponse | null> {
+	async loadImpact(
+		file: string,
+		projectId?: number
+	): Promise<GraphActionResult<GraphImpactResponse>> {
 		const pid = projectId ?? get(currentProjectId);
 		try {
 			const response = await graphApi.getImpact(pid, file);
@@ -274,10 +383,11 @@ export const graphActions = {
 					impactTransitive: response.transitive_dependents
 				}
 			}));
-			return response;
+			return { ok: true, value: response };
 		} catch (error) {
-			graphState.update((state) => ({ ...state, error: errorMessage(error) }));
-			return null;
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, error: ge }));
+			return { ok: false, error: ge };
 		}
 	},
 
