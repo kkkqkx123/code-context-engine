@@ -68,8 +68,9 @@
 //! downgrades vanished files to references when a workspace root is
 //! configured.
 //!
-//! Batch input must arrive sorted by score descending: the batch total budget
-//! downgrades from the tail up and the assembler never reorders the input.
+//! Every result is capped by the single per-result quota; recall count is
+//! owned by `assembly_top_n` and the score threshold, never by a batch token
+//! cap.
 //!
 //! The `#[allow(dead_code)]` below suppresses the resulting unused warnings
 //! and MUST be removed together with the final resolution.
@@ -93,5 +94,5 @@ pub use error::{AssemblyError, Result};
 pub use types::{
     AssembledResult, AssemblyMetadata, DedupStrategy, DowngradeReason, ExpandedUnit,
     ExpansionOrigin, FileInfo, SPSRGraphConfig, SearchResultInput, SemanticUnitType,
-    TruncationStrategy, UnitDeduplicator, reference_content,
+    reference_content,
 };

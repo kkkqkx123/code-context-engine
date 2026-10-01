@@ -379,14 +379,10 @@ pub enum DedupStrategy {
 pub struct SPSRGraphConfig {
     /// Enable SPSR-Graph assembly
     pub enable_assembly: bool,
-    /// Maximum assembled content per result in tokens (using TokenEstimator)
+    /// Maximum assembled content per result in tokens (using TokenEstimator).
+    /// A single oversized body is downgraded to a path-and-range reference;
+    /// the batch total is bounded by `assembly_top_n` times this value.
     pub max_assembled_length: usize,
-    /// Maximum tokens for a single segment. An oversized segment is
-    /// downgraded to a path-and-range reference without affecting others.
-    pub max_segment_tokens: usize,
-    /// Maximum total tokens across one assembled batch. Once exceeded,
-    /// low-score results are downgraded wholesale to references.
-    pub max_batch_tokens: usize,
     /// Include file boundary markers
     pub include_file_markers: bool,
     /// Deduplication strategy
@@ -424,8 +420,6 @@ impl Default for SPSRGraphConfig {
         Self {
             enable_assembly: false,
             max_assembled_length: 8000,
-            max_segment_tokens: 4000,
-            max_batch_tokens: 24000,
             include_file_markers: true,
             dedup_strategy: DedupStrategy::ByEntityId,
             assembly_top_n: 3,
@@ -482,18 +476,6 @@ impl SPSRGraphConfig {
         self
     }
 
-    /// Set the maximum tokens for a single segment (builder pattern).
-    pub fn with_max_segment_tokens(mut self, tokens: usize) -> Self {
-        self.max_segment_tokens = tokens;
-        self
-    }
-
-    /// Set the maximum total tokens across one assembled batch (builder pattern).
-    pub fn with_max_batch_tokens(mut self, tokens: usize) -> Self {
-        self.max_batch_tokens = tokens;
-        self
-    }
-
     /// Allow or forbid non-call (structural) expansion edges (builder pattern).
     pub fn with_structural_edges(mut self, allow: bool) -> Self {
         self.allow_structural_edges = allow;
@@ -542,23 +524,6 @@ impl Validate for SPSRGraphConfig {
         if self.max_assembled_length == 0 {
             errors.push(ConfigValidationError::invalid_field(
                 "max_assembled_length",
-                "must be greater than 0",
-            ));
-        }
-        if self.max_segment_tokens == 0 {
-            errors.push(ConfigValidationError::invalid_field(
-                "max_segment_tokens",
-                "must be greater than 0",
-            ));
-        } else if self.max_segment_tokens > self.max_assembled_length {
-            errors.push(ConfigValidationError::invalid_field(
-                "max_segment_tokens",
-                "must not exceed max_assembled_length",
-            ));
-        }
-        if self.max_batch_tokens == 0 {
-            errors.push(ConfigValidationError::invalid_field(
-                "max_batch_tokens",
                 "must be greater than 0",
             ));
         }

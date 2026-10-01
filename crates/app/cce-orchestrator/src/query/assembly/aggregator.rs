@@ -107,9 +107,7 @@ impl AggregatedSegment {
 
 /// Segment aggregator
 ///
-/// Aggregates code segments based on:
-/// - Adjacent segment merging
-/// - File coverage threshold
+/// Merges adjacent unmarked same-file primary segments.
 pub struct SegmentAggregator {
     config: SPSRGraphConfig,
 }

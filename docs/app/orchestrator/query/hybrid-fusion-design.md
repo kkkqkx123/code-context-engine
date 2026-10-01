@@ -103,8 +103,7 @@ When `WithAssembly` strategy is enabled, the fused results undergo additional pr
 
 1. **SPSR-Graph expansion**: Call-chain traversal (forward/backward) from each result's entity. Only call-domain edges are auto-attached; stdlib and external targets are filtered before the budget cap, and each direction is ordered by score with forward units filling the shared cap first.
 2. **Unit deduplication**: Remove duplicate expanded units (stable content hash over file path, line range, and body).
-3. **Structure concatenation**: Assemble primary unit + call chain into a coherent code block. Merging only joins unmarked same-file primary segments and marks gaps with omission notes. Oversized segments and missing files degrade to path-and-range references; remaining units are selected by score with the primary pinned, then rendered in file order.
-4. **Batch budget**: The batch total token cap downgrades low-score results wholesale to references. Batch input must arrive sorted by score descending; the assembler does not reorder.
+3. **Structure concatenation**: Assemble primary unit + call chain into a coherent code block. Merging only joins unmarked same-file primary segments and marks gaps with omission notes. A body larger than the single per-result quota and missing files degrade to path-and-range references; remaining units are selected by score with the primary pinned, then rendered in file order. Recall count is owned by top-N and the score threshold; there is no batch token cap.
 
 Whole-file replacement no longer exists: former high-coverage scenarios render as file path references instead.
 
@@ -117,10 +116,8 @@ bm25_weight = 0.5
 
 [assembly]
 max_assembled_length = 8000
-max_segment_tokens = 4000
-max_batch_tokens = 24000
 enable_segment_merge = true
-segment_merge_gap = 3
+segment_merge_gap = 2
 allow_structural_edges = false
 filter_stdlib = true
 filter_external = true

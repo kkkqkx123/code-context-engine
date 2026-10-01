@@ -3,8 +3,6 @@
 //! This module provides type definitions for SPSR-Graph (Structure-Preserving
 //! and Semantically-Reordered Code Graph) assembly operations.
 
-use std::collections::HashSet;
-
 use cce_types::{EntityId, RelationType};
 
 /// Search result input for assembly
@@ -34,22 +32,6 @@ pub struct SearchResultInput {
 
 /// Deduplication strategy
 pub use cce_config::modules::search::DedupStrategy;
-
-/// Truncation strategy for assembled content
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub enum TruncationStrategy {
-    /// Hard cut at character limit (current behavior)
-    #[default]
-    HardCut,
-    /// Cut at semantic boundaries (function/class boundaries)
-    SemanticBoundary,
-    /// Remove low-priority units first when approaching limit
-    PriorityBased,
-    /// Dynamically reduce expansion depth based on budget
-    Progressive,
-}
 
 /// SPSR-Graph assembly configuration
 pub use cce_config::modules::search::SPSRGraphConfig;
@@ -366,10 +348,6 @@ pub struct AssembledResult {
     pub end_line: u32,
     /// Assembled content
     pub assembled_content: String,
-    /// Whether the whole result was downgraded to a path-and-range reference
-    /// because the batch total budget ran out. The content then holds only the
-    /// reference rendering, never source text.
-    pub downgraded_to_reference: bool,
     /// Involved files
     pub involved_files: Vec<FileInfo>,
     /// Assembly metadata
@@ -392,7 +370,6 @@ impl AssembledResult {
             start_line: unit.start_line,
             end_line: unit.end_line,
             assembled_content: unit.code.clone(),
-            downgraded_to_reference: false,
             involved_files: vec![FileInfo::new(unit.file_path)],
             metadata: AssemblyMetadata {
                 expanded: false,
@@ -408,38 +385,6 @@ impl AssembledResult {
         }
     }
 
-    /// Downgrade the whole result to a path-and-range reference in place.
-    ///
-    /// Used when the batch total budget runs out: low-score results keep
-    /// their slot but lose their body text. Expansion bookkeeping is reset
-    /// because the reference only points at the primary location.
-    pub fn downgrade_to_reference(&mut self, reason: DowngradeReason) {
-        use cce_utils::token_estimation::TokenEstimator;
-
-        let body_tokens = TokenEstimator::estimate(&self.assembled_content);
-        let marker = format!("// ===== File: {} =====", self.file_path);
-        self.assembled_content = format!(
-            "{}\n{}",
-            marker,
-            reference_content(
-                &self.file_path,
-                self.start_line,
-                self.end_line,
-                body_tokens,
-                reason
-            )
-        );
-        self.downgraded_to_reference = true;
-        self.involved_files = vec![FileInfo::new(self.file_path.clone())];
-        self.metadata.expanded = false;
-        self.metadata.expanded_nodes = 0;
-        self.metadata.forward_nodes = 0;
-        self.metadata.backward_nodes = 0;
-        self.metadata.file_count = 1;
-        self.metadata.assembled_length = self.assembled_content.len();
-        self.metadata.truncated = false;
-    }
-
     /// Check if assembly was performed
     pub fn is_assembled(&self) -> bool {
         self.metadata.expanded
@@ -448,41 +393,6 @@ impl AssembledResult {
     /// Get total content length
     pub fn total_length(&self) -> usize {
         self.assembled_content.len()
-    }
-}
-
-/// Unit deduplicator
-#[derive(Debug, Default)]
-pub struct UnitDeduplicator {
-    seen_entity_ids: HashSet<EntityId>,
-    seen_hashes: HashSet<u64>,
-}
-
-impl UnitDeduplicator {
-    /// Create a new deduplicator
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Check if a unit should be kept (not duplicate)
-    pub fn should_keep(&mut self, unit: &ExpandedUnit, strategy: DedupStrategy) -> bool {
-        match strategy {
-            DedupStrategy::None => true,
-            DedupStrategy::ByEntityId => {
-                if let Some(id) = unit.entity_id {
-                    self.seen_entity_ids.insert(id)
-                } else {
-                    true
-                }
-            }
-            DedupStrategy::ByContentHash => self.seen_hashes.insert(unit.content_hash()),
-        }
-    }
-
-    /// Reset the deduplicator
-    pub fn reset(&mut self) {
-        self.seen_entity_ids.clear();
-        self.seen_hashes.clear();
     }
 }
 
@@ -520,37 +430,6 @@ mod tests {
         assert_eq!(unit.start_line, 1);
         assert_eq!(unit.end_line, 3);
         assert_eq!(unit.unit_type, SemanticUnitType::Unknown);
-    }
-
-    #[test]
-    fn test_unit_deduplicator() {
-        let mut dedup = UnitDeduplicator::new();
-
-        let unit1 = ExpandedUnit::new(
-            "fn foo() {}".to_string(),
-            "src/a.rs".to_string(),
-            1,
-            2,
-            "foo".to_string(),
-        );
-
-        let unit2 = ExpandedUnit::new(
-            "fn foo() {}".to_string(),
-            "src/a.rs".to_string(),
-            1,
-            2,
-            "foo".to_string(),
-        );
-
-        // By content hash
-        assert!(dedup.should_keep(&unit1, DedupStrategy::ByContentHash));
-        assert!(!dedup.should_keep(&unit2, DedupStrategy::ByContentHash));
-
-        dedup.reset();
-
-        // None strategy
-        assert!(dedup.should_keep(&unit1, DedupStrategy::None));
-        assert!(dedup.should_keep(&unit2, DedupStrategy::None));
     }
 
     #[test]

@@ -18,8 +18,6 @@ pub enum AssemblyError {
         end_line: u32,
         total_lines: u32,
     },
-    /// Content too large
-    ContentTooLarge { size: usize, max_size: usize },
     /// IO error
     IoError(String),
 }
@@ -52,11 +50,6 @@ impl AssemblyError {
             total_lines,
         }
     }
-
-    /// Create a content too large error
-    pub fn content_too_large(size: usize, max_size: usize) -> Self {
-        Self::ContentTooLarge { size, max_size }
-    }
 }
 
 impl fmt::Display for AssemblyError {
@@ -77,9 +70,6 @@ impl fmt::Display for AssemblyError {
                     "Invalid line range {}-{} in '{}' (total lines: {})",
                     start_line, end_line, file_path, total_lines
                 )
-            }
-            Self::ContentTooLarge { size, max_size } => {
-                write!(f, "Content size {} exceeds maximum {}", size, max_size)
             }
             Self::IoError(msg) => write!(f, "IO error: {}", msg),
         }

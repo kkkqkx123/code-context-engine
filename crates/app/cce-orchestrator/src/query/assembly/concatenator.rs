@@ -122,14 +122,14 @@ impl StructureConcatenator {
 
     /// Downgrade oversized segment bodies to references.
     ///
-    /// Each segment has an independent limit (`max_segment_tokens`); a single
-    /// huge span degrades alone instead of crowding out the other spans.
+    /// A body larger than the single per-result quota degrades alone to a
+    /// reference instead of crowding out the other spans.
     fn apply_segment_budget(&self, segments: &mut [AggregatedSegment]) {
         for segment in segments.iter_mut() {
             if segment.is_reference() {
                 continue;
             }
-            if self.standalone_cost(segment) > self.config.max_segment_tokens {
+            if self.standalone_cost(segment) > self.config.get_max_length() {
                 segment.downgrade_to_reference(DowngradeReason::OverLimit);
             }
         }
@@ -414,14 +414,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_informative_truncation_markers() {
+        let primary_code = "fn large_function() {\n    let x = 1;\n    let y = 2;\n    x + y\n}";
+        let budget = standalone_cost(primary_code, None, "src/a.rs") + 1;
         let config = SPSRGraphConfig {
-            max_assembled_length: 20, // Very small to trigger truncation of primary
+            max_assembled_length: budget,
             ..Default::default()
         };
         let concat = StructureConcatenator::new(config);
 
         let primary = ExpandedUnit::new(
-            "fn large_function() {\n    let x = 1;\n    let y = 2;\n    x + y\n}".to_string(),
+            primary_code.to_string(),
             "src/a.rs".to_string(),
             1,
             5,
@@ -438,8 +440,8 @@ mod tests {
 
         let (result, _) = concat.concatenate(&primary, &[extra_unit], &[]).await;
 
-        // The primary is always kept whole; the expansion unit does not fit
-        // the tiny budget and must be reported through the omission marker
+        // The primary fits the quota and is kept whole; the expansion unit
+        // does not fit and must be reported through the omission marker
         assert!(result.contains("large_function"));
         assert!(result.contains("omitted"));
     }
@@ -528,13 +530,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_oversized_segment_becomes_reference() {
-        // The limit fits the tiny expansion exactly; the huge primary must
+        // The quota fits the tiny expansion exactly; the huge primary must
         // exceed it.
         let tiny_code = "fn tiny() {}";
         let tiny_marker = "// --> calls: tiny (src/tiny.rs:1-3)";
         let limit = standalone_cost(tiny_code, Some(tiny_marker), "src/tiny.rs");
         let config = SPSRGraphConfig {
-            max_segment_tokens: limit,
+            max_assembled_length: limit,
             ..SPSRGraphConfig::new().enable(true)
         };
         let concat = StructureConcatenator::new(config);

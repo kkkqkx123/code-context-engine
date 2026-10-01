@@ -13,8 +13,8 @@ use super::concatenator::StructureConcatenator;
 use super::error::Result;
 use super::extractor::SemanticUnitExtractor;
 use super::types::{
-    AssembledResult, AssemblyMetadata, DedupStrategy, DowngradeReason, ExpandedUnit,
-    SPSRGraphConfig, SearchResultInput,
+    AssembledResult, AssemblyMetadata, DedupStrategy, ExpandedUnit, SPSRGraphConfig,
+    SearchResultInput,
 };
 
 /// SPSR-Graph assembler
@@ -116,7 +116,6 @@ impl SPSRGraphAssembler {
             start_line: input.start_line,
             end_line: input.end_line,
             assembled_content,
-            downgraded_to_reference: false,
             involved_files,
             metadata,
             original_content: input.content,
@@ -127,13 +126,9 @@ impl SPSRGraphAssembler {
     ///
     /// Only the top-N results (based on config.assembly_top_n) are assembled.
     /// The rest are returned as simple results. Each input carries its own
-    /// caller-resolved forward/backward expansion units.
-    ///
-    /// The input must arrive sorted by score descending. The batch total
-    /// budget (`max_batch_tokens`) is enforced from the tail up: once the
-    /// accumulated tokens exceed the cap, that result and every later
-    /// (lower-score) result is downgraded wholesale to a path-and-range
-    /// reference. The assembler never reorders the input itself.
+    /// caller-resolved forward/backward expansion units. Every result is
+    /// capped by the single per-result quota; the batch total is bounded by
+    /// `assembly_top_n` times that quota and never downgrades tail results.
     pub async fn assemble_batch(
         &self,
         results: Vec<(SearchResultInput, Vec<ExpandedUnit>, Vec<ExpandedUnit>)>,
@@ -164,32 +159,7 @@ impl SPSRGraphAssembler {
             assembled.push(self.create_simple_result(&input));
         }
 
-        self.apply_batch_budget(&mut assembled);
-
         Ok(assembled)
-    }
-
-    /// Enforce the batch total token budget in score order.
-    ///
-    /// Walks the results from highest to lowest score (input order) and
-    /// accumulates token costs. The first result is always kept whole; any
-    /// later result that would push the total over `max_batch_tokens` is
-    /// downgraded wholesale to a reference instead.
-    fn apply_batch_budget(&self, results: &mut [AssembledResult]) {
-        let mut total = 0usize;
-        for result in results.iter_mut() {
-            let cost = self
-                .config
-                .estimate_content_tokens(&result.assembled_content);
-            if total == 0 || total + cost <= self.config.max_batch_tokens {
-                total += cost;
-            } else {
-                result.downgrade_to_reference(DowngradeReason::OverLimit);
-                total += self
-                    .config
-                    .estimate_content_tokens(&result.assembled_content);
-            }
-        }
     }
 
     /// Deduplicate caller-supplied expansion units against the primary and
@@ -553,8 +523,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_batch_budget_downgrades_tail() {
-        let config = SPSRGraphConfig::new().enable(true).with_max_batch_tokens(5);
+    async fn test_batch_keeps_all_results() {
+        let config = SPSRGraphConfig::new().enable(true).with_max_length(1000);
         let assembler = SPSRGraphAssembler::new(config);
         let results = vec![
             (input(PRIMARY_CODE, 1), Vec::new(), Vec::new()),
@@ -566,9 +536,8 @@ mod tests {
             .await
             .expect("assembly ok");
         assert_eq!(assembled.len(), 3);
-        assert!(!assembled[0].downgraded_to_reference);
-        assert!(assembled[1].downgraded_to_reference);
-        assert!(assembled[2].downgraded_to_reference);
-        assert!(assembled[1].assembled_content.contains("[reference]"));
+        for result in &assembled {
+            assert!(result.assembled_content.contains("call_b"));
+        }
     }
 }
