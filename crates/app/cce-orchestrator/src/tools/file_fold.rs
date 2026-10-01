@@ -9,6 +9,7 @@
 //! `structure_known=false`.
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use cce_parser::parser::coordinator::ParseCoordinator;
 use cce_parser::summary::{FileFolder, FoldMode as ParserFoldMode};
@@ -21,6 +22,10 @@ pub const DEFAULT_FOLD_MAX_TOKENS: usize = 2000;
 pub const MAX_FOLD_MAX_TOKENS: usize = 8000;
 /// Inputs larger than this skip parsing and degrade directly.
 pub const MAX_FOLD_TEXT_BYTES: usize = 200_000;
+/// Maximum entries accepted by a single batch fold request.
+pub const MAX_FOLD_BATCH_ITEMS: usize = 32;
+/// Maximum summed `text` bytes accepted by a single batch fold request.
+pub const MAX_FOLD_BATCH_BYTES: usize = 2_000_000;
 
 /// Fold detail level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -240,6 +245,237 @@ impl FileFoldTool {
     }
 }
 
+/// One entry of a batch fold request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileFoldBatchItem {
+    /// Caller-provided stable identifier, echoed verbatim in the result.
+    pub id: String,
+    /// Raw source text to fold.
+    pub text: String,
+    /// Explicit language hint (highest priority).
+    pub language: Option<Language>,
+    /// File name hint for suffix inference.
+    pub file_name: Option<String>,
+    /// Caller token budget for the folded text.
+    pub max_tokens: Option<usize>,
+    /// Fold detail level.
+    pub mode: Option<FileFoldMode>,
+}
+
+impl FileFoldBatchItem {
+    /// Create an item carrying an id and raw text.
+    pub fn new(id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            text: text.into(),
+            language: None,
+            file_name: None,
+            max_tokens: None,
+            mode: None,
+        }
+    }
+
+    /// Set the explicit language hint.
+    pub fn with_language(mut self, language: Language) -> Self {
+        self.language = Some(language);
+        self
+    }
+
+    /// Set the file name hint.
+    pub fn with_file_name(mut self, file_name: impl Into<String>) -> Self {
+        self.file_name = Some(file_name.into());
+        self
+    }
+
+    /// Set the caller token budget.
+    pub fn with_max_tokens(mut self, max_tokens: usize) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Set the fold detail level.
+    pub fn with_mode(mut self, mode: FileFoldMode) -> Self {
+        self.mode = Some(mode);
+        self
+    }
+}
+
+/// Batch fold request with optional global defaults.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FileFoldBatchRequest {
+    /// Entries to fold; result order matches this order.
+    pub items: Vec<FileFoldBatchItem>,
+    /// Global language default for items without an explicit hint.
+    pub language: Option<Language>,
+    /// Global token budget default for items without an explicit budget.
+    pub max_tokens: Option<usize>,
+    /// Global fold mode default for items without an explicit mode.
+    pub mode: Option<FileFoldMode>,
+    /// Reserved for forward compatibility; the first version always runs sequentially.
+    pub max_concurrency: Option<usize>,
+}
+
+impl FileFoldBatchRequest {
+    /// Create a batch request from items.
+    pub fn new(items: Vec<FileFoldBatchItem>) -> Self {
+        Self {
+            items,
+            language: None,
+            max_tokens: None,
+            mode: None,
+            max_concurrency: None,
+        }
+    }
+
+    /// Set the global language default.
+    pub fn with_language(mut self, language: Language) -> Self {
+        self.language = Some(language);
+        self
+    }
+
+    /// Set the global token budget default.
+    pub fn with_max_tokens(mut self, max_tokens: usize) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Set the global fold mode default.
+    pub fn with_mode(mut self, mode: FileFoldMode) -> Self {
+        self.mode = Some(mode);
+        self
+    }
+
+    /// Set the reserved concurrency hint (ignored, always sequential).
+    pub fn with_max_concurrency(mut self, max_concurrency: usize) -> Self {
+        self.max_concurrency = Some(max_concurrency);
+        self
+    }
+}
+
+/// One entry of a batch fold response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileFoldBatchItemResponse {
+    /// Echo of the caller-provided identifier.
+    pub id: String,
+    /// Folded skeleton text, or truncated source on degraded paths.
+    pub folded_text: String,
+    /// Language actually used for folding (`Unknown` on degraded paths).
+    pub language: String,
+    /// Whether the skeleton carries parsed structure.
+    pub structure_known: bool,
+    /// Token estimate before folding.
+    pub original_tokens: usize,
+    /// Token estimate after folding.
+    pub folded_tokens: usize,
+    /// Sections kept in the skeleton.
+    pub kept_sections: usize,
+    /// Sections dropped by the token budget.
+    pub dropped_sections: usize,
+}
+
+/// Aggregate accounting over a batch fold response.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FileFoldBatchStats {
+    /// Summed `original_tokens` over all entries.
+    pub total_original_tokens: usize,
+    /// Summed `folded_tokens` over all entries.
+    pub total_folded_tokens: usize,
+    /// Entries folded with known structure.
+    pub structure_known_count: usize,
+}
+
+/// Batch fold response: per-entry results plus aggregate stats.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileFoldBatchResponse {
+    /// Per-entry results in request order.
+    pub results: Vec<FileFoldBatchItemResponse>,
+    /// Aggregate token accounting for observation and budget checks.
+    pub stats: FileFoldBatchStats,
+}
+
+/// Request-level batch fold failure.
+#[derive(Error, Debug, Clone, Serialize, Deserialize)]
+pub enum FileFoldBatchError {
+    /// Entry array is empty.
+    #[error("fold batch items must not be empty")]
+    Empty,
+    /// Entry count exceeds the batch limit; split the request.
+    #[error("fold batch holds {count} items, exceeding the limit of {max}; split the request")]
+    TooManyItems { count: usize, max: usize },
+    /// Summed text bytes exceed the batch limit; split the request.
+    #[error("fold batch holds {bytes} text bytes, exceeding the limit of {max}; split the request")]
+    TotalTooLarge { bytes: usize, max: usize },
+}
+
+/// Batch fold result type.
+pub type FileFoldBatchResult<T> = std::result::Result<T, FileFoldBatchError>;
+
+impl FileFoldTool {
+    /// Fold a batch of texts sequentially.
+    ///
+    /// Each entry reuses the single-item fold logic with its effective
+    /// options (explicit value first, then the batch global default), so
+    /// per-entry semantics and degrade behavior match single folding.
+    /// Request-level validation (empty, count, total size) rejects before
+    /// any folding; entry-level issues always degrade in-band.
+    pub fn fold_batch(request: FileFoldBatchRequest) -> FileFoldBatchResult<FileFoldBatchResponse> {
+        if request.items.is_empty() {
+            return Err(FileFoldBatchError::Empty);
+        }
+        if request.items.len() > MAX_FOLD_BATCH_ITEMS {
+            return Err(FileFoldBatchError::TooManyItems {
+                count: request.items.len(),
+                max: MAX_FOLD_BATCH_ITEMS,
+            });
+        }
+        let total_bytes: usize = request.items.iter().map(|item| item.text.len()).sum();
+        if total_bytes > MAX_FOLD_BATCH_BYTES {
+            return Err(FileFoldBatchError::TotalTooLarge {
+                bytes: total_bytes,
+                max: MAX_FOLD_BATCH_BYTES,
+            });
+        }
+
+        let mut results = Vec::with_capacity(request.items.len());
+        let mut stats = FileFoldBatchStats::default();
+        for item in &request.items {
+            let mut tool_request = FileFoldRequest::new(item.text.clone());
+            if let Some(language) = item.language.or(request.language) {
+                tool_request = tool_request.with_language(language);
+            }
+            if let Some(ref file_name) = item.file_name {
+                tool_request = tool_request.with_file_name(file_name.clone());
+            }
+            if let Some(max_tokens) = item.max_tokens.or(request.max_tokens) {
+                tool_request = tool_request.with_max_tokens(max_tokens);
+            }
+            if let Some(mode) = item.mode.or(request.mode) {
+                tool_request = tool_request.with_mode(mode);
+            }
+
+            let mut coordinator = ParseCoordinator::new();
+            let folded = Self::fold(&mut coordinator, tool_request);
+            stats.total_original_tokens += folded.original_tokens;
+            stats.total_folded_tokens += folded.folded_tokens;
+            if folded.structure_known {
+                stats.structure_known_count += 1;
+            }
+            results.push(FileFoldBatchItemResponse {
+                id: item.id.clone(),
+                folded_text: folded.folded_text,
+                language: folded.language,
+                structure_known: folded.structure_known,
+                original_tokens: folded.original_tokens,
+                folded_tokens: folded.folded_tokens,
+                kept_sections: folded.kept_sections,
+                dropped_sections: folded.dropped_sections,
+            });
+        }
+
+        Ok(FileFoldBatchResponse { results, stats })
+    }
+}
+
 /// Truncate text so its token estimate fits the budget.
 fn truncate_to_budget(text: &str, budget: usize) -> String {
     if estimate_tokens(text) <= budget {
@@ -324,5 +560,134 @@ mod tests {
         let response = FileFoldTool::fold(&mut coordinator, request);
         assert!(response.folded_tokens <= 200);
         assert!(response.original_tokens > response.folded_tokens);
+    }
+
+    #[test]
+    fn batch_matches_sequential_single_results() {
+        let rust_code = "pub struct User { pub name: String }\n\
+            pub fn normalize_name(input: &str) -> String { input.trim().to_string() }\n";
+        let python_code = "def hello():\n    pass\n";
+        let request = FileFoldBatchRequest {
+            items: vec![
+                FileFoldBatchItem::new("msg-1", rust_code).with_language(Language::Rust),
+                FileFoldBatchItem::new("msg-2", python_code)
+                    .with_file_name("hello.py")
+                    .with_max_tokens(500),
+            ],
+            language: None,
+            max_tokens: Some(2000),
+            mode: None,
+            max_concurrency: None,
+        };
+        let batch = FileFoldTool::fold_batch(request).expect("batch must succeed");
+        assert_eq!(batch.results.len(), 2);
+        assert_eq!(batch.results[0].id, "msg-1");
+        assert_eq!(batch.results[1].id, "msg-2");
+
+        let mut first_coordinator = coordinator();
+        let first = FileFoldTool::fold(
+            &mut first_coordinator,
+            FileFoldRequest::new(rust_code)
+                .with_language(Language::Rust)
+                .with_max_tokens(2000),
+        );
+        let mut second_coordinator = coordinator();
+        let second = FileFoldTool::fold(
+            &mut second_coordinator,
+            FileFoldRequest::new(python_code)
+                .with_file_name("hello.py")
+                .with_max_tokens(500),
+        );
+        assert_eq!(batch.results[0].folded_text, first.folded_text);
+        assert_eq!(batch.results[1].folded_text, second.folded_text);
+        assert_eq!(
+            batch.stats.total_original_tokens,
+            first.original_tokens + second.original_tokens
+        );
+        assert_eq!(
+            batch.stats.total_folded_tokens,
+            first.folded_tokens + second.folded_tokens
+        );
+    }
+
+    #[test]
+    fn batch_degrades_per_entry_without_affecting_others() {
+        let good = "pub fn format_user(name: &str) -> String { name.to_string() }\n";
+        let request = FileFoldBatchRequest::new(vec![
+            FileFoldBatchItem::new("good", good).with_language(Language::Rust),
+            FileFoldBatchItem::new("unknown", "some opaque text with no grammar"),
+            FileFoldBatchItem::new("empty", "").with_language(Language::Rust),
+        ]);
+        let batch = FileFoldTool::fold_batch(request).expect("batch must succeed");
+        assert_eq!(batch.results.len(), 3);
+        assert_eq!(
+            batch
+                .results
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["good", "unknown", "empty"]
+        );
+        assert!(batch.results[0].structure_known);
+        assert!(!batch.results[1].structure_known);
+        assert!(!batch.results[2].structure_known);
+        assert_eq!(batch.stats.structure_known_count, 1);
+    }
+
+    #[test]
+    fn batch_applies_global_defaults_with_explicit_override() {
+        let code = "pub fn a() {}\n";
+        let request = FileFoldBatchRequest {
+            items: vec![
+                FileFoldBatchItem::new("inherits", code),
+                FileFoldBatchItem::new("overrides", code).with_mode(FileFoldMode::Minimal),
+            ],
+            language: Some(Language::Rust),
+            max_tokens: Some(2000),
+            mode: Some(FileFoldMode::Detailed),
+            max_concurrency: None,
+        };
+        let batch = FileFoldTool::fold_batch(request).expect("batch must succeed");
+        assert_eq!(batch.results.len(), 2);
+        assert_eq!(batch.results[0].language, "Rust");
+        assert_eq!(batch.results[1].language, "Rust");
+        assert!(batch.results[0].structure_known);
+        assert!(batch.results[1].structure_known);
+    }
+
+    #[test]
+    fn batch_rejects_empty_and_oversized_requests() {
+        assert!(matches!(
+            FileFoldTool::fold_batch(FileFoldBatchRequest::new(Vec::new())),
+            Err(FileFoldBatchError::Empty)
+        ));
+
+        let items = (0..MAX_FOLD_BATCH_ITEMS + 1)
+            .map(|index| FileFoldBatchItem::new(format!("id-{index}"), "fn f() {}\n"))
+            .collect();
+        assert!(matches!(
+            FileFoldTool::fold_batch(FileFoldBatchRequest::new(items)),
+            Err(FileFoldBatchError::TooManyItems { .. })
+        ));
+
+        let oversized = "x".repeat(MAX_FOLD_BATCH_BYTES + 1);
+        let request = FileFoldBatchRequest::new(vec![FileFoldBatchItem::new("big", oversized)]);
+        assert!(matches!(
+            FileFoldTool::fold_batch(request),
+            Err(FileFoldBatchError::TotalTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn batch_truncates_oversized_entry_in_band() {
+        let code = "fn f() {}\n".repeat(5000);
+        let request = FileFoldBatchRequest::new(vec![
+            FileFoldBatchItem::new("big", code)
+                .with_language(Language::Rust)
+                .with_max_tokens(200),
+        ]);
+        let batch = FileFoldTool::fold_batch(request).expect("batch must succeed");
+        assert_eq!(batch.results.len(), 1);
+        assert!(batch.results[0].folded_tokens <= 200);
     }
 }

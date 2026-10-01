@@ -63,13 +63,15 @@ pub use tools::{
     AstDiagnosis, BatchCompressionRequest, BatchCompressionResponse, CompressionError,
     CompressionRequest, CompressionResponse, CompressionRetrieval, DefinitionCode,
     DefinitionLocation, DiagnosisError, DiagnosisRequest, DiagnosisResponse, Diagnostic,
-    DiagnosticKind, DiagnosticPrecision, FileFoldMode, FileFoldRequest, FileFoldResponse,
-    FileFoldTool, FileSymbolResult, FindReferencesConfig, FindReferencesRequest,
-    FindReferencesResponse, FindReferencesTool, GetSymbolsRequest, GetSymbolsResponse,
-    GetSymbolsTool, GotoDefinitionRequest, GotoDefinitionResponse, GotoDefinitionTool,
-    GroupedReferences, KeywordSearchError, KeywordSearchItem, KeywordSearchRequest,
-    KeywordSearchResponse, KeywordSearchTool, ReferenceLocation, SymbolInfo, SymbolKind,
-    SymbolLookupError,
+    DiagnosticKind, DiagnosticPrecision, FileFoldBatchError, FileFoldBatchItem,
+    FileFoldBatchItemResponse, FileFoldBatchRequest, FileFoldBatchResponse, FileFoldBatchResult,
+    FileFoldBatchStats, FileFoldMode, FileFoldRequest, FileFoldResponse, FileFoldTool,
+    FileSymbolResult, FindReferencesConfig, FindReferencesRequest, FindReferencesResponse,
+    FindReferencesTool, GetSymbolsRequest, GetSymbolsResponse, GetSymbolsTool,
+    GotoDefinitionRequest, GotoDefinitionResponse, GotoDefinitionTool, GroupedReferences,
+    KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
+    KeywordSearchTool, MAX_FOLD_BATCH_BYTES, MAX_FOLD_BATCH_ITEMS, ReferenceLocation, SymbolInfo,
+    SymbolKind, SymbolLookupError,
 };
 
 pub use operation::{

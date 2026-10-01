@@ -208,6 +208,74 @@ pub struct FoldResponse {
     pub dropped_sections: usize,
 }
 
+/// One entry of a batch fold request
+///
+/// Explicit entry values take precedence over the batch global defaults.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BatchFoldItem {
+    /// Caller-provided stable identifier, echoed verbatim in the result.
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+/// Batch file fold request
+///
+/// Entries inherit the global defaults when their own fields are missing.
+/// `max_concurrency` is reserved for forward compatibility and ignored:
+/// the first version always folds sequentially.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BatchFoldRequest {
+    pub items: Vec<BatchFoldItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrency: Option<usize>,
+}
+
+/// One entry of a batch fold response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BatchFoldResultItem {
+    /// Echo of the caller-provided identifier.
+    pub id: String,
+    pub folded_text: String,
+    pub language: String,
+    pub structure_known: bool,
+    pub original_tokens: usize,
+    pub folded_tokens: usize,
+    pub kept_sections: usize,
+    pub dropped_sections: usize,
+}
+
+/// Aggregate accounting over a batch fold response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BatchFoldStats {
+    pub total_original_tokens: usize,
+    pub total_folded_tokens: usize,
+    pub structure_known_count: usize,
+}
+
+/// Batch file fold response
+///
+/// `results` always has the same length and order as the request `items`.
+/// Entry-level issues degrade in-band with `structure_known=false`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BatchFoldResponse {
+    pub results: Vec<BatchFoldResultItem>,
+    pub stats: BatchFoldStats,
+}
+
 // ============================================================================
 // Symbol lookup (LSP-like, project-scoped)
 // ============================================================================

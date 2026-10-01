@@ -4230,6 +4230,48 @@
         }
       }
     },
+    "/api/tools/fold/batch": {
+      "post": {
+        "tags": [
+          "Tools"
+        ],
+        "summary": "Handle stateless batch file folding",
+        "description": "# Endpoint\n\n`POST /api/tools/fold/batch`",
+        "operationId": "handle_fold_batch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchFoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Batch fold result, entry errors reported in-band",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchFoldResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid batch request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tools/keyword-search": {
       "post": {
         "tags": [
@@ -4694,6 +4736,176 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "BatchFoldItem": {
+        "type": "object",
+        "description": "One entry of a batch fold request\n\nExplicit entry values take precedence over the batch global defaults.",
+        "required": [
+          "id",
+          "text"
+        ],
+        "properties": {
+          "file_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Caller-provided stable identifier, echoed verbatim in the result."
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "BatchFoldRequest": {
+        "type": "object",
+        "description": "Batch file fold request\n\nEntries inherit the global defaults when their own fields are missing.\n`max_concurrency` is reserved for forward compatibility and ignored:\nthe first version always folds sequentially.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchFoldItem"
+            }
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_concurrency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "max_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "BatchFoldResponse": {
+        "type": "object",
+        "description": "Batch file fold response\n\n`results` always has the same length and order as the request `items`.\nEntry-level issues degrade in-band with `structure_known=false`.",
+        "required": [
+          "results",
+          "stats"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchFoldResultItem"
+            }
+          },
+          "stats": {
+            "$ref": "#/components/schemas/BatchFoldStats"
+          }
+        }
+      },
+      "BatchFoldResultItem": {
+        "type": "object",
+        "description": "One entry of a batch fold response",
+        "required": [
+          "id",
+          "folded_text",
+          "language",
+          "structure_known",
+          "original_tokens",
+          "folded_tokens",
+          "kept_sections",
+          "dropped_sections"
+        ],
+        "properties": {
+          "dropped_sections": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "folded_text": {
+            "type": "string"
+          },
+          "folded_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Echo of the caller-provided identifier."
+          },
+          "kept_sections": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "language": {
+            "type": "string"
+          },
+          "original_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "structure_known": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BatchFoldStats": {
+        "type": "object",
+        "description": "Aggregate accounting over a batch fold response",
+        "required": [
+          "total_original_tokens",
+          "total_folded_tokens",
+          "structure_known_count"
+        ],
+        "properties": {
+          "structure_known_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_folded_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_original_tokens": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -6534,7 +6746,7 @@
       },
       "GraphEdge": {
         "type": "object",
-        "description": "An edge in a returned subgraph.",
+        "description": "An edge in a returned subgraph.\n\n`confidence` mirrors `cce_orchestrator::query::Confidence` serialized as\nlowercase snake_case (`\"extracted\"`, `\"inferred\"`, `\"external\"`).",
         "required": [
           "source",
           "target",
@@ -6599,7 +6811,7 @@
       },
       "GraphNode": {
         "type": "object",
-        "description": "A node in a returned subgraph.",
+        "description": "A node in a returned subgraph.\n\n`kind` is the serde-serialized value of `cce_types::EntityKind`\n(e.g. `\"function\"`, `\"class\"`, `\"interface\"`). It is validated against\nthe known kind set before being sent over the wire so callers never\nencounter arbitrary strings for this field.",
         "required": [
           "id",
           "label",

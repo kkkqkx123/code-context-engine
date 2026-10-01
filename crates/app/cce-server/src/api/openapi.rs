@@ -75,6 +75,7 @@ use super::handlers;
         handlers::tools::compression::handle_compress_batch,
         handlers::tools::diagnosis::handle_diagnose,
         handlers::tools::fold::handle_fold,
+        handlers::tools::fold::handle_fold_batch,
         handlers::tools::keyword::handle_keyword_search,
         handlers::tools::symbol::handle_get_symbols,
         handlers::tools::symbol::handle_find_references,

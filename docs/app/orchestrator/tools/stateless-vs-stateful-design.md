@@ -14,6 +14,7 @@
 | **无状态** | `batchCompress` (批量压缩) | ❌ | ✅ 不需要 | 本地文件实时解析 |
 | **无状态** | `diagnose` (AST 诊断) | ❌ | ✅ 不需要 | 源代码文本 |
 | **无状态** | `fold` (文件折叠) | ❌ | ✅ 不需要 | 源代码文本 |
+| **无状态** | `foldBatch` (批量文件折叠) | ❌ | ✅ 不需要 | 源代码文本数组，与单条语义等价 |
 | **有状态** | `getSymbols` (符号查找) | ✅ | ✅ 必填 | SQLite Symbol Table |
 | **有状态** | `findReferences` (引用查找) | ✅ | ✅ 必填 | SQLite Relation Graph |
 | **有状态** | `gotoDefinition` (跳转定义) | ✅ | ✅ 必填 | SQLite Symbol Table + Relations |
@@ -141,6 +142,21 @@ text [option: language, max_tokens, mode]
 - 大文件的概览视图
 - Token 预算管理
 - LLM 上下文优化
+
+#### 4. Batch File Folding (`foldBatch`)
+
+**功能**: 一次请求折叠多条文本，语义与单条 `fold` 等价，用于压缩窗口内一次往返完成快照内全部命中条目。
+
+**流程**:
+```
+items[id, text, option: language, file_name, max_tokens, mode] + 全局默认值
+   → 逐条继承默认值并复用单条 fold
+   → 按请求顺序回显 id 并汇总 token 统计
+```
+
+**特点**:
+- 顺序执行，`max_concurrency` 仅作前向兼容保留
+- 条目级问题降级返回，请求级超限直接拒绝并提示拆分
 
 ---
 

@@ -233,6 +233,10 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/api/tools/fold", post(handlers::tools::handle_fold))
         .route(
+            "/api/tools/fold/batch",
+            post(handlers::tools::handle_fold_batch),
+        )
+        .route(
             "/api/tools/keyword-search",
             post(handlers::tools::handle_keyword_search),
         )

@@ -260,6 +260,90 @@ curl -X POST "http://localhost:3000/api/tools/fold" \
 
 ---
 
+## POST /api/tools/fold/batch
+
+批量无状态文件折叠，语义与单条折叠完全一致。调用方一次发送快照内的多个条目，服务端顺序逐条折叠后一次返回，按请求顺序回填。
+
+每个条目缺省时继承全局默认值，条目显式值优先。`max_concurrency` 为前向兼容保留字段，首版忽略并始终顺序执行。
+
+条目级问题（未知语言、解析失败、结果为空、空输入、单条超限）统一降级为截断结果并标记 `structure_known=false`，不进入失败数组。请求级错误（条目数组为空、条目数超限、请求体总大小超限）返回 `INVALID_REQUEST`，提示调用方拆分发送。
+
+限额：单次最多 `32` 条，条目文本总大小最多 `2000000` 字节。合法请求的响应结果数恒等于请求条目数。
+
+### 请求
+
+**方法**: `POST`
+
+**Content-Type**: `application/json`
+
+**请求体**:
+
+```json
+{
+  "items": [
+    {"id": "msg-1", "text": "pub struct User { pub name: String }", "language": "rust"},
+    {"id": "msg-2", "text": "def hello():\n    pass\n", "file_name": "hello.py"}
+  ],
+  "max_tokens": 2000,
+  "mode": "detailed"
+}
+```
+
+**请求字段**:
+
+| 字段 | 类型 | 必填 | 默认值 | 描述 |
+|-----|------|------|--------|------|
+| `items` | object[] | 是 | - | 待折叠条目，顺序与结果顺序一致 |
+| `items[].id` | string | 是 | - | 调用方稳定标识，原样回显 |
+| `items[].text` | string | 是 | - | 待折叠原始文本 |
+| `items[].language` | string | 否 | 全局值 | 语言提示，优先于文件名 |
+| `items[].file_name` | string | 否 | - | 文件名提示，用于后缀推断 |
+| `items[].max_tokens` | number | 否 | 全局值/`2000` | 期望上限，上限 `8000` |
+| `items[].mode` | string | 否 | 全局值/`detailed` | `detailed` 含签名，`minimal` 仅名称 |
+| `language` | string | 否 | - | 全局语言默认值 |
+| `max_tokens` | number | 否 | `2000` | 全局期望上限默认值 |
+| `mode` | string | 否 | `detailed` | 全局模式默认值 |
+| `max_concurrency` | number | 否 | - | 保留字段，首版忽略 |
+
+### 响应
+
+```json
+{
+  "results": [
+    {
+      "id": "msg-1",
+      "folded_text": "// Definitions:\n1 | struct User",
+      "language": "Rust",
+      "structure_known": true,
+      "original_tokens": 120,
+      "folded_tokens": 18,
+      "kept_sections": 1,
+      "dropped_sections": 0
+    }
+  ],
+  "stats": {
+    "total_original_tokens": 140,
+    "total_folded_tokens": 30,
+    "structure_known_count": 1
+  }
+}
+```
+
+### 示例
+
+```bash
+curl -X POST "http://localhost:3000/api/tools/fold/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {"id": "msg-1", "text": "fn main() {}", "language": "rust"}
+    ],
+    "max_tokens": 2000
+  }'
+```
+
+---
+
 ## POST /api/tools/keyword-search
 
 BM25 关键词搜索。从 BM25 索引中检索匹配的代码块，从 SQLite 中获取完整内容并生成高亮片段（`<mark>` 标签）。

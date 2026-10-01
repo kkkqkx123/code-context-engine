@@ -25,8 +25,9 @@
 //!     │       └── AST parsing → Grouping → NL conversion
 //!     │
 //!     ├── FileFold (stateless skeleton fold)
-//!     │   └── fold() - Raw text → symbol skeleton
-//!     │       └── Language resolve → Parse → Fold → Token accounting
+//!     │   ├── fold() - Raw text → symbol skeleton
+//!     │   │   └── Language resolve → Parse → Fold → Token accounting
+//!     │   └── fold_batch() - Batch entries → per-entry skeletons plus stats
 //!     │
 //!     └── KeywordSearch (keyword search)
 //!         └── search() - BM25 keyword search with highlighted snippets
@@ -72,7 +73,11 @@ pub use compression::{
     BatchCompressionRequest, BatchCompressionResponse, CompressionError, CompressionRequest,
     CompressionResponse, CompressionRetrieval,
 };
-pub use file_fold::{FileFoldMode, FileFoldRequest, FileFoldResponse, FileFoldTool};
+pub use file_fold::{
+    FileFoldBatchError, FileFoldBatchItem, FileFoldBatchItemResponse, FileFoldBatchRequest,
+    FileFoldBatchResponse, FileFoldBatchResult, FileFoldBatchStats, FileFoldMode, FileFoldRequest,
+    FileFoldResponse, FileFoldTool, MAX_FOLD_BATCH_BYTES, MAX_FOLD_BATCH_ITEMS,
+};
 pub use find_references::{FindReferencesConfig, FindReferencesTool};
 pub use get_symbols::GetSymbolsTool;
 pub use goto_definition::GotoDefinitionTool;
