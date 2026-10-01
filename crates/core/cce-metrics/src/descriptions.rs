@@ -170,6 +170,22 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "Total LLM circuit breaker state transitions",
     ),
     (
+        "llm_health_consecutive_failures",
+        "Consecutive failed LLM health probes since the last success",
+    ),
+    (
+        "llm_health_last_check_timestamp",
+        "Unix epoch seconds of the last LLM health probe",
+    ),
+    (
+        "llm_health_latency_ms",
+        "LLM health probe latency in milliseconds",
+    ),
+    (
+        "llm_health_ok",
+        "Last LLM health probe outcome (1=ok, 0=failed)",
+    ),
+    (
         "llm_retry_exhausted_total",
         "Total LLM retries exhausted, by error class",
     ),
@@ -231,6 +247,18 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
     ("plugin_loads_total", "Total plugin loads"),
     ("plugin_unloads_total", "Total plugin unloads"),
     (
+        "process_cpu_usage_percent",
+        "Server process CPU usage percentage",
+    ),
+    (
+        "process_open_fds",
+        "Server process open file descriptor count",
+    ),
+    (
+        "process_rss_bytes",
+        "Server process resident memory in bytes",
+    ),
+    (
         "project_registry_cache_hits_total",
         "Total project registry cache hits",
     ),
@@ -281,7 +309,6 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "qdrant_vectors_upserted_total",
         "Total Qdrant vectors upserted",
     ),
-    ("queries_executed_total", "Total queries executed"),
     ("query_cache_hit_rate", "Query cache hit rate (percentage)"),
     ("query_cache_hits_total", "Total query cache hits"),
     ("query_cache_misses_total", "Total query cache misses"),
@@ -289,6 +316,7 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "query_execution_latency_ms",
         "Query execution latency in milliseconds",
     ),
+    ("query_executions_total", "Total query executions"),
     (
         "query_results_returned_total",
         "Total query results returned",
@@ -470,13 +498,10 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "scanner_scan_latency_ms",
         "Scanner scan latency in milliseconds",
     ),
-    ("search_documents_indexed_total", "Total documents indexed"),
     (
         "search_hybrid_alignment_match_ratio",
         "Hybrid search alignment match ratio",
     ),
-    ("search_index_operations_total", "Total indexing operations"),
-    ("search_index_size", "Current index size in documents"),
     ("search_queries_total", "Total search queries"),
     (
         "search_query_latency_ms",

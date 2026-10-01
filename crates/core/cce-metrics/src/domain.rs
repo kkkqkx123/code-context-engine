@@ -41,7 +41,7 @@ pub mod system;
 pub mod metrics_system;
 
 pub use http::HttpMetrics;
-pub use llm::LlmRetryMetrics;
+pub use llm::{LlmHealthMetrics, LlmRetryMetrics};
 pub use metrics_system::MetricsSystemMetrics;
 pub use orchestrator::{
     HotUpdateMetrics, HotUpdateStorageMetrics, IndexQualityMetrics, QueryMetrics, WatchMetrics,

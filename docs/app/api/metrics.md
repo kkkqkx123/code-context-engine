@@ -47,7 +47,7 @@ system_cpu_usage_percent 12.5
 | 摘要 | `summaries_generated_total`、`summary_generation_latency_ms`、`summary_avg_length` |
 | 关系 | `relations_extracted_total`、`relation_build_latency_ms` |
 | 插件 | `plugin_loads_total`、`plugin_executions_total`、`plugin_execution_latency_ms` |
-| 搜索/查询 | `search_queries_total`、`search_query_latency_ms`、`queries_executed_total`、`query_cache_hit_rate` |
+| 搜索/查询 | `search_queries_total`、`search_query_latency_ms`、`query_executions_total`、`query_cache_hit_rate` |
 | 存储 | `bm25_*`、`qdrant_*`（含 `qdrant_circuit_breaker_state`）、`sqlite_*` |
 | 热更新/监视 | `hot_update_*`、`watch_*` |
 | 队列 | `operation_queue_depth`、`retry_queue_depth` |
@@ -228,3 +228,7 @@ scrape_configs:
 ### 历史趋势
 
 历史指标默认保留 7 天，可在 `config.toml` 的 `[metrics.aggregation]` 中调整 `retention_seconds` 与 `cleanup_interval_secs`；`tokio_*` 瞬时指标不参与历史聚合。
+
+### 健康探测周期
+
+外部依赖的主动探测周期可在 `[metrics.probe]` 中调整：`llm_interval_secs`（默认 60，LLM 嵌入探针）与 `qdrant_interval_secs`（默认 30，Qdrant 连接检查）。两者必须大于 0。

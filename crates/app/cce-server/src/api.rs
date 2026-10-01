@@ -35,8 +35,19 @@ pub async fn serve(
     // Start Qdrant subprocess manager (if auto_start is configured)
     let qdrant_handle = engine.start_qdrant_process_manager();
 
+    // Health-probe cadences come from the metrics config so deployments can
+    // tune them without code changes. Fall back to historical defaults when
+    // global settings are unavailable (tests, embedded usage).
+    let (llm_probe_interval_secs, qdrant_probe_interval_secs) = cce_config::Settings::global()
+        .map_or((60, 30), |config| {
+            (
+                config.metrics.probe.llm_interval_secs,
+                config.metrics.probe.qdrant_interval_secs,
+            )
+        });
+
     // Start Qdrant connection health monitor
-    engine.start_qdrant_connection_monitor();
+    engine.start_qdrant_connection_monitor(qdrant_probe_interval_secs);
 
     // Start metrics aggregation with automatic TTL cleanup
     engine.start_metrics_aggregation_with_cleanup();
@@ -46,6 +57,9 @@ pub async fn serve(
 
     // Start system metrics collection (every 60s)
     engine.start_system_metrics_collection(60);
+
+    // Start LLM provider health probing
+    engine.start_llm_health_monitor(llm_probe_interval_secs);
 
     // Start queue backpressure metrics collection (every 10s)
     engine.start_queue_metrics(10);

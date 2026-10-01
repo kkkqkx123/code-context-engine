@@ -25,7 +25,7 @@ impl QueryMetrics {
     pub fn new(registry: &MetricsRegistry, project_id: i64) -> Arc<Self> {
         let proj_val = project_id.to_string();
         Arc::new(Self {
-            queries_total: registry.counter("queries_executed_total", &[("project_id", &proj_val)]),
+            queries_total: registry.counter("query_executions_total", &[("project_id", &proj_val)]),
             query_latency_ms: registry
                 .histogram_default("query_execution_latency_ms", &[("project_id", &proj_val)]),
             cache_hits_total: registry

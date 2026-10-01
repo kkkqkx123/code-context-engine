@@ -50,7 +50,7 @@ use cce_metrics::{
     FileProcessingMetrics, MetricsRegistry, ParserMetrics, PipelineStage, PipelineStageMetrics,
     RelationMetrics, SummaryMetrics,
 };
-use cce_metrics::{IndexQualityMetrics, ScannerMetrics, SearchMetrics};
+use cce_metrics::{IndexQualityMetrics, ScannerMetrics};
 use cce_parser::summary::{
     FileSummary, ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator,
 };
@@ -105,8 +105,6 @@ pub struct IndexOrchestrator {
     metrics_registry: Option<Arc<MetricsRegistry>>,
     /// Scanner metrics for file scanning operations
     scanner_metrics: Option<Arc<ScannerMetrics>>,
-    /// Search/index metrics collector
-    search_metrics: Option<Arc<SearchMetrics>>,
     /// Index-quality counters for silent-loss surfaces that do not fail the batch
     quality_metrics: Option<Arc<IndexQualityMetrics>>,
     /// Checkpoint manager for operation progress persistence
@@ -151,7 +149,6 @@ impl IndexOrchestrator {
             relation_config: RelationConfig::default(),
             metrics_registry: None,
             scanner_metrics: None,
-            search_metrics: None,
             quality_metrics: None,
             checkpoint_manager: None,
             relation_publisher: None,
@@ -383,9 +380,6 @@ impl IndexOrchestrator {
 
         // Inject scanner metrics for file scanning operations
         self.scanner_metrics = Some(ScannerMetrics::new(&registry, self.project_id));
-
-        // Inject search metrics for index size and document counters
-        self.search_metrics = Some(SearchMetrics::new(&registry, self.project_id));
 
         // Inject index-quality counters, shared with the storage coordinator
         let quality_metrics = IndexQualityMetrics::new(&registry, self.project_id);
@@ -704,21 +698,6 @@ impl IndexOrchestrator {
         }
 
         self.finalize_manifest(&mut ctx).await?;
-
-        if let Some(ref search_metrics) = self.search_metrics {
-            search_metrics.record_index(ctx.total_vectors);
-
-            if let Some(qdrant) = self.storage.qdrant() {
-                match qdrant.get_collection_info().await {
-                    Ok(info) => {
-                        search_metrics.update_index_size(info.points_count as usize);
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to refresh search index size");
-                    }
-                }
-            }
-        }
 
         // Create result with accumulated values
         // Any collected error (scanner skips, file failures, storage faults,

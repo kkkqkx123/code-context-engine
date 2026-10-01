@@ -12,38 +12,63 @@ from test_runner import CceApiClient
 
 logger = logging.getLogger(__name__)
 
+# Metrics that must be present in a healthy /api/metrics/json snapshot.
+# Used to detect server/benchmark contract drift early: missing entries are
+# warned about instead of being silently recorded as None.
+REQUIRED_SCALARS = [
+    "scanner_files_scanned_total",
+    "files_processed_total",
+    "files_failed_total",
+    "relations_extracted_total",
+    "search_queries_total",
+    "query_executions_total",
+    "rerank_requests_total",
+    "process_rss_bytes",
+    "process_open_fds",
+    "qdrant_collection_size",
+]
+
+REQUIRED_HISTOGRAMS = [
+    "search_query_latency_ms",
+    "rerank_latency_ms",
+]
+
 
 @dataclass
 class MetricSnapshot:
     """A single point-in-time snapshot of server metrics.
 
-    Fields are designed to align with the CCE /api/metrics/json response.
-    Unknown/missing fields are safely handled.
+    Parsed from the CCE /api/metrics/json response, whose shape is::
+
+        {"timestamp": ..., "metrics": [{"name", "labels", "value"}], "summary"}
+
+    where ``value`` is ``{"type": "Counter"|"Gauge"|"FloatGauge"|"Histogram",
+    "value": ...}``. Unknown/missing metrics are safely handled.
     """
     timestamp: float = 0.0
     timestamp_iso: str = ""
 
-    indexing_duration_ms: Optional[float] = None
     files_scanned_total: Optional[int] = None
-    files_indexed_total: Optional[int] = None
-    entities_extracted_total: Optional[int] = None
+    files_processed_total: Optional[int] = None
+    files_failed_total: Optional[int] = None
     relations_extracted_total: Optional[int] = None
-    indexing_errors_total: Optional[int] = None
 
     search_latency_p50_ms: Optional[float] = None
     search_latency_p95_ms: Optional[float] = None
     search_latency_p99_ms: Optional[float] = None
     search_total: Optional[int] = None
+    query_executions_total: Optional[int] = None
 
     rerank_latency_p50_ms: Optional[float] = None
     rerank_latency_p95_ms: Optional[float] = None
     rerank_total: Optional[int] = None
 
-    memory_resident_bytes: Optional[int] = None
-    memory_allocated_bytes: Optional[int] = None
+    process_rss_bytes: Optional[int] = None
+    process_open_fds: Optional[int] = None
 
     vector_count: Optional[int] = None
-    bm25_doc_count: Optional[int] = None
+
+    missing_metrics: List[str] = field(default_factory=list)
 
     @classmethod
     def from_metrics_response(cls, metrics: Dict[str, Any]) -> "MetricSnapshot":
@@ -53,36 +78,85 @@ class MetricSnapshot:
             timestamp_iso=datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
         )
 
-        snapshot.indexing_duration_ms = _safe_float(metrics, "indexing_duration_ms")
-        snapshot.files_scanned_total = _safe_int(metrics, "files_scanned_total")
-        snapshot.files_indexed_total = _safe_int(metrics, "files_indexed_total")
-        snapshot.entities_extracted_total = _safe_int(metrics, "entities_extracted_total")
-        snapshot.relations_extracted_total = _safe_int(metrics, "relations_extracted_total")
-        snapshot.indexing_errors_total = _safe_int(metrics, "indexing_errors_total")
+        series = metrics.get("metrics")
+        if not isinstance(series, list):
+            logger.warning(
+                "Metric snapshot has no 'metrics' list (got %s); "
+                "all fields will be None and reported as missing",
+                type(series).__name__,
+            )
+            series = []
 
-        search_latency = metrics.get("search_latency_ms", {})
-        if isinstance(search_latency, dict):
-            snapshot.search_latency_p50_ms = _safe_float(search_latency, "p50")
-            snapshot.search_latency_p95_ms = _safe_float(search_latency, "p95")
-            snapshot.search_latency_p99_ms = _safe_float(search_latency, "p99")
-        snapshot.search_total = _safe_int(metrics, "search_total")
+        snapshot.files_scanned_total = _scalar_int(series, "scanner_files_scanned_total")
+        snapshot.files_processed_total = _scalar_int(series, "files_processed_total")
+        snapshot.files_failed_total = _scalar_int(series, "files_failed_total")
+        snapshot.relations_extracted_total = _scalar_int(series, "relations_extracted_total")
 
-        rerank_latency = metrics.get("rerank_latency_ms", {})
-        if isinstance(rerank_latency, dict):
-            snapshot.rerank_latency_p50_ms = _safe_float(rerank_latency, "p50")
-            snapshot.rerank_latency_p95_ms = _safe_float(rerank_latency, "p95")
-        snapshot.rerank_total = _safe_int(metrics, "rerank_total")
+        search_latency = _histogram(series, "search_query_latency_ms")
+        snapshot.search_latency_p50_ms = _safe_float(search_latency, "p50")
+        snapshot.search_latency_p95_ms = _safe_float(search_latency, "p95")
+        snapshot.search_latency_p99_ms = _safe_float(search_latency, "p99")
+        snapshot.search_total = _scalar_int(series, "search_queries_total")
+        snapshot.query_executions_total = _scalar_int(series, "query_executions_total")
 
-        snapshot.memory_resident_bytes = _safe_int(metrics, "memory_resident_bytes")
-        snapshot.memory_allocated_bytes = _safe_int(metrics, "memory_allocated_bytes")
+        rerank_latency = _histogram(series, "rerank_latency_ms")
+        snapshot.rerank_latency_p50_ms = _safe_float(rerank_latency, "p50")
+        snapshot.rerank_latency_p95_ms = _safe_float(rerank_latency, "p95")
+        snapshot.rerank_total = _scalar_int(series, "rerank_requests_total")
 
-        snapshot.vector_count = _safe_int(metrics, "vector_count")
-        snapshot.bm25_doc_count = _safe_int(metrics, "bm25_doc_count")
+        snapshot.process_rss_bytes = _scalar_int(series, "process_rss_bytes")
+        snapshot.process_open_fds = _scalar_int(series, "process_open_fds")
+
+        snapshot.vector_count = _scalar_int(series, "qdrant_collection_size")
+
+        snapshot.missing_metrics = snapshot.validate(series)
+        if snapshot.missing_metrics:
+            logger.warning(
+                "Metric snapshot missing %d expected metrics: %s",
+                len(snapshot.missing_metrics),
+                ", ".join(snapshot.missing_metrics),
+            )
 
         return snapshot
 
+    def validate(self, series: list) -> List[str]:
+        """Return names of required metrics absent from the snapshot series."""
+        missing = []
+        for name in REQUIRED_SCALARS:
+            if _scalar_int(series, name) is None:
+                missing.append(name)
+        for name in REQUIRED_HISTOGRAMS:
+            if not _histogram(series, name):
+                missing.append(name)
+        return missing
+
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, ensure_ascii=False)
+
+
+def _find_series(series: list, name: str) -> Optional[dict]:
+    """Return the ``value`` payload of the metric with the given name, if any."""
+    for entry in series:
+        if isinstance(entry, dict) and entry.get("name") == name:
+            value = entry.get("value")
+            return value if isinstance(value, dict) else None
+    return None
+
+
+def _scalar_int(series: list, name: str) -> Optional[int]:
+    value = _find_series(series, name)
+    if value is not None:
+        return _safe_int(value, "value")
+    return None
+
+
+def _histogram(series: list, name: str) -> dict:
+    """Return the HistogramStats dict for the metric, or {} when absent."""
+    value = _find_series(series, name)
+    if value is not None and value.get("type") == "Histogram":
+        stats = value.get("value")
+        return stats if isinstance(stats, dict) else {}
+    return {}
 
 
 def _safe_float(d: dict, key: str) -> Optional[float]:

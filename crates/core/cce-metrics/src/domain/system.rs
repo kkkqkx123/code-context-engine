@@ -27,6 +27,10 @@ pub struct SystemMetrics {
     disk_read_bytes: LabeledGauge,
     disk_write_bytes: LabeledGauge,
 
+    process_rss_bytes: LabeledGauge,
+    process_cpu_usage_percent: LabeledFloatGauge,
+    process_open_fds: LabeledGauge,
+
     net_recv_bytes: LabeledGauge,
     net_sent_bytes: LabeledGauge,
 }
@@ -53,6 +57,10 @@ impl SystemMetrics {
             disk_read_bytes: registry.gauge("system_disk_read_bytes", &[]),
             disk_write_bytes: registry.gauge("system_disk_write_bytes", &[]),
 
+            process_rss_bytes: registry.gauge("process_rss_bytes", &[]),
+            process_cpu_usage_percent: registry.float_gauge("process_cpu_usage_percent", &[]),
+            process_open_fds: registry.gauge("process_open_fds", &[]),
+
             net_recv_bytes: registry.gauge("system_net_recv_bytes", &[]),
             net_sent_bytes: registry.gauge("system_net_sent_bytes", &[]),
         }
@@ -61,8 +69,36 @@ impl SystemMetrics {
     pub fn collect(&self) {
         self.collect_cpu_memory_swap();
         self.collect_network();
+        self.collect_process();
         #[cfg(target_os = "linux")]
         self.collect_disk_io();
+    }
+
+    /// Collect this server process's own resource usage (RSS, CPU, open FDs).
+    fn collect_process(&self) {
+        use sysinfo::ProcessesToUpdate;
+
+        let pid = sysinfo::Pid::from_u32(std::process::id());
+        let mut system = self.system.lock();
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), false);
+
+        if let Some(proc_info) = system.process(pid) {
+            self.process_rss_bytes.set(proc_info.memory());
+            self.process_cpu_usage_percent
+                .set(proc_info.cpu_usage() as f64);
+        } else {
+            debug!("Failed to collect own process info from sysinfo");
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            use procfs::process::Process;
+
+            match Process::myself().and_then(|p| p.fd_count()) {
+                Ok(fd_count) => self.process_open_fds.set(fd_count as u64),
+                Err(e) => debug!(error = %e, "Failed to collect process open FD count"),
+            }
+        }
     }
 
     fn collect_cpu_memory_swap(&self) {
@@ -165,6 +201,8 @@ impl SystemMetrics {
             disk_write_bytes: self.disk_write_bytes.get(),
             net_recv_bytes: self.net_recv_bytes.get(),
             net_sent_bytes: self.net_sent_bytes.get(),
+            process_rss_bytes: self.process_rss_bytes.get(),
+            process_open_fds: self.process_open_fds.get(),
         }
     }
 
@@ -186,6 +224,8 @@ pub struct SystemHealthSummary {
     pub disk_write_bytes: u64,
     pub net_recv_bytes: u64,
     pub net_sent_bytes: u64,
+    pub process_rss_bytes: u64,
+    pub process_open_fds: u64,
 }
 
 #[cfg(test)]

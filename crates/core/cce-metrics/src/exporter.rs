@@ -486,7 +486,6 @@ mod tests {
 
         let search = SearchMetrics::new(&registry, 1);
         search.record_search(15.0, Some(SearchType::HybridRecall));
-        search.record_index(3);
         search.record_hybrid_alignment(5, 5, 4);
 
         let query = QueryMetrics::new(&registry, 1);

@@ -16,6 +16,9 @@ pub struct MetricsConfig {
     /// Memory optimization configuration
     #[serde(default)]
     pub memory: cce_metrics::config::MetricsMemoryConfig,
+    /// Health-probe scheduling for external dependencies
+    #[serde(default)]
+    pub probe: cce_metrics::config::MetricsProbeConfig,
 }
 
 /// Metrics aggregation configuration
@@ -134,6 +137,25 @@ fn default_aggregation_batch_size() -> usize {
     100
 }
 
+impl MetricsConfig {
+    /// Validate health-probe scheduling parameters.
+    pub fn validate_metrics_probe(&self) -> Result<(), ConfigValidationError> {
+        if self.probe.llm_interval_secs == 0 {
+            return Err(ConfigValidationError::invalid_field(
+                "metrics.probe.llm_interval_secs",
+                "must be greater than 0",
+            ));
+        }
+        if self.probe.qdrant_interval_secs == 0 {
+            return Err(ConfigValidationError::invalid_field(
+                "metrics.probe.qdrant_interval_secs",
+                "must be greater than 0",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -246,5 +268,34 @@ tokio_workers_total = { enabled = false }
         assert_eq!(config.metrics.aggregation.batch_size, 100);
         assert!(config.metrics.aggregation.aggregate_counters);
         assert!(config.metrics.aggregation.aggregate_gauges);
+    }
+
+    #[test]
+    fn test_metrics_probe_config_toml_loading() {
+        let toml_str = r#"
+[metrics.probe]
+llm_interval_secs = 45
+qdrant_interval_secs = 20
+"#;
+        let config: crate::AppConfig = toml::from_str(toml_str).expect("probe must parse");
+        assert_eq!(config.metrics.probe.llm_interval_secs, 45);
+        assert_eq!(config.metrics.probe.qdrant_interval_secs, 20);
+        assert!(config.metrics.validate_metrics_probe().is_ok());
+    }
+
+    #[test]
+    fn test_metrics_probe_config_defaults_and_validation() {
+        let config = crate::AppConfig::default();
+        assert_eq!(config.metrics.probe.llm_interval_secs, 60);
+        assert_eq!(config.metrics.probe.qdrant_interval_secs, 30);
+        assert!(config.metrics.validate_metrics_probe().is_ok());
+
+        let mut bad = crate::AppConfig::default();
+        bad.metrics.probe.llm_interval_secs = 0;
+        assert!(bad.metrics.validate_metrics_probe().is_err());
+
+        let mut bad = crate::AppConfig::default();
+        bad.metrics.probe.qdrant_interval_secs = 0;
+        assert!(bad.metrics.validate_metrics_probe().is_err());
     }
 }

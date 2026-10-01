@@ -137,6 +137,40 @@ fn default_memory_cleanup_interval() -> u64 {
     300
 }
 
+/// Health-probe scheduling for external dependencies.
+///
+/// Both probes are passive from the metrics registry point of view: they
+/// only decide how often a background task samples an upstream. Keeping the
+/// two intervals together preserves the symmetry between the Qdrant
+/// connection monitor and the LLM embedder probe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MetricsProbeConfig {
+    /// Interval between LLM embedder health probes in seconds.
+    #[serde(default = "default_llm_probe_interval")]
+    pub llm_interval_secs: u64,
+    /// Interval between Qdrant connection health checks in seconds.
+    #[serde(default = "default_qdrant_probe_interval")]
+    pub qdrant_interval_secs: u64,
+}
+
+impl Default for MetricsProbeConfig {
+    fn default() -> Self {
+        Self {
+            llm_interval_secs: default_llm_probe_interval(),
+            qdrant_interval_secs: default_qdrant_probe_interval(),
+        }
+    }
+}
+
+fn default_llm_probe_interval() -> u64 {
+    60
+}
+
+fn default_qdrant_probe_interval() -> u64 {
+    30
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +218,13 @@ mod tests {
         assert!(!config.eviction_enabled);
         assert_eq!(config.retention_seconds, 3600);
         assert_eq!(config.cleanup_interval_secs, 300);
+    }
+
+    #[test]
+    fn test_probe_config_defaults_match_historical_intervals() {
+        let config = MetricsProbeConfig::default();
+        assert_eq!(config.llm_interval_secs, 60);
+        assert_eq!(config.qdrant_interval_secs, 30);
     }
 
     #[test]

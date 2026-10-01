@@ -263,6 +263,9 @@ impl Validate for AppConfig {
         if let Err(e) = self.metrics.aggregation.validate_metrics_aggregation() {
             errors.push(e);
         }
+        if let Err(e) = self.metrics.validate_metrics_probe() {
+            errors.push(e);
+        }
 
         if errors.is_empty() {
             Ok(())

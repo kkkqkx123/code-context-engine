@@ -1,21 +1,19 @@
 //! Search engine metrics
 //!
-//! Tracks performance metrics for search and indexing operations.
+//! Tracks retrieval execution metrics for the searcher. Index storage is
+//! measured by the storage backends (`bm25_*`, `qdrant_*`).
 
 use std::sync::Arc;
 
 use dashmap::DashMap;
 
-use crate::{LabeledCounter, LabeledGauge, LabeledHistogram, MetricsRegistry, SearchType};
+use crate::{LabeledCounter, LabeledHistogram, MetricsRegistry, SearchType};
 
 /// Search engine monitoring metrics
 #[derive(Debug)]
 pub struct SearchMetrics {
     pub queries_total: LabeledCounter,
     pub query_latency_ms: LabeledHistogram,
-    pub index_size: LabeledGauge,
-    pub index_operations_total: LabeledCounter,
-    pub documents_indexed_total: LabeledCounter,
     pub queries_by_type: Arc<DashMap<String, LabeledCounter>>,
     pub hybrid_alignment_match_ratio: LabeledHistogram,
     project_id_label: String,
@@ -29,15 +27,6 @@ impl SearchMetrics {
             queries_total: registry.counter("search_queries_total", &[("project_id", &proj_val)]),
             query_latency_ms: registry
                 .histogram_default("search_query_latency_ms", &[("project_id", &proj_val)]),
-            index_size: registry.gauge("search_index_size", &[("project_id", &proj_val)]),
-            index_operations_total: registry.counter(
-                "search_index_operations_total",
-                &[("project_id", &proj_val)],
-            ),
-            documents_indexed_total: registry.counter(
-                "search_documents_indexed_total",
-                &[("project_id", &proj_val)],
-            ),
             queries_by_type: Arc::new(DashMap::new()),
             hybrid_alignment_match_ratio: registry.histogram_default(
                 "search_hybrid_alignment_match_ratio",
@@ -69,11 +58,6 @@ impl SearchMetrics {
         }
     }
 
-    pub fn record_index(&self, document_count: usize) {
-        self.index_operations_total.increment();
-        self.documents_indexed_total.add(document_count as u64);
-    }
-
     pub fn record_hybrid_alignment(&self, vector_keys: usize, _bm25_keys: usize, matched: usize) {
         let ratio = if vector_keys == 0 {
             0.0
@@ -81,10 +65,6 @@ impl SearchMetrics {
             matched as f64 / vector_keys as f64
         };
         self.hybrid_alignment_match_ratio.observe(ratio);
-    }
-
-    pub fn update_index_size(&self, size: usize) {
-        self.index_size.set(size as u64);
     }
 }
 
@@ -99,7 +79,7 @@ mod tests {
         let metrics = SearchMetrics::new(&registry, 1);
 
         assert_eq!(metrics.queries_total.get(), 0);
-        assert_eq!(metrics.index_size.get(), 0);
+        assert_eq!(metrics.query_latency_ms.get_count(), 0);
     }
 
     #[test]
@@ -117,11 +97,5 @@ mod tests {
         let dense_counter = metrics.queries_by_type.get("dense_recall");
         assert!(dense_counter.is_some());
         assert_eq!(dense_counter.unwrap().get(), 1);
-
-        metrics.record_index(100);
-        assert_eq!(metrics.index_operations_total.get(), 1);
-
-        metrics.update_index_size(150);
-        assert_eq!(metrics.index_size.get(), 150);
     }
 }

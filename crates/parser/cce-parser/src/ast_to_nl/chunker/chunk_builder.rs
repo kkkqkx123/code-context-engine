@@ -159,10 +159,7 @@ impl ChunkBuilder {
                 continue;
             }
             let qualified = match owner {
-                Some(prefix)
-                    if name != prefix
-                        && !name.starts_with(&format!("{prefix}.")) =>
-                {
+                Some(prefix) if name != prefix && !name.starts_with(&format!("{prefix}.")) => {
                     format!("{prefix}.{name}")
                 }
                 _ => name,

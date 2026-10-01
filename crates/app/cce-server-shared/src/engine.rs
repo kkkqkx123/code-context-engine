@@ -107,6 +107,9 @@ pub struct CodeContextEngine {
     /// System resource metrics collector (CPU, memory, disk)
     system_metrics: Option<Arc<cce_metrics::SystemMetrics>>,
 
+    /// LLM provider health-probe metrics (fed by the periodic probe task)
+    llm_health_metrics: Option<Arc<cce_metrics::LlmHealthMetrics>>,
+
     /// Per-project retry queues for failed queries
     retry_queue: ProjectCache<RetryQueue>,
 
@@ -216,6 +219,14 @@ impl CodeContextEngine {
 
         let embedder = Arc::new(embedder);
 
+        // Create LLM health-probe metrics labeled by the provider
+        let llm_provider_label = config
+            .resolve_llm_connection(default_model, cce_config::modules::ServiceType::Embedding)
+            .map(|connection| connection.provider_id)
+            .unwrap_or_else(|_| "unknown".to_string());
+        let llm_health_metrics =
+            cce_metrics::LlmHealthMetrics::new(&metrics_registry, &llm_provider_label);
+
         // Create metrics aggregator (optional, can be disabled via config)
         let metrics_aggregator = if config.metrics.aggregation.enabled {
             let global = &config.metrics.aggregation;
@@ -271,6 +282,7 @@ impl CodeContextEngine {
             metrics_aggregator,
             runtime_metrics: Some(runtime_metrics),
             system_metrics: Some(system_metrics),
+            llm_health_metrics: Some(llm_health_metrics),
             retry_queue: ProjectCache::new(),
             render_cache: Arc::new(tokio::sync::RwLock::new(None)),
         })

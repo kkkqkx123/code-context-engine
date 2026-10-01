@@ -356,14 +356,13 @@ impl PreprocessingPipeline {
                                 let alias_id = entities
                                     .iter()
                                     .find(|e| {
-                                        e.kind == EntityKind::TypeAlias
-                                            && e.name == entity.name
+                                        e.kind == EntityKind::TypeAlias && e.name == entity.name
                                     })
                                     .map(|e| e.id);
                                 for method in methods {
                                     let mut group = EntityGroup::from_entity(method, language);
-                                    group.parent_group_id = alias_id
-                                        .map(EntityGroup::group_id_for_entity);
+                                    group.parent_group_id =
+                                        alias_id.map(EntityGroup::group_id_for_entity);
                                     groups.push(group);
                                 }
                             } else {

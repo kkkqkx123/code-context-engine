@@ -213,9 +213,9 @@ impl super::CodeContextEngine {
     /// auto_restart is enabled, the process manager handles restarts.
     ///
     /// This spawns a background task and returns immediately.
-    pub fn start_qdrant_connection_monitor(&self) {
+    pub fn start_qdrant_connection_monitor(&self, interval_secs: u64) {
         let qdrant = self.qdrant.clone();
-        let check_interval = Duration::from_secs(30);
+        let check_interval = Duration::from_secs(interval_secs.max(1));
 
         tracing::info!(
             interval_secs = check_interval.as_secs(),

@@ -144,6 +144,17 @@ class ResultsAnalyzer:
         proc_dir = self._processed_dir()
         proc_dir.mkdir(parents=True, exist_ok=True)
 
+        for r in benchmark_records:
+            for slot in ("metrics_before", "metrics_after"):
+                missing = (r.get(slot) or {}).get("missing_metrics") or []
+                if missing:
+                    logger.warning(
+                        "Benchmark iteration %s %s missing metrics: %s",
+                        r.get("iteration"),
+                        slot,
+                        ", ".join(missing),
+                    )
+
         index_timings = [
             r.get("index_elapsed_ms")
             for r in benchmark_records
@@ -166,15 +177,15 @@ class ResultsAnalyzer:
         for r in benchmark_records:
             mb = r.get("metrics_before") or {}
             ma = r.get("metrics_after") or {}
-            if mb.get("memory_resident_bytes"):
-                memory_before.append(mb["memory_resident_bytes"])
-            if ma.get("memory_resident_bytes"):
-                memory_after.append(ma["memory_resident_bytes"])
+            if mb.get("process_rss_bytes"):
+                memory_before.append(mb["process_rss_bytes"])
+            if ma.get("process_rss_bytes"):
+                memory_after.append(ma["process_rss_bytes"])
 
         if memory_before:
-            stats["memory_resident_before_bytes"] = _compute_stats(memory_before)
+            stats["process_rss_before_bytes"] = _compute_stats(memory_before)
         if memory_after:
-            stats["memory_resident_after_bytes"] = _compute_stats(memory_after)
+            stats["process_rss_after_bytes"] = _compute_stats(memory_after)
 
         vector_before = []
         vector_after = []

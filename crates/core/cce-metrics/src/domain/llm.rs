@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 
-use crate::{LabeledCounter, LabeledFloatGauge, MetricsRegistry};
+use crate::{LabeledCounter, LabeledFloatGauge, LabeledGauge, LabeledHistogram, MetricsRegistry};
 
 /// Retry and circuit breaker metrics for LLM upstreams, labeled by provider.
 #[derive(Debug)]
@@ -139,6 +139,63 @@ impl LlmRetryMetrics {
     /// Record a request rejected by an open circuit breaker
     pub fn record_circuit_rejection(&self) {
         self.circuit_breaker_rejections_total.increment();
+    }
+}
+
+/// Proactive health-probe metrics for LLM upstreams, labeled by provider.
+///
+/// Fed by the periodic embedder health monitor: each probe result updates
+/// the liveness gauge, the timestamp of the last check, the consecutive
+/// failure count, and the probe latency distribution.
+#[derive(Debug)]
+pub struct LlmHealthMetrics {
+    /// Last probe outcome: 1 = ok, 0 = failed (`llm_health_ok{provider}`)
+    ok: LabeledFloatGauge,
+    /// Unix epoch seconds of the last probe (`llm_health_last_check_timestamp{provider}`)
+    last_check_timestamp: LabeledGauge,
+    /// Consecutive failed probes since the last success (`llm_health_consecutive_failures{provider}`)
+    consecutive_failures: LabeledGauge,
+    /// Probe latency distribution in milliseconds (`llm_health_latency_ms{provider}`)
+    latency_ms: LabeledHistogram,
+}
+
+impl LlmHealthMetrics {
+    /// Create health-probe metrics bound to the given registry
+    pub fn new(registry: &MetricsRegistry, provider_label: &str) -> Arc<Self> {
+        let labels: &[(&str, &str)] = &[("provider", provider_label)];
+        Arc::new(Self {
+            ok: registry.float_gauge("llm_health_ok", labels),
+            last_check_timestamp: registry.gauge("llm_health_last_check_timestamp", labels),
+            consecutive_failures: registry.gauge("llm_health_consecutive_failures", labels),
+            latency_ms: registry.histogram(
+                "llm_health_latency_ms",
+                vec![10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0],
+                labels,
+            ),
+        })
+    }
+
+    /// Record a successful probe
+    pub fn record_success(&self, latency_ms: u64) {
+        self.ok.set(1.0);
+        self.consecutive_failures.set(0);
+        self.touch();
+        self.latency_ms.observe(latency_ms as f64);
+    }
+
+    /// Record a failed probe
+    pub fn record_failure(&self) {
+        self.ok.set(0.0);
+        self.consecutive_failures.increment();
+        self.touch();
+    }
+
+    fn touch(&self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.last_check_timestamp.set(now);
     }
 }
 

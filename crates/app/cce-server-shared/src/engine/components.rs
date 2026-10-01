@@ -188,6 +188,42 @@ impl super::CodeContextEngine {
         }
     }
 
+    /// Start the LLM provider health-probe background task
+    ///
+    /// Periodically issues a minimal embedding request through the global
+    /// embedder and records the outcome in `LlmHealthMetrics`, so provider
+    /// outages surface even when no indexing or query traffic is flowing.
+    pub fn start_llm_health_monitor(&self, interval_secs: u64) {
+        let Some(ref health_metrics) = self.llm_health_metrics else {
+            return;
+        };
+        let embedder = self.embedder.clone();
+        let metrics = health_metrics.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(interval_secs.max(1)));
+            // Consume the immediate first tick; probe on a steady cadence.
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+                let started = std::time::Instant::now();
+                match embedder.embed_one("cce health probe").await {
+                    Ok(_) => {
+                        metrics.record_success(started.elapsed().as_millis() as u64);
+                        tracing::debug!("LLM health probe succeeded");
+                    }
+                    Err(e) => {
+                        metrics.record_failure();
+                        tracing::warn!(error = %e, "LLM health probe failed");
+                    }
+                }
+            }
+        });
+
+        tracing::info!(interval_secs, "Started LLM provider health monitor");
+    }
+
     /// Start system metrics collection background task
     pub fn start_system_metrics_collection(&self, interval_secs: u64) {
         if let Some(ref system_metrics) = self.system_metrics {
