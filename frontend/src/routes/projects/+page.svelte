@@ -1,10 +1,10 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import { projects, selectedProject, loadProjects } from '$lib/stores/index';
 	import { projectApi, type Project } from '$lib/api/index';
 	import { currentProjectId } from '$lib/stores/project';
@@ -70,10 +70,25 @@
 			const data = {
 				name: formName,
 				root_path: formPath,
-				extensions: formExtensions ? formExtensions.split(',').map(s => s.trim()).filter(Boolean) : undefined,
-				exclude_dirs: formExcludeDirs ? formExcludeDirs.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+				extensions: formExtensions
+					? formExtensions
+							.split(',')
+							.map((s) => s.trim())
+							.filter(Boolean)
+					: undefined,
+				exclude_dirs: formExcludeDirs
+					? formExcludeDirs
+							.split(',')
+							.map((s) => s.trim())
+							.filter(Boolean)
+					: undefined,
 				respect_gitignore: formRespectGitignore,
-				ignore_patterns: formIgnorePatterns ? formIgnorePatterns.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+				ignore_patterns: formIgnorePatterns
+					? formIgnorePatterns
+							.split(',')
+							.map((s) => s.trim())
+							.filter(Boolean)
+					: undefined,
 			};
 
 			if (editingProject) {
@@ -84,8 +99,10 @@
 
 			resetForm();
 			await loadProjects();
-		} catch (e: any) {
-			error = e.message || `Failed to ${editingProject ? 'update' : 'create'} project`;
+		} catch (e) {
+			error =
+				errorMessage(e) ||
+				`Failed to ${editingProject ? 'update' : 'create'} project`;
 		} finally {
 			loading = false;
 		}
@@ -105,8 +122,8 @@
 				detailProject = null;
 			}
 			await loadProjects();
-		} catch (e: any) {
-			error = e.message || 'Failed to delete project';
+		} catch (e) {
+			error = errorMessage(e) || 'Failed to delete project';
 		} finally {
 			loading = false;
 		}
@@ -118,8 +135,8 @@
 
 		try {
 			await projectApi.indexProject(project.id);
-		} catch (e: any) {
-			error = e.message || 'Failed to start indexing';
+		} catch (e) {
+			error = errorMessage(e) || 'Failed to start indexing';
 		} finally {
 			loading = false;
 		}
@@ -131,8 +148,8 @@
 
 		try {
 			await projectApi.reloadProject(project.id);
-		} catch (e: any) {
-			error = e.message || 'Failed to reload project';
+		} catch (e) {
+			error = errorMessage(e) || 'Failed to reload project';
 		} finally {
 			loading = false;
 		}
@@ -150,135 +167,202 @@
 </svelte:head>
 
 <div class="page">
-	<PageHeader title="Projects" subtitle="Create, manage, and index your code projects" />
+	<PageHeader
+		title="Projects"
+		subtitle="Create, manage, and index your code projects"
+	/>
 
-		{#if error}
-			<div class="error-banner">
-				<span>{error}</span>
-				<button class="dismiss-btn" onclick={() => error = null}>×</button>
-			</div>
-		{/if}
+	{#if error}
+		<div class="error-banner">
+			<span>{error}</span>
+			<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
+		</div>
+	{/if}
 
-		<div class="layout">
-			<!-- Project List -->
-			<div class="list-column">
-				<Card title="All Projects" subtitle={`${$projects.length} project(s)`}>
-					<div class="header-actions">
-						<Button onclick={openCreateForm} disabled={showForm}>
-							+ New Project
-						</Button>
+	<div class="layout">
+		<!-- Project List -->
+		<div class="list-column">
+			<Card title="All Projects" subtitle={`${$projects.length} project(s)`}>
+				<div class="header-actions">
+					<Button onclick={openCreateForm} disabled={showForm}>
+						+ New Project
+					</Button>
+				</div>
+
+				{#if $projects.length === 0}
+					<p class="empty-state">
+						No projects found. Create your first project to get started.
+					</p>
+				{:else}
+					<div class="project-list">
+						{#each $projects as project (project.id)}
+							<button
+								class="project-item"
+								class:selected={detailProject?.id === project.id}
+								onclick={() => selectProject(project)}
+							>
+								<div class="project-info">
+									<strong>{project.name}</strong>
+									<span class="project-path">{project.root_path}</span>
+								</div>
+								{#if project.last_indexed}
+									<span class="project-indexed">{project.last_indexed}</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</Card>
+		</div>
+
+		<!-- Detail / Form Column -->
+		<div class="detail-column">
+			{#if showForm}
+				<Card
+					title={editingProject ? 'Edit Project' : 'Create Project'}
+					subtitle="Configure project settings"
+				>
+					<form
+						onsubmit={(e) => {
+							e.preventDefault();
+							handleSubmit();
+						}}
+					>
+						<div class="form-grid">
+							<Input
+								label="Project Name"
+								type="text"
+								bind:value={formName}
+								required={true}
+								placeholder="my-project"
+							/>
+							<Input
+								label="Root Path"
+								type="text"
+								bind:value={formPath}
+								required={true}
+								placeholder="/path/to/project"
+							/>
+							<Input
+								label="File Extensions (comma-separated)"
+								type="text"
+								bind:value={formExtensions}
+								placeholder="rs, ts, js, py"
+							/>
+							<Input
+								label="Exclude Directories (comma-separated)"
+								type="text"
+								bind:value={formExcludeDirs}
+								placeholder="node_modules, target, .git"
+							/>
+							<Input
+								label="Ignore Patterns (comma-separated)"
+								type="text"
+								bind:value={formIgnorePatterns}
+								placeholder="*.log, *.tmp"
+							/>
+							<div class="checkbox-field">
+								<label class="checkbox-label">
+									<input type="checkbox" bind:checked={formRespectGitignore} />
+									Respect .gitignore
+								</label>
+							</div>
+						</div>
+
+						<div class="form-actions">
+							<Button type="submit" disabled={loading}>
+								{editingProject ? 'Update' : 'Create'}
+							</Button>
+							<Button
+								variant="secondary"
+								onclick={resetForm}
+								disabled={loading}
+							>
+								Cancel
+							</Button>
+						</div>
+					</form>
+				</Card>
+			{:else if detailProject}
+				<Card title={detailProject.name} subtitle="Project details and actions">
+					<div class="detail-grid">
+						<div class="detail-item">
+							<span class="detail-label">Name</span>
+							<span class="detail-value">{detailProject.name}</span>
+						</div>
+						<div class="detail-item">
+							<span class="detail-label">Path</span>
+							<span class="detail-value code">{detailProject.root_path}</span>
+						</div>
+						{#if detailProject.extensions && detailProject.extensions.length > 0}
+							<div class="detail-item">
+								<span class="detail-label">Extensions</span>
+								<span class="detail-value"
+									>{detailProject.extensions.join(', ')}</span
+								>
+							</div>
+						{/if}
+						{#if detailProject.exclude_dirs && detailProject.exclude_dirs.length > 0}
+							<div class="detail-item">
+								<span class="detail-label">Excluded Dirs</span>
+								<span class="detail-value"
+									>{detailProject.exclude_dirs.join(', ')}</span
+								>
+							</div>
+						{/if}
+						{#if detailProject.last_indexed}
+							<div class="detail-item">
+								<span class="detail-label">Last Indexed</span>
+								<span class="detail-value">{detailProject.last_indexed}</span>
+							</div>
+						{/if}
 					</div>
 
-					{#if $projects.length === 0}
-						<p class="empty-state">No projects found. Create your first project to get started.</p>
-					{:else}
-						<div class="project-list">
-							{#each $projects as project (project.id)}
-								<button
-									class="project-item"
-									class:selected={detailProject?.id === project.id}
-									onclick={() => selectProject(project)}
-								>
-									<div class="project-info">
-										<strong>{project.name}</strong>
-										<span class="project-path">{project.root_path}</span>
-									</div>
-									{#if project.last_indexed}
-										<span class="project-indexed">{project.last_indexed}</span>
-									{/if}
-								</button>
-							{/each}
-						</div>
-					{/if}
+					<h3 class="section-title">Actions</h3>
+					<div class="action-buttons">
+						<Button
+							onclick={() => handleIndex(detailProject!)}
+							disabled={loading}
+						>
+							Run Index
+						</Button>
+						<Button
+							variant="secondary"
+							onclick={() => handleReload(detailProject!)}
+							disabled={loading}
+						>
+							Reload Config
+						</Button>
+						<Button
+							variant="secondary"
+							onclick={() => openEditForm(detailProject!)}
+							disabled={loading}
+						>
+							Edit
+						</Button>
+						<Button
+							variant="danger"
+							onclick={() => handleDelete(detailProject!)}
+							disabled={loading}
+						>
+							Delete
+						</Button>
+					</div>
 				</Card>
-			</div>
-
-			<!-- Detail / Form Column -->
-			<div class="detail-column">
-				{#if showForm}
-					<Card title={editingProject ? 'Edit Project' : 'Create Project'} subtitle="Configure project settings">
-						<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-							<div class="form-grid">
-								<Input label="Project Name" type="text" bind:value={formName} required={true} placeholder="my-project" />
-								<Input label="Root Path" type="text" bind:value={formPath} required={true} placeholder="/path/to/project" />
-								<Input label="File Extensions (comma-separated)" type="text" bind:value={formExtensions} placeholder="rs, ts, js, py" />
-								<Input label="Exclude Directories (comma-separated)" type="text" bind:value={formExcludeDirs} placeholder="node_modules, target, .git" />
-								<Input label="Ignore Patterns (comma-separated)" type="text" bind:value={formIgnorePatterns} placeholder="*.log, *.tmp" />
-								<div class="checkbox-field">
-									<label class="checkbox-label">
-										<input type="checkbox" bind:checked={formRespectGitignore} />
-										Respect .gitignore
-									</label>
-								</div>
-							</div>
-
-							<div class="form-actions">
-								<Button type="submit" disabled={loading}>
-									{editingProject ? 'Update' : 'Create'}
-								</Button>
-								<Button variant="secondary" onclick={resetForm} disabled={loading}>
-									Cancel
-								</Button>
-							</div>
-						</form>
-					</Card>
-
-				{:else if detailProject}
-					<Card title={detailProject.name} subtitle="Project details and actions">
-						<div class="detail-grid">
-							<div class="detail-item">
-								<span class="detail-label">Name</span>
-								<span class="detail-value">{detailProject.name}</span>
-							</div>
-							<div class="detail-item">
-								<span class="detail-label">Path</span>
-								<span class="detail-value code">{detailProject.root_path}</span>
-							</div>
-							{#if detailProject.extensions && detailProject.extensions.length > 0}
-								<div class="detail-item">
-									<span class="detail-label">Extensions</span>
-									<span class="detail-value">{detailProject.extensions.join(', ')}</span>
-								</div>
-							{/if}
-							{#if detailProject.exclude_dirs && detailProject.exclude_dirs.length > 0}
-								<div class="detail-item">
-									<span class="detail-label">Excluded Dirs</span>
-									<span class="detail-value">{detailProject.exclude_dirs.join(', ')}</span>
-								</div>
-							{/if}
-							{#if detailProject.last_indexed}
-								<div class="detail-item">
-									<span class="detail-label">Last Indexed</span>
-									<span class="detail-value">{detailProject.last_indexed}</span>
-								</div>
-							{/if}
-						</div>
-
-						<h3 class="section-title">Actions</h3>
-						<div class="action-buttons">
-							<Button onclick={() => handleIndex(detailProject!)} disabled={loading}>
-								Run Index
-							</Button>
-							<Button variant="secondary" onclick={() => handleReload(detailProject!)} disabled={loading}>
-								Reload Config
-							</Button>
-							<Button variant="secondary" onclick={() => openEditForm(detailProject!)} disabled={loading}>
-								Edit
-							</Button>
-							<Button variant="danger" onclick={() => handleDelete(detailProject!)} disabled={loading}>
-								Delete
-							</Button>
-						</div>
-					</Card>
-
-				{:else}
-					<Card title="Select a Project" subtitle="Choose a project from the list to view details">
-						<p class="placeholder-text">Select a project on the left to view its details and available actions.</p>
-					</Card>
-				{/if}
-			</div>
+			{:else}
+				<Card
+					title="Select a Project"
+					subtitle="Choose a project from the list to view details"
+				>
+					<p class="placeholder-text">
+						Select a project on the left to view its details and available
+						actions.
+					</p>
+				</Card>
+			{/if}
 		</div>
 	</div>
+</div>
 
 <style>
 	.error-banner {

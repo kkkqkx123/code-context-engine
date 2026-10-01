@@ -11,11 +11,15 @@ export type ServiceStatus = components['schemas']['ServiceStatus'];
 export type HealthStatus = components['schemas']['HealthStatus'];
 export type QdrantDiagnostic = components['schemas']['QdrantDiagnostic'];
 export type QdrantHealthStatus = components['schemas']['QdrantHealthResponse'];
-export type EmbeddingHealthStatus = components['schemas']['EmbeddingHealthResponse'];
+export type EmbeddingHealthStatus =
+	components['schemas']['EmbeddingHealthResponse'];
 export type Bm25HealthStatus = components['schemas']['Bm25HealthResponse'];
-export type RetryQueueStatus = components['schemas']['RetryQueueStatusResponse'];
-export type RetryQueueProcessResponse = components['schemas']['RetryQueueProcessResponse'];
-export type RetryQueueClearResponse = components['schemas']['RetryQueueClearResponse'];
+export type RetryQueueStatus =
+	components['schemas']['RetryQueueStatusResponse'];
+export type RetryQueueProcessResponse =
+	components['schemas']['RetryQueueProcessResponse'];
+export type RetryQueueClearResponse =
+	components['schemas']['RetryQueueClearResponse'];
 
 export const healthApi = {
 	// Unified health check
@@ -30,7 +34,8 @@ export const healthApi = {
 		call(client.GET('/api/health/embedding')),
 
 	// BM25 index health
-	getBm25Health: (): Promise<Bm25HealthStatus> => call(client.GET('/api/health/bm25')),
+	getBm25Health: (): Promise<Bm25HealthStatus> =>
+		call(client.GET('/api/health/bm25')),
 
 	// Retry queue status
 	getRetryQueueStatus: (): Promise<RetryQueueStatus> =>
@@ -42,5 +47,5 @@ export const healthApi = {
 
 	// Clear retry queue
 	clearRetryQueue: (): Promise<RetryQueueClearResponse> =>
-		call(client.DELETE('/api/retry-queue'))
+		call(client.DELETE('/api/retry-queue')),
 };

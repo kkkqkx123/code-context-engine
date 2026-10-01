@@ -29,8 +29,12 @@
 		<div class="filter-content">
 			<div class="filter-section">
 				<span class="section-label" id="query-type-label">Query Type</span>
-				<div class="query-type-tabs" role="group" aria-labelledby="query-type-label">
-					{#each ['vector', 'bm25', 'hybrid', 'summary', 'hierarchical', 'semantic_with_relations'] as type}
+				<div
+					class="query-type-tabs"
+					role="group"
+					aria-labelledby="query-type-label"
+				>
+					{#each ['vector', 'bm25', 'hybrid', 'summary', 'hierarchical', 'semantic_with_relations'] as type (type)}
 						<button
 							class="tab"
 							class:active={$searchState.queryType === type}
@@ -43,7 +47,9 @@
 			</div>
 
 			<div class="filter-section">
-				<label class="section-label" for="directory-input">Directory Prefix</label>
+				<label class="section-label" for="directory-input"
+					>Directory Prefix</label
+				>
 				<input
 					id="directory-input"
 					type="text"
@@ -54,7 +60,9 @@
 			</div>
 
 			<div class="filter-section">
-				<label class="section-label" for="min-score-range">Min Score Threshold</label>
+				<label class="section-label" for="min-score-range"
+					>Min Score Threshold</label
+				>
 				<input
 					id="min-score-range"
 					type="range"
@@ -64,7 +72,9 @@
 					value={$searchState.filters.min_score}
 					oninput={handleMinScoreChange}
 				/>
-				<span class="range-value">{$searchState.filters.min_score.toFixed(1)}</span>
+				<span class="range-value"
+					>{$searchState.filters.min_score.toFixed(1)}</span
+				>
 			</div>
 		</div>
 	{/if}

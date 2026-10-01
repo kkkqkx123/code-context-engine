@@ -4,17 +4,18 @@ import { visualizer } from 'rollup-plugin-visualizer';
 
 export default defineConfig(({ mode }) => {
 	const isProd = mode === 'production';
-	
+
 	return {
 		plugins: [
 			sveltekit(),
-			isProd && visualizer({
-				open: false,
-				filename: 'stats.html',
-				gzipSize: true,
-				brotliSize: true,
-				template: 'treemap'
-			})
+			isProd &&
+				visualizer({
+					open: false,
+					filename: 'stats.html',
+					gzipSize: true,
+					brotliSize: true,
+					template: 'treemap',
+				}),
 		].filter(Boolean),
 		build: {
 			sourcemap: !isProd,
@@ -42,18 +43,18 @@ export default defineConfig(({ mode }) => {
 						if (id.includes('/src/lib/stores/')) {
 							return 'stores';
 						}
-					}
-				}
-			}
+					},
+				},
+			},
 		},
 		server: {
 			port: 3001,
 			proxy: {
 				'/api': {
 					target: 'http://localhost:9000',
-					changeOrigin: true
-				}
-			}
-		}
+					changeOrigin: true,
+				},
+			},
+		},
 	};
 });

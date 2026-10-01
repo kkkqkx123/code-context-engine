@@ -1,6 +1,4 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
-
 	interface Props {
 		label?: string;
 		type?: string;
@@ -28,7 +26,9 @@
 	let inputEl: HTMLInputElement | HTMLTextAreaElement | undefined = $state();
 
 	// Generate unique ID if not provided
-	let inputId = $derived(id || `input-${Math.random().toString(36).slice(2, 11)}`);
+	let inputId = $derived(
+		id || `input-${Math.random().toString(36).slice(2, 11)}`,
+	);
 
 	export function focus() {
 		inputEl?.focus();
@@ -52,8 +52,7 @@
 			class="textarea"
 			{placeholder}
 			bind:value
-			{...rest}
-		></textarea>
+			{...rest}></textarea>
 	{:else}
 		<input
 			bind:this={inputEl}

@@ -10,7 +10,7 @@
 		checked = false,
 		label = '',
 		disabled = false,
-		onchange
+		onchange,
 	}: Props = $props();
 
 	function toggle() {

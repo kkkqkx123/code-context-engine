@@ -1,3 +1,5 @@
+import { errorMessage } from '../utils/errors';
+
 /**
  * Metrics State Store
  * Manages system metrics and health status
@@ -10,7 +12,7 @@ import type { StorageStatusDetail } from '../api/storage';
 
 export interface MetricsState {
 	storageStatus: StorageStatusDetail | null;
-	systemMetrics: any | null;
+	systemMetrics: Record<string, unknown> | null;
 	lastUpdated: Date | null;
 	isLoading: boolean;
 	error: string | null;
@@ -30,7 +32,11 @@ let refreshInterval: ReturnType<typeof setInterval> | null = null;
 // Actions
 export const metricsActions = {
 	async loadMetrics() {
-		metricsState.update(state => ({ ...state, isLoading: true, error: null }));
+		metricsState.update((state) => ({
+			...state,
+			isLoading: true,
+			error: null,
+		}));
 
 		try {
 			const [storageResponse, systemMetrics] = await Promise.all([
@@ -38,18 +44,18 @@ export const metricsActions = {
 				metricsApi.getJsonMetrics().catch(() => null),
 			]);
 
-			metricsState.update(state => ({
+			metricsState.update((state) => ({
 				...state,
 				storageStatus: storageResponse.status,
 				systemMetrics,
 				lastUpdated: new Date(),
 				isLoading: false,
 			}));
-		} catch (error: any) {
-			metricsState.update(state => ({
+		} catch (error) {
+			metricsState.update((state) => ({
 				...state,
 				isLoading: false,
-				error: error.message,
+				error: errorMessage(error),
 			}));
 		}
 	},

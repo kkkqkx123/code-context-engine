@@ -11,12 +11,15 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ## Feature Mapping: CLI Commands → Web UI Modules
 
 ### 1. **Dashboard Module** (Status + Metrics)
+
 **CLI Counterparts:**
+
 - `cce-cli status` - Server health check and storage overview
 - `cce-cli metrics json` - Export JSON metrics
 - `cce-cli metrics prometheus` - Prometheus metrics export
 
 **Web UI Features:**
+
 - Real-time server connectivity indicator
 - Storage component health cards (Vector DB, BM25, SQLite, Cache)
 - System metrics dashboard with charts:
@@ -27,6 +30,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - Auto-refresh mechanism (polling every 30s via Svelte stores)
 
 **Design Application:**
+
 - Use 4-column spec bar layout (`grid-template-columns: repeat(4, 1fr)`) for health cards
 - Apply Space Mono labels with uppercase styling for metric names
 - Display values in bold Space Grotesk typography
@@ -37,7 +41,9 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 2. **Index Management Module** (Core Priority)
+
 **CLI Counterparts:**
+
 - `cce-cli index run` - Full directory indexing
 - `cce-cli index incremental` - Incremental indexing
 - `cce-cli index parse` - Single file parse preview
@@ -45,12 +51,13 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - `cce-cli project index <ID>` - Trigger project indexing
 
 **Web UI Features:**
+
 - **Project Manager Panel:**
   - Project list table with status badges
   - Create/edit/delete project forms
   - Project configuration editor (extensions, exclude patterns)
   - Quick index trigger button per project
-  
+
 - **Index Control Center:**
   - Start full/incremental index with parameter inputs:
     - Directory path selector
@@ -73,6 +80,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
   - Language detection indicator
 
 **Design Application:**
+
 - Two-column grid layout for project list vs. detail view
 - Black background CTA buttons with hover transform to accent color (#ff3d00)
 - Form inputs with sharp borders, Space Mono labels
@@ -84,10 +92,13 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 3. **Search Interface Module**
+
 **CLI Counterparts:**
+
 - `cce-cli search query` - Advanced code search with multiple query types
 
 **Web UI Features:**
+
 - **Search Input Panel:**
   - Large search input field with typeahead suggestions
   - Query type selector tabs: Vector | BM25 | Hybrid | Hierarchical
@@ -100,7 +111,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
     - Include/exclude pattern inputs
     - Min score threshold slider
     - Pagination controls (page size, offset)
-  
+
 - **Results Display:**
   - Result cards showing:
     - Code snippet preview (syntax-highlighted)
@@ -113,6 +124,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
   - Copy code button per result
 
 **Design Application:**
+
 - Hero-style large search input with bold typography (Space Grotesk, 2rem+)
 - Filter panel with grid layout, compact spacing
 - Result cards with sharp borders, hover state shifts to gray-100
@@ -124,7 +136,9 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 4. **Entity Explorer Module**
+
 **CLI Counterparts:**
+
 - `cce-cli entity function <ID>` - Function details
 - `cce-cli entity calls/callers <ID>` - Call relationships
 - `cce-cli entity call-chain <ID>` - Full call chain visualization
@@ -133,12 +147,13 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - `cce-cli entity implementations <ID>` - Interface implementations
 
 **Web UI Features:**
+
 - **Entity Detail View:**
   - Function/class signature display
   - Source code location link
   - Metadata panel (language, file path, line range)
   - Natural language description (from AST-to-NL)
-  
+
 - **Relationship Graph Visualization:**
   - Interactive call graph (SVG-based):
     - Nodes represent functions/classes
@@ -147,7 +162,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
     - Node click reveals detail panel
   - Inheritance tree diagram (vertical/horizontal toggle)
   - Implementation hierarchy viewer
-  
+
 - **Call Chain Explorer:**
   - Linear chain display with direction toggle (up/down)
   - Each step shows function name, file, line number
@@ -155,6 +170,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
   - Depth control slider
 
 **Design Application:**
+
 - SVG-based diagrams using stroke-dasharray animation for edge drawing
 - Nodes as rectangular cards with sharp borders, accent color left-border for user-selected nodes
 - Staggered node pop-in animations (cubic-bezier easing, fast duration)
@@ -166,7 +182,9 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 5. **Storage Management Module**
+
 **CLI Counterparts:**
+
 - `cce-cli storage status` - Storage component status
 - `cce-cli storage stats` - Index statistics
 - `cce-cli storage clear` - Clear index data (selective)
@@ -175,6 +193,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - `cce-cli storage batch-delete` - Batch deletion
 
 **Web UI Features:**
+
 - **Storage Overview Dashboard:**
   - Component health cards (Qdrant, BM25, SQLite, Cache)
   - Usage statistics:
@@ -183,7 +202,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
     - Relation graph node/edge counts
     - Cache hit/miss rates
     - Total disk usage breakdown
-  
+
 - **Selective Cleanup Interface:**
   - Checkbox selectors for clear targets:
     - Vectors
@@ -197,6 +216,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
     - Execute batch operation button
 
 **Design Application:**
+
 - Spec bar layout (4-column grid) for component status
 - Warning dialogs with accent color borders for destructive actions
 - Data tables with alternating row backgrounds (white/gray-100)
@@ -207,18 +227,21 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 6. **File Watching Module**
+
 **CLI Counterparts:**
+
 - `cce-cli watch start` - Start file watching
 - `cce-cli watch stop` - Stop file watching
 - `cce-cli watch status` - Get watch status
 
 **Web UI Features:**
+
 - **Watch Control Panel:**
   - Toggle switch to start/stop watching
   - Directory selection input (multiple paths)
   - Extension filter configuration
   - Debounce interval slider (100ms - 5000ms)
-  
+
 - **Live Event Feed:**
   - Real-time log of file system events:
     - Timestamp
@@ -230,6 +253,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
   - Event count summary
 
 **Design Application:**
+
 - Toggle switches styled as black rectangles sliding to reveal accent color
 - Event feed as monospace log display (Space Mono, black background, white text)
 - Live indicator dot pulsing in accent color when active
@@ -239,7 +263,9 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 7. **Tools Module**
+
 **CLI Counterparts:**
+
 - `cce-cli tools compress` - Code compression
 - `cce-cli tools batch-compress` - Batch compression
 - `cce-cli tools diagnose` - Code diagnosis
@@ -248,13 +274,14 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - `cce-cli tools definition` - Go to definition
 
 **Web UI Features:**
+
 - **Code Compression Tool:**
   - Textarea for code input
   - Language selector dropdown
   - Compress button
   - Output panel showing compressed version
   - Token count reduction statistics
-  
+
 - **Code Diagnosis Tool:**
   - Code input area
   - Diagnose button
@@ -263,7 +290,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
     - Description
     - Suggested fix
     - Location (line/column)
-  
+
 - **Symbol Lookup Tools:**
   - File path input or upload
   - Extract symbols button
@@ -271,6 +298,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
   - Reference/definition search results
 
 **Design Application:**
+
 - Split-pane layout (input | output) with draggable divider
 - Code editors with black background, white text, Space Mono
 - Result panels with numbered lists, sharp borders
@@ -281,22 +309,26 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 8. **Configuration Module**
+
 **CLI Counterparts:**
+
 - `cce-cli config reload` - Reload configuration
 
 **Web UI Features:**
+
 - **Config Editor:**
   - TOML syntax-highlighted editor for global config
   - Project-specific config override panel
   - Environment variable manager (.env file editor)
   - Validation feedback (error highlighting)
-  
+
 - **Hot Reload Controls:**
   - Reload configuration button
   - Reload status indicator (success/failure)
   - Last reload timestamp
 
 **Design Application:**
+
 - Code editor with black background, syntax highlighting using gray scale + accent
 - Config sections separated by 1px black borders
 - Validation errors highlighted with accent color left-border
@@ -306,10 +338,13 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ---
 
 ### 9. **Summary Generation Module**
+
 **CLI Counterparts:**
+
 - `cce-cli summary generate` - Generate file summaries
 
 **Web UI Features:**
+
 - **Summary Generator:**
   - File/directory selector (multi-select)
   - Configuration options:
@@ -324,6 +359,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
     - Download as markdown option
 
 **Design Application:**
+
 - Form layout with grid alignment
 - Output cards with summary text in readable Space Grotesk body style
 - Action buttons grouped at bottom with consistent spacing
@@ -334,6 +370,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ## Technology Stack & Constraints
 
 ### Core Technologies
+
 - **Framework:** Svelte 5 (latest stable)
 - **Build Tool:** Vite
 - **Styling:** Pure CSS (no preprocessors, no frameworks)
@@ -342,6 +379,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - **Routing:** SvelteKit file-based routing or minimal custom router
 
 ### Dependency Minimization Strategy
+
 - **Avoid:** Heavy UI libraries (Material UI, Ant Design, Bootstrap)
 - **Avoid:** Complex state managers (Redux, Zustand)
 - **Avoid:** Icon libraries (use inline SVGs or Unicode characters)
@@ -350,6 +388,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - **Prefer:** Custom components built from scratch
 
 ### Allowed Lightweight Dependencies (if absolutely necessary)
+
 - Syntax highlighting: `prismjs` (minimal setup)
 - Charts: Custom SVG charts or lightweight library like `chart.js` (only if complex visualizations needed)
 - Date formatting: Native `Intl.DateTimeFormat`
@@ -359,32 +398,36 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ## Design System Implementation Guidelines
 
 ### Color Palette (Strict Enforcement)
+
 ```css
 :root {
-  --black: #0a0a0a;
-  --white: #fafafa;
-  --accent: #ff3d00;
-  --gray-100: #f5f5f5;
-  --gray-200: #e5e5e5;
-  --gray-400: #a3a3a3;
-  --gray-600: #525252;
-  --gray-800: #262626;
+	--black: #0a0a0a;
+	--white: #fafafa;
+	--accent: #ff3d00;
+	--gray-100: #f5f5f5;
+	--gray-200: #e5e5e5;
+	--gray-400: #a3a3a3;
+	--gray-600: #525252;
+	--gray-800: #262626;
 }
 ```
 
 **Rules:**
+
 - No custom colors beyond this palette
 - Accent color used ONLY for: critical alerts, active states, emphasis markers
 - Primary visual language: black-and-white high contrast
 - Gray scale for secondary text, borders, backgrounds
 
 ### Typography
+
 - **Headings:** Space Grotesk, weight 700, letter-spacing -0.03em to -0.04em, line-height 1.05-1.1
 - **Body:** Space Grotesk, size 1rem-1.25rem, color var(--gray-600), line-height 1.6-1.7
 - **Labels/Meta:** Space Mono, size 0.65rem-0.75rem, uppercase, letter-spacing 0.1em
 - **Code:** Space Mono, size 0.85rem, background var(--black), color var(--white)
 
 ### Layout Principles
+
 - **Container:** max-width 1400px, margin 0 auto, padding 0 2rem
 - **Grid System:** CSS Grid exclusively, modular divisions (1fr 1fr, repeat(4, 1fr), etc.)
 - **Borders:** 1px solid black for section boundaries, 1px solid gray-200 for internal dividers
@@ -393,6 +436,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - **Spacing:** Section padding 6rem 0, component gaps 2rem standard
 
 ### Component Patterns
+
 - **Buttons:** Black background, white text, Space Mono, uppercase, hover transforms to accent color with translateX(4px) displacement
 - **Cards:** Sharp corners, 1px black borders, no shadows, hover shifts background to gray-100
 - **Navigation Links:** Space Mono, uppercase, underline slide-in animation on hover
@@ -400,6 +444,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - **Forms:** Sharp-bordered inputs, Space Mono labels, compact vertical spacing
 
 ### Animation Specifications
+
 - **Line Drawing:** SVG stroke-dasharray/stroke-dashoffset for graph edges
 - **Node Pop-in:** Opacity 0→1, translateY(10px)→0, cubic-bezier(0.2, 0.9, 0.2, 1), 0.55s duration
 - **Button Hover:** translateX(4px), 0.3s transition
@@ -407,6 +452,7 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 - **General Principle:** Fast, crisp, mechanical feel (avoid slow, bouncy, organic easing)
 
 ### Responsive Breakpoints
+
 - **> 1024px:** Full multi-column layouts
 - **≤ 1024px:** Stack hero sections vertically, features become single column, specs become 2-column
 - **≤ 768px:** Header collapses to single column, navigation centered, footer stacked
@@ -416,10 +462,12 @@ The analysis derives feature requirements from the existing CLI commands in `cce
 ## Critical Files to Modify/Create
 
 ### Backend (Minimal Changes Required)
+
 - **No backend changes needed** - existing REST API endpoints are sufficient
 - Ensure CORS headers are properly configured in Axum server for local development
 
 ### Frontend Structure (New Files)
+
 ```
 frontend/
 ├── src/
@@ -505,6 +553,7 @@ frontend/
 ## Implementation Phases
 
 ### Phase 1: Foundation (Week 1)
+
 1. Initialize SvelteKit project with Vite
 2. Set up design system (CSS variables, typography, base components)
 3. Implement API client layer with fetch wrapper
@@ -512,6 +561,7 @@ frontend/
 5. Build root layout with navigation (header, footer)
 
 ### Phase 2: Core Features (Week 2-3)
+
 1. **Dashboard Module:**
    - Health status cards
    - Metrics display
@@ -523,6 +573,7 @@ frontend/
    - File parser preview
 
 ### Phase 3: Search & Entities (Week 4-5)
+
 1. **Search Interface:**
    - Search input with filters
    - Results display with code snippets
@@ -534,6 +585,7 @@ frontend/
    - Call chain explorer
 
 ### Phase 4: Advanced Features (Week 6-7)
+
 1. **Storage Management:**
    - Storage overview dashboard
    - Selective cleanup interface
@@ -547,6 +599,7 @@ frontend/
    - Symbol lookup tools
 
 ### Phase 5: Polish & Optimization (Week 8)
+
 1. Responsive design adjustments for tablet/mobile
 2. Performance optimization (lazy loading, code splitting)
 3. Accessibility improvements (ARIA labels, keyboard navigation)
@@ -558,60 +611,63 @@ frontend/
 ## Verification & Testing
 
 ### Manual Testing Checklist
+
 1. **Server Connectivity:**
    - Verify frontend can reach backend API at configured URL
    - Test CORS preflight requests succeed
-   
+
 2. **Index Management:**
    - Create new project with valid/invalid paths
    - Trigger full index and observe real-time progress updates
    - Cancel ongoing index operation
    - Parse single file and verify entity extraction display
-   
+
 3. **Search:**
    - Execute vector/bm25/hybrid searches
    - Apply filters (directory, extensions, entity types)
    - Verify result accuracy and relevance scores
    - Test pagination with large result sets
-   
+
 4. **Entity Explorer:**
    - Navigate to function/class detail pages
    - Render call graph SVG correctly
    - Traverse inheritance trees
    - Follow call chains in both directions
-   
+
 5. **Storage Management:**
    - View storage statistics
    - Perform selective clear operations
    - Verify data deletion reflects in subsequent queries
-   
+
 6. **File Watching:**
    - Start/stop watch operations
    - Observe live event feed updates
    - Configure debounce intervals
-   
+
 7. **Responsive Design:**
    - Test layouts at 1920px, 1024px, 768px, 375px widths
    - Verify grid collapses appropriately
    - Check touch targets on mobile (>44px)
 
 ### Automated Testing Strategy
+
 1. **Unit Tests (Vitest):**
    - Test Svelte stores state transitions
    - Test utility functions (formatters, validators)
    - Test API client error handling
-   
+
 2. **Component Tests (Testing Library):**
    - Test UI components render correctly with props
    - Test user interactions (button clicks, form submissions)
    - Test accessibility attributes
-   
+
 3. **Integration Tests (Playwright):**
    - End-to-end workflows (create project → index → search)
    - API integration verification
    - Cross-browser compatibility (Chrome, Firefox, Safari)
 
 ### Performance Benchmarks
+
 - Initial page load < 2s on 3G connection
 - Search query response < 500ms (excluding backend processing)
 - Smooth animations at 60fps
@@ -622,20 +678,21 @@ frontend/
 ## Risk Mitigation
 
 ### Potential Challenges
+
 1. **Real-time Updates:** Polling may cause unnecessary server load
-   - *Mitigation:* Implement exponential backoff, consider WebSocket upgrade later
+   - _Mitigation:_ Implement exponential backoff, consider WebSocket upgrade later
 
 2. **Large Dataset Rendering:** Rendering thousands of search results may lag
-   - *Mitigation:* Virtual scrolling, pagination, lazy loading
+   - _Mitigation:_ Virtual scrolling, pagination, lazy loading
 
 3. **SVG Graph Complexity:** Complex call graphs may be slow to render
-   - *Mitigation:* Limit initial depth, progressive rendering, canvas fallback
+   - _Mitigation:_ Limit initial depth, progressive rendering, canvas fallback
 
 4. **CORS Issues:** Browser security may block API requests
-   - *Mitigation:* Configure proper CORS headers in Axum, use proxy in dev
+   - _Mitigation:_ Configure proper CORS headers in Axum, use proxy in dev
 
 5. **Design Consistency:** Maintaining strict Swiss style across components
-   - *Mitigation:* Create comprehensive component library, enforce design tokens
+   - _Mitigation:_ Create comprehensive component library, enforce design tokens
 
 ---
 
@@ -657,6 +714,7 @@ frontend/
 ## Next Steps
 
 Upon approval of this plan:
+
 1. Initialize SvelteKit project structure
 2. Set up design system foundation (CSS variables, typography imports)
 3. Implement API client layer

@@ -1,10 +1,18 @@
+import { errorMessage } from '../utils/errors';
+
 /**
  * Index State Store
  * Manages indexing operations and project state
  */
 
 import { writable, derived, get } from 'svelte/store';
-import { indexApi, projectApi, type Project } from '../api/index';
+import {
+	indexApi,
+	projectApi,
+	type Project,
+	type IndexRequest,
+	type IncrementalIndexRequest,
+} from '../api/index';
 import { currentProjectId } from './project';
 
 export interface IndexState {
@@ -40,14 +48,14 @@ export async function loadProjects() {
 }
 
 // Derived store for active projects
-export const activeProjects = derived(projects, $projects =>
-	$projects.filter(p => p.id)
+export const activeProjects = derived(projects, ($projects) =>
+	$projects.filter((p) => p.id),
 );
 
 // Actions
 export const indexActions = {
-	async startIndex(data: any) {
-		indexState.update(state => ({
+	async startIndex(data: IndexRequest) {
+		indexState.update((state) => ({
 			...state,
 			isIndexing: true,
 			progress: 0,
@@ -56,24 +64,24 @@ export const indexActions = {
 
 		try {
 			await indexApi.runIndex(data);
-			indexState.update(state => ({
+			indexState.update((state) => ({
 				...state,
 				isIndexing: false,
 				progress: 100,
 				phase: null,
 			}));
-		} catch (error: any) {
-			indexState.update(state => ({
+		} catch (error) {
+			indexState.update((state) => ({
 				...state,
 				isIndexing: false,
 				errorCount: state.errorCount + 1,
-				lastError: error.message,
+				lastError: errorMessage(error),
 			}));
 		}
 	},
 
-	async startIncrementalIndex(data: any) {
-		indexState.update(state => ({
+	async startIncrementalIndex(data: IncrementalIndexRequest) {
+		indexState.update((state) => ({
 			...state,
 			isIndexing: true,
 			progress: 0,
@@ -83,32 +91,36 @@ export const indexActions = {
 		try {
 			const pid = get(currentProjectId);
 			await indexApi.incrementalIndex({ ...data, project_id: pid });
-			indexState.update(state => ({
+			indexState.update((state) => ({
 				...state,
 				isIndexing: false,
 				progress: 100,
 				phase: null,
 			}));
-		} catch (error: any) {
-			indexState.update(state => ({
+		} catch (error) {
+			indexState.update((state) => ({
 				...state,
 				isIndexing: false,
 				errorCount: state.errorCount + 1,
-				lastError: error.message,
+				lastError: errorMessage(error),
 			}));
 		}
 	},
 
 	stopIndex() {
-		indexState.update(state => ({
+		indexState.update((state) => ({
 			...state,
 			isIndexing: false,
 			phase: null,
 		}));
 	},
 
-	updateProgress(progress: number, currentFile: string, phase: IndexState['phase']) {
-		indexState.update(state => ({
+	updateProgress(
+		progress: number,
+		currentFile: string,
+		phase: IndexState['phase'],
+	) {
+		indexState.update((state) => ({
 			...state,
 			progress,
 			currentFile,

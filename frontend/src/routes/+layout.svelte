@@ -1,10 +1,12 @@
 <script lang="ts">
 	import '../app.css';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, type Snippet } from 'svelte';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
 	import { isOnline } from '$lib/stores/network';
-	import { healthState, healthActions } from '$lib/stores/health';
+	import { healthActions } from '$lib/stores/health';
 	import { metricsState, metricsActions } from '$lib/stores/metrics';
 	import { projects, loadProjects } from '$lib/stores/index';
 	import { currentProjectId } from '$lib/stores/project';
@@ -67,21 +69,23 @@
 		return { group: 'CCE', label: 'Untitled' };
 	}
 
-	let { children }: { children: any } = $props();
+	let { children }: { children: Snippet } = $props();
 
 	let currentPage = $derived(page.url.pathname);
 	let crumb = $derived(resolveCrumb(currentPage));
 	let entityName = $derived(
 		currentPage.startsWith('/entities/') && page.params.id
 			? `Entity ${page.params.id}`
-			: crumb.label
+			: crumb.label,
 	);
 
 	let mobileOpen = $state(false);
 	let clock = $state('');
 	let clockTimer: ReturnType<typeof setInterval> | null = null;
 
-	let serverOk = $derived($metricsState.lastUpdated != null && !$metricsState.error);
+	let serverOk = $derived(
+		$metricsState.lastUpdated != null && !$metricsState.error,
+	);
 
 	function toggleMobile() {
 		mobileOpen = !mobileOpen;
@@ -128,12 +132,23 @@
 
 <div class="app" class:nav-open={mobileOpen}>
 	<aside class="sidebar">
-		<a href="/" class="brand" onclick={closeMobile}>CCE<span>Console</span></a>
+		<a
+			href={resolve('/')}
+			class="brand"
+			onclick={(e) => {
+				e.preventDefault();
+				goto(resolve('/'));
+				closeMobile();
+			}}>CCE<span>Console</span></a
+		>
 
 		<div class="status-block">
 			<div class="status-row">
-				<span class="status-dot" class:ok={serverOk} class:bad={!serverOk}></span>
-				<span class="status-text">{serverOk ? 'Server Online' : 'Server Offline'}</span>
+				<span class="status-dot" class:ok={serverOk} class:bad={!serverOk}
+				></span>
+				<span class="status-text"
+					>{serverOk ? 'Server Online' : 'Server Offline'}</span
+				>
 			</div>
 			<label class="project-label" for="project-select">Current Project</label>
 			<select
@@ -142,10 +157,15 @@
 				onchange={onProjectChange}
 			>
 				{#if $projects.length === 0}
-					<option value={$currentProjectId} selected>{`#${$currentProjectId}`}</option>
+					<option value={$currentProjectId} selected
+						>{`#${$currentProjectId}`}</option
+					>
 				{:else}
 					{#each $projects as project (project.id)}
-						<option value={Number(project.id)} selected={Number(project.id) === $currentProjectId}>
+						<option
+							value={Number(project.id)}
+							selected={Number(project.id) === $currentProjectId}
+						>
 							{project.name || `#${project.id}`}
 						</option>
 					{/each}
@@ -154,15 +174,21 @@
 		</div>
 
 		<nav class="nav" aria-label="Main navigation">
-			{#each navGroups as group}
+			{#each navGroups as group (group.title)}
 				<div class="nav-group">
 					<div class="nav-title">{group.title}</div>
-					{#each group.items as item}
+					{#each group.items as item (item.href)}
 						<a
-							href={item.href}
+							href={resolve(item.href)}
 							class="nav-item"
-							class:active={item.href === '/' ? currentPage === '/' : currentPage.startsWith(item.href)}
-							onclick={closeMobile}
+							class:active={item.href === '/'
+								? currentPage === '/'
+								: currentPage.startsWith(item.href)}
+							onclick={(e) => {
+								e.preventDefault();
+								goto(resolve(item.href));
+								closeMobile();
+							}}
 						>
 							{item.label}
 						</a>
@@ -213,9 +239,18 @@
 				<div class="health-dots" title="Storage component health">
 					{#if $metricsState.storageStatus}
 						{@const s = $metricsState.storageStatus}
-						<span class="hdot" class:ok={s.vector_storage.connected} title="Vector DB"></span>
-						<span class="hdot" class:ok={s.bm25_storage.connected} title="BM25"></span>
-						<span class="hdot" class:ok={s.relation_storage.connected} title="Relations"></span>
+						<span
+							class="hdot"
+							class:ok={s.vector_storage.connected}
+							title="Vector DB"
+						></span>
+						<span class="hdot" class:ok={s.bm25_storage.connected} title="BM25"
+						></span>
+						<span
+							class="hdot"
+							class:ok={s.relation_storage.connected}
+							title="Relations"
+						></span>
 					{:else}
 						<span class="hdot idle"></span>
 						<span class="hdot idle"></span>

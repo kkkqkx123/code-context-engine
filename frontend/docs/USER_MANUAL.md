@@ -28,20 +28,24 @@ This manual covers all 9 modules of the application with detailed workflows and 
 ## 1. Dashboard Overview
 
 ### Purpose
+
 The dashboard serves as the central hub for monitoring your indexed projects and system status.
 
 ### Key Features
+
 - **Project Summary**: View total indexed projects, files, and entities
 - **System Health**: Monitor backend connection status
 - **Quick Actions**: Access frequently used features
 - **Recent Activity**: Track recent indexing and search operations
 
 ### How to Use
+
 1. Navigate to `/` (root path)
 2. Review project statistics at a glance
 3. Click on any module link in the navigation bar to access specific features
 
 ### Tips
+
 - Bookmark the dashboard for quick access
 - Check system status before performing large operations
 - Use the dashboard to verify successful indexing operations
@@ -51,9 +55,11 @@ The dashboard serves as the central hub for monitoring your indexed projects and
 ## 2. Index Management
 
 ### Purpose
+
 Manage codebase indexing operations including adding new projects, viewing index status, and reindexing.
 
 ### Key Features
+
 - **Add Project**: Index a new codebase directory
 - **Project List**: View all indexed projects with metadata
 - **Index Status**: Monitor indexing progress and completion
@@ -91,6 +97,7 @@ Manage codebase indexing operations including adding new projects, viewing index
 4. Monitor progress until completion
 
 ### Best Practices
+
 - Exclude `node_modules`, `.git`, `build/`, and other generated directories
 - Index only relevant source code directories
 - Use language filters for multi-language projects
@@ -101,9 +108,11 @@ Manage codebase indexing operations including adding new projects, viewing index
 ## 3. Search Interface
 
 ### Purpose
+
 Perform semantic and keyword searches across indexed codebases.
 
 ### Key Features
+
 - **Semantic Search**: Find code by meaning, not just keywords
 - **Keyword Search**: Traditional text-based search
 - **Filter by Language**: Narrow results to specific programming languages
@@ -139,6 +148,7 @@ Perform semantic and keyword searches across indexed codebases.
    - Save useful queries for future use
 
 ### Search Tips
+
 - Use natural language for semantic search
 - Be specific for better results
 - Combine keywords with context descriptions
@@ -148,18 +158,21 @@ Perform semantic and keyword searches across indexed codebases.
 ### Advanced Search Techniques
 
 **Finding Similar Code Patterns:**
+
 ```
 Query: "function that validates email addresses"
 Filter: Language = TypeScript, Type = Function
 ```
 
 **Locating API Endpoints:**
+
 ```
 Query: "HTTP POST endpoint for user registration"
 Filter: Type = Route Handler
 ```
 
 **Understanding Dependencies:**
+
 ```
 Query: "imports React hooks"
 Filter: Type = Import Statement
@@ -170,9 +183,11 @@ Filter: Type = Import Statement
 ## 4. Entity Explorer
 
 ### Purpose
+
 Explore individual code entities (functions, classes, variables) with detailed information and relationships.
 
 ### Key Features
+
 - **Entity Details**: View complete entity metadata
 - **Source Code**: See original code with syntax highlighting
 - **Relationships**: Explore dependencies, callers, and callees
@@ -221,6 +236,7 @@ Explore individual code entities (functions, classes, variables) with detailed i
 - **Component**: UI components (React, Vue, Svelte)
 
 ### Navigation Tips
+
 - Use breadcrumbs to track your exploration path
 - Browser back button works for entity navigation
 - Open entities in new tabs for comparison
@@ -231,9 +247,11 @@ Explore individual code entities (functions, classes, variables) with detailed i
 ## 5. Storage Management
 
 ### Purpose
+
 Monitor and manage storage resources used by indexed projects.
 
 ### Key Features
+
 - **Storage Statistics**: View disk usage breakdown
 - **Language Distribution**: See storage by programming language
 - **Clear Operations**: Remove indexes and free space
@@ -276,6 +294,7 @@ Monitor and manage storage resources used by indexed projects.
    - System ready for fresh indexing
 
 ### Best Practices
+
 - Regularly monitor storage growth
 - Remove unused project indexes
 - Archive important data before clearing
@@ -286,9 +305,11 @@ Monitor and manage storage resources used by indexed projects.
 ## 6. File Watching
 
 ### Purpose
+
 Automatically detect and index file changes in watched directories.
 
 ### Key Features
+
 - **Start/Stop Watching**: Control file monitoring
 - **Event Feed**: Real-time file change notifications
 - **Auto-Index**: Automatically reindex changed files
@@ -323,6 +344,7 @@ Automatically detect and index file changes in watched directories.
    - Resume later with "Start" button
 
 ### Event Feed Controls
+
 - **Pause Feed**: Stop scrolling to examine events
 - **Clear Feed**: Remove old events from view
 - **Auto-scroll**: Toggle automatic scrolling to latest events
@@ -330,21 +352,25 @@ Automatically detect and index file changes in watched directories.
 ### Use Cases
 
 **Active Development:**
+
 - Watch your main project directory
 - Get immediate feedback on indexing
 - Ensure search stays up-to-date
 
 **Code Reviews:**
+
 - Watch feature branches
 - Track changes during review process
 - Verify impact on existing code
 
 **Learning Codebases:**
+
 - Watch unfamiliar repositories
 - Observe file structure and organization
 - Understand development patterns
 
 ### Troubleshooting
+
 - If no events appear, verify directory path is correct
 - Check file extensions match your project's languages
 - Increase debounce delay if too many events trigger
@@ -355,9 +381,11 @@ Automatically detect and index file changes in watched directories.
 ## 7. Developer Tools
 
 ### Purpose
+
 Access specialized tools for code analysis, compression, and diagnostics.
 
 ### Key Features
+
 - **Symbol Lookup**: Find symbols across projects
 - **Code Compression**: Compress code for efficient storage
 - **Dependency Analysis**: Analyze project dependencies
@@ -368,6 +396,7 @@ Access specialized tools for code analysis, compression, and diagnostics.
 **Purpose**: Find symbol definitions and usages across all indexed projects.
 
 **Workflow**:
+
 1. Navigate to `/tools`
 2. Select "Symbol Lookup" tab
 3. Enter symbol name (e.g., `getUserData`)
@@ -379,6 +408,7 @@ Access specialized tools for code analysis, compression, and diagnostics.
    - File paths and line numbers
 
 **Use Cases**:
+
 - Find where a function is defined
 - Locate all usages of a variable
 - Discover API endpoints by name
@@ -389,6 +419,7 @@ Access specialized tools for code analysis, compression, and diagnostics.
 **Purpose**: Compress code entities for efficient vector storage.
 
 **Workflow**:
+
 1. Navigate to `/tools`
 2. Select "Compression" tab
 3. Choose compression language
@@ -401,6 +432,7 @@ Access specialized tools for code analysis, compression, and diagnostics.
    - Time taken
 
 **Benefits**:
+
 - Reduced storage requirements
 - Faster vector database operations
 - Improved search performance
@@ -410,12 +442,14 @@ Access specialized tools for code analysis, compression, and diagnostics.
 **Purpose**: Debug and troubleshoot CCE operations.
 
 **Available Diagnostics**:
+
 - **Index Health**: Check index integrity
 - **Search Performance**: Measure query response times
 - **Database Status**: Verify database connections
 - **Backend Connectivity**: Test API communication
 
 **Workflow**:
+
 1. Navigate to `/tools`
 2. Select "Diagnostics" tab
 3. Choose diagnostic test
@@ -423,6 +457,7 @@ Access specialized tools for code analysis, compression, and diagnostics.
 5. Review results and recommendations
 
 ### Best Practices
+
 - Use symbol lookup before refactoring
 - Run compression after major indexing operations
 - Perform diagnostics when experiencing issues
@@ -433,9 +468,11 @@ Access specialized tools for code analysis, compression, and diagnostics.
 ## 8. Summary Generation
 
 ### Purpose
+
 Generate natural language summaries of code entities for improved understanding and documentation.
 
 ### Key Features
+
 - **Entity Summarization**: Convert code to natural language
 - **Batch Processing**: Summarize multiple entities
 - **Custom Templates**: Configure summary format
@@ -470,6 +507,7 @@ Generate natural language summaries of code entities for improved understanding 
    - Integrate into documentation
 
 ### Summary Quality Tips
+
 - Provide clear entity names for better summaries
 - Include doc comments in source code
 - Use consistent coding conventions
@@ -478,16 +516,19 @@ Generate natural language summaries of code entities for improved understanding 
 ### Use Cases
 
 **Documentation Generation**:
+
 - Create API documentation
 - Generate README sections
 - Build knowledge base articles
 
 **Code Review Assistance**:
+
 - Understand unfamiliar code quickly
 - Identify purpose of complex functions
 - Explain architectural decisions
 
 **Onboarding New Developers**:
+
 - Provide overview of codebase structure
 - Explain key components and modules
 - Accelerate learning curve
@@ -497,9 +538,11 @@ Generate natural language summaries of code entities for improved understanding 
 ## 9. Configuration
 
 ### Purpose
+
 Customize CCE frontend behavior and appearance.
 
 ### Key Features
+
 - **Theme Settings**: Light/dark mode preferences
 - **API Configuration**: Backend connection settings
 - **Display Options**: Customize UI elements
@@ -529,6 +572,7 @@ Customize CCE frontend behavior and appearance.
 ### Common Configuration Tasks
 
 **Change API Endpoint**:
+
 ```
 Setting: API Base URL
 Value: http://localhost:9000 (default)
@@ -536,6 +580,7 @@ Use case: Connect to remote backend
 ```
 
 **Adjust Page Size**:
+
 ```
 Setting: Results Per Page
 Value: 10, 25, 50, 100
@@ -543,6 +588,7 @@ Use case: Optimize for screen size and preference
 ```
 
 **Enable/Disable Features**:
+
 ```
 Setting: Feature Flags
 Options: Enable/disable experimental features
@@ -550,6 +596,7 @@ Use case: Test new functionality safely
 ```
 
 ### Configuration Best Practices
+
 - Document custom configurations for team
 - Backup configuration before major changes
 - Test changes in development environment first
@@ -564,11 +611,13 @@ Use case: Test new functionality safely
 #### Issue: Cannot Connect to Backend
 
 **Symptoms**:
+
 - Error messages about API connection
 - Features not loading
 - Timeout errors
 
 **Solutions**:
+
 1. Verify backend server is running
 2. Check API URL in configuration
 3. Ensure network connectivity
@@ -578,10 +627,12 @@ Use case: Test new functionality safely
 #### Issue: Search Returns No Results
 
 **Symptoms**:
+
 - Empty search results
 - "No matches found" message
 
 **Solutions**:
+
 1. Verify projects are indexed
 2. Check search query spelling
 3. Try broader search terms
@@ -591,11 +642,13 @@ Use case: Test new functionality safely
 #### Issue: Slow Performance
 
 **Symptoms**:
+
 - Long load times
 - Laggy interactions
 - Timeout errors
 
 **Solutions**:
+
 1. Check network connection speed
 2. Reduce page size in settings
 3. Clear browser cache
@@ -605,10 +658,12 @@ Use case: Test new functionality safely
 #### Issue: File Watching Not Detecting Changes
 
 **Symptoms**:
+
 - No events in event feed
 - Stale search results
 
 **Solutions**:
+
 1. Verify watch directory path is correct
 2. Check file extension filters
 3. Review exclude patterns
@@ -618,11 +673,13 @@ Use case: Test new functionality safely
 #### Issue: Mobile Display Problems
 
 **Symptoms**:
+
 - Content overflow
 - Unreadable text
 - Broken layout
 
 **Solutions**:
+
 1. Refresh page
 2. Clear mobile browser cache
 3. Try different mobile browser
@@ -725,13 +782,13 @@ A: Yes, CCE respects system high contrast settings and provides sufficient color
 
 ### Keyboard Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `Tab` | Navigate between interactive elements |
-| `Enter` | Activate focused element |
-| `Escape` | Close dialogs/menus |
-| `/` | Focus search box (when implemented) |
-| `?` | Show help (when implemented) |
+| Key      | Action                                |
+| -------- | ------------------------------------- |
+| `Tab`    | Navigate between interactive elements |
+| `Enter`  | Activate focused element              |
+| `Escape` | Close dialogs/menus                   |
+| `/`      | Focus search box (when implemented)   |
+| `?`      | Show help (when implemented)          |
 
 ### Glossary
 

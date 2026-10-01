@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import { onMount } from 'svelte';
 	import { projects, selectedProject, loadProjects } from '$lib/stores/index';
 	import { projectApi, type Project } from '$lib/api/index';
@@ -41,13 +42,23 @@
 			await projectApi.createProject({
 				name: projectName,
 				root_path: projectPath,
-				extensions: extensions ? extensions.split(',').map(e => e.trim()).filter(Boolean) : undefined,
-				exclude_dirs: excludePatterns ? excludePatterns.split(',').map(e => e.trim()).filter(Boolean) : undefined,
+				extensions: extensions
+					? extensions
+							.split(',')
+							.map((e) => e.trim())
+							.filter(Boolean)
+					: undefined,
+				exclude_dirs: excludePatterns
+					? excludePatterns
+							.split(',')
+							.map((e) => e.trim())
+							.filter(Boolean)
+					: undefined,
 			});
 			resetForm();
 			await loadProjects();
-		} catch (error: any) {
-			alert(`Failed to create project: ${error.message}`);
+		} catch (error) {
+			alert(`Failed to create project: ${errorMessage(error)}`);
 		}
 	}
 
@@ -69,13 +80,23 @@
 		try {
 			await projectApi.updateProject(editingProject.id, {
 				name: projectName,
-				extensions: extensions ? extensions.split(',').map(e => e.trim()).filter(Boolean) : undefined,
-				exclude_dirs: excludePatterns ? excludePatterns.split(',').map(e => e.trim()).filter(Boolean) : undefined,
+				extensions: extensions
+					? extensions
+							.split(',')
+							.map((e) => e.trim())
+							.filter(Boolean)
+					: undefined,
+				exclude_dirs: excludePatterns
+					? excludePatterns
+							.split(',')
+							.map((e) => e.trim())
+							.filter(Boolean)
+					: undefined,
 			});
 			resetForm();
 			await loadProjects();
-		} catch (error: any) {
-			alert(`Failed to update project: ${error.message}`);
+		} catch (error) {
+			alert(`Failed to update project: ${errorMessage(error)}`);
 		}
 	}
 
@@ -87,8 +108,8 @@
 		try {
 			await projectApi.deleteProject(id);
 			await loadProjects();
-		} catch (error: any) {
-			alert(`Failed to delete project: ${error.message}`);
+		} catch (error) {
+			alert(`Failed to delete project: ${errorMessage(error)}`);
 		}
 	}
 
@@ -96,8 +117,8 @@
 		try {
 			await projectApi.indexProject(id);
 			alert('Indexing started successfully');
-		} catch (error: any) {
-			alert(`Failed to start indexing: ${error.message}`);
+		} catch (error) {
+			alert(`Failed to start indexing: ${errorMessage(error)}`);
 		}
 	}
 
@@ -110,8 +131,18 @@
 	{#if showCreateForm || showEditForm}
 		<div class="form-section">
 			<h3>{showEditForm ? 'Edit Project' : 'Create New Project'}</h3>
-			
-			<form onsubmit={(e) => { e.preventDefault(); showEditForm ? handleUpdate() : handleCreate(); }}>
+
+			<form
+				onsubmit={(e) => {
+					e.preventDefault();
+					if (showEditForm) {
+						handleUpdate();
+					} else {
+						handleCreate();
+					}
+					return false;
+				}}
+			>
 				<Input
 					label="Project Name"
 					type="text"
@@ -156,24 +187,28 @@
 
 	{#if !showCreateForm && !showEditForm}
 		<div class="header-actions">
-			<Button variant="primary" onclick={() => showCreateForm = true}>
+			<Button variant="primary" onclick={() => (showCreateForm = true)}>
 				+ New Project
 			</Button>
 		</div>
 	{/if}
 
 	{#if $projects.length === 0}
-		<p class="empty-state">No projects found. Create your first project above.</p>
+		<p class="empty-state">
+			No projects found. Create your first project above.
+		</p>
 	{:else}
 		<div class="project-list">
 			{#each $projects as project (project.id)}
-				<div 
-					class="project-item" 
+				<div
+					class="project-item"
 					class:selected={$selectedProject?.id === project.id}
 					onclick={() => selectProject(project)}
 					role="button"
 					tabindex="0"
-					onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectProject(project); }}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') selectProject(project);
+					}}
 				>
 					<div class="project-info">
 						<div class="project-header">
@@ -190,18 +225,31 @@
 						{#if project.exclude_dirs && project.exclude_dirs.length > 0}
 							<div class="project-meta">
 								<span class="meta-label">Excluded:</span>
-								<span class="meta-value">{project.exclude_dirs.join(', ')}</span>
+								<span class="meta-value">{project.exclude_dirs.join(', ')}</span
+								>
 							</div>
 						{/if}
 					</div>
 					<div class="project-actions">
-						<Button variant="secondary" size="sm" onclick={() => handleIndex(project.id)}>
+						<Button
+							variant="secondary"
+							size="sm"
+							onclick={() => handleIndex(project.id)}
+						>
 							Index
 						</Button>
-						<Button variant="secondary" size="sm" onclick={() => handleEdit(project)}>
+						<Button
+							variant="secondary"
+							size="sm"
+							onclick={() => handleEdit(project)}
+						>
 							Edit
 						</Button>
-						<Button variant="danger" size="sm" onclick={() => handleDelete(project.id)}>
+						<Button
+							variant="danger"
+							size="sm"
+							onclick={() => handleDelete(project.id)}
+						>
 							Delete
 						</Button>
 					</div>

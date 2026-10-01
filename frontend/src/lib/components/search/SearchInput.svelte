@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { searchState, searchActions } from '$lib/stores/search';
+	import { searchActions } from '$lib/stores/search';
 	import Button from '../ui/Button.svelte';
 
 	interface Props {
@@ -31,9 +31,7 @@
 		bind:value={query}
 		onkeydown={handleKeydown}
 	/>
-	<Button variant="primary" onclick={handleSearch}>
-		Search
-	</Button>
+	<Button variant="primary" onclick={handleSearch}>Search</Button>
 </div>
 
 <style>

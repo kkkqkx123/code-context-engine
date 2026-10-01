@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { toolsApi } from '$lib/api/tools';
@@ -20,8 +21,8 @@
 			result = await toolsApi.compress({
 				file_path: filePath,
 			});
-		} catch (err: any) {
-			error = err.message;
+		} catch (err) {
+			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}

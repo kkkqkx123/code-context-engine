@@ -14,16 +14,24 @@ import type { StylesheetStyle } from 'cytoscape';
 import type { GraphEdge, GraphNode } from '$lib/api/graph';
 
 /** Supported entity kinds in the codebase. */
-export type NodeKind = 
-	| 'function' | 'method' | 'constructor'
-	| 'class' | 'struct' | 'enum'
-	| 'interface' | 'trait'
-	| 'variable' | 'constant'
-	| 'module' | 'package'
+export type NodeKind =
+	| 'function'
+	| 'method'
+	| 'constructor'
+	| 'class'
+	| 'struct'
+	| 'enum'
+	| 'interface'
+	| 'trait'
+	| 'variable'
+	| 'constant'
+	| 'module'
+	| 'package'
 	| 'unknown';
 
 /** Coarse grouping of the backend relation taxonomy. */
-export type RelationDomain = 'call' | 'dependency' | 'structural' | 'reference' | 'other';
+export type RelationDomain =
+	'call' | 'dependency' | 'structural' | 'reference' | 'other';
 
 export interface RelationDomainMeta {
 	domain: RelationDomain;
@@ -40,32 +48,32 @@ export const RELATION_DOMAINS: Record<RelationDomain, RelationDomainMeta> = {
 		domain: 'call',
 		label: 'Call',
 		description: 'Function / method / constructor invocation',
-		color: '#2563eb'
+		color: '#2563eb',
 	},
 	dependency: {
 		domain: 'dependency',
 		label: 'Dependency',
 		description: 'Import / include / module dependency',
-		color: '#737373'
+		color: '#737373',
 	},
 	structural: {
 		domain: 'structural',
 		label: 'Structural',
 		description: 'Inheritance / implementation / containment',
-		color: '#8b5cf6'
+		color: '#8b5cf6',
 	},
 	reference: {
 		domain: 'reference',
 		label: 'Reference',
 		description: 'Type reference / field access / template binding',
-		color: '#0d9488'
+		color: '#0d9488',
 	},
 	other: {
 		domain: 'other',
 		label: 'Other',
 		description: 'Any unclassified relation',
-		color: '#475569'
-	}
+		color: '#475569',
+	},
 };
 
 export interface NodeKindMeta {
@@ -75,26 +83,66 @@ export interface NodeKindMeta {
 }
 
 export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
-	function: { kind: 'function', shape: 'round-rectangle', description: 'Free function' },
-	method: { kind: 'method', shape: 'round-rectangle', description: 'Method or member function' },
-	constructor: { kind: 'constructor', shape: 'round-rectangle', description: 'Constructor or initializer' },
+	function: {
+		kind: 'function',
+		shape: 'round-rectangle',
+		description: 'Free function',
+	},
+	method: {
+		kind: 'method',
+		shape: 'round-rectangle',
+		description: 'Method or member function',
+	},
+	constructor: {
+		kind: 'constructor',
+		shape: 'round-rectangle',
+		description: 'Constructor or initializer',
+	},
 	class: { kind: 'class', shape: 'rectangle', description: 'Class definition' },
-	struct: { kind: 'struct', shape: 'rectangle', description: 'Structure definition' },
+	struct: {
+		kind: 'struct',
+		shape: 'rectangle',
+		description: 'Structure definition',
+	},
 	enum: { kind: 'enum', shape: 'rectangle', description: 'Enumeration' },
-	interface: { kind: 'interface', shape: 'hexagon', description: 'Interface or protocol' },
+	interface: {
+		kind: 'interface',
+		shape: 'hexagon',
+		description: 'Interface or protocol',
+	},
 	trait: { kind: 'trait', shape: 'hexagon', description: 'Trait or mixin' },
-	variable: { kind: 'variable', shape: 'diamond', description: 'Variable or field' },
-	constant: { kind: 'constant', shape: 'diamond', description: 'Constant or macro' },
-	module: { kind: 'module', shape: 'diamond', description: 'Module or namespace' },
-	package: { kind: 'package', shape: 'diamond', description: 'Package or workspace' },
-	unknown: { kind: 'unknown', shape: 'diamond', description: 'Unknown entity type' }
+	variable: {
+		kind: 'variable',
+		shape: 'diamond',
+		description: 'Variable or field',
+	},
+	constant: {
+		kind: 'constant',
+		shape: 'diamond',
+		description: 'Constant or macro',
+	},
+	module: {
+		kind: 'module',
+		shape: 'diamond',
+		description: 'Module or namespace',
+	},
+	package: {
+		kind: 'package',
+		shape: 'diamond',
+		description: 'Package or workspace',
+	},
+	unknown: {
+		kind: 'unknown',
+		shape: 'diamond',
+		description: 'Unknown entity type',
+	},
 };
 
 /** Map a backend kind string to a known NodeKind, fallback to unknown. */
 export function normalizeNodeKind(kind?: string | null): NodeKind {
 	const value = (kind ?? '').trim().toLowerCase();
 	if (!value) return 'unknown';
-	return NODE_KINDS[value as NodeKind] ? value as NodeKind : 'unknown';
+	return NODE_KINDS[value as NodeKind] ? (value as NodeKind) : 'unknown';
 }
 
 /** Exact structural relation values (these carry no dotted prefix). */
@@ -107,7 +155,7 @@ const STRUCTURAL_RELATIONS = new Set([
 	'contains',
 	'impl_association',
 	'embedding',
-	'mixin'
+	'mixin',
 ]);
 
 /** Reference-domain relation values shared by reference and template relations. */
@@ -117,7 +165,7 @@ const REFERENCE_RELATIONS = new Set([
 	'contains.element',
 	'reference.template',
 	'parameter.binding',
-	'callback.event'
+	'callback.event',
 ]);
 
 /** Map a raw backend relation string onto its presentation domain. */
@@ -138,13 +186,17 @@ export function relationDomain(relation: string): RelationDomain {
 export function relationLabel(relation: string): string {
 	const value = (relation ?? '').trim();
 	if (!value) return 'unknown';
-	if (value.startsWith('call.')) return value.slice('call.'.length).replace(/\./g, ' ');
-	if (value.startsWith('dependency.')) return value.slice('dependency.'.length).replace(/\./g, ' ');
+	if (value.startsWith('call.'))
+		return value.slice('call.'.length).replace(/\./g, ' ');
+	if (value.startsWith('dependency.'))
+		return value.slice('dependency.'.length).replace(/\./g, ' ');
 	return value.replace(/[._]/g, ' ');
 }
 
 /** Edge dash pattern per domain. Calls and structural edges read as solid. */
-export function relationLineStyle(domain: RelationDomain): 'solid' | 'dashed' | 'dotted' {
+export function relationLineStyle(
+	domain: RelationDomain,
+): 'solid' | 'dashed' | 'dotted' {
 	if (domain === 'dependency') return 'dashed';
 	if (domain === 'reference') return 'dotted';
 	return 'solid';
@@ -155,11 +207,17 @@ export function relationLineStyle(domain: RelationDomain): 'solid' | 'dashed' | 
  * rendered as a warning because they are expected to be reviewed by a human;
  * external relations point outside the project into a dependency manifest.
  */
-export type EdgeConfidence = 'extracted' | 'inferred' | 'ambiguous' | 'external' | 'unknown';
+export type EdgeConfidence =
+	'extracted' | 'inferred' | 'ambiguous' | 'external' | 'unknown';
 
 export function edgeConfidence(confidence: string): EdgeConfidence {
 	const value = (confidence ?? '').trim().toLowerCase();
-	if (value === 'extracted' || value === 'inferred' || value === 'ambiguous' || value === 'external') {
+	if (
+		value === 'extracted' ||
+		value === 'inferred' ||
+		value === 'ambiguous' ||
+		value === 'external'
+	) {
 		return value;
 	}
 	return 'unknown';
@@ -179,36 +237,36 @@ export const CONFIDENCE_META: Record<EdgeConfidence, ConfidenceMeta> = {
 		label: 'Extracted',
 		description: 'Relationship is explicitly stated in the source',
 		opacity: 1,
-		color: null
+		color: null,
 	},
 	inferred: {
 		confidence: 'inferred',
 		label: 'Inferred',
 		description: 'Relationship is a reasonable deduction',
 		opacity: 0.55,
-		color: null
+		color: null,
 	},
 	ambiguous: {
 		confidence: 'ambiguous',
 		label: 'Ambiguous',
 		description: 'Relationship is uncertain and flagged for review',
 		opacity: 0.85,
-		color: '#8a6d00'
+		color: '#8a6d00',
 	},
 	external: {
 		confidence: 'external',
 		label: 'External',
 		description: 'Relationship points outside the project into a dependency',
 		opacity: 0.6,
-		color: '#6b7280'
+		color: '#6b7280',
 	},
 	unknown: {
 		confidence: 'unknown',
 		label: 'Unknown',
 		description: 'Confidence was not reported',
 		opacity: 0.75,
-		color: '#8a8a8a'
-	}
+		color: '#8a8a8a',
+	},
 };
 
 /** Node kinds that are rendered with a distinct silhouette. */
@@ -233,7 +291,9 @@ export function nodeShape(kind: string): NodeShape {
 }
 
 /** Deterministic, collision-free renderer id for an edge. */
-export function edgeElementId(edge: Pick<GraphEdge, 'source' | 'target' | 'relation'>): string {
+export function edgeElementId(
+	edge: Pick<GraphEdge, 'source' | 'target' | 'relation'>,
+): string {
 	return `${edge.source}->${edge.target}@${edge.relation}`;
 }
 
@@ -271,8 +331,8 @@ export function toElementNode(node: GraphNode): GraphElementNode {
 			label: node.label,
 			kind: node.kind,
 			sourceFile: node.source_file,
-			sourceLocation: node.source_location
-		}
+			sourceLocation: node.source_location,
+		},
 	};
 }
 
@@ -288,12 +348,14 @@ export function toElementEdge(edge: GraphEdge): GraphElementEdge {
 			relationLabel: relationLabel(edge.relation),
 			domain,
 			confidence,
-			lineStyle: relationLineStyle(domain)
-		}
+			lineStyle: relationLineStyle(domain),
+		},
 	};
 }
 
-export function isNodeElement(element: GraphElement): element is GraphElementNode {
+export function isNodeElement(
+	element: GraphElement,
+): element is GraphElementNode {
 	return 'label' in element.data;
 }
 
@@ -315,75 +377,132 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'background-color': '#fafafa',
 			'border-color': '#0a0a0a',
 			'border-width': 1.5,
-			'label': 'data(label)',
+			label: 'data(label)',
 			'font-family': 'Space Mono, monospace',
 			'font-size': 9,
-			'color': '#0a0a0a',
+			color: '#0a0a0a',
 			'text-valign': 'bottom',
 			'text-halign': 'center',
 			'text-margin-y': 4,
 			'text-max-width': '110px',
 			'text-wrap': 'ellipsis',
-			'width': 26,
-			'height': 26,
-			'overlay-opacity': 0
-		}
+			width: 26,
+			height: 26,
+			'overlay-opacity': 0,
+		},
 	},
-	{ selector: 'node[kind = "class"]', style: { 'shape': 'rectangle' } },
-	{ selector: 'node[kind = "struct"]', style: { 'shape': 'rectangle' } },
-	{ selector: 'node[kind = "enum"]', style: { 'shape': 'rectangle' } },
-	{ selector: 'node[kind = "function"]', style: { 'shape': 'round-rectangle' } },
-	{ selector: 'node[kind = "method"]', style: { 'shape': 'round-rectangle' } },
-	{ selector: 'node[kind = "interface"]', style: { 'shape': 'hexagon' } },
-	{ selector: 'node[kind = "trait"]', style: { 'shape': 'hexagon' } },
+	{ selector: 'node[kind = "class"]', style: { shape: 'rectangle' } },
+	{ selector: 'node[kind = "struct"]', style: { shape: 'rectangle' } },
+	{ selector: 'node[kind = "enum"]', style: { shape: 'rectangle' } },
+	{ selector: 'node[kind = "function"]', style: { shape: 'round-rectangle' } },
+	{ selector: 'node[kind = "method"]', style: { shape: 'round-rectangle' } },
+	{ selector: 'node[kind = "interface"]', style: { shape: 'hexagon' } },
+	{ selector: 'node[kind = "trait"]', style: { shape: 'hexagon' } },
 	{
 		selector: 'edge',
 		style: {
-			'width': 1.4,
+			width: 1.4,
 			'line-color': RELATION_DOMAINS.other.color,
 			'target-arrow-color': RELATION_DOMAINS.other.color,
 			'target-arrow-shape': 'triangle',
 			'arrow-scale': 0.8,
 			'curve-style': 'bezier',
-			'opacity': 0.8,
+			opacity: 0.8,
 			'overlay-opacity': 0,
 			'font-family': 'Space Mono, monospace',
 			'font-size': 8,
-			'color': '#475569',
+			color: '#475569',
 			'text-background-color': '#ffffff',
 			'text-background-opacity': 0.85,
 			'text-background-padding': '1px',
-			'text-rotation': 'autorotate'
-		}
+			'text-rotation': 'autorotate',
+		},
 	},
-	{ selector: 'edge[domain = "call"]', style: { 'line-color': RELATION_DOMAINS.call.color, 'target-arrow-color': RELATION_DOMAINS.call.color, 'width': 1.8 } },
-	{ selector: 'edge[domain = "dependency"]', style: { 'line-color': RELATION_DOMAINS.dependency.color, 'target-arrow-color': RELATION_DOMAINS.dependency.color, 'line-style': 'dashed' } },
-	{ selector: 'edge[domain = "structural"]', style: { 'line-color': RELATION_DOMAINS.structural.color, 'target-arrow-color': RELATION_DOMAINS.structural.color, 'width': 2.2 } },
-	{ selector: 'edge[domain = "reference"]', style: { 'line-color': RELATION_DOMAINS.reference.color, 'target-arrow-color': RELATION_DOMAINS.reference.color, 'line-style': 'dotted' } },
-	{ selector: 'edge[confidence = "inferred"]', style: { 'opacity': CONFIDENCE_META.inferred.opacity } },
-	{ selector: 'edge[confidence = "ambiguous"]', style: { 'opacity': CONFIDENCE_META.ambiguous.opacity, 'line-color': CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color, 'target-arrow-color': CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color } },
+	{
+		selector: 'edge[domain = "call"]',
+		style: {
+			'line-color': RELATION_DOMAINS.call.color,
+			'target-arrow-color': RELATION_DOMAINS.call.color,
+			width: 1.8,
+		},
+	},
+	{
+		selector: 'edge[domain = "dependency"]',
+		style: {
+			'line-color': RELATION_DOMAINS.dependency.color,
+			'target-arrow-color': RELATION_DOMAINS.dependency.color,
+			'line-style': 'dashed',
+		},
+	},
+	{
+		selector: 'edge[domain = "structural"]',
+		style: {
+			'line-color': RELATION_DOMAINS.structural.color,
+			'target-arrow-color': RELATION_DOMAINS.structural.color,
+			width: 2.2,
+		},
+	},
+	{
+		selector: 'edge[domain = "reference"]',
+		style: {
+			'line-color': RELATION_DOMAINS.reference.color,
+			'target-arrow-color': RELATION_DOMAINS.reference.color,
+			'line-style': 'dotted',
+		},
+	},
+	{
+		selector: 'edge[confidence = "inferred"]',
+		style: { opacity: CONFIDENCE_META.inferred.opacity },
+	},
+	{
+		selector: 'edge[confidence = "ambiguous"]',
+		style: {
+			opacity: CONFIDENCE_META.ambiguous.opacity,
+			'line-color':
+				CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color,
+			'target-arrow-color':
+				CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color,
+		},
+	},
 	{
 		selector: 'node.focus',
-		style: { 'border-width': 3, 'border-color': '#e63600', 'background-color': '#fef2f0' }
+		style: {
+			'border-width': 3,
+			'border-color': '#e63600',
+			'background-color': '#fef2f0',
+		},
 	},
 	{
 		selector: 'node.dimmed',
-		style: { 'opacity': 0.25 }
+		style: { opacity: 0.25 },
 	},
 	{
 		selector: 'edge.dimmed',
-		style: { 'opacity': 0.12 }
+		style: { opacity: 0.12 },
 	},
 	{
 		selector: 'node.impact',
-		style: { 'border-color': '#2563eb', 'border-width': 3, 'background-color': '#eff6ff' }
+		style: {
+			'border-color': '#2563eb',
+			'border-width': 3,
+			'background-color': '#eff6ff',
+		},
 	},
 	{
 		selector: 'node.impact-transitive',
-		style: { 'border-color': '#2563eb', 'border-style': 'dashed', 'border-width': 2 }
+		style: {
+			'border-color': '#2563eb',
+			'border-style': 'dashed',
+			'border-width': 2,
+		},
 	},
 	{
 		selector: 'edge.highlighted',
-		style: { 'width': 3, 'opacity': 1, 'line-color': '#e63600', 'target-arrow-color': '#e63600' }
-	}
+		style: {
+			width: 3,
+			opacity: 1,
+			'line-color': '#e63600',
+			'target-arrow-color': '#e63600',
+		},
+	},
 ];

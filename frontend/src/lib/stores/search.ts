@@ -4,7 +4,12 @@
  */
 
 import { writable, get } from 'svelte/store';
-import { searchApi, type SearchRequest, type SearchResultItem, type QueryType } from '../api/search';
+import {
+	searchApi,
+	type SearchRequest,
+	type SearchResultItem,
+	type QueryType,
+} from '../api/search';
 import { currentProjectId } from './project';
 
 export interface SearchState {
@@ -44,18 +49,18 @@ export const searchState = writable<SearchState>({
 // Actions
 export const searchActions = {
 	setQuery(query: string) {
-		searchState.update(state => ({ ...state, query }));
+		searchState.update((state) => ({ ...state, query }));
 	},
 
 	setQueryType(type: QueryType) {
-		searchState.update(state => ({ ...state, queryType: type }));
+		searchState.update((state) => ({ ...state, queryType: type }));
 	},
 
 	updateFilter<K extends keyof SearchState['filters']>(
 		key: K,
-		value: SearchState['filters'][K]
+		value: SearchState['filters'][K],
 	) {
-		searchState.update(state => ({
+		searchState.update((state) => ({
 			...state,
 			filters: { ...state.filters, [key]: value },
 		}));
@@ -63,11 +68,13 @@ export const searchActions = {
 
 	async executeSearch() {
 		let state: SearchState;
-		searchState.subscribe(s => { state = s; })();
+		searchState.subscribe((s) => {
+			state = s;
+		})();
 
 		if (!state!.query.trim()) return;
 
-		searchState.update(s => ({ ...s, isSearching: true }));
+		searchState.update((s) => ({ ...s, isSearching: true }));
 
 		try {
 			const projectId = get(currentProjectId);
@@ -82,7 +89,7 @@ export const searchActions = {
 
 			const response = await searchApi.search(request);
 
-			searchState.update(s => ({
+			searchState.update((s) => ({
 				...s,
 				results: response.items,
 				total: response.total,
@@ -90,12 +97,12 @@ export const searchActions = {
 			}));
 		} catch (error) {
 			console.error('Search failed:', error);
-			searchState.update(s => ({ ...s, isSearching: false }));
+			searchState.update((s) => ({ ...s, isSearching: false }));
 		}
 	},
 	/** Load results produced outside the standard search flow (aggregated search). */
 	setExternalResults(response: { items: SearchResultItem[]; total: number }) {
-		searchState.update(state => ({
+		searchState.update((state) => ({
 			...state,
 			results: response.items,
 			total: response.total,
@@ -105,7 +112,7 @@ export const searchActions = {
 	},
 
 	setPage(page: number) {
-		searchState.update(state => ({
+		searchState.update((state) => ({
 			...state,
 			pagination: { ...state.pagination, page },
 		}));
@@ -114,11 +121,14 @@ export const searchActions = {
 	// Get paginated results (client-side pagination)
 	getPaginatedResults(): SearchResultItem[] {
 		let currentState: SearchState | undefined;
-		searchState.subscribe(s => { currentState = s; })();
-		
+		searchState.subscribe((s) => {
+			currentState = s;
+		})();
+
 		if (!currentState) return [];
-		
-		const start = (currentState.pagination.page - 1) * currentState.pagination.limit;
+
+		const start =
+			(currentState.pagination.page - 1) * currentState.pagination.limit;
 		const end = start + currentState.pagination.limit;
 		return currentState.results.slice(start, end);
 	},

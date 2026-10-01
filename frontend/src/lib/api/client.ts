@@ -8,7 +8,8 @@
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
 
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
+export const BASE_URL =
+	import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
 
 export class ApiError extends Error {
 	status: number;
@@ -51,16 +52,19 @@ export async function call<T>(
 		data?: unknown;
 		error?: unknown;
 		response?: Response;
-	}>
+	}>,
 ): Promise<T> {
 	const res = await promise;
 	if (res.error !== undefined && res.error !== null) {
-		throw new ApiError(errorMessage(res.error, res.response?.status ?? 0), res.response?.status ?? 0);
+		throw new ApiError(
+			errorMessage(res.error, res.response?.status ?? 0),
+			res.response?.status ?? 0,
+		);
 	}
 	return res.data as T;
 }
 
 export const client = createClient<paths>({
 	baseUrl: BASE_URL,
-	headers: { 'Content-Type': 'application/json' }
+	headers: { 'Content-Type': 'application/json' },
 });

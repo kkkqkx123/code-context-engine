@@ -5,6 +5,7 @@
 This document provides a comprehensive overview of the Code Context Engine (CCE) Frontend architecture, including component hierarchy, data flow patterns, state management strategy, and API integration.
 
 **Technology Stack:**
+
 - **Framework**: SvelteKit 2.x
 - **Language**: TypeScript
 - **Styling**: CSS with custom properties
@@ -77,6 +78,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ### Module-Specific Components
 
 #### 1. Dashboard (`/`)
+
 ```
 +page.svelte
 ├── Statistics Cards
@@ -88,6 +90,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 2. Index Management (`/index`)
+
 ```
 +page.svelte
 ├── AddProjectForm
@@ -104,6 +107,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 3. Search Interface (`/search`)
+
 ```
 +page.svelte
 ├── SearchBar
@@ -119,6 +123,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 4. Entity Explorer (`/entities/[id]`)
+
 ```
 +page.svelte
 ├── EntityHeader
@@ -136,6 +141,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 5. Storage Management (`/storage`)
+
 ```
 +page.svelte
 ├── StorageStatistics
@@ -150,6 +156,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 6. File Watching (`/watch`)
+
 ```
 +page.svelte
 ├── WatchConfiguration
@@ -171,6 +178,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 7. Developer Tools (`/tools`)
+
 ```
 +page.svelte
 ├── ToolTabs
@@ -192,6 +200,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 8. Summary Generation (`/summary`)
+
 ```
 +page.svelte
 ├── EntitySelector
@@ -204,6 +213,7 @@ This document provides a comprehensive overview of the Code Context Engine (CCE)
 ```
 
 #### 9. Configuration (`/config`)
+
 ```
 +page.svelte
 ├── ApiSettings
@@ -240,76 +250,77 @@ src/lib/stores/
 import { writable } from 'svelte/store';
 
 export interface SearchState {
-  query: string;
-  results: SearchResult[];
-  loading: boolean;
-  error: string | null;
-  filters: SearchFilters;
+	query: string;
+	results: SearchResult[];
+	loading: boolean;
+	error: string | null;
+	filters: SearchFilters;
 }
 
 export const searchStore = writable<SearchState>({
-  query: '',
-  results: [],
-  loading: false,
-  error: null,
-  filters: {
-    language: null,
-    entityType: null
-  }
+	query: '',
+	results: [],
+	loading: false,
+	error: null,
+	filters: {
+		language: null,
+		entityType: null,
+	},
 });
 
 export const searchActions = {
-  setQuery(query: string) {
-    searchStore.update(state => ({ ...state, query }));
-  },
-  
-  async performSearch() {
-    searchStore.update(state => ({ ...state, loading: true, error: null }));
-    
-    try {
-      const results = await searchApi.search(searchStore.query);
-      searchStore.update(state => ({ 
-        ...state, 
-        results, 
-        loading: false 
-      }));
-    } catch (error) {
-      searchStore.update(state => ({ 
-        ...state, 
-        error: error.message, 
-        loading: false 
-      }));
-    }
-  }
+	setQuery(query: string) {
+		searchStore.update((state) => ({ ...state, query }));
+	},
+
+	async performSearch() {
+		searchStore.update((state) => ({ ...state, loading: true, error: null }));
+
+		try {
+			const results = await searchApi.search(searchStore.query);
+			searchStore.update((state) => ({
+				...state,
+				results,
+				loading: false,
+			}));
+		} catch (error) {
+			searchStore.update((state) => ({
+				...state,
+				error: error.message,
+				loading: false,
+			}));
+		}
+	},
 };
 ```
 
 ### 2. Component Communication
 
 #### Parent-to-Child: Props
-```svelte
-<!-- Parent -->
-<SearchResults results={results} on:resultClick={handleClick} />
 
+```svelte
 <!-- Child -->
 <script lang="ts">
-  export let results: SearchResult[];
-  export let onresultClick: (result: SearchResult) => void;
+	export let results: SearchResult[];
+	export let onresultClick: (result: SearchResult) => void;
 </script>
+
+<!-- Parent -->
+<SearchResults {results} on:resultClick={handleClick} />
 ```
 
 #### Child-to-Parent: Events
+
 ```svelte
 <!-- Child Component -->
-<button on:click={() => dispatch('select', item)}>
-  Select
-</button>
+<button on:click={() => dispatch('select', item)}> Select </button>
 
 <!-- Parent Component -->
 <Component on:select={handleSelect} />
 ```
 
 #### Global State: Stores
+
 ```typescript
 // Any component can subscribe
 import { searchStore } from '$lib/stores/search';
@@ -324,35 +335,37 @@ All API calls go through the centralized `ApiClient` with retry logic.
 ```typescript
 // src/lib/api/client.ts
 export class ApiClient {
-  private baseUrl: string;
-  
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
-  }
-  
-  async get<T>(endpoint: string): Promise<T> {
-    return this.fetchWithRetry(`${this.baseUrl}${endpoint}`);
-  }
-  
-  async post<T>(endpoint: string, data: any): Promise<T> {
-    return this.fetchWithRetry(`${this.baseUrl}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-  }
-  
-  private async fetchWithRetry<T>(
-    url: string,
-    options: RequestInit = {},
-    retries = 3
-  ): Promise<T> {
-    // Exponential backoff retry logic
-    // ... implementation ...
-  }
+	private baseUrl: string;
+
+	constructor(baseUrl: string) {
+		this.baseUrl = baseUrl;
+	}
+
+	async get<T>(endpoint: string): Promise<T> {
+		return this.fetchWithRetry(`${this.baseUrl}${endpoint}`);
+	}
+
+	async post<T>(endpoint: string, data: any): Promise<T> {
+		return this.fetchWithRetry(`${this.baseUrl}${endpoint}`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(data),
+		});
+	}
+
+	private async fetchWithRetry<T>(
+		url: string,
+		options: RequestInit = {},
+		retries = 3,
+	): Promise<T> {
+		// Exponential backoff retry logic
+		// ... implementation ...
+	}
 }
 
-export const apiClient = new ApiClient(import.meta.env.PUBLIC_API_URL || 'http://localhost:9000');
+export const apiClient = new ApiClient(
+	import.meta.env.PUBLIC_API_URL || 'http://localhost:9000',
+);
 ```
 
 ### 4. Data Flow Examples
@@ -449,10 +462,10 @@ Heavy components are lazy-loaded using dynamic imports to reduce initial bundle 
 // In route component
 <script lang="ts">
   import { onMount } from 'svelte';
-  
+
   let CallGraph: any = null;
   let graphLoaded = false;
-  
+
   async function loadCallGraph() {
     if (!graphLoaded) {
       const module = await import('$lib/components/entities/CallGraph.svelte');
@@ -460,7 +473,7 @@ Heavy components are lazy-loaded using dynamic imports to reduce initial bundle 
       graphLoaded = true;
     }
   }
-  
+
   // Load when component mounts or when needed
   onMount(() => {
     loadCallGraph();
@@ -498,78 +511,84 @@ Heavy components are lazy-loaded using dynamic imports to reduce initial bundle 
 /* Base styles: Mobile (< 768px) */
 
 @media (min-width: 768px) {
-  /* Tablet */
+	/* Tablet */
 }
 
 @media (min-width: 1024px) {
-  /* Desktop */
+	/* Desktop */
 }
 
 @media (max-width: 480px) {
-  /* Small mobile optimizations */
+	/* Small mobile optimizations */
 }
 ```
 
 ### Responsive Patterns
 
 #### 1. Grid Layouts
+
 ```css
 .grid-container {
-  display: grid;
-  grid-template-columns: 1fr; /* Mobile: single column */
-  gap: 1rem;
+	display: grid;
+	grid-template-columns: 1fr; /* Mobile: single column */
+	gap: 1rem;
 }
 
 @media (min-width: 1024px) {
-  .grid-container {
-    grid-template-columns: repeat(3, 1fr); /* Desktop: 3 columns */
-  }
+	.grid-container {
+		grid-template-columns: repeat(3, 1fr); /* Desktop: 3 columns */
+	}
 }
 ```
 
 #### 2. Mobile Navigation
+
 ```svelte
 <!-- Hamburger menu for mobile -->
 <button class="mobile-menu-toggle" on:click={toggleMobileMenu}>
-  <span class="hamburger-icon"></span>
+	<span class="hamburger-icon"></span>
 </button>
 
 <nav class:open={mobileMenuOpen}>
-  <!-- Navigation links -->
+	<!-- Navigation links -->
 </nav>
 
 <div class="mobile-overlay" on:click={closeMobileMenu}></div>
 ```
 
 #### 3. Responsive Tables
+
 ```css
 /* Desktop: Traditional table */
 .table {
-  display: table;
+	display: table;
 }
 
 /* Mobile: Card-based layout */
 @media (max-width: 480px) {
-  .table-row {
-    display: block;
-    margin-bottom: 1rem;
-    border: 1px solid var(--gray-200);
-  }
-  
-  .table-cell::before {
-    content: attr(data-label);
-    font-weight: bold;
-  }
+	.table-row {
+		display: block;
+		margin-bottom: 1rem;
+		border: 1px solid var(--gray-200);
+	}
+
+	.table-cell::before {
+		content: attr(data-label);
+		font-weight: bold;
+	}
 }
 ```
 
 #### 4. Touch Targets
+
 ```css
 @media (max-width: 768px) {
-  button, input, select {
-    min-height: 44px; /* WCAG 2.5.5 compliance */
-    min-width: 44px;
-  }
+	button,
+	input,
+	select {
+		min-height: 44px; /* WCAG 2.5.5 compliance */
+		min-width: 44px;
+	}
 }
 ```
 
@@ -580,59 +599,58 @@ Heavy components are lazy-loaded using dynamic imports to reduce initial bundle 
 ### WCAG 2.1 AA Compliance
 
 #### 1. Semantic HTML
+
 ```svelte
 <!-- Correct -->
 <nav aria-label="Main navigation">
-  <a href="/">Home</a>
+	<a href="/">Home</a>
 </nav>
 
 <main id="main-content">
-  <!-- Page content -->
+	<!-- Page content -->
 </main>
 ```
 
 #### 2. ARIA Attributes
+
 ```svelte
-<button 
-  aria-label="Close dialog"
-  aria-expanded={isOpen}
-  on:click={close}
->
-  ×
+<button aria-label="Close dialog" aria-expanded={isOpen} on:click={close}>
+	×
 </button>
 
 <div role="dialog" aria-modal="true" aria-labelledby="dialog-title">
-  <h2 id="dialog-title">Confirm Action</h2>
+	<h2 id="dialog-title">Confirm Action</h2>
 </div>
 ```
 
 #### 3. Keyboard Navigation
+
 ```svelte
 <!-- Focus trap in dialogs -->
-<div 
-  tabindex="-1"
-  on:keydown={(e) => {
-    if (e.key === 'Escape') close();
-  }}
+<div
+	tabindex="-1"
+	on:keydown={(e) => {
+		if (e.key === 'Escape') close();
+	}}
 >
-  <!-- Dialog content -->
+	<!-- Dialog content -->
 </div>
 
 <!-- Skip link -->
-<a href="#main-content" class="skip-link">
-  Skip to main content
-</a>
+<a href="#main-content" class="skip-link"> Skip to main content </a>
 ```
 
 #### 4. Live Regions
+
 ```svelte
 <!-- Announce dynamic updates -->
 <div aria-live="polite" aria-atomic="true" class="sr-only">
-  {statusMessage}
+	{statusMessage}
 </div>
 ```
 
 #### 5. Form Labels
+
 ```svelte
 <!-- Associated labels -->
 <label for="search-query">Search</label>
@@ -640,8 +658,8 @@ Heavy components are lazy-loaded using dynamic imports to reduce initial bundle 
 
 <!-- Or wrapped -->
 <label>
-  Search
-  <input type="text" bind:value={query} />
+	Search
+	<input type="text" bind:value={query} />
 </label>
 ```
 
@@ -652,65 +670,74 @@ Heavy components are lazy-loaded using dynamic imports to reduce initial bundle 
 ### Centralized Error Management
 
 #### 1. API Error Handling
+
 ```typescript
 // src/lib/api/client.ts
 async function handleResponse(response: Response) {
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new ApiError({
-      status: response.status,
-      message: error.message || response.statusText,
-      code: error.code
-    });
-  }
-  return response.json();
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({}));
+		throw new ApiError({
+			status: response.status,
+			message: error.message || response.statusText,
+			code: error.code,
+		});
+	}
+	return response.json();
 }
 ```
 
 #### 2. Component Error Boundaries
+
 ```svelte
 <script lang="ts">
-  import { onError } from 'svelte';
-  
-  let error: Error | null = null;
-  
-  onError((e) => {
-    error = e;
-    toastActions.error('Failed to load component');
-  });
+	import { onError } from 'svelte';
+
+	let error: Error | null = null;
+
+	onError((e) => {
+		error = e;
+		toastActions.error('Failed to load component');
+	});
 </script>
 
 {#if error}
-  <div class="error-state">
-    <p>An error occurred</p>
-    <button on:click={retry}>Retry</button>
-  </div>
+	<div class="error-state">
+		<p>An error occurred</p>
+		<button on:click={retry}>Retry</button>
+	</div>
 {:else}
-  <slot />
+	<slot />
 {/if}
 ```
 
 #### 3. Toast Notification System
+
 ```typescript
 // src/lib/stores/toast.ts
 export const toastActions = {
-  success(message: string) {
-    toasts.update(state => [...state, {
-      id: generateId(),
-      message,
-      type: 'success',
-      duration: 5000
-    }]);
-  },
-  
-  error(message: string) {
-    toasts.update(state => [...state, {
-      id: generateId(),
-      message,
-      type: 'error',
-      duration: 10000
-    }]);
-  }
+	success(message: string) {
+		toasts.update((state) => [
+			...state,
+			{
+				id: generateId(),
+				message,
+				type: 'success',
+				duration: 5000,
+			},
+		]);
+	},
+
+	error(message: string) {
+		toasts.update((state) => [
+			...state,
+			{
+				id: generateId(),
+				message,
+				type: 'error',
+				duration: 10000,
+			},
+		]);
+	},
 };
 ```
 
@@ -719,50 +746,54 @@ export const toastActions = {
 ## Performance Optimization Architecture
 
 ### 1. Bundle Analysis
+
 ```typescript
 // vite.config.ts
 import { visualizer } from 'rollup-plugin-visualizer';
 
 export default defineConfig({
-  plugins: [
-    sveltekit(),
-    visualizer({
-      open: true,
-      filename: 'stats.html',
-      gzipSize: true,
-      brotliSize: true
-    })
-  ]
+	plugins: [
+		sveltekit(),
+		visualizer({
+			open: true,
+			filename: 'stats.html',
+			gzipSize: true,
+			brotliSize: true,
+		}),
+	],
 });
 ```
 
 ### 2. Caching Strategy
 
 #### HTTP Caching (Backend)
+
 ```rust
 // Rust backend sets cache headers
 Cache-Control: public, max-age=3600
 ```
 
 #### Client-Side Caching
+
 ```typescript
 // In-memory cache with TTL
 const CACHE_TTL = 30000; // 30 seconds
 let cache = new Map();
 
 async function getCachedData(key: string, fetchFn: () => Promise<any>) {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
-  
-  const data = await fetchFn();
-  cache.set(key, { data, timestamp: Date.now() });
-  return data;
+	const cached = cache.get(key);
+	if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+		return cached.data;
+	}
+
+	const data = await fetchFn();
+	cache.set(key, { data, timestamp: Date.now() });
+	return data;
 }
 ```
 
 ### 3. Debouncing & Throttling
+
 ```typescript
 // Debounce search input
 import { debounce } from '$lib/utils/debounce';
@@ -779,32 +810,34 @@ const debouncedSearch = debounce((query: string) => {
 ## Testing Architecture
 
 ### Unit Testing
+
 ```typescript
 // Component unit tests
 import { render, fireEvent } from '@testing-library/svelte';
 import SearchInput from './SearchInput.svelte';
 
 test('emits search event on enter', async () => {
-  const { getByRole } = render(SearchInput);
-  const input = getByRole('textbox');
-  
-  await fireEvent.keyDown(input, { key: 'Enter' });
-  
-  expect(onSearch).toHaveBeenCalled();
+	const { getByRole } = render(SearchInput);
+	const input = getByRole('textbox');
+
+	await fireEvent.keyDown(input, { key: 'Enter' });
+
+	expect(onSearch).toHaveBeenCalled();
 });
 ```
 
 ### Integration Testing
+
 ```typescript
 // E2E workflow tests
 import { test, expect } from '@playwright/test';
 
 test('complete search workflow', async ({ page }) => {
-  await page.goto('/search');
-  await page.fill('[role="searchbox"]', 'authentication');
-  await page.click('[type="submit"]');
-  
-  await expect(page.locator('.result-card')).toHaveCountGreaterThan(0);
+	await page.goto('/search');
+	await page.fill('[role="searchbox"]', 'authentication');
+	await page.click('[type="submit"]');
+
+	await expect(page.locator('.result-card')).toHaveCountGreaterThan(0);
 });
 ```
 
@@ -813,6 +846,7 @@ test('complete search workflow', async ({ page }) => {
 ## Deployment Architecture
 
 ### Docker Setup
+
 ```dockerfile
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -829,25 +863,26 @@ CMD ["nginx", "-g", "daemon off;"]
 ```
 
 ### Nginx Configuration
+
 ```nginx
 server {
   listen 80;
   server_name cce.example.com;
-  
+
   root /usr/share/nginx/html;
   index index.html;
-  
+
   # SPA routing
   location / {
     try_files $uri $uri/ /index.html;
   }
-  
+
   # API proxy
   location /api/ {
     proxy_pass http://backend:9000;
     proxy_set_header Host $host;
   }
-  
+
   # Cache static assets
   location ~* \.(js|css|png|jpg)$ {
     expires 1y;
@@ -861,25 +896,27 @@ server {
 ## Monitoring & Analytics
 
 ### Error Tracking (Optional)
+
 ```typescript
 // Sentry integration
 import * as Sentry from '@sentry/svelte';
 
 Sentry.init({
-  dsn: process.env.SENTRY_DSN,
-  environment: process.env.NODE_ENV
+	dsn: process.env.SENTRY_DSN,
+	environment: process.env.NODE_ENV,
 });
 ```
 
 ### Performance Metrics
+
 ```typescript
 // Web Vitals monitoring
 import { getCLS, getFID, getLCP } from 'web-vitals';
 
 export function reportWebVitals() {
-  getCLS(console.log);
-  getFID(console.log);
-  getLCP(console.log);
+	getCLS(console.log);
+	getFID(console.log);
+	getLCP(console.log);
 }
 ```
 

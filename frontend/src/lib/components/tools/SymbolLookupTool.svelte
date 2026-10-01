@@ -1,19 +1,21 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import { currentProjectId } from '$lib/stores/project';
-	import type { SymbolInfo } from '$lib/api/tools';
+	import type { GetSymbolsResponse, FileSymbolResult } from '$lib/api/tools';
 
 	interface Props {
 		filePath?: string;
 		language?: string;
 	}
 
-	let { filePath = $bindable(''), language = $bindable('typescript') }: Props = $props();
+	let { filePath = $bindable(''), language = $bindable('typescript') }: Props =
+		$props();
 
-	let result: any = $state(null);
+	let result: GetSymbolsResponse | null = $state(null);
 	let loading = $state(false);
 	let error: string | null = $state(null);
 
@@ -26,11 +28,14 @@
 
 		try {
 			let projectId: number;
-			currentProjectId.subscribe(v => projectId = v)();
+			currentProjectId.subscribe((v) => (projectId = v))();
 
-			result = await toolsApi.getSymbols({ project_id: projectId!, paths: [filePath] });
-		} catch (err: any) {
-			error = err.message;
+			result = await toolsApi.getSymbols({
+				project_id: projectId!,
+				paths: [filePath],
+			});
+		} catch (err) {
+			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}
@@ -78,7 +83,9 @@
 	</div>
 
 	{#if result?.result?.results}
-		{@const symbols = result.result.results.flatMap((r: any) => r.symbols ?? [])}
+		{@const symbols = result.result.results.flatMap(
+			(r: FileSymbolResult) => r.symbols ?? [],
+		)}
 		<div class="symbols-results">
 			<h3 class="results-title">Found {symbols.length} Symbol(s)</h3>
 			<div class="symbols-table">
@@ -87,19 +94,23 @@
 					<div class="col-kind">Kind</div>
 					<div class="col-location">Location</div>
 				</div>
-				{#each symbols as sym}
+				{#each symbols as sym (sym.name)}
 					<div class="table-row">
 						<div class="col-name" data-label="Name">{sym.name}</div>
 						<div class="col-kind" data-label="Kind">
 							<Badge label={sym.kind} variant="default" />
 						</div>
-						<div class="col-location" data-label="Location">Lines {sym.line}-{sym.end_line}</div>
+						<div class="col-location" data-label="Location">
+							Lines {sym.line}-{sym.end_line}
+						</div>
 					</div>
 				{/each}
 			</div>
 		</div>
 	{:else if !loading}
-		<div class="empty-output">Symbol extraction results will appear here...</div>
+		<div class="empty-output">
+			Symbol extraction results will appear here...
+		</div>
 	{/if}
 </div>
 

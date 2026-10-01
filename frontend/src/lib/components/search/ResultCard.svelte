@@ -8,10 +8,7 @@
 		onNavigate?: (id: string) => void;
 	}
 
-	let {
-		result,
-		onNavigate = () => {}
-	}: Props = $props();
+	let { result, onNavigate = () => {} }: Props = $props();
 
 	function formatScore(score: number): string {
 		return (score * 100).toFixed(1);
@@ -29,11 +26,21 @@
 	}
 </script>
 
-<div class="result-card" role="button" tabindex="0" onclick={handleNavigate} onkeydown={handleKeydown}>
+<div
+	class="result-card"
+	role="button"
+	tabindex="0"
+	onclick={handleNavigate}
+	onkeydown={handleKeydown}
+>
 	<div class="result-header">
 		<div class="result-meta">
 			<span class="file-path">{result.file_path}</span>
-			<span class="line-numbers">:{result.start_line}{result.end_line ? `-${result.end_line}` : ''}</span>
+			<span class="line-numbers"
+				>:{result.start_line}{result.end_line
+					? `-${result.end_line}`
+					: ''}</span
+			>
 		</div>
 		<div class="result-badges">
 			<Badge variant={result.score > 0.8 ? 'active' : 'default'}>

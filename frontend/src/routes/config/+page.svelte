@@ -4,9 +4,14 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import { configApi, type ConfigInfoResponse, type ConfigValidateResponse } from '$lib/api/config';
+	import {
+		configApi,
+		type ConfigInfoResponse,
+		type ConfigValidateResponse,
+	} from '$lib/api/config';
 	import { projectApi, type ProjectConfigUpdateResponse } from '$lib/api';
 	import { currentProjectId } from '$lib/stores/project';
+	import { errorMessage } from '$lib/utils/errors';
 
 	let activeTab = $state<'info' | 'validate' | 'reload' | 'project'>('info');
 	let configInfo = $state<ConfigInfoResponse | null>(null);
@@ -38,13 +43,13 @@
 				extensions: project.extensions ?? [],
 				exclude_dirs: project.exclude_dirs ?? [],
 				ignore_patterns: project.ignore_patterns ?? [],
-				respect_gitignore: project.respect_gitignore ?? true
+				respect_gitignore: project.respect_gitignore ?? true,
 			};
 			projectConfigText = JSON.stringify(editable, null, 2);
 			projectConfigLoaded = true;
 			projectConfigResult = null;
-		} catch (e: any) {
-			projectConfigError = e.message || 'Failed to load project config';
+		} catch (e) {
+			projectConfigError = errorMessage(e);
 		} finally {
 			projectConfigLoading = false;
 		}
@@ -73,10 +78,10 @@
 			}
 			projectConfigResult = await projectApi.updateProjectConfig(
 				String($currentProjectId),
-				parsed
+				parsed,
 			);
-		} catch (e: any) {
-			projectConfigError = e.message || 'Failed to update project config';
+		} catch (e) {
+			projectConfigError = errorMessage(e);
 		} finally {
 			projectConfigSaving = false;
 		}
@@ -92,8 +97,8 @@
 		error = null;
 		try {
 			configInfo = await configApi.getInfo();
-		} catch (e: any) {
-			error = e.message || 'Failed to load config';
+		} catch (e) {
+			error = errorMessage(e);
 		} finally {
 			loading = false;
 		}
@@ -102,7 +107,7 @@
 	async function loadValidate() {
 		try {
 			validateResult = await configApi.validate();
-		} catch (_) {
+		} catch {
 			// silent
 		}
 	}
@@ -113,10 +118,10 @@
 		reloadResult = null;
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 			reloadResult = await configApi.reload(pid!);
-		} catch (e: any) {
-			error = e.message || 'Failed to reload config';
+		} catch (e) {
+			error = errorMessage(e);
 		} finally {
 			loading = false;
 		}
@@ -129,12 +134,15 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Configuration" subtitle="Manage application settings and environment variables" />
+		<PageHeader
+			title="Configuration"
+			subtitle="Manage application settings and environment variables"
+		/>
 
 		{#if error}
 			<div class="error-banner">
 				<span>{error}</span>
-				<button class="dismiss-btn" onclick={() => error = null}>×</button>
+				<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
 			</div>
 		{/if}
 
@@ -143,21 +151,21 @@
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'info'}
-				onclick={() => activeTab = 'info'}
+				onclick={() => (activeTab = 'info')}
 			>
 				Config Info
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'validate'}
-				onclick={() => activeTab = 'validate'}
+				onclick={() => (activeTab = 'validate')}
 			>
 				Validate
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'reload'}
-				onclick={() => activeTab = 'reload'}
+				onclick={() => (activeTab = 'reload')}
 			>
 				Reload
 			</button>
@@ -166,7 +174,8 @@
 				class:active={activeTab === 'project'}
 				onclick={() => {
 					activeTab = 'project';
-					if (!projectConfigLoaded && !projectConfigLoading) loadProjectConfig();
+					if (!projectConfigLoaded && !projectConfigLoading)
+						loadProjectConfig();
 				}}
 			>
 				Project Config
@@ -195,12 +204,20 @@
 
 					<div class="config-section">
 						<h3 class="section-title">Database</h3>
-						<pre class="config-json">{JSON.stringify(configInfo.database, null, 2)}</pre>
+						<pre class="config-json">{JSON.stringify(
+								configInfo.database,
+								null,
+								2,
+							)}</pre>
 					</div>
 
 					<div class="config-section">
 						<h3 class="section-title">Embedder</h3>
-						<pre class="config-json">{JSON.stringify(configInfo.embedder, null, 2)}</pre>
+						<pre class="config-json">{JSON.stringify(
+								configInfo.embedder,
+								null,
+								2,
+							)}</pre>
 					</div>
 				{:else}
 					<p class="placeholder-text">No configuration data available</p>
@@ -210,7 +227,10 @@
 
 		<!-- Validate Tab -->
 		{#if activeTab === 'validate'}
-			<Card title="Configuration Validation" subtitle="Check configuration for issues">
+			<Card
+				title="Configuration Validation"
+				subtitle="Check configuration for issues"
+			>
 				{#if validateResult}
 					<div class="validate-status">
 						<span class="validate-label">Status</span>
@@ -222,9 +242,11 @@
 
 					{#if validateResult.errors.length > 0}
 						<div class="issue-section">
-							<h3 class="section-title">Errors ({validateResult.errors.length})</h3>
+							<h3 class="section-title">
+								Errors ({validateResult.errors.length})
+							</h3>
 							<ul class="issue-list">
-								{#each validateResult.errors as err}
+								{#each validateResult.errors as err (err)}
 									<li class="issue-item error">{err}</li>
 								{/each}
 							</ul>
@@ -233,9 +255,11 @@
 
 					{#if validateResult.warnings.length > 0}
 						<div class="issue-section">
-							<h3 class="section-title">Warnings ({validateResult.warnings.length})</h3>
+							<h3 class="section-title">
+								Warnings ({validateResult.warnings.length})
+							</h3>
 							<ul class="issue-list">
-								{#each validateResult.warnings as warn}
+								{#each validateResult.warnings as warn (warn)}
 									<li class="issue-item warning">{warn}</li>
 								{/each}
 							</ul>
@@ -244,11 +268,15 @@
 
 					{#if validateResult.dependency_warnings.length > 0}
 						<div class="issue-section">
-							<h3 class="section-title">Dependency Warnings ({validateResult.dependency_warnings.length})</h3>
+							<h3 class="section-title">
+								Dependency Warnings ({validateResult.dependency_warnings
+									.length})
+							</h3>
 							<ul class="issue-list">
-								{#each validateResult.dependency_warnings as dw}
+								{#each validateResult.dependency_warnings as dw (dw.field)}
 									<li class="issue-item warning">
-										<strong>{dw.field}:</strong> {dw.suggestion}
+										<strong>{dw.field}:</strong>
+										{dw.suggestion}
 									</li>
 								{/each}
 							</ul>
@@ -256,7 +284,9 @@
 					{/if}
 
 					{#if validateResult.valid && validateResult.errors.length === 0 && validateResult.warnings.length === 0 && validateResult.dependency_warnings.length === 0}
-						<p class="placeholder-text">No issues found — configuration is clean.</p>
+						<p class="placeholder-text">
+							No issues found — configuration is clean.
+						</p>
 					{/if}
 				{:else}
 					<p class="placeholder-text">Loading validation results...</p>
@@ -266,7 +296,10 @@
 
 		<!-- Reload Tab -->
 		{#if activeTab === 'reload'}
-			<Card title="Reload Configuration" subtitle="Trigger a configuration reload">
+			<Card
+				title="Reload Configuration"
+				subtitle="Trigger a configuration reload"
+			>
 				<p class="reload-description">
 					This will reload the configuration for the current project from disk.
 					Any pending changes to configuration files will be applied.
@@ -291,20 +324,22 @@
 		{/if}
 		<!-- Project Config Tab -->
 		{#if activeTab === 'project'}
-			<Card title="Project Configuration" subtitle="Edit and hot-reload the current project config">
+			<Card
+				title="Project Configuration"
+				subtitle="Edit and hot-reload the current project config"
+			>
 				{#if projectConfigLoading}
 					<p class="placeholder-text">Loading project config...</p>
 				{:else}
 					<p class="reload-description">
-						Edit the JSON below and save. The backend applies hot-reloadable fields immediately.
-						Project id: <code>#{$currentProjectId}</code>
+						Edit the JSON below and save. The backend applies hot-reloadable
+						fields immediately. Project id: <code>#{$currentProjectId}</code>
 					</p>
 					<textarea
 						class="config-editor"
 						bind:value={projectConfigText}
 						spellcheck="false"
-						aria-label="Project configuration JSON"
-					></textarea>
+						aria-label="Project configuration JSON"></textarea>
 
 					<label class="validate-check">
 						<input type="checkbox" bind:checked={validateBeforeSave} />
@@ -312,7 +347,10 @@
 					</label>
 
 					<div class="reload-actions">
-						<Button onclick={saveProjectConfig} disabled={projectConfigSaving || projectConfigLoading}>
+						<Button
+							onclick={saveProjectConfig}
+							disabled={projectConfigSaving || projectConfigLoading}
+						>
 							{#if projectConfigSaving}Saving...{:else}Save Config{/if}
 						</Button>
 					</div>
@@ -328,8 +366,12 @@
 								variant={projectConfigResult.success ? 'active' : 'inactive'}
 							/>
 							<Badge
-								label={projectConfigResult.hot_reload_applied ? 'Hot Reload' : 'Restart Needed'}
-								variant={projectConfigResult.hot_reload_applied ? 'success' : 'warning'}
+								label={projectConfigResult.hot_reload_applied
+									? 'Hot Reload'
+									: 'Restart Needed'}
+								variant={projectConfigResult.hot_reload_applied
+									? 'success'
+									: 'warning'}
 							/>
 							<span class="reload-message">{projectConfigResult.message}</span>
 						</div>

@@ -16,9 +16,13 @@
 	import { onMount } from 'svelte';
 	import type { Core } from 'cytoscape';
 	import { page } from '$app/state';
+	import { SvelteMap } from 'svelte/reactivity';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import GraphCanvas, { layoutOptions, type GraphLayoutName } from '$lib/components/graph/GraphCanvas.svelte';
+	import GraphCanvas, {
+		layoutOptions,
+		type GraphLayoutName,
+	} from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
 	import GraphFilterPanel from '$lib/components/graph/GraphFilterPanel.svelte';
 	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
@@ -29,7 +33,7 @@
 		RELATION_DOMAINS,
 		edgeConfidence,
 		relationDomain,
-		relationLabel
+		relationLabel,
 	} from '$lib/utils/graph-style';
 
 	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
@@ -59,14 +63,18 @@
 	let visibleEdges = $derived(
 		store.filters.hideAmbiguous
 			? edges.filter((edge) => edgeConfidence(edge.confidence) !== 'ambiguous')
-			: edges
+			: edges,
 	);
 
-	let selectedNode = $derived(nodes.find((node) => node.id === selectedId) ?? null);
+	let selectedNode = $derived(
+		nodes.find((node) => node.id === selectedId) ?? null,
+	);
 	let selectedEdges = $derived(
 		selectedId === null
 			? []
-			: edges.filter((edge) => edge.source === selectedId || edge.target === selectedId)
+			: edges.filter(
+					(edge) => edge.source === selectedId || edge.target === selectedId,
+				),
 	);
 
 	let projectId = $derived($currentProjectId);
@@ -156,7 +164,7 @@
 
 	let communities = $derived.by(() => {
 		const map = store.meta.communities;
-		const groups = new Map<number, string[]>();
+		const groups = new SvelteMap<number, string[]>();
 		for (const node of nodes) {
 			const c = map[node.id];
 			if (c === undefined) continue;
@@ -189,7 +197,7 @@
 		if (!cy) return;
 		cy.zoom({
 			level: Math.min(3, Math.max(0.15, cy.zoom() + delta)),
-			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
 		});
 	}
 
@@ -207,7 +215,10 @@
 		if (!cy) return;
 		const node = cy.getElementById(nodeId);
 		if (node.length === 0) return;
-		cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1) }, { duration: 250 });
+		cy.animate(
+			{ center: { eles: node }, zoom: Math.max(cy.zoom(), 1) },
+			{ duration: 250 },
+		);
 	}
 
 	$effect(() => {
@@ -324,7 +335,12 @@
 				/>
 			{/if}
 
-			<button type="button" class="primary-btn" onclick={runSeed} disabled={store.loading}>
+			<button
+				type="button"
+				class="primary-btn"
+				onclick={runSeed}
+				disabled={store.loading}
+			>
 				{store.loading ? 'Loading…' : 'Load'}
 			</button>
 
@@ -338,9 +354,12 @@
 				onkeydown={(e) => e.key === 'Enter' && runImpact()}
 				aria-label="File path for impact analysis"
 			/>
-			<button type="button" class="ghost-btn" onclick={runImpact}>Impact</button>
+			<button type="button" class="ghost-btn" onclick={runImpact}>Impact</button
+			>
 			{#if store.meta.impactFile}
-				<button type="button" class="ghost-btn" onclick={clearImpact}>Clear</button>
+				<button type="button" class="ghost-btn" onclick={clearImpact}
+					>Clear</button
+				>
 			{/if}
 		</div>
 
@@ -387,7 +406,7 @@
 					onExportPng={exportPng}
 				/>
 				<GraphCanvas
-					bind:cy={cy}
+					bind:cy
 					elements={$graphState.elements}
 					{layout}
 					focusId={store.meta.focusId}
@@ -400,7 +419,8 @@
 					onNodeActivate={handleNodeActivate}
 				/>
 				<p class="canvas-hint">
-					Drag to pan · Ctrl/Cmd + wheel to zoom · Double click a node to expand its neighborhood
+					Drag to pan · Ctrl/Cmd + wheel to zoom · Double click a node to expand
+					its neighborhood
 				</p>
 			</div>
 
@@ -411,13 +431,19 @@
 						<dt>Kind</dt>
 						<dd>{selectedNode.kind}</dd>
 						<dt>Location</dt>
-						<dd class="mono">{selectedNode.source_file}:{selectedNode.source_location}</dd>
+						<dd class="mono">
+							{selectedNode.source_file}:{selectedNode.source_location}
+						</dd>
 						<dt>Community</dt>
 						<dd>{store.meta.communities[selectedNode.id] ?? '—'}</dd>
 					</dl>
 
 					<div class="inspector-actions">
-						<button type="button" class="ghost-btn" onclick={() => openEntity(selectedNode.id)}>
+						<button
+							type="button"
+							class="ghost-btn"
+							onclick={() => openEntity(selectedNode.id)}
+						>
 							Open entity
 						</button>
 						<button
@@ -446,13 +472,18 @@
 									<Badge variant={outgoing ? 'active' : 'default'}>
 										{outgoing ? 'OUT' : 'IN'}
 									</Badge>
-									<span class="relation-domain">{domainLabel(edge.relation)}</span>
+									<span class="relation-domain"
+										>{domainLabel(edge.relation)}</span
+									>
 								</div>
 								<p class="relation-name">{relationLabel(edge.relation)}</p>
 								<p class="relation-target mono">
 									{outgoing ? edge.target : edge.source}
 								</p>
-								<p class="relation-confidence" title={CONFIDENCE_META[confidence].description}>
+								<p
+									class="relation-confidence"
+									title={CONFIDENCE_META[confidence].description}
+								>
 									{CONFIDENCE_META[confidence].label}
 								</p>
 							</li>
@@ -479,7 +510,11 @@
 				<ul class="community-list">
 					{#each communities as [index, ids] (index)}
 						<li>
-							<button type="button" class="community-btn" onclick={() => loadCommunity(ids)}>
+							<button
+								type="button"
+								class="community-btn"
+								onclick={() => loadCommunity(ids)}
+							>
 								<span class="community-index">#{index}</span>
 								<span class="community-size">{ids.length}</span>
 								<span class="community-preview mono">

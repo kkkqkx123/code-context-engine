@@ -5,6 +5,7 @@ Web-based interface for the Code Context Engine project, built with SvelteKit.
 ## Design System
 
 This frontend follows the **Swiss Minimalist / Tech Industrial** design style:
+
 - High contrast black-and-white color scheme
 - Space Grotesk + Space Mono typography
 - Sharp borders, no rounded corners

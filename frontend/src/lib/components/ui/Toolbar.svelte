@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	/**
 	 * List/table toolbar: left slot holds search + filters, right slot holds
 	 * refresh and primary actions. Keeps the filter → query → action row consistent.
@@ -7,8 +8,8 @@
 		children,
 		actions,
 	}: {
-		children?: any;
-		actions?: any;
+		children?: Snippet;
+		actions?: Snippet;
 	} = $props();
 </script>
 

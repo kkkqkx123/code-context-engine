@@ -13,10 +13,7 @@
 		paused?: boolean;
 	}
 
-	let {
-		events = [],
-		paused = false
-	}: Props = $props();
+	let { events = [], paused = false }: Props = $props();
 
 	let logContainer: HTMLDivElement | undefined = $state();
 

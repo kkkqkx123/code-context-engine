@@ -10,7 +10,7 @@
 		progress = 0,
 		showLabel = true,
 		label = '',
-		variant = 'default'
+		variant = 'default',
 	}: Props = $props();
 
 	let clampedProgress = $derived(Math.max(0, Math.min(100, progress)));

@@ -16,10 +16,10 @@
 	--gray-900: #171717;
 
 	/* Semantic status tokens — WCAG AA compliant on white (>= 4.5:1) */
-	--info: #2563eb;    /* 6.5:1 on white */
+	--info: #2563eb; /* 6.5:1 on white */
 	--success: #1b7a3d; /* 5.9:1 on white */
 	--warning: #8a6d00; /* 5.7:1 on white */
-	--danger: #c62828;  /* 6.5:1 on white */
+	--danger: #c62828; /* 6.5:1 on white */
 
 	/* Soft tinted backgrounds for status banners (light bg + dark text) */
 	--info-bg: #eff6ff;
@@ -29,9 +29,9 @@
 	--accent-bg: #fef2f0;
 
 	/* Status colors tuned for dark backgrounds (LogViewer, Toast) */
-	--status-created: #4ade80;  /* bright green on black */
+	--status-created: #4ade80; /* bright green on black */
 	--status-modified: #fbbf24; /* amber on black */
-	--status-deleted: #f87171;  /* light red on black */
+	--status-deleted: #f87171; /* light red on black */
 }
 
 /* Reset & Base Styles */
@@ -48,7 +48,11 @@ html {
 }
 
 body {
-	font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+	font-family:
+		'Space Grotesk',
+		-apple-system,
+		BlinkMacSystemFont,
+		sans-serif;
 	background: var(--white);
 	color: var(--black);
 	line-height: 1.5;
@@ -56,7 +60,12 @@ body {
 }
 
 /* Typography System */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
 	font-family: 'Space Grotesk', sans-serif;
 	font-weight: 700;
 	letter-spacing: -0.03em;
@@ -84,7 +93,9 @@ p {
 }
 
 /* Labels & Meta Text */
-.label, .meta, small {
+.label,
+.meta,
+small {
 	font-family: 'Space Mono', monospace;
 	font-size: 0.7rem;
 	text-transform: uppercase;
@@ -93,7 +104,8 @@ p {
 }
 
 /* Code Blocks */
-code, pre {
+code,
+pre {
 	font-family: 'Space Mono', monospace;
 	font-size: 0.85rem;
 }
@@ -215,7 +227,9 @@ pre code {
 }
 
 /* Forms */
-.input, .select, .textarea {
+.input,
+.select,
+.textarea {
 	width: 100%;
 	padding: 0.75rem 1rem;
 	font-family: 'Space Grotesk', sans-serif;
@@ -227,7 +241,9 @@ pre code {
 	transition: border-color 0.3s;
 }
 
-.input:focus, .select:focus, .textarea:focus {
+.input:focus,
+.select:focus,
+.textarea:focus {
 	border-color: var(--accent);
 }
 
@@ -394,10 +410,10 @@ pre code {
 	h2 {
 		font-size: 1.75rem;
 	}
-	
+
 	/* Touch target optimization - WCAG 2.5.5 */
 	button,
-	[role="button"],
+	[role='button'],
 	input,
 	select,
 	textarea,
@@ -405,7 +421,7 @@ pre code {
 		min-height: 44px;
 		min-width: 44px;
 	}
-	
+
 	/* Prevent iOS zoom on input focus */
 	.input,
 	.select,
@@ -422,7 +438,7 @@ pre code {
 	.container {
 		padding: 0 0.75rem;
 	}
-	
+
 	.section {
 		padding: 3rem 0;
 	}

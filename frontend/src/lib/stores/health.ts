@@ -1,3 +1,5 @@
+import { errorMessage } from '../utils/errors';
+
 /**
  * Health State Store
  * Manages external service health status and retry queue state
@@ -47,7 +49,7 @@ let refreshInterval: ReturnType<typeof setInterval> | null = null;
 export const healthActions = {
 	/** Load unified health status and retry queue status */
 	async loadAll() {
-		healthState.update(state => ({ ...state, isLoading: true, error: null }));
+		healthState.update((state) => ({ ...state, isLoading: true, error: null }));
 
 		try {
 			const [unified, retryQueue] = await Promise.all([
@@ -55,18 +57,18 @@ export const healthActions = {
 				healthApi.getRetryQueueStatus().catch(() => null),
 			]);
 
-			healthState.update(state => ({
+			healthState.update((state) => ({
 				...state,
 				unified,
 				retryQueue,
 				lastUpdated: new Date(),
 				isLoading: false,
 			}));
-		} catch (error: any) {
-			healthState.update(state => ({
+		} catch (error) {
+			healthState.update((state) => ({
 				...state,
 				isLoading: false,
-				error: error.message,
+				error: errorMessage(error),
 			}));
 		}
 	},
@@ -75,9 +77,9 @@ export const healthActions = {
 	async loadQdrantHealth() {
 		try {
 			const qdrant = await healthApi.getQdrantHealth();
-			healthState.update(state => ({ ...state, qdrant }));
-		} catch (error: any) {
-			healthState.update(state => ({ ...state, error: error.message }));
+			healthState.update((state) => ({ ...state, qdrant }));
+		} catch (error) {
+			healthState.update((state) => ({ ...state, error: errorMessage(error) }));
 		}
 	},
 
@@ -85,9 +87,9 @@ export const healthActions = {
 	async loadEmbeddingHealth() {
 		try {
 			const embedding = await healthApi.getEmbeddingHealth();
-			healthState.update(state => ({ ...state, embedding }));
-		} catch (error: any) {
-			healthState.update(state => ({ ...state, error: error.message }));
+			healthState.update((state) => ({ ...state, embedding }));
+		} catch (error) {
+			healthState.update((state) => ({ ...state, error: errorMessage(error) }));
 		}
 	},
 
@@ -95,9 +97,9 @@ export const healthActions = {
 	async loadBm25Health() {
 		try {
 			const bm25 = await healthApi.getBm25Health();
-			healthState.update(state => ({ ...state, bm25 }));
-		} catch (error: any) {
-			healthState.update(state => ({ ...state, error: error.message }));
+			healthState.update((state) => ({ ...state, bm25 }));
+		} catch (error) {
+			healthState.update((state) => ({ ...state, error: errorMessage(error) }));
 		}
 	},
 
@@ -108,8 +110,8 @@ export const healthActions = {
 			// Refresh status after processing
 			await healthActions.loadAll();
 			return result;
-		} catch (error: any) {
-			healthState.update(state => ({ ...state, error: error.message }));
+		} catch (error) {
+			healthState.update((state) => ({ ...state, error: errorMessage(error) }));
 			return null;
 		}
 	},
@@ -121,8 +123,8 @@ export const healthActions = {
 			// Refresh status after clearing
 			await healthActions.loadAll();
 			return result;
-		} catch (error: any) {
-			healthState.update(state => ({ ...state, error: error.message }));
+		} catch (error) {
+			healthState.update((state) => ({ ...state, error: errorMessage(error) }));
 			return null;
 		}
 	},

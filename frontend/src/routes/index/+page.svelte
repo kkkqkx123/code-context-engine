@@ -1,12 +1,13 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import type { Component } from 'svelte';
 	import { onMount } from 'svelte';
 
 	// Lazy load components - only ProjectList loads initially
-	let ProjectList: any = $state(null);
-	let IndexControl: any = $state(null);
-	let FileParser: any = $state(null);
-	let IndexMaintenance: any = $state(null);
+	let ProjectList: Component | null = $state(null);
+	let IndexControl: Component | null = $state(null);
+	let FileParser: Component | null = $state(null);
+	let IndexMaintenance: Component | null = $state(null);
 
 	let projectListLoaded = $state(false);
 	let indexControlLoaded = $state(false);
@@ -17,19 +18,21 @@
 		// Load ProjectList and IndexControl in parallel after initial render
 		const [projectModule, controlModule] = await Promise.all([
 			import('$lib/components/index/ProjectList.svelte'),
-			import('$lib/components/index/IndexControl.svelte')
+			import('$lib/components/index/IndexControl.svelte'),
 		]);
 		ProjectList = projectModule.default;
 		IndexControl = controlModule.default;
 		projectListLoaded = true;
 		indexControlLoaded = true;
-		
+
 		// Load FileParser after primary components
-		const parserModule = await import('$lib/components/index/FileParser.svelte');
+		const parserModule =
+			await import('$lib/components/index/FileParser.svelte');
 		FileParser = parserModule.default;
 		fileParserLoaded = true;
 
-		const maintenanceModule = await import('$lib/components/index/IndexMaintenance.svelte');
+		const maintenanceModule =
+			await import('$lib/components/index/IndexMaintenance.svelte');
 		IndexMaintenance = maintenanceModule.default;
 		indexMaintenanceLoaded = true;
 	});
@@ -41,7 +44,10 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Index Management" subtitle="Manage projects and control code indexing operations" />
+		<PageHeader
+			title="Index Management"
+			subtitle="Manage projects and control code indexing operations"
+		/>
 
 		<div class="content-grid">
 			{#if projectListLoaded && ProjectList}

@@ -10,7 +10,7 @@
 		CONFIDENCE_META,
 		RELATION_DOMAINS,
 		relationLineStyle,
-		type RelationDomain
+		type RelationDomain,
 	} from '$lib/utils/graph-style';
 
 	interface Props {
@@ -28,18 +28,30 @@
 
 	let {
 		domains = [],
-		availableDomains = ['call', 'dependency', 'structural', 'reference', 'other'],
+		availableDomains = [
+			'call',
+			'dependency',
+			'structural',
+			'reference',
+			'other',
+		],
 		search = $bindable(''),
 		hideAmbiguous = $bindable(false),
 		showEdgeLabels = $bindable(false),
 		onToggleDomain = () => {},
 		onSearch = () => {},
 		onToggleAmbiguous = () => {},
-		onToggleEdgeLabels = () => {}
+		onToggleEdgeLabels = () => {},
 	}: Props = $props();
 
 	let available = $derived(new Set(availableDomains));
-	const domainOrder: RelationDomain[] = ['call', 'dependency', 'structural', 'reference', 'other'];
+	const domainOrder: RelationDomain[] = [
+		'call',
+		'dependency',
+		'structural',
+		'reference',
+		'other',
+	];
 
 	function handleSearchInput(event: Event) {
 		const value = (event.currentTarget as HTMLInputElement).value;
@@ -77,11 +89,17 @@
 						disabled={!present}
 						onclick={() => onToggleDomain(domain)}
 						aria-pressed={enabled}
-						title={present ? meta.description : `${meta.description} (not present in this graph)`}
+						title={present
+							? meta.description
+							: `${meta.description} (not present in this graph)`}
 					>
 						<span
 							class="swatch"
-							style="--swatch: {meta.color}; --dash: {relationLineStyle(domain) === 'solid' ? '0' : '3 2'}"
+							style="--swatch: {meta.color}; --dash: {relationLineStyle(
+								domain,
+							) === 'solid'
+								? '0'
+								: '3 2'}"
 						></span>
 						<span class="domain-name">{meta.label}</span>
 						<span class="domain-state">{enabled ? 'ON' : 'OFF'}</span>
@@ -94,7 +112,11 @@
 	<div class="panel-section">
 		<h4 class="panel-title">Confidence</h4>
 		<label class="checkbox-row">
-			<input type="checkbox" checked={hideAmbiguous} onchange={() => onToggleAmbiguous()} />
+			<input
+				type="checkbox"
+				checked={hideAmbiguous}
+				onchange={() => onToggleAmbiguous()}
+			/>
 			<span>Hide ambiguous relations</span>
 		</label>
 		<p class="hint">{CONFIDENCE_META.ambiguous.description}</p>
@@ -103,10 +125,17 @@
 	<div class="panel-section">
 		<h4 class="panel-title">Labels</h4>
 		<label class="checkbox-row">
-			<input type="checkbox" checked={showEdgeLabels} onchange={() => onToggleEdgeLabels()} />
+			<input
+				type="checkbox"
+				checked={showEdgeLabels}
+				onchange={() => onToggleEdgeLabels()}
+			/>
 			<span>Show edge labels</span>
 		</label>
-		<p class="hint">Render the relation type on each edge. Disable on large graphs to reduce clutter.</p>
+		<p class="hint">
+			Render the relation type on each edge. Disable on large graphs to reduce
+			clutter.
+		</p>
 	</div>
 </aside>
 

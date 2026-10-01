@@ -5,6 +5,9 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { searchApi, type EntitySearchResultItem } from '$lib/api/search';
 	import { currentProjectId } from '$lib/stores/project';
+	import { errorMessage } from '$lib/utils/errors';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 
 	let query = $state('');
 	let kindFilter = $state('');
@@ -16,7 +19,15 @@
 	let searched = $state(false);
 	let error = $state<string | null>(null);
 
-	const KIND_OPTIONS = ['function', 'method', 'class', 'struct', 'interface', 'trait', 'impl'];
+	const KIND_OPTIONS = [
+		'function',
+		'method',
+		'class',
+		'struct',
+		'interface',
+		'trait',
+		'impl',
+	];
 
 	async function runSearch() {
 		const trimmed = query.trim();
@@ -31,20 +42,22 @@
 				query: trimmed,
 				project_id: $currentProjectId,
 				kind_filter: kindFilter || undefined,
-				limit
+				limit,
 			});
 			results = response.items;
 			total = response.total;
 			elapsedMs = response.elapsed_ms;
 			searched = true;
-		} catch (e: any) {
-			error = e?.message ?? 'Entity search failed';
+		} catch (e) {
+			error = errorMessage(e);
 		} finally {
 			loading = false;
 		}
 	}
 
-	function kindBadgeVariant(kind: string): 'info' | 'active' | 'warning' | 'default' {
+	function kindBadgeVariant(
+		kind: string,
+	): 'info' | 'active' | 'warning' | 'default' {
 		if (kind === 'function' || kind === 'method') return 'info';
 		if (kind === 'class' || kind === 'struct') return 'active';
 		if (kind === 'interface' || kind === 'trait') return 'warning';
@@ -81,13 +94,21 @@
 						if (e.key === 'Enter') runSearch();
 					}}
 				/>
-				<select class="kind-select" bind:value={kindFilter} aria-label="Kind filter">
+				<select
+					class="kind-select"
+					bind:value={kindFilter}
+					aria-label="Kind filter"
+				>
 					<option value="">All kinds</option>
 					{#each KIND_OPTIONS as kind (kind)}
 						<option value={kind}>{kind}</option>
 					{/each}
 				</select>
-				<select class="kind-select" bind:value={limit} aria-label="Result limit">
+				<select
+					class="kind-select"
+					bind:value={limit}
+					aria-label="Result limit"
+				>
 					<option value={20}>20</option>
 					<option value={50}>50</option>
 					<option value={100}>100</option>
@@ -117,14 +138,31 @@
 							{#each results as entity (entity.id)}
 								<tr>
 									<td>
-										<a class="entity-link" href={`/entities/${entity.id}`}>{entity.name}</a>
+										<a
+											class="entity-link"
+											href={resolve(`/entities/${entity.id}`)}
+											onclick={(e) => {
+												e.preventDefault();
+												goto(resolve(`/entities/${entity.id}`));
+											}}>{entity.name}</a
+										>
 									</td>
-									<td><Badge label={entity.kind} variant={kindBadgeVariant(entity.kind)} /></td>
-									<td class="cell-signature">{truncateSignature(entity.signature)}</td>
+									<td
+										><Badge
+											label={entity.kind}
+											variant={kindBadgeVariant(entity.kind)}
+										/></td
+									>
+									<td class="cell-signature"
+										>{truncateSignature(entity.signature)}</td
+									>
 									<td class="cell-mono">#{entity.file_id}</td>
 									<td class="cell-mono">
 										{#if entity.span_start_row !== null && entity.span_start_row !== undefined}
-											{entity.span_start_row}{entity.span_end_row !== null && entity.span_end_row !== undefined ? `-${entity.span_end_row}` : ''}
+											{entity.span_start_row}{entity.span_end_row !== null &&
+											entity.span_end_row !== undefined
+												? `-${entity.span_end_row}`
+												: ''}
 										{:else}
 											-
 										{/if}
@@ -139,8 +177,8 @@
 				</div>
 			{:else}
 				<p class="placeholder-text">
-					Search the entity index by name. Results link to entity details with call chains and
-					relationships.
+					Search the entity index by name. Results link to entity details with
+					call chains and relationships.
 				</p>
 			{/if}
 		</Card>

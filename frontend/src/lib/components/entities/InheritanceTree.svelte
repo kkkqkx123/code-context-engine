@@ -1,12 +1,12 @@
 <script lang="ts">
 	import type {
 		ClassInheritanceResponse,
-		ClassImplementationsResponse
+		ClassImplementationsResponse,
 	} from '$lib/api/entities';
 	import EntityGraphView from '$lib/components/graph/EntityGraphView.svelte';
 	import {
 		inheritanceFocusId,
-		inheritanceToElements
+		inheritanceToElements,
 	} from '$lib/utils/entity-graph';
 
 	interface Props {
@@ -22,14 +22,20 @@
 		implementations = null,
 		focusId = null,
 		fallbackName = null,
-		onNavigate = () => {}
+		onNavigate = () => {},
 	}: Props = $props();
 
 	let elements = $derived(
-		inheritanceToElements({ inheritance, implementations, fallbackId: focusId, fallbackName })
+		inheritanceToElements({
+			inheritance,
+			implementations,
+			fallbackId: focusId,
+			fallbackName,
+		}),
 	);
 	let effectiveFocusId = $derived(
-		focusId ?? inheritanceFocusId({ inheritance, implementations, fallbackId: focusId })
+		focusId ??
+			inheritanceFocusId({ inheritance, implementations, fallbackId: focusId }),
 	);
 	let viewMode = $state<'graph' | 'list'>('graph');
 
@@ -37,7 +43,7 @@
 		(inheritance?.base_classes?.length ?? 0) > 0 ||
 			(inheritance?.derived_classes?.length ?? 0) > 0 ||
 			(implementations?.implemented_interfaces?.length ?? 0) > 0 ||
-			(implementations?.implementing_classes?.length ?? 0) > 0
+			(implementations?.implementing_classes?.length ?? 0) > 0,
 	);
 
 	function handleItemKeydown(event: KeyboardEvent, id: string) {
@@ -74,14 +80,13 @@
 		</div>
 
 		{#if viewMode === 'graph'}
-			<EntityGraphView {elements} focusId={effectiveFocusId} onNavigate={onNavigate} />
+			<EntityGraphView {elements} focusId={effectiveFocusId} {onNavigate} />
 		{:else}
 			{#if inheritance?.base_classes && inheritance.base_classes.length > 0}
 				<div class="tree-section">
 					<h3 class="section-title">Base Classes</h3>
 					<div class="tree-list">
-						{#each inheritance.base_classes as baseClass}
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
+						{#each inheritance.base_classes as baseClass (baseClass.class_id)}
 							<div
 								class="tree-item"
 								tabindex="0"
@@ -91,7 +96,9 @@
 							>
 								<span class="item-icon">▲</span>
 								<span class="item-name">{baseClass.class_name}</span>
-								<span class="item-location">{baseClass.file_path.split('/').pop()}</span>
+								<span class="item-location"
+									>{baseClass.file_path.split('/').pop()}</span
+								>
 							</div>
 						{/each}
 					</div>
@@ -102,8 +109,7 @@
 				<div class="tree-section">
 					<h3 class="section-title">Derived Classes</h3>
 					<div class="tree-list">
-						{#each inheritance.derived_classes as derivedClass}
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
+						{#each inheritance.derived_classes as derivedClass (derivedClass.class_id)}
 							<div
 								class="tree-item"
 								tabindex="0"
@@ -113,7 +119,9 @@
 							>
 								<span class="item-icon">▼</span>
 								<span class="item-name">{derivedClass.class_name}</span>
-								<span class="item-location">{derivedClass.file_path.split('/').pop()}</span>
+								<span class="item-location"
+									>{derivedClass.file_path.split('/').pop()}</span
+								>
 							</div>
 						{/each}
 					</div>
@@ -124,8 +132,7 @@
 				<div class="tree-section">
 					<h3 class="section-title">Implemented Interfaces</h3>
 					<div class="tree-list">
-						{#each implementations.implemented_interfaces as iface}
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
+						{#each implementations.implemented_interfaces as iface (iface.interface_id)}
 							<div
 								class="tree-item implementation"
 								tabindex="0"
@@ -135,7 +142,9 @@
 							>
 								<span class="item-icon">◆</span>
 								<span class="item-name">{iface.interface_name}</span>
-								<span class="item-location">{iface.file_path.split('/').pop()}</span>
+								<span class="item-location"
+									>{iface.file_path.split('/').pop()}</span
+								>
 							</div>
 						{/each}
 					</div>
@@ -146,8 +155,7 @@
 				<div class="tree-section">
 					<h3 class="section-title">Implementing Classes</h3>
 					<div class="tree-list">
-						{#each implementations.implementing_classes as impl}
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
+						{#each implementations.implementing_classes as impl (impl.class_id)}
 							<div
 								class="tree-item implementation"
 								tabindex="0"
@@ -157,7 +165,9 @@
 							>
 								<span class="item-icon">◆</span>
 								<span class="item-name">{impl.class_name}</span>
-								<span class="item-location">{impl.file_path.split('/').pop()}</span>
+								<span class="item-location"
+									>{impl.file_path.split('/').pop()}</span
+								>
 							</div>
 						{/each}
 					</div>

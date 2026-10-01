@@ -2,11 +2,7 @@
 	import type { LayoutOptions } from 'cytoscape';
 
 	export type GraphLayoutName =
-		| 'cose-bilkent'
-		| 'cose'
-		| 'breadthfirst'
-		| 'concentric'
-		| 'grid';
+		'cose-bilkent' | 'cose' | 'breadthfirst' | 'concentric' | 'grid';
 
 	/**
 	 * Produce Cytoscape layout options for the given name.
@@ -24,16 +20,20 @@
 					name: 'breadthfirst',
 					directed: true,
 					spacingFactor: 1.1,
-					animate: false
+					animate: false,
 				} as unknown as LayoutOptions;
 			case 'concentric':
 				return {
 					name: 'concentric',
 					minNodeSpacing: 24,
-					animate: false
+					animate: false,
 				} as unknown as LayoutOptions;
 			case 'grid':
-				return { name: 'grid', avoidOverlap: true, animate: false } as unknown as LayoutOptions;
+				return {
+					name: 'grid',
+					avoidOverlap: true,
+					animate: false,
+				} as unknown as LayoutOptions;
 			case 'cose-bilkent':
 				return {
 					name: 'cose-bilkent',
@@ -50,7 +50,7 @@
 					tile: true,
 					tilingPaddingVertical: 10,
 					tilingPaddingHorizontal: 10,
-					packComponents: true
+					packComponents: true,
 				} as unknown as LayoutOptions;
 			case 'cose':
 			default:
@@ -60,7 +60,7 @@
 					nodeRepulsion: 4000,
 					idealEdgeLength: 90,
 					nodeOverlap: 12,
-					numIter: 700
+					numIter: 700,
 				} as unknown as LayoutOptions;
 		}
 	}
@@ -85,7 +85,7 @@
 	import {
 		graphStylesheet,
 		type GraphElement,
-		type RelationDomain
+		type RelationDomain,
 	} from '$lib/utils/graph-style';
 
 	// GraphLayoutName and layoutOptions are exported from <script module> above.
@@ -130,13 +130,17 @@
 		onNodeSelect = () => {},
 		onNodeActivate = () => {},
 		cy = $bindable(null),
-		containerElement = $bindable(null)
 	}: Props = $props();
 
 	let container: HTMLDivElement | null = null;
-	let lastElementCount = $state(0);
 	let bilkentRegistered = false;
-	const ALL_RELATION_DOMAINS: RelationDomain[] = ['call', 'dependency', 'structural', 'reference', 'other'];
+	const ALL_RELATION_DOMAINS: RelationDomain[] = [
+		'call',
+		'dependency',
+		'structural',
+		'reference',
+		'other',
+	];
 
 	/** Resolve the requested layout to a registered one. Falls back to plain `cose`
 	 *  when the CoseBilkent extension did not load, so cy.layout() never receives a
@@ -151,7 +155,9 @@
 		if (!cy) return;
 
 		cy.batch(() => {
-			cy!.elements().removeClass('focus dimmed impact impact-transitive highlighted');
+			cy!
+				.elements()
+				.removeClass('focus dimmed impact impact-transitive highlighted');
 
 			const direct = new Set(impactDirect);
 			const transitive = new Set(impactTransitive);
@@ -176,8 +182,7 @@
 	function applyDomainFilter() {
 		if (!cy) return;
 		const allowed = new Set(visibleDomains);
-		const hideSelector = ALL_RELATION_DOMAINS
-			.filter((d) => !allowed.has(d))
+		const hideSelector = ALL_RELATION_DOMAINS.filter((d) => !allowed.has(d))
 			.map((d) => `edge[domain = "${d}"]`)
 			.join(', ');
 		cy.batch(() => {
@@ -197,12 +202,9 @@
 			layout: layoutOptions(effectiveLayoutName(layout)),
 			wheelSensitivity: 0.25,
 			boxSelectionEnabled: false,
-			selectionType: 'single'
+			selectionType: 'single',
 		});
 		cy = instance;
-
-		containerElement = container;
-		lastElementCount = elements.length;
 
 		instance.on('tap', 'node', (event) => {
 			onNodeSelect(event.target.id());
@@ -266,7 +268,9 @@
 			});
 
 			const existing = new Set(cy!.elements().map((element) => element.id()));
-			const additions = incoming.filter((element) => !existing.has(element.data.id));
+			const additions = incoming.filter(
+				(element) => !existing.has(element.data.id),
+			);
 			if (additions.length > 0) {
 				cy!.add(additions as unknown as ElementDefinition[]);
 				mutated = true;
@@ -276,7 +280,6 @@
 		if (mutated) {
 			cy.layout(layoutOptions(effectiveLayoutName(layout))).run();
 		}
-		lastElementCount = incoming.length;
 		applyDomainFilter();
 		applyDecorations();
 	});
@@ -309,7 +312,13 @@
 	});
 </script>
 
-<div class="graph-canvas" bind:this={container} role="application" aria-label="Relation graph canvas" style="min-height: {minHeight}px">
+<div
+	class="graph-canvas"
+	bind:this={container}
+	role="application"
+	aria-label="Relation graph canvas"
+	style="min-height: {minHeight}px"
+>
 	{#if elements.length === 0}
 		<div class="canvas-empty">
 			<p>No graph data</p>

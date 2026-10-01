@@ -1,16 +1,20 @@
 <script lang="ts">
-	import { searchApi, type SubQuery } from '$lib/api/search';
+	import {
+		searchApi,
+		type SubQuery,
+		type SearchResponse,
+	} from '$lib/api/search';
 	import { currentProjectId } from '$lib/stores/project';
 	import { get } from 'svelte/store';
 
 	interface Props {
 		placeholder?: string;
-		onSearch?: (results: any) => void;
+		onSearch?: (results: SearchResponse) => void;
 	}
 
 	let {
 		placeholder = 'Enter a search description...',
-		onSearch = () => {}
+		onSearch = () => {},
 	}: Props = $props();
 
 	let originalQuery = $state('');
@@ -35,7 +39,7 @@
 				subQueries.push({
 					text: bm25Query.trim(),
 					query_type: 'bm25',
-					weight: 1.2
+					weight: 1.2,
 				});
 			}
 
@@ -43,7 +47,7 @@
 				subQueries.push({
 					text: vectorQuery.trim(),
 					query_type: 'vector',
-					weight: 1.0
+					weight: 1.0,
 				});
 			}
 
@@ -51,14 +55,14 @@
 			if (subQueries.length === 0) {
 				subQueries.push(
 					{ text: originalQuery, query_type: 'bm25', weight: 1.2 },
-					{ text: originalQuery, query_type: 'vector', weight: 1.0 }
+					{ text: originalQuery, query_type: 'vector', weight: 1.0 },
 				);
 			}
 
 			const response = await searchApi.aggregatedSearch({
 				project_id: get(currentProjectId),
 				sub_queries: subQueries,
-				limit
+				limit,
 			});
 
 			// Call the search callback with results
@@ -80,10 +84,16 @@
 			{placeholder}
 			onkeydown={(e) => e.key === 'Enter' && handleSearch()}
 		/>
-		<button onclick={handleSearch} disabled={!originalQuery.trim() || isSearching}>
+		<button
+			onclick={handleSearch}
+			disabled={!originalQuery.trim() || isSearching}
+		>
 			{#if isSearching}Searching...{:else}Search{/if}
 		</button>
-		<button class="toggle-advanced" onclick={() => showAdvanced = !showAdvanced}>
+		<button
+			class="toggle-advanced"
+			onclick={() => (showAdvanced = !showAdvanced)}
+		>
 			{showAdvanced ? '▲' : '▼'} Advanced
 		</button>
 	</div>
@@ -122,7 +132,8 @@
 			</div>
 
 			<div class="tips">
-				Tip: leave the sub-queries empty to automatically run BM25 + Vector on the original query
+				Tip: leave the sub-queries empty to automatically run BM25 + Vector on
+				the original query
 			</div>
 		</div>
 	{/if}

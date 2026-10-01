@@ -5,8 +5,8 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
 	preprocess: vitePreprocess(),
 	kit: {
-		adapter: adapter()
-	}
+		adapter: adapter(),
+	},
 	// Note: SvelteKit automatically sets compilerOptions.dev based on build mode
 	// No need to manually configure it unless you have special requirements
 };

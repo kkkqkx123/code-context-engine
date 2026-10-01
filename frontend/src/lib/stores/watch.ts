@@ -1,3 +1,5 @@
+import { errorMessage } from '../utils/errors';
+
 /**
  * Watch State Store
  * Manages file watching operations
@@ -31,49 +33,53 @@ export const watchState = writable<WatchState>({
 // Actions
 export const watchActions = {
 	async startWatch(path: string, extensions?: string[], debounceMs?: number) {
-		watchState.update(state => ({ ...state, isLoading: true, error: null }));
+		watchState.update((state) => ({ ...state, isLoading: true, error: null }));
 
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 
-			await watchApi.startWatch(pid!, { path, extensions, debounce_ms: debounceMs });
+			await watchApi.startWatch(pid!, {
+				path,
+				extensions,
+				debounce_ms: debounceMs,
+			});
 			await watchActions.loadStatus();
 
-			watchState.update(state => ({
+			watchState.update((state) => ({
 				...state,
 				isLoading: false,
 				isWatching: true,
 			}));
-		} catch (error: any) {
-			watchState.update(state => ({
+		} catch (error) {
+			watchState.update((state) => ({
 				...state,
 				isLoading: false,
-				error: error.message,
+				error: errorMessage(error),
 			}));
 		}
 	},
 
 	async stopWatch() {
-		watchState.update(state => ({ ...state, isLoading: true, error: null }));
+		watchState.update((state) => ({ ...state, isLoading: true, error: null }));
 
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 
 			await watchApi.stopWatch(pid!);
 			await watchActions.loadStatus();
 
-			watchState.update(state => ({
+			watchState.update((state) => ({
 				...state,
 				isLoading: false,
 				isWatching: false,
 			}));
-		} catch (error: any) {
-			watchState.update(state => ({
+		} catch (error) {
+			watchState.update((state) => ({
 				...state,
 				isLoading: false,
-				error: error.message,
+				error: errorMessage(error),
 			}));
 		}
 	},
@@ -81,10 +87,10 @@ export const watchActions = {
 	async loadStatus() {
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 
 			const response = await watchApi.getStatus(pid!);
-			watchState.update(state => ({
+			watchState.update((state) => ({
 				...state,
 				status: response.status,
 				isWatching: response.status.active,
@@ -95,7 +101,7 @@ export const watchActions = {
 	},
 
 	addEvent(event: Omit<WatchState['events'][0], 'timestamp'>) {
-		watchState.update(state => ({
+		watchState.update((state) => ({
 			...state,
 			events: [
 				{ ...event, timestamp: new Date() },
@@ -105,6 +111,6 @@ export const watchActions = {
 	},
 
 	clearEvents() {
-		watchState.update(state => ({ ...state, events: [] }));
+		watchState.update((state) => ({ ...state, events: [] }));
 	},
 };

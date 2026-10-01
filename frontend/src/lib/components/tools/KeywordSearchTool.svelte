@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi, type KeywordSearchResult } from '$lib/api/tools';
@@ -23,10 +24,10 @@
 				project_id: get(currentProjectId),
 				query: q,
 				term_operator: termOperator,
-				top_n: topN
+				top_n: topN,
 			});
-		} catch (e: any) {
-			error = e?.message ?? 'Keyword search failed';
+		} catch (e) {
+			error = errorMessage(e) ?? 'Keyword search failed';
 		} finally {
 			loading = false;
 		}
@@ -58,7 +59,13 @@
 		</label>
 		<label class="field field-narrow">
 			<span class="field-label">Top N</span>
-			<input class="text-input" type="number" min="1" max="100" bind:value={topN} />
+			<input
+				class="text-input"
+				type="number"
+				min="1"
+				max="100"
+				bind:value={topN}
+			/>
 		</label>
 		<Button onclick={handleSearch} disabled={!query.trim() || loading}>
 			{#if loading}Searching...{:else}Search{/if}

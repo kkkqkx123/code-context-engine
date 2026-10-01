@@ -22,7 +22,7 @@ Before you begin, ensure you have the following installed:
 - **Node.js** (version 20.x or higher)
   - Download from: https://nodejs.org/
   - Verify installation: `node --version`
-  
+
 - **npm** (comes with Node.js)
   - Verify installation: `npm --version`
 
@@ -54,6 +54,7 @@ npm install
 ```
 
 This will install all required packages including:
+
 - SvelteKit framework
 - TypeScript
 - Vite build tool
@@ -82,8 +83,8 @@ VITE_API_BASE_URL=http://localhost:9000
 
 **Available Environment Variables:**
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable            | Default                 | Description          |
+| ------------------- | ----------------------- | -------------------- |
 | `VITE_API_BASE_URL` | `http://localhost:9000` | Backend API endpoint |
 
 ### Proxy Configuration
@@ -105,6 +106,7 @@ npm run dev
 The application will be available at: **http://localhost:3001**
 
 **Features:**
+
 - Hot reload on file changes
 - Detailed error messages
 - Source maps for debugging
@@ -151,6 +153,7 @@ Navigate to the **Index Management** page:
 4. Click "Start Indexing"
 
 The indexing process will:
+
 - Scan all files in the directory
 - Parse code using tree-sitter
 - Extract entities (functions, classes, etc.)
@@ -175,44 +178,57 @@ Once indexing is complete, you can:
 The frontend consists of 9 main modules:
 
 ### 1. Dashboard
+
 Central hub showing system status, recent activity, and quick actions.
 
 ### 2. Index Management
+
 Add, remove, and manage indexed projects. Monitor indexing progress.
 
 ### 3. Search Interface
+
 Powerful search with filters for:
+
 - Semantic search (vector-based)
 - Keyword search (BM25)
 - Entity type filtering
 - Language filtering
 
 ### 4. Entity Explorer
+
 Detailed view of code entities with:
+
 - Function/class details
 - Call graphs
 - Inheritance trees
 - Call chains
 
 ### 5. Storage Management
+
 Monitor storage usage, clear indexes, and manage cached data.
 
 ### 6. File Watching
+
 Set up automatic re-indexing when files change:
+
 - Configure watched directories
 - Set file extensions to monitor
 - View real-time event feed
 
 ### 7. Tools
+
 Developer utilities:
+
 - **Code Compression**: Reduce token count for LLM context
 - **Code Diagnosis**: Analyze code quality
 - **Symbol Lookup**: Find symbols across projects
 
 ### 8. Configuration
+
 System settings and preferences.
 
 ### 9. Summary Generation
+
 Generate natural language summaries of code entities.
 
 ---
@@ -226,6 +242,7 @@ Generate natural language summaries of code entities.
 **Symptoms:** Error messages about API connection
 
 **Solutions:**
+
 1. Verify backend is running: `curl http://localhost:9000/api/health`
 2. Check backend logs for errors
 3. Ensure firewall isn't blocking port 9000
@@ -235,6 +252,7 @@ Generate natural language summaries of code entities.
 **Symptoms:** Progress bar not moving
 
 **Solutions:**
+
 1. Check backend logs for parsing errors
 2. Verify the directory path is correct
 3. Ensure files are readable (permissions)
@@ -243,6 +261,7 @@ Generate natural language summaries of code entities.
 #### Search Returns No Results
 
 **Solutions:**
+
 1. Verify indexing completed successfully
 2. Check if the query matches indexed content
 3. Try simpler search terms
@@ -251,6 +270,7 @@ Generate natural language summaries of code entities.
 #### Slow Performance
 
 **Solutions:**
+
 1. Clear browser cache
 2. Reduce number of concurrent watchers
 3. Limit indexed file types
@@ -285,11 +305,13 @@ Now that you're set up, explore these resources:
 ## System Requirements
 
 ### Minimum
+
 - Node.js 20.x
 - 2GB RAM
 - Modern browser (last 2 versions)
 
 ### Recommended
+
 - Node.js 20.x LTS
 - 4GB+ RAM
 - SSD storage for faster indexing

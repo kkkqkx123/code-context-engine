@@ -57,6 +57,7 @@ npm run check
 ## Proxy Configuration
 
 The frontend development server proxies API requests to the backend:
+
 - Frontend: `http://localhost:3001`
 - Backend API: `http://localhost:9000` (proxied via `/api` prefix)
 
@@ -65,6 +66,7 @@ This is configured in `vite.config.ts`.
 ## Migration Notes
 
 If you previously had `node_modules/` in the root directory, it has been moved to `frontend/`. This ensures:
+
 - Cleaner project structure
 - No dependency conflicts between Rust and Node.js ecosystems
 - Proper separation of concerns

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
+	import type { IndexRequest } from '$lib/api/index';
 	import { indexState, indexActions, selectedProject } from '$lib/stores/index';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
@@ -29,18 +31,24 @@
 			return;
 		}
 
-		const data: any = {
+		const data: IndexRequest = {
 			path: indexPath,
 			force: forceReindex,
 			gitignore: respectGitignore,
 		};
 
 		if (extensions) {
-			data.extensions = extensions.split(',').map(e => e.trim()).filter(Boolean);
+			data.extensions = extensions
+				.split(',')
+				.map((e) => e.trim())
+				.filter(Boolean);
 		}
 
 		if (excludePatterns) {
-			data.exclude = excludePatterns.split(',').map(e => e.trim()).filter(Boolean);
+			data.exclude = excludePatterns
+				.split(',')
+				.map((e) => e.trim())
+				.filter(Boolean);
 		}
 
 		try {
@@ -50,8 +58,8 @@
 				await indexActions.startIndex(data);
 			}
 			resetForm();
-		} catch (error: any) {
-			alert(`Failed to start indexing: ${error.message}`);
+		} catch (error) {
+			alert(`Failed to start indexing: ${errorMessage(error)}`);
 		}
 	}
 
@@ -76,10 +84,7 @@
 				<Badge variant="active">{$indexState.phase || 'Processing'}</Badge>
 			</div>
 
-			<ProgressBar 
-				progress={$indexState.progress} 
-				showLabel={true}
-			/>
+			<ProgressBar progress={$indexState.progress} showLabel={true} />
 
 			{#if $indexState.currentFile}
 				<div class="current-file">
@@ -98,9 +103,7 @@
 			{/if}
 
 			<div class="progress-actions">
-				<Button variant="danger" onclick={handleCancel}>
-					Cancel Indexing
-				</Button>
+				<Button variant="danger" onclick={handleCancel}>Cancel Indexing</Button>
 			</div>
 		</div>
 	{:else}
@@ -114,7 +117,12 @@
 				{/if}
 			</div>
 
-			<form onsubmit={(e) => { e.preventDefault(); handleIndex(); }}>
+			<form
+				onsubmit={(e) => {
+					e.preventDefault();
+					handleIndex();
+				}}
+			>
 				<Input
 					label="Directory Path"
 					type="text"
@@ -141,13 +149,17 @@
 					<label class="toggle-item">
 						<input type="checkbox" bind:checked={forceReindex} />
 						<span class="toggle-label">Force Re-index</span>
-						<span class="toggle-description">Ignore cache and re-parse all files</span>
+						<span class="toggle-description"
+							>Ignore cache and re-parse all files</span
+						>
 					</label>
 
 					<label class="toggle-item">
 						<input type="checkbox" bind:checked={respectGitignore} />
 						<span class="toggle-label">Respect .gitignore</span>
-						<span class="toggle-description">Skip files listed in .gitignore</span>
+						<span class="toggle-description"
+							>Skip files listed in .gitignore</span
+						>
 					</label>
 
 					<label class="toggle-item">
@@ -158,9 +170,7 @@
 				</div>
 
 				<div class="form-actions">
-					<Button type="submit" variant="primary">
-						Start Indexing
-					</Button>
+					<Button type="submit" variant="primary">Start Indexing</Button>
 					<Button type="button" variant="secondary" onclick={resetForm}>
 						Reset
 					</Button>
@@ -274,7 +284,7 @@
 		cursor: pointer;
 	}
 
-	.toggle-item input[type="checkbox"] {
+	.toggle-item input[type='checkbox'] {
 		width: auto;
 		margin-right: 0.5rem;
 	}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import type { Component } from 'svelte';
 	import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import { onMount } from 'svelte';
 	import { searchState, searchActions } from '$lib/stores/search';
@@ -7,11 +8,10 @@
 	import AggSearchBox from '$lib/components/search/AggSearchBox.svelte';
 	import type { SearchResultItem } from '$lib/api/search';
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
-	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
 	// Lazy load FilterPanel component
-	let FilterPanel: any = $state(null);
+	let FilterPanel: Component | null = $state(null);
 	let filterPanelLoaded = $state(false);
 	let filterPanelVisible = $state(false);
 
@@ -28,7 +28,10 @@
 
 	let sortBy = $state<'relevance' | 'file_path' | 'entity_type'>('relevance');
 
-	function handleAggSearch(response: { items: SearchResultItem[]; total: number }) {
+	function handleAggSearch(response: {
+		items: SearchResultItem[];
+		total: number;
+	}) {
 		searchActions.setExternalResults(response);
 	}
 
@@ -48,7 +51,9 @@
 	}
 
 	function nextPage() {
-		const totalPages = Math.ceil($searchState.results.length / $searchState.pagination.limit);
+		const totalPages = Math.ceil(
+			$searchState.results.length / $searchState.pagination.limit,
+		);
 		if ($searchState.pagination.page < totalPages) {
 			const newPage = $searchState.pagination.page + 1;
 			searchActions.setPage(newPage);
@@ -75,14 +80,18 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Code Search" subtitle="Semantic and keyword-based code search across indexed projects" />
+		<PageHeader
+			title="Code Search"
+			subtitle="Semantic and keyword-based code search across indexed projects"
+		/>
 
 		<SearchInput onSearch={handleSearch} />
 
 		<div class="agg-search">
 			<h2 class="agg-title">Aggregated Search</h2>
 			<p class="agg-hint">
-				Run BM25 and Vector sub-queries in a single call and merge the ranked results.
+				Run BM25 and Vector sub-queries in a single call and merge the ranked
+				results.
 			</p>
 			<AggSearchBox onSearch={handleAggSearch} />
 		</div>
@@ -110,19 +119,21 @@
 				<p>Searching...</p>
 			</div>
 		{:else if $searchState.results.length > 0}
-		<Toolbar>
-			<h2 class="results-title">Results ({ $searchState.results.length } total, showing { displayedTotal })</h2>
-			{#snippet actions()}
-				<div class="sort-controls">
-					<label class="sort-label" for="sort-select">Sort by:</label>
-					<select id="sort-select" bind:value={sortBy}>
-						<option value="relevance">Relevance</option>
-						<option value="file_path">File Path</option>
-						<option value="entity_type">Entity Type</option>
-					</select>
-				</div>
-			{/snippet}
-		</Toolbar>
+			<Toolbar>
+				<h2 class="results-title">
+					Results ({$searchState.results.length} total, showing {displayedTotal})
+				</h2>
+				{#snippet actions()}
+					<div class="sort-controls">
+						<label class="sort-label" for="sort-select">Sort by:</label>
+						<select id="sort-select" bind:value={sortBy}>
+							<option value="relevance">Relevance</option>
+							<option value="file_path">File Path</option>
+							<option value="entity_type">Entity Type</option>
+						</select>
+					</div>
+				{/snippet}
+			</Toolbar>
 
 			<div class="results-list">
 				{#each sortedResults as result ((result.entity_ids ?? []).join(','))}
@@ -140,12 +151,17 @@
 						Previous
 					</Button>
 					<span class="page-info">
-						Page {$searchState.pagination.page} of {Math.ceil($searchState.results.length / $searchState.pagination.limit)}
+						Page {$searchState.pagination.page} of {Math.ceil(
+							$searchState.results.length / $searchState.pagination.limit,
+						)}
 					</span>
 					<Button
 						variant="secondary"
 						onclick={nextPage}
-						disabled={$searchState.pagination.page >= Math.ceil($searchState.results.length / $searchState.pagination.limit)}
+						disabled={$searchState.pagination.page >=
+							Math.ceil(
+								$searchState.results.length / $searchState.pagination.limit,
+							)}
 					>
 						Next
 					</Button>

@@ -15,27 +15,30 @@ export type WatchStatusResponse = components['schemas']['WatchStatusResponse'];
 
 export const watchApi = {
 	// Start watching directory
-	startWatch: (projectId: number, data: WatchStartRequest): Promise<StartWatchResponse> =>
+	startWatch: (
+		projectId: number,
+		data: WatchStartRequest,
+	): Promise<StartWatchResponse> =>
 		call(
 			client.POST('/api/project/{project_id}/watch/start', {
 				params: { path: { project_id: projectId } },
-				body: data
-			})
+				body: data,
+			}),
 		),
 
 	// Stop watching
 	stopWatch: (projectId: number): Promise<StopWatchResponse> =>
 		call(
 			client.POST('/api/project/{project_id}/watch/stop', {
-				params: { path: { project_id: projectId } }
-			})
+				params: { path: { project_id: projectId } },
+			}),
 		),
 
 	// Get watch status
 	getStatus: (projectId: number): Promise<WatchStatusResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/watch/status', {
-				params: { path: { project_id: projectId } }
-			})
-		)
+				params: { path: { project_id: projectId } },
+			}),
+		),
 };
