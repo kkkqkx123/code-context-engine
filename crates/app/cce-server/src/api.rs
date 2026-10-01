@@ -22,7 +22,16 @@ use cce_storage_sqlite::ProjectRepository;
 ///
 /// Accepts an Engine instance, builds AppState, starts background tasks,
 /// runs startup recovery for all projects, and starts the axum server.
-pub async fn serve(mut engine: CodeContextEngine, host: &str, port: u16) -> anyhow::Result<()> {
+///
+/// The `shutdown` future is supplied by the caller (process-level lifecycle
+/// concern, e.g. signal handling in `main`); when it resolves the server
+/// stops accepting connections and drains in-flight requests.
+pub async fn serve(
+    mut engine: CodeContextEngine,
+    host: &str,
+    port: u16,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
     // Start Qdrant subprocess manager (if auto_start is configured)
     let qdrant_handle = engine.start_qdrant_process_manager();
 
@@ -104,7 +113,11 @@ pub async fn serve(mut engine: CodeContextEngine, host: &str, port: u16) -> anyh
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", host, port)).await?;
     tracing::info!("Server listening on http://{}:{}", host, port);
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await?;
+
+    tracing::info!("Server stopped");
 
     Ok(())
 }

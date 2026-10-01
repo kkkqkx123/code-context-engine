@@ -17,7 +17,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal"] }
 axum = { workspace = true, features = ["macros"] }
 cce-types = { path = "../../core/cce-types" }
 cce-config = { path = "../../core/cce-config" }

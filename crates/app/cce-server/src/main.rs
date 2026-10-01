@@ -45,7 +45,28 @@ fn main() -> anyhow::Result<()> {
         // Build engine (this needs to be inside runtime because RuntimeMetrics requires it)
         let engine = CodeContextEngine::from_config(Settings::global()?.clone()).await?;
 
+        // Process-level shutdown: SIGINT/SIGTERM stop accepting new
+        // connections and let in-flight requests drain before exit.
+        let shutdown = async {
+            let ctrl_c = tokio::signal::ctrl_c();
+            #[cfg(unix)]
+            {
+                let mut sigterm =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("SIGTERM handler must register on unix");
+                tokio::select! {
+                    _ = ctrl_c => {}
+                    _ = sigterm.recv() => {}
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = ctrl_c.await;
+            }
+            tracing::info!("Shutdown signal received, draining in-flight requests");
+        };
+
         tracing::info!("Starting HTTP server on {}:{}", host, port);
-        api::serve(engine, host, port).await
+        api::serve(engine, host, port, shutdown).await
     })
 }

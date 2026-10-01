@@ -8,6 +8,7 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use std::path::PathBuf;
 
 use cce_api::models::{ErrorResponse, IncrementalIndexRequest, IncrementalIndexResponse};
+use cce_relation::index::entity_index::EntityIndexOps;
 
 /// Handle an explicit incremental index request.
 #[utoipa::path(
@@ -41,8 +42,9 @@ pub async fn handle_incremental(
         .collect();
 
     let mut errors = Vec::new();
-    let total_entities = 0usize;
-    let total_vectors = 0usize;
+
+    let mut total_entities = 0usize;
+    let mut total_vectors = 0usize;
 
     match state.engine.get_hot_update_coordinator(project_id).await {
         Ok(coordinator) => {
@@ -54,9 +56,29 @@ pub async fn handle_incremental(
         Err(error) => errors.push(format!("failed to initialize hot update: {error}")),
     }
 
-    // Entity/vector counts are intentionally reported as request-level counts
-    // here. The operation result is the authoritative success/failure record;
-    // processors may reparse dependent files as part of relation propagation.
+    // Report authoritative post-run totals: entity count from the relation
+    // index, vector count from the project-scoped Qdrant collection. The
+    // operation result is the authoritative success/failure record; processors
+    // may reparse dependent files as part of relation propagation, so
+    // request-level counts would understate the actual index state.
+    if errors.is_empty() {
+        if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
+            let orchestrator = orchestrator.lock().await;
+            if let Some(builder) = orchestrator.get_relation_builder() {
+                total_entities = builder.index().function_count();
+            }
+        }
+        let group_id = crate::api::handlers::storage::resolve_group_id(&state, project_id).await;
+        if let Some(gid) = group_id {
+            total_vectors = state
+                .engine
+                .qdrant()
+                .count_points_by_group(&gid)
+                .await
+                .unwrap_or(0);
+        }
+    }
+
     let response = IncrementalIndexResponse {
         success: errors.is_empty(),
         files_indexed,

@@ -751,7 +751,10 @@ pub async fn handle_storage_status(
 /// Resolve the Qdrant group_id from a project_id using the project registry.
 ///
 /// Returns `None` if the project is not found or has no root_path configured.
-async fn resolve_group_id(state: &crate::api::state::AppState, project_id: i64) -> Option<String> {
+pub(crate) async fn resolve_group_id(
+    state: &crate::api::state::AppState,
+    project_id: i64,
+) -> Option<String> {
     let registry = state.engine.project_registry();
     match registry.get_or_load(project_id).await {
         Ok(entry) => {
