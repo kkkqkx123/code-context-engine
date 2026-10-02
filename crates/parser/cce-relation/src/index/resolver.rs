@@ -8,7 +8,6 @@ use super::core::RelationIndex;
 use super::dependency_index::DependencyIndex;
 use crate::config_parser::UntypedDependency;
 use crate::index::EntityIndexOps;
-use crate::stdlib_classifier::with_stdlib_classifier;
 use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
 use crate::symbol_table::ResolutionContext;
@@ -287,37 +286,16 @@ impl RelationResolver {
         //
         // Standard library detection happens once during relation extraction
         // (in relation_extractor.rs) and is stored in RawRelationData.stdlib_category.
-        // This is the authoritative source and should always be set.
-        //
-        // The fallback detection here is only for backward compatibility with
-        // cached relations that may not have this field set. In a clean system,
-        // this fallback should never be needed.
+        // This is the authoritative source. There is intentionally no
+        // fallback detection here: the global classifier hook was never
+        // registered by any caller, so any fallback would be dead code that
+        // only masks missing classification at extraction time.
         //
         // See STDLIB_SUMMARY.md for detailed analysis of stdlib handling.
         //
         // detection no longer causes an early return; the stdlib identity
         // is applied only after symbol resolution.
-        let is_stdlib = if let Some(_category) = raw_data.stdlib_category {
-            true
-        } else {
-            let detected = with_stdlib_classifier(|c| {
-                c.is_stdlib_by_type(
-                    &raw_data.dst_name,
-                    &raw_data.relation_type,
-                    &parsed.language,
-                )
-            })
-            .unwrap_or(false);
-            if detected {
-                tracing::warn!(
-                    "Fallback stdlib detection for: {} -> {} (relation type: {:?})",
-                    raw_data.src,
-                    raw_data.dst_name,
-                    raw_data.relation_type
-                );
-            }
-            detected
-        };
+        let is_stdlib = raw_data.stdlib_category.is_some();
 
         self.resolve_calls
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -475,6 +453,9 @@ impl RelationResolver {
             is_stdlib,
             raw_data.relation_type.is_call(),
         ) {
+            if let Some(metrics) = &self.metrics {
+                metrics.debug_filtered.increment();
+            }
             return None;
         }
 

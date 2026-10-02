@@ -27,3 +27,7 @@ tempfile = { workspace = true }
 [[bench]]
 name = "metadata_read"
 harness = false
+
+[[bench]]
+name = "storage_txn"
+harness = false

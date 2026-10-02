@@ -96,13 +96,23 @@ impl Default for OrchestratorConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchConfig {
     /// Number of files to scan before yielding to callback
-    /// Controls memory usage during directory scanning
+    /// Controls memory usage during directory scanning.
+    /// Recovery cost is constant regardless of batch size (recovery always
+    /// re-scans; per-batch validation happens downstream), so do not shrink
+    /// this value to speed up recovery. Size it by memory budget instead.
     pub scan_batch_size: usize,
     /// Maximum concurrent file parsing tasks
-    /// Controls CPU and memory usage during parsing
+    /// Controls CPU and memory usage during parsing.
+    /// Benchmarked sweet spot on comparable hardware is 8-12 workers;
+    /// beyond that gains flatten. Values far outside this range deserve
+    /// a second look (too low leaves CPU idle, too high only adds
+    /// scheduling overhead).
     pub parse_concurrency: usize,
     /// Maximum concurrent file processing tasks
-    /// Includes entity grouping and NL conversion
+    /// Includes entity grouping and NL conversion.
+    /// The default stays below the parse-stage sweet spot on purpose:
+    /// production overlaps disk IO and embedding waits, so raising this
+    /// toward 8-12 only helps CPU-bound parse-heavy workloads.
     pub process_concurrency: usize,
     /// Number of chunks to accumulate before storing
     /// Controls memory during chunking phase

@@ -24,3 +24,7 @@ tempfile = { workspace = true }
 [[bench]]
 name = "bm25_query"
 harness = false
+
+[[bench]]
+name = "bm25_scale"
+harness = false

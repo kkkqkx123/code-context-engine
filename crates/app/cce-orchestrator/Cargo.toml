@@ -63,3 +63,15 @@ harness = false
 [[bench]]
 name = "checkpoint_codec"
 harness = false
+
+[[bench]]
+name = "batch_concurrency"
+harness = false
+
+[[bench]]
+name = "recovery_curve"
+harness = false
+
+[[bench]]
+name = "fusion_cache"
+harness = false

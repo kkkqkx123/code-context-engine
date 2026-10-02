@@ -499,11 +499,11 @@ pub struct CacheStats {
 # config.toml
 
 [orchestrator]
-# 扫描批次大小
+# 扫描批次大小（决定内存上界；恢复成本恒定，无需为恢复速度缩小批次）
 scan_batch_size = 100
-# 解析并发数
+# 解析并发数（实测甜点区间 8-12，默认 10 已在区间内）
 parse_concurrency = 10
-# 处理并发数  
+# 处理并发数（默认 5；生产叠加磁盘 IO 与嵌入等待，仅 CPU 瓶颈明显时再向 8-12 上调）
 process_concurrency = 5
 # 存储批次大小
 store_batch_size = 50

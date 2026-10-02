@@ -16,7 +16,6 @@ pub mod index;
 pub mod policy;
 pub mod query;
 mod resolution_affinity;
-pub mod stdlib_classifier;
 pub mod symbol;
 pub mod symbol_table;
 pub mod type_inference;

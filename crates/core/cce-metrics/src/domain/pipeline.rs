@@ -223,7 +223,9 @@ pub struct RelationMetrics {
     pub files_processed_total: LabeledCounter,
     /// Total number of relations dropped because the per-file budget was exceeded
     pub truncated_relations: LabeledCounter,
-    /// Total number of unresolved relations dropped because their callee looked like a standard library name
+    /// Total number of unresolved relations dropped because their callee looked like a standard library name.
+    /// Expected drop when the filter is enabled; see `debug_filtered` and
+    /// `relation_self_loop_filtered_total` for the other silent drop kinds.
     pub stdlib_filtered: LabeledCounter,
     /// Total number of unresolved standard-library-like relations preserved as external calls
     pub stdlib_preserved_external: LabeledCounter,
@@ -301,8 +303,19 @@ pub struct RelationMetrics {
     pub resolution_cache_hit_total: LabeledCounter,
     /// Resolution cache misses (negative cache hits or cache misses)
     pub resolution_cache_miss_total: LabeledCounter,
-    /// Total number of relation edges dropped due to self-loop suppression
+    /// Total number of relation edges dropped due to self-loop suppression.
+    /// Expected drop: the caller calls itself without an explicit
+    /// `self`/`Self` receiver. Together with `stdlib_filtered` and
+    /// `debug_filtered` this covers every silent resolution drop; a missing
+    /// edge not reflected in any of the three counters is anomalous.
     pub relation_self_loop_filtered_total: LabeledCounter,
+    /// Total number of unresolved call relations dropped by the
+    /// debug/log/macro post-filter (non-stdlib only).
+    /// Expected drop: calls to logging or debugging helpers that look like
+    /// project calls but match the filter pattern. Unlike `stdlib_filtered`
+    /// this path previously had no counting at all; it now shares the same
+    /// filter-counter family so all silent drops are observable.
+    pub debug_filtered: LabeledCounter,
     /// Registry for lazy per-reason counter creation
     registry: MetricsRegistry,
     /// Project id label value shared by all counters
@@ -437,6 +450,10 @@ impl RelationMetrics {
             ),
             relation_self_loop_filtered_total: registry.counter(
                 "relation_self_loop_filtered_total",
+                &[("project_id", &proj_val)],
+            ),
+            debug_filtered: registry.counter(
+                "relation_debug_filtered_total",
                 &[("project_id", &proj_val)],
             ),
             registry: registry.clone(),

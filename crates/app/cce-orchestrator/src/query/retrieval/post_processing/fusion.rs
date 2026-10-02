@@ -238,7 +238,10 @@ pub fn expand_multi_entity_results(results: Vec<SearchResult>) -> Vec<SearchResu
 /// the surviving path still goes through the unified fusion path, so its scores
 /// are normalized, weighted, and filtered by `min_score` exactly as they would
 /// be when both paths are present. This keeps scoring semantics independent of
-/// whether the other path happened to return nothing.
+/// whether the other path happened to return nothing. When one path is entirely
+/// empty the same semantics run through a dedicated fast path
+/// (`fuse_single_path`) that skips the union key set and the empty-side
+/// aggregation instead of materializing both sides of the union.
 ///
 /// # Arguments
 ///
@@ -299,15 +302,6 @@ pub fn fuse_hybrid_results_with_stats(
     } else {
         bm25_results
     };
-    if vector_results.is_empty() || bm25_results.is_empty() {
-        tracing::trace!(
-            vector_results = vector_results.len(),
-            bm25_results = bm25_results.len(),
-            "Hybrid fusion single-path mode: one recall path returned no results; \
-             scores are weighted and min_score-filtered as in dual-path mode"
-        );
-    }
-
     let alpha = config.vector_weight;
     let beta = config.bm25_weight;
 
@@ -349,6 +343,33 @@ pub fn fuse_hybrid_results_with_stats(
         bm25_only = stats.bm25_keys - stats.matched_keys,
         "Hybrid fusion alignment coverage"
     );
+
+    if vector_results.is_empty() || bm25_results.is_empty() {
+        tracing::trace!(
+            vector_results = vector_results.len(),
+            bm25_results = bm25_results.len(),
+            "Hybrid fusion single-path mode: one recall path returned no results; \
+             scores are weighted and min_score-filtered as in dual-path mode"
+        );
+        if vector_results.is_empty() {
+            return fuse_single_path(
+                &bm25_results,
+                |r| r.bm25_score.unwrap_or(0.0),
+                beta,
+                false,
+                config,
+                stats,
+            );
+        }
+        return fuse_single_path(
+            &vector_results,
+            |r| r.vector_score,
+            alpha,
+            true,
+            config,
+            stats,
+        );
+    }
 
     let mut fused: Vec<SearchResult> = Vec::with_capacity(all_keys.len());
 
@@ -412,30 +433,87 @@ pub fn fuse_hybrid_results_with_stats(
         fused.push(result);
     }
 
-    // Optional chunk-level dedup: collapse entries pointing at the same
-    // physical chunk (its id) to the best-scoring one. Entity-level alignment
-    // can otherwise surface the same chunk once per contained entity.
-    if config.dedup_by_chunk {
-        let mut best_by_chunk: HashMap<String, SearchResult> = HashMap::new();
-        for result in fused {
-            best_by_chunk
-                .entry(result.id.clone())
-                .and_modify(|existing| {
-                    if result.score > existing.score {
-                        *existing = result.clone();
-                    }
-                })
-                .or_insert(result);
-        }
-        fused = best_by_chunk.into_values().collect();
-    }
+    let mut fused = dedup_by_chunk_id(fused, config.dedup_by_chunk);
+    sort_fused_by_score(&mut fused);
 
-    // Step 4: Sort by fused score descending, with deterministic tie-breaking.
-    // Ties arise when a path yields few distinct raw scores (min-max then maps
-    // them onto few discrete normalized values, e.g. two results -> {0, 1}) or
-    // when raw scores coincide (multi-entity expansion duplicates scores);
-    // without a stable secondary key the order would depend on HashMap
-    // iteration order and differ across requests.
+    (fused, stats)
+}
+
+/// Score the surviving recall path when the other path returned nothing.
+///
+/// Semantics match the dual-path loop exactly for this shape: the surviving
+/// path is aggregated to one best entry per alignment key, min-max
+/// normalized, weighted, `min_score`-filtered, and marked as `hybrid`.
+/// Skipped is only the dead work: no union key set, no aggregation or
+/// normalization of the empty side, no per-key empty-side lookups.
+/// `from_vector` selects which side's score field and weight apply, mirroring
+/// the single-path arms of the dual-path loop.
+fn fuse_single_path(
+    surviving: &[SearchResult],
+    raw_score: impl Fn(&SearchResult) -> f32,
+    weight: f32,
+    from_vector: bool,
+    config: &HybridFusionConfig,
+    stats: FusionAlignmentStats,
+) -> (Vec<SearchResult>, FusionAlignmentStats) {
+    if !config.include_single_path {
+        return (Vec::new(), stats);
+    }
+    let by_key = normalize_by_key(best_per_key(surviving, raw_score));
+    let mut keys: Vec<&String> = by_key.keys().collect();
+    keys.sort();
+    let mut fused = Vec::with_capacity(by_key.len());
+    for key in keys {
+        let (idx, norm) = by_key[key];
+        let mut base = surviving[idx].clone();
+        if from_vector {
+            base.vector_score = norm;
+        } else {
+            base.vector_score = 0.0;
+            base.bm25_score = Some(norm);
+        }
+        let fused_score = weight * norm;
+        if fused_score < config.min_score {
+            continue;
+        }
+        base.score = fused_score;
+        base.original_score = fused_score;
+        base.sources = vec!["hybrid".to_string()];
+        fused.push(base);
+    }
+    let mut fused = dedup_by_chunk_id(fused, config.dedup_by_chunk);
+    sort_fused_by_score(&mut fused);
+    (fused, stats)
+}
+
+/// Collapse entries pointing at the same physical chunk (its id) to the
+/// best-scoring one. Entity-level alignment can otherwise surface the same
+/// chunk once per contained entity.
+fn dedup_by_chunk_id(results: Vec<SearchResult>, enabled: bool) -> Vec<SearchResult> {
+    if !enabled {
+        return results;
+    }
+    let mut best_by_chunk: HashMap<String, SearchResult> = HashMap::new();
+    for result in results {
+        best_by_chunk
+            .entry(result.id.clone())
+            .and_modify(|existing| {
+                if result.score > existing.score {
+                    *existing = result.clone();
+                }
+            })
+            .or_insert(result);
+    }
+    best_by_chunk.into_values().collect()
+}
+
+/// Sort by fused score descending, with deterministic tie-breaking.
+/// Ties arise when a path yields few distinct raw scores (min-max then maps
+/// them onto few discrete normalized values, e.g. two results -> {0, 1}) or
+/// when raw scores coincide (multi-entity expansion duplicates scores);
+/// without a stable secondary key the order would depend on HashMap
+/// iteration order and differ across requests.
+fn sort_fused_by_score(fused: &mut [SearchResult]) {
     fused.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -454,8 +532,6 @@ pub fn fuse_hybrid_results_with_stats(
                 a_key.cmp(&b_key)
             })
     });
-
-    (fused, stats)
 }
 
 #[cfg(test)]

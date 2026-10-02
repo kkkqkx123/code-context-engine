@@ -354,6 +354,10 @@ static DESCRIPTIONS: &[(&str, &str)] = &[
         "Total build configuration scan failures",
     ),
     (
+        "relation_debug_filtered_total",
+        "Total unresolved call relations dropped by the debug/log/macro post-filter",
+    ),
+    (
         "relation_delta_export_unresolved_total",
         "Total exports whose stable symbol key could not be resolved during delta application",
     ),

@@ -58,3 +58,7 @@ cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
 [[bench]]
 name = "relation_perf"
 harness = false
+
+[[bench]]
+name = "final_replay"
+harness = false

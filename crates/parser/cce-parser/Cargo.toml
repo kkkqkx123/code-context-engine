@@ -83,4 +83,8 @@ cce-relation = { path = "../cce-relation" }
 name = "parse_nl_chunk"
 harness = false
 
+[[bench]]
+name = "inline_embedded"
+harness = false
+
 

@@ -23,3 +23,7 @@ tempfile = { workspace = true }
 [[bench]]
 name = "scan_hash"
 harness = false
+
+[[bench]]
+name = "poll_rates"
+harness = false

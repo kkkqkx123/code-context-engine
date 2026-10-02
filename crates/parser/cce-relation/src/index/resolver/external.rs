@@ -7,7 +7,6 @@
 use super::RelationResolver;
 use crate::index::EntityIndexOps;
 use crate::index::core::RelationIndex;
-use crate::stdlib_classifier::with_stdlib_classifier;
 use crate::symbol::SymbolRef;
 use crate::symbol_table::ProjectSymbolTable;
 
@@ -274,26 +273,6 @@ impl RelationResolver {
                 self.extract_stdlib_name(&raw_data.dst_name, &parsed.language),
             ));
         }
-        // Python stdlib heuristics
-        if matches!(
-            lower.split('.').next().unwrap_or(""),
-            "os" | "sys" | "json" | "re" | "typing" | "collections" | "pathlib"
-        ) {
-            // Check via stdlib classifier for more accurate result
-            let is_stdlib = with_stdlib_classifier(|c| {
-                c.is_stdlib_by_type(
-                    &raw_data.dst_name,
-                    &raw_data.relation_type,
-                    &parsed.language,
-                )
-            })
-            .unwrap_or(false);
-            if is_stdlib {
-                return Some(ExternalCallType::standard_library(
-                    self.extract_stdlib_name(&raw_data.dst_name, &parsed.language),
-                ));
-            }
-        }
         // Go stdlib single-segment imports are often stdlib (fmt, net/http)
         if parsed.language == cce_types::language::Language::Go {
             let first = name
@@ -315,6 +294,10 @@ impl RelationResolver {
     ///
     /// Determines the type of external call (standard library, external package, or unknown).
     ///
+    /// Stdlib identity comes from the preset `stdlib_category` field and is
+    /// applied by the caller before reaching this path; classification here
+    /// only distinguishes external packages from unknown targets.
+    ///
     /// # Arguments
     ///
     /// * `raw_data` - The raw relation data
@@ -328,21 +311,6 @@ impl RelationResolver {
         raw_data: &RawRelationData,
         parsed: &ParsedFile,
     ) -> Option<ExternalCallType> {
-        let is_stdlib = with_stdlib_classifier(|c| {
-            c.is_stdlib_by_type(
-                &raw_data.dst_name,
-                &raw_data.relation_type,
-                &parsed.language,
-            )
-        })
-        .unwrap_or(false);
-
-        if is_stdlib {
-            Some(ExternalCallType::standard_library(
-                self.extract_stdlib_name(&raw_data.dst_name, &parsed.language),
-            ))
-        } else {
-            self.classify_external_package(raw_data, parsed)
-        }
+        self.classify_external_package(raw_data, parsed)
     }
 }
