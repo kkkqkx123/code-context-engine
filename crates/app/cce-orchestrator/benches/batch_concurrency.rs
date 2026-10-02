@@ -57,7 +57,8 @@ fn process_file(
     let req = ConversionRequest {
         force_mode: Some(OutputMode::Both),
     };
-    let conversions = converter.convert_entity_groups(&processing.groups, path, Some(&req), None, None);
+    let conversions =
+        converter.convert_entity_groups(&processing.groups, path, Some(&req), None, None);
     let mut chunker = GroupChunker::new(chunk_config.clone());
     let mut chunks = 0;
     for (group, conversion) in processing.groups.iter().zip(conversions.iter()) {
@@ -135,8 +136,7 @@ fn main() {
         .create(true)
         .append(true)
         .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/batch_concurrency.tsv"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/batch_concurrency.tsv"),
         )
         .ok();
     if let Some(f) = out.as_mut() {
@@ -162,8 +162,13 @@ fn main() {
         }
     }
     let base_rate = FILE_COUNT as f64 / (base_ms / 1000.0);
-    println!("baseline sequential: {base_ms:.2} ms ({base_rate:.1} files/sec, {base_chunks} chunks)");
+    println!(
+        "baseline sequential: {base_ms:.2} ms ({base_rate:.1} files/sec, {base_chunks} chunks)"
+    );
     if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# baseline\t1\t{base_ms:.2}\t{base_rate:.1}\t{base_chunks}");
+        let _ = writeln!(
+            f,
+            "# baseline\t1\t{base_ms:.2}\t{base_rate:.1}\t{base_chunks}"
+        );
     }
 }

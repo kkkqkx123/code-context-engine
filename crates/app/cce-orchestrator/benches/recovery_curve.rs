@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use cce_orchestrator::index::FileIndexer;
-use cce_scanner::{ScanOptions, FSScanner};
+use cce_scanner::{FSScanner, ScanOptions};
 use cce_storage_sqlite::BatchCheckpointRecord;
 
 const FILE_COUNT: usize = 300;
@@ -87,10 +87,7 @@ fn main() {
     let mut out = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/recovery_curve.tsv"),
-        )
+        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/recovery_curve.tsv"))
         .ok();
     if let Some(f) = out.as_mut() {
         let _ = writeln!(f, "# case\tms\toutcome");
@@ -124,7 +121,11 @@ fn main() {
             None,
         ))
         .expect("initialize");
-    row("initialize fresh", start.elapsed().as_secs_f64() * 1000.0, "ok");
+    row(
+        "initialize fresh",
+        start.elapsed().as_secs_f64() * 1000.0,
+        "ok",
+    );
     let total_batches = indexer.total_batches();
 
     // Completed-scale curve: crash at different batch indices. Recovery
@@ -147,8 +148,11 @@ fn main() {
     // change. Each must fail fast and force a fresh start (redo from zero).
     let mut tampered = indexer.checkpoint().clone();
     tampered.current_batch_index = 3;
-    fs::write(tmp.path().join("src/mod_000/file_9999.rs"), "pub fn extra() {}\n")
-        .expect("add file");
+    fs::write(
+        tmp.path().join("src/mod_000/file_9999.rs"),
+        "pub fn extra() {}\n",
+    )
+    .expect("add file");
     let start = Instant::now();
     let outcome = FileIndexer::recover(tmp.path(), BATCH_SIZE, &opts, tampered.clone(), None);
     row(

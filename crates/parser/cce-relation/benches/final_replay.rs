@@ -20,10 +20,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use cce_relation::SymbolTableBuilder;
 use cce_relation::index::{
     IndexBuilder, LayeredSnapshotIndex, RelationIndex, RelationResolver, RelationSnapshotIndex,
 };
-use cce_relation::SymbolTableBuilder;
 use cce_relation::query::CallChainQuery;
 use cce_types::entity::ParseStatus;
 use cce_types::relation::CallContext;

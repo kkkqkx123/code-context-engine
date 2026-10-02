@@ -17,10 +17,10 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use cce_config::AstToNlConfig;
 use cce_parser::ast_to_nl::{AstToNlConverter, ChunkingConfig, ConversionRequest, GroupChunker};
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::parser::ParseCoordinator;
-use cce_config::AstToNlConfig;
 use cce_types::OutputMode;
 
 fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
@@ -184,8 +184,13 @@ fn main() {
         let req = ConversionRequest {
             force_mode: Some(OutputMode::Both),
         };
-        let conversions =
-            converter.convert_entity_groups(&processing.groups, "src/grow.rs", Some(&req), None, None);
+        let conversions = converter.convert_entity_groups(
+            &processing.groups,
+            "src/grow.rs",
+            Some(&req),
+            None,
+            None,
+        );
         let chunk_ms = bench_ms(3, || {
             let mut chunker = GroupChunker::new(chunk_config.clone());
             for (group, conversion) in processing.groups.iter().zip(conversions.iter()) {

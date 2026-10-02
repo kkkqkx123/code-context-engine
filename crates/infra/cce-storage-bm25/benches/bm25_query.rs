@@ -166,9 +166,8 @@ fn main() {
                     for result in &results {
                         let title = result.title().map(String::as_str).unwrap_or("");
                         let title_tokens = tokenizer.tokenize(title);
-                        let content_tokens = tokenizer.tokenize(
-                            &format!("function {title} computes session"),
-                        );
+                        let content_tokens =
+                            tokenizer.tokenize(&format!("function {title} computes session"));
                         for token in title_tokens.iter().chain(content_tokens.iter()) {
                             if query_terms.iter().any(|t| t == token) {
                                 matched += 1;
@@ -194,9 +193,7 @@ fn main() {
                         let schema = big_schema.clone();
                         scope.spawn(move || {
                             for _ in 0..10 {
-                                let _ = r
-                                    .search(&manager, &schema, short, oo)
-                                    .expect("search");
+                                let _ = r.search(&manager, &schema, short, oo).expect("search");
                             }
                         });
                     }

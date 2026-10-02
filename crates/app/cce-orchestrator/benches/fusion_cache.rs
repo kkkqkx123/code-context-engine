@@ -19,10 +19,12 @@ use std::time::Instant;
 use cce_orchestrator::query::cache::{CacheConfig, QueryCache};
 use cce_orchestrator::query::filter::QueryFilter;
 use cce_orchestrator::query::retrieval::post_processing::fusion::{
-    compute_alignment_coverage, expand_multi_entity_results, fuse_hybrid_results,
-    HybridFusionConfig,
+    HybridFusionConfig, compute_alignment_coverage, expand_multi_entity_results,
+    fuse_hybrid_results,
 };
-use cce_orchestrator::query::types::{QueryConfigBuilder, QueryResult, SearchResult, SearchSources};
+use cce_orchestrator::query::types::{
+    QueryConfigBuilder, QueryResult, SearchResult, SearchSources,
+};
 use cce_types::EntityId;
 
 fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
@@ -72,9 +74,7 @@ fn main() {
     let mut out = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/fusion_cache.tsv"),
-        )
+        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/fusion_cache.tsv"))
         .ok();
     if let Some(f) = out.as_mut() {
         let _ = writeln!(f, "# case\tms\textra");
@@ -89,7 +89,11 @@ fn main() {
     let config = HybridFusionConfig::default();
 
     // Alignment sweep at fixed candidate size.
-    for (label, shift) in [("overlap full", 0), ("overlap half", 100), ("overlap none", 200)] {
+    for (label, shift) in [
+        ("overlap full", 0),
+        ("overlap half", 100),
+        ("overlap none", 200),
+    ] {
         let (vector, bm25) = make_pair(200, shift, false);
         let stats = compute_alignment_coverage(&vector, &bm25);
         let ms = bench_ms(10, || {
@@ -152,9 +156,15 @@ fn main() {
                 .build(format!("benchmark query {i}"))
                 .with_sources(SearchSources::default())
                 .with_limit(10);
-            cache.put_result_for_view(&options, &view, result.clone()).await;
+            cache
+                .put_result_for_view(&options, &view, result.clone())
+                .await;
         }
-        row("cache put x200", start.elapsed().as_secs_f64() * 1000.0 / 200.0, "per put");
+        row(
+            "cache put x200",
+            start.elapsed().as_secs_f64() * 1000.0 / 200.0,
+            "per put",
+        );
 
         let start = Instant::now();
         let mut hits = 0;
@@ -209,8 +219,16 @@ fn main() {
 
         let start = Instant::now();
         cache.invalidate_all().await;
-        row("cache invalidate_all", start.elapsed().as_secs_f64() * 1000.0, "one shot");
+        row(
+            "cache invalidate_all",
+            start.elapsed().as_secs_f64() * 1000.0,
+            "one shot",
+        );
         let after = cache.get_result_for_view(&options, &view).await;
-        row("cache get after inval", 0.0, if after.is_none() { "empty" } else { "leak" });
+        row(
+            "cache get after inval",
+            0.0,
+            if after.is_none() { "empty" } else { "leak" },
+        );
     });
 }

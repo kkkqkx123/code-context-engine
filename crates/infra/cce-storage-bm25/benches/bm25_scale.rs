@@ -106,7 +106,9 @@ fn main() {
         let o = opts(limit, 0);
         let mut hits = 0;
         let ms = bench_ms(5, || {
-            let r = retrieval.search(&manager, &schema, short, &o).expect("search");
+            let r = retrieval
+                .search(&manager, &schema, short, &o)
+                .expect("search");
             hits = r.len();
         });
         row(&format!("docs2000 limit{limit} off0"), ms, hits);
@@ -117,7 +119,9 @@ fn main() {
         let o = opts(10, offset);
         let mut hits = 0;
         let ms = bench_ms(5, || {
-            let r = retrieval.search(&manager, &schema, short, &o).expect("search");
+            let r = retrieval
+                .search(&manager, &schema, short, &o)
+                .expect("search");
             hits = r.len();
         });
         row(&format!("docs2000 limit10 off{offset}"), ms, hits);

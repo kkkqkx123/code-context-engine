@@ -55,9 +55,7 @@ fn main() {
     let mut out = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/storage_txn.tsv"),
-        )
+        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/storage_txn.tsv"))
         .ok();
     if let Some(f) = out.as_mut() {
         let _ = writeln!(f, "# write_batch\ttotal_ms\tper_txn_ms\ttxns");
@@ -101,7 +99,10 @@ fn main() {
             "  read-back: batched x{TOTAL_CHUNKS} {batched_ms:.2} ms vs per-row loop x200 {loop_ms:.2} ms"
         );
         if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "# batch{batch} readback batched_ms={batched_ms:.2} loop200_ms={loop_ms:.2}");
+            let _ = writeln!(
+                f,
+                "# batch{batch} readback batched_ms={batched_ms:.2} loop200_ms={loop_ms:.2}"
+            );
         }
     }
 }
