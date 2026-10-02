@@ -73,19 +73,40 @@ pub fn calculate_hash_with_limit(content: &[u8], limit: Option<usize>) -> String
 ///
 /// Identical to `calculate_hash` of the full file bytes.
 pub fn hash_file_stream(path: &std::path::Path) -> std::io::Result<String> {
+    let (hash, _) = hash_file_stream_with_prefix(path, 0)?;
+    Ok(hash)
+}
+
+/// Stream-hash a file while retaining a leading prefix sample.
+///
+/// Opens the file once: every chunk feeds the hasher, and the first
+/// `prefix_size` bytes are additionally retained for binary detection.
+/// Returns the full-content hash together with the prefix sample.
+pub fn hash_file_stream_with_prefix(
+    path: &std::path::Path,
+    prefix_size: usize,
+) -> std::io::Result<(String, Vec<u8>)> {
     use std::io::Read;
 
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 64 * 1024];
+    let mut prefix = Vec::new();
+    if prefix_size > 0 {
+        prefix.reserve(prefix_size.min(64 * 1024));
+    }
     loop {
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
+        if prefix.len() < prefix_size {
+            let want = (prefix_size - prefix.len()).min(read);
+            prefix.extend_from_slice(&buffer[..want]);
+        }
     }
-    Ok(hex::encode(hasher.finalize()))
+    Ok((hex::encode(hasher.finalize()), prefix))
 }
 
 #[cfg(test)]
@@ -200,5 +221,17 @@ mod tests {
 
         let stream_hash = hash_file_stream(&path).expect("stream hash");
         assert_eq!(stream_hash, calculate_hash(&content));
+    }
+
+    #[test]
+    fn test_hash_file_stream_with_prefix_single_pass() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("payload.bin");
+        let content: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &content).expect("write file");
+
+        let (hash, prefix) = hash_file_stream_with_prefix(&path, 8192).expect("stream hash");
+        assert_eq!(hash, calculate_hash(&content));
+        assert_eq!(prefix, content[..8192]);
     }
 }

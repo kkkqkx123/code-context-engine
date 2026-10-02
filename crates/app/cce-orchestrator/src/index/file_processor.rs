@@ -69,6 +69,36 @@ pub(crate) async fn read_verified_utf8(
         .map_err(|e| ParseError::encoding(format!("{}: {e}", path.display())))
 }
 
+/// Read a scanned file reusing its scan-phase fingerprint.
+///
+/// When the on-disk size and modification time still match the scan-phase
+/// entry, the content cannot have changed without updating the fingerprint,
+/// so the file is decoded directly without recomputing the full-content
+/// hash. Any fingerprint mismatch falls back to hash verification, which
+/// reports drift explicitly instead of silently indexing stale content.
+pub(crate) async fn read_verified_utf8_for_entry(entry: &FileEntry) -> Result<String, ParseError> {
+    let path = &entry.path;
+    let fresh = tokio::fs::metadata(path)
+        .await
+        .map(|metadata| {
+            let size_matches = metadata.len() == entry.size;
+            let mtime_matches = metadata
+                .modified()
+                .map(|modified| chrono::DateTime::<chrono::Utc>::from(modified) == entry.modified)
+                .unwrap_or(false);
+            size_matches && mtime_matches
+        })
+        .unwrap_or(false);
+    if fresh {
+        let bytes = tokio::fs::read(path)
+            .await
+            .map_err(|e| ParseError::Io(IoError::from(e)))?;
+        return cce_utils::file::decode_bytes_to_utf8(&bytes, path)
+            .map_err(|e| ParseError::encoding(format!("{}: {e}", path.display())));
+    }
+    read_verified_utf8(path, entry.content_hash.as_deref()).await
+}
+
 /// Stable cache-key label for an output mode.
 fn output_mode_label(mode: OutputMode) -> &'static str {
     match mode {
@@ -535,9 +565,9 @@ impl FileProcessor {
         &mut self,
         file_entry: &FileEntry,
     ) -> Result<FileProcessResult, OrchestratorError> {
-        // Read file content, verifying the raw bytes still match the hash
-        // recorded during scanning (encoding detection happens after the check)
-        let content = read_verified_utf8(&file_entry.path, file_entry.content_hash.as_deref())
+        // Read file content, reusing the scan-phase fingerprint when the file
+        // is unchanged (encoding detection happens after the check)
+        let content = read_verified_utf8_for_entry(file_entry)
             .await
             .map_err(OrchestratorError::Parse)?;
 
@@ -573,9 +603,9 @@ impl FileProcessor {
         file_entry: &FileEntry,
         output_mode: OutputMode,
     ) -> Result<CompleteFileProcessResult, OrchestratorError> {
-        // Read file content, verifying the raw bytes still match the hash
-        // recorded during scanning (encoding detection happens after the check)
-        let content = read_verified_utf8(&file_entry.path, file_entry.content_hash.as_deref())
+        // Read file content, reusing the scan-phase fingerprint when the file
+        // is unchanged (encoding detection happens after the check)
+        let content = read_verified_utf8_for_entry(file_entry)
             .await
             .map_err(OrchestratorError::Parse)?;
 
@@ -1433,6 +1463,58 @@ mod tests {
             .await
             .expect("missing baseline must skip verification");
         assert_eq!(content, "any content");
+    }
+
+    /// Entry-based read reuses the scan fingerprint without recomputing the
+    /// content hash when size and mtime are unchanged.
+    #[tokio::test]
+    async fn read_verified_utf8_for_entry_reuses_fingerprint() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("fresh.txt");
+        let source = "hello fingerprint reuse";
+        std::fs::write(&path, source).expect("write file");
+        let metadata = std::fs::metadata(&path).expect("stat file");
+        let entry = FileEntry {
+            path: path.clone(),
+            relative_path: std::path::PathBuf::from("fresh.txt"),
+            size: metadata.len(),
+            modified: metadata.modified().expect("mtime").into(),
+            content_hash: Some(cce_utils::hash::calculate_hash(source.as_bytes())),
+            language_info: None,
+        };
+
+        let content = read_verified_utf8_for_entry(&entry)
+            .await
+            .expect("fresh fingerprint must decode");
+        assert_eq!(content, source);
+    }
+
+    /// Entry-based read falls back to hash verification and reports drift
+    /// when the fingerprint no longer matches.
+    #[tokio::test]
+    async fn read_verified_utf8_for_entry_reports_drift() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("drifted_entry.txt");
+        std::fs::write(&path, "current on-disk content").expect("write file");
+        let metadata = std::fs::metadata(&path).expect("stat file");
+        let stale_modified = chrono::DateTime::<chrono::Utc>::from(std::time::UNIX_EPOCH);
+        assert_ne!(
+            chrono::DateTime::<chrono::Utc>::from(metadata.modified().expect("mtime")),
+            stale_modified
+        );
+        let entry = FileEntry {
+            path: path.clone(),
+            relative_path: std::path::PathBuf::from("drifted_entry.txt"),
+            size: 1,
+            modified: stale_modified,
+            content_hash: Some(cce_utils::hash::calculate_hash(b"content at scan time")),
+            language_info: None,
+        };
+
+        let error = read_verified_utf8_for_entry(&entry)
+            .await
+            .expect_err("drifted content must fail verification");
+        assert!(matches!(error, ParseError::ContentChanged(_)));
     }
 
     /// Non-UTF-8 files verify in the raw-byte domain before decoding; a GBK

@@ -781,8 +781,8 @@ impl<'a> DirectoryWalker<'a> {
     {
         let start = Instant::now();
 
-        let size = match std::fs::metadata(path) {
-            Ok(metadata) => metadata.len(),
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
             Err(error) => {
                 warn!(
                     path = %path.display(),
@@ -796,6 +796,7 @@ impl<'a> DirectoryWalker<'a> {
                 return Ok(());
             }
         };
+        let size = metadata.len();
         if let Some(include) = self.plugin_filter_decision(path, false, size) {
             if !include {
                 let elapsed = start.elapsed().as_secs_f64() * 1000.0;
@@ -845,7 +846,7 @@ impl<'a> DirectoryWalker<'a> {
             return Ok(());
         }
 
-        match self.process_file(path) {
+        match self.process_file_with_metadata(path, &metadata) {
             Ok(file_entry) => {
                 let elapsed = start.elapsed().as_secs_f64() * 1000.0;
                 let skipped = file_entry.content_hash.is_none();
@@ -947,7 +948,14 @@ impl<'a> DirectoryWalker<'a> {
     fn process_file(&self, path: &Path) -> Result<FileEntry> {
         let metadata = std::fs::metadata(path)
             .map_err(|e| FSScanner::io_error("failed to get file metadata", path, e))?;
+        self.process_file_with_metadata(path, &metadata)
+    }
 
+    fn process_file_with_metadata(
+        &self,
+        path: &Path,
+        metadata: &std::fs::Metadata,
+    ) -> Result<FileEntry> {
         let file_size = metadata.len();
 
         // Incremental scan: when a previous entry exists for the same
@@ -1003,7 +1011,8 @@ impl<'a> DirectoryWalker<'a> {
             }
         }
 
-        self.file_processor.process_file(path, self.root_path)
+        self.file_processor
+            .process_file_with_metadata(path, self.root_path, metadata)
     }
 }
 

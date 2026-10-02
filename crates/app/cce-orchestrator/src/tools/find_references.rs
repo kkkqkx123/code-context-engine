@@ -7,9 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cce_relation::index::LayeredSnapshotIndex;
-use cce_relation::index::snapshot_query::{
-    SnapshotEntityQueryOps, SnapshotRelationQueryOps,
-};
+use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
 use cce_relation::query::QueryCache;
 use cce_storage_sqlite::SqliteClient;
 use cce_storage_sqlite::repo::EntityRepository;

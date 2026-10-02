@@ -7,14 +7,13 @@
 //! - Language information detection
 //! - FileEntry creation
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
 use crate::models::FileEntry;
 use cce_types::error::common;
 use cce_types::language::LanguageInfo;
-use cce_utils::hash::{calculate_hash, hash_file_stream};
+use cce_utils::hash::{calculate_hash, hash_file_stream_with_prefix};
 
 /// Configuration for file processing
 #[derive(Debug, Clone)]
@@ -79,7 +78,19 @@ impl FileProcessor {
     pub fn process_file(&self, path: &Path, root_path: &Path) -> Result<FileEntry> {
         let metadata = std::fs::metadata(path)
             .map_err(|e| Self::io_error("failed to get file metadata", path, e))?;
+        self.process_file_with_metadata(path, root_path, &metadata)
+    }
 
+    /// Process a file reusing an already-fetched metadata record.
+    ///
+    /// Directory traversal already stats each path for filtering; passing the
+    /// record down avoids a second metadata query per file.
+    pub fn process_file_with_metadata(
+        &self,
+        path: &Path,
+        root_path: &Path,
+        metadata: &std::fs::Metadata,
+    ) -> Result<FileEntry> {
         let relative_path = PathBuf::from(cce_types::path::relativize(root_path, path));
 
         let file_size = metadata.len();
@@ -87,12 +98,11 @@ impl FileProcessor {
         // The hash always covers the full file content: a prefix-only hash
         // would mask edits beyond the window through incremental (size+mtime
         // reuse and manifest hash) comparison. Large files stream through the
-        // hasher instead of a bulk read, and only a small prefix is kept for
-        // binary detection.
+        // hasher in a single open while retaining a small prefix for binary
+        // detection, instead of hashing and sampling in two separate opens.
         let (content_hash, sample) = if file_size > self.config.max_hash_file_size {
-            let hash = hash_file_stream(path)
+            let (hash, sample) = hash_file_stream_with_prefix(path, self.config.binary_check_size)
                 .map_err(|e| Self::io_error("failed to hash file", path, e))?;
-            let sample = self.read_prefix(path, self.config.binary_check_size)?;
             (hash, sample)
         } else {
             let content =
@@ -119,18 +129,6 @@ impl FileProcessor {
             content_hash: Some(content_hash),
             language_info,
         })
-    }
-
-    /// Read the first `size` bytes of a file
-    fn read_prefix(&self, path: &Path, size: usize) -> Result<Vec<u8>> {
-        let mut file = std::fs::File::open(path)
-            .map_err(|e| Self::io_error("failed to open file", path, e))?;
-        let mut buffer = vec![0u8; size];
-        let bytes_read = file
-            .read(&mut buffer)
-            .map_err(|e| Self::io_error("failed to read file content", path, e))?;
-        buffer.truncate(bytes_read);
-        Ok(buffer)
     }
 
     /// Check if content is likely a text file

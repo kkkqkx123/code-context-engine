@@ -19,7 +19,7 @@ use cce_types::{OutputMode, ParsedFile};
 use super::checkpoint::persist_parsed_checkpoint;
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
-use crate::index::file_processor::read_verified_utf8;
+use crate::index::file_processor::read_verified_utf8_for_entry;
 
 use crate::index::options::IndexOptions;
 use crate::index_state::{IndexPhase, ModuleType, ModuleUpdateState, TrackerFailure};
@@ -735,13 +735,11 @@ impl IndexOrchestrator {
                             .await
                             .map_err(|error| (path_str.clone(), error))?
                     } else {
-                        // Verified read: the raw bytes must still match the
-                        // hash recorded during scanning, otherwise the file
-                        // drifted inside the scan→process window.
-                        let content = read_verified_utf8(
-                            &file_entry_clone.path,
-                            file_entry_clone.content_hash.as_deref(),
-                        )
+                        // Verified read: reuse the scan-phase fingerprint when
+                        // the file is unchanged, otherwise fall back to hash
+                        // verification for files drifted in the scan→process
+                        // window.
+                        let content = read_verified_utf8_for_entry(&file_entry_clone)
                         .await
                         .map_err(|error| (path_str.clone(), OrchestratorError::Parse(error)))?;
                         // Non-strict decoding of a mis-detected encoding

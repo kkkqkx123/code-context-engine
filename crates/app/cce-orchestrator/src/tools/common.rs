@@ -12,8 +12,8 @@ use cce_storage_sqlite::source_reader;
 use cce_storage_sqlite::types::ChunkRecord;
 use cce_types::Entity;
 
-use crate::query::filter::{load_active_query_filter, QueryFilter};
 use crate::query::error::Result as QueryResult;
+use crate::query::filter::{QueryFilter, load_active_query_filter};
 use crate::tools::symbol_lookup_types::SymbolLookupError;
 
 /// Resolve the epoch view for a project, with optional explicit epoch override.

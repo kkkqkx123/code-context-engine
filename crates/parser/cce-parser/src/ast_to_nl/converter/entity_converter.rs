@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::ast_to_nl::ConversionRequest;
+use crate::ast_to_nl::common::{NameNormalizer, create_standalone_group};
 use crate::grouper::EntityGroup;
 use cce_types::{ConversionResult, EntityKind, GroupedEntity, OutputMode};
 
@@ -11,13 +12,24 @@ use cce_types::{ConversionResult, EntityKind, GroupedEntity, OutputMode};
 /// Matches the head even when a signature follows (`function make_response (`),
 /// and never matches a longer identifier that merely starts with `name`.
 pub(crate) fn qualify_function_text(name: &str, file_path: &str, text: &str) -> String {
-    let Some(stem) = Path::new(file_path).file_stem() else {
+    let Some(stem) = module_stem(file_path) else {
         return text.to_string();
     };
-    let module = stem.to_string_lossy();
-    if module.is_empty() {
-        return text.to_string();
-    }
+    qualify_function_text_with_stem(name, &stem, text)
+}
+
+/// File module stem used to qualify module-level function heads.
+pub(crate) fn module_stem(file_path: &str) -> Option<String> {
+    let stem = Path::new(file_path)
+        .file_stem()?
+        .to_string_lossy()
+        .into_owned();
+    if stem.is_empty() { None } else { Some(stem) }
+}
+
+/// Stem-sharing variant of [`qualify_function_text`]: the caller resolves the
+/// module stem once and reuses it across all entities of the group.
+pub(crate) fn qualify_function_text_with_stem(name: &str, module: &str, text: &str) -> String {
     // Needle search only matches an unqualified head: an already-qualified
     // `function logging.foo` does not contain `function foo` after `function `.
     let needle = format!("function {}", name);
@@ -77,24 +89,26 @@ pub(crate) fn qualify_member_head(group_name: &str, member_name: &str, text: &st
 /// nested function groups) receive the file's module stem — not only the
 /// group header itself. Needles are entity names, so prose such as
 /// `function callable` is left alone unless a real function carries that name.
-pub(crate) fn qualify_group_function_heads(
+/// The module stem is resolved once by the caller and shared across all
+/// entities of the group.
+pub(crate) fn qualify_group_function_heads_with_stem(
     group: &EntityGroup,
-    file_path: &str,
+    module: &str,
     text: &str,
 ) -> String {
     let mut out = text.to_string();
     if let Some(ref header) = group.header {
         if header.kind == EntityKind::Function {
-            out = qualify_function_text(&header.name, file_path, &out);
+            out = qualify_function_text_with_stem(&header.name, module, &out);
         }
     }
     for member in &group.members {
         if member.kind == EntityKind::Function {
-            out = qualify_function_text(&member.name, file_path, &out);
+            out = qualify_function_text_with_stem(&member.name, module, &out);
         }
     }
     for nested in group.nested_groups.iter() {
-        out = qualify_group_function_heads(nested, file_path, &out);
+        out = qualify_group_function_heads_with_stem(nested, module, &out);
     }
     out
 }
@@ -160,8 +174,24 @@ impl super::AstToNlConverter {
     }
 
     fn convert_both_grouped(&self, entity: &GroupedEntity, file_path: &str) -> ConversionResult {
-        let bm25_text = self.bm25_generator.generate(entity);
-        let embedding_text = self.embedding_generator.generate(entity);
+        // Both paths describe the same entity: build the standalone group
+        // once and share it between the BM25 and embedding renderers instead
+        // of cloning the entity per path. Keyword extraction runs once on the
+        // shared entity. Output text is unchanged.
+        let shared_group = create_standalone_group(entity);
+        let bm25_text = self.bm25_generator.generate_for_group(&shared_group);
+        let embedding_text = if entity.kind == EntityKind::Module
+            && entity.doc_comment.is_none()
+            && !entity.metadata.contains_key("annotations")
+        {
+            String::new()
+        } else {
+            let descriptions = self.embedding_generator.generate_for_group(&shared_group);
+            descriptions
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| format!("{}.", NameNormalizer::normalize(&entity.name)))
+        };
         let embedding_text = Self::qualify_module_level(entity, file_path, &embedding_text);
         let keywords = self.bm25_generator.extract_keywords(entity);
 

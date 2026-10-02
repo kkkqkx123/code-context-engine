@@ -94,6 +94,7 @@ fn request(query: &str, top_n: usize, project_id: i64, epoch: Option<i64>) -> Ke
         top_n,
         project_id,
         epoch,
+        offset: 0,
         term_operator: Default::default(),
     }
 }

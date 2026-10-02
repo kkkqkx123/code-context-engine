@@ -672,6 +672,15 @@ impl super::AstToNlConverter {
     ) -> Vec<ConversionResult> {
         let mut results = Vec::new();
         let mode = self.resolve_mode(request);
+        // Resolve the file module stem once and share it across the header,
+        // member, and brief qualification passes below.
+        let module_stem = super::entity_converter::module_stem(file_path);
+        let qualify = |group: &EntityGroup, text: &str| match &module_stem {
+            Some(stem) => {
+                super::entity_converter::qualify_group_function_heads_with_stem(group, stem, text)
+            }
+            None => text.to_string(),
+        };
 
         if let Some(header) = &group.header {
             let bm25_text = if matches!(mode, OutputMode::Bm25 | OutputMode::Both) {
@@ -685,9 +694,7 @@ impl super::AstToNlConverter {
                     let descriptions = self.embedding_generator.generate_for_group(group);
                     if descriptions.is_empty() {
                         let text = self.embedding_generator.generate(header);
-                        let text = super::entity_converter::qualify_group_function_heads(
-                            group, file_path, &text,
-                        );
+                        let text = qualify(group, &text);
                         (text, Vec::new())
                     } else {
                         let mut line_count = 0usize;
@@ -706,9 +713,7 @@ impl super::AstToNlConverter {
                             })
                             .collect();
                         let joined = descriptions.join("\n");
-                        let joined = super::entity_converter::qualify_group_function_heads(
-                            group, file_path, &joined,
-                        );
+                        let joined = qualify(group, &joined);
                         (joined, offsets)
                     }
                 } else {
@@ -725,9 +730,7 @@ impl super::AstToNlConverter {
                 None
             } else if matches!(mode, OutputMode::Embedding | OutputMode::Both) {
                 let brief = self.embedding_generator.generate_brief_for_group(group);
-                Some(super::entity_converter::qualify_group_function_heads(
-                    group, file_path, &brief,
-                ))
+                Some(qualify(group, &brief))
             } else {
                 None
             };

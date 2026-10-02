@@ -15,6 +15,13 @@ use crate::types::{Bm25SearchOptions, Bm25SearchResult, TermOperator};
 #[derive(Debug, Clone, Default)]
 pub struct Bm25Retrieval;
 
+/// Upper bound for a single retrieval window (`limit + offset`).
+///
+/// Per-hit document materialization grows linearly with the window, so an
+/// unbounded caller would reintroduce the linear amplification previously
+/// observed with per-hit work. Requests beyond the window are truncated.
+const MAX_RETRIEVAL_WINDOW: usize = 200;
+
 /// Wrap a filter clause so it constrains the matched set without
 /// contributing a BM25 score.
 ///
@@ -195,12 +202,16 @@ impl Bm25Retrieval {
             }
         }
 
-        let limit = options.limit + options.offset;
+        let limit = (options.limit + options.offset).min(MAX_RETRIEVAL_WINDOW);
         let top_docs = tantivy::collector::TopDocs::with_limit(limit).order_by_score();
 
         let results: Vec<(f32, tantivy::DocAddress)> = searcher.search(&query, &top_docs)?;
 
-        let mut search_results = Vec::new();
+        let mut search_results = Vec::with_capacity(
+            results
+                .len()
+                .saturating_sub(options.offset.min(results.len())),
+        );
 
         for (score, doc_address) in results.into_iter().skip(options.offset) {
             let doc = searcher.doc(doc_address)?;
@@ -209,14 +220,14 @@ impl Bm25Retrieval {
             let file_path = Self::extract_field_value(&doc, schema.file_path);
             let title_value = Self::extract_field_value(&doc, schema.title);
 
-            let mut fields = HashMap::new();
+            let mut fields = HashMap::with_capacity(7);
             if !chunk_id.is_empty() {
                 fields.insert("chunk_id".to_string(), chunk_id);
             }
             if !file_path.is_empty() {
                 fields.insert("file_path".to_string(), file_path);
             }
-            fields.insert("title".to_string(), title_value.clone());
+            fields.insert("title".to_string(), title_value);
             let test_value = Self::extract_field_value(&doc, schema.test);
             if !test_value.is_empty() {
                 fields.insert("test".to_string(), test_value);
@@ -299,16 +310,23 @@ impl Bm25Retrieval {
     ) -> Box<dyn tantivy::query::Query> {
         let (phrase_segments, remaining) = extract_phrases(query_text);
         let mut clauses: Vec<(tantivy::query::Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+        let mut doc_freq_cache: HashMap<String, u64> = HashMap::new();
 
         for phrase in phrase_segments {
-            let phrase_query = build_phrase_query(&phrase, schema, &mut tokenizer, searcher);
+            let phrase_query = build_phrase_query(
+                &phrase,
+                schema,
+                &mut tokenizer,
+                searcher,
+                &mut doc_freq_cache,
+            );
             if let Some(q) = phrase_query {
                 clauses.push((occur_for(operator), q));
             }
         }
 
         let tokens = collect_tokens(&mut tokenizer, &remaining);
-        for (token, scale) in expand_query_tokens(&tokens, schema, searcher) {
+        for (token, scale) in expand_query_tokens(&tokens, schema, searcher, &mut doc_freq_cache) {
             let Some(clause) = build_token_query_with_scale(
                 token,
                 schema,
@@ -422,12 +440,14 @@ fn build_phrase_query(
     schema: &IndexSchema,
     tokenizer: &mut TextAnalyzer,
     searcher: &tantivy::Searcher,
+    doc_freq_cache: &mut HashMap<String, u64>,
 ) -> Option<Box<dyn tantivy::query::Query>> {
     let tokens = collect_tokens(tokenizer, phrase);
-    let expanded_terms: Vec<String> = expand_query_tokens(&tokens, schema, searcher)
-        .into_iter()
-        .map(|(token, _)| token.text)
-        .collect();
+    let expanded_terms: Vec<String> =
+        expand_query_tokens(&tokens, schema, searcher, doc_freq_cache)
+            .into_iter()
+            .map(|(token, _)| token.text)
+            .collect();
 
     if expanded_terms.is_empty() {
         return None;
@@ -505,12 +525,21 @@ fn is_query_stopword(text: &str) -> bool {
     matches!(text, "method" | "on" | "in" | "constructor" | "function")
 }
 
-fn whole_term_doc_freq(searcher: &tantivy::Searcher, schema: &IndexSchema, text: &str) -> u64 {
+fn whole_term_doc_freq(
+    searcher: &tantivy::Searcher,
+    schema: &IndexSchema,
+    text: &str,
+    cache: &mut HashMap<String, u64>,
+) -> u64 {
+    if let Some(&cached) = cache.get(text) {
+        return cached;
+    }
     let mut total = 0u64;
     for field in [schema.title, schema.content, schema.keywords] {
         let term = tantivy::Term::from_field_text(field, text);
         total += searcher.doc_freq(&term).unwrap_or(0);
     }
+    cache.insert(text.to_string(), total);
     total
 }
 
@@ -518,6 +547,7 @@ fn expand_query_tokens(
     tokens: &[MixedToken],
     schema: &IndexSchema,
     searcher: &tantivy::Searcher,
+    doc_freq_cache: &mut HashMap<String, u64>,
 ) -> Vec<(MixedToken, f32)> {
     use std::collections::BTreeMap;
 
@@ -542,7 +572,7 @@ fn expand_query_tokens(
             if is_query_stopword(whole_token.text.as_str()) {
                 continue;
             }
-            if whole_term_doc_freq(searcher, schema, whole_token.text.as_str()) == 0
+            if whole_term_doc_freq(searcher, schema, whole_token.text.as_str(), doc_freq_cache) == 0
                 && !splits.is_empty()
             {
                 for split in splits {
