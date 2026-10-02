@@ -54,3 +54,7 @@ tempfile = { workspace = true }
 cce-parser = { path = "../cce-parser" }
 cce-parser-core = { path = "../cce-parser-core" }
 cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
+
+[[bench]]
+name = "relation_perf"
+harness = false

@@ -1,7 +1,7 @@
 //! Types for keyword search tool
 //!
 //! Defines request/response types for the keyword search operation.
-//! The tool performs BM25-based keyword search with content highlight snippets
+//! The tool performs BM25-based keyword search with raw source snippets
 //! sourced from SQLite (not from Tantivy stored fields).
 
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ pub struct KeywordSearchRequest {
     pub term_operator: cce_storage_bm25::TermOperator,
 }
 
-/// A single keyword search result with highlighted snippet
+/// A single keyword search result with raw source snippet
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeywordSearchItem {
     /// Chunk/document ID
@@ -36,8 +36,8 @@ pub struct KeywordSearchItem {
     pub file_path: String,
     /// Entity/function title
     pub title: String,
-    /// Highlighted code snippet (HTML with <mark> tags)
-    pub highlighted_snippet: String,
+    /// Raw source snippet for the matched chunk (no markup)
+    pub snippet: String,
     /// Start line in the file
     pub start_line: u32,
     /// End line in the file
@@ -51,7 +51,7 @@ pub struct KeywordSearchResponse {
     pub query: String,
     /// Total number of results returned
     pub total: usize,
-    /// Search results with highlighted snippets
+    /// Search results with raw source snippets
     pub results: Vec<KeywordSearchItem>,
 }
 

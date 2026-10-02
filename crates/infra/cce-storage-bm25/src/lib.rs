@@ -7,7 +7,6 @@ pub mod client;
 pub mod config;
 pub mod delete;
 pub mod error;
-pub mod highlight;
 pub mod manager;
 pub mod metrics;
 pub mod retrieval;

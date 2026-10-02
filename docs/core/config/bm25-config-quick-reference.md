@@ -25,7 +25,6 @@ keywords = 2.0    # 提取的关键词（中等优先级）
 [database.bm25.search]
 default_limit = 10
 max_limit = 100
-enable_highlight = true
 
 [database.bm25.index_manager]
 writer_memory_budget = 50000000

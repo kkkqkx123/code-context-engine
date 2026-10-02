@@ -739,7 +739,7 @@ pub enum ToolCommands {
         project_id: i64,
     },
 
-    /// Keyword search (BM25-based with highlighted snippets)
+    /// Keyword search (BM25-based with raw source snippets)
     KeyWordSearch {
         /// Search query
         #[arg(short, long)]

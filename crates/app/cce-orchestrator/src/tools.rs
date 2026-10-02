@@ -30,8 +30,8 @@
 //!     │   └── fold_batch() - Batch entries → per-entry skeletons plus stats
 //!     │
 //!     └── KeywordSearch (keyword search)
-//!         └── search() - BM25 keyword search with highlighted snippets
-//!             └── BM25 → SQLite → highlight generation
+//!         └── search() - BM25 keyword search with raw source snippets
+//!             └── BM25 → SQLite → source snippet read
 //! ```
 //!
 //! # Available Tools

@@ -346,9 +346,9 @@ curl -X POST "http://localhost:3000/api/tools/fold/batch" \
 
 ## POST /api/tools/keyword-search
 
-BM25 关键词搜索。从 BM25 索引中检索匹配的代码块，从 SQLite 中获取完整内容并生成高亮片段（`<mark>` 标签）。
+BM25 关键词搜索。从 BM25 索引中检索匹配的代码块，从 SQLite 中读取对应的原始源码片段并附带文件路径与行号。
 
-该端点独立于向量搜索管道，专注于纯关键词搜索场景。如果 SQLite 未配置，仍然返回 BM25 结果但不含高亮片段。
+该端点独立于向量搜索管道，专注于纯关键词搜索场景。返回的 `snippet` 为原始源码文本，不含任何标记，调用方可直接对其检索或按行号阅读。
 
 ### 请求
 
@@ -388,7 +388,7 @@ BM25 关键词搜索。从 BM25 索引中检索匹配的代码块，从 SQLite �
         "score": 0.85,
         "file_path": "src/server.rs",
         "title": "handle_request",
-        "highlighted_snippet": "pub <mark>async</mark> <mark>fn</mark> <mark>handle</mark>(req: Request) -> Response { ... }",
+        "snippet": "pub async fn handle(req: Request) -> Response { ... }",
         "start_line": 10,
         "end_line": 25
       }

@@ -7231,13 +7231,13 @@
       },
       "KeywordSearchItem": {
         "type": "object",
-        "description": "A single keyword search result with highlighted snippet",
+        "description": "A single keyword search result with raw source snippet",
         "required": [
           "chunk_id",
           "score",
           "file_path",
           "title",
-          "highlighted_snippet",
+          "snippet",
           "start_line",
           "end_line"
         ],
@@ -7256,14 +7256,14 @@
             "type": "string",
             "description": "File path containing the match"
           },
-          "highlighted_snippet": {
-            "type": "string",
-            "description": "Highlighted code snippet (HTML with <mark> tags)"
-          },
           "score": {
             "type": "number",
             "format": "float",
             "description": "BM25 relevance score"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "Raw source snippet for the matched chunk (no markup)"
           },
           "start_line": {
             "type": "integer",
@@ -7332,7 +7332,7 @@
             "items": {
               "$ref": "#/components/schemas/KeywordSearchItem"
             },
-            "description": "Search results with highlighted snippets"
+            "description": "Search results with raw source snippets"
           },
           "total": {
             "type": "integer",

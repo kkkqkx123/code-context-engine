@@ -7,7 +7,6 @@ use cce_text::MixedToken;
 use tantivy::schema::Value;
 use tantivy::tokenizer::{TextAnalyzer, Token, TokenStream};
 
-use crate::highlight;
 use crate::manager::IndexManager;
 use crate::schema::IndexSchema;
 use crate::types::{Bm25SearchOptions, Bm25SearchResult, TermOperator};
@@ -238,20 +237,10 @@ impl Bm25Retrieval {
                 fields.insert("segment_id".to_string(), segment_id);
             }
 
-            let matched_terms = highlight::extract_matched_terms(query_text, &title_value);
-
-            let highlights = if options.highlight {
-                highlight::generate_highlights(query_text, &title_value)
-            } else {
-                HashMap::new()
-            };
-
             search_results.push(Bm25SearchResult {
                 document_id,
                 score,
                 fields,
-                highlights,
-                matched_terms,
             });
         }
 

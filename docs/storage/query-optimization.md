@@ -339,7 +339,6 @@ impl Bm25Client {
             limit: options.limit,
             offset: options.offset,
             field_weights: options.field_weights.clone(),
-            highlight: options.highlight,
             boost_title: options.boost_title,
             filter: options.filter.clone(),
             sort_by: options.sort_by.clone(),
@@ -420,7 +419,6 @@ impl Bm25Client {
                     document_id: result.document_id,
                     score: result.score,
                     fields: result.fields,
-                    highlights: result.highlights,
                 });
             }
         }
@@ -438,8 +436,6 @@ pub struct Bm25SearchOptions {
     pub offset: usize,
     /// 字段权重
     pub field_weights: HashMap<String, f32>,
-    /// 是否高亮
-    pub highlight: bool,
     /// 标题字段权重提升
     pub boost_title: bool,
     /// 过滤器
@@ -888,7 +884,6 @@ impl SmartQueryRouter {
             limit: options.limit,
             offset: 0,
             field_weights: options.bm25_field_weights.clone(),
-            highlight: true,
             boost_title: true,
             filter: None,
             sort_by: Some(SortOption::ScoreDesc),

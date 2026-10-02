@@ -1,17 +1,18 @@
 //! Keyword search tool
 //!
-//! Provides standalone BM25 keyword search with content-highlighted snippets.
+//! Provides standalone BM25 keyword search with raw source snippets.
 //! This tool is independent of the vector search pipeline and can be used
 //! as a focused keyword query module.
 //!
 //! # Architecture
 //!
 //! ```text
-//! Query → BM25 search → get chunk_ids → SQLite lookup → highlight content → scored results
+//! Query → BM25 search → get chunk_ids → SQLite lookup → read source snippet → scored results
 //! ```
 //!
-//! Content is sourced from SQLite (not Tantivy stored fields), enabling accurate
-//! highlight generation from the full code content.
+//! Content is sourced from SQLite (not Tantivy stored fields), returning the
+//! raw source lines so the caller can grep or read them directly. No markup is
+//! embedded in the snippet.
 //!
 //! # Usage
 //!
@@ -29,7 +30,6 @@ mod types;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cce_storage_bm25::highlight::highlight_text;
 use cce_storage_bm25::{Bm25Client, Bm25Retrieval, Bm25SearchOptions};
 use cce_storage_sqlite::SqliteClient;
 
@@ -39,17 +39,10 @@ pub use self::types::{
     KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
 };
 
-/// Tokenize query text with the shared `MixedTokenizer` for symmetric term
-/// matching against the BM25 index.
-fn tokenize_terms(text: &str) -> Vec<String> {
-    cce_text::MixedTokenizer::new().tokenize(text)
-}
-
 /// Keyword search tool
 ///
-/// Provides standalone BM25-based keyword search with highlighted snippets
+/// Provides standalone BM25-based keyword search with raw source snippets
 /// sourced from SQLite content. Results are sorted by BM25 relevance score.
-/// Only results that have at least one highlighted content match are returned.
 #[derive(Clone)]
 pub struct KeywordSearchTool {
     /// BM25 client for Tantivy index access
@@ -82,10 +75,9 @@ impl KeywordSearchTool {
     ///
     /// 1. Validate input (project_id must be positive, query must be non-empty, top_n > 0)
     /// 2. Search BM25 index for matching documents
-    /// 3. Enrich with chunk content from SQLite
-    /// 4. Generate highlighted snippets from full content
-    /// 5. Filter to only results with content highlights
-    /// 6. Sort by BM25 score descending
+    /// 3. Enrich with chunk metadata from SQLite
+    /// 4. Read raw source snippets for the matched chunks
+    /// 5. Sort by BM25 score descending
     ///
     /// # Arguments
     ///
@@ -93,7 +85,7 @@ impl KeywordSearchTool {
     ///
     /// # Returns
     ///
-    /// Search results with highlighted snippets, or an error
+    /// Search results with raw source snippets, or an error
     pub async fn search(
         &self,
         request: KeywordSearchRequest,
@@ -149,7 +141,6 @@ impl KeywordSearchTool {
             limit: request.top_n,
             offset: 0,
             field_weights: HashMap::new(),
-            highlight: false,
             project_id: request.project_id,
             epochs: query_filter.epochs(),
             excluded_files: if query_filter.excluded_files().is_empty() {
@@ -207,47 +198,30 @@ impl KeywordSearchTool {
             }
         };
 
-        // Step 5: Generate highlighted snippets from SQLite content
-        let query_terms: Vec<String> = tokenize_terms(&request.query);
-
+        // Step 5: Read raw source snippets for matched chunks. BM25 already
+        // established the match, so no post-hoc re-verification is performed;
+        // the caller gets the exact file path and line range to grep or read.
         let mut keyword_results: Vec<KeywordSearchItem> = Vec::new();
 
         for result in &results {
             let chunk_id = result.fields.get("chunk_id").cloned().unwrap_or_default();
 
-            // Look up SQLite chunk record
             let chunk = match chunk_records.as_ref() {
                 Some(records) => records.get(&chunk_id),
                 None => None,
             };
 
-            let content_snippet = match chunk {
-                Some(chunk) => highlight_text(
-                    &cce_storage_sqlite::source_reader::read_source_lines(
-                        project_root.as_deref(),
-                        &chunk.file_path,
-                        chunk.start_line.max(0) as u32,
-                        chunk.end_line.max(0) as u32,
-                    ),
-                    &query_terms,
+            let snippet = match chunk {
+                Some(chunk) => cce_storage_sqlite::source_reader::read_source_lines(
+                    project_root.as_deref(),
+                    &chunk.file_path,
+                    chunk.start_line.max(0) as u32,
+                    chunk.end_line.max(0) as u32,
                 ),
-                None => None,
+                None => String::new(),
             };
 
-            // Determine whether the title/keywords fields hit (title hits do
-            // not require the query term to appear verbatim in the source).
-            // title field itself must stay plain text — BM25 results are data,
-            // not HTML, so highlight markup is never written back into it.
             let title_value = result.fields.get("title").cloned().unwrap_or_default();
-            let title_hit = highlight_text(&title_value, &query_terms).is_some();
-
-            // A result is kept if it has a content highlight OR a title hit.
-            // Only results with neither are discarded.
-            if content_snippet.is_none() && !title_hit {
-                continue;
-            }
-
-            let highlighted_snippet = content_snippet.unwrap_or_default();
             let (start_line, end_line) = match chunk {
                 Some(chunk) => (chunk.start_line as u32, chunk.end_line as u32),
                 None => (0, 0),
@@ -259,7 +233,7 @@ impl KeywordSearchTool {
                 score: result.score,
                 file_path,
                 title: title_value,
-                highlighted_snippet,
+                snippet,
                 start_line,
                 end_line,
             });
@@ -275,7 +249,7 @@ impl KeywordSearchTool {
         let total = keyword_results.len();
 
         tracing::trace!(
-            "Keyword search '{}' — {} results with content highlights",
+            "Keyword search '{}' — {} results with source snippets",
             request.query,
             total
         );

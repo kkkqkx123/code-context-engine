@@ -88,7 +88,7 @@
 					<p class="hit-location mono">
 						{item.file_path}:{item.start_line}-{item.end_line}
 					</p>
-					<p class="hit-snippet">{item.highlighted_snippet}</p>
+					<p class="hit-snippet">{item.snippet}</p>
 				</div>
 			{/each}
 		{/if}

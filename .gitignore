@@ -51,6 +51,9 @@ test_output/
 **/__pycache__
 **/.pyc
 
+# Per-crate benchmark trend files (local only)
+crates/**/benches/results/
+
 # Binary executables
 bin/cce
 bin/cce-cli

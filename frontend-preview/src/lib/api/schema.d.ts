@@ -2107,7 +2107,7 @@ export interface components {
             result?: null | components["schemas"]["KeywordSearchResult"];
             success: boolean;
         };
-        /** @description A single keyword search result with highlighted snippet */
+        /** @description A single keyword search result with raw source snippet */
         KeywordSearchItem: {
             /** @description Chunk/document ID */
             chunk_id: string;
@@ -2118,13 +2118,13 @@ export interface components {
             end_line: number;
             /** @description File path containing the match */
             file_path: string;
-            /** @description Highlighted code snippet (HTML with <mark> tags) */
-            highlighted_snippet: string;
             /**
              * Format: float
              * @description BM25 relevance score
              */
             score: number;
+            /** @description Raw source snippet for the matched chunk (no markup) */
+            snippet: string;
             /**
              * Format: int32
              * @description Start line in the file
@@ -2156,7 +2156,7 @@ export interface components {
         KeywordSearchResult: {
             /** @description The original query */
             query: string;
-            /** @description Search results with highlighted snippets */
+            /** @description Search results with raw source snippets */
             results: components["schemas"]["KeywordSearchItem"][];
             /** @description Total number of results returned */
             total: number;

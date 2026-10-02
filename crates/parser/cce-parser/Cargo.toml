@@ -79,4 +79,8 @@ tempfile = { workspace = true }
 cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
 cce-relation = { path = "../cce-relation" }
 
+[[bench]]
+name = "parse_nl_chunk"
+harness = false
+
 

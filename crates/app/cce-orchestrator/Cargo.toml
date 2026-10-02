@@ -59,3 +59,7 @@ tracing-subscriber = { workspace = true }
 [[bench]]
 name = "hot_update_scaling"
 harness = false
+
+[[bench]]
+name = "checkpoint_codec"
+harness = false

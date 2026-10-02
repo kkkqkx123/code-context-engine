@@ -541,7 +541,7 @@ pub struct KeywordSearchRequest {
     pub term_operator: KeywordTermOperator,
 }
 
-/// A single keyword search result with highlighted snippet
+/// A single keyword search result with raw source snippet
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct KeywordSearchItem {
     /// Chunk/document ID
@@ -552,8 +552,8 @@ pub struct KeywordSearchItem {
     pub file_path: String,
     /// Entity/function title
     pub title: String,
-    /// Highlighted code snippet (HTML with <mark> tags)
-    pub highlighted_snippet: String,
+    /// Raw source snippet for the matched chunk (no markup)
+    pub snippet: String,
     /// Start line in the file
     pub start_line: u32,
     /// End line in the file
@@ -567,7 +567,7 @@ pub struct KeywordSearchResult {
     pub query: String,
     /// Total number of results returned
     pub total: usize,
-    /// Search results with highlighted snippets
+    /// Search results with raw source snippets
     pub results: Vec<KeywordSearchItem>,
 }
 

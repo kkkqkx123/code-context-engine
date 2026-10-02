@@ -1,8 +1,8 @@
 //! Keyword search tool integration tests (regression, local-only)
 //!
 //! Exercises the unified storage-layer `Bm25Retrieval` path through the
-//! `KeywordSearchTool`: BM25 matching, SQLite chunk enrichment, highlight
-//! generation and filtering. No external services (Qdrant/LLM) required.
+//! `KeywordSearchTool`: BM25 matching, SQLite chunk enrichment and raw source
+//! snippet materialization. No external services (Qdrant/LLM) required.
 
 use std::sync::Arc;
 
@@ -99,7 +99,7 @@ fn request(query: &str, top_n: usize, project_id: i64, epoch: Option<i64>) -> Ke
 }
 
 #[tokio::test]
-async fn test_keyword_search_full_flow_with_highlights() {
+async fn test_keyword_search_full_flow_with_snippets() {
     let env = setup().await;
     let chunks = vec![
         chunk(
@@ -168,9 +168,14 @@ async fn test_keyword_search_full_flow_with_highlights() {
     assert_eq!(item.start_line, 0);
     assert_eq!(item.end_line, 1024);
     assert!(
-        item.highlighted_snippet.contains("<mark>"),
-        "Snippet should contain highlights: {}",
-        item.highlighted_snippet
+        item.snippet.contains("parse_query"),
+        "Snippet should contain the raw source lines: {}",
+        item.snippet
+    );
+    assert!(
+        !item.snippet.contains("<mark>"),
+        "Snippet must not embed highlight markup: {}",
+        item.snippet
     );
     assert!(item.score > 0.0);
 }

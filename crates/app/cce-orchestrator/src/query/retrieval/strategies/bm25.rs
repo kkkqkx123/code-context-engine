@@ -79,7 +79,6 @@ impl Bm25Strategy {
             limit,
             offset: 0,
             field_weights: options.config.bm25.field_weights.clone(),
-            highlight: false,
             project_id: options.project_id,
             epochs: query_filter.epochs(),
             excluded_files: if query_filter.excluded_files().is_empty() {

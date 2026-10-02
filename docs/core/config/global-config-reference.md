@@ -125,8 +125,6 @@ keywords = 2.0                        # 关键词字段权重（提取的术语 
 [database.bm25.search]
 default_limit = 10                    # 默认结果数量限制
 max_limit = 100                       # 最大结果数量限制
-enable_highlight = true               # 启用结果高亮
-highlight_fragment_size = 200         # 高亮片段大小（字符）
 
 # 索引管理器配置
 [database.bm25.index_manager]

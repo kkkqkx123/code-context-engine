@@ -223,7 +223,7 @@ impl McpServerHandler {
     }
 
     #[tool(
-        description = "BM25 keyword search with highlighted snippets. Complements hybrid search for exact identifier or token matches."
+        description = "BM25 keyword search returning raw source snippets with file paths and line ranges. Complements hybrid search for exact identifier or token matches."
     )]
     async fn keyword_search(
         &self,
@@ -254,7 +254,7 @@ impl McpServerHandler {
                             "score": item.score,
                             "file_path": item.file_path,
                             "title": item.title,
-                            "highlighted_snippet": item.highlighted_snippet,
+                            "snippet": item.snippet,
                             "start_line": item.start_line,
                             "end_line": item.end_line,
                         })

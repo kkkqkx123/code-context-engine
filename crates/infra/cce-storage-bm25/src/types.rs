@@ -5,17 +5,6 @@ use std::collections::HashMap;
 
 pub use cce_config::modules::search::TermOperator;
 
-/// Matched term information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MatchedTerm {
-    /// The matched term text
-    pub term: String,
-    /// The field where the term was matched
-    pub field: String,
-    /// Number of occurrences in the field
-    pub count: usize,
-}
-
 /// Document for BM25 indexing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bm25Document {
@@ -63,12 +52,6 @@ pub struct Bm25SearchResult {
 
     /// Field values
     pub fields: HashMap<String, String>,
-
-    /// Highlighted snippets (if requested)
-    pub highlights: HashMap<String, String>,
-
-    /// Matched terms across all fields
-    pub matched_terms: Vec<MatchedTerm>,
 }
 
 impl Bm25SearchResult {
@@ -92,8 +75,6 @@ pub struct Bm25SearchOptions {
     pub offset: usize,
     /// Field weights for ranking (title/content/keywords)
     pub field_weights: HashMap<String, f32>,
-    /// Whether to generate highlighted snippets
-    pub highlight: bool,
     /// Required project_id for multi-tenant isolation
     /// Only documents with this project_id will be returned
     pub project_id: i64,

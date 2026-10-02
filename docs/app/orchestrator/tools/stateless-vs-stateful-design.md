@@ -303,14 +303,14 @@ project_id + path + line + symbol
 project_id + query + top_n
   → Query Tantivy index
   → Score matches
-  → Extract snippets
-  → Return {results[], total_count, highlights[]}
+  → Read raw source snippets
+  → Return {results[], total_count, snippets[]}
 ```
 
 **关键点**:
 - BM25 index per-project
 - 支持 OR/AND term operator
-- 高亮匹配片段
+- 返回原始源码片段与行号，供调用方直接检索或阅读
 
 ---
 
