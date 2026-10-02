@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use cce_relation::index::LayeredSnapshotIndex;
 use cce_relation::index::snapshot_query::{
-    SnapshotEntityQueryOps, SnapshotFileQueryOps, SnapshotRelationQueryOps,
+    SnapshotEntityQueryOps, SnapshotRelationQueryOps,
 };
 use cce_relation::query::QueryCache;
 use cce_storage_sqlite::SqliteClient;
@@ -207,18 +207,7 @@ impl FindReferencesTool {
 
     /// Get entities by file path
     fn get_entities_by_file(&self, path: &str) -> Result<Vec<Entity>, SymbolLookupError> {
-        let entities: Vec<Entity> = self
-            .index
-            .get_entities_by_file(path)
-            .into_iter()
-            .map(|(_, entity)| entity)
-            .collect();
-
-        if entities.is_empty() {
-            Err(SymbolLookupError::FileNotFound(path.to_string()))
-        } else {
-            Ok(entities)
-        }
+        crate::tools::common::get_entities_by_file(&self.index, path)
     }
 
     /// Check if a position is contained in a span
@@ -342,9 +331,8 @@ impl FindReferencesTool {
 
     /// Read file content from disk (chunk rows no longer persist raw code)
     fn get_file_content_from_chunks(&self, path: &str) -> Option<String> {
-        let sqlite = self.sqlite.as_ref()?;
         let project_id = self.project_id;
-        let conn = sqlite.write_connection().ok()?;
+        let conn = crate::tools::common::get_read_connection(&self.sqlite).ok()?;
         let project_root =
             cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
         let content = cce_storage_sqlite::source_reader::read_source_lines(

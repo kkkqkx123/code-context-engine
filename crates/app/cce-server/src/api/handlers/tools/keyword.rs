@@ -23,40 +23,17 @@ pub async fn handle_keyword_search(
 ) -> Json<KeywordSearchApiResponse> {
     let tool = KeywordSearchTool::new(state.engine.bm25_clone());
 
-    let mut request = OrchKeywordSearchRequest {
+    let request = OrchKeywordSearchRequest {
         query: request.query,
         top_n: request.top_n,
         project_id: request.project_id,
         epoch: request.epoch,
+        offset: request.offset,
         term_operator: match request.term_operator {
             KeywordTermOperator::Or => TermOperator::Or,
             KeywordTermOperator::And => TermOperator::And,
         },
     };
-    if request.epoch.is_none()
-        && let Some(sqlite) = state.engine.metadata_store()
-        && let Ok(project) = sqlite.for_project(request.project_id)
-        && let Ok(conn) = project.read_connection()
-    {
-        request.epoch = cce_storage_sqlite::ProjectIndexManifestRepository::get_active(
-            &conn,
-            request.project_id,
-        )
-        .ok()
-        .flatten()
-        .map(|manifest| manifest.data_epoch)
-        .or_else(|| {
-            conn.query_row(
-                "SELECT value FROM project_meta WHERE project_id = ?1 AND key = 'active_epoch'",
-                rusqlite::params![request.project_id],
-                |row| {
-                    let value: String = row.get(0)?;
-                    value.parse().map_err(|_| rusqlite::Error::InvalidQuery)
-                },
-            )
-            .ok()
-        });
-    }
 
     match tool.search(request).await {
         Ok(response) => match to_api_model::<_, KeywordSearchResult>(response) {

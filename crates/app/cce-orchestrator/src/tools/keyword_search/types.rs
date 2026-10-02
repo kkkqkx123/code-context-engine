@@ -20,6 +20,9 @@ pub struct KeywordSearchRequest {
     pub project_id: i64,
     /// Optional epoch for version-aware filtering
     pub epoch: Option<i64>,
+    /// Number of results to skip (for pagination)
+    #[serde(default)]
+    pub offset: usize,
     /// Operator for combining multiple query terms (`or`/`and`)
     #[serde(default)]
     pub term_operator: cce_storage_bm25::TermOperator,

@@ -536,6 +536,9 @@ pub struct KeywordSearchRequest {
     /// Optional epoch for version-aware filtering
     #[serde(default)]
     pub epoch: Option<i64>,
+    /// Number of results to skip (for pagination)
+    #[serde(default)]
+    pub offset: usize,
     /// Operator for combining multiple query terms
     #[serde(default)]
     pub term_operator: KeywordTermOperator,

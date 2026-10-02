@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use cce_relation::index::LayeredSnapshotIndex;
 use cce_relation::index::snapshot_query::{
-    SnapshotEntityQueryOps, SnapshotFileQueryOps, SnapshotRelationQueryOps,
+    SnapshotEntityQueryOps, SnapshotRelationQueryOps,
 };
 use cce_storage_sqlite::SqliteClient;
 use cce_storage_sqlite::{ChunkRepository, EntityDetailMappingRepository};
@@ -112,18 +112,7 @@ impl GotoDefinitionTool {
 
     /// Get entities by file path
     fn get_entities_by_file(&self, path: &str) -> Result<Vec<Entity>, SymbolLookupError> {
-        let entities: Vec<Entity> = self
-            .index
-            .get_entities_by_file(path)
-            .into_iter()
-            .map(|(_, entity)| entity)
-            .collect();
-
-        if entities.is_empty() {
-            Err(SymbolLookupError::FileNotFound(path.to_string()))
-        } else {
-            Ok(entities)
-        }
+        crate::tools::common::get_entities_by_file(&self.index, path)
     }
 
     /// Find definition locations
@@ -182,9 +171,8 @@ impl GotoDefinitionTool {
     /// Resolves the mapping and chunks with two-stage epoch resolution
     /// ("own first, miss → parent") so inherited generations stay readable.
     fn get_body_from_chunks(&self, entity_id: EntityId) -> Option<String> {
-        let sqlite = self.sqlite.as_ref()?;
         let project_id = self.project_id;
-        let conn = sqlite.write_connection().ok()?;
+        let conn = crate::tools::common::get_read_connection(&self.sqlite).ok()?;
 
         let view = crate::query::filter::load_active_query_filter(&conn, project_id).ok()?;
 

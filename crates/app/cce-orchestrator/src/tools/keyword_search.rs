@@ -33,7 +33,7 @@ use std::sync::Arc;
 use cce_storage_bm25::{Bm25Client, Bm25Retrieval, Bm25SearchOptions};
 use cce_storage_sqlite::SqliteClient;
 
-use crate::query::filter::QueryFilter;
+use crate::tools::common::{read_snippets_batch, resolve_epoch_view};
 
 pub use self::types::{
     KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
@@ -125,21 +125,19 @@ impl KeywordSearchTool {
         // the active manifest view (own + parent + overridden files) applies.
         // The same connection serves the chunk lookup below so both stages
         // observe one consistent snapshot.
-        let sqlite_ref = self.sqlite.as_ref().expect("sqlite presence checked above");
+        let sqlite_ref = self
+            .sqlite
+            .as_ref()
+            .ok_or(KeywordSearchError::SqliteNotConfigured)?;
         let conn = sqlite_ref
             .read_connection()
             .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
-        let query_filter = match request.epoch {
-            Some(epoch) => {
-                QueryFilter::new(epoch).map_err(|e| KeywordSearchError::Bm25(e.to_string()))?
-            }
-            None => crate::query::filter::load_active_query_filter(&conn, request.project_id)
-                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?,
-        };
+        let query_filter = resolve_epoch_view(&conn, request.project_id, request.epoch)
+            .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
 
         let options = Bm25SearchOptions {
             limit: request.top_n,
-            offset: 0,
+            offset: request.offset,
             field_weights: HashMap::new(),
             project_id: request.project_id,
             epochs: query_filter.epochs(),
@@ -198,9 +196,15 @@ impl KeywordSearchTool {
             }
         };
 
-        // Step 5: Read raw source snippets for matched chunks. BM25 already
-        // established the match, so no post-hoc re-verification is performed;
-        // the caller gets the exact file path and line range to grep or read.
+        // Step 5: Read raw source snippets for matched chunks in batch.
+        // BM25 already established the match, so no post-hoc re-verification
+        // is performed; the caller gets the exact file path and line range
+        // to grep or read.
+        let snippets = match &chunk_records {
+            Some(records) => read_snippets_batch(project_root.as_deref(), records),
+            None => HashMap::new(),
+        };
+
         let mut keyword_results: Vec<KeywordSearchItem> = Vec::new();
 
         for result in &results {
@@ -211,15 +215,7 @@ impl KeywordSearchTool {
                 None => None,
             };
 
-            let snippet = match chunk {
-                Some(chunk) => cce_storage_sqlite::source_reader::read_source_lines(
-                    project_root.as_deref(),
-                    &chunk.file_path,
-                    chunk.start_line.max(0) as u32,
-                    chunk.end_line.max(0) as u32,
-                ),
-                None => String::new(),
-            };
+            let snippet = snippets.get(&chunk_id).cloned().unwrap_or_default();
 
             let title_value = result.fields.get("title").cloned().unwrap_or_default();
             let (start_line, end_line) = match chunk {
@@ -273,6 +269,7 @@ mod tests {
             top_n: 10,
             project_id: 1,
             epoch: None,
+            offset: 0,
             term_operator: Default::default(),
         };
         // Empty query should fail — but we can't easily test async here.

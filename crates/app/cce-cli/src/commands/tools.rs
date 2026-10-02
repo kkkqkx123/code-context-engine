@@ -428,6 +428,7 @@ pub async fn execute_keyword_search(
         top_n,
         project_id,
         epoch: None,
+        offset: 0,
         term_operator: KeywordTermOperator::Or,
     };
 

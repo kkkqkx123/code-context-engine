@@ -56,6 +56,7 @@
 //! ```
 
 pub mod ast_diagnosis;
+pub mod common;
 pub mod compression;
 pub mod file_fold;
 pub mod find_references;

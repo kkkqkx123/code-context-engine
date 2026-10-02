@@ -241,6 +241,7 @@ impl McpServerHandler {
             top_n: args.top_n.unwrap_or(10),
             project_id: args.project_id,
             epoch: None,
+            offset: 0,
             term_operator: Default::default(),
         };
         match tool.search(request).await {
