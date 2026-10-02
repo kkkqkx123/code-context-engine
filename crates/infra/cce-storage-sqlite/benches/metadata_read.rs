@@ -112,6 +112,16 @@ fn main() {
         }
     });
     row("get_by_id loop x50", loop_ms);
+    // Oversized batch spanning the chunking boundary (500 present + 700
+    // missing ids exercise the multi-batch path).
+    let ids_big: Vec<String> = (0..500)
+        .map(|i| format!("chunk_{i:04}"))
+        .chain((0..700).map(|i| format!("ghost_{i:04}")))
+        .collect();
+    let big_ms = bench_ms(5, || {
+        let _ = ChunkRepository::get_by_chunk_ids(&conn, &ids_big, 1, None).expect("batch");
+    });
+    row("get_by_chunk_ids x1200", big_ms);
 
     let file_ms = bench_ms(10, || {
         let _ =

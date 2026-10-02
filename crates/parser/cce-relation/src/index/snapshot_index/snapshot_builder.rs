@@ -11,6 +11,10 @@ use cce_types::{
 
 use super::{LayeredSnapshotIndex, RelationSnapshotIndex};
 
+/// Per-file stack of `(removed, added)` relation diffs, in chain order.
+type FileRelationDiffs<'a> =
+    HashMap<&'a str, Vec<(&'a Vec<ResolvedRelation>, &'a Vec<ResolvedRelation>)>>;
+
 impl RelationSnapshotIndex {
     /// Stable symbol key of an entity, degrading to a derived key rebuilt
     /// from the entity's own fields when the reverse map has no entry.
@@ -441,18 +445,20 @@ impl LayeredSnapshotIndex {
             });
         }
 
-        let mut callers: Vec<EntityId> = self
+        let mut caller_set: HashSet<EntityId> = self
             .base
             .resolved_relation_index
             .iter()
             .map(|e| *e.key())
             .collect();
-        for d in &self.deltas {
-            callers.retain(|id| !removed_entities.contains(id));
-            callers.extend(d.added_entities.iter().map(|added| added.entity.id));
+        for id in &removed_entities {
+            caller_set.remove(id);
         }
+        for id in final_added_entities.keys() {
+            caller_set.insert(*id);
+        }
+        let mut callers: Vec<EntityId> = caller_set.into_iter().collect();
         callers.sort();
-        callers.dedup();
         for caller in callers {
             let Some(relations) = self.get_resolved_relations_by_caller(caller) else {
                 continue;
@@ -491,17 +497,15 @@ impl LayeredSnapshotIndex {
         }
 
         // File-scoped edges merge the base map with the delta file-relation
-        // diffs (removed edges dropped, added edges appended).
-        let mut file_relation_diffs_by_path: std::collections::HashMap<
-            &str,
-            (&Vec<ResolvedRelation>, &Vec<ResolvedRelation>),
-        > = std::collections::HashMap::new();
+        // diffs applied in chain order (removed edges dropped, added edges
+        // appended), matching `apply_delta` replay semantics.
+        let mut file_relation_diffs_by_path: FileRelationDiffs<'_> = HashMap::new();
         for d in &self.deltas {
             for diff in &d.file_relation_diffs {
-                file_relation_diffs_by_path.insert(
-                    &diff.file_path,
-                    (&diff.removed_relations, &diff.added_relations),
-                );
+                file_relation_diffs_by_path
+                    .entry(&diff.file_path)
+                    .or_default()
+                    .push((&diff.removed_relations, &diff.added_relations));
             }
         }
         for file in &snapshot.files {
@@ -512,14 +516,23 @@ impl LayeredSnapshotIndex {
                 .get(&file.path)
                 .map(|entry| entry.edges.clone())
                 .unwrap_or_default();
-            if let Some((removed, added)) = file_relation_diffs_by_path.get(file.path.as_str()) {
-                for relation in removed.iter() {
-                    edges.retain(|candidate| {
-                        crate::index::delta::relation_identity(candidate)
-                            != crate::index::delta::relation_identity(relation)
-                    });
+            if let Some(diffs) = file_relation_diffs_by_path.get(file.path.as_str()) {
+                for (removed, added) in diffs {
+                    for relation in removed.iter() {
+                        edges.retain(|candidate| {
+                            crate::index::delta::relation_identity(candidate)
+                                != crate::index::delta::relation_identity(relation)
+                        });
+                    }
+                    for relation in added.iter() {
+                        let identity = crate::index::delta::relation_identity(relation);
+                        if !edges.iter().any(|candidate| {
+                            crate::index::delta::relation_identity(candidate) == identity
+                        }) {
+                            edges.push(relation.clone());
+                        }
+                    }
                 }
-                edges.extend(added.iter().cloned());
             }
             for relation in edges {
                 let target = if let Some(callee_id) = relation.callee_id {
@@ -551,15 +564,23 @@ impl LayeredSnapshotIndex {
             }
         }
 
+        let dependency_diffs_by_delta: Vec<
+            std::collections::HashMap<&str, &cce_types::DependencyDiff>,
+        > = self
+            .deltas
+            .iter()
+            .map(|d| {
+                d.dependency_diffs
+                    .iter()
+                    .map(|diff| (diff.source_file.as_str(), diff))
+                    .collect()
+            })
+            .collect();
         for file in &snapshot.files {
             let mut targets: Vec<String> = self.base.dependency_graph.get_dependencies(&file.path);
-            for d in &self.deltas {
+            for (d, diff_map) in self.deltas.iter().zip(&dependency_diffs_by_delta) {
                 targets.retain(|t| !d.removed_files.contains(t));
-                if let Some(diff) = d
-                    .dependency_diffs
-                    .iter()
-                    .find(|diff| diff.source_file == file.path)
-                {
+                if let Some(diff) = diff_map.get(file.path.as_str()) {
                     targets.retain(|t| !diff.removed_dependencies.contains(t));
                     for added in &diff.added_dependencies {
                         if !targets.contains(added) {

@@ -33,6 +33,15 @@ fn long_title() -> String {
         .repeat(10)
 }
 
+fn chinese_long() -> String {
+    "数据库连接池初始化失败重试机制缓存穿透保护限流降级熔断器配置中心注册发现心跳检测负载均衡会话保持分布式锁事务补偿幂等性保障"
+        .repeat(600)
+}
+
+fn identifier_long() -> String {
+    "calculateTotalAmountWithDiscountAndTaxForUserSessionManagerFactoryProviderImpl ".repeat(2000)
+}
+
 fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
     f();
     let start = Instant::now();
@@ -65,6 +74,8 @@ fn main() {
         ("ident", identifier_dense()),
         ("mixed", mixed()),
         ("title", long_title()),
+        ("chinese_long", chinese_long()),
+        ("ident_long", identifier_long()),
     ];
     for (label, text) in &samples {
         let tokens = tokenizer.tokenize(text).len();
@@ -82,4 +93,5 @@ fn main() {
             let _ = writeln!(f, "{label}\t{t1:.2}\t{t2:.2}\t{t3:.2}\t{tokens}");
         }
     }
+    println!("truncated_inputs: {}", cce_text::truncated_input_count());
 }

@@ -17,8 +17,9 @@ use std::time::Instant;
 
 use cce_orchestrator::hot_update::FileChangeType;
 use cce_orchestrator::operation::checkpoint::{
-    ParsedCheckpointEnvelope, ParsedCheckpointPayload, decode_parsed_checkpoint,
-    encode_parsed_checkpoint,
+    ParsedCheckpointEnvelope, ParsedCheckpointPayload, SummaryCheckpointPayload,
+    decode_parsed_checkpoint, decode_summary_checkpoint, encode_parsed_checkpoint,
+    encode_summary_checkpoint,
 };
 use cce_parser::parser::ParseCoordinator;
 
@@ -119,6 +120,48 @@ fn main() {
         println!("deleted      {tomb_ms:>12.2}");
         if let Some(f) = out.as_mut() {
             let _ = writeln!(f, "deleted-{label}\t{tomb_ms:.2}\t0\t0\t0\t0");
+        }
+
+        // Summary second-write contrast: the dedicated small payload against
+        // the source-bearing parse blob above. Recovery replays the summary
+        // without touching the parse blob.
+        let summary = cce_parser::summary::FileSummary::new(path)
+            .with_summary("Benchmark file summary")
+            .with_entities(vec!["func_0".to_string()]);
+        let summary_payload =
+            SummaryCheckpointPayload::new(summary, None, Some("bench-config".to_string()));
+        let summary_json = serde_json::to_vec(&summary_payload).expect("json").len();
+        let mut summary_bytes = 0;
+        let summary_encode_ms = bench_ms(10, || {
+            let b = encode_summary_checkpoint(&summary_payload).expect("encode");
+            summary_bytes = b.len();
+        });
+        let summary_encoded = encode_summary_checkpoint(&summary_payload).expect("encode");
+        summary_bytes = summary_encoded.len();
+        let summary_decode_ms = bench_ms(10, || {
+            let _ = decode_summary_checkpoint(&summary_encoded).expect("decode");
+        });
+        println!(
+            "summary-{label:<4} {summary_encode_ms:>12.2} {summary_decode_ms:>12.2} {summary_bytes:>14} {:>12.1}",
+            summary_bytes as f64 / summary_json as f64 * 100.0,
+        );
+        if let Some(f) = out.as_mut() {
+            let _ = writeln!(
+                f,
+                "summary-{label}\t{summary_encode_ms:.2}\t{summary_decode_ms:.2}\t{summary_bytes}\t{summary_json}\t0"
+            );
+        }
+
+        // Decode-versus-reparse contrast: recovery either decodes the stored
+        // blob or pays a full re-parse. The gap bounds the acceptable
+        // interruption window before resume loses its advantage.
+        let reparse_ms = bench_ms(3, || {
+            let mut coord = ParseCoordinator::new();
+            let _ = coord.parse(path, &content).expect("reparse");
+        });
+        println!("reparse-{label:<4} {reparse_ms:>12.2}");
+        if let Some(f) = out.as_mut() {
+            let _ = writeln!(f, "reparse-{label}\t{reparse_ms:.2}\t0\t0\t0\t0");
         }
     }
 }

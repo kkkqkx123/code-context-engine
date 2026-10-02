@@ -181,4 +181,58 @@ fn main() {
             );
         }
     }
+
+    // CSS-in-JS extraction: first call compiles and caches the query, later
+    // calls reuse it; sources without markers skip extraction entirely.
+    {
+        use cce_parser::parser::AstParser;
+        use cce_parser::parser::extractor::EmbeddedParser;
+        use cce_types::language::Language;
+
+        let styled_src = r#"import styled from "styled-components";
+const Button = styled.button`
+  color: red;
+`;
+const Title = styled("h1")`
+  font-size: 2em;
+`;
+"#;
+        let plain_src = r#"function add(a, b) { return a + b; }
+module.exports = { add };
+"#;
+        let mut ast = AstParser::new();
+        let embedded = EmbeddedParser::new();
+        let (styled_tree, _) = ast
+            .parse_with_tree(styled_src, &Language::JavaScript)
+            .expect("parse styled js");
+        let (plain_tree, _) = ast
+            .parse_with_tree(plain_src, &Language::JavaScript)
+            .expect("parse plain js");
+
+        let cold_start = Instant::now();
+        let cold_blocks = embedded
+            .extract_css_in_js(&styled_tree, styled_src, &Language::JavaScript)
+            .expect("css-in-js cold");
+        let cold_ms = cold_start.elapsed().as_secs_f64() * 1000.0;
+        assert!(!cold_blocks.is_empty(), "styled sample must yield blocks");
+        let warm_ms = bench_ms(5, || {
+            let blocks = embedded
+                .extract_css_in_js(&styled_tree, styled_src, &Language::JavaScript)
+                .expect("css-in-js warm");
+            assert!(!blocks.is_empty());
+        });
+        let skip_ms = bench_ms(5, || {
+            let blocks = embedded
+                .extract_css_in_js(&plain_tree, plain_src, &Language::JavaScript)
+                .expect("css-in-js skip");
+            assert!(blocks.is_empty());
+        });
+        println!(
+            "{:<14} {:>10.2} {:>10} {:>10.2} {:>10} {:>10} {:>10} {:>10}",
+            "css_in_js", cold_ms, "-", warm_ms, "-", "-", "-", skip_ms
+        );
+        if let Some(f) = out.as_mut() {
+            let _ = writeln!(f, "css_in_js\t{cold_ms:.2}\t{warm_ms:.2}\t{skip_ms:.2}");
+        }
+    }
 }

@@ -817,13 +817,27 @@ pub(crate) fn plugin_fingerprint_for(language: cce_types::Language) -> Option<St
     }
 }
 
+/// Single-byte encoding for deletion tombstones.
+///
+/// Tombstones carry no data, so routing them through JSON serialization and
+/// zstd compression only burns cycles on the hottest checkpoint path.
+/// Compressed payloads always start with the zstd magic bytes, so this
+/// marker can never collide with a real parse blob. Decoding recognizes the
+/// marker first and falls back to the legacy compressed format, keeping rows
+/// written before this change readable.
+const TOMBSTONE_MARKER: u8 = 0x00;
+
 /// Encode a parsed checkpoint payload for durable storage.
 ///
 /// The JSON payload (which embeds the full file source) is zstd-compressed;
 /// uncompressed checkpoints would dominate the `checkpoint_file` volume.
+/// Deletion tombstones use the single-byte marker instead.
 pub fn encode_parsed_checkpoint(
     payload: &ParsedCheckpointPayload,
 ) -> Result<Vec<u8>, StorageError> {
+    if matches!(payload, ParsedCheckpointPayload::Deleted) {
+        return Ok(vec![TOMBSTONE_MARKER]);
+    }
     let json = serde_json::to_vec(payload).map_err(|error| {
         StorageError::query(format!("Failed to serialize parsed checkpoint: {error}"))
     })?;
@@ -837,6 +851,9 @@ pub fn encode_parsed_checkpoint(
 /// Returns `None` when the payload cannot be decoded; callers treat this as
 /// a missing checkpoint and fall back to re-parsing the source file.
 pub fn decode_parsed_checkpoint(bytes: &[u8]) -> Option<ParsedCheckpointPayload> {
+    if bytes == [TOMBSTONE_MARKER] {
+        return Some(ParsedCheckpointPayload::Deleted);
+    }
     let json = zstd::decode_all(bytes).ok()?;
     serde_json::from_slice(&json).ok()
 }

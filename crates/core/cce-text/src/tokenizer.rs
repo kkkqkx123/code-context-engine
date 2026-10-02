@@ -1,8 +1,43 @@
 use jieba_rs::{Jieba, TokenizeMode};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
 use cce_utils::text::split_identifier;
+
+/// Upper bound for tokenized input length, in characters.
+///
+/// Inputs beyond this limit are truncated to the prefix before
+/// segmentation. Leading terms dominate BM25 scoring, so the prefix keeps
+/// retrieval quality while pathological blobs stay bounded. Truncations are
+/// counted in [`truncated_input_count`].
+pub const MAX_TOKENIZE_CHARS: usize = 32_768;
+
+/// Maximum consecutive CJK characters sent to the dictionary segmenter in a
+/// single call. Longer runs are split into character-aligned windows so one
+/// huge run cannot spike indexing latency. The window is orders of magnitude
+/// larger than common words, keeping boundary effects negligible.
+const MAX_CJK_RUN_CHARS: usize = 4096;
+
+/// Number of inputs truncated by the length guard since process start.
+static TRUNCATED_INPUTS: AtomicU64 = AtomicU64::new(0);
+
+/// Number of inputs truncated by [`MAX_TOKENIZE_CHARS`] so far.
+pub fn truncated_input_count() -> u64 {
+    TRUNCATED_INPUTS.load(Ordering::Relaxed)
+}
+
+/// Truncate over-long inputs to the [`MAX_TOKENIZE_CHARS`] prefix,
+/// preserving a character boundary. Short inputs pass through untouched.
+fn cap_text(text: &str) -> &str {
+    match text.char_indices().nth(MAX_TOKENIZE_CHARS) {
+        Some((byte_idx, _)) => {
+            TRUNCATED_INPUTS.fetch_add(1, Ordering::Relaxed);
+            &text[..byte_idx]
+        }
+        None => text,
+    }
+}
 
 /// Shared Jieba instance.
 ///
@@ -45,7 +80,7 @@ impl MixedTokenizer {
     /// Tokenize text into words, returning only the word strings.
     /// Used externally for word counting during chunking.
     pub fn tokenize(&self, text: &str) -> Vec<String> {
-        self.tokenize_offsets(text)
+        MixedTokenStream::tokenize_text(cap_text(text), self.jieba)
             .into_iter()
             .map(|td| td.text)
             .collect()
@@ -57,7 +92,7 @@ impl MixedTokenizer {
     /// information (highlighting, benchmarks) and must stay symmetric with the
     /// tantivy `Tokenizer` implementation used during indexing.
     pub fn tokenize_offsets(&self, text: &str) -> Vec<MixedToken> {
-        MixedTokenStream::tokenize_text(text, self.jieba)
+        MixedTokenStream::tokenize_text(cap_text(text), self.jieba)
             .into_iter()
             .map(|td| MixedToken {
                 text: td.text,
@@ -105,7 +140,7 @@ struct TokenData {
 
 impl<'a> MixedTokenStream<'a> {
     fn new(text: &'a str, jieba: &'static Jieba) -> Self {
-        let tokens = Self::tokenize_text(text, jieba);
+        let tokens = Self::tokenize_text(cap_text(text), jieba);
         Self {
             tokens,
             pos: 0,
@@ -153,18 +188,21 @@ impl<'a> MixedTokenStream<'a> {
 
                 let cjk_text = &text[cjk_start..cjk_end];
                 let char_offsets = Self::calc_char_offsets(cjk_text);
-                let jieba_tokens = jieba.tokenize(cjk_text, TokenizeMode::Search, true);
-                for jt in jieba_tokens {
-                    let byte_start = char_offsets.get(jt.start).copied().unwrap_or(0);
-                    let byte_end = char_offsets.get(jt.end).copied().unwrap_or(cjk_text.len());
-                    result.push(TokenData {
-                        text: jt.word.to_string(),
-                        offset_from: cjk_start + byte_start,
-                        offset_to: cjk_start + byte_end,
-                        position: current_position,
-                        position_length: 1,
-                    });
-                    current_position += 1;
+                let total_chars = char_offsets.len().saturating_sub(1);
+                let mut window_char_start = 0usize;
+                while window_char_start < total_chars {
+                    let window_char_end = (window_char_start + MAX_CJK_RUN_CHARS).min(total_chars);
+                    let window =
+                        &cjk_text[char_offsets[window_char_start]..char_offsets[window_char_end]];
+                    let window_base = cjk_start + char_offsets[window_char_start];
+                    Self::push_cjk_window(
+                        &mut result,
+                        &mut current_position,
+                        jieba,
+                        window_base,
+                        window,
+                    );
+                    window_char_start = window_char_end;
                 }
             } else if c.is_whitespace() {
                 i += char_len;
@@ -267,6 +305,31 @@ impl<'a> MixedTokenStream<'a> {
         }
         offsets.push(text.len());
         offsets
+    }
+
+    /// Segment one character-aligned CJK window through the dictionary and
+    /// append the resulting tokens with absolute byte offsets.
+    fn push_cjk_window(
+        result: &mut Vec<TokenData>,
+        current_position: &mut u32,
+        jieba: &Jieba,
+        window_base: usize,
+        window: &str,
+    ) {
+        let char_offsets = Self::calc_char_offsets(window);
+        let jieba_tokens = jieba.tokenize(window, TokenizeMode::Search, true);
+        for jt in jieba_tokens {
+            let byte_start = char_offsets.get(jt.start).copied().unwrap_or(0);
+            let byte_end = char_offsets.get(jt.end).copied().unwrap_or(window.len());
+            result.push(TokenData {
+                text: jt.word.to_string(),
+                offset_from: window_base + byte_start,
+                offset_to: window_base + byte_end,
+                position: *current_position,
+                position_length: 1,
+            });
+            *current_position += 1;
+        }
     }
 }
 
@@ -440,6 +503,31 @@ mod tests {
         assert_eq!(tokens[1].0, "总价");
         assert!(tokens[0].1 < tokens[0].2);
         assert!(tokens[1].1 < tokens[1].2);
+    }
+
+    #[test]
+    fn test_tokenize_matches_offsets_texts() {
+        let text = "计算total price get_or_init 数据库连接";
+        let tokenizer = MixedTokenizer::default();
+        let words = tokenizer.tokenize(text);
+        let offsets: Vec<String> = tokenizer
+            .tokenize_offsets(text)
+            .into_iter()
+            .map(|t| t.text)
+            .collect();
+        assert_eq!(words, offsets);
+    }
+
+    #[test]
+    fn test_long_input_truncated_to_prefix() {
+        let long = "数据库连接池".repeat(8000);
+        assert!(long.chars().count() > MAX_TOKENIZE_CHARS);
+        let tokenizer = MixedTokenizer::default();
+        let before = truncated_input_count();
+        let words = tokenizer.tokenize(&long);
+        assert!(truncated_input_count() > before);
+        let prefix: String = long.chars().take(MAX_TOKENIZE_CHARS).collect();
+        assert_eq!(words, tokenizer.tokenize(&prefix));
     }
 
     #[test]

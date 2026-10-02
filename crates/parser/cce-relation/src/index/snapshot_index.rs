@@ -217,6 +217,14 @@ impl RelationSnapshotIndex {
     }
 }
 
+/// Recommended upper bound for a [`LayeredSnapshotIndex`] delta chain.
+///
+/// Normalization cost is dominated by the base size rather than the chain
+/// length, but every additional delta adds per-file overlay work and keeps
+/// superseded payloads alive. Chains beyond this length should be compacted
+/// into a fresh base snapshot.
+pub const LAYERED_CHAIN_COMPACTION_THRESHOLD: usize = 20;
+
 /// Immutable base snapshot overlaid with an ordered chain of incremental deltas.
 ///
 /// Queries merge `base` + `deltas` at read time, avoiding a full rebuild
@@ -251,7 +259,24 @@ impl LayeredSnapshotIndex {
         base: Arc<RelationSnapshotIndex>,
         deltas: Vec<Arc<cce_types::SnapshotDelta>>,
     ) -> Self {
+        if deltas.len() > LAYERED_CHAIN_COMPACTION_THRESHOLD {
+            tracing::warn!(
+                chain_len = deltas.len(),
+                threshold = LAYERED_CHAIN_COMPACTION_THRESHOLD,
+                "layered delta chain exceeds the compaction threshold; compact into a fresh base snapshot"
+            );
+        }
         Self { base, deltas }
+    }
+
+    /// Number of deltas in the overlay chain.
+    pub fn chain_len(&self) -> usize {
+        self.deltas.len()
+    }
+
+    /// Whether the chain has grown past the compaction threshold.
+    pub fn should_compact(&self) -> bool {
+        self.deltas.len() > LAYERED_CHAIN_COMPACTION_THRESHOLD
     }
 
     /// Create an empty layered snapshot (no base data, no deltas).
