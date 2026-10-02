@@ -11,6 +11,7 @@ use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
 use crate::query::types::SearchResult;
 use cce_storage_sqlite::repo::ChunkRepository;
+use cce_storage_sqlite::source_reader::SourceFileCache;
 use cce_storage_sqlite::types::ChunkRecord;
 
 /// Fetch chunk records by chunk IDs, resolving the full epoch view.
@@ -93,20 +94,31 @@ fn resolve_chunk_records(
     Ok(records)
 }
 
-/// Enrich a single search result with chunk record data.
+/// Batch-enrich results sharing one file-content cache.
 ///
-/// Fills in snippet, content, start_line, end_line, kind, and name fields
-/// from the chunk record if available. Also falls back to SQLite entity IDs
-/// when the result's entity_ids is not already populated. Snippet/content are
-/// lazy-loaded from the source file on disk (chunks no longer persist raw
-/// code), so `project_root` must be resolved by the caller.
-pub(crate) fn enrich_from_chunk(
-    result: &mut SearchResult,
+/// Multi-hit files are read once per batch instead of once per hit.
+/// Snippet and content are lazy-loaded from the source file on disk, so
+/// `project_root` must be resolved by the caller.
+pub(crate) fn enrich_results(
+    results: &mut [SearchResult],
     chunk_records: &HashMap<String, ChunkRecord>,
     project_root: Option<&std::path::Path>,
 ) {
+    let mut cache = SourceFileCache::new();
+    for result in results.iter_mut() {
+        enrich_from_chunk_cached(result, chunk_records, project_root, &mut cache);
+    }
+}
+
+fn enrich_from_chunk_cached(
+    result: &mut SearchResult,
+    chunk_records: &HashMap<String, ChunkRecord>,
+    project_root: Option<&std::path::Path>,
+    cache: &mut SourceFileCache,
+) {
     if let Some(chunk) = chunk_records.get(&result.id) {
-        let source_text = cce_storage_sqlite::source_reader::read_source_lines(
+        let source_text = cce_storage_sqlite::source_reader::read_source_lines_cached(
+            cache,
             project_root,
             &chunk.file_path,
             chunk.start_line.max(0) as u32,
@@ -277,7 +289,7 @@ mod tests {
             ..Default::default()
         };
         let records = HashMap::from([("chunk_x".to_string(), chunk_record(&[7, 8]))]);
-        enrich_from_chunk(&mut result, &records, None);
+        enrich_results(std::slice::from_mut(&mut result), &records, None);
 
         assert_eq!(result.entity_ids, vec![EntityId(7), EntityId(8)]);
     }
@@ -290,7 +302,7 @@ mod tests {
             ..Default::default()
         };
         let records = HashMap::from([("chunk_x".to_string(), chunk_record(&[7, 8]))]);
-        enrich_from_chunk(&mut result, &records, None);
+        enrich_results(std::slice::from_mut(&mut result), &records, None);
 
         assert_eq!(result.entity_ids, vec![EntityId(7), EntityId(8)]);
     }
@@ -309,7 +321,7 @@ mod tests {
             name: "stale".to_string(),
             ..Default::default()
         };
-        enrich_from_chunk(&mut result, &records, None);
+        enrich_results(std::slice::from_mut(&mut result), &records, None);
         assert_eq!(result.name, "beta");
     }
 

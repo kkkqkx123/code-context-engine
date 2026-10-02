@@ -532,6 +532,15 @@ impl RelationUpdateProcessor {
             let mut replaced_files = changed_files;
             replaced_files.extend(dependents);
 
+            if replaced_files.is_empty() {
+                tracing::warn!(
+                    operation_id,
+                    epoch = active_epoch + 1,
+                    "relation hot update carries an empty affected scope; skipping candidate build and delta"
+                );
+                return Ok(0);
+            }
+
             // Sparse candidate: an empty index whose entity ID counter
             // continues past the base's max ID; only the affected files are
             // loaded below. The read-only base view supplies the full symbol

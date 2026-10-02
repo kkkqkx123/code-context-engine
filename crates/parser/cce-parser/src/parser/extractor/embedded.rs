@@ -16,8 +16,47 @@ use cce_types::Span;
 use cce_types::entity::{Entity, EntityId, RawRelationData};
 use cce_types::language::Language;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tree_sitter::Tree;
+
+/// Cached CSS-in-JS queries keyed by host language.
+static CSS_IN_JS_QUERY_CACHE: OnceLock<dashmap::DashMap<Language, Arc<tree_sitter::Query>>> =
+    OnceLock::new();
+
+fn cached_css_in_js_query(language: &Language) -> Result<Arc<tree_sitter::Query>, ParseError> {
+    use crate::tree_sitter_query::scheme::javascript;
+
+    let cache = CSS_IN_JS_QUERY_CACHE.get_or_init(dashmap::DashMap::new);
+    if let Some(query) = cache.get(language) {
+        return Ok(query.clone());
+    }
+    let query_str = javascript::css_in_js_query();
+    let ts_language = match language {
+        Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        _ => {
+            return Err(ParseError::ast_parsing(
+                "CSS-in-JS extraction only supports JavaScript/TypeScript".to_string(),
+            ));
+        }
+    };
+    let query = tree_sitter::Query::new(&ts_language, query_str).map_err(|e| {
+        ParseError::ast_parsing(format!("Failed to compile CSS-in-JS query: {:?}", e))
+    })?;
+    let query = Arc::new(query);
+    cache.insert(*language, Arc::clone(&query));
+    Ok(query)
+}
+
+/// Conservative fast-path guard for CSS-in-JS extraction.
+fn source_may_contain_css_in_js(source: &str) -> bool {
+    source.contains("styled")
+        || source.contains("css")
+        || source.contains("cx")
+        || source.contains("keyframes")
+        || source.contains("injectGlobal")
+        || source.contains("createGlobalStyle")
+}
 
 /// Parser for embedded code blocks in SFC files
 pub struct EmbeddedParser {
@@ -342,25 +381,12 @@ impl EmbeddedParser {
         source: &str,
         language: &Language,
     ) -> Result<CssInJsCollection, ParseError> {
-        use crate::tree_sitter_query::scheme::javascript;
-
         let mut collection = CssInJsCollection::new();
 
-        // Get CSS-in-JS query
-        let query_str = javascript::css_in_js_query();
-        let ts_language = match language {
-            Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
-            Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            _ => {
-                return Err(ParseError::ast_parsing(
-                    "CSS-in-JS extraction only supports JavaScript/TypeScript".to_string(),
-                ));
-            }
-        };
-
-        let query = tree_sitter::Query::new(&ts_language, query_str).map_err(|e| {
-            ParseError::ast_parsing(format!("Failed to compile CSS-in-JS query: {:?}", e))
-        })?;
+        if !source_may_contain_css_in_js(source) {
+            return Ok(collection);
+        }
+        let query = cached_css_in_js_query(language)?;
 
         let mut cursor = tree_sitter::QueryCursor::new();
         let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());

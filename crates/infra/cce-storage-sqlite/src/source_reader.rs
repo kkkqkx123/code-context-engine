@@ -5,6 +5,7 @@
 //! straight from disk. Failure to read is a degraded result (empty text), not
 //! an error: files may legitimately have disappeared since indexing.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
@@ -63,6 +64,88 @@ pub fn read_source_lines(
         }
     };
 
+    let start = start_line as usize;
+    let end = (end_line as usize + 1).min(content.lines().count());
+    content
+        .lines()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Per-request cache of source file contents.
+///
+/// Hybrid recall often yields multiple hits in the same file. Reading and
+/// splitting the file once per request bounds enrichment I/O by distinct
+/// files instead of by hit count.
+pub struct SourceFileCache {
+    entries: HashMap<PathBuf, String>,
+}
+
+impl SourceFileCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    fn resolve_candidate(project_root: Option<&Path>, file_path: &str) -> PathBuf {
+        let path_buf = PathBuf::from(file_path);
+        if path_buf.is_absolute() {
+            path_buf
+        } else {
+            match project_root {
+                Some(root) => root.join(&path_buf),
+                None => path_buf,
+            }
+        }
+    }
+
+    fn file_content(&mut self, candidate: &Path) -> Option<&str> {
+        if !self.entries.contains_key(candidate) {
+            match std::fs::read_to_string(candidate) {
+                Ok(content) => {
+                    self.entries.insert(candidate.to_path_buf(), content);
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        path = %candidate.display(),
+                        error = %error,
+                        "Lazy source read failed; snippet degrades to empty"
+                    );
+                    return None;
+                }
+            }
+        }
+        self.entries.get(candidate).map(String::as_str)
+    }
+}
+
+impl Default for SourceFileCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Cached variant of [`read_source_lines`].
+///
+/// The file is read at most once per cache lifetime; subsequent hits in the
+/// same file slice the cached content. Missing files still degrade to empty.
+pub fn read_source_lines_cached(
+    cache: &mut SourceFileCache,
+    project_root: Option<&Path>,
+    file_path: &str,
+    start_line: u32,
+    end_line: u32,
+) -> String {
+    if end_line < start_line {
+        return String::new();
+    }
+    let candidate = SourceFileCache::resolve_candidate(project_root, file_path);
+    let Some(content) = cache.file_content(&candidate) else {
+        return String::new();
+    };
     let start = start_line as usize;
     let end = (end_line as usize + 1).min(content.lines().count());
     content

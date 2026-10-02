@@ -72,6 +72,34 @@ impl RelationDeltaOps for RelationIndex {
         config_fingerprint: String,
         affected_files: Option<&HashSet<String>>,
     ) -> SnapshotDelta {
+        if let Some(files) = affected_files
+            && files.is_empty()
+        {
+            return SnapshotDelta {
+                epoch,
+                base_epoch,
+                config_fingerprint,
+                removed_files: Vec::new(),
+                added_files: Vec::new(),
+                removed_entities: Vec::new(),
+                added_entities: Vec::new(),
+                removed_relations: Vec::new(),
+                added_relations: Vec::new(),
+                file_relation_diffs: Vec::new(),
+                import_diffs: Vec::new(),
+                export_diffs: Vec::new(),
+                dependency_diffs: Vec::new(),
+                relation_edges_dropped_unbounded: 0,
+                renamed_entities: Vec::new(),
+            };
+        }
+        if affected_files.is_none() {
+            tracing::warn!(
+                epoch,
+                base_epoch,
+                "relation delta without scope degrades to full project comparison; pass the changed-file closure to bound cost"
+            );
+        }
         let mut removed_files = Vec::new();
         let mut added_files = Vec::new();
 

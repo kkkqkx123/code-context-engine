@@ -500,7 +500,9 @@ impl Searcher {
         project_id: i64,
         query_filter: &QueryFilter,
     ) {
-        use crate::query::retrieval::post_processing::{enrich_from_chunk, get_chunk_records};
+        use crate::query::retrieval::post_processing::{
+            enrich_results as enrich_results_batch, get_chunk_records,
+        };
 
         let Some(sqlite_db) = &self.sqlite else {
             return;
@@ -517,9 +519,7 @@ impl Searcher {
             Ok(Some(records)) => {
                 let project_root =
                     cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
-                for result in results.iter_mut() {
-                    enrich_from_chunk(result, &records, project_root.as_deref());
-                }
+                enrich_results_batch(results, &records, project_root.as_deref());
             }
             Ok(None) => {}
             Err(e) => {

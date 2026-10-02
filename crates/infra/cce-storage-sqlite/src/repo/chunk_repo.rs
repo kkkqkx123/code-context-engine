@@ -34,6 +34,12 @@ use cce_types::StorageError;
 /// Chunk repository for CRUD operations
 pub struct ChunkRepository;
 
+/// Maximum chunk IDs per single batch query.
+const CHUNK_ID_BATCH_SIZE: usize = 500;
+
+/// Offset beyond which paged scans pay a significant skip cost.
+const LARGE_OFFSET_WARN_THRESHOLD: i64 = 10_000;
+
 impl ChunkRepository {
     /// Insert a single chunk record
     pub fn insert(tx: &rusqlite::Transaction, chunk: &ChunkRecord) -> Result<(), StorageError> {
@@ -228,6 +234,14 @@ impl ChunkRepository {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ChunkRecord>, StorageError> {
+        if offset > LARGE_OFFSET_WARN_THRESHOLD {
+            tracing::warn!(
+                project_id,
+                offset,
+                limit,
+                "chunk paged scan uses a large offset; prefer cursor pagination"
+            );
+        }
         execute_query(
             conn,
             "SELECT chunk_id, file_path, content,
@@ -257,6 +271,15 @@ impl ChunkRepository {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<(ChunkRecord, u8)>, StorageError> {
+        if offset > LARGE_OFFSET_WARN_THRESHOLD {
+            tracing::warn!(
+                project_id,
+                epoch,
+                offset,
+                limit,
+                "epoch paged scan uses a large offset; prefer cursor pagination"
+            );
+        }
         execute_query(
             conn,
             "SELECT c.chunk_id, c.file_path, c.content,
@@ -297,38 +320,43 @@ impl ChunkRepository {
             return Ok(Vec::new());
         }
 
-        let placeholders = chunk_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let epoch_clause = epoch
-            .map(|_| " AND epoch = ?".to_string())
-            .unwrap_or_default();
-        let query = format!(
-            "SELECT chunk_id, file_path, content,
-                    start_line, end_line, entity_ids, entity_names,
-                    chunk_type, test_status, test_source,
-                    created_at, updated_at, project_id, epoch, batch_id, path,
-                    bm25_keywords, segment_id, truncated
-             FROM chunks WHERE project_id = ?1 AND chunk_id IN ({}){}",
-            placeholders, epoch_clause
-        );
+        let mut results = Vec::with_capacity(chunk_ids.len());
+        for batch in chunk_ids.chunks(CHUNK_ID_BATCH_SIZE) {
+            let placeholders = batch.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let epoch_clause = epoch
+                .map(|_| " AND epoch = ?".to_string())
+                .unwrap_or_default();
+            let query = format!(
+                "SELECT chunk_id, file_path, content,
+                        start_line, end_line, entity_ids, entity_names,
+                        chunk_type, test_status, test_source,
+                        created_at, updated_at, project_id, epoch, batch_id, path,
+                        bm25_keywords, segment_id, truncated
+                 FROM chunks WHERE project_id = ?1 AND chunk_id IN ({}){}",
+                placeholders, epoch_clause
+            );
 
-        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&project_id];
-        for id in chunk_ids {
-            params.push(id as &dyn rusqlite::ToSql);
+            let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(batch.len() + 2);
+            params.push(&project_id);
+            for id in batch {
+                params.push(id as &dyn rusqlite::ToSql);
+            }
+            if let Some(ref e) = epoch {
+                params.push(e as &dyn rusqlite::ToSql);
+            }
+
+            let mut stmt = conn
+                .prepare(&query)
+                .map_err(|e| StorageError::query(format!("Failed to prepare query: {}", e)))?;
+
+            let batch_results = stmt
+                .query_map(&params[..], Self::map_row)
+                .map_err(|e| StorageError::query(format!("Failed to query chunks: {}", e)))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| StorageError::query(format!("Failed to collect chunks: {}", e)))?;
+            drop(stmt);
+            results.extend(batch_results);
         }
-        if let Some(ref e) = epoch {
-            params.push(e as &dyn rusqlite::ToSql);
-        }
-
-        let mut stmt = conn
-            .prepare(&query)
-            .map_err(|e| StorageError::query(format!("Failed to prepare query: {}", e)))?;
-
-        let results = stmt
-            .query_map(&params[..], Self::map_row)
-            .map_err(|e| StorageError::query(format!("Failed to query chunks: {}", e)))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| StorageError::query(format!("Failed to collect chunks: {}", e)))?;
-        drop(stmt);
         Ok(results)
     }
 
@@ -387,7 +415,10 @@ impl ChunkRepository {
         epoch: i64,
     ) -> Result<Option<u64>, StorageError> {
         let mut stmt = conn
-            .prepare("SELECT entity_ids FROM chunks WHERE project_id = ?1 AND epoch = ?2")
+            .prepare(
+                "SELECT entity_ids FROM chunks WHERE project_id = ?1 AND epoch = ?2 \
+                 AND entity_ids IS NOT NULL AND entity_ids != '' AND entity_ids != '[]'",
+            )
             .map_err(|e| StorageError::query(format!("Failed to prepare query: {e}")))?;
         let rows = stmt
             .query_map(rusqlite::params![project_id, epoch], |row| {

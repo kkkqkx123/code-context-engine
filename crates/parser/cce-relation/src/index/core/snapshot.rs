@@ -23,6 +23,9 @@ impl RelationIndex {
     ///
     /// Cost: O(affected_entries) instead of O(total_entries).
     pub fn selective_cow_copy(&self, affected_files: &HashSet<String>) -> Self {
+        if affected_files.is_empty() {
+            return self.detached_clone();
+        }
         // Entity store: copy function_index, name_index, entity_file_index
         // for entities whose file is in affected_files; share the rest.
         let function_index = if affected_files.is_empty() {
