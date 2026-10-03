@@ -168,7 +168,7 @@ pub async fn handle_entity_search(
             depth: record.depth,
             parent_id: record.parent_id,
             project_id: record.project_id,
-            rank: 1.0, // FTS5 rank is handled by ORDER BY in SQL, set to 1.0 for now
+            rank: record.rank,
         })
         .collect();
 

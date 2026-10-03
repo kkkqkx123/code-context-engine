@@ -63,7 +63,7 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 /// | `rerank` | LLM reranking (enable, model, candidates, temperature) |
 /// | `score` | Score normalization (enable, strategy) |
 /// | `boost` | Unified boost aggregation configuration |
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SearchConfig {
     /// Vector retrieval configuration
     pub vector: VectorRetrievalConfig,
@@ -83,6 +83,25 @@ pub struct SearchConfig {
     pub plugin: PluginSearchConfig,
     /// Structure-preserving assembly of the final top-N results
     pub assembly: SPSRGraphConfig,
+    /// Overall search pipeline timeout in milliseconds
+    pub timeout_ms: u64,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            vector: VectorRetrievalConfig::default(),
+            bm25: Bm25FusionConfig::default(),
+            result: ResultFilterConfig::default(),
+            summary: SummaryBoostConfig::default(),
+            rerank: RerankConfig::default(),
+            score: ScoreNormalizationConfig::default(),
+            boost: BoostAggregationConfig::default(),
+            plugin: PluginSearchConfig::default(),
+            assembly: SPSRGraphConfig::default(),
+            timeout_ms: 30_000,
+        }
+    }
 }
 
 impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
@@ -100,6 +119,7 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             boost: cfg.boost,
             plugin: cfg.plugin,
             assembly: cfg.assembly,
+            timeout_ms: cfg.timeout_ms,
         }
     }
 }

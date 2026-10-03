@@ -46,6 +46,7 @@ pub struct EntityRecord {
     pub project_id: i64,
     pub epoch: i64,
     pub batch_id: i64,
+    pub rank: f32,
 }
 
 /// Project record.
@@ -500,6 +501,7 @@ impl FromRow for EntityRecord {
             project_id: row.get(19)?,
             epoch: row.get(20)?,
             batch_id: row.get(21)?,
+            rank: row.get(22)?,
         })
     }
 }

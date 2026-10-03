@@ -26,7 +26,7 @@ use cce_utils::token_estimation::estimate_tokens;
 /// only the visible view is returned.
 ///
 /// Returns a map of chunk_id -> ChunkRecord.
-pub(crate) fn get_chunk_records(
+pub fn get_chunk_records(
     conn: &Connection,
     chunk_ids: &[String],
     project_id: i64,
@@ -104,7 +104,7 @@ fn resolve_chunk_records(
 /// (within the token budget) or a file-and-range reference. Metadata (file
 /// path, line range, kind) is taken from the chunk record; an unreadable file
 /// becomes a reference rather than an empty body.
-pub(crate) fn enrich_results(
+pub fn enrich_results(
     results: &mut [SearchResult],
     chunk_records: &HashMap<String, ChunkRecord>,
     project_root: Option<&std::path::Path>,

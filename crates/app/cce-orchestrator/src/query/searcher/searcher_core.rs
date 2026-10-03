@@ -246,7 +246,8 @@ impl Searcher {
             options.project_id,
             query_filter,
             options.config.result.max_content_tokens,
-        );
+        )
+        .await;
         self.post_process_results(results, options).await
     }
 
@@ -368,7 +369,8 @@ impl Searcher {
             options.project_id,
             query_filter,
             options.config.result.max_content_tokens,
-        );
+        )
+        .await;
         self.post_process_results(fused_results, options).await
     }
 
@@ -422,7 +424,8 @@ impl Searcher {
             options.project_id,
             query_filter,
             options.config.result.max_content_tokens,
-        );
+        )
+        .await;
         self.post_process_results(results, options).await
     }
 
@@ -509,7 +512,10 @@ impl Searcher {
     /// Batch-enrich results from SQLite chunk records (content/snippet, line
     /// ranges, kind, entity fallback). Lookup failures degrade to unenriched
     /// results; enrichment is data-only and never fails the request.
-    fn enrich_results(
+    ///
+    /// SQLite operations run on a blocking thread pool to avoid stalling the
+    /// async runtime.
+    async fn enrich_results(
         &self,
         results: &mut [SearchResult],
         project_id: i64,
@@ -527,14 +533,27 @@ impl Searcher {
             return;
         }
         let point_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-        let Ok(conn) = sqlite_db.read_connection() else {
-            tracing::warn!("Failed to get SQLite connection for enrichment");
-            return;
-        };
-        match get_chunk_records(&conn, &point_ids, project_id, query_filter) {
-            Ok(Some(records)) => {
-                let project_root =
-                    cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
+        let sqlite = sqlite_db.clone();
+        let point_ids_clone = point_ids.clone();
+        let query_filter_clone = query_filter.clone();
+
+        let enrichment_result = tokio::task::spawn_blocking(move || {
+            let conn = match sqlite.read_connection() {
+                Ok(conn) => conn,
+                Err(e) => return Err(format!("Failed to get SQLite connection: {e}")),
+            };
+            let records = match get_chunk_records(&conn, &point_ids_clone, project_id, &query_filter_clone) {
+                Ok(Some(records)) => records,
+                Ok(None) => return Ok(None),
+                Err(e) => return Err(format!("Chunk enrichment failed: {e}")),
+            };
+            let project_root = cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
+            Ok(Some((records, project_root)))
+        })
+        .await;
+
+        match enrichment_result {
+            Ok(Ok(Some((records, project_root)))) => {
                 enrich_results_batch(
                     results,
                     &records,
@@ -542,9 +561,12 @@ impl Searcher {
                     max_content_tokens,
                 );
             }
-            Ok(None) => {}
+            Ok(Ok(None)) => {}
+            Ok(Err(e)) => {
+                tracing::warn!("{}", e);
+            }
             Err(e) => {
-                tracing::warn!("Chunk enrichment failed: {}", e);
+                tracing::warn!("Enriching results panicked: {}", e);
             }
         }
     }

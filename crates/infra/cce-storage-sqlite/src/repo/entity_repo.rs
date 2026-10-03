@@ -117,7 +117,7 @@ impl EntityRepository {
     pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<EntityRecord>, StorageError> {
         execute_query_optional(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE id = ?1",
             params![id],
             Self::from_row,
@@ -135,7 +135,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE file_id = ?1",
             params![file_id],
             Self::from_row,
@@ -150,7 +150,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE file_id = ?1 AND epoch = ?2",
             params![file_id, epoch],
             Self::from_row,
@@ -169,7 +169,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE file_id = ?1 AND project_id = ?2",
             params![file_id, project_id],
             Self::from_row,
@@ -188,7 +188,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE name = ?1 AND project_id = ?2",
             params![name, project_id],
             Self::from_row,
@@ -208,11 +208,11 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.rank
              FROM entities e
              JOIN entities_fts f ON e.id = f.rowid
              WHERE entities_fts MATCH ?1 AND e.project_id = ?2
-             ORDER BY rank LIMIT ?3",
+             ORDER BY f.rank LIMIT ?3",
             params![query, project_id, limit],
             Self::from_row,
         )
@@ -228,11 +228,11 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.rank
              FROM entities e
              JOIN entities_fts f ON e.id = f.rowid
              WHERE entities_fts MATCH ?1 AND e.project_id = ?2 AND e.epoch = ?4
-             ORDER BY rank LIMIT ?3",
+             ORDER BY f.rank LIMIT ?3",
             params![query, project_id, limit, epoch],
             Self::from_row,
         )
@@ -249,7 +249,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE kind = ?1 AND project_id = ?2",
             params![kind, project_id],
             Self::from_row,
@@ -266,7 +266,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE project_id = ?1",
             params![project_id],
             Self::from_row,
@@ -285,7 +285,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
              FROM entities WHERE project_id = ?1 ORDER BY id LIMIT ?2 OFFSET ?3",
             params![project_id, limit, offset],
             Self::from_row,
@@ -301,13 +301,13 @@ impl EntityRepository {
     ) -> Result<Vec<(EntityRecord, String)>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.path
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, f.path
              FROM entities e JOIN files f ON e.file_id = f.id
              WHERE e.project_id = ?1",
             params![project_id],
             |row| {
                 let entity = Self::parse_entity_from_row(row)?;
-                let file_path: String = row.get(22)?;
+                let file_path: String = row.get(23)?;
                 Ok((entity, file_path))
             },
         )
@@ -322,13 +322,13 @@ impl EntityRepository {
     ) -> Result<Vec<(EntityRecord, String)>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.path
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, f.path
              FROM entities e JOIN files f ON e.file_id = f.id
              WHERE e.project_id = ?1 AND e.epoch = ?2",
             params![project_id, epoch],
             |row| {
                 let entity = Self::parse_entity_from_row(row)?;
-                let file_path: String = row.get(22)?;
+                let file_path: String = row.get(23)?;
                 Ok((entity, file_path))
             },
         )
@@ -490,6 +490,7 @@ impl EntityRepository {
             project_id: row.get::<_, i64>(19)?,
             epoch: row.get(20)?,
             batch_id: row.get(21)?,
+            rank: row.get(22)?,
         })
     }
 
@@ -528,7 +529,8 @@ mod tests {
                 modifiers_json TEXT,
                 project_id INTEGER NOT NULL,
                 epoch INTEGER NOT NULL DEFAULT 0,
-                batch_id INTEGER NOT NULL DEFAULT 0
+                batch_id INTEGER NOT NULL DEFAULT 0,
+                rank REAL NOT NULL DEFAULT 0.0
             )",
             [],
         )
@@ -567,6 +569,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         let id = EntityRepository::insert(&tx, &entity).expect("Failed to insert");
@@ -605,6 +608,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         let id = EntityRepository::insert(&tx, &entity).expect("Failed to insert");
@@ -645,6 +649,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         EntityRepository::insert(&tx, &entity).expect("Failed to insert");
@@ -686,6 +691,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         EntityRepository::insert(&tx, &entity).expect("Failed to insert");
@@ -726,6 +732,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         let entity2 = EntityRecord {
@@ -751,6 +758,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         EntityRepository::insert(&tx, &entity1).expect("Failed to insert");
@@ -793,6 +801,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         EntityRepository::insert(&tx, &entity).expect("Failed to insert");
@@ -832,6 +841,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         let id = EntityRepository::insert(&tx, &entity).expect("Failed to insert");
@@ -872,6 +882,7 @@ mod tests {
             project_id: 1,
             epoch: 0,
             batch_id: 0,
+            rank: 0.0,
         };
 
         EntityRepository::insert(&tx, &entity).expect("Failed to insert");
@@ -910,7 +921,8 @@ mod tests {
                 modifiers_json TEXT,
                 project_id INTEGER NOT NULL,
                 epoch INTEGER NOT NULL DEFAULT 0,
-                batch_id INTEGER NOT NULL DEFAULT 0
+                batch_id INTEGER NOT NULL DEFAULT 0,
+                rank REAL NOT NULL DEFAULT 0.0
             )",
             [],
         )
@@ -967,6 +979,7 @@ mod tests {
                 project_id: 1,
                 epoch: 0,
                 batch_id: 0,
+                rank: 0.0,
             },
             EntityRecord {
                 span_start_column: None,
@@ -991,6 +1004,7 @@ mod tests {
                 project_id: 1,
                 epoch: 0,
                 batch_id: 0,
+                rank: 0.0,
             },
             EntityRecord {
                 span_start_column: None,
@@ -1015,6 +1029,7 @@ mod tests {
                 project_id: 1,
                 epoch: 0,
                 batch_id: 0,
+                rank: 0.0,
             },
         ];
 

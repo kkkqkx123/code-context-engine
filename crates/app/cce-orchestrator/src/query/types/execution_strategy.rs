@@ -1,6 +1,6 @@
 //! Execution strategy types
 
-use super::query_options::{QueryIntent, QueryOptions, SearchSources};
+use super::query_options::{QueryOptions, SearchSources};
 use crate::query::types::search_config::QueryIntentWeightsExt;
 
 /// Internal execution strategy (not exposed to users)
@@ -66,7 +66,9 @@ impl ExecutionStrategy {
         // Resolve fusion weights based on query intent if enabled
         let (resolved_v_weight, resolved_b_weight) =
             if options.config.bm25.enable_intent_based_weights {
-                let intent = options.query_intent.unwrap_or(QueryIntent::Hybrid);
+                let intent = options
+                    .query_intent
+                    .unwrap_or_else(|| super::intent_detector::detect_intent(&options.query));
                 let w = options.config.bm25.intent_weights.for_intent(intent);
                 (w.vector_weight, w.bm25_weight)
             } else {

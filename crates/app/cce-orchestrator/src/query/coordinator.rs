@@ -469,7 +469,20 @@ impl QueryCoordinator {
 
         // Execute search — no silent degradation. If services are unavailable,
         // the error propagates to the caller, and the query is queued for retry.
-        match self.searcher.search_with_view(options, view).await {
+        // The overall timeout bounds the entire pipeline so a slow component
+        // cannot stall the request indefinitely.
+        let timeout_ms = options.config.timeout_ms;
+        let search_future = self.searcher.search_with_view(options, view);
+        let search_result = match tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            search_future,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(QueryError::Timeout { timeout_ms }),
+        };
+        match search_result {
             Ok(result) => {
                 // Store in cache
                 self.cache

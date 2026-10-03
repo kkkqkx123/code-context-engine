@@ -4,6 +4,7 @@
 
 // Core query option types
 pub mod execution_strategy;
+pub mod intent_detector;
 pub mod query_options;
 pub mod search_config;
 

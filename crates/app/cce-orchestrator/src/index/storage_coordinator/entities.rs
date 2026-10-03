@@ -217,6 +217,7 @@ impl StorageCoordinator {
                             project_id: self.project_id,
                             epoch,
                             batch_id,
+                            rank: 0.0,
                         };
                         let db_id = EntityRepository::insert(tx, &record)?;
                         inserted.push((entity.id, db_id, entity.parent));

@@ -607,6 +607,17 @@ pub struct SearchModuleConfig {
     /// Structure-preserving assembly of the final top-N results.
     #[serde(default)]
     pub assembly: SPSRGraphConfig,
+    /// Overall search pipeline timeout in milliseconds.
+    ///
+    /// Bounds the end-to-end search operation at the coordinator level,
+    /// covering retrieval, fusion, enrichment, reranking, and assembly.
+    /// Defaults to 30 seconds.
+    #[serde(default = "default_search_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_search_timeout_ms() -> u64 {
+    30_000
 }
 
 /// Query-side plugin hook toggles.
