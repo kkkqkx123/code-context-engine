@@ -51,7 +51,7 @@ fn language_detection(
     context: &mut ParseContext,
     components: &mut Components,
 ) -> Result<(), ParseError> {
-    let language_info = components.language_detector.detect(&context.file_path)?;
+    let language_info = components.language_detector.detect(context.file_path())?;
     context.language_info = Some(language_info);
     Ok(())
 }
@@ -67,7 +67,7 @@ fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Resul
 
     let (tree, _) = components
         .ast_parser
-        .parse_with_tree(&context.source, &language)?;
+        .parse_with_tree(context.source(), &language)?;
 
     // Syntax errors produce a partial tree that is still consumed downstream;
     // entities inside ERROR regions are silently lost, so surface the fact
@@ -75,7 +75,7 @@ fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Resul
     if tree.root_node().has_error() {
         context.has_syntax_errors = true;
         tracing::warn!(
-            file = %context.file_path,
+            file = %context.file_path(),
             language = %language,
             "Parsed with syntax errors; extracted entities may be incomplete"
         );
@@ -100,11 +100,12 @@ fn entity_extraction(
 
     context.entities = components
         .entity_extractor
-        .extract(tree, &context.source, &language)
+        .extract(tree, context.source(), &language)
         .map_err(|e| {
             ParseError::ast_parsing(format!(
                 "Entity extraction failed for file '{}': {}",
-                context.file_path, e
+                context.file_path(),
+                e
             ))
         })?;
     Ok(())
@@ -123,19 +124,23 @@ fn control_flow_extraction(
         .as_ref()
         .ok_or_else(|| ParseError::ast_parsing("AST tree not available".to_string()))?;
 
+    let source = context.source().to_string();
+    let entities = context.entities.clone();
+
     components
         .control_flow_extractor
         .extract(
             tree,
-            &context.source,
+            &source,
             &language,
-            &context.entities,
+            &entities,
             &mut context.control_flow,
         )
         .map_err(|e| {
             ParseError::ast_parsing(format!(
                 "Control-flow extraction failed for file '{}': {}",
-                context.file_path, e
+                context.file_path(),
+                e
             ))
         })?;
 
@@ -155,19 +160,17 @@ fn behavior_extraction(
         .as_ref()
         .ok_or_else(|| ParseError::ast_parsing("AST tree not available".to_string()))?;
 
+    let source = context.source().to_string();
+    let entities = context.entities.clone();
+
     components
         .behavior_extractor
-        .extract(
-            tree,
-            &context.source,
-            &language,
-            &context.entities,
-            &mut context.behavior,
-        )
+        .extract(tree, &source, &language, &entities, &mut context.behavior)
         .map_err(|e| {
             ParseError::ast_parsing(format!(
                 "Behavior extraction failed for file '{}': {}",
-                context.file_path, e
+                context.file_path(),
+                e
             ))
         })?;
 
@@ -191,15 +194,12 @@ fn macro_body_extraction(
         .as_ref()
         .ok_or_else(|| ParseError::ast_parsing("AST tree not available".to_string()))?;
 
+    let source = context.source().to_string();
+    let entities = context.entities.clone();
+
     components
         .macro_body_extractor
-        .extract(
-            tree,
-            &context.source,
-            &language,
-            &context.entities,
-            &mut context.behavior,
-        )
+        .extract(tree, &source, &language, &entities, &mut context.behavior)
         .map_err(|e| ParseError::ast_parsing(format!("Macro body extraction failed: {e}")))?;
 
     Ok(())
@@ -219,22 +219,23 @@ fn doc_comment_processing(
         .as_ref()
         .ok_or_else(|| ParseError::ast_parsing("AST tree not available".to_string()))?;
 
+    let source = context.source().to_string();
+    let mut entities = context.entities.clone();
+    let mut behavior = context.behavior.clone();
+
     let file_doc = components
         .comment_processor
-        .process_with_span(
-            tree,
-            &context.source,
-            &language,
-            &mut context.entities,
-            &mut context.behavior,
-        )
+        .process_with_span(tree, &source, &language, &mut entities, &mut behavior)
         .map_err(|e| {
             ParseError::ast_parsing(format!(
                 "Comment processing failed for file '{}': {}",
-                context.file_path, e
+                context.file_path(),
+                e
             ))
         })?;
 
+    context.entities = entities;
+    context.behavior = behavior;
     context.file_doc_comment = file_doc.as_ref().map(|doc| doc.text.clone());
     context.file_doc_span = file_doc.map(|doc| doc.span);
     Ok(())
@@ -253,13 +254,17 @@ fn relation_extraction(
         .as_ref()
         .ok_or_else(|| ParseError::ast_parsing("AST tree not available".to_string()))?;
 
+    let source = context.source().to_string();
+    let entities = context.entities.clone();
+
     let relations = components
         .relation_extractor
-        .extract(tree, &context.source, language, &context.entities, None)
+        .extract(tree, &source, language, &entities, None)
         .map_err(|e| {
             ParseError::ast_parsing(format!(
                 "Relation extraction failed for file '{}': {}",
-                context.file_path, e
+                context.file_path(),
+                e
             ))
         })?;
 

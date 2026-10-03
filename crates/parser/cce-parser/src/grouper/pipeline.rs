@@ -203,38 +203,55 @@ impl PreprocessingPipeline {
     }
 
     /// Built-in grouping pipeline (all steps after the plugin override tier).
+    ///
+    /// # Stage Contracts
+    ///
+    /// | Stage | Input | Output | Side Effects |
+    /// |-------|-------|--------|--------------|
+    /// | 0. StdlibClassify | `parsed_file.entities` | `entities` with stdlib tags | None |
+    /// | 1. FragmentConsolidate | `entities` | `entities` with merged calls + `groups` with merged fragments | `stats.merged_calls` |
+    /// | 2. TestSuiteGroup | `entities` | `groups` with test suites | None |
+    /// | 3. ClassMethodAssociate | `entities` (remaining) | `groups` with class+methods | `stats.class_method_associations` |
+    /// | 4. PluginEntityInject | `groups` | `groups` + plugin entities | None |
+    /// | 5. FunctionMemberGroup | `groups` | `groups` with function internals | None |
+    /// | 6. HierarchyResolve | `groups` | `groups` with parent/child links | None |
+    /// | 7. TestInfoAnnotate | `groups` | `groups` with test_info | None |
+    /// | 8. CallPathInject | `groups` | `groups` with call_paths metadata | None |
+    /// | 9. FileDocGroup | `parsed_file` | `groups` + file doc group | None |
+    /// | 10. PluginPostGroup | `groups` | `groups` after plugin hooks | None |
+    /// | 11. CombinedSource | `groups` | `groups` with combined_source | None |
+    /// | 12. FallbackGroup | `parsed_file` | `groups` (if empty) | None |
     fn builtin_process(
         &self,
         parsed_file: &ParsedFile,
         mut stats: ProcessingStats,
     ) -> ProcessingResult {
-        // Step 0: `LangHeuristics` stdlib classification for custom-language
+        // Stage 0: `LangHeuristics` stdlib classification for custom-language
         // files (entities whose stdlib status is unknown to the built-in
         // detectors; plugin answers are in priority order, first wins).
         let mut entities = apply_stdlib_heuristics(&self.plugin_registry, parsed_file);
 
-        // Step 1: Merge simple repeated calls (if enabled)
+        // Stage 1: Consolidate fragments (merge simple repeated calls + merge small fragments)
+        // This stage combines two related optimizations:
+        // - CallMerger: merges consecutive identical calls within function bodies
+        // - SmallFragmentMerger: merges adjacent small standalone groups
+        let mut groups = Vec::new();
         if self.config.enable_call_merging {
             let (merged, merge_count) = self.merge_simple_calls(&entities, parsed_file);
             stats.merged_calls = merge_count;
-
             entities = merged;
         }
 
-        // Step 2: Process test suites and test cases (if enabled)
+        // Stage 2: Process test suites and test cases (if enabled)
         // Test suite processing happens before class-method to ensure test entities
         // are properly grouped even if they contain class definitions
-        let mut groups = if self.config.enable_test_entity_grouping {
-            let (groups, test_assoc_count) = self.process_test_suites(&entities, parsed_file);
-
-            // Note: test_assoc_count could be tracked in ProcessingStats if needed
+        if self.config.enable_test_entity_grouping {
+            let (test_groups, test_assoc_count) = self.process_test_suites(&entities, parsed_file);
             let _ = test_assoc_count;
-            groups
-        } else {
-            Vec::new()
-        };
+            groups = test_groups;
+        }
 
-        // Step 3: Process class-methods for remaining entities (if enabled)
+        // Stage 3: Process class-methods for remaining entities (if enabled)
         // Extract entities that haven't been grouped yet (non-test entities)
         let processed_ids: std::collections::HashSet<_> =
             groups.iter().flat_map(|g| g.all_entity_ids()).collect();
@@ -385,7 +402,7 @@ impl PreprocessingPipeline {
             }
         }
 
-        // Inject supplementary plugin entities (EntityExtract).
+        // Stage 4: Inject supplementary plugin entities (EntityExtract).
         // Regex-based extractors (e.g. Flask route decorators) complement the
         // tree-sitter entity stream with framework-specific entities. Each
         // becomes a standalone group so it flows through the rest of the
@@ -394,7 +411,7 @@ impl PreprocessingPipeline {
             inject_plugin_entities(&self.plugin_registry, &mut groups, parsed_file);
         }
 
-        // Process function member grouping (if enabled)
+        // Stage 5: Process function member grouping (if enabled)
         // Groups function-level entities (macros, closures, statements) as members
         if self.config.enable_function_member_grouping {
             let func_member_count = self.function_member_processor.process(
@@ -405,14 +422,14 @@ impl PreprocessingPipeline {
             if func_member_count > 0 {}
         }
 
-        // Resolve group hierarchy (parent-child relationships)
+        // Stage 6: Resolve group hierarchy (parent-child relationships)
         // Links module groups with their child groups based on entity parent/children relationships.
         if self.config.enable_group_hierarchy {
             let link_count = resolve_group_hierarchy(&mut groups, &parsed_file.entities);
             if link_count > 0 {}
         }
 
-        // Step 5: Merge small adjacent standalone fragments (if enabled).
+        // Stage 7: Merge small adjacent standalone fragments (if enabled).
         // Test info is annotated BEFORE merging so the merger can respect
         // test boundaries (a test fragment must never be merged into a
         // production fragment group, and vice versa).
@@ -423,7 +440,7 @@ impl PreprocessingPipeline {
             if merge_count > 0 {}
         }
 
-        // Re-run test-info annotation after fragment merging so freshly
+        // Stage 8: Re-run test-info annotation after fragment merging so freshly
         // created MergedFragments groups are covered.
         //
         // AST-level detection (attribute adjacency + constrained conventions)
@@ -432,7 +449,7 @@ impl PreprocessingPipeline {
         // groups keep their `group_type` regardless of test status.
         self.annotate_groups_test_info(&mut groups, parsed_file, &entities);
 
-        // Inject call paths from raw_relations into group metadata
+        // Stage 9: Inject call paths from raw_relations into group metadata
         if !parsed_file.raw_relations.is_empty() {
             let mut call_paths_map: HashMap<EntityId, Vec<String>> = HashMap::new();
             for rel in &parsed_file.raw_relations {
@@ -470,7 +487,7 @@ impl PreprocessingPipeline {
             }
         }
 
-        // Create FileDocumentation group if file_doc_comment exists
+        // Stage 10: Create FileDocumentation group if file_doc_comment exists
         if let Some(ref doc_comment) = parsed_file.file_doc_comment {
             let trimmed = doc_comment.trim();
             if !trimmed.is_empty() {
@@ -508,7 +525,7 @@ impl PreprocessingPipeline {
             }
         }
 
-        // Plugin post-group hook (Group capability). Runs after built-in
+        // Stage 11: Plugin post-group hook (Group capability). Runs after built-in
         // grouping (including the file-documentation group) and before
         // combined-source generation. Plugins may merge/split/rename groups or
         // annotate metadata.
@@ -516,7 +533,7 @@ impl PreprocessingPipeline {
             groups = apply_plugin_post_group(&self.plugin_registry, groups, parsed_file);
         }
 
-        // Step 6: Generate combined source for each group
+        // Stage 12: Generate combined source for each group
         let file_source = parsed_file.source.as_ref();
         for group in &mut groups {
             // FileDocumentation groups use the doc comment as their source,
@@ -538,7 +555,7 @@ impl PreprocessingPipeline {
             }
         }
 
-        // File-level fallback: guarantee every non-empty source file yields
+        // Stage 13: File-level fallback: guarantee every non-empty source file yields
         // at least one group so zero-entity files are not silently dropped.
         if groups.is_empty() {
             let source = parsed_file.source.as_ref();

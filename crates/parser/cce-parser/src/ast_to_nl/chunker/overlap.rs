@@ -281,6 +281,58 @@ impl OverlapManager {
         }
     }
 
+    /// Apply overlap to embedding chunks only.
+    ///
+    /// Type-system guarantee: this method only accepts `EmbeddingChunk` wrappers,
+    /// ensuring BM25 chunks never enter the overlap pass.
+    pub fn apply_overlap_emb(&self, chunks: &mut [super::chunker::EmbeddingChunk]) {
+        if chunks.len() < 2 {
+            return;
+        }
+
+        for i in 1..chunks.len() {
+            let prev_text = chunks[i - 1].inner().pure_text();
+            let info = self.extract_overlap_from_end(prev_text, ChunkPath::Embedding);
+            if !info.text.is_empty() {
+                let token_count = self.estimator.estimate_text(&info.text);
+
+                if self.validate_overlap(chunks[i].inner().token_count, token_count) {
+                    let prev_id = chunks[i - 1].inner().chunk_id.clone();
+
+                    chunks[i].0.prev_overlap = Some(OverlapRegion {
+                        text: info.text.clone(),
+                        token_count,
+                        source_chunk_id: prev_id,
+                        overlap_type: OverlapType::Previous,
+                        start_byte: info.start_byte,
+                        end_byte: info.end_byte,
+                    });
+
+                    if let Some(code_meta) = chunks[i].0.metadata.as_code_mut() {
+                        code_meta.has_overlap = true;
+                    }
+                }
+            }
+        }
+
+        for chunk in chunks.iter() {
+            if let Some(ref overlap) = chunk.inner().prev_overlap {
+                let total_tokens = chunk.inner().token_count + overlap.token_count;
+                if total_tokens > self.config.max_tokens * 2 {
+                    tracing::warn!(
+                        chunk_id = chunk.inner().chunk_id,
+                        overlap_source = overlap.source_chunk_id,
+                        chunk_tokens = chunk.inner().token_count,
+                        overlap_tokens = overlap.token_count,
+                        total_tokens = total_tokens,
+                        max_allowed = self.config.max_tokens * 2,
+                        "Chunk with overlap may exceed model context window"
+                    );
+                }
+            }
+        }
+    }
+
     /// Validate overlap doesn't exceed max ratio
     pub fn validate_overlap(&self, chunk_tokens: usize, overlap_tokens: usize) -> bool {
         if chunk_tokens == 0 {

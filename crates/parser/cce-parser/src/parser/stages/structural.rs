@@ -34,11 +34,12 @@ pub(crate) fn run(
 
     let (structural_entities, structural_relations) = components
         .structural_extractor
-        .extract(tree, &context.source, language, &context.entities)
+        .extract(tree, context.source(), language, &context.entities)
         .map_err(|e| {
             ParseError::ast_parsing(format!(
                 "Structural extraction failed for file '{}': {}",
-                context.file_path, e
+                context.file_path(),
+                e
             ))
         })?;
 

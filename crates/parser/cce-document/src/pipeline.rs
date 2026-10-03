@@ -5,16 +5,13 @@
 //!
 //! # Design
 //!
-//! Uses global singleton pattern with `std::sync::OnceLock` for:
-//! - Single PipelineRouter instance shared across the entire application
-//! - Eliminates redundant initialization in tests and production
-//!
-//! This design is lightweight since document parsers have minimal initialization cost
-//! (unlike tree-sitter which requires loading native libraries and compiling queries).
+//! PipelineRouter is designed for dependency injection. Each consumer holds
+//! its own instance (wrapped in `Arc` for shared ownership), enabling:
+//! - Per-project configuration isolation
+//! - Testability without global state
+//! - Explicit ownership and lifecycle management
 
-use std::sync::OnceLock;
-
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use cce_config::modules::ChunkingConfig;
 use cce_types::ChunkedResult;
@@ -130,20 +127,15 @@ pub trait TextPipeline {
     }
 }
 
-/// Global singleton PipelineRouter instance
-///
-/// This ensures all parts of the application (including tests) share the same
-/// PipelineRouter instance, eliminating redundant initialization.
-static GLOBAL_ROUTER: OnceLock<PipelineRouter> = OnceLock::new();
-
 /// Pipeline router
 ///
 /// Routes to appropriate pipeline based on file extension.
 ///
-/// # Global Singleton
+/// # Dependency Injection
 ///
-/// Use `PipelineRouter::global()` to access the global instance instead of creating
-/// new instances. This ensures efficient resource usage across tests and production.
+/// Each consumer holds its own `PipelineRouter` instance (wrapped in `Arc`
+/// for shared ownership). This enables per-project configuration isolation
+/// and testability without global state.
 #[derive(Clone)]
 pub struct PipelineRouter {
     /// Markdown pipeline
@@ -161,24 +153,7 @@ pub struct PipelineRouter {
 }
 
 impl PipelineRouter {
-    /// Get the global PipelineRouter instance
-    ///
-    /// This is the recommended way to access PipelineRouter in both production
-    /// and tests. Using the global instance ensures:
-    /// - Single instance shared across all code
-    /// - No redundant initialization
-    /// - Efficient memory usage
-    pub fn global() -> &'static Self {
-        GLOBAL_ROUTER.get_or_init(|| {
-            info!("PipelineRouter initialized");
-            Self::new()
-        })
-    }
-
     /// Create a new pipeline router
-    ///
-    /// Note: Prefer using `PipelineRouter::global()` instead of this method.
-    /// This constructor is kept for backward compatibility and special cases.
     pub fn new() -> Self {
         debug!("Creating PipelineRouter");
         Self {

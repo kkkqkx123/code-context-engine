@@ -214,6 +214,10 @@ impl ParseCoordinator {
             .cloned()
             .ok_or_else(|| ParseError::ast_parsing("Language not detected".to_string()))?;
 
+        let source = context.source().to_string();
+        let file_path = context.file_path().to_string();
+        let tree = context.tree.clone();
+
         // Merge entities first
         let mut all_entities = context.entities;
         all_entities.extend(context.block_entities);
@@ -248,12 +252,12 @@ impl ParseCoordinator {
         };
 
         // Extract imports from AST if available (before source is moved into ParsedFile)
-        let import_table = context.tree.as_ref().and_then(|tree| {
-            match crate::relation_helpers::extract_imports(tree, &context.source, &language, None) {
+        let import_table = tree.as_ref().and_then(|tree| {
+            match crate::relation_helpers::extract_imports(tree, &source, &language, None) {
                 Ok(table) => Some(table),
                 Err(e) => {
                     tracing::warn!(
-                        path = %context.file_path,
+                        path = %file_path,
                         error = %e,
                         "Import extraction failed; cross-file relations for this file will be incomplete"
                     );
@@ -265,22 +269,19 @@ impl ParseCoordinator {
         // Extract named re-exports (Rust `pub use`, JS/TS `export { x } from`)
         // from the same AST. Resolution happens in the symbol table, so the
         // raw records are enough here.
-        let reexports = context
-            .tree
+        let reexports = tree
             .as_ref()
-            .map(|tree| {
-                crate::relation_helpers::extract_reexports(tree, &context.source, &language)
-            })
+            .map(|tree| crate::relation_helpers::extract_reexports(tree, &source, &language))
             .unwrap_or_default();
 
         // The full-content hash is computed once here (source is in hand) and
         // reused by the relation build instead of re-hashing.
-        let file_hash = Some(cce_utils::hash::calculate_hash(context.source.as_bytes()));
+        let file_hash = Some(cce_utils::hash::calculate_hash(source.as_bytes()));
 
         let parsed = ParsedFile {
             language,
-            path: context.file_path.clone(),
-            source: context.source.into(),
+            path: file_path,
+            source: source.into(),
             entities: all_entities,
             local_symbols: context.local_symbols,
             raw_relations: all_raw_relations,

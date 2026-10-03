@@ -72,6 +72,56 @@ use super::splitter::TextSplitter;
 use super::strategy::SplitStrategy;
 use super::tracker::GroupTracker;
 
+/// Embedding-path chunk wrapper.
+///
+/// Type-system guarantee: only embedding chunks can enter cross-group merge
+/// and overlap passes. BM25 chunks are excluded at compile time.
+#[derive(Debug, Clone)]
+pub struct EmbeddingChunk(pub ChunkedResult);
+
+impl EmbeddingChunk {
+    /// Create a new embedding chunk wrapper
+    pub fn new(chunk: ChunkedResult) -> Self {
+        debug_assert_eq!(chunk.path, ChunkPath::Embedding);
+        Self(chunk)
+    }
+
+    /// Unwrap the inner chunk
+    pub fn into_inner(self) -> ChunkedResult {
+        self.0
+    }
+
+    /// Get a reference to the inner chunk
+    pub fn inner(&self) -> &ChunkedResult {
+        &self.0
+    }
+}
+
+/// BM25-path chunk wrapper.
+///
+/// Type-system guarantee: BM25 chunks never enter cross-group merge or overlap
+/// passes. They are kept separate from embedding chunks at compile time.
+#[derive(Debug, Clone)]
+pub struct Bm25Chunk(pub ChunkedResult);
+
+impl Bm25Chunk {
+    /// Create a new BM25 chunk wrapper
+    pub fn new(chunk: ChunkedResult) -> Self {
+        debug_assert_eq!(chunk.path, ChunkPath::Bm25);
+        Self(chunk)
+    }
+
+    /// Unwrap the inner chunk
+    pub fn into_inner(self) -> ChunkedResult {
+        self.0
+    }
+
+    /// Get a reference to the inner chunk
+    pub fn inner(&self) -> &ChunkedResult {
+        &self.0
+    }
+}
+
 /// Group-level chunker
 pub struct GroupChunker {
     config: ChunkingConfig,
@@ -299,34 +349,45 @@ impl GroupChunker {
             .map(|g| (g.group_id.to_string(), g.span))
             .collect();
 
-        let mut emb_chunks: Vec<ChunkedResult> = all_chunks
+        let emb_chunks: Vec<EmbeddingChunk> = all_chunks
             .chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
             .cloned()
+            .map(EmbeddingChunk::new)
             .collect();
-        let bm25_chunks: Vec<ChunkedResult> = all_chunks
+        let bm25_chunks: Vec<Bm25Chunk> = all_chunks
             .chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Bm25)
             .cloned()
+            .map(Bm25Chunk::new)
             .collect();
         let dropped_blank_segments = all_chunks.dropped_blank_segments;
 
         // Cross-group merging and word overlap stay on the embedding path only.
         // Merging BM25 chunks across groups would mix independent entities
         // into one block, and overlap would repeat content across blocks.
-        emb_chunks =
-            super::merge::merge_small_chunks_cross_group(emb_chunks, &group_spans, &self.config);
+        // The type system guarantees Bm25Chunk cannot enter this path.
+        let emb_chunks_inner: Vec<ChunkedResult> =
+            emb_chunks.into_iter().map(|c| c.into_inner()).collect();
+        let merged_emb_chunks = super::merge::merge_small_chunks_cross_group(
+            emb_chunks_inner,
+            &group_spans,
+            &self.config,
+        );
 
-        self.overlap_manager
-            .apply_overlap(&mut emb_chunks, ChunkPath::Embedding);
+        let mut emb_chunks: Vec<EmbeddingChunk> = merged_emb_chunks
+            .into_iter()
+            .map(EmbeddingChunk::new)
+            .collect();
+        self.overlap_manager.apply_overlap_emb(&mut emb_chunks);
 
         let total_chunks = emb_chunks.len() + bm25_chunks.len();
 
         let mut result = Vec::with_capacity(total_chunks);
-        result.extend(emb_chunks);
-        result.extend(bm25_chunks);
+        result.extend(emb_chunks.into_iter().map(|c| c.into_inner()));
+        result.extend(bm25_chunks.into_iter().map(|c| c.into_inner()));
         Ok(ChunkOutput {
             chunks: result,
             dropped_blank_segments,

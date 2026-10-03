@@ -23,7 +23,7 @@ pub(crate) fn run(
     if language.has_embedded_blocks() {
         let embedded_result = helpers::parse_embedded_blocks(
             tree,
-            &context.source,
+            context.source(),
             &language,
             &context.entities,
             &mut components.embedded_parser,
@@ -42,11 +42,12 @@ pub(crate) fn run(
 
     // Extract macro body facts (Rust only, runs after entity extraction)
     if MacroBodyExtractor::supports_language(&language) {
+        let source = context.source().to_string();
         components
             .macro_body_extractor
             .extract(
                 tree,
-                &context.source,
+                &source,
                 &language,
                 &all_entities,
                 &mut context.behavior,
