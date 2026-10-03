@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tracing::warn;
 
 use crate::error::PluginError;
-use crate::lua_mapping::entity_group_to_lua_table;
+use crate::loader::lua_mapping::entity_group_to_lua_table;
 use crate::pattern::{CompiledPattern, PatternDeclaration, compile_patterns};
 use crate::types::PluginMetadata;
 use crate::utils::CancellationToken;

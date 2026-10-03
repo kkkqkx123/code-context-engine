@@ -1,4 +1,7 @@
 //! Score normalization for hybrid fusion.
+//!
+//! Canonical home of min-max normalization for the query pipeline: the boost
+//! layer delegates to [`minmax_normalize`] instead of keeping its own copy.
 
 use std::collections::HashMap;
 
@@ -7,8 +10,12 @@ use crate::query::types::SearchResult;
 
 /// Normalize a slice of scores to [0.0, 1.0] using min-max normalization.
 ///
-/// Returns the normalized scores. If all scores are equal, returns all 1.0.
-/// If the input is empty, returns an empty vec.
+/// Returns the normalized scores. A degenerate input (all scores equal, or a
+/// single score) has no spread to normalize against and maps to full credit
+/// (`1.0` for every element): each key is the best evidence on its path, and
+/// the path weight alone controls its contribution. Uniform shifts preserve
+/// ranking; only absolute score scales change. If the input is empty, returns
+/// an empty vec.
 pub fn minmax_normalize(scores: &[f32]) -> Vec<f32> {
     if scores.is_empty() {
         return Vec::new();
@@ -30,9 +37,7 @@ pub fn minmax_normalize(scores: &[f32]) -> Vec<f32> {
 ///
 /// Keys are sorted before pairing so the order of the normalized values does
 /// not depend on HashMap iteration order.
-pub fn normalize_by_key(
-    map: HashMap<String, (usize, f32)>,
-) -> HashMap<String, (usize, f32)> {
+pub fn normalize_by_key(map: HashMap<String, (usize, f32)>) -> HashMap<String, (usize, f32)> {
     let mut entries: Vec<(String, (usize, f32))> = map.into_iter().collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     let raw: Vec<f32> = entries.iter().map(|(_, (_, s))| *s).collect();
@@ -44,16 +49,16 @@ pub fn normalize_by_key(
         .collect()
 }
 
+/// Per alignment key: `(result index, normalized score)`.
+pub type KeyScores = HashMap<String, (usize, f32)>;
+
 /// Normalize scores within each path's results by alignment key.
 ///
 /// Returns `key -> (result index, normalized score)` for both paths.
 pub fn normalize_path_scores(
     vector_results: &[SearchResult],
     bm25_results: &[SearchResult],
-) -> (
-    HashMap<String, (usize, f32)>,
-    HashMap<String, (usize, f32)>,
-) {
+) -> (KeyScores, KeyScores) {
     let vector_by_key = normalize_by_key(best_per_key(vector_results, |r| r.vector_score));
     let bm25_by_key = normalize_by_key(best_per_key(bm25_results, |r| r.bm25_score.unwrap_or(0.0)));
     (vector_by_key, bm25_by_key)

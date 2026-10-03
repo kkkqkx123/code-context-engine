@@ -365,7 +365,7 @@ mod tests {
                     || trimmed.starts_with("pub async fn ")
                     || trimmed.starts_with("pub(crate) async fn ");
                 if is_fn {
-                    fn_active = pending_attr.take().map_or(true, |expr| eval_cfg(&expr));
+                    fn_active = pending_attr.take().is_none_or(|expr| eval_cfg(&expr));
                     entry = None;
                     continue;
                 }

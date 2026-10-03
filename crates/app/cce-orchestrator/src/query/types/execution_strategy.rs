@@ -44,8 +44,8 @@ impl ExecutionStrategy {
 
             // Vector + BM25 -> hybrid recall: two-path parallel + weighted fusion
             (true, true, _) => ExecutionStrategy::HybridRecall {
-                vector_weight: config.bm25.vector_weight,
-                bm25_weight: config.bm25.bm25_weight,
+                vector_weight: config.fusion.vector_weight,
+                bm25_weight: config.fusion.bm25_weight,
             },
 
             // Summary only -> SummaryRecall (pure summary vector search)
@@ -59,29 +59,31 @@ impl ExecutionStrategy {
 
     /// Determine execution strategy with query intent resolution.
     ///
-    /// When `config.bm25.enable_intent_based_weights` is enabled, this method
+    /// When `config.fusion.enable_intent_based_weights` is enabled, this method
     /// resolves the effective `QueryIntent` (via explicit override, defaults to `Hybrid`)
-    /// and selects the corresponding weight profile from `config.bm25.intent_weights`.
+    /// and selects the corresponding weight profile from `config.fusion.intent_weights`.
+    /// Intent resolution swaps the weight pair only; the fusion algorithm is
+    /// never changed implicitly.
     pub fn from_options(options: &QueryOptions) -> Self {
         // Resolve fusion weights based on query intent if enabled
         let (resolved_v_weight, resolved_b_weight) =
-            if options.config.bm25.enable_intent_based_weights {
+            if options.config.fusion.enable_intent_based_weights {
                 let intent = options
                     .query_intent
                     .unwrap_or_else(|| super::intent_detector::detect_intent(&options.query));
-                let w = options.config.bm25.intent_weights.for_intent(intent);
+                let w = options.config.fusion.intent_weights.for_intent(intent);
                 (w.vector_weight, w.bm25_weight)
             } else {
                 (
-                    options.config.bm25.vector_weight,
-                    options.config.bm25.bm25_weight,
+                    options.config.fusion.vector_weight,
+                    options.config.fusion.bm25_weight,
                 )
             };
 
         // Create adjusted config with resolved weights for strategy selection
         let mut adjusted_config = options.config.clone();
-        adjusted_config.bm25.vector_weight = resolved_v_weight;
-        adjusted_config.bm25.bm25_weight = resolved_b_weight;
+        adjusted_config.fusion.vector_weight = resolved_v_weight;
+        adjusted_config.fusion.bm25_weight = resolved_b_weight;
 
         Self::from_sources(&options.sources, &adjusted_config)
     }
@@ -223,9 +225,9 @@ mod tests {
 
         // Disable intent-based weights, should use static 0.5/0.5
         let mut config = SearchConfig::default();
-        config.bm25.enable_intent_based_weights = false;
-        config.bm25.vector_weight = 0.6;
-        config.bm25.bm25_weight = 0.4;
+        config.fusion.enable_intent_based_weights = false;
+        config.fusion.vector_weight = 0.6;
+        config.fusion.bm25_weight = 0.4;
 
         let options = QueryConfigBuilder::new(1)
             .build("semantic query that should be ignored")

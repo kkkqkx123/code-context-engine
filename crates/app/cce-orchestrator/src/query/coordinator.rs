@@ -473,15 +473,13 @@ impl QueryCoordinator {
         // cannot stall the request indefinitely.
         let timeout_ms = options.config.timeout_ms;
         let search_future = self.searcher.search_with_view(options, view);
-        let search_result = match tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            search_future,
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_) => Err(QueryError::Timeout { timeout_ms }),
-        };
+        let search_result =
+            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), search_future)
+                .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(QueryError::Timeout { timeout_ms }),
+            };
         match search_result {
             Ok(result) => {
                 // Store in cache
@@ -573,55 +571,89 @@ impl QueryCoordinator {
 
     /// Execute aggregated search with multiple sub-queries
     ///
-    /// Runs each sub-query in sequence against one shared epoch view and
+    /// Max concurrently executing sub-queries in an aggregated search. Each
+    /// sub-query runs the full search pipeline, so unbounded concurrency would
+    /// multiply the load on Qdrant / the embedder by the sub-query count.
+    const AGGREGATED_SUB_QUERY_CONCURRENCY: usize = 4;
+
+    /// Runs sub-queries concurrently against one shared epoch view and
     /// merges the results, deduplicating by entity ID and sorting by score.
-    /// A failed sub-query does not abort the search; its text is reported in
-    /// [`QueryResult::failed_sub_queries`] so partial degradation is visible.
+    /// Each sub-query's `weight` scales its candidates' scores before the
+    /// merge, so a weight of 2.0 counts that sub-query's hits double against
+    /// the rest. A failed sub-query does not abort the search; its text is
+    /// reported in [`QueryResult::failed_sub_queries`] so partial degradation
+    /// is visible.
     pub async fn search_aggregated(
         &self,
         agg_options: &AggregatedQueryOptions,
     ) -> Result<QueryResult> {
         let start = std::time::Instant::now();
         let view = self.searcher.load_query_filter(agg_options.project_id)?;
+        let sub_queries_count = agg_options.sub_queries.len();
+
+        // Build every sub-query's options up front so the shared filters and
+        // config are decomposed in one place (see `build_sub_query_options`).
+        let sub_options: Vec<QueryOptions> = agg_options
+            .sub_queries
+            .iter()
+            .map(|sub_query| self.build_sub_query_options(agg_options, sub_query))
+            .collect();
+
+        // Execute sub-queries concurrently, bounded by a semaphore: the results
+        // stay aligned with the sub-query order (`join_all` preserves input
+        // order), so the merged output is deterministic regardless of which
+        // sub-query finishes first.
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            Self::AGGREGATED_SUB_QUERY_CONCURRENCY,
+        ));
+        let attempts: Vec<_> = sub_options
+            .into_iter()
+            .map(|options| {
+                let semaphore = semaphore.clone();
+                let view = view.clone();
+                async move {
+                    // The semaphore is never closed, so acquire cannot fail.
+                    let _permit = semaphore
+                        .acquire_owned()
+                        .await
+                        .expect("aggregated search semaphore closed");
+                    self.search_with_view(&options, &view).await
+                }
+            })
+            .collect();
+        let attempts = futures::future::join_all(attempts).await;
+
         let mut all_results: Vec<crate::query::types::SearchResult> = Vec::new();
         let mut sources_used: Vec<String> = Vec::new();
         let mut failed_sub_queries: Vec<String> = Vec::new();
-        let sub_queries_count = agg_options.sub_queries.len();
 
-        for sub_query in &agg_options.sub_queries {
-            let options = QueryOptions {
-                query: sub_query.text.clone(),
-                project_id: agg_options.project_id,
-                sources: sub_query.sources,
-                config: agg_options.global_config.clone(),
-                directory_prefix: agg_options
-                    .filters
-                    .as_ref()
-                    .and_then(|f| f.directory_prefix.clone()),
-                exclude_content_types: agg_options
-                    .filters
-                    .as_ref()
-                    .map_or(Vec::new(), |f| f.exclude_content_types.clone()),
-                include_categories: agg_options
-                    .filters
-                    .as_ref()
-                    .map_or(Vec::new(), |f| f.include_categories.clone()),
-                exclude_categories: agg_options
-                    .filters
-                    .as_ref()
-                    .map_or(Vec::new(), |f| f.exclude_categories.clone()),
-                exclude_patterns: agg_options.exclude_patterns.clone(),
-                include_patterns: agg_options.include_patterns.clone(),
-                with_source: true,
-                query_intent: None, // Auto-detect for sub-queries
-                enable_rerank: agg_options.enable_rerank,
-            };
-
-            match self.search_with_view(&options, &view).await {
-                Ok(result) => {
+        for (sub_query, attempt) in agg_options.sub_queries.iter().zip(attempts) {
+            match attempt {
+                Ok(mut result) => {
                     for source in &result.sources {
                         if !sources_used.contains(source) {
                             sources_used.push(source.clone());
+                        }
+                    }
+                    // Weight the sub-query's candidates before the merge so
+                    // the weight decides cross-query ranking, not just
+                    // bookkeeping. Invalid weights degrade to neutral (1.0)
+                    // with a warning instead of dropping results; the API
+                    // boundary rejects them outright.
+                    let weight = if sub_query.weight.is_finite() && sub_query.weight >= 0.0 {
+                        sub_query.weight
+                    } else {
+                        tracing::warn!(
+                            query = %sub_query.text,
+                            weight = sub_query.weight,
+                            "Sub-query has an invalid weight; treating it as 1.0"
+                        );
+                        1.0
+                    };
+                    if weight != 1.0 {
+                        for item in &mut result.items {
+                            item.score *= weight;
+                            item.original_score *= weight;
                         }
                     }
                     all_results.extend(result.items);
@@ -682,6 +714,35 @@ impl QueryCoordinator {
             sub_queries_count,
             failed_sub_queries,
         })
+    }
+
+    /// Decompose one sub-query's options out of the aggregated options.
+    ///
+    /// Centralizes the field mapping so the aggregated and per-sub-query
+    /// option surfaces stay in sync: global filters/config/patterns are shared,
+    /// the query text and sources come from the sub-query itself, and source
+    /// content is always requested for aggregated results.
+    fn build_sub_query_options(
+        &self,
+        agg_options: &AggregatedQueryOptions,
+        sub_query: &crate::query::types::SubQuery,
+    ) -> QueryOptions {
+        let filters = agg_options.filters.as_ref();
+        QueryOptions {
+            query: sub_query.text.clone(),
+            project_id: agg_options.project_id,
+            sources: sub_query.sources,
+            config: agg_options.global_config.clone(),
+            directory_prefix: filters.and_then(|f| f.directory_prefix.clone()),
+            exclude_content_types: filters.map_or(Vec::new(), |f| f.exclude_content_types.clone()),
+            include_categories: filters.map_or(Vec::new(), |f| f.include_categories.clone()),
+            exclude_categories: filters.map_or(Vec::new(), |f| f.exclude_categories.clone()),
+            exclude_patterns: agg_options.exclude_patterns.clone(),
+            include_patterns: agg_options.include_patterns.clone(),
+            with_source: true,
+            query_intent: None, // Auto-detect for sub-queries
+            enable_rerank: agg_options.enable_rerank,
+        }
     }
 
     /// Check if required capabilities are available for the query

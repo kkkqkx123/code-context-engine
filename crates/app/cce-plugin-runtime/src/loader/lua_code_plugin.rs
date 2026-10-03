@@ -4,7 +4,7 @@ use tracing::warn;
 use super::lua_helpers::{get_string_field, parse_entity_array};
 use super::lua_plugin::LuaPlugin;
 use crate::error::PluginError;
-use crate::lua_mapping::{
+use crate::loader::lua_mapping::{
     entity_group_to_lua_table, group_conversions_to_lua_table, group_plugin_context_to_lua_table,
     lua_table_to_chunked_result, lua_table_to_entity_group, lua_table_to_plugin_document,
     lua_table_to_rerank_result,
@@ -718,7 +718,7 @@ impl CodePlugin for LuaPlugin {
                 })?;
             match result {
                 mlua::Value::Table(t) => {
-                    let symbols = crate::lua_mapping::lua_table_to_plugin_symbols(&t)
+                    let symbols = crate::loader::lua_mapping::lua_table_to_plugin_symbols(&t)
                         .map_err(|e| PluginError::InvalidOutput(format!("Invalid symbols: {e}")))?;
                     if symbols.is_empty() {
                         Ok(None)
@@ -769,10 +769,10 @@ impl CodePlugin for LuaPlugin {
                 })?;
             match result {
                 mlua::Value::Table(t) => {
-                    let relations =
-                        crate::lua_mapping::lua_table_to_plugin_relations(&t).map_err(|e| {
-                            PluginError::InvalidOutput(format!("Invalid relations: {e}"))
-                        })?;
+                    let relations = crate::loader::lua_mapping::lua_table_to_plugin_relations(&t)
+                        .map_err(|e| {
+                        PluginError::InvalidOutput(format!("Invalid relations: {e}"))
+                    })?;
                     if relations.is_empty() {
                         Ok(None)
                     } else {
@@ -828,7 +828,7 @@ impl CodePlugin for LuaPlugin {
                 })?;
             match result {
                 mlua::Value::Table(t) => {
-                    let imports = crate::lua_mapping::lua_table_to_plugin_imports(&t)
+                    let imports = crate::loader::lua_mapping::lua_table_to_plugin_imports(&t)
                         .map_err(|e| PluginError::InvalidOutput(format!("Invalid imports: {e}")))?;
                     if imports.is_empty() {
                         Ok(None)
@@ -879,7 +879,7 @@ impl CodePlugin for LuaPlugin {
                 })?;
             match result {
                 mlua::Value::Table(t) => {
-                    let exports = crate::lua_mapping::lua_table_to_plugin_exports(&t)
+                    let exports = crate::loader::lua_mapping::lua_table_to_plugin_exports(&t)
                         .map_err(|e| PluginError::InvalidOutput(format!("Invalid exports: {e}")))?;
                     if exports.is_empty() {
                         Ok(None)
@@ -984,10 +984,14 @@ impl CodePlugin for LuaPlugin {
                         vector_weight: t.get("vector_weight").ok().flatten(),
                         bm25_weight: t.get("bm25_weight").ok().flatten(),
                         min_score: t.get("min_score").ok().flatten(),
+                        algorithm: t.get("algorithm").ok().flatten(),
+                        rrf_k: t.get("rrf_k").ok().flatten(),
                     };
                     if weights.vector_weight.is_none()
                         && weights.bm25_weight.is_none()
                         && weights.min_score.is_none()
+                        && weights.algorithm.is_none()
+                        && weights.rrf_k.is_none()
                     {
                         Ok(None)
                     } else {
@@ -1050,8 +1054,8 @@ impl CodePlugin for LuaPlugin {
                 .map_err(|e| PluginError::ScriptError(format!("filter_results error: {e}")))?;
             match result {
                 mlua::Value::Table(t) => {
-                    let entries =
-                        crate::lua_mapping::lua_table_to_filter_entries(&t).map_err(|e| {
+                    let entries = crate::loader::lua_mapping::lua_table_to_filter_entries(&t)
+                        .map_err(|e| {
                             PluginError::InvalidOutput(format!("Invalid filter entries: {e}"))
                         })?;
                     if entries.is_empty() {

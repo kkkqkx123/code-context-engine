@@ -365,13 +365,16 @@ char *cce_plugin_extract_exports(void *ctx, const char *content, const char *fil
 char *cce_plugin_rewrite_query(void *ctx, const char *query);
 
 /*
- * Override hybrid fusion weights.
+ * Override hybrid fusion weights and algorithm.
  *   (void *ctx, const char *query, size_t vector_count, size_t bm25_count)
  *     -> char *result_json
  *
  * Result `value` is a FusionWeights:
- *   {"vector_weight":0.7,"bm25_weight":0.3,"min_score":0.2}
- * Weights are validated to [0,1] by the host before use.
+ *   {"vector_weight":0.7,"bm25_weight":0.3,"min_score":0.2,
+ *    "algorithm":"rrf","rrf_k":30}
+ * Weights are validated to [0,1] by the host before use. `algorithm` is one
+ * of "weighted_min_max", "weighted_sum", "rrf", "borda_count" (unknown names
+ * are ignored); `rrf_k` applies to "rrf" only and defaults to 60 when absent.
  */
 char *cce_plugin_fusion_weights(void *ctx, const char *query, size_t vector_count,
                                 size_t bm25_count);

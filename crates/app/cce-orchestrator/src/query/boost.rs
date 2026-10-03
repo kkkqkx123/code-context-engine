@@ -126,22 +126,15 @@ pub fn apply_boosts(
         grouped.entry(id).or_default().push(c);
     }
 
-    // Build per-result aggregated boosts
-    let per_source_cap: HashMap<&str, f32> = {
-        let mut m = HashMap::new();
-        m.insert("summary", config.summary_max);
-        m
-    };
-
+    // Build per-result aggregated boosts. Per-source caps come from the
+    // configuration table (`cap_for` falls back to the default cap), so a
+    // new boost source only needs a config entry, no code change.
     let mut aggregated_map: HashMap<String, AggregatedBoost> = HashMap::new();
     for (id, contribs) in grouped {
         // Cap each source independently
         let mut source_totals: HashMap<&str, f32> = HashMap::new();
         for c in &contribs {
-            let cap = per_source_cap
-                .get(c.source)
-                .copied()
-                .unwrap_or(config.max_source_boost);
+            let cap = config.cap_for(c.source);
             let entry = source_totals.entry(c.source).or_insert(0.0);
             *entry = (*entry + c.boost_value).min(cap);
         }
@@ -150,10 +143,7 @@ pub fn apply_boosts(
         let capped_contribs: Vec<BoostContribution> = contribs
             .into_iter()
             .filter_map(|mut c| {
-                let cap = per_source_cap
-                    .get(c.source)
-                    .copied()
-                    .unwrap_or(config.max_source_boost);
+                let cap = config.cap_for(c.source);
                 if c.boost_value > cap {
                     c.boost_value = cap;
                 }

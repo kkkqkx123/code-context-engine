@@ -1,7 +1,7 @@
 use mlua::Table;
 
 use crate::error::PluginError;
-use crate::lua_mapping::lua_table_to_plugin_entity;
+use crate::loader::lua_mapping::lua_table_to_plugin_entity;
 use cce_types::PluginEntity;
 
 /// Read the `plugin.priority` metadata field.

@@ -1,5 +1,6 @@
 pub(crate) mod lua_code_plugin;
 pub(crate) mod lua_helpers;
+pub(crate) mod lua_mapping;
 pub mod lua_plugin;
 pub(crate) mod lua_vm_pool;
 

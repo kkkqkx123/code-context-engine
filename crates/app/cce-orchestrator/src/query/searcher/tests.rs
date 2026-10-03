@@ -102,6 +102,8 @@ fn fusion_weights(vector: Option<f32>, bm25: Option<f32>) -> cce_types::plugin::
         vector_weight: vector,
         bm25_weight: bm25,
         min_score: None,
+        algorithm: None,
+        rrf_k: None,
     }
 }
 
@@ -136,6 +138,42 @@ fn test_merge_fusion_weights_partial_fields_keep_defaults() {
     // Out-of-range weight is rejected; valid fields apply; bm25 keeps default.
     assert!((merged.vector_weight - 0.5).abs() < 1e-6);
     assert!((merged.bm25_weight - 0.5).abs() < 1e-6);
+}
+
+#[test]
+fn test_merge_fusion_weights_algorithm_override() {
+    use cce_config::modules::search::FusionAlgorithm;
+    let config = fusion_config_with(0.5, 0.5);
+    let merged = merge_fusion_weights_override(
+        config,
+        vec![Some(cce_types::plugin::FusionWeights {
+            algorithm: Some("rrf".to_string()),
+            rrf_k: Some(30),
+            ..fusion_weights(None, None)
+        })],
+    );
+    assert_eq!(merged.algorithm, FusionAlgorithm::Rrf { k: 30 });
+
+    let config = fusion_config_with(0.5, 0.5);
+    let merged = merge_fusion_weights_override(
+        config,
+        vec![Some(cce_types::plugin::FusionWeights {
+            algorithm: Some("not_a_method".to_string()),
+            ..fusion_weights(None, None)
+        })],
+    );
+    assert_eq!(merged.algorithm, FusionAlgorithm::WeightedMinMax);
+
+    let config = fusion_config_with(0.5, 0.5);
+    let merged = merge_fusion_weights_override(
+        config,
+        vec![Some(cce_types::plugin::FusionWeights {
+            algorithm: Some("rrf".to_string()),
+            rrf_k: Some(0),
+            ..fusion_weights(None, None)
+        })],
+    );
+    assert_eq!(merged.algorithm, FusionAlgorithm::WeightedMinMax);
 }
 
 fn project_meta_table(conn: &rusqlite::Connection) {
@@ -421,6 +459,8 @@ async fn test_fusion_override_first_non_none_plugin_wins() {
             vector_weight: Some(0.8),
             bm25_weight: Some(0.2),
             min_score: None,
+            algorithm: None,
+            rrf_k: None,
         }))
     }
     fn heavy_bm25(
@@ -432,6 +472,8 @@ async fn test_fusion_override_first_non_none_plugin_wins() {
             vector_weight: Some(0.1),
             bm25_weight: Some(0.9),
             min_score: None,
+            algorithm: None,
+            rrf_k: None,
         }))
     }
     let mut registry = PluginRegistry::new();

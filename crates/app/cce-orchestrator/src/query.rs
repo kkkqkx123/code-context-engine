@@ -14,7 +14,8 @@
 //!     │   │   └── core/ = stateless storage access (Qdrant), strategies = orchestration
 //!     │   │
 //!     │   ├── Hybrid Fusion (retrieval/post_processing/fusion)
-//!     │   │   └── entity-level alignment, weighted normalized score fusion
+//!     │   │   └── entity-level alignment, selectable fusion algorithms
+//!     │   │       (config.search.fusion.algorithm)
 //!     │   │
 //!     │   ├── Glob Filter + Score Normalization + Enrichment
 //!     │   │   └── path filtering, uniform score scale, SQLite chunk enrichment

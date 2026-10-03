@@ -65,6 +65,7 @@ fn test_end_to_end_code_chunk_alignment() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -103,6 +104,7 @@ fn test_end_to_end_document_chunk_alignment() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -145,6 +147,7 @@ fn test_end_to_end_mixed_code_and_document() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -184,6 +187,7 @@ fn test_end_to_end_bm25_sub_chunks_align_with_embedding() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -208,6 +212,7 @@ fn test_end_to_end_different_segments_do_not_fuse() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -240,6 +245,7 @@ fn test_end_to_end_entity_id_takes_priority() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -270,6 +276,7 @@ fn test_end_to_end_exclude_single_path() {
         include_single_path: false,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -300,6 +307,7 @@ fn test_end_to_end_fusion_preserves_metadata() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
 
     let fused = fuse_hybrid_results(vec![vector], vec![bm25], &config);
@@ -402,6 +410,7 @@ fn test_searcher_pipeline_expand_then_fuse_matches_across_paths() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
     let fused = fuse_hybrid_results(expanded_vector, expanded_bm25, &config);
 
@@ -448,6 +457,7 @@ fn test_searcher_pipeline_dedup_collapses_expanded_entities() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
     let fused = fuse_hybrid_results(expanded_vector.clone(), expanded_bm25.clone(), &config);
     assert_eq!(fused.len(), 2);
@@ -511,6 +521,7 @@ fn test_searcher_pipeline_unkeyed_results_keep_distinct_keys() {
         include_single_path: true,
         min_score: 0.0,
         dedup_by_chunk: false,
+        ..HybridFusionConfig::default()
     };
     let fused = fuse_hybrid_results(expanded_vector, expanded_bm25, &config);
     assert_eq!(fused.len(), 3, "unkeyed results must not collapse");

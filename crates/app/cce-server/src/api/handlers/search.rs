@@ -328,6 +328,17 @@ pub async fn handle_aggregated_search(
                 ));
             }
         };
+        // The weight scales this sub-query's candidate scores before the
+        // cross-query merge; only finite non-negative weights are meaningful.
+        if !sq.weight.is_finite() || sq.weight < 0.0 {
+            return SearchApiResponse::Error(ErrorResponse::new(
+                error_codes::INVALID_INPUT,
+                format!(
+                    "Invalid weight in sub-query '{}': must be finite and >= 0",
+                    sq.text
+                ),
+            ));
+        }
         sub_queries.push(SubQuery {
             text: sq.text.clone(),
             sources: search_sources,

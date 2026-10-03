@@ -2,12 +2,15 @@
 
 use std::collections::HashMap;
 
-use super::aligner::{compute_alignment_coverage, expand_multi_entity_results, FusionAlignmentStats};
+use super::aligner::{
+    FusionAlignmentStats, best_per_key, compute_alignment_coverage, expand_multi_entity_results,
+};
 use super::normalizer::{normalize_by_key, normalize_path_scores};
 use crate::query::types::SearchResult;
+use cce_config::modules::search::FusionAlgorithm;
 
 /// Fuse two sets of search results (vector path and BM25 path) into a single
-/// ranked list using weighted normalized fusion at the **alignment key** level.
+/// ranked list using weighted fusion at the **alignment key** level.
 ///
 /// Alignment key priority:
 /// 1. First element of `entity_ids` for code chunks (function/class/method
@@ -15,23 +18,20 @@ use crate::query::types::SearchResult;
 ///    most one entity; unexpanded input is expanded internally.
 /// 2. `segment_id` for document/plain-text chunks (logical sections without entities)
 ///
-/// # Algorithm
-///
-/// 1. Normalize scores within each path (vector path, BM25 path) using min-max.
-/// 2. Match results across paths by alignment key (entity or segment_id).
-/// 3. For each key present in both paths, select the **best-matching chunk**
-///    from each path and compute:
-///    `score = alpha * norm(vector_score) + beta * norm(bm25_score)`
-/// 4. For keys present in only one path (if `include_single_path`), compute:
-///    `score = path_weight * norm(path_score)` (partial score).
-/// 5. Sort by fused score descending.
+/// How per-key scores combine is selected by
+/// [`FusionAlgorithm`](cce_config::modules::search::FusionAlgorithm):
+/// normalized weighted sum (default), raw weighted sum, reciprocal rank
+/// fusion, or weight-aware Borda count. Keys present in only one path
+/// contribute that path's term alone when `include_single_path` is set.
+/// Results are sorted by fused score descending with deterministic
+/// tie-breaking.
 ///
 /// An empty recall path is treated as an empty result set rather than a bypass:
 /// the surviving path still goes through the unified fusion path, so its scores
-/// are normalized, weighted, and filtered by `min_score` exactly as they would
+/// are combined, weighted, and filtered by `min_score` exactly as they would
 /// be when both paths are present. This keeps scoring semantics independent of
 /// whether the other path happened to return nothing. When one path is entirely
-/// empty the same semantics run through a dedicated fast path
+/// empty the score-based algorithms run through a dedicated fast path
 /// (`fuse_single_path`) that skips the union key set and the empty-side
 /// aggregation instead of materializing both sides of the union.
 ///
@@ -39,7 +39,7 @@ use crate::query::types::SearchResult;
 ///
 /// * `vector_results` - Results from the vector recall path (embedded chunks)
 /// * `bm25_results` - Results from the BM25 recall path (BM25 chunks)
-/// * `config` - Fusion configuration (weights, thresholds)
+/// * `config` - Fusion configuration (weights, algorithm, thresholds)
 ///
 /// # Returns
 ///
@@ -74,6 +74,8 @@ pub fn fuse_hybrid_results_with_stats(
     // Unexpanded input would make the alignment key `e:{id}` ambiguous, so it
     // is expanded here defensively instead of silently picking
     // `entity_ids.first()` — a warning keeps the contract violation visible.
+    // Shared by every algorithm so rank-based paths observe the same key space
+    // as score-based paths.
     let vector_needs_expand = vector_results.iter().any(|r| r.entity_ids.len() > 1);
     let bm25_needs_expand = bm25_results.iter().any(|r| r.entity_ids.len() > 1);
     if vector_needs_expand || bm25_needs_expand {
@@ -94,33 +96,6 @@ pub fn fuse_hybrid_results_with_stats(
     } else {
         bm25_results
     };
-    let alpha = config.vector_weight;
-    let beta = config.bm25_weight;
-
-    // Step 1+2: Aggregate each path to a single best-raw-score entry per
-    // alignment key, then min-max normalize over the key set. Normalizing at
-    // key granularity (rather than over every returned chunk) keeps long
-    // entities with many fragments from stretching the min/max range and
-    // compressing the normalized scores of single-fragment entities, matching
-    // the granularity at which fusion actually combines scores.
-    let (vector_by_key, bm25_by_key) = normalize_path_scores(&vector_results, &bm25_results);
-
-    // Step 3: Fuse results by alignment key
-    let mut all_keys: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for key in vector_by_key.keys() {
-        if seen.insert(key.clone()) {
-            all_keys.push(key.clone());
-        }
-    }
-    if config.include_single_path {
-        for key in bm25_by_key.keys() {
-            if seen.insert(key.clone()) {
-                all_keys.push(key.clone());
-            }
-        }
-    }
 
     // Observe cross-path alignment coverage so silent degradation (e.g. all
     // keys single-path) stays visible instead of blending into a ranked list.
@@ -133,6 +108,80 @@ pub fn fuse_hybrid_results_with_stats(
         bm25_only = stats.bm25_keys - stats.matched_keys,
         "Hybrid fusion alignment coverage"
     );
+
+    match config.algorithm {
+        FusionAlgorithm::WeightedMinMax => {
+            fuse_weighted_minmax(vector_results, bm25_results, config, stats)
+        }
+        FusionAlgorithm::WeightedSum => {
+            fuse_weighted_sum(vector_results, bm25_results, config, stats)
+        }
+        FusionAlgorithm::Rrf { k } => {
+            fuse_rrf(vector_results, bm25_results, config, k.max(1), stats)
+        }
+        FusionAlgorithm::BordaCount => fuse_borda(vector_results, bm25_results, config, stats),
+    }
+}
+
+/// Union of alignment keys across both paths in deterministic (sorted) order.
+///
+/// Vector keys always seed the union; BM25-only keys join only when
+/// `include_single_path` is set, so excluding single-path hits removes the
+/// BM25-only tail while keeping single-path vector recall.
+fn union_keys<V, W>(
+    vector_by_key: &HashMap<String, V>,
+    bm25_by_key: &HashMap<String, W>,
+    include_single_path: bool,
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut all_keys: Vec<String> = Vec::new();
+    for key in vector_by_key.keys() {
+        if seen.insert(key.clone()) {
+            all_keys.push(key.clone());
+        }
+    }
+    if include_single_path {
+        for key in bm25_by_key.keys() {
+            if seen.insert(key.clone()) {
+                all_keys.push(key.clone());
+            }
+        }
+    }
+    all_keys.sort();
+    all_keys
+}
+
+/// Collapse per-chunk duplicates and sort by fused score descending.
+fn finish_fused(fused: Vec<SearchResult>, dedup_by_chunk: bool) -> Vec<SearchResult> {
+    let mut fused = dedup_by_chunk_id(fused, dedup_by_chunk);
+    sort_fused_by_score(&mut fused);
+    fused
+}
+
+/// Weighted min-max fusion (the default algorithm): normalize each path's
+/// per-key best scores to [0, 1], then take the weighted linear combination
+/// `score = alpha * norm(vector) + beta * norm(bm25)`. A key seen on one
+/// path only scores that path's weighted term. Per-path score fields on the
+/// output carry the normalized values so they stay comparable with `score`.
+fn fuse_weighted_minmax(
+    vector_results: Vec<SearchResult>,
+    bm25_results: Vec<SearchResult>,
+    config: &super::HybridFusionConfig,
+    stats: FusionAlignmentStats,
+) -> (Vec<SearchResult>, FusionAlignmentStats) {
+    let alpha = config.vector_weight;
+    let beta = config.bm25_weight;
+
+    // Aggregate each path to a single best-raw-score entry per alignment
+    // key, then min-max normalize over the key set. Normalizing at key
+    // granularity (rather than over every returned chunk) keeps long
+    // entities with many fragments from stretching the min/max range and
+    // compressing the normalized scores of single-fragment entities,
+    // matching the granularity at which fusion actually combines scores.
+    let (vector_by_key, bm25_by_key) = normalize_path_scores(&vector_results, &bm25_results);
+
+    // Step 3: Fuse results by alignment key
+    let all_keys = union_keys(&vector_by_key, &bm25_by_key, config.include_single_path);
 
     if vector_results.is_empty() || bm25_results.is_empty() {
         tracing::trace!(
@@ -149,6 +198,7 @@ pub fn fuse_hybrid_results_with_stats(
                 false,
                 config,
                 stats,
+                true,
             );
         }
         return fuse_single_path(
@@ -158,6 +208,7 @@ pub fn fuse_hybrid_results_with_stats(
             true,
             config,
             stats,
+            true,
         );
     }
 
@@ -223,21 +274,302 @@ pub fn fuse_hybrid_results_with_stats(
         fused.push(result);
     }
 
-    let mut fused = dedup_by_chunk_id(fused, config.dedup_by_chunk);
-    sort_fused_by_score(&mut fused);
+    (finish_fused(fused, config.dedup_by_chunk), stats)
+}
 
-    (fused, stats)
+/// Weighted raw-score sum (CombSUM-style): combine each path's best per-key
+/// raw score without normalization as
+/// `score = alpha * raw(vector) + beta * raw(bm25)`.
+///
+/// Unlike min-max this preserves absolute score gaps and never collapses a
+/// single-key path to full credit, but it requires comparable raw scales:
+/// vector cosine scores sit near [0, 1] while BM25 scores are unbounded, so
+/// the weights usually need retuning when switching to this algorithm (a
+/// BM25-heavy weight pair compensates the scale gap). Per-path score fields
+/// on the output keep the raw values; `min_score` is interpreted on the
+/// raw weighted-sum scale.
+fn fuse_weighted_sum(
+    vector_results: Vec<SearchResult>,
+    bm25_results: Vec<SearchResult>,
+    config: &super::HybridFusionConfig,
+    stats: FusionAlignmentStats,
+) -> (Vec<SearchResult>, FusionAlignmentStats) {
+    let alpha = config.vector_weight;
+    let beta = config.bm25_weight;
+
+    let vector_by_key = best_per_key(&vector_results, |r| r.vector_score);
+    let bm25_by_key = best_per_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
+    let all_keys = union_keys(&vector_by_key, &bm25_by_key, config.include_single_path);
+
+    if vector_results.is_empty() || bm25_results.is_empty() {
+        if vector_results.is_empty() {
+            return fuse_single_path(
+                &bm25_results,
+                |r| r.bm25_score.unwrap_or(0.0),
+                beta,
+                false,
+                config,
+                stats,
+                false,
+            );
+        }
+        return fuse_single_path(
+            &vector_results,
+            |r| r.vector_score,
+            alpha,
+            true,
+            config,
+            stats,
+            false,
+        );
+    }
+
+    let mut fused: Vec<SearchResult> = Vec::with_capacity(all_keys.len());
+
+    for key in all_keys {
+        let vec_entry = vector_by_key.get(&key);
+        let bm25_entry = bm25_by_key.get(&key);
+
+        let (base_result, v_raw, b_raw) = match (vec_entry, bm25_entry) {
+            (Some(&(vi, vn)), Some(&(bi, bn))) => {
+                let v_contrib = alpha * vn;
+                let b_contrib = beta * bn;
+                let base = if v_contrib >= b_contrib {
+                    let mut b = vector_results[vi].clone();
+                    b.bm25_score = bm25_results[bi].bm25_score;
+                    b
+                } else {
+                    let mut b = bm25_results[bi].clone();
+                    b.vector_score = vector_results[vi].vector_score;
+                    b
+                };
+                (base, vn, bn)
+            }
+            (Some(&(vi, vn)), None) => {
+                if config.include_single_path {
+                    (vector_results[vi].clone(), vn, 0.0)
+                } else {
+                    continue;
+                }
+            }
+            (None, Some(&(bi, bn))) => {
+                if config.include_single_path {
+                    let mut base = bm25_results[bi].clone();
+                    base.vector_score = 0.0;
+                    (base, 0.0, bn)
+                } else {
+                    continue;
+                }
+            }
+            (None, None) => {
+                unreachable!("all_keys only contains keys present in at least one path")
+            }
+        };
+
+        let fused_score = alpha * v_raw + beta * b_raw;
+
+        if fused_score < config.min_score {
+            continue;
+        }
+
+        let mut result = base_result;
+        result.score = fused_score;
+        result.original_score = fused_score;
+        result.sources = vec!["hybrid".to_string()];
+
+        fused.push(result);
+    }
+
+    (finish_fused(fused, config.dedup_by_chunk), stats)
+}
+
+/// Reciprocal Rank Fusion: rank-based fusion that ignores raw score
+/// distributions, making it robust to min-max's sensitivity to outliers and
+/// compressed score ranges.
+///
+/// Each path's keys are ranked by their best raw score (rank starts at 1,
+/// ties broken by alignment key for determinism) and fused as
+/// `score = w_v/(k+rank_v) + w_b/(k+rank_b)`; a key present in only one path
+/// (when `include_single_path`) gets that path's term alone. The raw per-path
+/// scores are kept on the result fields untouched — only `score`/`original_score`
+/// carry the RRF value, so `min_score` is interpreted on the RRF scale
+/// `(0, (w_v+w_b)/(k+1)]`.
+fn fuse_rrf(
+    vector_results: Vec<SearchResult>,
+    bm25_results: Vec<SearchResult>,
+    config: &super::HybridFusionConfig,
+    k: u32,
+    stats: FusionAlignmentStats,
+) -> (Vec<SearchResult>, FusionAlignmentStats) {
+    // Rank each path's alignment keys by best raw score. Ranking at key
+    // granularity mirrors the min-max path: fragments of the same entity do
+    // not crowd the rank list.
+    let vector_ranks = rank_by_key(&vector_results, |r| r.vector_score);
+    let bm25_ranks = rank_by_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
+
+    let alpha = config.vector_weight;
+    let beta = config.bm25_weight;
+    let k = k.max(1) as f32;
+
+    let all_keys = union_keys(&vector_ranks, &bm25_ranks, config.include_single_path);
+
+    let vector_results = &vector_results;
+    let bm25_results = &bm25_results;
+    let mut fused: Vec<SearchResult> = Vec::with_capacity(all_keys.len());
+    for key in all_keys {
+        let vec_rank = vector_ranks.get(&key);
+        let bm25_rank = bm25_ranks.get(&key);
+
+        let (base, rrf_score) = match (vec_rank, bm25_rank) {
+            (Some(&(vi, rv)), Some(&(bi, rb))) => {
+                let v_term = alpha / (k + rv as f32);
+                let b_term = beta / (k + rb as f32);
+                // Pick the path with the larger weighted term as the output
+                // chunk, and surface the other path's raw score as well —
+                // mirroring the min-max path, where both per-path score
+                // fields are populated for matched keys.
+                let base = if v_term >= b_term {
+                    let mut b = vector_results[vi].clone();
+                    b.bm25_score = bm25_results[bi].bm25_score;
+                    b
+                } else {
+                    let mut b = bm25_results[bi].clone();
+                    b.vector_score = vector_results[vi].vector_score;
+                    b
+                };
+                (base, v_term + b_term)
+            }
+            (Some(&(vi, rv)), None) if config.include_single_path => {
+                let base = vector_results[vi].clone();
+                (base, alpha / (k + rv as f32))
+            }
+            (None, Some(&(bi, rb))) if config.include_single_path => {
+                let base = bm25_results[bi].clone();
+                (base, beta / (k + rb as f32))
+            }
+            _ => continue,
+        };
+
+        if rrf_score < config.min_score {
+            continue;
+        }
+        let mut result = base;
+        result.score = rrf_score;
+        result.original_score = rrf_score;
+        result.sources = vec!["hybrid".to_string()];
+        fused.push(result);
+    }
+
+    (finish_fused(fused, config.dedup_by_chunk), stats)
+}
+
+/// Weight-aware Borda count: rank-based fusion with linear (instead of
+/// hyperbolic) rank decay.
+///
+/// Each path ranks its alignment keys by best raw score exactly like RRF.
+/// With `m` keys on a path, the key at 1-based rank `r` earns `m - r + 1`
+/// points (best key earns `m`, worst earns 1); the fused score is
+/// `score = w_v * points_v + w_b * points_b`, with a missing path
+/// contributing zero (single-path keys keep their path's points when
+/// `include_single_path` is set). Deep ranks keep contributing instead of
+/// decaying toward zero as in RRF, which suits recall-heavy queries where
+/// the tail still matters. Raw per-path scores stay untouched on the result
+/// fields; `min_score` is interpreted on the points scale
+/// `[0, w_v * vector_keys + w_b * bm25_keys]`.
+fn fuse_borda(
+    vector_results: Vec<SearchResult>,
+    bm25_results: Vec<SearchResult>,
+    config: &super::HybridFusionConfig,
+    stats: FusionAlignmentStats,
+) -> (Vec<SearchResult>, FusionAlignmentStats) {
+    let vector_ranks = rank_by_key(&vector_results, |r| r.vector_score);
+    let bm25_ranks = rank_by_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
+
+    let alpha = config.vector_weight;
+    let beta = config.bm25_weight;
+    let vector_points = vector_ranks.len() as f32;
+    let bm25_points = bm25_ranks.len() as f32;
+
+    let all_keys = union_keys(&vector_ranks, &bm25_ranks, config.include_single_path);
+
+    let mut fused: Vec<SearchResult> = Vec::with_capacity(all_keys.len());
+    for key in all_keys {
+        let vec_rank = vector_ranks.get(&key);
+        let bm25_rank = bm25_ranks.get(&key);
+
+        let (base, borda_score) = match (vec_rank, bm25_rank) {
+            (Some(&(vi, rv)), Some(&(bi, rb))) => {
+                let v_points = vector_points - rv as f32 + 1.0;
+                let b_points = bm25_points - rb as f32 + 1.0;
+                let v_term = alpha * v_points;
+                let b_term = beta * b_points;
+                let base = if v_term >= b_term {
+                    let mut b = vector_results[vi].clone();
+                    b.bm25_score = bm25_results[bi].bm25_score;
+                    b
+                } else {
+                    let mut b = bm25_results[bi].clone();
+                    b.vector_score = vector_results[vi].vector_score;
+                    b
+                };
+                (base, v_term + b_term)
+            }
+            (Some(&(vi, rv)), None) if config.include_single_path => {
+                let base = vector_results[vi].clone();
+                (base, alpha * (vector_points - rv as f32 + 1.0))
+            }
+            (None, Some(&(bi, rb))) if config.include_single_path => {
+                let base = bm25_results[bi].clone();
+                (base, beta * (bm25_points - rb as f32 + 1.0))
+            }
+            _ => continue,
+        };
+
+        if borda_score < config.min_score {
+            continue;
+        }
+        let mut result = base;
+        result.score = borda_score;
+        result.original_score = borda_score;
+        result.sources = vec!["hybrid".to_string()];
+        fused.push(result);
+    }
+
+    (finish_fused(fused, config.dedup_by_chunk), stats)
+}
+
+/// Rank each path's alignment keys by their best raw score.
+///
+/// Returns `key -> (result index, rank)` with ranks starting at 1; ties on
+/// score are broken by key so the ranking is deterministic.
+fn rank_by_key(
+    results: &[SearchResult],
+    raw_score: impl Fn(&SearchResult) -> f32,
+) -> HashMap<String, (usize, u32)> {
+    let mut by_key: Vec<(String, (usize, f32))> =
+        best_per_key(results, raw_score).into_iter().collect();
+    by_key.sort_by(|a, b| {
+        b.1.1
+            .partial_cmp(&a.1.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    by_key
+        .into_iter()
+        .enumerate()
+        .map(|(i, (key, (idx, _)))| (key, (idx, (i + 1) as u32)))
+        .collect()
 }
 
 /// Score the surviving recall path when the other path returned nothing.
 ///
 /// Semantics match the dual-path loop exactly for this shape: the surviving
-/// path is aggregated to one best entry per alignment key, min-max
-/// normalized, weighted, `min_score`-filtered, and marked as `hybrid`.
-/// Skipped is only the dead work: no union key set, no aggregation or
-/// normalization of the empty side, no per-key empty-side lookups.
-/// `from_vector` selects which side's score field and weight apply, mirroring
-/// the single-path arms of the dual-path loop.
+/// path is aggregated to one best entry per alignment key, optionally
+/// min-max normalized (`normalize`), weighted, `min_score`-filtered, and
+/// marked as `hybrid`. Skipped is only the dead work: no union key set, no
+/// aggregation or normalization of the empty side, no per-key empty-side
+/// lookups. `from_vector` selects which side's score field and weight apply,
+/// mirroring the single-path arms of the dual-path loop.
 fn fuse_single_path(
     surviving: &[SearchResult],
     raw_score: impl Fn(&SearchResult) -> f32,
@@ -245,11 +577,17 @@ fn fuse_single_path(
     from_vector: bool,
     config: &super::HybridFusionConfig,
     stats: FusionAlignmentStats,
+    normalize: bool,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
     if !config.include_single_path {
         return (Vec::new(), stats);
     }
-    let by_key = normalize_by_key(super::aligner::best_per_key(surviving, raw_score));
+    let best = best_per_key(surviving, raw_score);
+    let by_key = if normalize {
+        normalize_by_key(best)
+    } else {
+        best
+    };
     let mut keys: Vec<&String> = by_key.keys().collect();
     keys.sort();
     let mut fused = Vec::with_capacity(by_key.len());
@@ -271,9 +609,7 @@ fn fuse_single_path(
         base.sources = vec!["hybrid".to_string()];
         fused.push(base);
     }
-    let mut fused = dedup_by_chunk_id(fused, config.dedup_by_chunk);
-    sort_fused_by_score(&mut fused);
-    (fused, stats)
+    (finish_fused(fused, config.dedup_by_chunk), stats)
 }
 
 /// Collapse entries pointing at the same physical chunk (its id) to the

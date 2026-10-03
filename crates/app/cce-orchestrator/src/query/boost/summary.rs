@@ -105,7 +105,7 @@ impl SummaryBoost {
                     let normalized = ((summary_score - config.summary.min_score)
                         / (1.0 - config.summary.min_score))
                         .clamp(0.0, 1.0);
-                    let boost_value = boost_config.summary_max * normalized;
+                    let boost_value = boost_config.cap_for("summary") * normalized;
 
                     if boost_value > 0.0 {
                         contributions.push(

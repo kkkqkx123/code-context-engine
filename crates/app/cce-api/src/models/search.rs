@@ -99,7 +99,9 @@ pub struct SubQueryRequest {
     /// Query type (vector, bm25, hybrid, summary)
     #[serde(default = "default_subquery_type")]
     pub query_type: String,
-    /// Weight for weighted score fusion
+    /// Weight applied to this sub-query's candidate scores before the
+    /// cross-query merge (`score *= weight`, then dedup keeps the highest
+    /// weighted score per alignment key). Must be finite and >= 0.
     #[serde(default = "default_weight")]
     pub weight: f32,
 }

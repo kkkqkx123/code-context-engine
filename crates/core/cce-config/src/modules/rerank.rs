@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::search::ScoreFusionStrategy;
+use crate::validation::{Validate, ValidationResult};
+use cce_types::error::config::ConfigValidationError;
 
 /// Rerank execution order for the `plugin` + LLM rerankers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -111,6 +113,38 @@ fn default_min_score() -> f32 {
 
 fn default_drop_detection_start() -> f32 {
     0.6
+}
+
+impl Validate for RerankConfig {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+
+        match self.score_fusion_strategy {
+            ScoreFusionStrategy::LinearWeighted { alpha } => {
+                if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                    errors.push(ConfigValidationError::invalid_field(
+                        "score_fusion_strategy.alpha",
+                        "must be finite and within [0.0, 1.0]",
+                    ));
+                }
+            }
+            ScoreFusionStrategy::ReciprocalRankFusion { k } => {
+                if !k.is_finite() || k <= 0.0 {
+                    errors.push(ConfigValidationError::invalid_field(
+                        "score_fusion_strategy.k",
+                        "must be finite and greater than 0",
+                    ));
+                }
+            }
+            ScoreFusionStrategy::RerankOnly | ScoreFusionStrategy::Multiplicative => {}
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
 }
 
 impl Default for RerankConfig {

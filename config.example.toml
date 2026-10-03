@@ -324,10 +324,39 @@ drop_detection_start = 0.6
 temperature = 0.0
 # Whether to return reasoning for reranking decisions
 return_reasoning = false
-# Score fusion strategy
+# Score fusion strategy: "rerank_only" | "multiplicative" | "rrf" |
+# { linear_weighted = { alpha = 0.7 } } | { reciprocal_rank_fusion = { k = 60.0 } }
 score_fusion_strategy = "linear_weighted"
 # Timeout in milliseconds
 timeout_ms = 5000
+
+# ---------------------------------------------------------------------------
+# Search Configuration (all sections optional; defaults shown)
+# ---------------------------------------------------------------------------
+
+# [search.bm25]
+# BM25 recall parameters (no fusion semantics here).
+# min_score = 0.1
+# term_operator = "or"  # "or" (fuzzy recall) | "and" (exact-entity lookups)
+# field_weights = { title = 2.0, content = 1.0, keywords = 2.0 }
+
+# [search.fusion]
+# Hybrid fusion: how vector + BM25 recall paths combine.
+# vector_weight = 0.5
+# bm25_weight = 0.5
+# algorithm = "weighted_min_max"  # "weighted_min_max" | "weighted_sum" |
+#                                 # "borda_count" | { rrf = { k = 60 } }
+# include_single_path = true
+# min_score = 0.0  # interpreted on the algorithm scale (see docs)
+# dedup_by_chunk = true
+# enable_intent_based_weights = true
+
+# [search.boost]
+# Unified boost aggregation: per-source capped additions, globally capped.
+# enabled = true
+# max_addition = 0.5
+# max_source_boost = 0.3
+# source_caps = { summary = 0.15 }
 
 [scanner]
 # Whether to follow symbolic links

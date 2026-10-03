@@ -1,9 +1,14 @@
 //! Score normalization utilities for boosting
 //!
 //! Provides various normalization strategies to make scores comparable
-//! before boost aggregation.
+//! before boost aggregation. Min-max scaling delegates to the fusion
+//! canonical implementation so the pipeline has a single min-max definition;
+//! the Z-score strategy applies only to roughly normal score columns, never
+//! to fusion key-granularity normalization.
 
 pub use cce_config::modules::search::NormalizationStrategy;
+
+use crate::query::retrieval::post_processing::fusion::minmax_normalize as fusion_minmax;
 
 /// Normalize scores using the specified strategy
 pub fn normalize_scores(
@@ -17,25 +22,17 @@ pub fn normalize_scores(
     }
 }
 
-/// Min-Max normalization to [0, 1]
+/// Min-Max normalization to [0, 1], delegating to the fusion canonical form.
+///
+/// Degenerate inputs (all equal, single element) map to full credit per the
+/// shared contract; the shift is uniform so candidate order is preserved.
 fn normalize_min_max(scores: &mut [f32]) -> Result<(), String> {
     if scores.is_empty() {
         return Ok(());
     }
 
-    let min = scores.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-
-    if (max - min).abs() < f32::EPSILON {
-        for score in scores.iter_mut() {
-            *score = 0.5;
-        }
-        return Ok(());
-    }
-
-    for score in scores.iter_mut() {
-        *score = (*score - min) / (max - min);
-    }
+    let normalized = fusion_minmax(scores);
+    scores.copy_from_slice(&normalized);
 
     Ok(())
 }
@@ -81,14 +78,14 @@ mod tests {
     fn test_normalize_min_max_constant() {
         let mut scores = vec![0.5, 0.5, 0.5];
         normalize_min_max(&mut scores).unwrap();
-        assert!((scores[0] - 0.5).abs() < 1e-6);
+        assert!((scores[0] - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_normalize_min_max_single() {
         let mut scores = vec![0.5];
         normalize_min_max(&mut scores).unwrap();
-        assert!((scores[0] - 0.5).abs() < 1e-6);
+        assert!((scores[0] - 1.0).abs() < 1e-6);
     }
 
     #[test]

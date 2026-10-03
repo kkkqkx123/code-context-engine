@@ -101,16 +101,17 @@ impl GenerativeRerankProvider {
                 )));
             }
 
-            let candidate = request
+            let initial_rank = request
                 .candidates
                 .iter()
-                .find(|candidate| candidate.id == item.id)
+                .position(|candidate| candidate.id == item.id)
                 .ok_or_else(|| {
                     LlmError::invalid_response(format!(
                         "Rerank response contains unknown candidate ID '{}'",
                         item.id
                     ))
                 })?;
+            let candidate = &request.candidates[initial_rank];
 
             reranked.push(RerankedCandidate {
                 id: item.id.clone(),
@@ -120,6 +121,7 @@ impl GenerativeRerankProvider {
                     item.score,
                     candidate.initial_score,
                     new_rank,
+                    initial_rank,
                 ),
                 rank_change: 0,
                 reasoning: request
@@ -306,6 +308,7 @@ impl CohereRerankProvider {
                     item.relevance_score,
                     candidate.initial_score,
                     new_rank,
+                    item.index,
                 ),
                 rank_change: 0,
                 reasoning: request

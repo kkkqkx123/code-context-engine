@@ -321,15 +321,12 @@ impl Searcher {
         let vector_results = expand_multi_entity_results(vector_results);
         let bm25_results = expand_multi_entity_results(bm25_results);
 
-        // include_single_path/min_score/dedup_by_chunk are reserved tuning
-        // switches pending the retrieval-method benchmark; the production
-        // defaults keep single-path recall included, unbounded, and collapse
-        // multi-entity duplicates per physical chunk (dedup_by_chunk).
-        let fusion_config = HybridFusionConfig {
-            vector_weight,
-            bm25_weight,
-            ..HybridFusionConfig::default()
-        };
+        // The per-request weights arrive via the execution strategy (static
+        // config refined by query-intent resolution); the algorithm and the
+        // runtime switches come straight from `[search.fusion]` so new
+        // file-side switches propagate without touching this call site.
+        let fusion_config =
+            HybridFusionConfig::resolve(&options.config.fusion, vector_weight, bm25_weight);
         // Plugin fusion-weight override (Fusion capability).
         let fusion_config = if options.config.plugin.fusion_enabled {
             self.apply_fusion_override(
@@ -542,12 +539,14 @@ impl Searcher {
                 Ok(conn) => conn,
                 Err(e) => return Err(format!("Failed to get SQLite connection: {e}")),
             };
-            let records = match get_chunk_records(&conn, &point_ids_clone, project_id, &query_filter_clone) {
-                Ok(Some(records)) => records,
-                Ok(None) => return Ok(None),
-                Err(e) => return Err(format!("Chunk enrichment failed: {e}")),
-            };
-            let project_root = cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
+            let records =
+                match get_chunk_records(&conn, &point_ids_clone, project_id, &query_filter_clone) {
+                    Ok(Some(records)) => records,
+                    Ok(None) => return Ok(None),
+                    Err(e) => return Err(format!("Chunk enrichment failed: {e}")),
+                };
+            let project_root =
+                cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
             Ok(Some((records, project_root)))
         })
         .await;

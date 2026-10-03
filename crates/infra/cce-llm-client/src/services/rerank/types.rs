@@ -11,14 +11,14 @@ mod tests {
     #[test]
     fn test_score_fusion_rerank_only() {
         let strategy = ScoreFusionStrategy::RerankOnly;
-        let score = strategy.calculate(0.9, 0.8, 0);
+        let score = strategy.calculate(0.9, 0.8, 0, 1);
         assert!((score - 0.9).abs() < f32::EPSILON);
     }
 
     #[test]
     fn test_score_fusion_linear_weighted() {
         let strategy = ScoreFusionStrategy::LinearWeighted { alpha: 0.7 };
-        let score = strategy.calculate(0.9, 0.8, 0);
+        let score = strategy.calculate(0.9, 0.8, 0, 1);
         let expected = 0.7 * 0.9 + 0.3 * 0.8;
         assert!((score - expected).abs() < f32::EPSILON);
     }
@@ -26,8 +26,16 @@ mod tests {
     #[test]
     fn test_score_fusion_multiplicative() {
         let strategy = ScoreFusionStrategy::Multiplicative;
-        let score = strategy.calculate(0.9, 0.8, 0);
+        let score = strategy.calculate(0.9, 0.8, 0, 1);
         assert!((score - 0.72).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_score_fusion_rrf_uses_both_ranks() {
+        let strategy = ScoreFusionStrategy::ReciprocalRankFusion { k: 60.0 };
+        let score = strategy.calculate(0.9, 0.8, 0, 0);
+        let expected = 1.0 / 61.0 + 1.0 / 61.0;
+        assert!((score - expected).abs() < f32::EPSILON);
     }
 
     #[test]

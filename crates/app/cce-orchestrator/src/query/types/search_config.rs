@@ -14,9 +14,9 @@
 /// between config.toml and runtime usage.
 pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
-    Bm25FusionConfig, BoostAggregationConfig, HybridWeightConfig, PluginSearchConfig,
-    QueryIntentWeights, ResultFilterConfig, SPSRGraphConfig, ScoreFusionStrategy,
-    ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
+    Bm25RetrievalConfig, BoostAggregationConfig, HybridFusionConfig, HybridWeightConfig,
+    PluginSearchConfig, QueryIntentWeights, ResultFilterConfig, SPSRGraphConfig,
+    ScoreFusionStrategy, ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
 };
 
 // ============================================================================
@@ -57,7 +57,8 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 /// | Field | Purpose |
 /// |-------|---------|
 /// | `vector` | Vector retrieval parameters (top_k, min_score, hnsw_ef) |
-/// | `bm25` | BM25 fusion parameters (min_score, field_weights) |
+/// | `bm25` | BM25 retrieval parameters (min_score, field_weights, term_operator) |
+/// | `fusion` | Hybrid fusion parameters (weights, algorithm, intent weights) |
 /// | `result` | Result filtering (limit, min_score, max_per_file) |
 /// | `summary` | Summary pre-filter and boost (top_k, min_score, boost_factor) |
 /// | `rerank` | LLM reranking (enable, model, candidates, temperature) |
@@ -67,8 +68,10 @@ impl QueryIntentWeightsExt for QueryIntentWeights {
 pub struct SearchConfig {
     /// Vector retrieval configuration
     pub vector: VectorRetrievalConfig,
-    /// BM25 fusion configuration
-    pub bm25: Bm25FusionConfig,
+    /// BM25 retrieval configuration
+    pub bm25: Bm25RetrievalConfig,
+    /// Hybrid fusion configuration
+    pub fusion: HybridFusionConfig,
     /// Result filtering configuration
     pub result: ResultFilterConfig,
     /// Summary-based score boost configuration
@@ -91,7 +94,8 @@ impl Default for SearchConfig {
     fn default() -> Self {
         Self {
             vector: VectorRetrievalConfig::default(),
-            bm25: Bm25FusionConfig::default(),
+            bm25: Bm25RetrievalConfig::default(),
+            fusion: HybridFusionConfig::default(),
             result: ResultFilterConfig::default(),
             summary: SummaryBoostConfig::default(),
             rerank: RerankConfig::default(),
@@ -109,6 +113,7 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
         Self {
             vector: cfg.vector,
             bm25: cfg.bm25,
+            fusion: cfg.fusion,
             result: cfg.result,
             summary: cfg.summary,
             // `[search.rerank]` was removed: rerank runtime parameters come
@@ -163,10 +168,12 @@ mod tests {
 
     #[test]
     fn test_bm25_fusion_config_default() {
-        let config = Bm25FusionConfig::default();
-        assert!(config.enable_intent_based_weights);
-        assert!((config.vector_weight - 0.5).abs() < f32::EPSILON);
-        assert!((config.bm25_weight - 0.5).abs() < f32::EPSILON);
+        let retrieval = Bm25RetrievalConfig::default();
+        assert!((retrieval.min_score - 0.1).abs() < f32::EPSILON);
+        let fusion = HybridFusionConfig::default();
+        assert!(fusion.enable_intent_based_weights);
+        assert!((fusion.vector_weight - 0.5).abs() < f32::EPSILON);
+        assert!((fusion.bm25_weight - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]

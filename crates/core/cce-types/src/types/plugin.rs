@@ -338,6 +338,17 @@ pub struct FusionWeights {
     pub bm25_weight: Option<f32>,
     /// Minimum fusion score threshold.
     pub min_score: Option<f32>,
+    /// Fusion algorithm override. One of `"weighted_min_max"`,
+    /// `"weighted_sum"`, `"rrf"`, `"borda_count"`; unknown names are ignored
+    /// by the host. Only parsed when the host supports algorithm override;
+    /// absent means "keep the configured algorithm".
+    #[serde(default)]
+    pub algorithm: Option<String>,
+    /// RRF rank-discount constant used together with `"rrf"`. Absent means
+    /// the configured default (60); zero or negative values are rejected by
+    /// the host. Ignored for other algorithms.
+    #[serde(default)]
+    pub rrf_k: Option<u32>,
 }
 
 /// One entry of the `ResultFilter` capability output: keep/remove/boost a

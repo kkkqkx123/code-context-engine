@@ -39,8 +39,20 @@ fn looks_like_entity_query(query: &str) -> bool {
 
     // Code keywords that indicate entity lookup
     let code_keywords = [
-        "fn ", "func ", "function ", "struct ", "class ", "trait ", "impl ",
-        "enum ", "type ", "const ", "static ", "mod ", "use ", "pub ",
+        "fn ",
+        "func ",
+        "function ",
+        "struct ",
+        "class ",
+        "trait ",
+        "impl ",
+        "enum ",
+        "type ",
+        "const ",
+        "static ",
+        "mod ",
+        "use ",
+        "pub ",
     ];
     for kw in &code_keywords {
         if lower.contains(kw) {
@@ -70,8 +82,17 @@ fn looks_like_semantic_query(query: &str) -> bool {
 
     // Question words indicating natural-language intent
     let question_words = [
-        "what ", "how ", "why ", "when ", "where ", "which ", "who ",
-        "explain ", "describe ", "understand ", "difference between ",
+        "what ",
+        "how ",
+        "why ",
+        "when ",
+        "where ",
+        "which ",
+        "who ",
+        "explain ",
+        "describe ",
+        "understand ",
+        "difference between ",
     ];
     for qw in &question_words {
         if lower.starts_with(qw) || lower.contains(&format!(" {qw}")) {
@@ -87,8 +108,8 @@ fn looks_like_semantic_query(query: &str) -> bool {
 fn looks_like_keyword_query(query: &str) -> bool {
     // Operators and special characters that indicate keyword intent
     let operators = [
-        '(', ')', '{', '}', '=', '>', '<', '+', '-', '*', '/', '!', '?',
-        ':', ';', ',', '.', '|', '&', '%', '$', '@', '#', '~', '^',
+        '(', ')', '{', '}', '=', '>', '<', '+', '-', '*', '/', '!', '?', ':', ';', ',', '.', '|',
+        '&', '%', '$', '@', '#', '~', '^',
     ];
     if query.chars().any(|c| operators.contains(&c)) {
         return true;

@@ -173,8 +173,9 @@ impl Searcher {
     ///
     /// Plugins are queried by priority (descending); the **first** plugin
     /// returning a non-`None` weight set takes effect (override tier).
-    /// Provided weights are validated to `[0, 1]`; invalid fields keep the
-    /// configured default.
+    /// Provided weights are validated to `[0, 1]` and the algorithm name to
+    /// the known set; invalid fields keep the configured default and emit a
+    /// warning so a misbehaving plugin stays visible.
     pub(crate) async fn apply_fusion_override(
         &self,
         options: &QueryOptions,
@@ -231,21 +232,71 @@ pub(crate) fn merge_fusion_weights_override(
             continue;
         };
         if let Some(w) = weights.vector_weight {
-            if (0.0..=1.0).contains(&w) {
+            if w.is_finite() && (0.0..=1.0).contains(&w) {
                 config.vector_weight = w;
+            } else {
+                tracing::warn!(
+                    vector_weight = w,
+                    "Fusion plugin returned an out-of-range vector_weight; keeping configured default"
+                );
             }
         }
         if let Some(w) = weights.bm25_weight {
-            if (0.0..=1.0).contains(&w) {
+            if w.is_finite() && (0.0..=1.0).contains(&w) {
                 config.bm25_weight = w;
+            } else {
+                tracing::warn!(
+                    bm25_weight = w,
+                    "Fusion plugin returned an out-of-range bm25_weight; keeping configured default"
+                );
             }
         }
         if let Some(min_score) = weights.min_score {
-            config.min_score = min_score;
+            if min_score.is_finite() && min_score >= 0.0 {
+                config.min_score = min_score;
+            } else {
+                tracing::warn!(
+                    min_score,
+                    "Fusion plugin returned an invalid min_score; keeping configured default"
+                );
+            }
+        }
+        if let Some(name) = weights.algorithm.as_deref() {
+            match parse_plugin_algorithm(name, weights.rrf_k) {
+                Some(algorithm) => config.algorithm = algorithm,
+                None => tracing::warn!(
+                    algorithm = name,
+                    "Fusion plugin returned an unknown algorithm; keeping configured default"
+                ),
+            }
         }
         break;
     }
     config
+}
+
+/// Parse a plugin-supplied fusion algorithm name with its optional RRF
+/// constant. Returns `None` for unknown names or a rejected `rrf_k`
+/// (zero), in which case the caller keeps the configured algorithm.
+fn parse_plugin_algorithm(
+    name: &str,
+    rrf_k: Option<u32>,
+) -> Option<cce_config::modules::search::FusionAlgorithm> {
+    use cce_config::modules::search::FusionAlgorithm;
+    match name {
+        "weighted_min_max" | "minmax" => Some(FusionAlgorithm::WeightedMinMax),
+        "weighted_sum" | "combsum" => Some(FusionAlgorithm::WeightedSum),
+        "rrf" | "reciprocal_rank_fusion" => {
+            let k = rrf_k.unwrap_or(60);
+            if k == 0 {
+                None
+            } else {
+                Some(FusionAlgorithm::Rrf { k })
+            }
+        }
+        "borda_count" | "borda" => Some(FusionAlgorithm::BordaCount),
+        _ => None,
+    }
 }
 
 /// Run the `QueryRewrite` capability chain over a registry.

@@ -11,7 +11,10 @@ pub struct SubQuery {
     pub text: String,
     /// Retrieval source used for this subquery (e.g. BM25 only, Vector only)
     pub sources: super::query_options::SearchSources,
-    /// Weights (used to weight the final result when fusing)
+    /// Weight applied to this sub-query's candidate scores before the
+    /// cross-query merge (`score *= weight`, then dedup keeps the highest
+    /// weighted score per alignment key). Must be finite and >= 0.0;
+    /// defaults to 1.0 (neutral).
     pub weight: f32,
 }
 

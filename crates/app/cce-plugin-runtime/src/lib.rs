@@ -10,7 +10,6 @@
 
 mod error;
 pub mod loader;
-pub mod lua_mapping;
 pub mod native;
 pub mod pattern;
 pub mod registry;
@@ -18,7 +17,7 @@ pub mod types;
 pub mod utils;
 
 pub use loader::LuaPlugin;
-pub use lua_mapping::{
+pub use loader::lua_mapping::{
     entity_group_to_lua_table, group_conversions_to_lua_table, grouped_entity_to_lua_table,
     lua_table_to_chunked_result, lua_table_to_plugin_document, lua_table_to_plugin_entity,
     lua_table_to_rerank_result,

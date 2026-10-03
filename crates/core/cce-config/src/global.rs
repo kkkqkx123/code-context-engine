@@ -256,6 +256,12 @@ impl Validate for AppConfig {
         if let Err(e) = self.symbol_resolution.validate_structured() {
             errors.push(e);
         }
+        if let Err(e) = self.search.validate_structured() {
+            errors.push(e);
+        }
+        if let Err(e) = self.rerank.validate_structured() {
+            errors.push(e);
+        }
         if let Err(e) = self.license_header.validate_structured() {
             errors.push(e);
         }

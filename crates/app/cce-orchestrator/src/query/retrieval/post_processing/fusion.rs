@@ -1,33 +1,45 @@
 //! Hybrid retrieval fusion module
 //!
-//! Provides weighted normalized score fusion for combining results from
-//! two independent recall paths (vector + BM25). This module performs
-//! min-max normalization within each path's results, then computes a
-//! weighted linear combination.
+//! Combines results from two independent recall paths (vector + BM25) at the
+//! alignment-key level (entity id, else segment id, else chunk id). The
+//! [`FusionAlgorithm`](cce_config::modules::search::FusionAlgorithm)
+//! selected in `[search.fusion]` decides how per-key scores combine:
+//! normalized weighted sum (default), raw weighted sum, reciprocal rank
+//! fusion, or weight-aware Borda count.
 //!
-//! This approach preserves score magnitude information and allows
-//! per-query-intent weight customization.
+//! Per-query-intent weight profiles and plugin weight overrides only swap
+//! the weight pair; they never change the algorithm implicitly.
 
 mod aligner;
 mod merger;
 mod normalizer;
 
 pub use aligner::{
-    alignment_key, compute_alignment_coverage, expand_multi_entity_results, FusionAlignmentStats,
+    FusionAlignmentStats, alignment_key, compute_alignment_coverage, expand_multi_entity_results,
 };
 pub use merger::{fuse_hybrid_results, fuse_hybrid_results_with_stats};
 pub use normalizer::minmax_normalize;
 
-/// Configuration for hybrid vector + BM25 fusion
+/// Resolved configuration for hybrid vector + BM25 fusion.
+///
+/// This is the per-request view: the path weights are already resolved
+/// (static config, query-intent profile, then plugin override), while the
+/// algorithm and the runtime switches are copied from the file-side
+/// [`cce_config::modules::search::HybridFusionConfig`] via [`resolve`].
+/// Build it with [`resolve`](HybridFusionConfig::resolve), never field by
+/// field, so new file-side switches propagate automatically.
 #[derive(Debug, Clone)]
 pub struct HybridFusionConfig {
     /// Weight assigned to normalized vector scores [0.0, 1.0]
     pub vector_weight: f32,
     /// Weight assigned to normalized BM25 scores [0.0, 1.0]
     pub bm25_weight: f32,
+    /// Fusion algorithm with its parameters
+    pub algorithm: cce_config::modules::search::FusionAlgorithm,
     /// Whether to include items that only appear in one path
     pub include_single_path: bool,
-    /// Minimum fused score threshold
+    /// Minimum fused score threshold (interpreted on the algorithm scale;
+    /// see the file-side config docs)
     pub min_score: f32,
     /// Whether to keep at most one result per physical chunk after fusion.
     ///
@@ -38,15 +50,33 @@ pub struct HybridFusionConfig {
     pub dedup_by_chunk: bool,
 }
 
+impl HybridFusionConfig {
+    /// Resolve a per-request config from the file-side fusion config and the
+    /// effective weight pair (intent resolution and plugin override applied
+    /// by the caller beforehand).
+    pub fn resolve(
+        source: &cce_config::modules::search::HybridFusionConfig,
+        vector_weight: f32,
+        bm25_weight: f32,
+    ) -> Self {
+        Self {
+            vector_weight,
+            bm25_weight,
+            algorithm: source.algorithm,
+            include_single_path: source.include_single_path,
+            min_score: source.min_score,
+            dedup_by_chunk: source.dedup_by_chunk,
+        }
+    }
+}
+
 impl Default for HybridFusionConfig {
     fn default() -> Self {
-        Self {
-            vector_weight: 0.5,
-            bm25_weight: 0.5,
-            include_single_path: true,
-            min_score: 0.0,
-            dedup_by_chunk: true,
-        }
+        Self::resolve(
+            &cce_config::modules::search::HybridFusionConfig::default(),
+            0.5,
+            0.5,
+        )
     }
 }
 
@@ -145,6 +175,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -189,6 +220,7 @@ mod tests {
             include_single_path: false,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -222,6 +254,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
         let fused = fuse_hybrid_results(vec![], vec![make_bm25_result("a", 1, 0.9)], &config);
         assert_eq!(fused.len(), 1);
@@ -267,6 +300,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -297,6 +331,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -340,6 +375,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -372,6 +408,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -400,6 +437,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vec![vector], vec![bm25], &config);
@@ -431,6 +469,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -457,6 +496,7 @@ mod tests {
             include_single_path: false,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -501,6 +541,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -533,6 +574,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -569,6 +611,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -603,6 +646,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
         };
 
         let fused = fuse_hybrid_results(vector, bm25, &config);
@@ -639,6 +683,7 @@ mod tests {
             include_single_path: true,
             min_score: 0.0,
             dedup_by_chunk: true,
+            ..HybridFusionConfig::default()
         };
         let fused = fuse_hybrid_results(vec![v1, v2], vec![b1], &config);
 
@@ -690,5 +735,163 @@ mod tests {
         assert_eq!(stats.vector_keys, 3);
         assert_eq!(stats.bm25_keys, 3);
         assert_eq!(stats.matched_keys, 2);
+    }
+
+    fn rrf_config(k: u32) -> HybridFusionConfig {
+        HybridFusionConfig {
+            algorithm: cce_config::modules::search::FusionAlgorithm::Rrf { k },
+            ..HybridFusionConfig::default()
+        }
+    }
+
+    #[test]
+    fn test_rrf_fuses_matched_key_from_both_paths() {
+        // Entity 1 is rank 1 on both paths: 0.5/(1+1) + 0.5/(1+1) = 0.5.
+        // Entity 2 is rank 2 on both paths (its raw score is lower on each):
+        // 0.5/(1+2) + 0.5/(1+2) = 1/3.
+        let fused = fuse_hybrid_results(
+            vec![
+                make_vector_result("emb_1", 1, 0.9),
+                make_vector_result("emb_2", 2, 0.8),
+            ],
+            vec![
+                make_bm25_result("bm25_1", 1, 0.9),
+                make_bm25_result("bm25_2", 2, 0.5),
+            ],
+            &rrf_config(1),
+        );
+        assert_eq!(fused.len(), 2);
+        assert_eq!(fused[0].entity_ids, vec![EntityId(1)]);
+        assert!((fused[0].score - 0.5).abs() < 1e-6);
+        assert!((fused[1].score - 1.0 / 3.0).abs() < 1e-6);
+        // Raw per-path scores stay untouched under RRF.
+        assert!((fused[0].vector_score - 0.9).abs() < 1e-6);
+        assert_eq!(
+            fused[0].bm25_score.map(|s| (s - 0.9).abs() < 1e-6),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_rrf_single_path_key_gets_one_term() {
+        // Entity 3 appears only on the vector path at rank 2: 0.5/(1+2) ≈ 0.1667.
+        let fused = fuse_hybrid_results(
+            vec![
+                make_vector_result("emb_1", 1, 0.9),
+                make_vector_result("emb_3", 3, 0.8),
+            ],
+            vec![make_bm25_result("bm25_1", 1, 0.9)],
+            &rrf_config(1),
+        );
+        assert_eq!(fused.len(), 2);
+        let single = fused
+            .iter()
+            .find(|r| r.entity_ids == vec![EntityId(3)])
+            .expect("single-path key included");
+        assert!((single.score - 0.5 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_rrf_minmax_default_unchanged() {
+        // Default config keeps the weighted min-max algorithm.
+        assert_eq!(
+            HybridFusionConfig::default().algorithm,
+            cce_config::modules::search::FusionAlgorithm::WeightedMinMax
+        );
+    }
+
+    fn weighted_sum_config() -> HybridFusionConfig {
+        HybridFusionConfig {
+            algorithm: cce_config::modules::search::FusionAlgorithm::WeightedSum,
+            ..HybridFusionConfig::default()
+        }
+    }
+
+    fn borda_config() -> HybridFusionConfig {
+        HybridFusionConfig {
+            algorithm: cce_config::modules::search::FusionAlgorithm::BordaCount,
+            ..HybridFusionConfig::default()
+        }
+    }
+
+    #[test]
+    fn test_weighted_sum_combines_raw_scores() {
+        // No normalization: e1 = 0.5*0.9 + 0.5*0.9 = 0.9,
+        // e2 = 0.5*0.8 + 0.5*0.5 = 0.65.
+        let fused = fuse_hybrid_results(
+            vec![
+                make_vector_result("emb_1", 1, 0.9),
+                make_vector_result("emb_2", 2, 0.8),
+            ],
+            vec![
+                make_bm25_result("bm25_1", 1, 0.9),
+                make_bm25_result("bm25_2", 2, 0.5),
+            ],
+            &weighted_sum_config(),
+        );
+        assert_eq!(fused.len(), 2);
+        assert_eq!(fused[0].entity_ids, vec![EntityId(1)]);
+        assert!((fused[0].score - 0.9).abs() < 1e-6);
+        assert!((fused[1].score - 0.65).abs() < 1e-6);
+        // Raw per-path scores stay untouched under weighted sum.
+        assert!((fused[0].vector_score - 0.9).abs() < 1e-6);
+        assert_eq!(
+            fused[0].bm25_score.map(|s| (s - 0.9).abs() < 1e-6),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_weighted_sum_single_path_skips_normalization() {
+        // A lone key keeps weight * raw instead of being normalized to 1.0.
+        let fused = fuse_hybrid_results(
+            vec![make_vector_result("emb_3", 3, 0.8)],
+            vec![],
+            &weighted_sum_config(),
+        );
+        assert_eq!(fused.len(), 1);
+        assert!((fused[0].score - 0.5 * 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_borda_prefers_keys_ranked_high_in_both_paths() {
+        // Two keys per path: e1 earns 2 points per path, e2 earns 1.
+        // e1 = 0.5*2 + 0.5*2 = 2.0, e2 = 0.5*1 + 0.5*1 = 1.0.
+        let fused = fuse_hybrid_results(
+            vec![
+                make_vector_result("emb_1", 1, 0.9),
+                make_vector_result("emb_2", 2, 0.8),
+            ],
+            vec![
+                make_bm25_result("bm25_1", 1, 0.9),
+                make_bm25_result("bm25_2", 2, 0.5),
+            ],
+            &borda_config(),
+        );
+        assert_eq!(fused.len(), 2);
+        assert_eq!(fused[0].entity_ids, vec![EntityId(1)]);
+        assert!((fused[0].score - 2.0).abs() < 1e-6);
+        assert!((fused[1].score - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_borda_single_path_key_gets_own_points() {
+        // e3 is rank 2 of 2 vector keys: 0.5 * (2-2+1) = 0.5.
+        // e1: 0.5 * 2 (vector) + 0.5 * 1 (lone bm25 key) = 1.5.
+        let fused = fuse_hybrid_results(
+            vec![
+                make_vector_result("emb_1", 1, 0.9),
+                make_vector_result("emb_3", 3, 0.8),
+            ],
+            vec![make_bm25_result("bm25_1", 1, 0.9)],
+            &borda_config(),
+        );
+        assert_eq!(fused.len(), 2);
+        let single = fused
+            .iter()
+            .find(|r| r.entity_ids == vec![EntityId(3)])
+            .expect("single-path key included");
+        assert!((single.score - 0.5).abs() < 1e-6);
+        assert!((fused[0].score - 1.5).abs() < 1e-6);
     }
 }
