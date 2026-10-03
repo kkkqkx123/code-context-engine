@@ -10,13 +10,15 @@ use std::sync::Arc;
 
 use crate::api::validation;
 use cce_orchestrator::SearchResult as OrchestratorResultItem;
-use cce_orchestrator::query::types::{ExcludableContentType, SearchSources};
+use cce_orchestrator::query::types::{
+    ContentState, DowngradeReason, ExcludableContentType, SearchSources,
+};
 use cce_orchestrator::query::{SubQuery, types::ResultFilterConfig, types::SearchConfig};
 use cce_utils::text::is_blank;
 
 use cce_api::models::{
-    AggregatedSearchRequest, ErrorResponse, SearchRequest, SearchResponse, SearchResultItem,
-    error_codes,
+    AggregatedSearchRequest, ContentStateDto, ErrorResponse, SearchRequest, SearchResponse,
+    SearchResultItem, error_codes,
 };
 
 use crate::api::response::ApiResult;
@@ -133,6 +135,7 @@ pub async fn handle_search(
     query_opts.config.rerank = project_entry.config.rerank.clone();
     query_opts.config.boost = project_entry.config.search.boost.clone();
     query_opts.config.result = project_entry.config.search.result.clone();
+    query_opts.config.assembly = project_entry.config.search.assembly.clone();
 
     // Per-request rerank overrides take precedence over the config.
     if let Some(enable_rerank) = request.enable_rerank {
@@ -342,6 +345,7 @@ pub async fn handle_aggregated_search(
     };
     global_config.boost = project_entry.config.search.boost.clone();
     global_config.rerank = project_entry.config.rerank.clone();
+    global_config.assembly = project_entry.config.search.assembly.clone();
     global_config.result = {
         let mut r = project_entry.config.search.result.clone();
         r.limit = request.limit;
@@ -497,6 +501,14 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
     } else {
         Some(item.kind)
     };
+    let content_state = match item.content_state {
+        ContentState::Full => ContentStateDto::Full,
+        ContentState::Reference(DowngradeReason::OverLimit) => ContentStateDto::ReferenceOverLimit,
+        ContentState::Reference(DowngradeReason::FileMissing) => {
+            ContentStateDto::ReferenceFileMissing
+        }
+        ContentState::Reference(DowngradeReason::FileLevel) => ContentStateDto::ReferenceFileLevel,
+    };
 
     SearchResultItem {
         score: item.score,
@@ -507,6 +519,7 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
         entity_type,
         source,
         entity_ids: item.entity_ids.iter().map(|eid| eid.0).collect(),
+        content_state,
     }
 }
 

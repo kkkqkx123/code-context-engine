@@ -102,6 +102,7 @@ impl DenseRetrieval {
                 pattern_info: None,
                 category: None,
                 truncated: r.payload.truncated.unwrap_or(false),
+                content_state: crate::query::types::ContentState::Full,
             })
             .collect();
 

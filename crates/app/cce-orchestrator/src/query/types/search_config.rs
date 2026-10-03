@@ -15,8 +15,8 @@
 pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
     Bm25FusionConfig, BoostAggregationConfig, HybridWeightConfig, PluginSearchConfig,
-    QueryIntentWeights, ResultFilterConfig, ScoreFusionStrategy, ScoreNormalizationConfig,
-    SummaryBoostConfig, VectorRetrievalConfig,
+    QueryIntentWeights, ResultFilterConfig, SPSRGraphConfig, ScoreFusionStrategy,
+    ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
 };
 
 // ============================================================================
@@ -81,6 +81,8 @@ pub struct SearchConfig {
     pub boost: BoostAggregationConfig,
     /// Query-side plugin hooks configuration
     pub plugin: PluginSearchConfig,
+    /// Structure-preserving assembly of the final top-N results
+    pub assembly: SPSRGraphConfig,
 }
 
 impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
@@ -97,6 +99,7 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             score: cfg.score,
             boost: cfg.boost,
             plugin: cfg.plugin,
+            assembly: cfg.assembly,
         }
     }
 }

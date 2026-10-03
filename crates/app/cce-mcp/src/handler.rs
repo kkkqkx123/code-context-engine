@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cce_orchestrator::query::RelationQueryOptions;
-use cce_orchestrator::query::types::QueryOptions;
+use cce_orchestrator::query::types::{ContentState, QueryOptions};
 use cce_orchestrator::{IndexOptions, KeywordSearchTool};
 use cce_server_shared::state::AppState;
 use cce_types::EntityId;
@@ -203,6 +203,10 @@ impl McpServerHandler {
                             "snippet": item.snippet,
                             "start_line": item.start_line,
                             "end_line": item.end_line,
+                            "content_state": match item.content_state {
+                                ContentState::Full => "full",
+                                ContentState::Reference(_) => "reference",
+                            },
                         })
                     })
                     .collect();

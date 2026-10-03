@@ -8,9 +8,8 @@ use std::path::Path;
 use cce_utils::token_estimation::TokenEstimator;
 
 use super::aggregator::{AggregatedSegment, SegmentAggregator};
-use super::types::{
-    DowngradeReason, ExpandedUnit, ExpansionOrigin, FileInfo, SPSRGraphConfig, reference_content,
-};
+use super::types::{ExpandedUnit, ExpansionOrigin, FileInfo, SPSRGraphConfig};
+use crate::query::types::content_reference::{DowngradeReason, reference_content};
 
 /// Structure-aware concatenator
 ///
@@ -73,25 +72,25 @@ impl StructureConcatenator {
         self.select_and_render(segments, primary_count)
     }
 
-    /// Build the relation marker line for an expansion unit
+    /// Build the relation marker line for an expansion unit.
+    ///
+    /// The marker is a uniform `// [<label>] <name> (<file>:<start>-<end>)`
+    /// line. The edge label carries the direction (`calls` / `called by`), so
+    /// no separate arrow is needed.
     fn relation_marker(unit: &ExpandedUnit) -> Option<String> {
-        let arrow = match unit.origin {
+        let default_label = match unit.origin {
             ExpansionOrigin::Primary => return None,
-            ExpansionOrigin::Forward => "-->",
-            ExpansionOrigin::Backward => "<--",
+            ExpansionOrigin::Forward => "calls",
+            ExpansionOrigin::Backward => "called by",
         };
         let label = if unit.edge_label.is_empty() {
-            match unit.origin {
-                ExpansionOrigin::Forward => "calls",
-                ExpansionOrigin::Backward => "called by",
-                ExpansionOrigin::Primary => "",
-            }
+            default_label
         } else {
             unit.edge_label.as_str()
         };
         Some(format!(
-            "// {} {}: {} ({}:{}-{})",
-            arrow, label, unit.name, unit.file_path, unit.start_line, unit.end_line
+            "// [{}] {} ({}:{}-{})",
+            label, unit.name, unit.file_path, unit.start_line, unit.end_line
         ))
     }
 
@@ -204,7 +203,7 @@ impl StructureConcatenator {
         if omitted_count > 0 {
             result.push_str("\n\n");
             result.push_str(&format!(
-                "// === Additional context truncated to preserve code structure: {} unit(s) omitted (~{} tokens) ===",
+                "// [omitted] {} unit(s) (~{} tokens)",
                 omitted_count, omitted_size
             ));
         }
@@ -221,20 +220,24 @@ impl StructureConcatenator {
         file_info_map: &mut std::collections::HashMap<String, FileInfo>,
         segment: &AggregatedSegment,
     ) {
-        // Add file marker if entering a new file
-        if self.config.include_file_markers && *current_file != Some(segment.file_path.clone()) {
+        // A reference line already carries the file path, so a separate file
+        // marker would duplicate it. Only body-bearing segments get a marker.
+        if segment.reference.is_none()
+            && self.config.include_file_markers
+            && *current_file != Some(segment.file_path.clone())
+        {
             if current_file.is_some() {
                 result.push('\n');
             }
             result.push_str(&self.format_file_marker(&segment.file_path));
             result.push('\n');
             *current_file = Some(segment.file_path.clone());
-
-            // Initialize file info if not exists
-            file_info_map
-                .entry(segment.file_path.clone())
-                .or_insert_with(|| FileInfo::new(segment.file_path.clone()));
         }
+
+        // Initialize file info if not exists
+        file_info_map
+            .entry(segment.file_path.clone())
+            .or_insert_with(|| FileInfo::new(segment.file_path.clone()));
 
         // Add the relation marker for expansion segments
         if let Some(marker) = &segment.marker {
@@ -286,6 +289,9 @@ impl StructureConcatenator {
 
     /// Token cost used for budget selection: body cost, or the reference
     /// line cost for downgraded segments.
+    ///
+    /// Reference segments render no file marker (their reference line already
+    /// names the file), so the estimate omits it to stay order-independent.
     fn selection_cost(&self, segment: &AggregatedSegment) -> usize {
         if let Some(reason) = segment.reference {
             let line = reference_content(
@@ -299,9 +305,6 @@ impl StructureConcatenator {
             if let Some(marker) = &segment.marker {
                 cost += TokenEstimator::estimate(marker) + 1;
             }
-            if self.config.include_file_markers {
-                cost += TokenEstimator::estimate(&self.format_file_marker(&segment.file_path)) + 1;
-            }
             cost
         } else {
             self.standalone_cost(segment)
@@ -310,7 +313,7 @@ impl StructureConcatenator {
 
     /// Format a file marker
     fn format_file_marker(&self, file_path: &str) -> String {
-        format!("// ===== File: {} =====", file_path)
+        format!("// [file] {}", file_path)
     }
 
     /// Get the configuration
@@ -353,7 +356,7 @@ mod tests {
         // Forward expansion is attached with its relation marker
         assert!(result.contains("multiply"));
         assert!(result.contains("fn add"));
-        assert!(result.contains("// --> calls: add (src/math.rs:1-3)"));
+        assert!(result.contains("// [calls] add (src/math.rs:1-3)"));
         assert_eq!(files.len(), 2);
     }
 
@@ -363,7 +366,7 @@ mod tests {
         let concat = StructureConcatenator::new(config);
 
         let marker = concat.format_file_marker("src/main.rs");
-        assert_eq!(marker, "// ===== File: src/main.rs =====");
+        assert_eq!(marker, "// [file] src/main.rs");
     }
 
     #[tokio::test]
@@ -480,7 +483,7 @@ mod tests {
         if let Some(marker) = marker {
             cost += TokenEstimator::estimate(marker) + 1;
         }
-        cost += TokenEstimator::estimate(&format!("// ===== File: {} =====", path)) + 1;
+        cost += TokenEstimator::estimate(&format!("// [file] {}", path)) + 1;
         cost
     }
 
@@ -502,7 +505,8 @@ mod tests {
 
         let (result, files) = concat.concatenate(&primary, &[], &[]).await;
 
-        assert!(result.contains("// ===== File: src/missing.rs ====="));
+        // A reference already names the file, so no separate file marker.
+        assert!(!result.contains("// [file]"));
         assert!(result.contains("[reference] src/missing.rs:1-3"));
         assert!(result.contains("not found"));
         assert!(!result.contains("fn ghost"));
@@ -530,11 +534,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_oversized_segment_becomes_reference() {
-        // The quota fits the tiny expansion exactly; the huge primary must
-        // exceed it.
+        // The quota fits the tiny expansion plus the primary's downgraded
+        // reference line; the huge primary body must exceed it and degrade.
+        let huge_code = "let value = compute();\n".repeat(200);
         let tiny_code = "fn tiny() {}";
-        let tiny_marker = "// --> calls: tiny (src/tiny.rs:1-3)";
-        let limit = standalone_cost(tiny_code, Some(tiny_marker), "src/tiny.rs");
+        let tiny_marker = "// [calls] tiny (src/tiny.rs:1-3)";
+
+        let tiny_cost = standalone_cost(tiny_code, Some(tiny_marker), "src/tiny.rs");
+        let primary_reference = reference_content(
+            "src/huge.rs",
+            1,
+            200,
+            TokenEstimator::estimate(&huge_code),
+            DowngradeReason::OverLimit,
+        );
+        // Reference segments render no file marker; selection counts the line.
+        let primary_reference_cost = TokenEstimator::estimate(&primary_reference) + 1;
+        let limit = tiny_cost + primary_reference_cost + 2;
+
         let config = SPSRGraphConfig {
             max_assembled_length: limit,
             ..SPSRGraphConfig::new().enable(true)
@@ -542,11 +559,10 @@ mod tests {
         let concat = StructureConcatenator::new(config);
 
         let primary = ExpandedUnit::new(
-            "fn huge() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n    a + b + c\n}"
-                .to_string(),
+            huge_code,
             "src/huge.rs".to_string(),
             1,
-            6,
+            200,
             "huge".to_string(),
         );
         let tiny = expansion_unit("tiny", "src/tiny.rs", tiny_code, 0.9);
@@ -555,9 +571,9 @@ mod tests {
 
         // The pinned primary degrades to a reference instead of crowding out
         // the small expansion.
-        assert!(result.contains("[reference] src/huge.rs:1-6"));
+        assert!(result.contains("[reference] src/huge.rs:1-200"));
         assert!(result.contains("over budget"));
-        assert!(!result.contains("let a = 1"));
+        assert!(!result.contains("let value = compute();"));
         assert!(result.contains("fn tiny() {}"));
     }
 
@@ -566,7 +582,7 @@ mod tests {
         let primary_code = "fn main() {}";
         let high_code = "fn high() {\n    work();\n}";
         let low_code = "fn low() {\n    rest();\n}";
-        let high_marker = "// --> calls: high (src/high.rs:1-3)";
+        let high_marker = "// [calls] high (src/high.rs:1-3)";
 
         let budget = standalone_cost(primary_code, None, "src/main.rs")
             + standalone_cost(high_code, Some(high_marker), "src/high.rs")

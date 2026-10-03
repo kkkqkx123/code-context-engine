@@ -58,6 +58,21 @@ pub struct SearchResponse {
     pub failed_sub_queries: Vec<String>,
 }
 
+/// Whether a result carries its full body or a file-and-range reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentStateDto {
+    /// `code_chunk` is the full source body.
+    #[default]
+    Full,
+    /// `code_chunk` is a reference because the body exceeded the token budget.
+    ReferenceOverLimit,
+    /// `code_chunk` is a reference because the source file is unreadable.
+    ReferenceFileMissing,
+    /// `code_chunk` is a reference because the hit is file-level.
+    ReferenceFileLevel,
+}
+
 /// Search result item
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SearchResultItem {
@@ -71,6 +86,9 @@ pub struct SearchResultItem {
     pub source: String,
     #[serde(default)]
     pub entity_ids: Vec<u64>,
+    /// Whether `code_chunk` is the full body or a reference.
+    #[serde(default)]
+    pub content_state: ContentStateDto,
 }
 
 /// Sub-query definition for aggregated search

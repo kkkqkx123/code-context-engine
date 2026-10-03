@@ -85,6 +85,7 @@ impl SummaryRetrieval {
                 pattern_info: None,
                 category: None,
                 truncated: false,
+                content_state: crate::query::types::ContentState::Full,
             })
             .collect();
 

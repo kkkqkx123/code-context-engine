@@ -229,46 +229,6 @@ impl ExpandedUnit {
     }
 }
 
-/// Why a segment or result was downgraded to a path-and-range reference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DowngradeReason {
-    /// The body exceeded its token budget (per-segment or batch total).
-    OverLimit,
-    /// The source file no longer exists under the workspace root.
-    FileMissing,
-}
-
-impl DowngradeReason {
-    /// Short human-readable note rendered after the reference line.
-    pub fn note(self) -> &'static str {
-        match self {
-            Self::OverLimit => "omitted: over budget; read the file range on demand",
-            Self::FileMissing => "file not found; path may be stale, adjust or skip",
-        }
-    }
-}
-
-/// Render a file-path-plus-range reference line for a downgraded segment.
-///
-/// The line carries the location, a token-magnitude estimate of the dropped
-/// body, and the downgrade reason so the model can decide whether to read on.
-pub fn reference_content(
-    file_path: &str,
-    start_line: u32,
-    end_line: u32,
-    body_tokens: usize,
-    reason: DowngradeReason,
-) -> String {
-    format!(
-        "// [reference] {}:{}-{} (~{} tokens, {})",
-        file_path,
-        start_line,
-        end_line,
-        body_tokens,
-        reason.note()
-    )
-}
-
 /// File information
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileInfo {

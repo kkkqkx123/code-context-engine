@@ -186,6 +186,10 @@ pub struct ResultFilterConfig {
     pub limit: usize,
     /// Minimum score threshold for final results
     pub min_score: f32,
+    /// Maximum token budget for a single result body. A body over this budget
+    /// is replaced by a file-and-range reference instead of being returned in
+    /// full.
+    pub max_content_tokens: usize,
 }
 
 impl Default for ResultFilterConfig {
@@ -193,6 +197,7 @@ impl Default for ResultFilterConfig {
         Self {
             limit: 10,
             min_score: 0.25,
+            max_content_tokens: 2000,
         }
     }
 }
@@ -412,6 +417,10 @@ pub struct SPSRGraphConfig {
     /// Workspace root for file existence checks. Relative segment paths
     /// resolve against it; absolute paths are checked directly. Missing files
     /// are downgraded to references. `None` skips the check entirely.
+    ///
+    /// Runtime-only: derived from the project registry, never read from or
+    /// written to the config file.
+    #[serde(skip)]
     pub workspace_root: Option<std::path::PathBuf>,
 }
 
@@ -595,6 +604,9 @@ pub struct SearchModuleConfig {
     /// `ResultFilter`).
     #[serde(default)]
     pub plugin: PluginSearchConfig,
+    /// Structure-preserving assembly of the final top-N results.
+    #[serde(default)]
+    pub assembly: SPSRGraphConfig,
 }
 
 /// Query-side plugin hook toggles.

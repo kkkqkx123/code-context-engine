@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use cce_types::EntityId;
 
+use super::content_reference::ContentState;
+
 /// Unified search result item
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -57,6 +59,8 @@ pub struct SearchResult {
     pub category: Option<String>,
     /// Whether the stored content was token-budget truncated during indexing.
     pub truncated: bool,
+    /// Whether `content` carries a full body or a file-and-range reference.
+    pub content_state: ContentState,
 }
 
 impl Default for SearchResult {
@@ -83,6 +87,7 @@ impl Default for SearchResult {
             pattern_info: None,
             category: None,
             truncated: false,
+            content_state: ContentState::Full,
         }
     }
 }

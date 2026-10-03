@@ -6,7 +6,8 @@
 
 use cce_utils::token_estimation::TokenEstimator;
 
-use super::types::{DowngradeReason, ExpandedUnit, ExpansionOrigin, SPSRGraphConfig};
+use super::types::{ExpandedUnit, ExpansionOrigin, SPSRGraphConfig};
+use crate::query::types::content_reference::DowngradeReason;
 
 /// Aggregated segment representing merged units
 #[derive(Debug, Clone)]
@@ -226,7 +227,7 @@ impl SegmentAggregator {
         omitted_end: u32,
     ) -> String {
         let marker = if gap > 0 {
-            format!("// ... omitted {gap} line(s) [{omitted_start}-{omitted_end}] ...\n")
+            format!("// [omitted] {gap} line(s) [{omitted_start}-{omitted_end}]\n")
         } else {
             String::new()
         };
@@ -304,11 +305,7 @@ mod tests {
         assert_eq!(result[0].start_line, 1);
         assert_eq!(result[0].end_line, 8);
         // Gap lines are reported with an omission marker, not blank-filled.
-        assert!(
-            result[0]
-                .code
-                .contains("// ... omitted 2 line(s) [4-5] ...")
-        );
+        assert!(result[0].code.contains("// [omitted] 2 line(s) [4-5]"));
         assert!(result[0].code.contains("fn foo()"));
         assert!(result[0].code.contains("fn bar()"));
     }
@@ -415,7 +412,7 @@ mod tests {
 
         // A marked expansion segment also opts out of merging.
         let mut marked = AggregatedSegment::from_unit(create_test_unit("src/a.rs", 6, 8, "bar"));
-        marked.marker = Some("// --> calls: bar".to_string());
+        marked.marker = Some("// [calls] bar".to_string());
         assert!(marked.has_relation());
     }
 }

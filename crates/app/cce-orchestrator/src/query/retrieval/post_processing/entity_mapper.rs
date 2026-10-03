@@ -10,9 +10,13 @@ use rusqlite::Connection;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
 use crate::query::types::SearchResult;
+use crate::query::types::content_reference::{
+    ContentState, DowngradeReason, file_level_reference, reference_content,
+};
 use cce_storage_sqlite::repo::ChunkRepository;
-use cce_storage_sqlite::source_reader::SourceFileCache;
+use cce_storage_sqlite::source_reader::{SourceFileCache, read_source_lines_cached};
 use cce_storage_sqlite::types::ChunkRecord;
+use cce_utils::token_estimation::estimate_tokens;
 
 /// Fetch chunk records by chunk IDs, resolving the full epoch view.
 ///
@@ -96,62 +100,107 @@ fn resolve_chunk_records(
 
 /// Batch-enrich results sharing one file-content cache.
 ///
-/// Multi-hit files are read once per batch instead of once per hit.
-/// Snippet and content are lazy-loaded from the source file on disk, so
-/// `project_root` must be resolved by the caller.
+/// Materialization is mandatory: every result either carries its full body
+/// (within the token budget) or a file-and-range reference. Metadata (file
+/// path, line range, kind) is taken from the chunk record; an unreadable file
+/// becomes a reference rather than an empty body.
 pub(crate) fn enrich_results(
     results: &mut [SearchResult],
     chunk_records: &HashMap<String, ChunkRecord>,
     project_root: Option<&std::path::Path>,
+    max_content_tokens: usize,
 ) {
     let mut cache = SourceFileCache::new();
     for result in results.iter_mut() {
-        enrich_from_chunk_cached(result, chunk_records, project_root, &mut cache);
+        materialize(
+            result,
+            chunk_records,
+            project_root,
+            &mut cache,
+            max_content_tokens,
+        );
     }
 }
 
-fn enrich_from_chunk_cached(
+fn materialize(
     result: &mut SearchResult,
     chunk_records: &HashMap<String, ChunkRecord>,
     project_root: Option<&std::path::Path>,
     cache: &mut SourceFileCache,
+    max_content_tokens: usize,
 ) {
-    if let Some(chunk) = chunk_records.get(&result.id) {
-        let source_text = cce_storage_sqlite::source_reader::read_source_lines_cached(
-            cache,
-            project_root,
-            &chunk.file_path,
-            chunk.start_line.max(0) as u32,
-            chunk.end_line.max(0) as u32,
-        );
-        result.snippet = Some(source_text.clone());
-        result.content = source_text;
-        result.file_path = chunk.file_path.clone();
-        result.start_line = chunk.start_line as u32;
-        result.end_line = chunk.end_line as u32;
-        result.kind = chunk.chunk_type.clone();
-        result.truncated = chunk.truncated != 0;
-
-        let entity_names: Vec<String> =
-            serde_json::from_str(&chunk.entity_names).unwrap_or_default();
-        if !entity_names.is_empty() {
-            // After hybrid expansion a result carries at most one entity; name
-            // it with that entity's own display name when available. Otherwise
-            // fall back to the first named entry (the group title).
-            result.name = choose_entity_name(&chunk.entity_ids, &entity_names, &result.entity_ids);
+    let Some(chunk) = chunk_records.get(&result.id) else {
+        // A file-level hit carries no chunk record by construction; point at
+        // the file instead of returning an empty body. A chunk hit without a
+        // record is left as retrieved.
+        if result.content.is_empty() && result.kind == "summary" {
+            result.content_state = ContentState::Reference(DowngradeReason::FileLevel);
+            result.content = file_level_reference(&result.file_path, DowngradeReason::FileLevel);
+            result.snippet = Some(result.content.clone());
         }
+        return;
+    };
 
-        let sqlite_entity_ids: Vec<i64> =
-            serde_json::from_str(&chunk.entity_ids).unwrap_or_default();
+    // Metadata is authoritative from the chunk record.
+    result.file_path = chunk.file_path.clone();
+    result.start_line = chunk.start_line.max(0) as u32;
+    result.end_line = chunk.end_line.max(0) as u32;
+    result.kind = chunk.chunk_type.clone();
+    result.truncated = chunk.truncated != 0;
 
-        if result.entity_ids.is_empty() {
-            // Fallback: populate entity_ids from SQLite if the payload/BM25
-            // index didn't carry them.
-            if !sqlite_entity_ids.is_empty() {
-                result.entity_ids = sqlite_entity_ids
-                    .iter()
-                    .map(|&id| cce_types::EntityId(id as u64))
-                    .collect();
+    let entity_names: Vec<String> = serde_json::from_str(&chunk.entity_names).unwrap_or_default();
+    if !entity_names.is_empty() {
+        // After hybrid expansion a result carries at most one entity; name
+        // it with that entity's own display name when available. Otherwise
+        // fall back to the first named entry (the group title).
+        result.name = choose_entity_name(&chunk.entity_ids, &entity_names, &result.entity_ids);
+    }
+
+    let sqlite_entity_ids: Vec<i64> = serde_json::from_str(&chunk.entity_ids).unwrap_or_default();
+    if result.entity_ids.is_empty() && !sqlite_entity_ids.is_empty() {
+        // Fallback: populate entity_ids from SQLite if the payload/BM25
+        // index didn't carry them.
+        result.entity_ids = sqlite_entity_ids
+            .iter()
+            .map(|&id| cce_types::EntityId(id as u64))
+            .collect();
+    }
+
+    // Body materialization: read the live source, then apply the budget.
+    match read_source_lines_cached(
+        cache,
+        project_root,
+        &chunk.file_path,
+        result.start_line,
+        result.end_line,
+    ) {
+        None => {
+            result.content_state = ContentState::Reference(DowngradeReason::FileMissing);
+            result.content = reference_content(
+                &chunk.file_path,
+                result.start_line,
+                result.end_line,
+                0,
+                DowngradeReason::FileMissing,
+            );
+            result.snippet = Some(result.content.clone());
+        }
+        Some(source_text) => {
+            let tokens = estimate_tokens(&source_text);
+            if tokens > max_content_tokens {
+                result.content_state = ContentState::Reference(DowngradeReason::OverLimit);
+                result.content = reference_content(
+                    &chunk.file_path,
+                    result.start_line,
+                    result.end_line,
+                    tokens,
+                    DowngradeReason::OverLimit,
+                );
+                result.snippet = Some(result.content.clone());
+            } else {
+                result.content_state = ContentState::Full;
+                result.snippet = Some(source_text.clone());
+                result.content = source_text;
             }
         }
     }
@@ -289,7 +338,7 @@ mod tests {
             ..Default::default()
         };
         let records = HashMap::from([("chunk_x".to_string(), chunk_record(&[7, 8]))]);
-        enrich_results(std::slice::from_mut(&mut result), &records, None);
+        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
 
         assert_eq!(result.entity_ids, vec![EntityId(7), EntityId(8)]);
     }
@@ -302,7 +351,7 @@ mod tests {
             ..Default::default()
         };
         let records = HashMap::from([("chunk_x".to_string(), chunk_record(&[7, 8]))]);
-        enrich_results(std::slice::from_mut(&mut result), &records, None);
+        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
 
         assert_eq!(result.entity_ids, vec![EntityId(7), EntityId(8)]);
     }
@@ -321,7 +370,7 @@ mod tests {
             name: "stale".to_string(),
             ..Default::default()
         };
-        enrich_results(std::slice::from_mut(&mut result), &records, None);
+        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
         assert_eq!(result.name, "beta");
     }
 
@@ -332,5 +381,133 @@ mod tests {
             "a"
         );
         assert_eq!(choose_entity_name("[1,2]", &[], &[EntityId(1)]), "");
+    }
+
+    fn write_source(dir: &std::path::Path, rel: &str, body: &str) {
+        let file = dir.join(rel);
+        std::fs::create_dir_all(file.parent().expect("parent")).expect("create dir");
+        std::fs::write(&file, body).expect("write source");
+    }
+
+    #[test]
+    fn materialize_downgrades_over_budget_body_to_reference() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_source(
+            dir.path(),
+            "src/big.rs",
+            &"let value = compute();\n".repeat(400),
+        );
+
+        let mut result = SearchResult {
+            id: "chunk_big".to_string(),
+            ..Default::default()
+        };
+        let records = HashMap::from([(
+            "chunk_big".to_string(),
+            ChunkRecord::new(
+                "chunk_big".to_string(),
+                "src/big.rs".to_string(),
+                "code".to_string(),
+                0,
+                399,
+            ),
+        )]);
+        enrich_results(
+            std::slice::from_mut(&mut result),
+            &records,
+            Some(dir.path()),
+            50,
+        );
+
+        assert_eq!(
+            result.content_state,
+            ContentState::Reference(DowngradeReason::OverLimit)
+        );
+        assert!(result.content.contains("[reference] src/big.rs:0-399"));
+        assert!(result.content.contains("over budget"));
+        assert_eq!(result.start_line, 0);
+        assert_eq!(result.end_line, 399);
+    }
+
+    #[test]
+    fn materialize_missing_file_becomes_reference() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut result = SearchResult {
+            id: "chunk_gone".to_string(),
+            ..Default::default()
+        };
+        let records = HashMap::from([(
+            "chunk_gone".to_string(),
+            ChunkRecord::new(
+                "chunk_gone".to_string(),
+                "src/gone.rs".to_string(),
+                "code".to_string(),
+                3,
+                9,
+            ),
+        )]);
+        enrich_results(
+            std::slice::from_mut(&mut result),
+            &records,
+            Some(dir.path()),
+            2000,
+        );
+
+        assert_eq!(
+            result.content_state,
+            ContentState::Reference(DowngradeReason::FileMissing)
+        );
+        assert!(result.content.contains("[reference] src/gone.rs:3-9"));
+        assert!(result.content.contains("not found"));
+    }
+
+    #[test]
+    fn materialize_keeps_body_within_budget() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_source(dir.path(), "src/small.rs", "fn a() {}\nfn b() {}\n");
+
+        let mut result = SearchResult {
+            id: "chunk_small".to_string(),
+            ..Default::default()
+        };
+        let records = HashMap::from([(
+            "chunk_small".to_string(),
+            ChunkRecord::new(
+                "chunk_small".to_string(),
+                "src/small.rs".to_string(),
+                "code".to_string(),
+                0,
+                1,
+            ),
+        )]);
+        enrich_results(
+            std::slice::from_mut(&mut result),
+            &records,
+            Some(dir.path()),
+            2000,
+        );
+
+        assert_eq!(result.content_state, ContentState::Full);
+        assert_eq!(result.content, "fn a() {}\nfn b() {}");
+        assert_eq!(result.start_line, 0);
+        assert_eq!(result.end_line, 1);
+    }
+
+    #[test]
+    fn materialize_summary_without_record_gets_file_level_reference() {
+        let mut result = SearchResult {
+            id: "summary::src/lib.rs".to_string(),
+            kind: "summary".to_string(),
+            file_path: "src/lib.rs".to_string(),
+            ..Default::default()
+        };
+        let records = HashMap::new();
+        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
+
+        assert_eq!(
+            result.content_state,
+            ContentState::Reference(DowngradeReason::FileLevel)
+        );
+        assert!(result.content.contains("[reference] src/lib.rs"));
     }
 }

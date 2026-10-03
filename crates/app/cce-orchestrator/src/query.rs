@@ -31,8 +31,9 @@
 //!         ├── Call chain queries / path finding / inheritance
 //!         └── GraphService (ego graph, shortest path, components, export)
 //!
-//! Dormant: assembly/ (SPSR-Graph) is disconnected from the online pipeline;
-//! it is kept only for the offline assembly-review example in cce-e2e-tests.
+//! Optional post-processing: when `search.assembly.enable_assembly` is set,
+//! the final top-N results are assembled with structure-preserving file and
+//! relation markers after ranking (assembly/ module), leaving order untouched.
 //!
 //! Tools Module (code analysis tools, outside the query pipeline)
 //!     ├── SymbolLookup (symbol lookup: find references, goto definition)

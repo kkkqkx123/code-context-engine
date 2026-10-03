@@ -42,22 +42,12 @@
 //!     .await?;
 //! ```
 //!
-//! # Status (dormant)
+//! # Relation expansion
 //!
-//! This module is currently disconnected from the search pipeline: the
-//! `ExecutionStrategy::WithAssembly` entry point and the `Searcher`
-//! assembly handler were removed because their benefit was never validated
-//! (see `docs/plan/tests/assembly-review-export-design.md`). The module is
-//! kept for the offline assembly-review example in `cce-e2e-tests`, which
-//! generates per-query assembled outputs for manual inspection. Once that
-//! review produces a verdict, either re-integrate the module behind a
-//! config gate or delete it entirely.
-//!
-//! Relation expansion is now driven by the caller: `assemble_single` takes
-//! pre-resolved forward (callee) and backward (caller) [`ExpandedUnit`]s and
-//! only performs structure-preserving concatenation, dedup and budget
-//! capping. Graph traversal itself lives on the caller side (the review
-//! example reads call edges from the benchmark relation sidecar).
+//! Relation expansion is caller-driven: `assemble_single` takes pre-resolved
+//! forward (callee) and backward (caller) [`ExpandedUnit`]s and only performs
+//! structure-preserving concatenation, dedup and budget capping. Graph
+//! traversal itself lives on the caller side.
 //!
 //! The caller owns path/visibility policy: expansion units must be filtered
 //! against the query's exclusion rules (path filters, epoch view) *before*
@@ -72,12 +62,11 @@
 //! owned by `assembly_top_n` and the score threshold, never by a batch token
 //! cap.
 //!
-//! The `#[allow(dead_code)]` below suppresses the resulting unused warnings
-//! and MUST be removed together with the final resolution.
-
-// Dormant module: kept only for the offline assembly-review example.
-// See the "Status (dormant)" section above for the resolution plan.
-#![allow(dead_code)]
+//! # Integration
+//!
+//! When `search.assembly.enable_assembly` is set, the searcher assembles the
+//! final top-N results after ranking and thresholding (see
+//! `searcher::post_processing`), leaving ordering untouched.
 
 pub mod aggregator;
 pub mod assembler;
@@ -92,7 +81,6 @@ pub use assembler::SPSRGraphAssembler;
 pub use concatenator::StructureConcatenator;
 pub use error::{AssemblyError, Result};
 pub use types::{
-    AssembledResult, AssemblyMetadata, DedupStrategy, DowngradeReason, ExpandedUnit,
-    ExpansionOrigin, FileInfo, SPSRGraphConfig, SearchResultInput, SemanticUnitType,
-    reference_content,
+    AssembledResult, AssemblyMetadata, DedupStrategy, ExpandedUnit, ExpansionOrigin, FileInfo,
+    SPSRGraphConfig, SearchResultInput, SemanticUnitType,
 };

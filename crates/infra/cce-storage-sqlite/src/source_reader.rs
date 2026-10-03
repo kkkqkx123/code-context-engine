@@ -131,29 +131,31 @@ impl Default for SourceFileCache {
 /// Cached variant of [`read_source_lines`].
 ///
 /// The file is read at most once per cache lifetime; subsequent hits in the
-/// same file slice the cached content. Missing files still degrade to empty.
+/// same file slice the cached content. Returns `None` when the file cannot be
+/// read, so callers can distinguish an unreadable file from an empty range;
+/// an empty range yields `Some("")`.
 pub fn read_source_lines_cached(
     cache: &mut SourceFileCache,
     project_root: Option<&Path>,
     file_path: &str,
     start_line: u32,
     end_line: u32,
-) -> String {
-    if end_line < start_line {
-        return String::new();
-    }
+) -> Option<String> {
     let candidate = SourceFileCache::resolve_candidate(project_root, file_path);
-    let Some(content) = cache.file_content(&candidate) else {
-        return String::new();
-    };
+    let content = cache.file_content(&candidate)?;
+    if end_line < start_line {
+        return Some(String::new());
+    }
     let start = start_line as usize;
     let end = (end_line as usize + 1).min(content.lines().count());
-    content
-        .lines()
-        .skip(start)
-        .take(end.saturating_sub(start))
-        .collect::<Vec<_>>()
-        .join("\n")
+    Some(
+        content
+            .lines()
+            .skip(start)
+            .take(end.saturating_sub(start))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 #[cfg(test)]

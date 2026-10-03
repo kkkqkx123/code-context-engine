@@ -357,12 +357,12 @@ mod tests {
         assert!(
             result
                 .assembled_content
-                .contains("// --> calls: b (src/b.rs:1-3)")
+                .contains("// [calls] b (src/b.rs:1-3)")
         );
         assert!(
             result
                 .assembled_content
-                .contains("// <-- called by: c (src/c.rs:1-3)")
+                .contains("// [called by] c (src/c.rs:1-3)")
         );
     }
 
@@ -409,7 +409,7 @@ mod tests {
             .expect("assembly ok");
         assert_eq!(result.metadata.forward_nodes, 1);
         assert_eq!(result.metadata.backward_nodes, 0);
-        assert!(!result.assembled_content.contains("<--"));
+        assert!(!result.assembled_content.contains("called by"));
     }
 
     #[tokio::test]

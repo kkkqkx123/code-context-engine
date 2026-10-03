@@ -241,7 +241,12 @@ impl Searcher {
 
         results = self.apply_glob_filter(results, options)?;
         self.apply_score_normalization(&mut results, options);
-        self.enrich_results(&mut results, options.project_id, query_filter);
+        self.enrich_results(
+            &mut results,
+            options.project_id,
+            query_filter,
+            options.config.result.max_content_tokens,
+        );
         self.post_process_results(results, options).await
     }
 
@@ -358,7 +363,12 @@ impl Searcher {
         // `sources.summary` in hybrid mode means "boost fused hits by file
         // summary relevance", mirroring the dense-path boost.
         self.apply_summary_boost(&mut fused_results, options).await;
-        self.enrich_results(&mut fused_results, options.project_id, query_filter);
+        self.enrich_results(
+            &mut fused_results,
+            options.project_id,
+            query_filter,
+            options.config.result.max_content_tokens,
+        );
         self.post_process_results(fused_results, options).await
     }
 
@@ -407,7 +417,12 @@ impl Searcher {
             self.apply_summary_boost(&mut results, options).await;
         }
 
-        self.enrich_results(&mut results, options.project_id, query_filter);
+        self.enrich_results(
+            &mut results,
+            options.project_id,
+            query_filter,
+            options.config.result.max_content_tokens,
+        );
         self.post_process_results(results, options).await
     }
 
@@ -499,6 +514,7 @@ impl Searcher {
         results: &mut [SearchResult],
         project_id: i64,
         query_filter: &QueryFilter,
+        max_content_tokens: usize,
     ) {
         use crate::query::retrieval::post_processing::{
             enrich_results as enrich_results_batch, get_chunk_records,
@@ -519,7 +535,12 @@ impl Searcher {
             Ok(Some(records)) => {
                 let project_root =
                     cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
-                enrich_results_batch(results, &records, project_root.as_deref());
+                enrich_results_batch(
+                    results,
+                    &records,
+                    project_root.as_deref(),
+                    max_content_tokens,
+                );
             }
             Ok(None) => {}
             Err(e) => {

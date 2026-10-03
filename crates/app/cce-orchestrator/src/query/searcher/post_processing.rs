@@ -79,7 +79,72 @@ impl Searcher {
             .threshold_filter
             .apply(sorted_results, &options.config)?;
 
+        // Step 4: Optional structure-preserving assembly of the top-N
+        // survivors. Runs after ranking so ordering is never touched.
+        if options.config.assembly.enable_assembly {
+            return Ok(self
+                .assemble_results(final_results, &options.config.assembly)
+                .await);
+        }
+
         Ok(final_results)
+    }
+
+    /// Assemble the top-N results with structure-preserving markers.
+    ///
+    /// Runs after ranking and thresholding so it never affects ordering. Only
+    /// body-bearing results are assembled: a reference line already names its
+    /// file and range, and re-wrapping it would duplicate the path. Assembly
+    /// failures degrade to the unassembled body.
+    async fn assemble_results(
+        &self,
+        mut results: Vec<SearchResult>,
+        config: &crate::query::assembly::SPSRGraphConfig,
+    ) -> Vec<SearchResult> {
+        use crate::query::assembly::{SPSRGraphAssembler, SearchResultInput};
+
+        let assembler = SPSRGraphAssembler::new(config.clone());
+        let top_n = config.assembly_top_n.min(results.len());
+        for result in results.iter_mut().take(top_n) {
+            if result.content_state.is_reference() {
+                continue;
+            }
+            let line_count = result.content.lines().count();
+            if line_count == 0 {
+                continue;
+            }
+            let input = SearchResultInput {
+                id: result.id.clone(),
+                entity_id: result.entity_ids.first().copied(),
+                name: result.name.clone(),
+                kind: result.kind.clone(),
+                file_path: result.file_path.clone(),
+                // The body is already the exact unit; a 1-based whole-unit
+                // range makes extraction identity, so absolute line metadata
+                // stays owned by the result itself.
+                start_line: 1,
+                end_line: u32::try_from(line_count).unwrap_or(u32::MAX),
+                content: result.content.clone(),
+                score: result.score,
+            };
+            match assembler
+                .assemble_single(input, Vec::new(), Vec::new())
+                .await
+            {
+                Ok(assembled) => {
+                    result.content = assembled.assembled_content;
+                    result.snippet = Some(result.content.clone());
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        result_id = %result.id,
+                        %error,
+                        "Assembly failed; keeping unassembled body"
+                    );
+                }
+            }
+        }
+        results
     }
 
     /// Apply the `QueryRewrite` capability chain: each plugin rewrites the

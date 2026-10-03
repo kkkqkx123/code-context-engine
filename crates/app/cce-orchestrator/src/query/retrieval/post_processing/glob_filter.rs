@@ -140,6 +140,7 @@ mod tests {
             metadata: HashMap::new(),
             pattern_info: None,
             category: None,
+            content_state: crate::query::types::ContentState::Full,
         }
     }
 
