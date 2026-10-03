@@ -344,9 +344,11 @@ timeout_ms = 5000
 # Hybrid fusion: how vector + BM25 recall paths combine.
 # vector_weight = 0.5
 # bm25_weight = 0.5
-# algorithm = "weighted_min_max"  # "weighted_min_max" | "weighted_sum" |
-#                                 # "borda_count" | { rrf = { k = 60 } }
-# include_single_path = true
+# algorithm = "weighted_min_max"  # "weighted_min_max" | "borda_count" |
+#                                 # { rrf = { k = 60 } }
+# include_single_path = true  # controls BM25-only keys only; vector-only
+#                             # keys are always kept (vector path is the
+#                             # primary semantic recall)
 # min_score = 0.0  # interpreted on the algorithm scale (see docs)
 # dedup_by_chunk = true
 # enable_intent_based_weights = true

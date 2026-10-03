@@ -1,5 +1,6 @@
 //! Type definitions for the code context engine
 
+pub mod alignment;
 pub mod ast_to_nl;
 pub mod chunk_refs;
 pub mod entity;
@@ -24,6 +25,8 @@ pub use language::{ContentRoute, FileType, Language, LanguageInfo};
 pub use literal::{LiteralKind, classify_numeric_literal, literal_type_name};
 
 pub const INDEX_FORMAT_VERSION: u32 = 2;
+
+pub use alignment::{alignment_key, entity_alignment_key};
 
 pub use chunk_refs::ChunkEntityRefs;
 

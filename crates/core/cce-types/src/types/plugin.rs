@@ -339,7 +339,7 @@ pub struct FusionWeights {
     /// Minimum fusion score threshold.
     pub min_score: Option<f32>,
     /// Fusion algorithm override. One of `"weighted_min_max"`,
-    /// `"weighted_sum"`, `"rrf"`, `"borda_count"`; unknown names are ignored
+    /// `"rrf"`, `"borda_count"`; unknown names are ignored
     /// by the host. Only parsed when the host supports algorithm override;
     /// absent means "keep the configured algorithm".
     #[serde(default)]

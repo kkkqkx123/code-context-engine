@@ -253,7 +253,7 @@ fn apply_logger_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
 ///
 /// ```
 /// unsafe { std::env::set_var("TEST_API_KEY", "sk-test") };
-/// let result = cce_core::config::env_loader::resolve_env_placeholders("${TEST_API_KEY}");
+/// let result = cce_config::env_loader::resolve_env_placeholders("${TEST_API_KEY}");
 /// assert_eq!(result, "sk-test");
 /// unsafe { std::env::remove_var("TEST_API_KEY") };
 /// ```

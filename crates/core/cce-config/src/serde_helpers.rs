@@ -14,7 +14,7 @@ use serde::{Deserialize, Deserializer};
 ///
 /// ```rust
 /// use serde::Deserialize;
-/// use cce_core::config::serde_helpers::empty_string_as_none;
+/// use cce_config::serde_helpers::empty_string_as_none;
 ///
 /// #[derive(Deserialize)]
 /// struct Config {
@@ -41,7 +41,7 @@ where
 ///
 /// ```rust
 /// use serde::Serialize;
-/// use cce_core::config::serde_helpers::none_as_empty_string;
+/// use cce_config::serde_helpers::none_as_empty_string;
 ///
 /// #[derive(Serialize)]
 /// struct Config {

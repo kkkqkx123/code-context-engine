@@ -6,24 +6,8 @@ use crate::query::types::SearchResult;
 
 /// Derive the cross-path alignment key for a search result.
 ///
-/// Priority: the first entity in `entity_ids` for code chunks, `segment_id`
-/// for document/plain-text chunks, chunk id as the final fallback so unkeyed
-/// results survive as individual single-path entries instead of collapsing
-/// onto one shared key or being dropped entirely. Returns `None` only when
-/// every key source is empty.
-///
-/// The fallback uses the raw chunk id without normalization: the embedding
-/// and BM25 paths chunk independently, so their ids for the "same" logical
-/// block intentionally differ and must not be force-aligned by string surgery
-/// at read time. Any chunk reaching this branch lacks both entity and segment
-/// identity; the index side guarantees a non-empty `segment_id` at write time
-/// (see `storage_coordinator.rs`), so this branch should be effectively
-/// unreachable in production. When it does fire we log instead of silently
-/// degrading.
-///
-/// Results are expected to be pre-expanded so `entity_ids` holds at most one
-/// element for code chunks and the alignment key resolves to a single entity;
-/// fusion expands unexpanded input defensively before deriving keys.
+/// Delegates to the shared derivation in `cce_types`, which is the single
+/// source of truth also consumed by the offline benchmark/e2e mirror.
 ///
 /// Exposed so the aggregation dedup in `query/coordinator.rs` derives the same
 /// key format as hybrid fusion instead of duplicating it with a bare `{id}`.
@@ -32,23 +16,14 @@ pub fn alignment_key(
     segment_id: Option<&str>,
     chunk_id: &str,
 ) -> Option<String> {
-    match entity_ids.first() {
-        Some(eid) => Some(format!("e:{}", eid.0)),
-        None => segment_id
-            .filter(|s| !s.is_empty())
-            .map(|s| format!("s:{}", s))
-            .or_else(|| {
-                if chunk_id.is_empty() {
-                    None
-                } else {
-                    tracing::trace!(
-                        chunk_id,
-                        "Hybrid alignment key fell back to raw chunk id (no entity_id/segment_id)"
-                    );
-                    Some(format!("c:{}", chunk_id))
-                }
-            }),
+    let key = cce_types::alignment_key(entity_ids, segment_id, chunk_id);
+    if key.is_none() {
+        tracing::trace!(
+            chunk_id,
+            "Hybrid alignment key could not be derived (no entity_id/segment_id/chunk_id)"
+        );
     }
+    key
 }
 
 /// Cross-path alignment coverage between the vector and BM25 result sets.

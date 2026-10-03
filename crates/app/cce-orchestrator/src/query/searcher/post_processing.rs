@@ -285,7 +285,6 @@ fn parse_plugin_algorithm(
     use cce_config::modules::search::FusionAlgorithm;
     match name {
         "weighted_min_max" | "minmax" => Some(FusionAlgorithm::WeightedMinMax),
-        "weighted_sum" | "combsum" => Some(FusionAlgorithm::WeightedSum),
         "rrf" | "reciprocal_rank_fusion" => {
             let k = rrf_k.unwrap_or(60);
             if k == 0 {

@@ -4,8 +4,8 @@
 //! alignment-key level (entity id, else segment id, else chunk id). The
 //! [`FusionAlgorithm`](cce_config::modules::search::FusionAlgorithm)
 //! selected in `[search.fusion]` decides how per-key scores combine:
-//! normalized weighted sum (default), raw weighted sum, reciprocal rank
-//! fusion, or weight-aware Borda count.
+//! normalized weighted sum (default), reciprocal rank fusion, or
+//! weight-aware Borda count.
 //!
 //! Per-query-intent weight profiles and plugin weight overrides only swap
 //! the weight pair; they never change the algorithm implicitly.
@@ -800,57 +800,11 @@ mod tests {
         );
     }
 
-    fn weighted_sum_config() -> HybridFusionConfig {
-        HybridFusionConfig {
-            algorithm: cce_config::modules::search::FusionAlgorithm::WeightedSum,
-            ..HybridFusionConfig::default()
-        }
-    }
-
     fn borda_config() -> HybridFusionConfig {
         HybridFusionConfig {
             algorithm: cce_config::modules::search::FusionAlgorithm::BordaCount,
             ..HybridFusionConfig::default()
         }
-    }
-
-    #[test]
-    fn test_weighted_sum_combines_raw_scores() {
-        // No normalization: e1 = 0.5*0.9 + 0.5*0.9 = 0.9,
-        // e2 = 0.5*0.8 + 0.5*0.5 = 0.65.
-        let fused = fuse_hybrid_results(
-            vec![
-                make_vector_result("emb_1", 1, 0.9),
-                make_vector_result("emb_2", 2, 0.8),
-            ],
-            vec![
-                make_bm25_result("bm25_1", 1, 0.9),
-                make_bm25_result("bm25_2", 2, 0.5),
-            ],
-            &weighted_sum_config(),
-        );
-        assert_eq!(fused.len(), 2);
-        assert_eq!(fused[0].entity_ids, vec![EntityId(1)]);
-        assert!((fused[0].score - 0.9).abs() < 1e-6);
-        assert!((fused[1].score - 0.65).abs() < 1e-6);
-        // Raw per-path scores stay untouched under weighted sum.
-        assert!((fused[0].vector_score - 0.9).abs() < 1e-6);
-        assert_eq!(
-            fused[0].bm25_score.map(|s| (s - 0.9).abs() < 1e-6),
-            Some(true)
-        );
-    }
-
-    #[test]
-    fn test_weighted_sum_single_path_skips_normalization() {
-        // A lone key keeps weight * raw instead of being normalized to 1.0.
-        let fused = fuse_hybrid_results(
-            vec![make_vector_result("emb_3", 3, 0.8)],
-            vec![],
-            &weighted_sum_config(),
-        );
-        assert_eq!(fused.len(), 1);
-        assert!((fused[0].score - 0.5 * 0.8).abs() < 1e-6);
     }
 
     #[test]

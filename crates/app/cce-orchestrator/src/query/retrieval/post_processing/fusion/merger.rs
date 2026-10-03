@@ -113,9 +113,6 @@ pub fn fuse_hybrid_results_with_stats(
         FusionAlgorithm::WeightedMinMax => {
             fuse_weighted_minmax(vector_results, bm25_results, config, stats)
         }
-        FusionAlgorithm::WeightedSum => {
-            fuse_weighted_sum(vector_results, bm25_results, config, stats)
-        }
         FusionAlgorithm::Rrf { k } => {
             fuse_rrf(vector_results, bm25_results, config, k.max(1), stats)
         }
@@ -261,112 +258,6 @@ fn fuse_weighted_minmax(
         };
 
         let fused_score = alpha * v_norm + beta * b_norm;
-
-        if fused_score < config.min_score {
-            continue;
-        }
-
-        let mut result = base_result;
-        result.score = fused_score;
-        result.original_score = fused_score;
-        result.sources = vec!["hybrid".to_string()];
-
-        fused.push(result);
-    }
-
-    (finish_fused(fused, config.dedup_by_chunk), stats)
-}
-
-/// Weighted raw-score sum (CombSUM-style): combine each path's best per-key
-/// raw score without normalization as
-/// `score = alpha * raw(vector) + beta * raw(bm25)`.
-///
-/// Unlike min-max this preserves absolute score gaps and never collapses a
-/// single-key path to full credit, but it requires comparable raw scales:
-/// vector cosine scores sit near [0, 1] while BM25 scores are unbounded, so
-/// the weights usually need retuning when switching to this algorithm (a
-/// BM25-heavy weight pair compensates the scale gap). Per-path score fields
-/// on the output keep the raw values; `min_score` is interpreted on the
-/// raw weighted-sum scale.
-fn fuse_weighted_sum(
-    vector_results: Vec<SearchResult>,
-    bm25_results: Vec<SearchResult>,
-    config: &super::HybridFusionConfig,
-    stats: FusionAlignmentStats,
-) -> (Vec<SearchResult>, FusionAlignmentStats) {
-    let alpha = config.vector_weight;
-    let beta = config.bm25_weight;
-
-    let vector_by_key = best_per_key(&vector_results, |r| r.vector_score);
-    let bm25_by_key = best_per_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
-    let all_keys = union_keys(&vector_by_key, &bm25_by_key, config.include_single_path);
-
-    if vector_results.is_empty() || bm25_results.is_empty() {
-        if vector_results.is_empty() {
-            return fuse_single_path(
-                &bm25_results,
-                |r| r.bm25_score.unwrap_or(0.0),
-                beta,
-                false,
-                config,
-                stats,
-                false,
-            );
-        }
-        return fuse_single_path(
-            &vector_results,
-            |r| r.vector_score,
-            alpha,
-            true,
-            config,
-            stats,
-            false,
-        );
-    }
-
-    let mut fused: Vec<SearchResult> = Vec::with_capacity(all_keys.len());
-
-    for key in all_keys {
-        let vec_entry = vector_by_key.get(&key);
-        let bm25_entry = bm25_by_key.get(&key);
-
-        let (base_result, v_raw, b_raw) = match (vec_entry, bm25_entry) {
-            (Some(&(vi, vn)), Some(&(bi, bn))) => {
-                let v_contrib = alpha * vn;
-                let b_contrib = beta * bn;
-                let base = if v_contrib >= b_contrib {
-                    let mut b = vector_results[vi].clone();
-                    b.bm25_score = bm25_results[bi].bm25_score;
-                    b
-                } else {
-                    let mut b = bm25_results[bi].clone();
-                    b.vector_score = vector_results[vi].vector_score;
-                    b
-                };
-                (base, vn, bn)
-            }
-            (Some(&(vi, vn)), None) => {
-                if config.include_single_path {
-                    (vector_results[vi].clone(), vn, 0.0)
-                } else {
-                    continue;
-                }
-            }
-            (None, Some(&(bi, bn))) => {
-                if config.include_single_path {
-                    let mut base = bm25_results[bi].clone();
-                    base.vector_score = 0.0;
-                    (base, 0.0, bn)
-                } else {
-                    continue;
-                }
-            }
-            (None, None) => {
-                unreachable!("all_keys only contains keys present in at least one path")
-            }
-        };
-
-        let fused_score = alpha * v_raw + beta * b_raw;
 
         if fused_score < config.min_score {
             continue;

@@ -121,7 +121,7 @@ impl Default for VectorRetrievalConfig {
 /// Each variant carries its own parameters so adding an algorithm only
 /// requires a new variant plus its merger implementation; the surrounding
 /// pipeline (alignment keys, coverage stats, dedup, sorting) is shared.
-/// TOML form: `"weighted_min_max"` / `"weighted_sum"` / `"borda_count"` for
+/// TOML form: `"weighted_min_max"` / `"borda_count"` for
 /// the parameter-free variants, `{ rrf = { k = 60 } }` for RRF.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -131,12 +131,6 @@ pub enum FusionAlgorithm {
     /// combination. Sensitive to per-query score distribution outliers.
     #[default]
     WeightedMinMax,
-    /// Weighted raw-score sum (CombSUM-style): combine each path's best
-    /// per-key raw score without normalization. Preserves absolute score
-    /// gaps; only use when both paths emit comparable scales, otherwise
-    /// retune the weights (BM25 raw scores are unbounded while vector
-    /// cosine scores sit near [0, 1]).
-    WeightedSum,
     /// Reciprocal Rank Fusion: score = w_v/(k+rank_v) + w_b/(k+rank_b), using
     /// ranks only, so the result is robust to raw score distribution skew.
     Rrf { k: u32 },
@@ -183,11 +177,17 @@ pub struct HybridFusionConfig {
     pub intent_weights: QueryIntentWeights,
     /// Whether to enable query-intent-based dynamic weight selection
     pub enable_intent_based_weights: bool,
-    /// Whether to include items that only appear in one path
+    /// Whether to include items that only appear in one path.
+    ///
+    /// The semantics are asymmetric by design: vector-only keys are always
+    /// kept, and this switch only controls whether BM25-only keys join the
+    /// fused list. The vector path is treated as the primary semantic recall,
+    /// so dropping its single-path hits is never desired; the switch instead
+    /// governs the noisy BM25-only tail (e.g. keyword mentions with no
+    /// semantic match).
     pub include_single_path: bool,
     /// Minimum fused score threshold. The scale depends on the algorithm:
-    /// weighted min-max yields roughly `[0, w_v + w_b]`, weighted sum is on
-    /// the raw-score scale (unbounded for BM25), RRF yields
+    /// weighted min-max yields roughly `[0, w_v + w_b]`, RRF yields
     /// `(0, (w_v + w_b) / (k + 1)]`, Borda yields points up to
     /// `w_v * vector_keys + w_b * bm25_keys`.
     pub min_score: f32,
@@ -257,12 +257,37 @@ fn validate_weight(field: &str, value: f32, errors: &mut Vec<ConfigValidationErr
     }
 }
 
+/// Require a vector/bm25 weight pair to sum to 1.
+///
+/// The fused score, the single-path score, and therefore `min_score` are all
+/// interpreted on the `[0, 1]` scale only when the weights are complementary;
+/// a pair summing to something else silently rescales every threshold.
+fn validate_weight_pair_sum(
+    field: &str,
+    vector: f32,
+    bm25: f32,
+    errors: &mut Vec<ConfigValidationError>,
+) {
+    if vector.is_finite() && bm25.is_finite() && (vector + bm25 - 1.0).abs() > 1e-4 {
+        errors.push(ConfigValidationError::invalid_field(
+            field,
+            "vector_weight + bm25_weight must sum to 1.0",
+        ));
+    }
+}
+
 impl Validate for HybridFusionConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
         validate_weight("vector_weight", self.vector_weight, &mut errors);
         validate_weight("bm25_weight", self.bm25_weight, &mut errors);
+        validate_weight_pair_sum(
+            "vector_weight",
+            self.vector_weight,
+            self.bm25_weight,
+            &mut errors,
+        );
         for (name, w) in [
             ("intent_weights.semantic", &self.intent_weights.semantic),
             ("intent_weights.keyword", &self.intent_weights.keyword),
@@ -275,6 +300,7 @@ impl Validate for HybridFusionConfig {
                 &mut errors,
             );
             validate_weight(&format!("{name}.bm25_weight"), w.bm25_weight, &mut errors);
+            validate_weight_pair_sum(name, w.vector_weight, w.bm25_weight, &mut errors);
         }
         if !self.min_score.is_finite() || self.min_score < 0.0 {
             errors.push(ConfigValidationError::invalid_field(
@@ -1062,6 +1088,17 @@ mod tests {
         config.min_score = 0.0;
 
         config.algorithm = FusionAlgorithm::Rrf { k: 0 };
+        assert!(config.validate_structured().is_err());
+        config.algorithm = FusionAlgorithm::default();
+
+        config.bm25_weight = 0.6;
+        assert!(config.validate_structured().is_err());
+        config.bm25_weight = 0.5;
+
+        config.intent_weights.semantic = HybridWeightConfig {
+            vector_weight: 0.9,
+            bm25_weight: 0.2,
+        };
         assert!(config.validate_structured().is_err());
     }
 }

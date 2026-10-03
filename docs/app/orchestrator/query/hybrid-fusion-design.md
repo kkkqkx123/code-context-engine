@@ -51,7 +51,7 @@ Each path's scores are min-max normalized independently to [0.0, 1.0]. This make
 
 **Limitation**: Single-result paths get normalized to 1.0 (no distribution to normalize against). This is intentional — the path weight fully controls the contribution, rather than imposing an arbitrary penalty. Cross-path score calibration (e.g., vector cosine vs BM25 TF-IDF) is not addressed by min-max; users should tune weights based on empirical results.
 
-**Alternatives considered**: Z-score normalization (requires historical statistics), rank-based fusion (loses score magnitude), learned calibration (requires labeled data). Min-max chosen for simplicity; see `score-normalization-analysis.md` for detailed comparison.
+**Alternatives considered**: Z-score normalization (requires historical statistics), rank-based fusion (loses score magnitude), learned calibration (requires labeled data). Min-max chosen for simplicity; rank-based fusion is available as the `rrf` / `borda_count` algorithms.
 
 ### Step 2: Best-Score-Per-Key Selection
 

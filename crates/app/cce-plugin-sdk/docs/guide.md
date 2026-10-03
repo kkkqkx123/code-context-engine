@@ -195,7 +195,7 @@ cargo build --release
 - **RelationExtract**：向关系索引补充框架特定符号与显式关系（如 Spring `@Bean` 注入）。实现 `extract_symbols(...)` / `extract_relations(...)`，返回 `PluginSymbol` / `PluginRelation` 数组；宿主将符号注册进项目符号表、关系经解析器解析为 `SymbolKey → entity_id`（无法解析的目标丢弃并告警）。默认关闭，需 `relation.plugin_symbols_enabled = true`。
 - **SymbolExtract**：自定义语言的 import/export 符号提取，配合 `AstLanguage` 使用。实现 `extract_imports(content, file_path, language)` / `extract_exports(...)`，返回 `PluginImport` / `PluginExport` 数组；宿主将其转换为标准化 import/export 进入关系索引（默认关闭，需 `relation.plugin_symbol_extract_enabled = true`）。
 - **QueryRewrite**：召回前改写 / 扩展查询（链式档）。返回 `QueryRewriteResult { rewritten_query, expansion_terms }`；原始查询保留为兜底项。
-- **Fusion**：覆写混合融合权重与算法（覆盖档，首个非 `None` 生效）。返回 `FusionWeights { vector_weight, bm25_weight, min_score, algorithm, rrf_k }`，权重由宿主校验至 `[0, 1]`；`algorithm` 为算法名（`weighted_min_max` / `weighted_sum` / `rrf` / `borda_count`，未知名忽略），`rrf_k` 仅配合 `rrf` 使用（缺省 60，零值拒绝）。
+- **Fusion**：覆写混合融合权重与算法（覆盖档，首个非 `None` 生效）。返回 `FusionWeights { vector_weight, bm25_weight, min_score, algorithm, rrf_k }`，权重由宿主校验至 `[0, 1]`；`algorithm` 为算法名（`weighted_min_max` / `rrf` / `borda_count`，未知名忽略），`rrf_k` 仅配合 `rrf` 使用（缺省 60，零值拒绝）。
 - **ResultFilter**：重排后按 id 移除 / 增益 / 标注候选（链式档）。返回 `ResultFilterEntry { id, remove, boost, note }` 数组。
 - **FileFilter**：扫描期文件纳入 / 排除决策（覆盖档，首个非 `Neutral` 生效）。返回 `FileFilterDecision`（`include` / `exclude` / `neutral`）；`Neutral` 交由内置 `PatternMatcher`。
 
