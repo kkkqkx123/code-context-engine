@@ -570,6 +570,7 @@ mod tests {
                     priority,
                     capabilities: Vec::new(),
                     capability_priorities: std::collections::HashMap::new(),
+                    capability_timeouts: std::collections::HashMap::new(),
                     description: None,
                 },
                 parse: None,

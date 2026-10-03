@@ -276,6 +276,7 @@ impl QueryMockPlugin {
                 priority,
                 capabilities: Vec::new(),
                 capability_priorities: std::collections::HashMap::new(),
+                capability_timeouts: std::collections::HashMap::new(),
                 description: None,
             },
             rewrite: None,

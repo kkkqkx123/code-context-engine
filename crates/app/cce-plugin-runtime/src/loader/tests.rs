@@ -896,7 +896,11 @@ fn test_infinite_loop_times_out() {
                 end
             }
         "#;
-    let plugin = LuaPlugin::with_timeout(script, Duration::from_millis(300)).expect("plugin loads");
+    let mut plugin = LuaPlugin::from_script(script).expect("plugin loads");
+    plugin
+        .metadata
+        .capability_timeouts
+        .insert("generate_bm25".to_string(), 300);
     let start = std::time::Instant::now();
     let result = plugin.generate_bm25(&empty_group());
     assert!(
@@ -920,7 +924,11 @@ fn test_vm_pool_usable_after_timeout() {
                 end
             }
         "#;
-    let plugin = LuaPlugin::with_timeout(script, Duration::from_millis(200)).expect("plugin loads");
+    let mut plugin = LuaPlugin::from_script(script).expect("plugin loads");
+    plugin
+        .metadata
+        .capability_timeouts
+        .insert("generate_bm25".to_string(), 200);
 
     let mut slow = empty_group();
     slow.name = "slow".into();
@@ -952,8 +960,7 @@ fn test_memory_limit_interrupts_allocation() {
         "#;
     // Tight memory budget: the allocation loop must be interrupted by the
     // debug hook long before it exhausts host memory.
-    let plugin =
-        LuaPlugin::with_options(script, Duration::from_secs(5), 256).expect("plugin loads");
+    let plugin = LuaPlugin::with_options(script, 256).expect("plugin loads");
     let start = std::time::Instant::now();
     let result = plugin.generate_bm25(&empty_group());
     match result {
@@ -981,8 +988,7 @@ fn test_memory_limit_budget_honored_for_small_scripts() {
                 end
             }
         "#;
-    let plugin =
-        LuaPlugin::with_options(script, Duration::from_secs(1), 256).expect("plugin loads");
+    let plugin = LuaPlugin::with_options(script, 256).expect("plugin loads");
     let result = plugin.generate_bm25(&empty_group()).expect("call succeeds");
     assert_eq!(result.as_deref(), Some("small"));
 }

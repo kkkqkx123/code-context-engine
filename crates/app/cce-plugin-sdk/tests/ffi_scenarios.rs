@@ -22,6 +22,7 @@ impl FfiPlugin for NlPlugin {
             version: "0.2.0".to_string(),
             priority: 1,
             capability_priorities: std::collections::HashMap::new(),
+            capability_timeouts: std::collections::HashMap::new(),
             description: None,
             capabilities: Vec::new(),
         }

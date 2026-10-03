@@ -27,3 +27,32 @@ pub use pattern::{CompiledPattern, PatternDeclaration, compile_patterns, extract
 pub use registry::FilePluginSource;
 pub use types::{PluginEntry, PluginRegistryFile, PluginType};
 pub use utils::{CancellationToken, execute_with_timeout_blocking};
+
+/// Default timeout for lightweight operations (filter_file, rewrite_query, etc.)
+const LIGHTWEIGHT_TIMEOUT_MS: u64 = 1_000;
+/// Default timeout for standard operations (single NL generation, parse, etc.)
+const STANDARD_TIMEOUT_MS: u64 = 5_000;
+/// Default timeout for heavyweight operations (batch generation, relation extract, etc.)
+const HEAVYWEIGHT_TIMEOUT_MS: u64 = 30_000;
+
+/// Return the default timeout in milliseconds for a given operation.
+///
+/// Three tiers:
+/// - Lightweight (1s): filter_file, rewrite_query, classify_stdlib, is_test_file, entity_kind
+/// - Standard (5s): generate_bm25, generate_embedding, parse_document, post_group, chunk, rerank, filter_results, fusion_weights
+/// - Heavyweight (30s): generate_bm25_batch, generate_embedding_batch, extract_entities, extract_symbols, extract_relations, extract_imports, extract_exports
+pub fn default_timeout_for(operation: &str) -> u64 {
+    match operation {
+        "filter_file" | "rewrite_query" | "classify_stdlib" | "is_test_file" | "entity_kind" => {
+            LIGHTWEIGHT_TIMEOUT_MS
+        }
+        "generate_bm25_batch"
+        | "generate_embedding_batch"
+        | "extract_entities"
+        | "extract_symbols"
+        | "extract_relations"
+        | "extract_imports"
+        | "extract_exports" => HEAVYWEIGHT_TIMEOUT_MS,
+        _ => STANDARD_TIMEOUT_MS,
+    }
+}

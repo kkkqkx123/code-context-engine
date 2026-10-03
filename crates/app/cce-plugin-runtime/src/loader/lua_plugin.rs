@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::lua_helpers::{capability_label, parse_query_type, read_lua_priority};
 use super::lua_vm_pool::LuaVmPool;
+use crate::default_timeout_for;
 
-const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_MEMORY_LIMIT_KB: usize = 64 * 1024;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 10_000;
 
@@ -26,7 +26,6 @@ static LUA_PLUGIN_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub struct LuaPlugin {
     pub(crate) metadata: PluginMetadata,
     pub(crate) vm_pool: Arc<LuaVmPool>,
-    pub(crate) timeout: Duration,
     pub(crate) memory_limit_kb: usize,
     pub(crate) generate_bm25_fn_name: Option<String>,
     pub(crate) generate_embedding_fn_name: Option<String>,
@@ -67,18 +66,10 @@ pub struct LuaPlugin {
 
 impl LuaPlugin {
     pub fn from_script(script: &str) -> Result<Self, PluginError> {
-        Self::with_timeout(script, Duration::from_millis(DEFAULT_TIMEOUT_MS))
+        Self::with_options(script, DEFAULT_MEMORY_LIMIT_KB)
     }
 
-    pub fn with_timeout(script: &str, timeout: Duration) -> Result<Self, PluginError> {
-        Self::with_options(script, timeout, DEFAULT_MEMORY_LIMIT_KB)
-    }
-
-    pub fn with_options(
-        script: &str,
-        timeout: Duration,
-        memory_limit_kb: usize,
-    ) -> Result<Self, PluginError> {
+    pub fn with_options(script: &str, memory_limit_kb: usize) -> Result<Self, PluginError> {
         // Validate the script by loading it into a temporary VM.
         // The pool will create its own states lazily on first use.
         let lua = LuaVmPool::create(script)?;
@@ -109,12 +100,19 @@ impl LuaPlugin {
             .flatten()
             .unwrap_or_default();
 
+        let capability_timeouts: std::collections::HashMap<String, u64> = plugin_table
+            .get::<Option<std::collections::HashMap<String, u64>>>("capability_timeouts")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
         let metadata = PluginMetadata {
             id,
             name,
             version,
             priority,
             capability_priorities,
+            capability_timeouts,
             description,
             capabilities,
         };
@@ -324,7 +322,6 @@ impl LuaPlugin {
         Ok(Self {
             metadata,
             vm_pool: Arc::new(LuaVmPool::new(Arc::new(script.to_string()))),
-            timeout,
             memory_limit_kb,
             generate_bm25_fn_name,
             generate_embedding_fn_name,
@@ -393,6 +390,16 @@ impl LuaPlugin {
         Ok(())
     }
 
+    /// Resolve the effective timeout for an operation, considering the
+    /// plugin's per-capability overrides and the tier defaults.
+    pub(crate) fn timeout_for(&self, operation: &str) -> Duration {
+        self.metadata
+            .capability_timeouts
+            .get(operation)
+            .map(|&ms| Duration::from_millis(ms))
+            .unwrap_or_else(|| Duration::from_millis(default_timeout_for(operation)))
+    }
+
     /// Run `f` on a Lua VM from the pool, with a hard timeout.
     ///
     /// Lua states are pooled and reused across calls — each state has
@@ -438,7 +445,7 @@ impl LuaPlugin {
     {
         let (tx, rx) = channel::<Result<R, PluginError>>();
         let plugin_id = self.metadata.id.clone();
-        let timeout = self.timeout;
+        let timeout = self.timeout_for(operation);
         let vm_pool = self.vm_pool.clone();
         let max_kb = self.memory_limit_kb;
         let token = CancellationToken::new();

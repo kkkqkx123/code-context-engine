@@ -17,6 +17,10 @@ impl CodePlugin for NativePlugin {
         &self.metadata
     }
 
+    fn is_disabled(&self) -> bool {
+        self.disabled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     fn supports_bm25(&self) -> bool {
         (self.generate_bm25_fn.is_some() || self.generate_bm25_batch_fn.is_some()) && self.has_bm25
     }

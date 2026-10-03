@@ -186,6 +186,7 @@ impl PluginRegistry {
             .entries
             .values()
             .filter(|e| admit(e))
+            .filter(|e| !e.plugin.is_disabled())
             .filter(|e| {
                 if let Some(path) = file_path {
                     if let Some(patterns) = &e.file_patterns {
@@ -409,6 +410,7 @@ mod tests {
                     version: "0.1.0".to_string(),
                     priority: 0,
                     capability_priorities: HashMap::new(),
+                    capability_timeouts: HashMap::new(),
                     description: None,
                     capabilities: Vec::new(),
                 },

@@ -52,10 +52,13 @@
 use std::ffi::CStr;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use libloading::Library;
+use tracing::error;
 
+use crate::default_timeout_for;
 use crate::error::PluginError;
 use crate::types::PluginMetadata;
 use crate::utils::execute_with_timeout_blocking;
@@ -83,11 +86,8 @@ pub(crate) const MINIMUM_ABI_VERSION: u32 = 1;
 /// so the operator knows the plugin was built against a newer SDK.
 pub(crate) const CURRENT_ABI_VERSION: u32 = 1;
 
-/// Default per-call timeout for native FFI calls (milliseconds).
-///
-/// The FFI call itself cannot be interrupted; the worker thread lingers
-/// until the plugin returns, but the caller proceeds after this budget.
-const NATIVE_TIMEOUT_MS: u64 = 5_000;
+/// Consecutive timeouts before the circuit breaker disables the plugin.
+const CIRCUIT_BREAKER_THRESHOLD: u64 = 3;
 
 /// A loaded native plugin, wrapping a dynamic library handle.
 ///
@@ -214,6 +214,12 @@ pub struct NativePlugin {
     // ── Runtime metrics ──
     /// Optional metrics sink for execution accounting.
     pub(crate) metrics: Option<Arc<PluginMetrics>>,
+
+    // ── Circuit breaker ──
+    /// Consecutive timeout count; reset on success.
+    pub(crate) consecutive_timeouts: AtomicU64,
+    /// Whether the plugin has been disabled by the circuit breaker.
+    pub(crate) disabled: AtomicBool,
 }
 
 // SAFETY: `Library` is not `Sync`, but we never access it after
@@ -705,6 +711,8 @@ impl NativePlugin {
             remap_grammar_language,
             context,
             metrics: None,
+            consecutive_timeouts: AtomicU64::new(0),
+            disabled: AtomicBool::new(false),
         })
     }
 
@@ -714,11 +722,22 @@ impl NativePlugin {
         self
     }
 
+    /// Resolve the effective timeout for an operation, considering the
+    /// plugin's per-capability overrides and the tier defaults.
+    pub(crate) fn timeout_for(&self, operation: &str) -> Duration {
+        self.metadata
+            .capability_timeouts
+            .get(operation)
+            .map(|&ms| Duration::from_millis(ms))
+            .unwrap_or_else(|| Duration::from_millis(default_timeout_for(operation)))
+    }
+
     /// Run `f` on a dedicated thread with a hard timeout and record metrics.
     ///
     /// The thread cannot be forcefully terminated; on timeout it lingers
     /// until the FFI call returns naturally. The caller proceeds after
-    /// [`NATIVE_TIMEOUT_MS`].
+    /// the per-operation timeout. After `CIRCUIT_BREAKER_THRESHOLD`
+    /// consecutive timeouts the plugin is disabled.
     pub(crate) fn execute_with_timeout<T>(
         &self,
         operation: &str,
@@ -727,10 +746,15 @@ impl NativePlugin {
     where
         T: Send + 'static,
     {
+        if self.disabled.load(Ordering::SeqCst) {
+            return Err(PluginError::CircuitBroken);
+        }
+
         let plugin_id = self.metadata.id.clone();
+        let timeout_ms = self.timeout_for(operation).as_millis() as u64;
         let start = Instant::now();
-        let result =
-            execute_with_timeout_blocking(|_token| f(), NATIVE_TIMEOUT_MS, &plugin_id, operation);
+        let result = execute_with_timeout_blocking(|_token| f(), timeout_ms, &plugin_id, operation);
+
         if let Some(m) = &self.metrics {
             let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
             match &result {
@@ -743,6 +767,26 @@ impl NativePlugin {
                 }
             }
         }
+
+        match &result {
+            Ok(_) => {
+                self.consecutive_timeouts.store(0, Ordering::SeqCst);
+            }
+            Err(PluginError::Timeout) => {
+                let count = self.consecutive_timeouts.fetch_add(1, Ordering::SeqCst) + 1;
+                if count >= CIRCUIT_BREAKER_THRESHOLD {
+                    self.disabled.store(true, Ordering::SeqCst);
+                    error!(
+                        plugin = %plugin_id,
+                        operation = %operation,
+                        consecutive_timeouts = count,
+                        "Plugin disabled by circuit breaker after repeated timeouts"
+                    );
+                }
+            }
+            Err(_) => {}
+        }
+
         result
     }
 }

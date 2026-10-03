@@ -124,6 +124,7 @@ mod tests {
                 version: "0.1.0".to_string(),
                 priority,
                 capability_priorities: std::collections::HashMap::new(),
+                capability_timeouts: std::collections::HashMap::new(),
                 description: None,
                 capabilities: Vec::new(),
             },

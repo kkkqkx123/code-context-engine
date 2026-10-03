@@ -380,6 +380,7 @@ fn test_plugin_filter_directory_prefix_cache() {
                 version: "0.1.0".into(),
                 priority: 10,
                 capability_priorities: std::collections::HashMap::new(),
+                capability_timeouts: std::collections::HashMap::new(),
                 description: None,
                 capabilities: vec!["file_filter".into()],
             })

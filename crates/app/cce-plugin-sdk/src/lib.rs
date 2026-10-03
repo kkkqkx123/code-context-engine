@@ -101,6 +101,7 @@ mod tests {
                 version: "0.1.0".to_string(),
                 priority: 5,
                 capability_priorities: std::collections::HashMap::new(),
+                capability_timeouts: std::collections::HashMap::new(),
                 description: Some("A test plugin for unit tests".to_string()),
                 capabilities: Vec::new(),
             }

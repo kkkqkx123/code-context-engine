@@ -260,10 +260,14 @@ pub struct PluginMetadata {
     ///
     /// Capabilities not listed fall back to [`Self::priority`]. See
     /// [`PluginCapability::as_str`] for the canonical capability names.
-    /// Negative values follow the same below-built-in fallback semantics
+    /// Negative values follow the same below-builtin fallback semantics
     /// as [`Self::priority`].
     #[serde(default)]
     pub capability_priorities: HashMap<String, i32>,
+    /// Per-capability timeout overrides in milliseconds (operation name →
+    /// timeout). Operations not listed fall back to the tier default.
+    #[serde(default)]
+    pub capability_timeouts: HashMap<String, u64>,
     /// Description of what the plugin does
     pub description: Option<String>,
     /// Declared capability facets. Empty = the host probes `supports_*` at
@@ -280,6 +284,7 @@ impl Default for PluginMetadata {
             version: "0.1.0".to_string(),
             priority: 0,
             capability_priorities: HashMap::new(),
+            capability_timeouts: HashMap::new(),
             description: None,
             capabilities: Vec::new(),
         }
@@ -301,6 +306,13 @@ pub trait CodePlugin: Send + Sync {
 
     /// Return the plugin's metadata
     fn metadata(&self) -> &PluginMetadata;
+
+    /// Whether the plugin has been disabled (e.g. by a circuit breaker
+    /// after repeated timeouts). Disabled plugins are skipped by the
+    /// registry.
+    fn is_disabled(&self) -> bool {
+        false
+    }
 
     // ── Capability reporting (override to advertise support) ──────────
 
