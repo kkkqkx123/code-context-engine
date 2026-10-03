@@ -809,8 +809,9 @@ mod tests {
 
     #[test]
     fn test_borda_prefers_keys_ranked_high_in_both_paths() {
-        // Two keys per path: e1 earns 2 points per path, e2 earns 1.
-        // e1 = 0.5*2 + 0.5*2 = 2.0, e2 = 0.5*1 + 0.5*1 = 1.0.
+        // Two keys per path: e1 earns 2/2 = 1.0 normalized points per path,
+        // e2 earns 1/2 = 0.5.
+        // e1 = 0.5*1.0 + 0.5*1.0 = 1.0, e2 = 0.5*0.5 + 0.5*0.5 = 0.5.
         let fused = fuse_hybrid_results(
             vec![
                 make_vector_result("emb_1", 1, 0.9),
@@ -824,14 +825,15 @@ mod tests {
         );
         assert_eq!(fused.len(), 2);
         assert_eq!(fused[0].entity_ids, vec![EntityId(1)]);
-        assert!((fused[0].score - 2.0).abs() < 1e-6);
-        assert!((fused[1].score - 1.0).abs() < 1e-6);
+        assert!((fused[0].score - 1.0).abs() < 1e-6);
+        assert!((fused[1].score - 0.5).abs() < 1e-6);
     }
 
     #[test]
     fn test_borda_single_path_key_gets_own_points() {
-        // e3 is rank 2 of 2 vector keys: 0.5 * (2-2+1) = 0.5.
-        // e1: 0.5 * 2 (vector) + 0.5 * 1 (lone bm25 key) = 1.5.
+        // e3 is rank 2 of 2 vector keys: 0.5 * (2-2+1)/2 = 0.25.
+        // e1: 0.5 * 1.0 (vector, rank 1 of 2) + 0.5 * 1.0 (lone bm25 key,
+        // full normalized points on its 1-key path) = 1.0.
         let fused = fuse_hybrid_results(
             vec![
                 make_vector_result("emb_1", 1, 0.9),
@@ -845,7 +847,57 @@ mod tests {
             .iter()
             .find(|r| r.entity_ids == vec![EntityId(3)])
             .expect("single-path key included");
-        assert!((single.score - 0.5).abs() < 1e-6);
-        assert!((fused[0].score - 1.5).abs() < 1e-6);
+        assert!((single.score - 0.25).abs() < 1e-6);
+        assert!((fused[0].score - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_borda_scores_stay_within_weight_sum_regardless_of_key_count() {
+        // Normalization pins the scale to [0, w_v + w_b]: even with many keys
+        // per path the best possible score never exceeds w_v + w_b, so a
+        // static min_score keeps the same meaning across queries.
+        let mut vector = Vec::new();
+        let mut bm25 = Vec::new();
+        for i in 1..=20 {
+            let raw = 1.0 - i as f32 * 0.01;
+            vector.push(make_vector_result(&format!("emb_{i}"), i as u64, raw));
+            bm25.push(make_bm25_result(&format!("bm25_{i}"), i as u64, raw));
+        }
+        let fused = fuse_hybrid_results(vector, bm25, &borda_config());
+        assert_eq!(fused.len(), 20);
+        let max_score = fused.iter().map(|r| r.score).fold(f32::MIN, f32::max);
+        assert!(
+            max_score <= 1.0 + 1e-6,
+            "best score {max_score} exceeds w_v + w_b"
+        );
+        assert!((fused[0].score - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_fuse_single_vector_path_kept_even_when_single_path_excluded() {
+        // The vector path is the primary semantic recall: when BM25 returns
+        // nothing, vector-only results are kept regardless of
+        // `include_single_path` — matching `union_keys` seeding with vector
+        // keys in the dual-path algorithms.
+        let config = HybridFusionConfig {
+            include_single_path: false,
+            ..HybridFusionConfig::default()
+        };
+        let (fused, _) = fuse_hybrid_results_with_stats(
+            vec![make_vector_result("emb_1", 1, 0.9)],
+            vec![],
+            &config,
+        );
+        assert_eq!(fused.len(), 1);
+        assert_eq!(fused[0].entity_ids, vec![EntityId(1)]);
+        assert!((fused[0].score - 0.5).abs() < 1e-6);
+
+        // A surviving BM25 path still honors the switch.
+        let (fused, _) = fuse_hybrid_results_with_stats(
+            vec![],
+            vec![make_bm25_result("bm25_1", 1, 0.9)],
+            &config,
+        );
+        assert_eq!(fused.len(), 0);
     }
 }

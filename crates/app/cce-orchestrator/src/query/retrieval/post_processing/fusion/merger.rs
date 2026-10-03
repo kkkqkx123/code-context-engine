@@ -359,14 +359,18 @@ fn fuse_rrf(
 ///
 /// Each path ranks its alignment keys by best raw score exactly like RRF.
 /// With `m` keys on a path, the key at 1-based rank `r` earns `m - r + 1`
-/// points (best key earns `m`, worst earns 1); the fused score is
-/// `score = w_v * points_v + w_b * points_b`, with a missing path
-/// contributing zero (single-path keys keep their path's points when
-/// `include_single_path` is set). Deep ranks keep contributing instead of
-/// decaying toward zero as in RRF, which suits recall-heavy queries where
-/// the tail still matters. Raw per-path scores stay untouched on the result
-/// fields; `min_score` is interpreted on the points scale
-/// `[0, w_v * vector_keys + w_b * bm25_keys]`.
+/// points (best key earns `m`, worst earns 1), normalized by `m` to
+/// `(m - r + 1) / m ∈ (0, 1]`; the fused score is
+/// `score = w_v * norm_points_v + w_b * norm_points_b`, with a missing path
+/// contributing zero (single-path keys keep their own path's normalized
+/// points when `include_single_path` is set). Normalization pins the score
+/// scale to `[0, w_v + w_b]` regardless of how many keys a query returns, so
+/// `min_score` carries the same meaning across queries and algorithms (it
+/// matches the weighted min-max scale). Like RRF it ignores raw score
+/// magnitudes, but awards linearly instead of hyperbolically, so deep ranks
+/// keep contributing instead of decaying toward zero as in RRF, which suits
+/// recall-heavy queries where the tail still matters. Raw per-path scores
+/// stay untouched on the result fields.
 fn fuse_borda(
     vector_results: Vec<SearchResult>,
     bm25_results: Vec<SearchResult>,
@@ -390,10 +394,10 @@ fn fuse_borda(
 
         let (base, borda_score) = match (vec_rank, bm25_rank) {
             (Some(&(vi, rv)), Some(&(bi, rb))) => {
-                let v_points = vector_points - rv as f32 + 1.0;
-                let b_points = bm25_points - rb as f32 + 1.0;
-                let v_term = alpha * v_points;
-                let b_term = beta * b_points;
+                let v_norm_points = (vector_points - rv as f32 + 1.0) / vector_points;
+                let b_norm_points = (bm25_points - rb as f32 + 1.0) / bm25_points;
+                let v_term = alpha * v_norm_points;
+                let b_term = beta * b_norm_points;
                 let base = if v_term >= b_term {
                     let mut b = vector_results[vi].clone();
                     b.bm25_score = bm25_results[bi].bm25_score;
@@ -407,11 +411,13 @@ fn fuse_borda(
             }
             (Some(&(vi, rv)), None) if config.include_single_path => {
                 let base = vector_results[vi].clone();
-                (base, alpha * (vector_points - rv as f32 + 1.0))
+                let v_norm_points = (vector_points - rv as f32 + 1.0) / vector_points;
+                (base, alpha * v_norm_points)
             }
             (None, Some(&(bi, rb))) if config.include_single_path => {
                 let base = bm25_results[bi].clone();
-                (base, beta * (bm25_points - rb as f32 + 1.0))
+                let b_norm_points = (bm25_points - rb as f32 + 1.0) / bm25_points;
+                (base, beta * b_norm_points)
             }
             _ => continue,
         };
@@ -461,6 +467,12 @@ fn rank_by_key(
 /// aggregation or normalization of the empty side, no per-key empty-side
 /// lookups. `from_vector` selects which side's score field and weight apply,
 /// mirroring the single-path arms of the dual-path loop.
+///
+/// The `include_single_path` switch keeps its asymmetric meaning here: the
+/// vector path is the primary semantic recall, so a surviving vector path is
+/// always kept and the switch is consulted only when the surviving path is
+/// BM25. This matches `union_keys` (vector keys seed the union) and the RRF
+/// and Borda paths.
 fn fuse_single_path(
     surviving: &[SearchResult],
     raw_score: impl Fn(&SearchResult) -> f32,
@@ -470,7 +482,7 @@ fn fuse_single_path(
     stats: FusionAlignmentStats,
     normalize: bool,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
-    if !config.include_single_path {
+    if !config.include_single_path && !from_vector {
         return (Vec::new(), stats);
     }
     let best = best_per_key(surviving, raw_score);

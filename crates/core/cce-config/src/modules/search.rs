@@ -134,11 +134,12 @@ pub enum FusionAlgorithm {
     /// Reciprocal Rank Fusion: score = w_v/(k+rank_v) + w_b/(k+rank_b), using
     /// ranks only, so the result is robust to raw score distribution skew.
     Rrf { k: u32 },
-    /// Weight-aware Borda count: each path awards `key_count - rank + 1`
-    /// points per alignment key (rank starts at 1, best key first) and the
-    /// fused score is the weighted point sum. Like RRF it ignores raw score
-    /// magnitudes, but awards linearly instead of hyperbolically, so deep
-    /// ranks keep contributing instead of decaying to zero.
+    /// Weight-aware Borda count: each path awards `(key_count - rank + 1) /
+    /// key_count` normalized points per alignment key (rank starts at 1, best
+    /// key first) and the fused score is the weighted point sum, on the same
+    /// `[0, w_v + w_b]` scale as weighted min-max. Like RRF it ignores raw
+    /// score magnitudes, but awards linearly instead of hyperbolically, so
+    /// deep ranks keep contributing instead of decaying to zero.
     BordaCount,
 }
 
@@ -187,9 +188,9 @@ pub struct HybridFusionConfig {
     /// semantic match).
     pub include_single_path: bool,
     /// Minimum fused score threshold. The scale depends on the algorithm:
-    /// weighted min-max yields roughly `[0, w_v + w_b]`, RRF yields
-    /// `(0, (w_v + w_b) / (k + 1)]`, Borda yields points up to
-    /// `w_v * vector_keys + w_b * bm25_keys`.
+    /// weighted min-max and borda count yield `[0, w_v + w_b]` (borda normalizes
+    /// its per-path points by the path's key count), RRF yields
+    /// `(0, (w_v + w_b) / (k + 1)]`.
     pub min_score: f32,
     /// Whether to keep at most one result per physical chunk after fusion.
     ///

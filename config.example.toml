@@ -349,7 +349,8 @@ timeout_ms = 5000
 # include_single_path = true  # controls BM25-only keys only; vector-only
 #                             # keys are always kept (vector path is the
 #                             # primary semantic recall)
-# min_score = 0.0  # interpreted on the algorithm scale (see docs)
+# min_score = 0.0  # on the [0, w_v + w_b] scale for weighted_min_max and
+#                  # borda_count; RRF yields at most (w_v + w_b) / (k + 1)
 # dedup_by_chunk = true
 # enable_intent_based_weights = true
 
