@@ -122,8 +122,7 @@ impl Default for VectorRetrievalConfig {
 /// requires a new variant plus its merger implementation; the surrounding
 /// pipeline (alignment keys, coverage stats, dedup, sorting) is shared.
 /// TOML form: `"weighted_min_max"` / `"borda_count"` for
-/// the parameter-free variants, `{ rrf = { k = 60 } }` for RRF,
-/// `{ composite = { strategies = [...] } }` for algorithm composition.
+/// the parameter-free variants, `{ rrf = { k = 60 } }` for RRF.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecallFusionAlgorithm {
@@ -144,19 +143,6 @@ pub enum RecallFusionAlgorithm {
     /// score magnitudes, but awards linearly instead of hyperbolically, so
     /// deep ranks keep contributing instead of decaying to zero.
     BordaCount,
-    /// Composite fusion: combines multiple algorithms with weighted averaging.
-    Composite {
-        strategies: Vec<CompositeStrategy>,
-    },
-}
-
-/// One strategy within a composite fusion configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CompositeStrategy {
-    /// The algorithm to apply.
-    pub algorithm: RecallFusionAlgorithm,
-    /// The weight for this strategy's score in the final combination.
-    pub weight: f32,
 }
 
 /// BM25 retrieval configuration (recall only, no fusion semantics).
@@ -331,30 +317,6 @@ impl Validate for HybridFusionConfig {
                     "algorithm.rrf.k",
                     "must be greater than 0",
                 ));
-            }
-        }
-        if let RecallFusionAlgorithm::Composite { strategies } = &self.algorithm {
-            if strategies.is_empty() {
-                errors.push(ConfigValidationError::invalid_field(
-                    "algorithm.composite.strategies",
-                    "must contain at least one strategy",
-                ));
-            }
-            for (i, strategy) in strategies.iter().enumerate() {
-                if !strategy.weight.is_finite() || strategy.weight < 0.0 {
-                    errors.push(ConfigValidationError::invalid_field(
-                        &format!("algorithm.composite.strategies[{i}].weight"),
-                        "must be finite and >= 0.0",
-                    ));
-                }
-                if let RecallFusionAlgorithm::Rrf { k } = strategy.algorithm {
-                    if k == 0 {
-                        errors.push(ConfigValidationError::invalid_field(
-                            &format!("algorithm.composite.strategies[{i}].algorithm.rrf.k"),
-                            "must be greater than 0",
-                        ));
-                    }
-                }
             }
         }
 

@@ -32,9 +32,6 @@ pub fn create_fusion_algorithm(config: &HybridFusionConfig) -> Box<dyn FusionAlg
         RecallFusionAlgorithm::WeightedMinMax => Box::new(WeightedMinMaxFuser),
         RecallFusionAlgorithm::Rrf { k } => Box::new(RrfFuser { k: *k }),
         RecallFusionAlgorithm::BordaCount => Box::new(BordaFuser),
-        RecallFusionAlgorithm::Composite { strategies } => {
-            Box::new(CompositeFuser::from_strategies(strategies))
-        }
     }
 }
 
@@ -221,101 +218,6 @@ impl FusionAlgorithmImpl for BordaFuser {
         stats: FusionAlignmentStats,
     ) -> (Vec<SearchResult>, FusionAlignmentStats) {
         fuse_borda(vector_results, bm25_results, config, stats)
-    }
-}
-
-/// Composite fusion algorithm: combines multiple algorithms with weighted averaging.
-pub struct CompositeFuser {
-    strategies: Vec<(Box<dyn FusionAlgorithmImpl>, f32)>,
-}
-
-impl CompositeFuser {
-    fn from_strategies(strategies: &[cce_config::modules::search::CompositeStrategy]) -> Self {
-        let total_weight: f32 = strategies.iter().map(|s| s.weight).sum();
-        let strategies = strategies
-            .iter()
-            .map(|s| {
-                let config = HybridFusionConfig {
-                    algorithm: s.algorithm.clone(),
-                    ..HybridFusionConfig::default()
-                };
-                let fuser = create_fusion_algorithm(&config);
-                let normalized_weight = if total_weight > 0.0 {
-                    s.weight / total_weight
-                } else {
-                    0.0
-                };
-                (fuser, normalized_weight)
-            })
-            .collect();
-        Self { strategies }
-    }
-}
-
-impl FusionAlgorithmImpl for CompositeFuser {
-    fn fuse(
-        &self,
-        vector_results: Vec<SearchResult>,
-        bm25_results: Vec<SearchResult>,
-        config: &HybridFusionConfig,
-        stats: FusionAlignmentStats,
-    ) -> (Vec<SearchResult>, FusionAlignmentStats) {
-        use std::collections::HashMap;
-
-        let mut score_maps: Vec<HashMap<String, (SearchResult, f32)>> = Vec::new();
-
-        for (fuser, weight) in &self.strategies {
-            let (fused, _) = fuser.fuse(
-                vector_results.clone(),
-                bm25_results.clone(),
-                config,
-                stats,
-            );
-            let mut score_map: HashMap<String, (SearchResult, f32)> = HashMap::new();
-            for result in fused {
-                let key = alignment_key(&result.entity_ids, result.segment_id.as_deref(), &result.id)
-                    .unwrap_or_default();
-                score_map.insert(key, (result, *weight));
-            }
-            score_maps.push(score_map);
-        }
-
-        let mut all_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for map in &score_maps {
-            for key in map.keys() {
-                all_keys.insert(key.clone());
-            }
-        }
-
-        let mut fused: Vec<SearchResult> = Vec::new();
-        for key in all_keys {
-            let mut total_score = 0.0;
-            let mut best_result: Option<SearchResult> = None;
-            let mut best_score = f32::MIN;
-
-            for map in &score_maps {
-                if let Some((result, weight)) = map.get(&key) {
-                    total_score += result.score * weight;
-                    if result.score > best_score {
-                        best_score = result.score;
-                        best_result = Some(result.clone());
-                    }
-                }
-            }
-
-            if total_score < config.min_score {
-                continue;
-            }
-
-            if let Some(mut result) = best_result {
-                result.score = total_score;
-                result.original_score = total_score;
-                result.sources = vec!["hybrid".to_string()];
-                fused.push(result);
-            }
-        }
-
-        (finish_fused(fused, config.dedup_by_chunk), stats)
     }
 }
 
