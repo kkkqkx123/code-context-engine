@@ -329,6 +329,21 @@ pub struct QueryRewriteResult {
     pub expansion_terms: Vec<String>,
 }
 
+/// Fusion algorithm override for the `Fusion` capability.
+///
+/// Type-safe enumeration of algorithms a plugin can request. The host maps
+/// each variant to its internal `RecallFusionAlgorithm` representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginFusionAlgorithm {
+    /// Weighted min-max score fusion.
+    WeightedMinMax,
+    /// Reciprocal rank fusion.
+    Rrf,
+    /// Weight-aware Borda count.
+    BordaCount,
+}
+
 /// Weight override for hybrid fusion (`Fusion` capability).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FusionWeights {
@@ -338,15 +353,12 @@ pub struct FusionWeights {
     pub bm25_weight: Option<f32>,
     /// Minimum fusion score threshold.
     pub min_score: Option<f32>,
-    /// Fusion algorithm override. One of `"weighted_min_max"`,
-    /// `"rrf"`, `"borda_count"`; unknown names are ignored
-    /// by the host. Only parsed when the host supports algorithm override;
-    /// absent means "keep the configured algorithm".
+    /// Fusion algorithm override. Absent means "keep the configured algorithm".
     #[serde(default)]
-    pub algorithm: Option<String>,
-    /// RRF rank-discount constant used together with `"rrf"`. Absent means
-    /// the configured default (60); zero or negative values are rejected by
-    /// the host. Ignored for other algorithms.
+    pub algorithm: Option<PluginFusionAlgorithm>,
+    /// RRF rank-discount constant used together with `Rrf`. Absent means
+    /// the configured default (60); zero is rejected by the host.
+    /// Ignored for other algorithms.
     #[serde(default)]
     pub rrf_k: Option<u32>,
 }

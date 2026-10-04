@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::search::ScoreFusionStrategy;
+use super::search::RerankFusionStrategy;
 use crate::validation::{Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
 
@@ -52,7 +52,7 @@ pub struct RerankConfig {
 
     /// Score fusion strategy
     #[serde(default = "default_score_fusion")]
-    pub score_fusion_strategy: ScoreFusionStrategy,
+    pub score_fusion_strategy: RerankFusionStrategy,
 
     /// Timeout in milliseconds
     #[serde(default = "default_timeout_ms")]
@@ -91,8 +91,8 @@ fn default_temperature() -> f32 {
     0.0
 }
 
-fn default_score_fusion() -> ScoreFusionStrategy {
-    ScoreFusionStrategy::LinearWeighted { alpha: 0.7 }
+fn default_score_fusion() -> RerankFusionStrategy {
+    RerankFusionStrategy::LinearWeighted { alpha: 0.7 }
 }
 
 fn default_timeout_ms() -> u64 {
@@ -120,7 +120,7 @@ impl Validate for RerankConfig {
         let mut errors = Vec::new();
 
         match self.score_fusion_strategy {
-            ScoreFusionStrategy::LinearWeighted { alpha } => {
+            RerankFusionStrategy::LinearWeighted { alpha } => {
                 if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
                     errors.push(ConfigValidationError::invalid_field(
                         "score_fusion_strategy.alpha",
@@ -128,7 +128,7 @@ impl Validate for RerankConfig {
                     ));
                 }
             }
-            ScoreFusionStrategy::ReciprocalRankFusion { k } => {
+            RerankFusionStrategy::ReciprocalRankFusion { k } => {
                 if !k.is_finite() || k <= 0.0 {
                     errors.push(ConfigValidationError::invalid_field(
                         "score_fusion_strategy.k",
@@ -136,7 +136,7 @@ impl Validate for RerankConfig {
                     ));
                 }
             }
-            ScoreFusionStrategy::RerankOnly | ScoreFusionStrategy::Multiplicative => {}
+            RerankFusionStrategy::RerankOnly | RerankFusionStrategy::Multiplicative => {}
         }
 
         if errors.is_empty() {
@@ -182,7 +182,7 @@ mod tests {
         assert!(!config.return_reasoning);
         assert_eq!(
             config.score_fusion_strategy,
-            ScoreFusionStrategy::LinearWeighted { alpha: 0.7 }
+            RerankFusionStrategy::LinearWeighted { alpha: 0.7 }
         );
         assert_eq!(config.timeout_ms, 5000);
         assert_eq!(config.min_candidates, 3);
@@ -211,7 +211,7 @@ mod tests {
         assert!(config.return_reasoning);
         assert_eq!(
             config.score_fusion_strategy,
-            ScoreFusionStrategy::Multiplicative
+            RerankFusionStrategy::Multiplicative
         );
         assert_eq!(config.timeout_ms, 10000);
     }

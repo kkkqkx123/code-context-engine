@@ -122,10 +122,11 @@ impl Default for VectorRetrievalConfig {
 /// requires a new variant plus its merger implementation; the surrounding
 /// pipeline (alignment keys, coverage stats, dedup, sorting) is shared.
 /// TOML form: `"weighted_min_max"` / `"borda_count"` for
-/// the parameter-free variants, `{ rrf = { k = 60 } }` for RRF.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// the parameter-free variants, `{ rrf = { k = 60 } }` for RRF,
+/// `{ composite = { strategies = [...] } }` for algorithm composition.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FusionAlgorithm {
+pub enum RecallFusionAlgorithm {
     /// Weighted min-max score fusion (the historical default): normalize each
     /// path's per-key scores to [0, 1] and take the weighted linear
     /// combination. Sensitive to per-query score distribution outliers.
@@ -133,7 +134,9 @@ pub enum FusionAlgorithm {
     WeightedMinMax,
     /// Reciprocal Rank Fusion: score = w_v/(k+rank_v) + w_b/(k+rank_b), using
     /// ranks only, so the result is robust to raw score distribution skew.
-    Rrf { k: u32 },
+    Rrf {
+        k: u32,
+    },
     /// Weight-aware Borda count: each path awards `(key_count - rank + 1) /
     /// key_count` normalized points per alignment key (rank starts at 1, best
     /// key first) and the fused score is the weighted point sum, on the same
@@ -141,6 +144,19 @@ pub enum FusionAlgorithm {
     /// score magnitudes, but awards linearly instead of hyperbolically, so
     /// deep ranks keep contributing instead of decaying to zero.
     BordaCount,
+    /// Composite fusion: combines multiple algorithms with weighted averaging.
+    Composite {
+        strategies: Vec<CompositeStrategy>,
+    },
+}
+
+/// One strategy within a composite fusion configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompositeStrategy {
+    /// The algorithm to apply.
+    pub algorithm: RecallFusionAlgorithm,
+    /// The weight for this strategy's score in the final combination.
+    pub weight: f32,
 }
 
 /// BM25 retrieval configuration (recall only, no fusion semantics).
@@ -173,7 +189,7 @@ pub struct HybridFusionConfig {
     /// Weight assigned to BM25 path scores in hybrid recall fusion [0.0, 1.0]
     pub bm25_weight: f32,
     /// Hybrid fusion algorithm selection
-    pub algorithm: FusionAlgorithm,
+    pub algorithm: RecallFusionAlgorithm,
     /// Per-intent weight configuration for query-adaptive hybrid fusion
     pub intent_weights: QueryIntentWeights,
     /// Whether to enable query-intent-based dynamic weight selection
@@ -187,10 +203,10 @@ pub struct HybridFusionConfig {
     /// governs the noisy BM25-only tail (e.g. keyword mentions with no
     /// semantic match).
     pub include_single_path: bool,
-    /// Minimum fused score threshold. The scale depends on the algorithm:
-    /// weighted min-max and borda count yield `[0, w_v + w_b]` (borda normalizes
-    /// its per-path points by the path's key count), RRF yields
-    /// `(0, (w_v + w_b) / (k + 1)]`.
+    /// Minimum fused score threshold, normalized to `[0.0, 1.0]` across all
+    /// algorithms. Each algorithm internally scales its raw output to this
+    /// range before thresholding, so the same value carries the same meaning
+    /// regardless of the selected algorithm.
     pub min_score: f32,
     /// Whether to keep at most one result per physical chunk after fusion.
     ///
@@ -239,7 +255,7 @@ impl Default for HybridFusionConfig {
         Self {
             vector_weight: 0.5,
             bm25_weight: 0.5,
-            algorithm: FusionAlgorithm::default(),
+            algorithm: RecallFusionAlgorithm::default(),
             intent_weights: QueryIntentWeights::default(),
             enable_intent_based_weights: true,
             include_single_path: true,
@@ -303,18 +319,42 @@ impl Validate for HybridFusionConfig {
             validate_weight(&format!("{name}.bm25_weight"), w.bm25_weight, &mut errors);
             validate_weight_pair_sum(name, w.vector_weight, w.bm25_weight, &mut errors);
         }
-        if !self.min_score.is_finite() || self.min_score < 0.0 {
+        if !self.min_score.is_finite() || !(0.0..=1.0).contains(&self.min_score) {
             errors.push(ConfigValidationError::invalid_field(
                 "min_score",
-                "must be finite and >= 0.0 (interpreted on the selected algorithm scale)",
+                "must be finite and within [0.0, 1.0] (normalized across all algorithms)",
             ));
         }
-        if let FusionAlgorithm::Rrf { k } = self.algorithm {
+        if let RecallFusionAlgorithm::Rrf { k } = self.algorithm {
             if k == 0 {
                 errors.push(ConfigValidationError::invalid_field(
                     "algorithm.rrf.k",
                     "must be greater than 0",
                 ));
+            }
+        }
+        if let RecallFusionAlgorithm::Composite { strategies } = &self.algorithm {
+            if strategies.is_empty() {
+                errors.push(ConfigValidationError::invalid_field(
+                    "algorithm.composite.strategies",
+                    "must contain at least one strategy",
+                ));
+            }
+            for (i, strategy) in strategies.iter().enumerate() {
+                if !strategy.weight.is_finite() || strategy.weight < 0.0 {
+                    errors.push(ConfigValidationError::invalid_field(
+                        &format!("algorithm.composite.strategies[{i}].weight"),
+                        "must be finite and >= 0.0",
+                    ));
+                }
+                if let RecallFusionAlgorithm::Rrf { k } = strategy.algorithm {
+                    if k == 0 {
+                        errors.push(ConfigValidationError::invalid_field(
+                            &format!("algorithm.composite.strategies[{i}].algorithm.rrf.k"),
+                            "must be greater than 0",
+                        ));
+                    }
+                }
             }
         }
 
@@ -516,7 +556,7 @@ fn default_fusion_rrf_k() -> f32 {
 /// the defaults so existing configuration files keep parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ScoreFusionStrategy {
+pub enum RerankFusionStrategy {
     /// Use only rerank scores
     RerankOnly,
     /// Linear weighted fusion: final = alpha * rerank + (1 - alpha) * initial
@@ -542,7 +582,7 @@ struct RankFusionParams {
     k: f32,
 }
 
-impl<'de> Deserialize<'de> for ScoreFusionStrategy {
+impl<'de> Deserialize<'de> for RerankFusionStrategy {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -550,19 +590,19 @@ impl<'de> Deserialize<'de> for ScoreFusionStrategy {
         use serde::de;
         struct StrategyVisitor;
         impl<'de> de::Visitor<'de> for StrategyVisitor {
-            type Value = ScoreFusionStrategy;
+            type Value = RerankFusionStrategy;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 f.write_str("a score fusion strategy string (\"rerank_only\", \"linear_weighted\", \"multiplicative\", \"reciprocal_rank_fusion\"/\"rrf\") or a single-key map such as {\"linear_weighted\": {\"alpha\": 0.7}}")
             }
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 match v {
-                    "rerank_only" => Ok(ScoreFusionStrategy::RerankOnly),
-                    "linear_weighted" => Ok(ScoreFusionStrategy::LinearWeighted {
+                    "rerank_only" => Ok(RerankFusionStrategy::RerankOnly),
+                    "linear_weighted" => Ok(RerankFusionStrategy::LinearWeighted {
                         alpha: default_fusion_alpha(),
                     }),
-                    "multiplicative" => Ok(ScoreFusionStrategy::Multiplicative),
+                    "multiplicative" => Ok(RerankFusionStrategy::Multiplicative),
                     "reciprocal_rank_fusion" | "rrf" => {
-                        Ok(ScoreFusionStrategy::ReciprocalRankFusion {
+                        Ok(RerankFusionStrategy::ReciprocalRankFusion {
                             k: default_fusion_rrf_k(),
                         })
                     }
@@ -586,21 +626,21 @@ impl<'de> Deserialize<'de> for ScoreFusionStrategy {
                 let strategy = match name.as_str() {
                     "rerank_only" => {
                         let _: de::IgnoredAny = map.next_value()?;
-                        ScoreFusionStrategy::RerankOnly
+                        RerankFusionStrategy::RerankOnly
                     }
                     "linear_weighted" => {
                         let params: LinearWeightedParams = map.next_value()?;
-                        ScoreFusionStrategy::LinearWeighted {
+                        RerankFusionStrategy::LinearWeighted {
                             alpha: params.alpha,
                         }
                     }
                     "multiplicative" => {
                         let _: de::IgnoredAny = map.next_value()?;
-                        ScoreFusionStrategy::Multiplicative
+                        RerankFusionStrategy::Multiplicative
                     }
                     "reciprocal_rank_fusion" | "rrf" => {
                         let params: RankFusionParams = map.next_value()?;
-                        ScoreFusionStrategy::ReciprocalRankFusion { k: params.k }
+                        RerankFusionStrategy::ReciprocalRankFusion { k: params.k }
                     }
                     other => {
                         return Err(de::Error::unknown_variant(
@@ -625,7 +665,7 @@ impl<'de> Deserialize<'de> for ScoreFusionStrategy {
     }
 }
 
-impl ScoreFusionStrategy {
+impl RerankFusionStrategy {
     /// Calculate the final score from rerank and initial scores.
     ///
     /// Both ranks are 0-based positions: `rerank_rank` in the reranked order,
@@ -639,12 +679,12 @@ impl ScoreFusionStrategy {
         initial_rank: usize,
     ) -> f32 {
         match self {
-            ScoreFusionStrategy::RerankOnly => rerank_score,
-            ScoreFusionStrategy::LinearWeighted { alpha } => {
+            RerankFusionStrategy::RerankOnly => rerank_score,
+            RerankFusionStrategy::LinearWeighted { alpha } => {
                 alpha * rerank_score + (1.0 - alpha) * initial_score
             }
-            ScoreFusionStrategy::Multiplicative => rerank_score * initial_score,
-            ScoreFusionStrategy::ReciprocalRankFusion { k } => {
+            RerankFusionStrategy::Multiplicative => rerank_score * initial_score,
+            RerankFusionStrategy::ReciprocalRankFusion { k } => {
                 let denom_rerank = *k + rerank_rank as f32 + 1.0;
                 let denom_initial = *k + initial_rank as f32 + 1.0;
                 if !denom_rerank.is_finite()
@@ -1001,7 +1041,7 @@ mod tests {
         assert_eq!(config.result.limit, 10);
         assert!(config.boost.enabled);
         assert!((config.boost.max_addition - 0.5).abs() < f32::EPSILON);
-        assert_eq!(config.fusion.algorithm, FusionAlgorithm::WeightedMinMax);
+        assert_eq!(config.fusion.algorithm, RecallFusionAlgorithm::WeightedMinMax);
         assert!((config.boost.cap_for("summary") - 0.15).abs() < f32::EPSILON);
         assert!((config.boost.cap_for("unknown_source") - 0.3).abs() < f32::EPSILON);
     }
@@ -1030,43 +1070,43 @@ mod tests {
 
     #[test]
     fn test_fusion_algorithm_serde() {
-        let json = serde_json::to_string(&FusionAlgorithm::WeightedMinMax).unwrap();
+        let json = serde_json::to_string(&RecallFusionAlgorithm::WeightedMinMax).unwrap();
         assert_eq!(json, "\"weighted_min_max\"");
-        let deser: FusionAlgorithm = serde_json::from_str(&json).unwrap();
-        assert_eq!(deser, FusionAlgorithm::WeightedMinMax);
+        let deser: RecallFusionAlgorithm = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser, RecallFusionAlgorithm::WeightedMinMax);
 
-        let rrf = FusionAlgorithm::Rrf { k: 30 };
+        let rrf = RecallFusionAlgorithm::Rrf { k: 30 };
         let json = serde_json::to_string(&rrf).unwrap();
-        let deser: FusionAlgorithm = serde_json::from_str(&json).unwrap();
+        let deser: RecallFusionAlgorithm = serde_json::from_str(&json).unwrap();
         assert_eq!(deser, rrf);
     }
 
     #[test]
     fn test_score_fusion_strategy_serde_roundtrip() {
         for strategy in [
-            ScoreFusionStrategy::RerankOnly,
-            ScoreFusionStrategy::LinearWeighted { alpha: 0.8 },
-            ScoreFusionStrategy::Multiplicative,
-            ScoreFusionStrategy::ReciprocalRankFusion { k: 30.0 },
+            RerankFusionStrategy::RerankOnly,
+            RerankFusionStrategy::LinearWeighted { alpha: 0.8 },
+            RerankFusionStrategy::Multiplicative,
+            RerankFusionStrategy::ReciprocalRankFusion { k: 30.0 },
         ] {
             let json = serde_json::to_string(&strategy).expect("serialize");
-            let deser: ScoreFusionStrategy = serde_json::from_str(&json).expect("deserialize");
+            let deser: RerankFusionStrategy = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(deser, strategy);
         }
     }
 
     #[test]
     fn test_score_fusion_strategy_legacy_strings() {
-        let deser: ScoreFusionStrategy =
+        let deser: RerankFusionStrategy =
             serde_json::from_str("\"linear_weighted\"").expect("deserialize");
-        assert_eq!(deser, ScoreFusionStrategy::LinearWeighted { alpha: 0.7 });
-        let deser: ScoreFusionStrategy = serde_json::from_str("\"rrf\"").expect("deserialize");
-        assert_eq!(deser, ScoreFusionStrategy::ReciprocalRankFusion { k: 60.0 });
+        assert_eq!(deser, RerankFusionStrategy::LinearWeighted { alpha: 0.7 });
+        let deser: RerankFusionStrategy = serde_json::from_str("\"rrf\"").expect("deserialize");
+        assert_eq!(deser, RerankFusionStrategy::ReciprocalRankFusion { k: 60.0 });
     }
 
     #[test]
     fn test_score_fusion_rrf_uses_both_ranks() {
-        let strategy = ScoreFusionStrategy::ReciprocalRankFusion { k: 60.0 };
+        let strategy = RerankFusionStrategy::ReciprocalRankFusion { k: 60.0 };
         let top_both = strategy.calculate(0.9, 0.8, 0, 0);
         let top_rerank_only = strategy.calculate(0.9, 0.8, 0, 9);
         let deep_both = strategy.calculate(0.9, 0.8, 9, 9);
@@ -1088,9 +1128,9 @@ mod tests {
         assert!(config.validate_structured().is_err());
         config.min_score = 0.0;
 
-        config.algorithm = FusionAlgorithm::Rrf { k: 0 };
+        config.algorithm = RecallFusionAlgorithm::Rrf { k: 0 };
         assert!(config.validate_structured().is_err());
-        config.algorithm = FusionAlgorithm::default();
+        config.algorithm = RecallFusionAlgorithm::default();
 
         config.bm25_weight = 0.6;
         assert!(config.validate_structured().is_err());

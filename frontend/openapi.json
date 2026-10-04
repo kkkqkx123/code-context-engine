@@ -5445,6 +5445,16 @@
           }
         }
       },
+      "ContentStateDto": {
+        "type": "string",
+        "description": "Whether a result carries its full body or a file-and-range reference.",
+        "enum": [
+          "full",
+          "reference_over_limit",
+          "reference_file_missing",
+          "reference_file_level"
+        ]
+      },
       "CreateProjectRequest": {
         "type": "object",
         "description": "Create project request",
@@ -7294,6 +7304,11 @@
             "format": "int64",
             "description": "Optional epoch for version-aware filtering"
           },
+          "offset": {
+            "type": "integer",
+            "description": "Number of results to skip (for pagination)",
+            "minimum": 0
+          },
           "project_id": {
             "type": "integer",
             "format": "int64",
@@ -8197,28 +8212,28 @@
         "type": "object",
         "description": "Search result item",
         "required": [
-          "score",
           "file_path",
           "code_chunk",
           "start_line",
-          "end_line",
-          "source"
+          "end_line"
         ],
         "properties": {
           "code_chunk": {
             "type": "string"
+          },
+          "content_state": {
+            "$ref": "#/components/schemas/ContentStateDto",
+            "description": "Whether `code_chunk` is the full body or a reference."
           },
           "end_line": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
           },
-          "entity_ids": {
+          "entity_names": {
             "type": "array",
             "items": {
-              "type": "integer",
-              "format": "int64",
-              "minimum": 0
+              "type": "string"
             }
           },
           "entity_type": {
@@ -8228,13 +8243,6 @@
             ]
           },
           "file_path": {
-            "type": "string"
-          },
-          "score": {
-            "type": "number",
-            "format": "float"
-          },
-          "source": {
             "type": "string"
           },
           "start_line": {
@@ -8487,7 +8495,7 @@
           "weight": {
             "type": "number",
             "format": "float",
-            "description": "Weight for weighted score fusion"
+            "description": "Weight applied to this sub-query's candidate scores before the\ncross-query merge (`score *= weight`, then dedup keeps the highest\nweighted score per alignment key). Must be finite and >= 0."
           }
         }
       },

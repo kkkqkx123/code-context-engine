@@ -3,11 +3,40 @@
 use std::collections::HashMap;
 
 use super::aligner::{
-    FusionAlignmentStats, best_per_key, compute_alignment_coverage, expand_multi_entity_results,
+    FusionAlignmentStats, alignment_key, best_per_key, compute_alignment_coverage,
+    expand_multi_entity_results,
 };
 use super::normalizer::{normalize_by_key, normalize_path_scores};
+use super::HybridFusionConfig;
 use crate::query::types::SearchResult;
-use cce_config::modules::search::FusionAlgorithm;
+use cce_config::modules::search::RecallFusionAlgorithm;
+
+/// Trait for hybrid fusion algorithms.
+///
+/// Each algorithm implements its own score combination logic while sharing
+/// the common pipeline (alignment keys, coverage stats, dedup, sorting).
+pub trait FusionAlgorithmImpl {
+    /// Fuse two result sets into a single ranked list.
+    fn fuse(
+        &self,
+        vector_results: Vec<SearchResult>,
+        bm25_results: Vec<SearchResult>,
+        config: &HybridFusionConfig,
+        stats: FusionAlignmentStats,
+    ) -> (Vec<SearchResult>, FusionAlignmentStats);
+}
+
+/// Factory function to create a fusion algorithm instance from config.
+pub fn create_fusion_algorithm(config: &HybridFusionConfig) -> Box<dyn FusionAlgorithmImpl> {
+    match &config.algorithm {
+        RecallFusionAlgorithm::WeightedMinMax => Box::new(WeightedMinMaxFuser),
+        RecallFusionAlgorithm::Rrf { k } => Box::new(RrfFuser { k: *k }),
+        RecallFusionAlgorithm::BordaCount => Box::new(BordaFuser),
+        RecallFusionAlgorithm::Composite { strategies } => {
+            Box::new(CompositeFuser::from_strategies(strategies))
+        }
+    }
+}
 
 /// Fuse two sets of search results (vector path and BM25 path) into a single
 /// ranked list using weighted fusion at the **alignment key** level.
@@ -19,7 +48,7 @@ use cce_config::modules::search::FusionAlgorithm;
 /// 2. `segment_id` for document/plain-text chunks (logical sections without entities)
 ///
 /// How per-key scores combine is selected by
-/// [`FusionAlgorithm`](cce_config::modules::search::FusionAlgorithm):
+/// [`RecallFusionAlgorithm`](cce_config::modules::search::RecallFusionAlgorithm):
 /// normalized weighted sum (default), raw weighted sum, reciprocal rank
 /// fusion, or weight-aware Borda count. Keys present in only one path
 /// contribute that path's term alone when `include_single_path` is set.
@@ -47,7 +76,7 @@ use cce_config::modules::search::FusionAlgorithm;
 pub fn fuse_hybrid_results(
     vector_results: Vec<SearchResult>,
     bm25_results: Vec<SearchResult>,
-    config: &super::HybridFusionConfig,
+    config: &HybridFusionConfig,
 ) -> Vec<SearchResult> {
     fuse_hybrid_results_with_stats(vector_results, bm25_results, config).0
 }
@@ -57,7 +86,7 @@ pub fn fuse_hybrid_results(
 pub fn fuse_hybrid_results_with_stats(
     vector_results: Vec<SearchResult>,
     bm25_results: Vec<SearchResult>,
-    config: &super::HybridFusionConfig,
+    config: &HybridFusionConfig,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
     if vector_results.is_empty() && bm25_results.is_empty() {
         return (
@@ -109,15 +138,8 @@ pub fn fuse_hybrid_results_with_stats(
         "Hybrid fusion alignment coverage"
     );
 
-    match config.algorithm {
-        FusionAlgorithm::WeightedMinMax => {
-            fuse_weighted_minmax(vector_results, bm25_results, config, stats)
-        }
-        FusionAlgorithm::Rrf { k } => {
-            fuse_rrf(vector_results, bm25_results, config, k.max(1), stats)
-        }
-        FusionAlgorithm::BordaCount => fuse_borda(vector_results, bm25_results, config, stats),
-    }
+    let algorithm = create_fusion_algorithm(config);
+    algorithm.fuse(vector_results, bm25_results, config, stats)
 }
 
 /// Union of alignment keys across both paths in deterministic (sorted) order.
@@ -155,6 +177,148 @@ fn finish_fused(fused: Vec<SearchResult>, dedup_by_chunk: bool) -> Vec<SearchRes
     fused
 }
 
+/// Weighted min-max fusion algorithm implementation.
+pub struct WeightedMinMaxFuser;
+
+impl FusionAlgorithmImpl for WeightedMinMaxFuser {
+    fn fuse(
+        &self,
+        vector_results: Vec<SearchResult>,
+        bm25_results: Vec<SearchResult>,
+        config: &HybridFusionConfig,
+        stats: FusionAlignmentStats,
+    ) -> (Vec<SearchResult>, FusionAlignmentStats) {
+        fuse_weighted_minmax(vector_results, bm25_results, config, stats)
+    }
+}
+
+/// Reciprocal rank fusion algorithm implementation.
+pub struct RrfFuser {
+    k: u32,
+}
+
+impl FusionAlgorithmImpl for RrfFuser {
+    fn fuse(
+        &self,
+        vector_results: Vec<SearchResult>,
+        bm25_results: Vec<SearchResult>,
+        config: &HybridFusionConfig,
+        stats: FusionAlignmentStats,
+    ) -> (Vec<SearchResult>, FusionAlignmentStats) {
+        fuse_rrf(vector_results, bm25_results, config, self.k, stats)
+    }
+}
+
+/// Weight-aware Borda count algorithm implementation.
+pub struct BordaFuser;
+
+impl FusionAlgorithmImpl for BordaFuser {
+    fn fuse(
+        &self,
+        vector_results: Vec<SearchResult>,
+        bm25_results: Vec<SearchResult>,
+        config: &HybridFusionConfig,
+        stats: FusionAlignmentStats,
+    ) -> (Vec<SearchResult>, FusionAlignmentStats) {
+        fuse_borda(vector_results, bm25_results, config, stats)
+    }
+}
+
+/// Composite fusion algorithm: combines multiple algorithms with weighted averaging.
+pub struct CompositeFuser {
+    strategies: Vec<(Box<dyn FusionAlgorithmImpl>, f32)>,
+}
+
+impl CompositeFuser {
+    fn from_strategies(strategies: &[cce_config::modules::search::CompositeStrategy]) -> Self {
+        let total_weight: f32 = strategies.iter().map(|s| s.weight).sum();
+        let strategies = strategies
+            .iter()
+            .map(|s| {
+                let config = HybridFusionConfig {
+                    algorithm: s.algorithm.clone(),
+                    ..HybridFusionConfig::default()
+                };
+                let fuser = create_fusion_algorithm(&config);
+                let normalized_weight = if total_weight > 0.0 {
+                    s.weight / total_weight
+                } else {
+                    0.0
+                };
+                (fuser, normalized_weight)
+            })
+            .collect();
+        Self { strategies }
+    }
+}
+
+impl FusionAlgorithmImpl for CompositeFuser {
+    fn fuse(
+        &self,
+        vector_results: Vec<SearchResult>,
+        bm25_results: Vec<SearchResult>,
+        config: &HybridFusionConfig,
+        stats: FusionAlignmentStats,
+    ) -> (Vec<SearchResult>, FusionAlignmentStats) {
+        use std::collections::HashMap;
+
+        let mut score_maps: Vec<HashMap<String, (SearchResult, f32)>> = Vec::new();
+
+        for (fuser, weight) in &self.strategies {
+            let (fused, _) = fuser.fuse(
+                vector_results.clone(),
+                bm25_results.clone(),
+                config,
+                stats,
+            );
+            let mut score_map: HashMap<String, (SearchResult, f32)> = HashMap::new();
+            for result in fused {
+                let key = alignment_key(&result.entity_ids, result.segment_id.as_deref(), &result.id)
+                    .unwrap_or_default();
+                score_map.insert(key, (result, *weight));
+            }
+            score_maps.push(score_map);
+        }
+
+        let mut all_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for map in &score_maps {
+            for key in map.keys() {
+                all_keys.insert(key.clone());
+            }
+        }
+
+        let mut fused: Vec<SearchResult> = Vec::new();
+        for key in all_keys {
+            let mut total_score = 0.0;
+            let mut best_result: Option<SearchResult> = None;
+            let mut best_score = f32::MIN;
+
+            for map in &score_maps {
+                if let Some((result, weight)) = map.get(&key) {
+                    total_score += result.score * weight;
+                    if result.score > best_score {
+                        best_score = result.score;
+                        best_result = Some(result.clone());
+                    }
+                }
+            }
+
+            if total_score < config.min_score {
+                continue;
+            }
+
+            if let Some(mut result) = best_result {
+                result.score = total_score;
+                result.original_score = total_score;
+                result.sources = vec!["hybrid".to_string()];
+                fused.push(result);
+            }
+        }
+
+        (finish_fused(fused, config.dedup_by_chunk), stats)
+    }
+}
+
 /// Weighted min-max fusion (the default algorithm): normalize each path's
 /// per-key best scores to [0, 1], then take the weighted linear combination
 /// `score = alpha * norm(vector) + beta * norm(bm25)`. A key seen on one
@@ -163,7 +327,7 @@ fn finish_fused(fused: Vec<SearchResult>, dedup_by_chunk: bool) -> Vec<SearchRes
 fn fuse_weighted_minmax(
     vector_results: Vec<SearchResult>,
     bm25_results: Vec<SearchResult>,
-    config: &super::HybridFusionConfig,
+    config: &HybridFusionConfig,
     stats: FusionAlignmentStats,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
     let alpha = config.vector_weight;
@@ -191,7 +355,6 @@ fn fuse_weighted_minmax(
             return fuse_single_path(
                 &bm25_results,
                 |r| r.bm25_score.unwrap_or(0.0),
-                beta,
                 false,
                 config,
                 stats,
@@ -201,7 +364,6 @@ fn fuse_weighted_minmax(
         return fuse_single_path(
             &vector_results,
             |r| r.vector_score,
-            alpha,
             true,
             config,
             stats,
@@ -257,7 +419,8 @@ fn fuse_weighted_minmax(
             }
         };
 
-        let fused_score = alpha * v_norm + beta * b_norm;
+        let raw_score = alpha * v_norm + beta * b_norm;
+        let fused_score = raw_score / (alpha + beta);
 
         if fused_score < config.min_score {
             continue;
@@ -274,6 +437,63 @@ fn fuse_weighted_minmax(
     (finish_fused(fused, config.dedup_by_chunk), stats)
 }
 
+/// Rank context shared by rank-based fusion algorithms (RRF, Borda).
+///
+/// Encapsulates the per-path ranking and key union so individual algorithms
+/// only implement their score combination logic.
+struct RankContext {
+    vector_ranks: HashMap<String, (usize, u32)>,
+    bm25_ranks: HashMap<String, (usize, u32)>,
+    all_keys: Vec<String>,
+    vector_results: Vec<SearchResult>,
+    bm25_results: Vec<SearchResult>,
+}
+
+impl RankContext {
+    fn new(
+        vector_results: Vec<SearchResult>,
+        bm25_results: Vec<SearchResult>,
+        include_single_path: bool,
+    ) -> Self {
+        let vector_ranks = rank_by_key(&vector_results, |r| r.vector_score);
+        let bm25_ranks = rank_by_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
+        let all_keys = union_keys(&vector_ranks, &bm25_ranks, include_single_path);
+        Self {
+            vector_ranks,
+            bm25_ranks,
+            all_keys,
+            vector_results,
+            bm25_results,
+        }
+    }
+
+    fn get(
+        &self,
+        key: &str,
+    ) -> (Option<&(usize, u32)>, Option<&(usize, u32)>) {
+        (
+            self.vector_ranks.get(key),
+            self.bm25_ranks.get(key),
+        )
+    }
+
+    fn vector_result(&self, index: usize) -> &SearchResult {
+        &self.vector_results[index]
+    }
+
+    fn bm25_result(&self, index: usize) -> &SearchResult {
+        &self.bm25_results[index]
+    }
+
+    fn vector_key_count(&self) -> usize {
+        self.vector_ranks.len()
+    }
+
+    fn bm25_key_count(&self) -> usize {
+        self.bm25_ranks.len()
+    }
+}
+
 /// Reciprocal Rank Fusion: rank-based fusion that ignores raw score
 /// distributions, making it robust to min-max's sensitivity to outliers and
 /// compressed score ranges.
@@ -288,65 +508,55 @@ fn fuse_weighted_minmax(
 fn fuse_rrf(
     vector_results: Vec<SearchResult>,
     bm25_results: Vec<SearchResult>,
-    config: &super::HybridFusionConfig,
+    config: &HybridFusionConfig,
     k: u32,
     stats: FusionAlignmentStats,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
-    // Rank each path's alignment keys by best raw score. Ranking at key
-    // granularity mirrors the min-max path: fragments of the same entity do
-    // not crowd the rank list.
-    let vector_ranks = rank_by_key(&vector_results, |r| r.vector_score);
-    let bm25_ranks = rank_by_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
-
     let alpha = config.vector_weight;
     let beta = config.bm25_weight;
     let k = k.max(1) as f32;
 
-    let all_keys = union_keys(&vector_ranks, &bm25_ranks, config.include_single_path);
+    let ctx = RankContext::new(vector_results, bm25_results, config.include_single_path);
+    let mut fused: Vec<SearchResult> = Vec::with_capacity(ctx.all_keys.len());
 
-    let vector_results = &vector_results;
-    let bm25_results = &bm25_results;
-    let mut fused: Vec<SearchResult> = Vec::with_capacity(all_keys.len());
-    for key in all_keys {
-        let vec_rank = vector_ranks.get(&key);
-        let bm25_rank = bm25_ranks.get(&key);
+    for key in &ctx.all_keys {
+        let (vec_rank, bm25_rank) = ctx.get(key);
 
         let (base, rrf_score) = match (vec_rank, bm25_rank) {
             (Some(&(vi, rv)), Some(&(bi, rb))) => {
                 let v_term = alpha / (k + rv as f32);
                 let b_term = beta / (k + rb as f32);
-                // Pick the path with the larger weighted term as the output
-                // chunk, and surface the other path's raw score as well —
-                // mirroring the min-max path, where both per-path score
-                // fields are populated for matched keys.
                 let base = if v_term >= b_term {
-                    let mut b = vector_results[vi].clone();
-                    b.bm25_score = bm25_results[bi].bm25_score;
+                    let mut b = ctx.vector_result(vi).clone();
+                    b.bm25_score = ctx.bm25_result(bi).bm25_score;
                     b
                 } else {
-                    let mut b = bm25_results[bi].clone();
-                    b.vector_score = vector_results[vi].vector_score;
+                    let mut b = ctx.bm25_result(bi).clone();
+                    b.vector_score = ctx.vector_result(vi).vector_score;
                     b
                 };
                 (base, v_term + b_term)
             }
             (Some(&(vi, rv)), None) if config.include_single_path => {
-                let base = vector_results[vi].clone();
+                let base = ctx.vector_result(vi).clone();
                 (base, alpha / (k + rv as f32))
             }
             (None, Some(&(bi, rb))) if config.include_single_path => {
-                let base = bm25_results[bi].clone();
+                let base = ctx.bm25_result(bi).clone();
                 (base, beta / (k + rb as f32))
             }
             _ => continue,
         };
 
-        if rrf_score < config.min_score {
+        let max_score = (alpha + beta) / (k + 1.0);
+        let normalized_score = rrf_score / max_score;
+
+        if normalized_score < config.min_score {
             continue;
         }
         let mut result = base;
-        result.score = rrf_score;
-        result.original_score = rrf_score;
+        result.score = normalized_score;
+        result.original_score = normalized_score;
         result.sources = vec!["hybrid".to_string()];
         fused.push(result);
     }
@@ -374,23 +584,19 @@ fn fuse_rrf(
 fn fuse_borda(
     vector_results: Vec<SearchResult>,
     bm25_results: Vec<SearchResult>,
-    config: &super::HybridFusionConfig,
+    config: &HybridFusionConfig,
     stats: FusionAlignmentStats,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
-    let vector_ranks = rank_by_key(&vector_results, |r| r.vector_score);
-    let bm25_ranks = rank_by_key(&bm25_results, |r| r.bm25_score.unwrap_or(0.0));
-
     let alpha = config.vector_weight;
     let beta = config.bm25_weight;
-    let vector_points = vector_ranks.len() as f32;
-    let bm25_points = bm25_ranks.len() as f32;
 
-    let all_keys = union_keys(&vector_ranks, &bm25_ranks, config.include_single_path);
+    let ctx = RankContext::new(vector_results, bm25_results, config.include_single_path);
+    let vector_points = ctx.vector_key_count() as f32;
+    let bm25_points = ctx.bm25_key_count() as f32;
 
-    let mut fused: Vec<SearchResult> = Vec::with_capacity(all_keys.len());
-    for key in all_keys {
-        let vec_rank = vector_ranks.get(&key);
-        let bm25_rank = bm25_ranks.get(&key);
+    let mut fused: Vec<SearchResult> = Vec::with_capacity(ctx.all_keys.len());
+    for key in &ctx.all_keys {
+        let (vec_rank, bm25_rank) = ctx.get(key);
 
         let (base, borda_score) = match (vec_rank, bm25_rank) {
             (Some(&(vi, rv)), Some(&(bi, rb))) => {
@@ -399,35 +605,37 @@ fn fuse_borda(
                 let v_term = alpha * v_norm_points;
                 let b_term = beta * b_norm_points;
                 let base = if v_term >= b_term {
-                    let mut b = vector_results[vi].clone();
-                    b.bm25_score = bm25_results[bi].bm25_score;
+                    let mut b = ctx.vector_result(vi).clone();
+                    b.bm25_score = ctx.bm25_result(bi).bm25_score;
                     b
                 } else {
-                    let mut b = bm25_results[bi].clone();
-                    b.vector_score = vector_results[vi].vector_score;
+                    let mut b = ctx.bm25_result(bi).clone();
+                    b.vector_score = ctx.vector_result(vi).vector_score;
                     b
                 };
                 (base, v_term + b_term)
             }
             (Some(&(vi, rv)), None) if config.include_single_path => {
-                let base = vector_results[vi].clone();
+                let base = ctx.vector_result(vi).clone();
                 let v_norm_points = (vector_points - rv as f32 + 1.0) / vector_points;
                 (base, alpha * v_norm_points)
             }
             (None, Some(&(bi, rb))) if config.include_single_path => {
-                let base = bm25_results[bi].clone();
+                let base = ctx.bm25_result(bi).clone();
                 let b_norm_points = (bm25_points - rb as f32 + 1.0) / bm25_points;
                 (base, beta * b_norm_points)
             }
             _ => continue,
         };
 
-        if borda_score < config.min_score {
+        let normalized_score = borda_score / (alpha + beta);
+
+        if normalized_score < config.min_score {
             continue;
         }
         let mut result = base;
-        result.score = borda_score;
-        result.original_score = borda_score;
+        result.score = normalized_score;
+        result.original_score = normalized_score;
         result.sources = vec!["hybrid".to_string()];
         fused.push(result);
     }
@@ -476,9 +684,8 @@ fn rank_by_key(
 fn fuse_single_path(
     surviving: &[SearchResult],
     raw_score: impl Fn(&SearchResult) -> f32,
-    weight: f32,
     from_vector: bool,
-    config: &super::HybridFusionConfig,
+    config: &HybridFusionConfig,
     stats: FusionAlignmentStats,
     normalize: bool,
 ) -> (Vec<SearchResult>, FusionAlignmentStats) {
@@ -503,7 +710,7 @@ fn fuse_single_path(
             base.vector_score = 0.0;
             base.bm25_score = Some(norm);
         }
-        let fused_score = weight * norm;
+        let fused_score = norm;
         if fused_score < config.min_score {
             continue;
         }

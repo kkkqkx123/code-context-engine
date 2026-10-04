@@ -13,7 +13,7 @@ pub use handler::RerankRequestHandler;
 pub use provider::{CohereRerankProvider, GenerativeRerankProvider};
 pub use types::{
     RerankCandidate, RerankRequest, RerankResult, RerankRuntimeConfig, RerankedCandidate,
-    ScoreFusionStrategy,
+    RerankFusionStrategy,
 };
 
 /// Rerank handler used by the production generative LLM provider.

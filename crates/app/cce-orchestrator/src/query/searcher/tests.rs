@@ -97,6 +97,19 @@ fn fusion_config_with(vector: f32, bm25: f32) -> crate::query::retrieval::Hybrid
     }
 }
 
+fn fusion_weights_with_algorithm(
+    algorithm: cce_types::plugin::PluginFusionAlgorithm,
+    rrf_k: Option<u32>,
+) -> cce_types::plugin::FusionWeights {
+    cce_types::plugin::FusionWeights {
+        vector_weight: None,
+        bm25_weight: None,
+        min_score: None,
+        algorithm: Some(algorithm),
+        rrf_k,
+    }
+}
+
 fn fusion_weights(vector: Option<f32>, bm25: Option<f32>) -> cce_types::plugin::FusionWeights {
     cce_types::plugin::FusionWeights {
         vector_weight: vector,
@@ -142,38 +155,27 @@ fn test_merge_fusion_weights_partial_fields_keep_defaults() {
 
 #[test]
 fn test_merge_fusion_weights_algorithm_override() {
-    use cce_config::modules::search::FusionAlgorithm;
+    use cce_config::modules::search::RecallFusionAlgorithm;
+    use cce_types::plugin::PluginFusionAlgorithm;
     let config = fusion_config_with(0.5, 0.5);
     let merged = merge_fusion_weights_override(
         config,
-        vec![Some(cce_types::plugin::FusionWeights {
-            algorithm: Some("rrf".to_string()),
-            rrf_k: Some(30),
-            ..fusion_weights(None, None)
-        })],
+        vec![Some(fusion_weights_with_algorithm(
+            PluginFusionAlgorithm::Rrf,
+            Some(30),
+        ))],
     );
-    assert_eq!(merged.algorithm, FusionAlgorithm::Rrf { k: 30 });
+    assert_eq!(merged.algorithm, RecallFusionAlgorithm::Rrf { k: 30 });
 
     let config = fusion_config_with(0.5, 0.5);
     let merged = merge_fusion_weights_override(
         config,
-        vec![Some(cce_types::plugin::FusionWeights {
-            algorithm: Some("not_a_method".to_string()),
-            ..fusion_weights(None, None)
-        })],
+        vec![Some(fusion_weights_with_algorithm(
+            PluginFusionAlgorithm::Rrf,
+            Some(0),
+        ))],
     );
-    assert_eq!(merged.algorithm, FusionAlgorithm::WeightedMinMax);
-
-    let config = fusion_config_with(0.5, 0.5);
-    let merged = merge_fusion_weights_override(
-        config,
-        vec![Some(cce_types::plugin::FusionWeights {
-            algorithm: Some("rrf".to_string()),
-            rrf_k: Some(0),
-            ..fusion_weights(None, None)
-        })],
-    );
-    assert_eq!(merged.algorithm, FusionAlgorithm::WeightedMinMax);
+    assert_eq!(merged.algorithm, RecallFusionAlgorithm::WeightedMinMax);
 }
 
 fn project_meta_table(conn: &rusqlite::Connection) {

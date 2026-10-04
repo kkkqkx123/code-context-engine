@@ -980,11 +980,24 @@ impl CodePlugin for LuaPlugin {
                 .map_err(|e| PluginError::ScriptError(format!("fusion_weights error: {e}")))?;
             match result {
                 mlua::Value::Table(t) => {
+                    let algorithm_str: Option<String> = t.get("algorithm").ok().flatten();
+                    let algorithm = algorithm_str.and_then(|s| match s.as_str() {
+                        "weighted_min_max" | "minmax" => {
+                            Some(cce_types::plugin::PluginFusionAlgorithm::WeightedMinMax)
+                        }
+                        "rrf" | "reciprocal_rank_fusion" => {
+                            Some(cce_types::plugin::PluginFusionAlgorithm::Rrf)
+                        }
+                        "borda_count" | "borda" => {
+                            Some(cce_types::plugin::PluginFusionAlgorithm::BordaCount)
+                        }
+                        _ => None,
+                    });
                     let weights = FusionWeights {
                         vector_weight: t.get("vector_weight").ok().flatten(),
                         bm25_weight: t.get("bm25_weight").ok().flatten(),
                         min_score: t.get("min_score").ok().flatten(),
-                        algorithm: t.get("algorithm").ok().flatten(),
+                        algorithm,
                         rrf_k: t.get("rrf_k").ok().flatten(),
                     };
                     if weights.vector_weight.is_none()

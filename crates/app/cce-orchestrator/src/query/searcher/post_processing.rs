@@ -182,6 +182,7 @@ impl Searcher {
         vector_count: usize,
         bm25_count: usize,
     ) -> crate::query::retrieval::HybridFusionConfig {
+        // Type is now re-exported from cce_config, no conversion needed
         let Some(registry) = &self.plugin_registry else {
             return config;
         };
@@ -226,6 +227,7 @@ pub(crate) fn merge_fusion_weights_override(
     mut config: crate::query::retrieval::HybridFusionConfig,
     results: impl IntoIterator<Item = Option<cce_types::plugin::FusionWeights>>,
 ) -> crate::query::retrieval::HybridFusionConfig {
+    // Type is now re-exported from cce_config, no conversion needed
     for result in results {
         let Some(weights) = result else {
             continue;
@@ -260,12 +262,12 @@ pub(crate) fn merge_fusion_weights_override(
                 );
             }
         }
-        if let Some(name) = weights.algorithm.as_deref() {
-            match parse_plugin_algorithm(name, weights.rrf_k) {
-                Some(algorithm) => config.algorithm = algorithm,
+        if let Some(algorithm) = weights.algorithm {
+            match convert_plugin_algorithm(algorithm, weights.rrf_k) {
+                Some(converted) => config.algorithm = converted,
                 None => tracing::warn!(
-                    algorithm = name,
-                    "Fusion plugin returned an unknown algorithm; keeping configured default"
+                    algorithm = ?algorithm,
+                    "Fusion plugin returned an invalid algorithm configuration; keeping configured default"
                 ),
             }
         }
@@ -274,26 +276,27 @@ pub(crate) fn merge_fusion_weights_override(
     config
 }
 
-/// Parse a plugin-supplied fusion algorithm name with its optional RRF
-/// constant. Returns `None` for unknown names or a rejected `rrf_k`
-/// (zero), in which case the caller keeps the configured algorithm.
-fn parse_plugin_algorithm(
-    name: &str,
+/// Convert a plugin-supplied algorithm enum to the internal representation.
+/// Returns `None` when the RRF constant is rejected (zero), in which case the
+/// caller keeps the configured algorithm.
+fn convert_plugin_algorithm(
+    algorithm: cce_types::plugin::PluginFusionAlgorithm,
     rrf_k: Option<u32>,
-) -> Option<cce_config::modules::search::FusionAlgorithm> {
-    use cce_config::modules::search::FusionAlgorithm;
-    match name {
-        "weighted_min_max" | "minmax" => Some(FusionAlgorithm::WeightedMinMax),
-        "rrf" | "reciprocal_rank_fusion" => {
+) -> Option<cce_config::modules::search::RecallFusionAlgorithm> {
+    use cce_config::modules::search::RecallFusionAlgorithm;
+    match algorithm {
+        cce_types::plugin::PluginFusionAlgorithm::WeightedMinMax => {
+            Some(RecallFusionAlgorithm::WeightedMinMax)
+        }
+        cce_types::plugin::PluginFusionAlgorithm::Rrf => {
             let k = rrf_k.unwrap_or(60);
             if k == 0 {
                 None
             } else {
-                Some(FusionAlgorithm::Rrf { k })
+                Some(RecallFusionAlgorithm::Rrf { k })
             }
         }
-        "borda_count" | "borda" => Some(FusionAlgorithm::BordaCount),
-        _ => None,
+        cce_types::plugin::PluginFusionAlgorithm::BordaCount => Some(RecallFusionAlgorithm::BordaCount),
     }
 }
 

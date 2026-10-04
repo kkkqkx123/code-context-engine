@@ -156,3 +156,31 @@ dynamic dispatch remains for LLM chat.
 
 **Status:** Resolved — dynamic dispatch removed; filtered out of this list.
 
+### FusionAlgorithmImpl — Hybrid Fusion Algorithm Dispatch
+
+**File:** `crates/app/cce-orchestrator/src/query/retrieval/post_processing/fusion/merger.rs`
+
+```rust
+pub trait FusionAlgorithmImpl {
+    fn fuse(
+        &self,
+        vector_results: Vec<SearchResult>,
+        bm25_results: Vec<SearchResult>,
+        config: &HybridFusionConfig,
+        stats: FusionAlignmentStats,
+    ) -> (Vec<SearchResult>, FusionAlignmentStats);
+}
+
+pub fn create_fusion_algorithm(config: &HybridFusionConfig) -> Box<dyn FusionAlgorithmImpl> {
+    match config.algorithm {
+        FusionAlgorithm::WeightedMinMax => Box::new(WeightedMinMaxFuser),
+        FusionAlgorithm::Rrf { k } => Box::new(RrfFuser { k }),
+        FusionAlgorithm::BordaCount => Box::new(BordaFuser),
+    }
+}
+```
+
+The hybrid fusion pipeline supports multiple aggregation algorithms (weighted min-max, RRF, Borda count) selected at runtime by configuration. Each algorithm is implemented as a struct with its own score combination logic. An enum wrapper would require a match on every call site and would not support plugin-provided algorithms.
+
+**Status:** Necessary — runtime algorithm selection from configuration.
+

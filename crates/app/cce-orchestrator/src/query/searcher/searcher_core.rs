@@ -325,8 +325,11 @@ impl Searcher {
         // config refined by query-intent resolution); the algorithm and the
         // runtime switches come straight from `[search.fusion]` so new
         // file-side switches propagate without touching this call site.
-        let fusion_config =
-            HybridFusionConfig::resolve(&options.config.fusion, vector_weight, bm25_weight);
+        let fusion_config = HybridFusionConfig {
+            vector_weight,
+            bm25_weight,
+            ..options.config.fusion.clone()
+        };
         // Plugin fusion-weight override (Fusion capability).
         let fusion_config = if options.config.plugin.fusion_enabled {
             self.apply_fusion_override(

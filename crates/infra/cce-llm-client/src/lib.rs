@@ -27,6 +27,6 @@ pub use crate::services::embedding::provider::OpenAICompatibleProvider;
 pub use crate::services::rerank::{
     CohereRerankProvider, GenerativeRerankProvider, GenerativeRerankRequestHandler,
     ProductionRerankHandler, RerankCandidate, RerankRequest, RerankResult, RerankRuntimeConfig,
-    RerankedCandidate, ScoreFusionStrategy,
+    RerankedCandidate, RerankFusionStrategy,
 };
 pub use cce_llm::{EmbeddingResult, RerankProvider};

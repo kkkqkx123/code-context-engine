@@ -15,7 +15,7 @@
 use std::future::Future;
 
 use crate::error::LlmError;
-use cce_config::modules::search::ScoreFusionStrategy;
+use cce_config::modules::search::RerankFusionStrategy;
 pub use cce_types::ast_to_nl::{RerankCandidate, RerankResult, RerankedCandidate};
 
 /// Port for LLM rerank capability
@@ -62,7 +62,7 @@ pub struct RerankRuntimeConfig {
     /// Whether to return the reason for the rearrangement
     pub return_reasoning: bool,
     /// Score integration strategy
-    pub score_fusion_strategy: ScoreFusionStrategy,
+    pub score_fusion_strategy: RerankFusionStrategy,
     /// Timeout time (milliseconds)
     pub timeout_ms: u64,
 }
@@ -73,7 +73,7 @@ impl Default for RerankRuntimeConfig {
             max_candidates: 50,
             temperature: 0.0,
             return_reasoning: false,
-            score_fusion_strategy: ScoreFusionStrategy::LinearWeighted { alpha: 0.7 },
+            score_fusion_strategy: RerankFusionStrategy::LinearWeighted { alpha: 0.7 },
             timeout_ms: 5000,
         }
     }

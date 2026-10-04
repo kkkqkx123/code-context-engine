@@ -223,6 +223,9 @@ mod tests {
         let encoder = Encoder::default();
         let data = b"Hello";
         let result = encoder.to_utf8(data, "ISO-8859-1");
+        assert_eq!(result.expect("ISO-8859-1 maps to Windows1252"), "Hello");
+
+        let result = encoder.to_utf8(data, "NONEXISTENT-ENCODING");
         assert!(result.is_err());
         assert!(matches!(result, Err(Error::UnsupportedEncoding(_))));
     }
