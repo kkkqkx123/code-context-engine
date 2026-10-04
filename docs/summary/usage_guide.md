@@ -103,7 +103,6 @@ use code_context_engine::orchestrator::query::Searcher;
 
 let searcher = Searcher::builder(qdrant, embedder, bm25)
     .with_sqlite(sqlite)
-    .with_assembler(assembler)
     .with_rerank(rerank_handler)
     .with_relation_boost(relation_searcher)
     .with_summary_boost()  // 启用摘要增益支持

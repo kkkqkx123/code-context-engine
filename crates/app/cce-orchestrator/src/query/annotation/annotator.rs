@@ -1,9 +1,9 @@
-//! SPSR-Graph assembler
+//! Relation annotator
 //!
-//! Main assembler that coordinates extraction, caller-supplied relation
-//! expansion, and structure-preserving concatenation. Graph traversal
-//! lives on the caller side; this module only attaches, deduplicates,
-//! caps and concatenates the units it is given.
+//! Coordinates extraction, caller-supplied relation expansion, and
+//! structure-preserving concatenation. Graph traversal lives on the caller
+//! side; this module only attaches, deduplicates, caps and concatenates the
+//! units it is given.
 
 use futures::future;
 
@@ -13,23 +13,24 @@ use super::concatenator::StructureConcatenator;
 use super::error::Result;
 use super::extractor::SemanticUnitExtractor;
 use super::types::{
-    AssembledResult, AssemblyMetadata, DedupStrategy, ExpandedUnit, SPSRGraphConfig,
+    AnnotatedResult, AnnotationMetadata, DedupStrategy, ExpandedUnit, RelationAnnotationConfig,
     SearchResultInput,
 };
 
-/// SPSR-Graph assembler
+/// Relation annotator
 ///
-/// Coordinates the assembly of search results while preserving structure.
-pub struct SPSRGraphAssembler {
+/// Coordinates the annotation of search results with caller-resolved
+/// call-graph neighbours while preserving structure.
+pub struct RelationAnnotator {
     /// Semantic unit extractor
     extractor: SemanticUnitExtractor,
     /// Configuration
-    config: SPSRGraphConfig,
+    config: RelationAnnotationConfig,
 }
 
-impl SPSRGraphAssembler {
-    /// Create a new assembler
-    pub fn new(config: SPSRGraphConfig) -> Self {
+impl RelationAnnotator {
+    /// Create a new annotator
+    pub fn new(config: RelationAnnotationConfig) -> Self {
         Self {
             extractor: SemanticUnitExtractor::new(),
             config,
@@ -38,10 +39,10 @@ impl SPSRGraphAssembler {
 
     /// Create with default configuration
     pub fn with_default_config() -> Self {
-        Self::new(SPSRGraphConfig::default())
+        Self::new(RelationAnnotationConfig::default())
     }
 
-    /// Assemble a single search result
+    /// Annotate a single search result
     ///
     /// # Arguments
     ///
@@ -50,15 +51,15 @@ impl SPSRGraphAssembler {
     ///   `expansion_enabled` is false; capped by `max_expanded_units`)
     /// * `backward` - Caller-resolved caller units (additionally dropped
     ///   when `expansion_include_callers` is false)
-    pub async fn assemble_single(
+    pub async fn annotate_single(
         &self,
         input: SearchResultInput,
         forward: Vec<ExpandedUnit>,
         backward: Vec<ExpandedUnit>,
-    ) -> Result<AssembledResult> {
-        // Check if assembly is enabled
-        if !self.config.enable_assembly {
-            return Ok(self.create_simple_result(&input));
+    ) -> Result<AnnotatedResult> {
+        // Check if annotation is enabled
+        if !self.config.enable_annotation {
+            return Ok(self.create_unannotated_result(&input));
         }
 
         // 1. Extract the primary unit and carry the hit score onto it so
@@ -88,25 +89,25 @@ impl SPSRGraphAssembler {
 
         // 3. Concatenate with structure-preserving markers
         let concatenator = StructureConcatenator::new(self.config.clone());
-        let (assembled_content, involved_files) = concatenator
+        let (annotated_content, involved_files) = concatenator
             .concatenate(&primary_unit, &forward, &backward)
             .await;
 
         // 4. Build metadata (truncation compares tokens against the token budget)
         let expanded_nodes = forward.len() + backward.len();
         let max_length = self.config.get_max_length();
-        let metadata = AssemblyMetadata {
+        let metadata = AnnotationMetadata {
             expanded: expanded_nodes > 0,
             expanded_nodes,
             forward_nodes: forward.len(),
             backward_nodes: backward.len(),
             file_count: involved_files.len(),
             original_length: input.content.len(),
-            assembled_length: assembled_content.len(),
-            truncated: self.config.estimate_content_tokens(&assembled_content) >= max_length,
+            annotated_length: annotated_content.len(),
+            truncated: self.config.estimate_content_tokens(&annotated_content) >= max_length,
         };
 
-        Ok(AssembledResult {
+        Ok(AnnotatedResult {
             id: input.id,
             entity_id: input.entity_id,
             name: input.name,
@@ -115,27 +116,27 @@ impl SPSRGraphAssembler {
             score: input.score,
             start_line: input.start_line,
             end_line: input.end_line,
-            assembled_content,
+            annotated_content,
             involved_files,
             metadata,
             original_content: input.content,
         })
     }
 
-    /// Assemble multiple search results.
+    /// Annotate multiple search results.
     ///
-    /// Only the top-N results (based on config.assembly_top_n) are assembled.
+    /// Only the top-N results (based on config.annotation_top_n) are annotated.
     /// The rest are returned as simple results. Each input carries its own
     /// caller-resolved forward/backward expansion units. Every result is
     /// capped by the single per-result quota; the batch total is bounded by
-    /// `assembly_top_n` times that quota and never downgrades tail results.
-    pub async fn assemble_batch(
+    /// `annotation_top_n` times that quota and never downgrades tail results.
+    pub async fn annotate_batch(
         &self,
         results: Vec<(SearchResultInput, Vec<ExpandedUnit>, Vec<ExpandedUnit>)>,
-    ) -> Result<Vec<AssembledResult>> {
-        let top_n = self.config.assembly_top_n;
+    ) -> Result<Vec<AnnotatedResult>> {
+        let top_n = self.config.annotation_top_n;
 
-        // Split into top-N (to be assembled) and rest (simple results)
+        // Split into top-N (to be annotated) and rest (simple results)
         let (top_results, rest_results): (Vec<_>, Vec<_>) = results
             .into_iter()
             .enumerate()
@@ -144,22 +145,22 @@ impl SPSRGraphAssembler {
         // Process top-N results in parallel
         let mut futures = Vec::new();
         for (_, (input, forward, backward)) in top_results {
-            futures.push(self.assemble_single(input, forward, backward));
+            futures.push(self.annotate_single(input, forward, backward));
         }
 
         // Execute all futures concurrently
-        let assembled_top = future::join_all(futures).await;
+        let annotated_top = future::join_all(futures).await;
 
-        // Convert Results to AssembledResults
-        let mut assembled: Vec<AssembledResult> =
-            assembled_top.into_iter().collect::<Result<Vec<_>>>()?;
+        // Convert Results to AnnotatedResults
+        let mut annotated: Vec<AnnotatedResult> =
+            annotated_top.into_iter().collect::<Result<Vec<_>>>()?;
 
         // Add simple results for the rest
         for (_, (input, _, _)) in rest_results {
-            assembled.push(self.create_simple_result(&input));
+            annotated.push(self.create_unannotated_result(&input));
         }
 
-        Ok(assembled)
+        Ok(annotated)
     }
 
     /// Deduplicate caller-supplied expansion units against the primary and
@@ -178,7 +179,7 @@ impl SPSRGraphAssembler {
         primary_unit: &ExpandedUnit,
         forward: Vec<ExpandedUnit>,
         backward: Vec<ExpandedUnit>,
-        config: &SPSRGraphConfig,
+        config: &RelationAnnotationConfig,
     ) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
         use std::collections::HashSet;
 
@@ -249,7 +250,7 @@ impl SPSRGraphAssembler {
     }
 
     /// Decide whether an expansion unit survives noise filtering.
-    fn keep_unit(unit: &ExpandedUnit, config: &SPSRGraphConfig) -> bool {
+    fn keep_unit(unit: &ExpandedUnit, config: &RelationAnnotationConfig) -> bool {
         if config.filter_stdlib && unit.is_stdlib {
             return false;
         }
@@ -262,8 +263,8 @@ impl SPSRGraphAssembler {
         true
     }
 
-    /// Create a simple (non-assembled) result
-    fn create_simple_result(&self, input: &SearchResultInput) -> AssembledResult {
+    /// Create a simple (non-annotated) result
+    fn create_unannotated_result(&self, input: &SearchResultInput) -> AnnotatedResult {
         let unit = ExpandedUnit::new(
             input.content.clone(),
             input.file_path.clone(),
@@ -272,11 +273,11 @@ impl SPSRGraphAssembler {
             input.name.clone(),
         );
 
-        AssembledResult::from_primary(unit, input.score, input.id.clone(), input.kind.clone())
+        AnnotatedResult::from_primary(unit, input.score, input.id.clone(), input.kind.clone())
     }
 
     /// Get the configuration
-    pub fn config(&self) -> &SPSRGraphConfig {
+    pub fn config(&self) -> &RelationAnnotationConfig {
         &self.config
     }
 
@@ -331,8 +332,8 @@ mod tests {
         )
     }
 
-    fn expansion_config(cap: usize, callers: bool) -> SPSRGraphConfig {
-        SPSRGraphConfig::new()
+    fn expansion_config(cap: usize, callers: bool) -> RelationAnnotationConfig {
+        RelationAnnotationConfig::new()
             .enable(true)
             .with_expansion(true)
             .with_max_expanded_units(cap)
@@ -341,125 +342,125 @@ mod tests {
 
     #[tokio::test]
     async fn test_forward_and_backward_attached() {
-        let assembler = SPSRGraphAssembler::new(expansion_config(4, true));
-        let result = assembler
-            .assemble_single(
+        let annotator = RelationAnnotator::new(expansion_config(4, true));
+        let result = annotator
+            .annotate_single(
                 input(PRIMARY_CODE, 1),
                 vec![unit(2, "b", ExpansionOrigin::Forward)],
                 vec![unit(3, "c", ExpansionOrigin::Backward)],
             )
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert!(result.metadata.expanded);
         assert_eq!(result.metadata.forward_nodes, 1);
         assert_eq!(result.metadata.backward_nodes, 1);
         assert_eq!(result.metadata.expanded_nodes, 2);
         assert!(
             result
-                .assembled_content
+                .annotated_content
                 .contains("// [calls] b (src/b.rs:1-3)")
         );
         assert!(
             result
-                .assembled_content
+                .annotated_content
                 .contains("// [called by] c (src/c.rs:1-3)")
         );
     }
 
     #[tokio::test]
     async fn test_budget_cap_forward_first() {
-        let assembler = SPSRGraphAssembler::new(expansion_config(2, true));
+        let annotator = RelationAnnotator::new(expansion_config(2, true));
         let forward = (10..14)
             .map(|i| unit(i, &format!("f{i}"), ExpansionOrigin::Forward))
             .collect();
         let backward = vec![unit(20, "g", ExpansionOrigin::Backward)];
-        let result = assembler
-            .assemble_single(input(PRIMARY_CODE, 1), forward, backward)
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), forward, backward)
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 2);
         assert_eq!(result.metadata.backward_nodes, 0);
     }
 
     #[tokio::test]
     async fn test_duplicate_entity_dropped() {
-        let assembler = SPSRGraphAssembler::new(expansion_config(4, true));
+        let annotator = RelationAnnotator::new(expansion_config(4, true));
         let forward = vec![
             unit(1, "dup", ExpansionOrigin::Forward),
             unit(2, "ok", ExpansionOrigin::Forward),
             unit(2, "again", ExpansionOrigin::Forward),
         ];
-        let result = assembler
-            .assemble_single(input(PRIMARY_CODE, 1), forward, Vec::new())
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), forward, Vec::new())
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 1);
     }
 
     #[tokio::test]
     async fn test_callers_excluded_when_disabled() {
-        let assembler = SPSRGraphAssembler::new(expansion_config(4, false));
-        let result = assembler
-            .assemble_single(
+        let annotator = RelationAnnotator::new(expansion_config(4, false));
+        let result = annotator
+            .annotate_single(
                 input(PRIMARY_CODE, 1),
                 vec![unit(2, "b", ExpansionOrigin::Forward)],
                 vec![unit(3, "c", ExpansionOrigin::Backward)],
             )
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 1);
         assert_eq!(result.metadata.backward_nodes, 0);
-        assert!(!result.assembled_content.contains("called by"));
+        assert!(!result.annotated_content.contains("called by"));
     }
 
     #[tokio::test]
     async fn test_expansion_disabled_drops_units() {
-        let assembler = SPSRGraphAssembler::new(SPSRGraphConfig::new().enable(true));
-        let result = assembler
-            .assemble_single(
+        let annotator = RelationAnnotator::new(RelationAnnotationConfig::new().enable(true));
+        let result = annotator
+            .annotate_single(
                 input(PRIMARY_CODE, 1),
                 vec![unit(2, "b", ExpansionOrigin::Forward)],
                 vec![unit(3, "c", ExpansionOrigin::Backward)],
             )
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert!(!result.metadata.expanded);
         assert_eq!(result.metadata.expanded_nodes, 0);
     }
 
     #[tokio::test]
-    async fn test_assembly_disabled_shortcuts() {
-        let assembler = SPSRGraphAssembler::new(SPSRGraphConfig::new());
-        let result = assembler
-            .assemble_single(
+    async fn test_annotation_disabled_shortcuts() {
+        let annotator = RelationAnnotator::new(RelationAnnotationConfig::new());
+        let result = annotator
+            .annotate_single(
                 input(PRIMARY_CODE, 1),
                 vec![unit(2, "b", ExpansionOrigin::Forward)],
                 Vec::new(),
             )
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert!(!result.metadata.expanded);
-        assert_eq!(result.assembled_content, PRIMARY_CODE);
+        assert_eq!(result.annotated_content, PRIMARY_CODE);
     }
 
     #[tokio::test]
     async fn test_stdlib_and_external_filtered() {
-        let assembler = SPSRGraphAssembler::new(expansion_config(4, true));
+        let annotator = RelationAnnotator::new(expansion_config(4, true));
         let stdlib = unit(2, "b", ExpansionOrigin::Forward).with_stdlib(true);
         let external = unit(3, "c", ExpansionOrigin::Forward).with_external(true);
         let ok = unit(4, "d", ExpansionOrigin::Forward);
-        let result = assembler
-            .assemble_single(
+        let result = annotator
+            .annotate_single(
                 input(PRIMARY_CODE, 1),
                 vec![stdlib, external, ok],
                 Vec::new(),
             )
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 1);
-        assert!(result.assembled_content.contains("fn d()"));
-        assert!(!result.assembled_content.contains("fn b()"));
-        assert!(!result.assembled_content.contains("fn c()"));
+        assert!(result.annotated_content.contains("fn d()"));
+        assert!(!result.annotated_content.contains("fn b()"));
+        assert!(!result.annotated_content.contains("fn c()"));
     }
 
     #[tokio::test]
@@ -469,43 +470,45 @@ mod tests {
         let structural =
             || unit(2, "b", ExpansionOrigin::Forward).with_relation_type(RelationType::Inheritance);
 
-        let assembler = SPSRGraphAssembler::new(expansion_config(4, true));
-        let result = assembler
-            .assemble_single(input(PRIMARY_CODE, 1), vec![structural()], Vec::new())
+        let annotator = RelationAnnotator::new(expansion_config(4, true));
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), vec![structural()], Vec::new())
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 0);
 
         let config = expansion_config(4, true).with_structural_edges(true);
-        let assembler = SPSRGraphAssembler::new(config);
-        let result = assembler
-            .assemble_single(input(PRIMARY_CODE, 1), vec![structural()], Vec::new())
+        let annotator = RelationAnnotator::new(config);
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), vec![structural()], Vec::new())
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 1);
     }
 
     #[tokio::test]
     async fn test_direction_internal_score_order() {
-        let assembler = SPSRGraphAssembler::new(expansion_config(1, true));
+        let annotator = RelationAnnotator::new(expansion_config(1, true));
         // Low score arrives first; the high-score unit must win the single slot.
         let forward = vec![
             unit_scored(10, "low", ExpansionOrigin::Forward, 0.2),
             unit_scored(11, "high", ExpansionOrigin::Forward, 0.9),
         ];
-        let result = assembler
-            .assemble_single(input(PRIMARY_CODE, 1), forward, Vec::new())
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), forward, Vec::new())
             .await
-            .expect("assembly ok");
+            .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 1);
-        assert!(result.assembled_content.contains("fn high()"));
-        assert!(!result.assembled_content.contains("fn low()"));
+        assert!(result.annotated_content.contains("fn high()"));
+        assert!(!result.annotated_content.contains("fn low()"));
     }
 
     #[tokio::test]
     async fn test_truncated_uses_token_basis() {
-        let config = SPSRGraphConfig::new().enable(true).with_max_length(1000);
-        let assembler = SPSRGraphAssembler::new(config);
+        let config = RelationAnnotationConfig::new()
+            .enable(true)
+            .with_max_length(1000);
+        let annotator = RelationAnnotator::new(config);
         // More than 1000 bytes but far fewer tokens: byte comparison would
         // report truncation, token comparison must not.
         let big = format!(
@@ -514,30 +517,32 @@ mod tests {
             "y".repeat(400),
             "z".repeat(400)
         );
-        let result = assembler
-            .assemble_single(input(&big, 1), Vec::new(), Vec::new())
+        let result = annotator
+            .annotate_single(input(&big, 1), Vec::new(), Vec::new())
             .await
-            .expect("assembly ok");
-        assert!(result.assembled_content.len() > 1000);
+            .expect("annotation ok");
+        assert!(result.annotated_content.len() > 1000);
         assert!(!result.metadata.truncated);
     }
 
     #[tokio::test]
     async fn test_batch_keeps_all_results() {
-        let config = SPSRGraphConfig::new().enable(true).with_max_length(1000);
-        let assembler = SPSRGraphAssembler::new(config);
+        let config = RelationAnnotationConfig::new()
+            .enable(true)
+            .with_max_length(1000);
+        let annotator = RelationAnnotator::new(config);
         let results = vec![
             (input(PRIMARY_CODE, 1), Vec::new(), Vec::new()),
             (input(PRIMARY_CODE, 2), Vec::new(), Vec::new()),
             (input(PRIMARY_CODE, 3), Vec::new(), Vec::new()),
         ];
-        let assembled = assembler
-            .assemble_batch(results)
+        let annotated = annotator
+            .annotate_batch(results)
             .await
-            .expect("assembly ok");
-        assert_eq!(assembled.len(), 3);
-        for result in &assembled {
-            assert!(result.assembled_content.contains("call_b"));
+            .expect("annotation ok");
+        assert_eq!(annotated.len(), 3);
+        for result in &annotated {
+            assert!(result.annotated_content.contains("call_b"));
         }
     }
 }

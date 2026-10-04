@@ -13,7 +13,7 @@
 - ❌ 混合召回（HybridRecall：向量 + BM25 融合）
 - ❌ 聚合查询（Aggregated Search：多子查询合并）
 - ❌ 关系扩展（WithRelationExpansion）
-- ❌ 组装模式（WithAssembly：SPSR-Graph 调用链组装）
+- ❌ 标注模式（WithAnnotation：调用关系标注）
 - ❌ 摘要召回（SummaryRecall）
 
 ### 1.2 目标
@@ -23,7 +23,7 @@
 1. **融合策略对比**：HybridRecall vs DenseRecall vs Bm25Recall
 2. **权重调优**：不同 `vector_weight` / `bm25_weight` 组合的效果
 3. **聚合收益**：多子查询聚合 vs 单子查询
-4. **组装效果**：WithAssembly 对代码理解任务的提升
+4. **标注效果**：WithAnnotation 对代码理解任务的提升
 5. **关系扩展**：WithRelationExpansion 对调用链查询的帮助
 
 ---
@@ -91,7 +91,7 @@
 |------|------|------|
 | `plain` | 纯检索，无后处理 | - |
 | `relation` | 调用链关系扩展 | `depth=2`, `strategy=Bidirectional` |
-| `assembly` | SPSR-Graph 代码组装 | `depth=1`, `strategy=Bidirectional` |
+| `annotation` | 调用关系标注 | `depth=1`, `strategy=Bidirectional` |
 | `aggregated` | 多子查询聚合 | `sub_queries=2-3` |
 
 ### 3.2 完整测试矩阵
@@ -110,8 +110,8 @@
 
 | 融合方法 | 执行模式 | 组合数 |
 |----------|----------|--------|
-| `minmax-balanced` | plain/relation/assembly/aggregated | 4 × 3 baselines = 12 |
-| `rrf-standard` | plain/relation/assembly/aggregated | 4 × 3 baselines = 12 |
+| `minmax-balanced` | plain/relation/annotation/aggregated | 4 × 3 baselines = 12 |
+| `rrf-standard` | plain/relation/annotation/aggregated | 4 × 3 baselines = 12 |
 | **小计** | - | **24 条扩展评测** |
 
 **总计**：36 + 24 = **60 条评测结果** × 2 fixtures = **120 条最终结果**
@@ -128,7 +128,7 @@
 | 新增组 | 类型 | 示例查询 | 预期受益策略 |
 |--------|------|----------|--------------|
 | G5 - Call Chain | 调用链 | `find all callers of initialize()` | WithRelationExpansion |
-| G6 - Code Assembly | 代码组装 | `show me the full authentication flow` | WithAssembly |
+| G6 - Code Annotation | 代码标注 | `show me the full authentication flow` | WithAnnotation |
 | G7 - Multi-Intent | 多意图 | `auth middleware and database connection` | Aggregated Search |
 | G8 - Summary | 摘要匹配 | `high level overview of request handling` | SummaryRecall |
 
@@ -158,12 +158,12 @@ pub struct BenchmarkData {
 // 新增：执行策略配置
 #[derive(Archive, Serialize, Deserialize, Debug, Clone)]
 pub struct ExecutionStrategyConfig {
-    pub strategy_name: String,  // "HybridRecall", "WithAssembly", etc.
+    pub strategy_name: String,  // "HybridRecall", "WithAnnotation", etc.
     pub vector_weight: Option<f32>,
     pub bm25_weight: Option<f32>,
     pub expansion_depth: Option<usize>,
     pub expansion_strategy: Option<String>,  // "ForwardOnly", "BackwardOnly", "Bidirectional"
-    pub enable_assembly: bool,
+    pub enable_annotation: bool,
     pub enable_relation_expansion: bool,
 }
 ```
@@ -283,8 +283,8 @@ class AggregationMetricSnapshot:
     hybrid_fusion_latency_p50_ms: Optional[float]
     fusion_overhead_ms: Optional[float]  # 相比单路召回的额外延迟
     
-    # 组装相关
-    assembly_expansion_ratio: Optional[float]  # 组装后代码量 / 原始代码量
+    # 标注相关
+    annotation_expansion_ratio: Optional[float]  # 标注后代码量 / 原始代码量
     call_chain_depth_achieved: Optional[int]
     
     # 聚合相关
@@ -327,7 +327,7 @@ python benches/scripts/analyze_results.py --mode aggregation
 | **Fusion Gain@10** | 同上但用 P@10 | minmax, rrf |
 | **RRF vs MinMax Gap** | rrf_score - minmax_score（同权重下） | 融合方法对比 |
 | **Weight Sensitivity** | 同一融合方法在不同权重下的 P@5 标准差 | minmax, rrf |
-| **Assembly Coverage** | 组装后代码行数 / 原始代码行数 | assembly |
+| **Annotation Coverage** | 标注后代码行数 / 原始代码行数 | annotation |
 | **Relation Precision** | 扩展的调用链节点中相关的比例 | relation |
 | **Dedup Efficiency** | 1 - (去重后结果数 / 去重前结果数) | aggregated |
 | **Strategy Win Rate** | 该策略在所有查询中获胜的比例 | 所有策略 |
@@ -415,7 +415,7 @@ outputs/benchmark/aggregation/summary/
 ├── fusion_method_comparison.csv   # minmax vs rrf vs 单路
 ├── weight_sensitivity.csv         # 7 种权重预设的敏感性分析
 ├── rrf_k_sensitivity.csv          # 3 种 k 值的对比
-├── execution_mode_comparison.csv  # plain/relation/assembly/aggregated
+├── execution_mode_comparison.csv  # plain/relation/annotation/aggregated
 ├── group_analysis.csv             # G1-G8 组别分析
 └── recommendation.md              # 推荐配置文档
 ```
@@ -546,15 +546,15 @@ fused_score = alpha * rrf_score_v + beta * rrf_score_b
 |----|----------|----------|----------|
 | G5-1 | `find all functions that call initialize()` | WithRelationExpansion | `initialize()`, `main()`, `setup()` |
 | G5-2 | `who uses the authenticate method` | WithRelationExpansion | `authenticate()`, `login_handler()` |
-| G5-3 | `trace the request processing flow` | WithAssembly | `handle_request()`, `middleware()`, `router()` |
+| G5-3 | `trace the request processing flow` | WithAnnotation | `handle_request()`, `middleware()`, `router()` |
 
-### G6 - Code Assembly（代码组装）
+### G6 - Code Annotation（代码标注）
 
 | ID | 查询文本 | 预期受益 | 相关实体 |
 |----|----------|----------|----------|
-| G6-1 | `show me the full authentication implementation` | WithAssembly | `auth_module/*` |
-| G6-2 | `complete database connection handling code` | WithAssembly | `db_connect()`, `db_close()`, `query()` |
-| G6-3 | `all code related to error handling` | WithAssembly | `error_handler()`, `logging()` |
+| G6-1 | `show me the full authentication implementation` | WithAnnotation | `auth_module/*` |
+| G6-2 | `complete database connection handling code` | WithAnnotation | `db_connect()`, `db_close()`, `query()` |
+| G6-3 | `all code related to error handling` | WithAnnotation | `error_handler()`, `logging()` |
 
 ### G7 - Multi-Intent（多意图）
 
@@ -588,7 +588,7 @@ pub enum FusionMethod {
 pub enum ExecutionMode {
     Plain,                                          // 纯检索
     Relation { depth: usize, strategy: String },     // 关系扩展
-    Assembly { depth: usize, strategy: String },     // 代码组装
+    Annotation { depth: usize, strategy: String },     // 代码标注
     Aggregated { sub_queries: Vec<String> },         // 多子查询聚合
 }
 
@@ -649,12 +649,12 @@ ExecutionStrategyConfig {
 
 // ========== 执行模式扩展 ==========
 
-// minmax-balanced + assembly
+// minmax-balanced + annotation
 ExecutionStrategyConfig {
     fusion_method: FusionMethod::Minmax,
     vector_weight: Some(0.5),
     bm25_weight: Some(0.5),
-    execution_mode: ExecutionMode::Assembly {
+    execution_mode: ExecutionMode::Annotation {
         depth: 1,
         strategy: "Bidirectional".to_string(),
     },

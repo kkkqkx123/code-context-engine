@@ -135,7 +135,7 @@ pub async fn handle_search(
     query_opts.config.rerank = project_entry.config.rerank.clone();
     query_opts.config.boost = project_entry.config.search.boost.clone();
     query_opts.config.result = project_entry.config.search.result.clone();
-    query_opts.config.assembly = project_entry.config.search.assembly.clone();
+    query_opts.config.annotation = project_entry.config.search.annotation.clone();
 
     // Per-request rerank overrides take precedence over the config.
     if let Some(enable_rerank) = request.enable_rerank {
@@ -356,7 +356,7 @@ pub async fn handle_aggregated_search(
     };
     global_config.boost = project_entry.config.search.boost.clone();
     global_config.rerank = project_entry.config.rerank.clone();
-    global_config.assembly = project_entry.config.search.assembly.clone();
+    global_config.annotation = project_entry.config.search.annotation.clone();
     global_config.result = {
         let mut r = project_entry.config.search.result.clone();
         r.limit = request.limit;
@@ -504,8 +504,6 @@ pub async fn handle_aggregated_search(
 
 /// Convert orchestrator result item to API result item
 fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem {
-    // Get source from sources list (first one) or default
-    let source = item.sources.first().cloned().unwrap_or_default();
     // Get entity type from kind
     let entity_type = if item.kind.is_empty() {
         None
@@ -522,14 +520,12 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
     };
 
     SearchResultItem {
-        score: item.score,
         file_path: item.file_path,
-        code_chunk: item.content, // Use content as code_chunk
+        code_chunk: item.content,
         start_line: item.start_line,
         end_line: item.end_line,
         entity_type,
-        source,
-        entity_ids: item.entity_ids.iter().map(|eid| eid.0).collect(),
+        entity_names: Vec::new(),
         content_state,
     }
 }

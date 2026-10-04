@@ -32,9 +32,9 @@
 //!         ├── Call chain queries / path finding / inheritance
 //!         └── GraphService (ego graph, shortest path, components, export)
 //!
-//! Optional post-processing: when `search.assembly.enable_assembly` is set,
-//! the final top-N results are assembled with structure-preserving file and
-//! relation markers after ranking (assembly/ module), leaving order untouched.
+//! Optional post-processing: when `search.annotation.enable_annotation` is set,
+//! the final top-N results are annotated with structure-preserving file and
+//! relation markers after ranking (annotation/ module), leaving order untouched.
 //!
 //! Tools Module (code analysis tools, outside the query pipeline)
 //!     ├── SymbolLookup (symbol lookup: find references, goto definition)
@@ -103,8 +103,8 @@ pub mod boost;
 // Ranking module
 pub mod ranking;
 
-// SPSR-Graph assembly
-pub mod assembly;
+// Relation annotation
+pub mod annotation;
 
 // Independent graph retrieval path
 pub mod graph;

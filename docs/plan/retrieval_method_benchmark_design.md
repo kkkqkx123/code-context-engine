@@ -5,7 +5,7 @@
 现有 benchmark（`examples/{rust,python}/benchmark_*.rs`）的评测轴是 **chunking 方案 × 检索器**：固定 3 个 baseline（full_pipeline / full_pipeline_raw_source / direct_chunking），对每个 baseline 独立评测 emb（余弦相似度）与 BM25（Okapi）两条单路召回路。它回答的问题是"哪种分块方案更好"，但没有覆盖**召回方式**这一维度：
 
 - 生产系统（`cce_orchestrator::query`）支持三种召回方式：Dense（纯向量）、Sparse（纯 BM25）、Hybrid（按 entity_id 对齐的 min-max 归一化 + 加权融合，含按查询意图的动态权重）。现有 benchmark 从未评测 Hybrid。
-- `docs/benchmark/query-aggregation-benchmark-design.md` 已提出融合评测的大框架，但矩阵过大（含关系扩展、组装、聚合等多维执行模式），未落地。
+- `docs/benchmark/query-aggregation-benchmark-design.md` 已提出融合评测的大框架，但矩阵过大（含关系扩展、标注、聚合等多维执行模式），未落地。
 
 本方案的目标：新增一个**召回方式基准测试**，回答"对固定 chunking 方案，emb / bm25 / minmax-hybrid（各权重）/ rrf-hybrid（各 k 值）中哪种召回方式检索质量最优、最优权重是多少"，并与生产融合逻辑口径一致。
 
@@ -153,7 +153,7 @@ outputs/benchmark/{fixture}/retrieval_method/
 
 ## 9. 非目标
 
-- 不评测关系扩展、SPSR-Graph 组装、多子查询聚合等执行模式（由 `query-aggregation-benchmark-design.md` 另行规划）。
+- 不评测关系扩展、关系标注、多子查询聚合等执行模式（由 `query-aggregation-benchmark-design.md` 另行规划）。
 - 不引入 Qdrant/Tantivy 真实存储服务，评测完全基于离线 rkyv 数据。
 - 不修改现有 baseline benchmark 的评测语义（其 chunk 级不去重口径保持不变）。
 - min-max 归一化的离群/单结果失真问题交由本基准的评测结果数据驱动决策（如改用 RRF 或加权 RRF），不在本轮直接修改生产算法。

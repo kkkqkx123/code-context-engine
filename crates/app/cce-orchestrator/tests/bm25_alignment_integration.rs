@@ -371,11 +371,6 @@ fn test_bm25_results_are_enriched_from_sqlite() {
             r.id
         );
         assert!(
-            r.snippet.is_some(),
-            "BM25 result '{}' must carry a snippet",
-            r.id
-        );
-        assert!(
             r.start_line > 0,
             "BM25 result '{}' must carry a start_line",
             r.id

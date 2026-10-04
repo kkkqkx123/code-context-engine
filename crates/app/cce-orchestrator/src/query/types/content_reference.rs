@@ -1,4 +1,4 @@
-//! Content reference types shared by query materialization and assembly.
+//! Content reference types shared by query materialization and annotation.
 //!
 //! A reference replaces an unavailable body with a file-and-range pointer plus
 //! a reason, so consumers always receive a non-empty, actionable result even

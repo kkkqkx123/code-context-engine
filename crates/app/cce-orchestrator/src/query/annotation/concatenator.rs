@@ -1,29 +1,29 @@
 //! Structure-aware concatenator
 //!
-//! Concatenates code units with structure-aware formatting.
-//! Uses unit-level boundaries (from AST parsing) rather than text pattern matching.
+//! Concatenates code units with relation markers and structure-aware formatting.
+//! Uses unit-level boundaries rather than text pattern matching.
 
 use std::path::Path;
 
 use cce_utils::token_estimation::TokenEstimator;
 
 use super::aggregator::{AggregatedSegment, SegmentAggregator};
-use super::types::{ExpandedUnit, ExpansionOrigin, FileInfo, SPSRGraphConfig};
+use super::types::{ExpandedUnit, ExpansionOrigin, FileInfo, RelationAnnotationConfig};
 use crate::query::types::content_reference::{DowngradeReason, reference_content};
 
 /// Structure-aware concatenator
 ///
 /// Concatenates code units with:
 /// - File boundary markers
-/// - Relation markers
+/// - Relation markers (`// [calls] name (file:lines)`)
 /// - Unit-boundary-respecting truncation (never splits a semantic unit)
 pub struct StructureConcatenator {
-    config: SPSRGraphConfig,
+    config: RelationAnnotationConfig,
 }
 
 impl StructureConcatenator {
     /// Create a new concatenator
-    pub fn new(config: SPSRGraphConfig) -> Self {
+    pub fn new(config: RelationAnnotationConfig) -> Self {
         Self { config }
     }
 
@@ -42,7 +42,7 @@ impl StructureConcatenator {
     ///
     /// # Returns
     ///
-    /// A tuple of (assembled_content, involved_files)
+    /// A tuple of (annotated_content, involved_files)
     pub async fn concatenate(
         &self,
         primary: &ExpandedUnit,
@@ -317,7 +317,7 @@ impl StructureConcatenator {
     }
 
     /// Get the configuration
-    pub fn config(&self) -> &SPSRGraphConfig {
+    pub fn config(&self) -> &RelationAnnotationConfig {
         &self.config
     }
 }
@@ -328,7 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concatenate_basic() {
-        let config = SPSRGraphConfig::default();
+        let config = RelationAnnotationConfig::default();
         let concat = StructureConcatenator::new(config);
 
         let primary = ExpandedUnit::new(
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_format_file_marker() {
-        let config = SPSRGraphConfig::default();
+        let config = RelationAnnotationConfig::default();
         let concat = StructureConcatenator::new(config);
 
         let marker = concat.format_file_marker("src/main.rs");
@@ -371,8 +371,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_concatenate_respects_unit_boundaries() {
-        let config = SPSRGraphConfig {
-            max_assembled_length: 100, // Very small to trigger truncation
+        let config = RelationAnnotationConfig {
+            max_annotated_length: 100, // Very small to trigger truncation
             ..Default::default()
         };
         let concat = StructureConcatenator::new(config);
@@ -395,8 +395,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_priority_based_truncation() {
-        let config = SPSRGraphConfig {
-            max_assembled_length: 200,
+        let config = RelationAnnotationConfig {
+            max_annotated_length: 200,
             ..Default::default()
         };
         let concat = StructureConcatenator::new(config);
@@ -419,8 +419,8 @@ mod tests {
     async fn test_informative_truncation_markers() {
         let primary_code = "fn large_function() {\n    let x = 1;\n    let y = 2;\n    x + y\n}";
         let budget = standalone_cost(primary_code, None, "src/a.rs") + 1;
-        let config = SPSRGraphConfig {
-            max_assembled_length: budget,
+        let config = RelationAnnotationConfig {
+            max_annotated_length: budget,
             ..Default::default()
         };
         let concat = StructureConcatenator::new(config);
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn test_character_counting_vs_byte_counting() {
-        let _config = SPSRGraphConfig::default();
+        let _config = RelationAnnotationConfig::default();
         let _concat = StructureConcatenator::new(_config);
 
         // Create a unit with multi-byte characters (e.g., Chinese comments)
@@ -490,7 +490,7 @@ mod tests {
     #[tokio::test]
     async fn test_missing_file_becomes_reference() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let config = SPSRGraphConfig::new()
+        let config = RelationAnnotationConfig::new()
             .enable(true)
             .with_workspace_root(dir.path());
         let concat = StructureConcatenator::new(config);
@@ -515,7 +515,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_workspace_root_skips_existence_check() {
-        let config = SPSRGraphConfig::new().enable(true);
+        let config = RelationAnnotationConfig::new().enable(true);
         let concat = StructureConcatenator::new(config);
 
         let primary = ExpandedUnit::new(
@@ -552,9 +552,9 @@ mod tests {
         let primary_reference_cost = TokenEstimator::estimate(&primary_reference) + 1;
         let limit = tiny_cost + primary_reference_cost + 2;
 
-        let config = SPSRGraphConfig {
-            max_assembled_length: limit,
-            ..SPSRGraphConfig::new().enable(true)
+        let config = RelationAnnotationConfig {
+            max_annotated_length: limit,
+            ..RelationAnnotationConfig::new().enable(true)
         };
         let concat = StructureConcatenator::new(config);
 
@@ -587,9 +587,9 @@ mod tests {
         let budget = standalone_cost(primary_code, None, "src/main.rs")
             + standalone_cost(high_code, Some(high_marker), "src/high.rs")
             + 5;
-        let config = SPSRGraphConfig {
-            max_assembled_length: budget,
-            ..SPSRGraphConfig::new().enable(true)
+        let config = RelationAnnotationConfig {
+            max_annotated_length: budget,
+            ..RelationAnnotationConfig::new().enable(true)
         };
         let concat = StructureConcatenator::new(config);
 
@@ -616,9 +616,9 @@ mod tests {
     async fn test_omitted_size_counts_markers() {
         let low_code = "fn low() {}";
         let budget = standalone_cost("fn main() {}", None, "src/main.rs") + 1;
-        let config = SPSRGraphConfig {
-            max_assembled_length: budget,
-            ..SPSRGraphConfig::new().enable(true)
+        let config = RelationAnnotationConfig {
+            max_annotated_length: budget,
+            ..RelationAnnotationConfig::new().enable(true)
         };
         let concat = StructureConcatenator::new(config);
 

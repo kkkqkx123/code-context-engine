@@ -79,32 +79,32 @@ impl Searcher {
             .threshold_filter
             .apply(sorted_results, &options.config)?;
 
-        // Step 4: Optional structure-preserving assembly of the top-N
+        // Step 4: Optional structure-preserving annotation of the top-N
         // survivors. Runs after ranking so ordering is never touched.
-        if options.config.assembly.enable_assembly {
+        if options.config.annotation.enable_annotation {
             return Ok(self
-                .assemble_results(final_results, &options.config.assembly)
+                .annotate_results(final_results, &options.config.annotation)
                 .await);
         }
 
         Ok(final_results)
     }
 
-    /// Assemble the top-N results with structure-preserving markers.
+    /// Annotate the top-N results with relation annotations.
     ///
     /// Runs after ranking and thresholding so it never affects ordering. Only
-    /// body-bearing results are assembled: a reference line already names its
-    /// file and range, and re-wrapping it would duplicate the path. Assembly
-    /// failures degrade to the unassembled body.
-    async fn assemble_results(
+    /// body-bearing results are annotated: a reference line already names its
+    /// file and range, and re-wrapping it would duplicate the path. Annotation
+    /// failures degrade to the unannotated body.
+    async fn annotate_results(
         &self,
         mut results: Vec<SearchResult>,
-        config: &crate::query::assembly::SPSRGraphConfig,
+        config: &crate::query::annotation::RelationAnnotationConfig,
     ) -> Vec<SearchResult> {
-        use crate::query::assembly::{SPSRGraphAssembler, SearchResultInput};
+        use crate::query::annotation::{RelationAnnotator, SearchResultInput};
 
-        let assembler = SPSRGraphAssembler::new(config.clone());
-        let top_n = config.assembly_top_n.min(results.len());
+        let annotator = RelationAnnotator::new(config.clone());
+        let top_n = config.annotation_top_n.min(results.len());
         for result in results.iter_mut().take(top_n) {
             if result.content_state.is_reference() {
                 continue;
@@ -127,19 +127,18 @@ impl Searcher {
                 content: result.content.clone(),
                 score: result.score,
             };
-            match assembler
-                .assemble_single(input, Vec::new(), Vec::new())
+            match annotator
+                .annotate_single(input, Vec::new(), Vec::new())
                 .await
             {
-                Ok(assembled) => {
-                    result.content = assembled.assembled_content;
-                    result.snippet = Some(result.content.clone());
+                Ok(annotated) => {
+                    result.content = annotated.annotated_content;
                 }
                 Err(error) => {
                     tracing::warn!(
                         result_id = %result.id,
                         %error,
-                        "Assembly failed; keeping unassembled body"
+                        "Annotation failed; keeping unannotated body"
                     );
                 }
             }
@@ -414,7 +413,9 @@ pub(crate) async fn query_fusion_weights_from_plugins(
 /// Apply the `ResultFilter` capability chain over a registry.
 ///
 /// Each plugin receives the current candidate list; its entries remove or
-/// boost results by id. Failures keep the current list.
+/// boost results by id. Boosts are multiplicative (`score *= 1 + boost`) to
+/// stay consistent with the summary boost semantics. Failures keep the
+/// current list.
 pub(crate) async fn apply_result_filter_chain(
     registry: &cce_plugin::PluginRegistry,
     results: &[SearchResult],
@@ -457,7 +458,7 @@ pub(crate) async fn apply_result_filter_chain(
                             continue;
                         }
                         if let Some(boost) = entry.boost {
-                            r.score += boost;
+                            r.score *= 1.0 + boost;
                         }
                     }
                     new_results.push(r);

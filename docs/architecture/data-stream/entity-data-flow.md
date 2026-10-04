@@ -274,11 +274,11 @@ Searcher (cce_orchestrator::query::searcher)
   ├── 重排序阶段 (可选):
   │     └── LlmReranker — LLM 重排序
   │
-  └── 组装阶段 (可选):
-        └── SPSRGraphAssembler — 调用链组装
-              ├── 前向传播 (caller → callee)
-              ├── 后向传播 (callee → caller)
-              └── 路径发现
+  └── 关系标注阶段 (可选):
+        └── RelationAnnotator — 调用方提供关系单元后执行结构保持拼接
+              ├── 前向关系 (callee)
+              ├── 后向关系 (caller)
+              └── 预算裁剪与文件标记
 ```
 
 ## 3. 数据格式转换

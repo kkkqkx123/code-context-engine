@@ -15,7 +15,7 @@
 pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
     Bm25RetrievalConfig, BoostAggregationConfig, HybridFusionConfig, HybridWeightConfig,
-    PluginSearchConfig, QueryIntentWeights, ResultFilterConfig, SPSRGraphConfig,
+    PluginSearchConfig, QueryIntentWeights, RelationAnnotationConfig, ResultFilterConfig,
     ScoreFusionStrategy, ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
 };
 
@@ -84,8 +84,8 @@ pub struct SearchConfig {
     pub boost: BoostAggregationConfig,
     /// Query-side plugin hooks configuration
     pub plugin: PluginSearchConfig,
-    /// Structure-preserving assembly of the final top-N results
-    pub assembly: SPSRGraphConfig,
+    /// Structure-preserving annotation of the final top-N results
+    pub annotation: RelationAnnotationConfig,
     /// Overall search pipeline timeout in milliseconds
     pub timeout_ms: u64,
 }
@@ -102,7 +102,7 @@ impl Default for SearchConfig {
             score: ScoreNormalizationConfig::default(),
             boost: BoostAggregationConfig::default(),
             plugin: PluginSearchConfig::default(),
-            assembly: SPSRGraphConfig::default(),
+            annotation: RelationAnnotationConfig::default(),
             timeout_ms: 30_000,
         }
     }
@@ -123,7 +123,7 @@ impl From<cce_config::modules::search::SearchModuleConfig> for SearchConfig {
             score: cfg.score,
             boost: cfg.boost,
             plugin: cfg.plugin,
-            assembly: cfg.assembly,
+            annotation: cfg.annotation,
             timeout_ms: cfg.timeout_ms,
         }
     }

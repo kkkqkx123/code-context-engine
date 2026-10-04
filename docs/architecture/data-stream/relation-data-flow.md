@@ -202,15 +202,15 @@ RelationBoost (cce_orchestrator::query::boost::relation)
     └── 提升系数: score = score * (1 + boost_factor * call_count)
 ```
 
-#### 2.5.4 SPSR-Graph 组装
+#### 2.5.4 关系标注
 
 ```
-SPSRGraphAssembler (cce_orchestrator::query::assembly)
+RelationAnnotator (cce_orchestrator::query::annotation)
     │
     ├── 接收基础搜索结果
-    ├── 通过调用链扩展结果集
-    │     ├── 前向传播: 找 callee
-    │     └── 后向传播: 找 caller
+    ├── 使用调用方提供的关系扩展单元
+    │     ├── 前向关系: callee
+    │     └── 后向关系: caller
     ├── 聚合上下文信息
     └── 返回丰富后的搜索结果
 ```
@@ -401,5 +401,5 @@ impl RelationType {
 | `cce_orchestrator/src/query/relation_searcher.rs` | 关系查询 |
 | `cce_orchestrator/src/query/relation_bridge.rs` | 关系桥接 |
 | `cce_orchestrator/src/query/boost/relation.rs` | 关系增强 |
-| `cce_orchestrator/src/query/assembly/` | SPSR-Graph 组装 |
+| `cce_orchestrator/src/query/annotation/` | 关系标注 |
 | `cce_orchestrator/src/tools/symbol_lookup/` | 符号查找工具 |

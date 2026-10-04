@@ -356,7 +356,6 @@ impl Searcher {
         );
 
         fused_results = self.apply_glob_filter(fused_results, options)?;
-        self.apply_score_normalization(&mut fused_results, options);
         // Summary boost applies on the fused score (not a third recall path):
         // `sources.summary` in hybrid mode means "boost fused hits by file
         // summary relevance", mirroring the dense-path boost.
@@ -514,7 +513,7 @@ impl Searcher {
     /// async runtime.
     async fn enrich_results(
         &self,
-        results: &mut [SearchResult],
+        results: &mut Vec<SearchResult>,
         project_id: i64,
         query_filter: &QueryFilter,
         max_content_tokens: usize,

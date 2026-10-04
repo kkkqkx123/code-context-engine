@@ -75,10 +75,6 @@ pub enum QueryError {
     #[error("Index '{0}' is not available. Run 'cce index --{0}' to build it.")]
     IndexNotAvailable(String),
 
-    /// Assembly error
-    #[error("Assembly failed: {0}")]
-    Assembly(String),
-
     /// Reranking error
     #[error("Reranking error: {0}")]
     Rerank(String),
@@ -198,7 +194,6 @@ impl QueryError {
             Self::PathNotFound(..) => "QUERY_PATH_NOT_FOUND",
             Self::Invalid(_) => "QUERY_INVALID_ERROR",
             Self::IndexNotAvailable(_) => "QUERY_INDEX_NOT_AVAILABLE",
-            Self::Assembly(_) => "QUERY_ASSEMBLY_ERROR",
             Self::Rerank(_) => "QUERY_RERANK_ERROR",
             Self::Retryable { .. } => "QUERY_RETRYABLE_ERROR",
         }
@@ -279,8 +274,7 @@ impl ErrorClassify for QueryError {
             | QueryError::Traversal(_)
             | QueryError::PathNotFound { .. }
             | QueryError::Invalid(_)
-            | QueryError::IndexNotAvailable(_)
-            | QueryError::Assembly(_) => false,
+            | QueryError::IndexNotAvailable(_) => false,
         }
     }
 

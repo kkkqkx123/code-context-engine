@@ -131,7 +131,6 @@ mod tests {
             vector_score: 1.0,
             bm25_score: None,
             sources: vec![],
-            snippet: None,
             content: String::new(),
             start_line: 0,
             end_line: 0,

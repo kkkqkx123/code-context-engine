@@ -622,7 +622,6 @@ pub struct Searcher {
     bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
     sqlite: Option<Arc<SqliteDatabase>>,
     result_processor: Arc<ResultProcessor>,
-    assembly_handler: Option<Arc<AssemblyHandler>>,
     /// 可选的重排处理器
     rerank_handler: Option<Arc<RerankRequestHandler>>,
 }
@@ -643,7 +642,6 @@ impl Searcher {
             bm25,
             sqlite: None,
             result_processor: Arc::new(ResultProcessor::new()),
-            assembly_handler: None,
             rerank_handler: Some(rerank_handler),
         }
     }

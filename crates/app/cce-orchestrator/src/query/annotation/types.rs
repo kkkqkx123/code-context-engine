@@ -1,13 +1,12 @@
-//! SPSR-Graph assembly types
+//! Relation annotation types
 //!
-//! This module provides type definitions for SPSR-Graph (Structure-Preserving
-//! and Semantically-Reordered Code Graph) assembly operations.
+//! This module provides type definitions for relation annotation operations.
 
 use cce_types::{EntityId, RelationType};
 
-/// Search result input for assembly
+/// Search result input for annotation
 ///
-/// Encapsulates all parameters needed for assembling a search result.
+/// Encapsulates all parameters needed for annotating a search result.
 #[derive(Debug, Clone)]
 pub struct SearchResultInput {
     /// Result ID
@@ -33,8 +32,8 @@ pub struct SearchResultInput {
 /// Deduplication strategy
 pub use cce_config::modules::search::DedupStrategy;
 
-/// SPSR-Graph assembly configuration
-pub use cce_config::modules::search::SPSRGraphConfig;
+/// Relation annotation configuration
+pub use cce_config::modules::search::RelationAnnotationConfig;
 
 /// Semantic unit type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -118,10 +117,6 @@ pub struct ExpandedUnit {
     pub is_stdlib: bool,
     /// True when the target has no in-workspace source.
     pub is_external: bool,
-    /// Depth in the expansion tree. Expansion is single-hop only, so this is
-    /// always zero today; the field documents the position for a future
-    /// multi-hop design.
-    pub depth: u32,
 }
 
 impl ExpandedUnit {
@@ -147,7 +142,6 @@ impl ExpandedUnit {
             score: 0.0,
             is_stdlib: false,
             is_external: false,
-            depth: 0,
         }
     }
 
@@ -251,9 +245,9 @@ impl FileInfo {
     }
 }
 
-/// Assembly metadata
+/// Annotation metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AssemblyMetadata {
+pub struct AnnotationMetadata {
     /// Whether relation expansion attached any unit
     pub expanded: bool,
     /// Number of expanded nodes (forward + backward)
@@ -266,13 +260,13 @@ pub struct AssemblyMetadata {
     pub file_count: usize,
     /// Original content length
     pub original_length: usize,
-    /// Assembled content length
-    pub assembled_length: usize,
+    /// Annotated content length
+    pub annotated_length: usize,
     /// Whether content was truncated
     pub truncated: bool,
 }
 
-impl Default for AssemblyMetadata {
+impl Default for AnnotationMetadata {
     fn default() -> Self {
         Self {
             expanded: false,
@@ -281,15 +275,15 @@ impl Default for AssemblyMetadata {
             backward_nodes: 0,
             file_count: 1,
             original_length: 0,
-            assembled_length: 0,
+            annotated_length: 0,
             truncated: false,
         }
     }
 }
 
-/// Assembled result
+/// Annotated result
 #[derive(Debug, Clone)]
-pub struct AssembledResult {
+pub struct AnnotatedResult {
     /// Primary search result ID
     pub id: String,
     /// Primary entity ID
@@ -306,17 +300,17 @@ pub struct AssembledResult {
     pub start_line: u32,
     /// Primary end line
     pub end_line: u32,
-    /// Assembled content
-    pub assembled_content: String,
+    /// Annotated content
+    pub annotated_content: String,
     /// Involved files
     pub involved_files: Vec<FileInfo>,
-    /// Assembly metadata
-    pub metadata: AssemblyMetadata,
-    /// Original content (before assembly)
+    /// Annotation metadata
+    pub metadata: AnnotationMetadata,
+    /// Original content (before annotation)
     pub original_content: String,
 }
 
-impl AssembledResult {
+impl AnnotatedResult {
     /// Create from a primary unit
     pub fn from_primary(unit: ExpandedUnit, score: f32, id: String, kind: String) -> Self {
         let original_length = unit.code.len();
@@ -329,30 +323,30 @@ impl AssembledResult {
             score,
             start_line: unit.start_line,
             end_line: unit.end_line,
-            assembled_content: unit.code.clone(),
+            annotated_content: unit.code.clone(),
             involved_files: vec![FileInfo::new(unit.file_path)],
-            metadata: AssemblyMetadata {
+            metadata: AnnotationMetadata {
                 expanded: false,
                 expanded_nodes: 0,
                 forward_nodes: 0,
                 backward_nodes: 0,
                 file_count: 1,
                 original_length,
-                assembled_length: original_length,
+                annotated_length: original_length,
                 truncated: false,
             },
             original_content: unit.code,
         }
     }
 
-    /// Check if assembly was performed
-    pub fn is_assembled(&self) -> bool {
+    /// Check if caller-supplied relation units were expanded into the result.
+    pub fn has_expanded_relations(&self) -> bool {
         self.metadata.expanded
     }
 
     /// Get total content length
     pub fn total_length(&self) -> usize {
-        self.assembled_content.len()
+        self.annotated_content.len()
     }
 }
 
@@ -361,18 +355,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_spsr_graph_config_default() {
-        let config = SPSRGraphConfig::default();
-        assert!(!config.enable_assembly);
-        assert_eq!(config.max_assembled_length, 8000);
+    fn test_relation_annotation_config_default() {
+        let config = RelationAnnotationConfig::default();
+        assert!(!config.enable_annotation);
+        assert_eq!(config.max_annotated_length, 8000);
     }
 
     #[test]
-    fn test_spsr_graph_config_builder() {
-        let config = SPSRGraphConfig::new().enable(true).with_max_length(3000);
+    fn test_relation_annotation_config_builder() {
+        let config = RelationAnnotationConfig::new()
+            .enable(true)
+            .with_max_length(3000);
 
-        assert!(config.enable_assembly);
-        assert_eq!(config.max_assembled_length, 3000);
+        assert!(config.enable_annotation);
+        assert_eq!(config.max_annotated_length, 3000);
     }
 
     #[test]
@@ -390,23 +386,22 @@ mod tests {
         assert_eq!(unit.start_line, 1);
         assert_eq!(unit.end_line, 3);
         assert_eq!(unit.unit_type, SemanticUnitType::Unknown);
+        assert_eq!(unit.origin, ExpansionOrigin::Primary);
     }
 
     #[test]
     fn test_token_estimation() {
-        let config = SPSRGraphConfig {
-            max_assembled_length: 1000, // 1000 tokens
+        let config = RelationAnnotationConfig {
+            max_annotated_length: 1000,
             ..Default::default()
         };
 
         assert_eq!(config.get_max_length(), 1000);
 
-        // Test token estimation
         let test_content = "fn hello() { println!(\"world\"); }";
         let tokens = config.estimate_content_tokens(test_content);
         assert!(tokens > 0, "Should estimate some tokens");
 
-        // Test token limit check
         assert!(config.check_content_limit(tokens));
     }
 }

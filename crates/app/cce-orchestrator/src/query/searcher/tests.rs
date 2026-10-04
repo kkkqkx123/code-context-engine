@@ -558,7 +558,10 @@ async fn test_result_filter_removes_and_boosts() {
         .iter()
         .find(|r| r.id == "boosted")
         .expect("boosted present");
-    assert!((boosted.score - 0.7).abs() < 1e-6, "boost must be additive");
+    assert!(
+        (boosted.score - 0.6).abs() < 1e-6,
+        "boost must be multiplicative"
+    );
 }
 
 #[tokio::test]
@@ -610,7 +613,7 @@ async fn test_result_filter_chain_applies_sequentially() {
     assert_eq!(filtered.len(), 1, "first plugin removes a");
     assert_eq!(filtered[0].id, "b");
     assert!(
-        (filtered[0].score - 0.6).abs() < 1e-6,
+        (filtered[0].score - 0.55).abs() < 1e-6,
         "second plugin boosts remaining"
     );
 }

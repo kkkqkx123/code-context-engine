@@ -75,7 +75,6 @@ impl SummaryRetrieval {
                 vector_score: r.score,
                 bm25_score: None,
                 sources: vec!["summary".to_string()],
-                snippet: None,
                 content: String::new(),
                 start_line: 0,
                 end_line: 0,

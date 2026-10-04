@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use crate::client::ApiClient;
-use crate::output::{format_duration, format_score, print_error, print_success, truncate};
+use crate::output::{format_duration, print_error, print_success, truncate};
 use cce_api::models::{AggregatedSearchRequest, SearchResponse, SearchResultItem, SubQueryRequest};
 
 /// Execute multi-query aggregated search
@@ -152,13 +152,11 @@ impl AggSearchCommand {
 
 fn print_result_item(index: usize, item: &SearchResultItem) {
     println!(
-        "{}. {} [{}] {}:{}-{}",
-        index,
-        format_score(item.score),
-        item.source,
-        truncate(&item.file_path, 50),
-        item.start_line,
-        item.end_line
+        "{index}. {path} {start}-{end}",
+        index = index,
+        path = truncate(&item.file_path, 50),
+        start = item.start_line,
+        end = item.end_line
     );
 
     if let Some(ref entity_type) = item.entity_type {

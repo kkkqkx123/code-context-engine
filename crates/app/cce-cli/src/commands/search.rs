@@ -4,9 +4,7 @@ use anyhow::Result;
 
 use crate::cli::SearchCommands;
 use crate::client::ApiClient;
-use crate::output::{
-    format_duration, format_score, print_error, print_output, print_success, truncate,
-};
+use crate::output::{format_duration, print_error, print_output, print_success, truncate};
 use cce_api::models::{SearchRequest, SearchResponse, SearchResultItem};
 
 /// Search query parameters
@@ -146,26 +144,18 @@ async fn search_query(
 }
 
 fn print_result_item(index: usize, item: &SearchResultItem) {
-    let entity_ids = if item.entity_ids.is_empty() {
+    let entity_names = if item.entity_names.is_empty() {
         String::new()
     } else {
-        let list = item
-            .entity_ids
-            .iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        format!("[entity_ids:{}] ", list)
+        format!("[{}] ", item.entity_names.join(", "))
     };
     println!(
-        "{}. {}{} {} {}:{}-{}",
-        index,
-        entity_ids,
-        format_score(item.score),
-        item.source,
-        truncate(&item.file_path, 50),
-        item.start_line,
-        item.end_line
+        "{index}.{names} {path} {start}-{end}",
+        index = index,
+        names = entity_names,
+        path = truncate(&item.file_path, 50),
+        start = item.start_line,
+        end = item.end_line
     );
 
     if let Some(ref entity_type) = item.entity_type {

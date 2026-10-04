@@ -98,6 +98,11 @@ impl MockEmbeddingServer {
                 name: "Mock".to_string(),
                 base_url: self.base_url(),
                 api_keys: vec!["sk-mock".to_string()],
+                max_retries: 0,
+                rate_limit_max_retries: 0,
+                retry_delay_ms: 0,
+                retry_jitter: 0.0,
+                rate_limit: 0,
                 ..Default::default()
             },
         );
@@ -125,9 +130,8 @@ fn handle_connection(
     responses: Arc<Mutex<Vec<MockResponse>>>,
     request_count: Arc<AtomicUsize>,
 ) {
-    let mut buffer = [0u8; 4096];
-    let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-    let _request = String::from_utf8_lossy(&buffer[..bytes_read]);
+    let request_body = read_request_body(&mut stream);
+    let (input_count, requested_dimension) = parse_embedding_request(&request_body);
 
     request_count.fetch_add(1, Ordering::SeqCst);
 
@@ -144,12 +148,8 @@ fn handle_connection(
 
     let (status_line, body) = match response {
         MockResponse::Success { dimension } => {
-            let embeddings: Vec<Vec<f32>> = vec![vec![0.5; dimension]; 1];
-            let body = serde_json::json!({
-                "data": [{"index": 0, "embedding": embeddings[0]}],
-                "usage": {"prompt_tokens": 0, "total_tokens": 0}
-            });
-            ("200 OK", body.to_string())
+            let dimension = requested_dimension.unwrap_or(dimension);
+            ("200 OK", success_body(input_count, dimension))
         }
         MockResponse::RateLimit => {
             let body = serde_json::json!({
@@ -165,12 +165,8 @@ fn handle_connection(
         }
         MockResponse::Delayed { delay, dimension } => {
             thread::sleep(delay);
-            let embeddings: Vec<Vec<f32>> = vec![vec![0.5; dimension]; 1];
-            let body = serde_json::json!({
-                "data": [{"index": 0, "embedding": embeddings[0]}],
-                "usage": {"prompt_tokens": 0, "total_tokens": 0}
-            });
-            ("200 OK", body.to_string())
+            let dimension = requested_dimension.unwrap_or(dimension);
+            ("200 OK", success_body(input_count, dimension))
         }
     };
 
@@ -183,4 +179,87 @@ fn handle_connection(
 
     stream.write_all(response_text.as_bytes()).ok();
     stream.flush().ok();
+}
+
+fn read_request_body(stream: &mut TcpStream) -> String {
+    let mut data = Vec::new();
+    let mut buffer = [0u8; 1024];
+
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => {
+                data.extend_from_slice(&buffer[..n]);
+                if let Some(header_end) = find_header_end(&data) {
+                    let body_start = header_end + 4;
+                    let content_length = parse_content_length(&data[..header_end]);
+                    if data.len() >= body_start + content_length {
+                        let body_end = body_start + content_length;
+                        return String::from_utf8_lossy(&data[body_start..body_end]).to_string();
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    String::new()
+}
+
+fn find_header_end(data: &[u8]) -> Option<usize> {
+    data.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_content_length(headers: &[u8]) -> usize {
+    let text = String::from_utf8_lossy(headers).to_lowercase();
+    for line in text.lines() {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim() == "content-length" {
+            if let Ok(content_length) = value.trim().parse::<usize>() {
+                return content_length;
+            }
+        }
+    }
+    0
+}
+
+fn parse_embedding_request(body: &str) -> (usize, Option<usize>) {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok();
+
+    let input_count = value
+        .as_ref()
+        .and_then(|value| value.get("input"))
+        .map(|input| match input {
+            serde_json::Value::Array(items) => items.len(),
+            serde_json::Value::String(_) => 1,
+            _ => 1,
+        })
+        .unwrap_or(1);
+
+    let dimension = value
+        .as_ref()
+        .and_then(|value| value.get("dimensions"))
+        .and_then(|dimension| dimension.as_u64())
+        .map(|dimension| dimension as usize);
+
+    (input_count, dimension)
+}
+
+fn success_body(input_count: usize, dimension: usize) -> String {
+    let data: Vec<serde_json::Value> = (0..input_count)
+        .map(|index| {
+            serde_json::json!({
+                "index": index,
+                "embedding": vec![0.5f32; dimension]
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "data": data,
+        "usage": {"prompt_tokens": 0, "total_tokens": 0}
+    })
+    .to_string()
 }

@@ -63,17 +63,6 @@ pub fn format_duration(ms: u64) -> String {
     }
 }
 
-/// Format score with color
-pub fn format_score(score: f32) -> String {
-    if score >= 0.8 {
-        format!("{:.3}", score).green().to_string()
-    } else if score >= 0.5 {
-        format!("{:.3}", score).yellow().to_string()
-    } else {
-        format!("{:.3}", score).red().to_string()
-    }
-}
-
 /// Truncate string to max length
 pub fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {

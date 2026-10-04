@@ -200,7 +200,6 @@ impl McpServerHandler {
                             "score": item.score,
                             "bm25_score": item.bm25_score,
                             "sources": item.sources,
-                            "snippet": item.snippet,
                             "start_line": item.start_line,
                             "end_line": item.end_line,
                             "content_state": match item.content_state {

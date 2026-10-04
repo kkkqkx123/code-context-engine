@@ -549,7 +549,7 @@ impl QueryConfigBuilder {
             .build(query)
     }
 
-    /// Code exploration preset: comprehensive results with assembly
+    /// Code exploration preset: comprehensive results
     pub fn explore_code(project_id: i64, query: impl Into<String>) -> QueryOptions {
         QueryConfigBuilder::new(project_id)
             .result_limit(10)

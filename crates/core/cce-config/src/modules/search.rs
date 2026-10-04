@@ -662,10 +662,10 @@ impl ScoreFusionStrategy {
 }
 
 // ============================================================================
-// Deduplication strategy for SPSR-Graph
+// Deduplication strategy for relation annotation
 // ============================================================================
 
-/// Deduplication strategy for assembled results.
+/// Deduplication strategy for annotated results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum DedupStrategy {
@@ -679,34 +679,34 @@ pub enum DedupStrategy {
 }
 
 // ============================================================================
-// SPSR-Graph assembly configuration
+// Relation annotation configuration
 // ============================================================================
 
-/// SPSR-Graph assembly configuration.
+/// Relation annotation configuration.
 ///
-/// Controls how search results are assembled into structure-preserving
-/// code graphs with call-chain context.
+/// Controls how search results are annotated with structure-preserving
+/// relation markers and caller-supplied expansion units.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct SPSRGraphConfig {
-    /// Enable SPSR-Graph assembly
-    pub enable_assembly: bool,
-    /// Maximum assembled content per result in tokens (using TokenEstimator).
+pub struct RelationAnnotationConfig {
+    /// Enable relation annotation
+    pub enable_annotation: bool,
+    /// Maximum annotated content per result in tokens (using TokenEstimator).
     /// A single oversized body is downgraded to a path-and-range reference;
-    /// the batch total is bounded by `assembly_top_n` times this value.
-    pub max_assembled_length: usize,
+    /// the batch total is bounded by `annotation_top_n` times this value.
+    pub max_annotated_length: usize,
     /// Include file boundary markers
     pub include_file_markers: bool,
     /// Deduplication strategy
     pub dedup_strategy: DedupStrategy,
-    /// Number of top results to assemble
-    pub assembly_top_n: usize,
+    /// Number of top results to annotate
+    pub annotation_top_n: usize,
     /// Enable adjacent segment merging
     pub enable_segment_merge: bool,
     /// Maximum gap between segments to merge (in lines)
     pub segment_merge_gap: u32,
     /// Enable relation expansion: attach pre-resolved call-graph neighbours
-    /// (callees/callers) supplied by the caller to each assembled result.
+    /// (callees/callers) supplied by the caller to each annotated result.
     pub expansion_enabled: bool,
     /// Maximum number of expansion units attached to one result
     /// (shared across both directions; forward units are taken first).
@@ -731,14 +731,14 @@ pub struct SPSRGraphConfig {
     pub workspace_root: Option<std::path::PathBuf>,
 }
 
-impl Default for SPSRGraphConfig {
+impl Default for RelationAnnotationConfig {
     fn default() -> Self {
         Self {
-            enable_assembly: false,
-            max_assembled_length: 8000,
+            enable_annotation: false,
+            max_annotated_length: 8000,
             include_file_markers: true,
             dedup_strategy: DedupStrategy::ByEntityId,
-            assembly_top_n: 3,
+            annotation_top_n: 3,
             enable_segment_merge: true,
             segment_merge_gap: 2,
             expansion_enabled: false,
@@ -753,24 +753,24 @@ impl Default for SPSRGraphConfig {
 }
 
 // ============================================================================
-// SPSR-Graph config builder & utility methods
+// Relation annotation config builder & utility methods
 // ============================================================================
 
-impl SPSRGraphConfig {
-    /// Creates a new `SPSRGraphConfig` with default values.
+impl RelationAnnotationConfig {
+    /// Creates a new `RelationAnnotationConfig` with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Enable or disable SPSR-Graph assembly (builder pattern).
+    /// Enable or disable relation annotation (builder pattern).
     pub fn enable(mut self, enabled: bool) -> Self {
-        self.enable_assembly = enabled;
+        self.enable_annotation = enabled;
         self
     }
 
-    /// Set the maximum assembled content length in tokens (builder pattern).
+    /// Set the maximum annotated content length in tokens (builder pattern).
     pub fn with_max_length(mut self, length: usize) -> Self {
-        self.max_assembled_length = length;
+        self.max_annotated_length = length;
         self
     }
 
@@ -816,14 +816,14 @@ impl SPSRGraphConfig {
         self
     }
 
-    /// Returns the maximum assembled content length in tokens.
+    /// Returns the maximum annotated content length in tokens.
     pub fn get_max_length(&self) -> usize {
-        self.max_assembled_length
+        self.max_annotated_length
     }
 
     /// Check whether the given token count is within the configured limit.
     pub fn check_content_limit(&self, token_count: usize) -> bool {
-        token_count <= self.max_assembled_length
+        token_count <= self.max_annotated_length
     }
 
     /// Estimate the token count of a text string using `TokenEstimator`.
@@ -833,13 +833,13 @@ impl SPSRGraphConfig {
     }
 }
 
-impl Validate for SPSRGraphConfig {
+impl Validate for RelationAnnotationConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
-        if self.max_assembled_length == 0 {
+        if self.max_annotated_length == 0 {
             errors.push(ConfigValidationError::invalid_field(
-                "max_assembled_length",
+                "max_annotated_length",
                 "must be greater than 0",
             ));
         }
@@ -858,21 +858,21 @@ impl Validate for SPSRGraphConfig {
     }
 }
 
-impl SPSRGraphConfig {
-    /// Create a conservative SPSR-Graph configuration with shallow assembly.
+impl RelationAnnotationConfig {
+    /// Create a conservative relation annotation configuration with shallow annotation.
     pub fn conservative() -> Self {
         Self {
-            enable_assembly: true,
-            max_assembled_length: 4000,
+            enable_annotation: true,
+            max_annotated_length: 4000,
             ..Self::default()
         }
     }
 
-    /// Create an aggressive SPSR-Graph configuration with deep assembly.
+    /// Create an aggressive relation annotation configuration with deep annotation.
     pub fn aggressive() -> Self {
         Self {
-            enable_assembly: true,
-            max_assembled_length: 16000,
+            enable_annotation: true,
+            max_annotated_length: 16000,
             ..Self::default()
         }
     }
@@ -914,13 +914,13 @@ pub struct SearchModuleConfig {
     /// `ResultFilter`).
     #[serde(default)]
     pub plugin: PluginSearchConfig,
-    /// Structure-preserving assembly of the final top-N results.
+    /// Structure-preserving annotation of the final top-N results.
     #[serde(default)]
-    pub assembly: SPSRGraphConfig,
+    pub annotation: RelationAnnotationConfig,
     /// Overall search pipeline timeout in milliseconds.
     ///
     /// Bounds the end-to-end search operation at the coordinator level,
-    /// covering retrieval, fusion, enrichment, reranking, and assembly.
+    /// covering retrieval, fusion, enrichment, reranking, and annotation.
     /// Defaults to 30 seconds.
     #[serde(default = "default_search_timeout_ms")]
     pub timeout_ms: u64,

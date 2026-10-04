@@ -37,8 +37,6 @@ pub struct SearchResult {
     pub bm25_score: Option<f32>,
     /// Source identifiers (e.g., "vector", "bm25")
     pub sources: Vec<String>,
-    /// Code snippet (raw code, if available)
-    pub snippet: Option<String>,
     /// Code chunk content
     pub content: String,
     /// Start line
@@ -77,7 +75,6 @@ impl Default for SearchResult {
             vector_score: 0.0,
             bm25_score: None,
             sources: Vec::new(),
-            snippet: None,
             content: String::new(),
             start_line: 0,
             end_line: 0,

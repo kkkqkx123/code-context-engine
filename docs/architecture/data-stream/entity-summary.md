@@ -195,9 +195,9 @@ pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
     let strategy = options.execution_strategy();
     let mut results = self.execute_search_flow(options, &strategy).await?;
 
-    // 可选组装 (SPSR-Graph)
-    if let WithAssembly { depth, strategy, .. } = &strategy {
-        results = self.assembly_handler.assemble_results(results, depth, strategy).await?;
+    // 可选关系标注
+    if options.config.annotation.enable_annotation {
+        results = self.annotate_results(results).await?;
     }
     Ok(results)
 }

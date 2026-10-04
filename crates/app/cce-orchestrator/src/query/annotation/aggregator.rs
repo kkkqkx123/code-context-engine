@@ -1,12 +1,12 @@
 //! Segment aggregator
 //!
 //! Merges adjacent unmarked same-file primary segments and reports gaps with
-//! omission markers. Expansion segments (relation-marked) and reference
+//! omission markers. Relation-marked expansion segments and reference
 //! segments never position-merge.
 
 use cce_utils::token_estimation::TokenEstimator;
 
-use super::types::{ExpandedUnit, ExpansionOrigin, SPSRGraphConfig};
+use super::types::{ExpandedUnit, ExpansionOrigin, RelationAnnotationConfig};
 use crate::query::types::content_reference::DowngradeReason;
 
 /// Aggregated segment representing merged units
@@ -110,12 +110,12 @@ impl AggregatedSegment {
 ///
 /// Merges adjacent unmarked same-file primary segments.
 pub struct SegmentAggregator {
-    config: SPSRGraphConfig,
+    config: RelationAnnotationConfig,
 }
 
 impl SegmentAggregator {
     /// Create a new aggregator
-    pub fn new(config: SPSRGraphConfig) -> Self {
+    pub fn new(config: RelationAnnotationConfig) -> Self {
         Self { config }
     }
 
@@ -243,7 +243,7 @@ impl SegmentAggregator {
     }
 
     /// Get the configuration
-    pub fn config(&self) -> &SPSRGraphConfig {
+    pub fn config(&self) -> &RelationAnnotationConfig {
         &self.config
     }
 }
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_no_merge() {
-        let config = SPSRGraphConfig {
+        let config = RelationAnnotationConfig {
             enable_segment_merge: false,
             ..Default::default()
         };
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_adjacent_merge() {
-        let config = SPSRGraphConfig {
+        let config = RelationAnnotationConfig {
             enable_segment_merge: true,
             segment_merge_gap: 2,
             ..Default::default()
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_merge_keeps_highest_score() {
-        let config = SPSRGraphConfig {
+        let config = RelationAnnotationConfig {
             enable_segment_merge: true,
             segment_merge_gap: 2,
             ..Default::default()
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_expansion_units_never_merge() {
-        let config = SPSRGraphConfig {
+        let config = RelationAnnotationConfig {
             enable_segment_merge: true,
             segment_merge_gap: 2,
             ..Default::default()
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_no_merge_large_gap() {
-        let config = SPSRGraphConfig {
+        let config = RelationAnnotationConfig {
             enable_segment_merge: true,
             segment_merge_gap: 2,
             ..Default::default()
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_multiple_files() {
-        let config = SPSRGraphConfig {
+        let config = RelationAnnotationConfig {
             enable_segment_merge: true,
             segment_merge_gap: 2,
             ..Default::default()

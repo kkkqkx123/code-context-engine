@@ -43,15 +43,15 @@ impl EmbeddingRequestHandler {
         while idx < batches.len() {
             let result = match self.embed_batch(&batches[idx], config).await {
                 Ok(result) => result,
-                Err(error) if ErrorClassify::is_transient(&error) => {
-                    // A single failed sub-batch must not discard the already
+                Err(error) if !all_embeddings.is_empty() && ErrorClassify::is_transient(&error) => {
+                    // A later failed sub-batch must not discard the already
                     // embedded ones; replay only this sub-batch once and let a
                     // second failure propagate.
                     tracing::warn!(
                         sub_batch = idx,
                         sub_batch_count = batches.len(),
                         error = %error,
-                        "Embedding sub-batch failed with transient error; replaying once"
+                        "Embedding sub-batch failed after partial progress; replaying once"
                     );
                     self.embed_batch(&batches[idx], config).await?
                 }

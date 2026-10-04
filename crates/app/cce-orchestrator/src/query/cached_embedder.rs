@@ -139,7 +139,7 @@ mod tests {
             .embed_one("flaky query")
             .await
             .expect_err("first call fails");
-        assert_eq!(err.error_code(), "LLM_RATE_LIMIT_EXCEEDED");
+        assert_eq!(err.error_code(), "LLM_RATE_LIMIT_EXCEEDED_ERROR");
 
         let vector = cached.embed_one("flaky query").await.expect("retry embed");
         assert_eq!(vector, vec![0.5, 0.5, 0.5]);

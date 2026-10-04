@@ -95,15 +95,15 @@ This expansion happens in `Searcher::expand_multi_entity_results()` before calli
 
 This ensures the same entity from different sub-queries or paths is correctly deduplicated.
 
-## Post-Fusion Assembly (Dormant)
+## Post-Fusion Relation Annotation
 
-SPSR-Graph 组装已与在线管线断开（仅 `cce-e2e-tests` 离线 assembly-review 消费），以下为历史设计保留：
+`query::annotation` 已接入在线后处理阶段，在排序和阈值过滤之后对 top-N 命中执行关系标注，不改变排序结果。在线 `Searcher` 当前只传入主命中单元，调用方自行解析的 forward/backward expansion 由离线审查路径使用。
 
-When `WithAssembly` strategy is enabled, the fused results undergo additional processing:
+When `search.annotation.enable_annotation` is enabled:
 
-1. **SPSR-Graph expansion**: Call-chain traversal (forward/backward) from each result's entity. Only call-domain edges are auto-attached; stdlib and external targets are filtered before the budget cap, and each direction is ordered by score with forward units filling the shared cap first.
+1. **Semantic unit extraction**: Extract the body-bearing result as a structure-preserving semantic unit with its line range.
 2. **Unit deduplication**: Remove duplicate expanded units (stable content hash over file path, line range, and body).
-3. **Structure concatenation**: Assemble primary unit + call chain into a coherent code block. Merging only joins unmarked same-file primary segments and marks gaps with omission notes. A body larger than the single per-result quota and missing files degrade to path-and-range references; remaining units are selected by score with the primary pinned, then rendered in file order. Recall count is owned by top-N and the score threshold; there is no batch token cap.
+3. **Structure concatenation**: Annotate the primary unit and optional caller-supplied relation units into a coherent code block. Merging only joins unmarked same-file primary segments and marks gaps with omission notes. A body larger than the single per-result quota and missing files degrade to path-and-range references; remaining units are selected by score with the primary pinned, then rendered in file order. Recall count is owned by top-N and the score threshold; there is no batch token cap.
 
 Whole-file replacement no longer exists: former high-coverage scenarios render as file path references instead.
 
@@ -114,8 +114,10 @@ Whole-file replacement no longer exists: former high-coverage scenarios render a
 vector_weight = 0.5
 bm25_weight = 0.5
 
-[assembly]
-max_assembled_length = 8000
+[search.annotation]
+enable_annotation = false
+max_annotated_length = 8000
+annotation_top_n = 3
 enable_segment_merge = true
 segment_merge_gap = 2
 allow_structural_edges = false
@@ -129,4 +131,4 @@ filter_external = true
 
 2. **No cross-path chunk boundary alignment**: The system intentionally avoids mapping chunk N in BM25 to chunk M in Embedding. This means fine-grained positional correspondence is lost.
 
-3. **Segment aggregation is assembly-only**: The `SegmentAggregator` only runs in the dormant `WithAssembly` path (removed from online pipeline). Standard hybrid results may contain fragmented segments from the same file.
+3. **Segment aggregation is annotation-only**: The `SegmentAggregator` only runs when relation annotation is enabled. Standard hybrid results may contain fragmented segments from the same file.

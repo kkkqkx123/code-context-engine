@@ -104,8 +104,11 @@ fn resolve_chunk_records(
 /// (within the token budget) or a file-and-range reference. Metadata (file
 /// path, line range, kind) is taken from the chunk record; an unreadable file
 /// becomes a reference rather than an empty body.
+///
+/// After enrichment, results that downgraded to file references for the same
+/// file are deduplicated by file_path, keeping the highest-scoring one.
 pub fn enrich_results(
-    results: &mut [SearchResult],
+    results: &mut Vec<SearchResult>,
     chunk_records: &HashMap<String, ChunkRecord>,
     project_root: Option<&std::path::Path>,
     max_content_tokens: usize,
@@ -120,6 +123,42 @@ pub fn enrich_results(
             max_content_tokens,
         );
     }
+    dedup_file_references(results);
+}
+
+/// Deduplicate file-reference results by file_path, keeping the highest-scoring one.
+///
+/// After enrichment, multiple chunks from the same file may downgrade to file
+/// references (over budget, missing file, or file-level hits). This collapses
+/// them to a single reference per file.
+fn dedup_file_references(results: &mut Vec<SearchResult>) {
+    use std::collections::HashMap;
+    let mut best_by_file: HashMap<&str, usize> = HashMap::new();
+    let mut keep = vec![true; results.len()];
+    for (i, result) in results.iter().enumerate() {
+        if !result.content_state.is_reference() {
+            continue;
+        }
+        let path = result.file_path.as_str();
+        if let Some(&best_idx) = best_by_file.get(path) {
+            if result.score > results[best_idx].score {
+                keep[best_idx] = false;
+                best_by_file.insert(path, i);
+            } else {
+                keep[i] = false;
+            }
+        } else {
+            best_by_file.insert(path, i);
+        }
+    }
+    let mut write_idx = 0;
+    for (read_idx, &keep_item) in keep.iter().enumerate() {
+        if keep_item {
+            results.swap(write_idx, read_idx);
+            write_idx += 1;
+        }
+    }
+    results.truncate(write_idx);
 }
 
 fn materialize(
@@ -136,7 +175,7 @@ fn materialize(
         if result.content.is_empty() && result.kind == "summary" {
             result.content_state = ContentState::Reference(DowngradeReason::FileLevel);
             result.content = file_level_reference(&result.file_path, DowngradeReason::FileLevel);
-            result.snippet = Some(result.content.clone());
+            result.score *= 0.8;
         }
         return;
     };
@@ -183,7 +222,7 @@ fn materialize(
                 0,
                 DowngradeReason::FileMissing,
             );
-            result.snippet = Some(result.content.clone());
+            result.score *= 0.8;
         }
         Some(source_text) => {
             let tokens = estimate_tokens(&source_text);
@@ -196,10 +235,9 @@ fn materialize(
                     tokens,
                     DowngradeReason::OverLimit,
                 );
-                result.snippet = Some(result.content.clone());
+                result.score *= 0.8;
             } else {
                 result.content_state = ContentState::Full;
-                result.snippet = Some(source_text.clone());
                 result.content = source_text;
             }
         }
@@ -332,28 +370,30 @@ mod tests {
 
     #[test]
     fn test_enrich_populates_entity_ids_when_payload_empty() {
-        let mut result = SearchResult {
+        let result = SearchResult {
             id: "chunk_x".to_string(),
             entity_ids: Vec::new(),
             ..Default::default()
         };
         let records = HashMap::from([("chunk_x".to_string(), chunk_record(&[7, 8]))]);
-        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
 
-        assert_eq!(result.entity_ids, vec![EntityId(7), EntityId(8)]);
+        assert_eq!(results[0].entity_ids, vec![EntityId(7), EntityId(8)]);
     }
 
     #[test]
     fn test_enrich_keeps_payload_when_populated() {
-        let mut result = SearchResult {
+        let result = SearchResult {
             id: "chunk_x".to_string(),
             entity_ids: vec![EntityId(7), EntityId(8)],
             ..Default::default()
         };
         let records = HashMap::from([("chunk_x".to_string(), chunk_record(&[7, 8]))]);
-        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
 
-        assert_eq!(result.entity_ids, vec![EntityId(7), EntityId(8)]);
+        assert_eq!(results[0].entity_ids, vec![EntityId(7), EntityId(8)]);
     }
 
     #[test]
@@ -364,14 +404,15 @@ mod tests {
         let records = HashMap::from([("chunk_x".to_string(), record)]);
 
         // Expanded hit for entity 8 must carry "beta", not the group title.
-        let mut result = SearchResult {
+        let result = SearchResult {
             id: "chunk_x".to_string(),
             entity_ids: vec![EntityId(8)],
             name: "stale".to_string(),
             ..Default::default()
         };
-        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
-        assert_eq!(result.name, "beta");
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
+        assert_eq!(results[0].name, "beta");
     }
 
     #[test]
@@ -398,7 +439,7 @@ mod tests {
             &"let value = compute();\n".repeat(400),
         );
 
-        let mut result = SearchResult {
+        let result = SearchResult {
             id: "chunk_big".to_string(),
             ..Default::default()
         };
@@ -412,27 +453,23 @@ mod tests {
                 399,
             ),
         )]);
-        enrich_results(
-            std::slice::from_mut(&mut result),
-            &records,
-            Some(dir.path()),
-            50,
-        );
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, Some(dir.path()), 50);
 
         assert_eq!(
-            result.content_state,
+            results[0].content_state,
             ContentState::Reference(DowngradeReason::OverLimit)
         );
-        assert!(result.content.contains("[reference] src/big.rs:0-399"));
-        assert!(result.content.contains("over budget"));
-        assert_eq!(result.start_line, 0);
-        assert_eq!(result.end_line, 399);
+        assert!(results[0].content.contains("[reference] src/big.rs:0-399"));
+        assert!(results[0].content.contains("over budget"));
+        assert_eq!(results[0].start_line, 0);
+        assert_eq!(results[0].end_line, 399);
     }
 
     #[test]
     fn materialize_missing_file_becomes_reference() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut result = SearchResult {
+        let result = SearchResult {
             id: "chunk_gone".to_string(),
             ..Default::default()
         };
@@ -446,19 +483,15 @@ mod tests {
                 9,
             ),
         )]);
-        enrich_results(
-            std::slice::from_mut(&mut result),
-            &records,
-            Some(dir.path()),
-            2000,
-        );
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, Some(dir.path()), 2000);
 
         assert_eq!(
-            result.content_state,
+            results[0].content_state,
             ContentState::Reference(DowngradeReason::FileMissing)
         );
-        assert!(result.content.contains("[reference] src/gone.rs:3-9"));
-        assert!(result.content.contains("not found"));
+        assert!(results[0].content.contains("[reference] src/gone.rs:3-9"));
+        assert!(results[0].content.contains("not found"));
     }
 
     #[test]
@@ -466,7 +499,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         write_source(dir.path(), "src/small.rs", "fn a() {}\nfn b() {}\n");
 
-        let mut result = SearchResult {
+        let result = SearchResult {
             id: "chunk_small".to_string(),
             ..Default::default()
         };
@@ -480,34 +513,31 @@ mod tests {
                 1,
             ),
         )]);
-        enrich_results(
-            std::slice::from_mut(&mut result),
-            &records,
-            Some(dir.path()),
-            2000,
-        );
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, Some(dir.path()), 2000);
 
-        assert_eq!(result.content_state, ContentState::Full);
-        assert_eq!(result.content, "fn a() {}\nfn b() {}");
-        assert_eq!(result.start_line, 0);
-        assert_eq!(result.end_line, 1);
+        assert_eq!(results[0].content_state, ContentState::Full);
+        assert_eq!(results[0].content, "fn a() {}\nfn b() {}");
+        assert_eq!(results[0].start_line, 0);
+        assert_eq!(results[0].end_line, 1);
     }
 
     #[test]
     fn materialize_summary_without_record_gets_file_level_reference() {
-        let mut result = SearchResult {
+        let result = SearchResult {
             id: "summary::src/lib.rs".to_string(),
             kind: "summary".to_string(),
             file_path: "src/lib.rs".to_string(),
             ..Default::default()
         };
         let records = HashMap::new();
-        enrich_results(std::slice::from_mut(&mut result), &records, None, 2000);
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
 
         assert_eq!(
-            result.content_state,
+            results[0].content_state,
             ContentState::Reference(DowngradeReason::FileLevel)
         );
-        assert!(result.content.contains("[reference] src/lib.rs"));
+        assert!(results[0].content.contains("[reference] src/lib.rs"));
     }
 }

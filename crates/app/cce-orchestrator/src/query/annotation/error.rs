@@ -1,12 +1,12 @@
-//! Assembly error types
+//! Annotation error types
 
 use std::fmt;
 
 use cce_types::EntityId;
 
-/// Assembly error type
+/// Annotation error type
 #[derive(Debug)]
-pub enum AssemblyError {
+pub enum AnnotationError {
     /// Entity not found
     EntityNotFound(EntityId),
     /// Extraction failed
@@ -22,7 +22,7 @@ pub enum AssemblyError {
     IoError(String),
 }
 
-impl AssemblyError {
+impl AnnotationError {
     /// Create an entity not found error
     pub fn entity_not_found(id: EntityId) -> Self {
         Self::EntityNotFound(id)
@@ -52,7 +52,7 @@ impl AssemblyError {
     }
 }
 
-impl fmt::Display for AssemblyError {
+impl fmt::Display for AnnotationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EntityNotFound(id) => write!(f, "Entity not found: {}", id),
@@ -76,13 +76,13 @@ impl fmt::Display for AssemblyError {
     }
 }
 
-impl std::error::Error for AssemblyError {}
+impl std::error::Error for AnnotationError {}
 
-impl From<std::io::Error> for AssemblyError {
+impl From<std::io::Error> for AnnotationError {
     fn from(err: std::io::Error) -> Self {
         Self::IoError(err.to_string())
     }
 }
 
-/// Assembly result type
-pub type Result<T> = std::result::Result<T, AssemblyError>;
+/// Annotation result type
+pub type Result<T> = std::result::Result<T, AnnotationError>;

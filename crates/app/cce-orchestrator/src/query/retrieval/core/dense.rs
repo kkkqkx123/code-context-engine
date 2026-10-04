@@ -92,7 +92,6 @@ impl DenseRetrieval {
                 vector_score: r.score,
                 bm25_score: None,
                 sources: vec!["vector".to_string()],
-                snippet: None,
                 content: String::new(),
                 start_line: 0,
                 end_line: 0,

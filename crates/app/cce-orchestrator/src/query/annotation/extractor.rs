@@ -1,10 +1,10 @@
 //! Semantic unit extractor
 //!
 //! Slices complete semantic units (functions, classes, etc.) from caller
-//! supplied content strings without touching the filesystem, so assembly
+//! supplied content strings without touching the filesystem, so annotation
 //! always observes the index snapshot view.
 
-use super::error::{AssemblyError, Result};
+use super::error::{AnnotationError, Result};
 use super::types::{ExpandedUnit, SemanticUnitType};
 
 /// Semantic unit extractor
@@ -39,19 +39,19 @@ impl SemanticUnitExtractor {
 
         // Validate line range
         if start_line == 0 || end_line == 0 {
-            return Err(AssemblyError::invalid_line_range(
+            return Err(AnnotationError::invalid_line_range(
                 file_path, start_line, end_line, line_count,
             ));
         }
 
         if start_line > line_count || end_line > line_count {
-            return Err(AssemblyError::invalid_line_range(
+            return Err(AnnotationError::invalid_line_range(
                 file_path, start_line, end_line, line_count,
             ));
         }
 
         if start_line > end_line {
-            return Err(AssemblyError::invalid_line_range(
+            return Err(AnnotationError::invalid_line_range(
                 file_path, start_line, end_line, line_count,
             ));
         }
@@ -78,7 +78,6 @@ impl SemanticUnitExtractor {
             score: 0.0,
             is_stdlib: false,
             is_external: false,
-            depth: 0,
         })
     }
 

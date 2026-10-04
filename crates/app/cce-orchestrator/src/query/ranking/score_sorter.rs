@@ -14,12 +14,29 @@ impl ScoreSorter {
         Self
     }
 
-    /// Sort results by score (descending) with stable ordering
+    /// Sort results by score (descending) with deterministic tie-breaking.
+    ///
+    /// Ties are broken by (entity_id, segment_id, chunk_id) — the same key
+    /// chain used by the fusion merger — so reranker output order is stable
+    /// across requests.
     pub fn sort(&self, mut results: Vec<SearchResult>) -> Vec<SearchResult> {
         results.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    let a_key = (
+                        a.entity_ids.first().map(|e| e.0),
+                        a.segment_id.clone().unwrap_or_default(),
+                        a.id.clone(),
+                    );
+                    let b_key = (
+                        b.entity_ids.first().map(|e| e.0),
+                        b.segment_id.clone().unwrap_or_default(),
+                        b.id.clone(),
+                    );
+                    a_key.cmp(&b_key)
+                })
         });
         results
     }

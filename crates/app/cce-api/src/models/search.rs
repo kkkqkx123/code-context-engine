@@ -76,16 +76,14 @@ pub enum ContentStateDto {
 /// Search result item
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SearchResultItem {
-    pub score: f32,
     pub file_path: String,
     pub code_chunk: String,
     pub start_line: u32,
     pub end_line: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entity_type: Option<String>,
-    pub source: String,
     #[serde(default)]
-    pub entity_ids: Vec<u64>,
+    pub entity_names: Vec<String>,
     /// Whether `code_chunk` is the full body or a reference.
     #[serde(default)]
     pub content_state: ContentStateDto,
