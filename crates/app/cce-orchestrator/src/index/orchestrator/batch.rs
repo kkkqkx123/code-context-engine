@@ -19,8 +19,8 @@ use cce_types::{OutputMode, ParsedFile};
 use super::checkpoint::persist_parsed_checkpoint;
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
-use cce_scanner::read_verified_utf8_for_entry;
 
+use crate::index::FileProcessor;
 use crate::index::options::IndexOptions;
 use crate::index_state::{IndexPhase, ModuleType, ModuleUpdateState, TrackerFailure};
 
@@ -735,28 +735,17 @@ impl IndexOrchestrator {
                             .await
                             .map_err(|error| (path_str.clone(), error))?
                     } else {
-                        // Verified read: reuse the scan-phase fingerprint when
-                        // the file is unchanged, otherwise fall back to hash
-                        // verification for files drifted in the scan→process
-                        // window.
-                        let content = read_verified_utf8_for_entry(&file_entry_clone)
-                        .await
-                        .map_err(|error| (path_str.clone(), OrchestratorError::Parse(error)))?;
+                        // Shared read-and-route: verified read (reusing the
+                        // scan-phase fingerprint) plus the document/code
+                        // decision, identical to the other entry points.
+                        let (content, route) = FileProcessor::read_and_route(&file_entry_clone)
+                            .await
+                            .map_err(|error| (path_str.clone(), error))?;
                         // Non-strict decoding of a mis-detected encoding
                         // yields U+FFFD replacement characters: the file
                         // parses "fine" but the indexed text is lossy.
                         content_lossy = content.contains('\u{FFFD}');
-                        let language_info =
-                            file_entry_clone.language_info.as_ref().ok_or_else(|| {
-                                (
-                                    path_str.clone(),
-                                    OrchestratorError::Parse(ParseError::unsupported_language(
-                                        format!("no language info for file: {path_str}"),
-                                    )),
-                                )
-                            })?;
-
-                        if language_info.is_document_like() {
+                        if route.is_document() {
                             processor
                                 .process_document_file_complete(
                                     &file_entry_clone,

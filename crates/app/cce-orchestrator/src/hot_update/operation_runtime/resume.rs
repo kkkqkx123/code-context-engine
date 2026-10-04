@@ -106,10 +106,12 @@ impl HotUpdateOperationRuntime {
                     }
                     Some(ParsedCheckpointPayload::Parsed(envelope)) => {
                         let read_path = self.resolve_scan_path(&identity);
-                        let disk_matches = std::fs::read(&read_path)
-                            .ok()
-                            .map(|content| cce_utils::hash::calculate_hash(&content))
-                            == checkpoint.content_hash;
+                        let disk_matches = match checkpoint.content_hash.as_deref() {
+                            Some(expected) => {
+                                cce_scanner::file_matches_scan_hash(&read_path, expected).await
+                            }
+                            None => false,
+                        };
                         if disk_matches {
                             // A file whose NL document was already exported in a
                             // previous (interrupted) run is a resume candidate.

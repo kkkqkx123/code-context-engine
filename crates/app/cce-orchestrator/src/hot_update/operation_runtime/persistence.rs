@@ -201,21 +201,21 @@ impl HotUpdateOperationRuntime {
         let Some(store) = &self.metadata_store else {
             return 0;
         };
+        // Resolve the active epoch through the same cache entry every other
+        // read path uses, instead of re-deriving the manifest fallback here.
+        let cache = cce_storage_sqlite::cache::FileHashCache::new(
+            std::sync::Arc::clone(store),
+            self.project_id,
+        );
+        let active_epoch = match cache.active_epoch() {
+            Ok(Some(epoch)) => epoch,
+            Ok(None) => 0,
+            Err(_) => return 0,
+        };
         let Ok(conn) = store.read_connection() else {
             return 0;
         };
         let project_id = self.project_id;
-        let active_epoch = match ProjectIndexManifestRepository::get_active(&conn, project_id) {
-            Ok(Some(manifest)) => manifest.data_epoch,
-            Ok(None) => cce_storage_sqlite::ProjectRepository::meta_get_int_optional(
-                &conn,
-                project_id,
-                "active_epoch",
-            )
-            .map(|value| value.unwrap_or(0))
-            .unwrap_or(0),
-            Err(_) => return 0,
-        };
         let candidate_epoch =
             ProjectIndexManifestRepository::get_building_max_epoch(&conn, project_id)
                 .ok()

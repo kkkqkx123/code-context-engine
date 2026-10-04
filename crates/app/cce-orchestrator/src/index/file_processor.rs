@@ -18,7 +18,7 @@ use cce_parser::grouper::{PreprocessingPipeline, ProcessingResult};
 use cce_parser::parser::ParseCoordinator;
 use cce_parser::summary::FileCategory;
 use cce_plugin::PluginRegistry;
-use cce_scanner::{FileEntry, read_verified_utf8_for_entry};
+use cce_scanner::{FileEntry, read_verified_utf8, read_verified_utf8_for_entry};
 use cce_types::error::ParseError;
 use cce_types::{ContentRoute, LanguageInfo, OutputMode, ParsedFile};
 
@@ -215,9 +215,21 @@ impl FileProcessor {
         expected_hash: &str,
         output_mode: OutputMode,
     ) -> Result<Option<Vec<ChunkedResult>>, OrchestratorError> {
-        let bytes = match tokio::fs::read(read_path).await {
-            Ok(bytes) => bytes,
-            Err(error) => {
+        // Verified read through the scanner: a missing/unreadable file or
+        // drifted bytes means the file moved outside change tracking, so the
+        // sweep leaves it to the regular change flow. Decoding failures still
+        // surface as errors.
+        let content = match read_verified_utf8(read_path, Some(expected_hash)).await {
+            Ok(content) => content,
+            Err(ParseError::ContentChanged(reason)) => {
+                tracing::warn!(
+                    path = %read_path.display(),
+                    %reason,
+                    "Chunking-drift sweep found drifted on-disk content; skipping"
+                );
+                return Ok(None);
+            }
+            Err(ParseError::Io(error)) => {
                 tracing::warn!(
                     path = %read_path.display(),
                     %error,
@@ -225,20 +237,8 @@ impl FileProcessor {
                 );
                 return Ok(None);
             }
+            Err(error) => return Err(OrchestratorError::Parse(error)),
         };
-        if cce_utils::hash::calculate_hash(&bytes) != expected_hash {
-            tracing::warn!(
-                path = %read_path.display(),
-                "Chunking-drift sweep found drifted on-disk content; skipping"
-            );
-            return Ok(None);
-        }
-        let content = cce_utils::file::decode_bytes_to_utf8(&bytes, read_path).map_err(|e| {
-            OrchestratorError::Parse(ParseError::encoding(format!(
-                "{}: {e}",
-                read_path.display()
-            )))
-        })?;
 
         // Route like `process_file`: code files run the AST pipeline, while
         // document/config/text files belong to the document pipeline.
@@ -496,31 +496,36 @@ impl FileProcessor {
         &mut self,
         file_entry: &FileEntry,
     ) -> Result<FileProcessResult, OrchestratorError> {
-        // Read file content, reusing the scan-phase fingerprint when the file
-        // is unchanged (encoding detection happens after the check)
+        // This entry has no output-mode context, so document files keep the
+        // full generation (Both) as a safe fallback.
+        let (content, route) = Self::read_and_route(file_entry).await?;
+        if route.is_document() {
+            self.process_document_file(file_entry, &content, OutputMode::Both)
+                .await
+        } else {
+            self.process_code_file(file_entry, &content).await
+        }
+    }
+
+    /// Read a file's verified content and resolve its processing route.
+    ///
+    /// Every entry point shares this single read-and-route step so the
+    /// document/code decision is not re-derived at each call site.
+    pub(crate) async fn read_and_route(
+        file_entry: &FileEntry,
+    ) -> Result<(String, ContentRoute), OrchestratorError> {
+        // Reuse the scan-phase fingerprint when the file is unchanged
+        // (encoding detection happens after the check).
         let content = read_verified_utf8_for_entry(file_entry)
             .await
             .map_err(OrchestratorError::Parse)?;
-
-        // Use language info from FileEntry (already detected during scanning)
         let language_info = file_entry.language_info.as_ref().ok_or_else(|| {
             OrchestratorError::Parse(ParseError::unsupported_language(format!(
                 "no language info for file: {}",
                 file_entry.path.display()
             )))
         })?;
-
-        // Route to different processing paths based on the shared routing
-        // predicate: document-like files (documentation/config/text) go
-        // through the document pipeline, everything else through AST parsing.
-        // This entry has no output-mode context, so document files keep the
-        // full generation (Both) as a safe fallback.
-        if language_info.is_document_like() {
-            self.process_document_file(file_entry, &content, OutputMode::Both)
-                .await
-        } else {
-            self.process_code_file(file_entry, &content).await
-        }
+        Ok((content, ContentRoute::from_language_info(language_info)))
     }
 
     /// Process a file and return complete result including pre-processor output
@@ -534,23 +539,8 @@ impl FileProcessor {
         file_entry: &FileEntry,
         output_mode: OutputMode,
     ) -> Result<CompleteFileProcessResult, OrchestratorError> {
-        // Read file content, reusing the scan-phase fingerprint when the file
-        // is unchanged (encoding detection happens after the check)
-        let content = read_verified_utf8_for_entry(file_entry)
-            .await
-            .map_err(OrchestratorError::Parse)?;
-
-        // Use language info from FileEntry (already detected during scanning)
-        let language_info = file_entry.language_info.as_ref().ok_or_else(|| {
-            OrchestratorError::Parse(ParseError::unsupported_language(format!(
-                "no language info for file: {}",
-                file_entry.path.display()
-            )))
-        })?;
-
-        // Route to different processing paths based on the shared routing
-        // predicate (see `process_file`).
-        if language_info.is_document_like() {
+        let (content, route) = Self::read_and_route(file_entry).await?;
+        if route.is_document() {
             self.process_document_file_complete(file_entry, &content, output_mode)
                 .await
         } else {
@@ -1243,6 +1233,36 @@ mod tests {
                 .all(|chunk| chunk.metadata.content_type.is_document()),
             "swept document chunks must be document-typed"
         );
+    }
+
+    /// The shared read-and-route step reads the verified content once and
+    /// resolves the document/code pipeline from the entry's language info.
+    #[tokio::test]
+    async fn read_and_route_reads_content_and_classifies_route() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cases = [
+            ("README.md", "# guide\n", true),
+            ("main.rs", "fn main() {}\n", false),
+        ];
+        for (name, source, is_document) in cases {
+            let path = dir.path().join(name);
+            std::fs::write(&path, source).expect("write file");
+            let metadata = std::fs::metadata(&path).expect("stat file");
+            let entry = FileEntry {
+                path: path.clone(),
+                relative_path: std::path::PathBuf::from(name),
+                size: metadata.len(),
+                modified: metadata.modified().expect("mtime").into(),
+                content_hash: Some(cce_utils::hash::calculate_hash(source.as_bytes())),
+                language_info: Some(LanguageInfo::detect_from_path(name)),
+            };
+
+            let (content, route) = FileProcessor::read_and_route(&entry)
+                .await
+                .expect("read-and-route");
+            assert_eq!(content, source);
+            assert_eq!(route.is_document(), is_document, "route for {name}");
+        }
     }
 
     /// Document-route parse results (placeholders arriving from hot updates)

@@ -50,6 +50,17 @@ pub async fn read_verified_utf8(
         .map_err(|e| ParseError::encoding(format!("{}: {e}", path.display())))
 }
 
+/// Whether the on-disk raw bytes of `path` still match the scan-phase hash.
+///
+/// Used where only the fingerprint comparison matters and decoding would be
+/// wasted work (e.g. resume validation); an unreadable file never matches.
+pub async fn file_matches_scan_hash(path: &Path, expected: &str) -> bool {
+    match tokio::fs::read(path).await {
+        Ok(bytes) => raw_bytes_match_scan_hash(&bytes, expected),
+        Err(_) => false,
+    }
+}
+
 /// Read a scanned file reusing its scan-phase fingerprint.
 ///
 /// When the on-disk size and modification time still match the scan-phase
@@ -103,6 +114,20 @@ mod tests {
             &big,
             &cce_utils::hash::calculate_hash(&big)
         ));
+    }
+
+    /// Raw-byte fingerprint comparison matches only identical bytes and
+    /// treats an unreadable path as a non-match.
+    #[tokio::test]
+    async fn file_matches_scan_hash_compares_raw_bytes() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let path = dir.path().join("fingerprint.txt");
+        std::fs::write(&path, "fingerprint me").expect("write file");
+        let hash = cce_utils::hash::calculate_hash(b"fingerprint me");
+
+        assert!(file_matches_scan_hash(&path, &hash).await);
+        assert!(!file_matches_scan_hash(&path, "stale").await);
+        assert!(!file_matches_scan_hash(&dir.path().join("missing.txt"), &hash).await);
     }
 
     /// Verified read accepts content whose raw bytes still hash to the

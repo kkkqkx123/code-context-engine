@@ -98,6 +98,16 @@ pub async fn handle_entity_search(
         }
     };
 
+    // Resolve the published epoch through the storage cache so the manifest
+    // plus legacy-meta fallback is not re-derived here. Resolved before the
+    // read connection is taken: the cache acquires the same read lock.
+    let active_epoch =
+        cce_storage_sqlite::cache::FileHashCache::new(sqlite_client.clone(), project_id)
+            .active_epoch()
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+
     // Execute FTS5 search
     let conn = match sqlite_client.read_connection() {
         Ok(c) => c,
@@ -108,24 +118,6 @@ pub async fn handle_entity_search(
             ));
         }
     };
-
-    let active_epoch =
-        cce_storage_sqlite::ProjectIndexManifestRepository::get_active(&conn, project_id)
-            .ok()
-            .flatten()
-            .map(|manifest| manifest.data_epoch)
-            .or_else(|| {
-                conn.query_row(
-                    "SELECT value FROM project_meta WHERE project_id = ?1 AND key = 'active_epoch'",
-                    rusqlite::params![project_id],
-                    |row| {
-                        let value: String = row.get(0)?;
-                        value.parse().map_err(|_| rusqlite::Error::InvalidQuery)
-                    },
-                )
-                .ok()
-            })
-            .unwrap_or(0);
 
     let results = match cce_storage_sqlite::repo::EntityRepository::search_fts_at_epoch(
         &conn,
