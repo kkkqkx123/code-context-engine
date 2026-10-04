@@ -194,7 +194,7 @@ impl HotUpdateCoordinator {
     }
 
     /// Get change-detection statistics for monitoring.
-    pub async fn change_detection_stats(&self) -> crate::hot_update::ChangeDetectionStats {
+    pub async fn change_detection_stats(&self) -> Result<crate::hot_update::ChangeDetectionStats> {
         self.operation.lock().await.change_detection_stats().await
     }
 

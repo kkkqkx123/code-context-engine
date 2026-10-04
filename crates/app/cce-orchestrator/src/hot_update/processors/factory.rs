@@ -14,7 +14,6 @@ use crate::export::NlDocumentExporter;
 use crate::index::RelationSnapshotPublisher;
 use crate::index::StorageCoordinator;
 use cce_config::{NestProcessorConfig, RelationConfig};
-use cce_llm::Embedder;
 use cce_metrics::RelationMetrics;
 use cce_parser::summary::{RuleBasedGenerator, SummaryGenerator};
 use cce_plugin::PluginRegistry;
@@ -214,7 +213,7 @@ impl ProcessorFactory {
         qdrant: Option<Arc<QdrantClient>>,
         bm25: Option<Arc<Mutex<Bm25Client>>>,
         metadata_store: Option<Arc<SqliteClient>>,
-        embedder: Option<Arc<dyn Embedder>>,
+        embedder: Option<Arc<cce_llm_client::OpenAICompatibleProvider>>,
         project_group_id: Option<String>,
         project_id: i64,
         relation_publisher: Option<Arc<dyn RelationSnapshotPublisher>>,

@@ -1,5 +1,6 @@
 //! File system scanner
 
+pub(crate) mod content;
 pub(crate) mod error;
 pub(crate) mod file_processor;
 pub(crate) mod ignore;
@@ -10,6 +11,7 @@ pub(crate) mod pattern_matcher;
 pub(crate) mod walker;
 
 pub use cce_config::ScannerConfig;
+pub use content::{read_verified_utf8, read_verified_utf8_for_entry};
 pub use error::{Result, ScannerError};
 pub use file_processor::{FileProcessor, FileProcessorConfig, compute_content_hash};
 pub use ignore::IgnoreMatcher;

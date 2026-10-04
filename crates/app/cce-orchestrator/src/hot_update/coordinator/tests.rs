@@ -32,7 +32,10 @@ async fn test_change_detection_stats_and_debounce_info() {
         .set_project_id(1);
 
     // change_detection_stats should return valid defaults.
-    let stats = coordinator.change_detection_stats().await;
+    let stats = coordinator
+        .change_detection_stats()
+        .await
+        .expect("change-detection stats must resolve");
     assert_eq!(stats.stored_files, 0);
 
     // debounce_info should reflect initial state (no pending changes).

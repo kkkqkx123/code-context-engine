@@ -156,23 +156,3 @@ dynamic dispatch remains for LLM chat.
 
 **Status:** Resolved — dynamic dispatch removed; filtered out of this list.
 
-### Embedder — LLM Embedding Port
-
-**Files:**
-- `crates/cce_core/src/llm/embedding.rs` (trait definition)
-- `crates/cce_orchestrator/src/index/storage_coordinator.rs`,
-  `crates/cce_orchestrator/src/query/searcher.rs`,
-  `crates/cce_orchestrator/src/query/boost/summary.rs`,
-  `crates/cce_orchestrator/src/hot_update/processors/factory.rs`,
-  `crates/cce_server/src/engine.rs`, `crates/cce_server/src/api/state.rs`
-
-Embedding is a cross-cutting dependency consumed by the storage coordinator,
-the searcher, hot-update processors and summary boosts. Unlike the chat port
-(`LlmClient`, a deterministic generic bound), parameterizing every consumer
-would ripple a generic type through the whole orchestration layer, so the
-`Embedder` port is injected as `Arc<dyn Embedder>`. Its async methods use
-`#[async_trait]` (boxed futures) to stay dyn-compatible; the only production
-implementation is `OpenAICompatibleProvider`.
-
-**Status:** Necessary — cross-cutting injection boundary; single documented
-`dyn` in the LLM service layer.

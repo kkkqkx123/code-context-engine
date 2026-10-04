@@ -27,7 +27,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 
-use cce_llm::Embedder;
 use cce_storage_sqlite::ChunkRepository;
 
 use crate::hot_update::ParseResultWithChanges;
@@ -59,7 +58,7 @@ const EMBEDDER_FINGERPRINT_KEY: &str = "embedding_model_fingerprint";
 /// vectors incompatible when they change. A fingerprint drift between the
 /// persisted value and the current embedder triggers a regeneration sweep
 /// that refreshes vectors from stored chunk texts without re-parsing.
-pub fn embedder_fingerprint(embedder: &dyn Embedder) -> String {
+pub fn embedder_fingerprint(embedder: &cce_llm_client::OpenAICompatibleProvider) -> String {
     let raw = format!("{}::{}", embedder.model_name(), embedder.dimension());
     cce_utils::hash::calculate_hash(raw.as_bytes())
 }

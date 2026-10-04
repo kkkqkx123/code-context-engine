@@ -15,7 +15,7 @@ use cce_config::project_registry::ProjectScope;
 use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
-use cce_llm::Embedder;
+use cce_llm_client::OpenAICompatibleProvider;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::SearchMetrics;
 
@@ -29,7 +29,7 @@ use super::searcher_core::Searcher;
 
 pub struct SearcherBuilder {
     qdrant: Arc<QdrantClient>,
-    embedder: Arc<dyn Embedder>,
+    embedder: Arc<OpenAICompatibleProvider>,
     bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
     sqlite: Option<Arc<SqliteClient>>,
     rerank_handler: Option<Arc<ProductionRerankHandler>>,
@@ -44,7 +44,7 @@ impl SearcherBuilder {
     /// Create a new builder with required components and project scope
     pub(crate) fn new(
         qdrant: Arc<QdrantClient>,
-        embedder: Arc<dyn Embedder>,
+        embedder: Arc<OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         scope: ProjectScope,
     ) -> Self {
@@ -121,15 +121,15 @@ impl SearcherBuilder {
         // Memoize query embeddings: dense retrieval and summary boost embed
         // the same query text within one search flow; the shared wrapper
         // collapses those into a single remote call.
-        let embedder: Arc<dyn Embedder> = Arc::new(
-            crate::query::cached_embedder::CachedEmbedder::new(self.embedder.clone()),
-        );
+        let _embedder = Arc::new(crate::query::cached_embedder::CachedEmbedder::new(
+            self.embedder.clone(),
+        ));
 
         // Create summary boost if enabled
         let summary_boost = if self.enable_summary_boost {
             Some(Arc::new(SummaryBoost::new(
                 qdrant_retrieval.clone(),
-                embedder.clone(),
+                self.embedder.clone(),
                 self.scope.project_group_id().to_string(),
             )))
         } else {
@@ -138,7 +138,7 @@ impl SearcherBuilder {
 
         Searcher {
             qdrant_retrieval,
-            embedder,
+            embedder: self.embedder.clone(),
             bm25: self.bm25,
             sqlite: self.sqlite,
             reranker: Arc::new(LlmReranker::new(self.rerank_handler)),

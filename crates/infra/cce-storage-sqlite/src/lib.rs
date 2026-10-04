@@ -4,6 +4,7 @@
 //! client management, schema creation, migration, and repository implementations
 //! for files, entities, chunks, checkpoints, relation snapshots, and more.
 
+pub mod cache;
 pub mod client;
 pub mod config;
 pub mod helpers;

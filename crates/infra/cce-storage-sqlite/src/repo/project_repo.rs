@@ -42,6 +42,26 @@ impl ProjectRepository {
         Ok(tx.last_insert_rowid())
     }
 
+    /// Ensure a project row with a caller-assigned ID exists.
+    ///
+    /// Used where a writer already owns the ID (change detection seeding
+    /// file rows against a known project) and only needs the parent row to
+    /// satisfy the foreign key.
+    pub fn ensure(
+        tx: &rusqlite::Transaction,
+        project_id: i64,
+        root_path: &str,
+    ) -> Result<(), StorageError> {
+        let now = current_timestamp();
+        tx.execute(
+            "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![project_id, format!("project_{project_id}"), root_path, now],
+        )
+        .map_err(|e| StorageError::insert("projects", format!("Failed to ensure project: {e}")))?;
+        Ok(())
+    }
+
     /// Get a project by ID
     pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<ProjectRecord>, StorageError> {
         execute_query_optional(

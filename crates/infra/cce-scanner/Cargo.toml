@@ -15,10 +15,12 @@ cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
 serde = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[bench]]
 name = "scan_hash"

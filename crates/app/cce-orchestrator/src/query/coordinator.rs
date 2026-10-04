@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use cce_config::project_registry::ProjectScope;
-use cce_llm::Embedder;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::{MetricsRegistry, QueryMetrics, SearchMetrics};
 use cce_relation::CallChainQuery;
@@ -99,7 +98,7 @@ impl QueryCoordinatorBuilder {
     /// Create a new builder with required components
     fn new(
         qdrant: Arc<QdrantClient>,
-        embedder: Arc<dyn Embedder>,
+        embedder: Arc<cce_llm_client::OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         call_chain_query: Arc<CallChainQuery>,
         scope: ProjectScope,
@@ -185,7 +184,7 @@ impl QueryCoordinator {
     /// Create a new builder for QueryCoordinator with required components
     pub fn builder(
         qdrant: Arc<QdrantClient>,
-        embedder: Arc<dyn Embedder>,
+        embedder: Arc<cce_llm_client::OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         call_chain_query: Arc<CallChainQuery>,
         scope: ProjectScope,

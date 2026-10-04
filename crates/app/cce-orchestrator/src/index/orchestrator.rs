@@ -229,7 +229,10 @@ impl IndexOrchestrator {
 
 impl IndexOrchestrator {
     /// Set embedder
-    pub fn with_embedder(mut self, embedder: Arc<dyn cce_llm::Embedder>) -> Self {
+    pub fn with_embedder(
+        mut self,
+        embedder: Arc<cce_llm_client::OpenAICompatibleProvider>,
+    ) -> Self {
         self.storage = self.storage.with_embedder(embedder);
         self
     }

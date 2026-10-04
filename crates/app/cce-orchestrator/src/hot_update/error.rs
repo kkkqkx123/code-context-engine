@@ -181,6 +181,12 @@ impl From<crate::error::OrchestratorError> for HotUpdateError {
     }
 }
 
+impl From<cce_types::StorageError> for HotUpdateError {
+    fn from(e: cce_types::StorageError) -> Self {
+        Self::from(crate::error::OrchestratorError::Storage(e))
+    }
+}
+
 impl From<std::io::Error> for HotUpdateError {
     fn from(e: std::io::Error) -> Self {
         Self::File {

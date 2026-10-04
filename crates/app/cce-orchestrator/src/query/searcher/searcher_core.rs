@@ -30,7 +30,7 @@ use crate::query::filter::QueryFilter;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
 use crate::query::types::{ExecutionStrategy, QueryOptions, QueryResult, SearchResult};
-use cce_llm::Embedder;
+use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{SearchMetrics, SearchType};
 
 use cce_storage_qdrant::QdrantRetrieval;
@@ -50,7 +50,7 @@ use super::search_builder::SearcherBuilder;
 pub struct Searcher {
     /// Qdrant retrieval implementation used by DenseRetrieval strategy
     pub(crate) qdrant_retrieval: Arc<QdrantRetrieval>,
-    pub(crate) embedder: Arc<dyn Embedder>,
+    pub(crate) embedder: Arc<OpenAICompatibleProvider>,
     pub(crate) bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
     /// SQLite database for chunk content lookup (optional)
     pub(crate) sqlite: Option<Arc<SqliteClient>>,
@@ -100,7 +100,7 @@ impl Searcher {
     /// ```
     pub fn builder(
         qdrant: Arc<QdrantClient>,
-        embedder: Arc<dyn Embedder>,
+        embedder: Arc<OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         scope: ProjectScope,
     ) -> SearcherBuilder {

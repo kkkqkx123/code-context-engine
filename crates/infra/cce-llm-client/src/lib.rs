@@ -29,4 +29,4 @@ pub use crate::services::rerank::{
     ProductionRerankHandler, RerankCandidate, RerankRequest, RerankResult, RerankRuntimeConfig,
     RerankedCandidate, ScoreFusionStrategy,
 };
-pub use cce_llm::{Embedder, EmbeddingResult, RerankProvider};
+pub use cce_llm::{EmbeddingResult, RerankProvider};

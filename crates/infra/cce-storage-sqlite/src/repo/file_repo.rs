@@ -225,9 +225,10 @@ impl FileRepository {
         )
     }
 
-    /// Insert file hash for a specific epoch, creating a new row.
-    /// Unlike upsert_or_update_hash, this always creates a new row for the given epoch
-    /// instead of overwriting the existing row, preserving old epoch data.
+    /// Record a file hash for one generation's epoch.
+    ///
+    /// Rows are keyed by `(project_id, epoch, path)`, so writing a newer
+    /// generation never disturbs the rows older generations published.
     pub fn insert_hash_for_epoch(
         tx: &rusqlite::Transaction,
         path: &std::path::Path,
@@ -254,44 +255,6 @@ impl FileRepository {
             ],
         )
         .map_err(|e| StorageError::insert("files", format!("Failed to insert file record for epoch: {e}")))?;
-
-        Ok(())
-    }
-
-    /// Upsert or update file hash (insert if not exists, update if exists)
-    /// Deprecated: use insert_hash_for_epoch for epoch-versioned writes
-    pub fn upsert_or_update_hash(
-        tx: &rusqlite::Transaction,
-        path: &std::path::Path,
-        content_hash: &str,
-        project_id: i64,
-    ) -> Result<(), StorageError> {
-        let path_str = path.to_string_lossy();
-
-        let updated = tx
-            .execute(
-                "UPDATE files SET content_hash = ?1 WHERE path = ?2 AND project_id = ?3",
-                params![content_hash, path_str.as_ref(), project_id],
-            )
-            .map_err(|e| {
-                StorageError::update("files", format!("Failed to update file hash: {e}"))
-            })?;
-
-        if updated == 0 {
-            let now = chrono::Utc::now().timestamp();
-            tx.execute(
-                "INSERT INTO files (path, language, last_modified, created_at, project_id, content_hash)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    path_str.as_ref(),
-                    "unknown",
-                    now,
-                    now,
-                    project_id,
-                    content_hash,
-                ],
-            ).map_err(|e| StorageError::insert("files", format!("Failed to insert file record: {e}")))?;
-        }
 
         Ok(())
     }

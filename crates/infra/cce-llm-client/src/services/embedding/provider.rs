@@ -9,7 +9,6 @@ use crate::core::error::LlmError;
 use crate::core::{EmbeddingConfig, HttpLlmClient};
 use crate::services::embedding::handler::EmbeddingRequestHandler;
 use crate::services::embedding::types::EmbeddingResult;
-use cce_llm::Embedder;
 use cce_metrics::{EmbeddingErrorType, EmbeddingMetrics};
 
 use crate::services::embedding::preprocessor::{
@@ -231,33 +230,6 @@ impl OpenAICompatibleProvider {
     /// Get monitoring metrics (optional)
     pub fn get_metrics(&self) -> Option<Arc<EmbeddingMetrics>> {
         self.metrics.clone()
-    }
-}
-
-#[async_trait::async_trait]
-impl Embedder for OpenAICompatibleProvider {
-    async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-        OpenAICompatibleProvider::embed(self, texts).await
-    }
-
-    async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
-        OpenAICompatibleProvider::embed_one(self, text).await
-    }
-
-    async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-        OpenAICompatibleProvider::embed_vectors(self, texts).await
-    }
-
-    fn dimension(&self) -> usize {
-        OpenAICompatibleProvider::dimension(self)
-    }
-
-    fn model_name(&self) -> &str {
-        OpenAICompatibleProvider::model_name(self)
-    }
-
-    fn is_healthy(&self) -> bool {
-        OpenAICompatibleProvider::is_healthy(self)
     }
 }
 

@@ -131,7 +131,7 @@ impl FileProcessor {
         // Event-driven read: no scan-phase hash baseline exists here, so the
         // verification inside `read_verified_utf8` is skipped by passing
         // `None`; the entry point stays shared with the full-index path.
-        let content = crate::index::read_verified_utf8(read_path, None)
+        let content = cce_scanner::read_verified_utf8(read_path, None)
             .await
             .map_err(|e| {
                 HotUpdateError::file(format!(
@@ -223,7 +223,7 @@ impl FileProcessor {
         // Event-driven read: no scan-phase hash baseline exists here, so the
         // verification inside `read_verified_utf8` is skipped by passing
         // `None`; the entry point stays shared with the full-index path.
-        let content = crate::index::read_verified_utf8(read_path, None)
+        let content = cce_scanner::read_verified_utf8(read_path, None)
             .await
             .map_err(|e| {
                 HotUpdateError::file(format!(

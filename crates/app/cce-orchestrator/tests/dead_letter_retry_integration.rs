@@ -9,7 +9,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use cce_config::{AstToNlConfig, NestProcessorConfig};
-use cce_llm::{Embedder, EmbeddingResult, LlmError};
+use cce_llm_client::OpenAICompatibleProvider;
+use cce_llm_client::services::embedding::mock_server::MockEmbeddingServer;
 use cce_orchestrator::hot_update::FileChangeType;
 use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index_state::{
@@ -66,37 +67,11 @@ fn mock_qdrant_client(url: &str) -> Arc<cce_storage_qdrant::QdrantClient> {
     )
 }
 
-struct StubEmbedder;
-
-#[async_trait::async_trait]
-impl Embedder for StubEmbedder {
-    async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-        Ok(EmbeddingResult {
-            embeddings: texts.iter().map(|_| vec![0.5_f32, 0.5_f32]).collect(),
-            prompt_tokens: 0,
-            total_tokens: 0,
-        })
-    }
-
-    async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
-        self.embed(&[text]).await.map(|r| r.embeddings[0].clone())
-    }
-
-    async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-        self.embed(texts).await.map(|r| r.embeddings)
-    }
-
-    fn dimension(&self) -> usize {
-        2
-    }
-
-    fn model_name(&self) -> &str {
-        "stub-embedder"
-    }
-
-    fn is_healthy(&self) -> bool {
-        true
-    }
+fn create_test_embedder(server: &MockEmbeddingServer) -> Arc<OpenAICompatibleProvider> {
+    let config = server.app_config("test-model", 2);
+    let provider =
+        OpenAICompatibleProvider::from_model(&config, "test-model").expect("create embedder");
+    Arc::new(provider)
 }
 
 /// End-to-end executor pass: a dead-lettered file is re-chunked from
@@ -167,7 +142,7 @@ async fn truncate_retry_repairs_dead_letter_embedding() {
     let mut orchestrator = IndexOrchestrator::new(1)
         .expect("valid project")
         .with_metadata_store(database.clone())
-        .with_embedder(Arc::new(StubEmbedder))
+        .with_embedder(create_test_embedder(&MockEmbeddingServer::start()))
         .with_qdrant_client(mock_qdrant_client(&qdrant_url))
         .with_project_fingerprint("project-1-root".to_string())
         .with_file_processor_configs(

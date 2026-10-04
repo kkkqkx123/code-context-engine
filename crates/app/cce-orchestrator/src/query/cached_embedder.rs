@@ -15,7 +15,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cce_llm::{Embedder, EmbeddingResult, LlmError};
+use cce_llm::{EmbeddingResult, LlmError};
+use cce_llm_client::OpenAICompatibleProvider;
 use moka::future::Cache;
 
 /// Maximum number of cached query embeddings per searcher.
@@ -24,15 +25,15 @@ const CACHE_MAX_ENTRIES: u64 = 512;
 /// Time-to-live for one cached query embedding.
 const CACHE_TTL: Duration = Duration::from_secs(600);
 
-/// [`Embedder`] wrapper that deduplicates `embed_one` calls per query text.
+/// Wrapper that deduplicates `embed_one` calls per query text.
 pub struct CachedEmbedder {
-    inner: Arc<dyn Embedder>,
+    inner: Arc<OpenAICompatibleProvider>,
     cache: Cache<String, Vec<f32>>,
 }
 
 impl CachedEmbedder {
     /// Wrap the given embedder with a small TTL cache.
-    pub fn new(inner: Arc<dyn Embedder>) -> Self {
+    pub fn new(inner: Arc<OpenAICompatibleProvider>) -> Self {
         Self {
             inner,
             cache: Self::build_cache(CACHE_TTL),
@@ -41,7 +42,7 @@ impl CachedEmbedder {
 
     /// Wrap with an explicit TTL; test-only, used for expiry testing.
     #[cfg(test)]
-    fn with_ttl(inner: Arc<dyn Embedder>, ttl: Duration) -> Self {
+    fn with_ttl(inner: Arc<OpenAICompatibleProvider>, ttl: Duration) -> Self {
         Self {
             inner,
             cache: Self::build_cache(ttl),
@@ -56,18 +57,12 @@ impl CachedEmbedder {
     }
 }
 
-#[async_trait::async_trait]
-impl Embedder for CachedEmbedder {
-    async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
+impl CachedEmbedder {
+    pub async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
         self.inner.embed(texts).await
     }
 
-    async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
-        // `try_get_with` provides single-flight semantics: concurrent
-        // identical texts share one remote call instead of racing separate
-        // ones, and a failed result is never inserted, so the error stays
-        // observable and the next lookup retries against the remote instead
-        // of replaying it from the cache for the whole TTL.
+    pub async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
         let key = text.to_owned();
         let inner = Arc::clone(&self.inner);
         let pending = {
@@ -77,24 +72,22 @@ impl Embedder for CachedEmbedder {
         self.cache
             .try_get_with(key, pending)
             .await
-            // Single caller gets the error back without cloning; extra
-            // awaiters of the same in-flight call clone the shared error.
             .map_err(|err| Arc::try_unwrap(err).unwrap_or_else(|shared| (*shared).clone()))
     }
 
-    async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
+    pub async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
         self.inner.embed_vectors(texts).await
     }
 
-    fn dimension(&self) -> usize {
+    pub fn dimension(&self) -> usize {
         self.inner.dimension()
     }
 
-    fn model_name(&self) -> &str {
+    pub fn model_name(&self) -> &str {
         self.inner.model_name()
     }
 
-    fn is_healthy(&self) -> bool {
+    pub fn is_healthy(&self) -> bool {
         self.inner.is_healthy()
     }
 }
@@ -102,201 +95,73 @@ impl Embedder for CachedEmbedder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cce_llm_client::services::embedding::mock_server::{MockEmbeddingServer, MockResponse};
 
-    /// Inner embedder that counts `embed_one` invocations.
-    struct CountingEmbedder {
-        calls: std::sync::atomic::AtomicUsize,
-    }
-
-    impl CountingEmbedder {
-        fn new() -> Self {
-            Self {
-                calls: std::sync::atomic::AtomicUsize::new(0),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl Embedder for CountingEmbedder {
-        async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-            Ok(EmbeddingResult {
-                embeddings: texts.iter().map(|_| vec![0.0; 3]).collect(),
-                prompt_tokens: 0,
-                total_tokens: 0,
-            })
-        }
-
-        async fn embed_one(&self, _text: &str) -> Result<Vec<f32>, LlmError> {
-            self.calls
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Ok(vec![1.0, 2.0, 3.0])
-        }
-
-        async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-            Ok(texts.iter().map(|_| vec![0.0; 3]).collect())
-        }
-
-        fn dimension(&self) -> usize {
-            3
-        }
-
-        fn model_name(&self) -> &str {
-            "counting"
-        }
-
-        fn is_healthy(&self) -> bool {
-            true
-        }
+    fn create_test_embedder(
+        server: &MockEmbeddingServer,
+    ) -> Arc<cce_llm_client::OpenAICompatibleProvider> {
+        let config = server.app_config("test-model", 3);
+        let provider = cce_llm_client::OpenAICompatibleProvider::from_model(&config, "test-model")
+            .expect("create embedder");
+        Arc::new(provider)
     }
 
     #[tokio::test]
     async fn repeated_text_hits_cache_once() {
-        let counting = Arc::new(CountingEmbedder::new());
-        let cached = CachedEmbedder::new(counting.clone());
+        let server = MockEmbeddingServer::start();
+        let embedder = create_test_embedder(&server);
+        let cached = CachedEmbedder::new(embedder);
 
         let first = cached.embed_one("same query").await.expect("first embed");
         let second = cached.embed_one("same query").await.expect("second embed");
 
         assert_eq!(first, second);
         assert_eq!(
-            counting.calls.load(std::sync::atomic::Ordering::Relaxed),
+            server.request_count(),
             1,
             "identical text must be embedded exactly once"
         );
 
-        // Different text goes through to the inner embedder.
         let _ = cached.embed_one("other query").await.expect("other embed");
-        assert_eq!(counting.calls.load(std::sync::atomic::Ordering::Relaxed), 2);
-    }
-
-    /// Inner embedder whose first call fails and subsequent calls succeed.
-    struct FailFirstEmbedder {
-        calls: std::sync::atomic::AtomicUsize,
-    }
-
-    impl FailFirstEmbedder {
-        fn new() -> Self {
-            Self {
-                calls: std::sync::atomic::AtomicUsize::new(0),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl Embedder for FailFirstEmbedder {
-        async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-            Ok(EmbeddingResult {
-                embeddings: texts.iter().map(|_| vec![0.0; 3]).collect(),
-                prompt_tokens: 0,
-                total_tokens: 0,
-            })
-        }
-
-        async fn embed_one(&self, _text: &str) -> Result<Vec<f32>, LlmError> {
-            let call = self
-                .calls
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if call == 0 {
-                Err(LlmError::internal("remote unavailable"))
-            } else {
-                Ok(vec![1.0, 2.0, 3.0])
-            }
-        }
-
-        async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-            Ok(texts.iter().map(|_| vec![0.0; 3]).collect())
-        }
-
-        fn dimension(&self) -> usize {
-            3
-        }
-
-        fn model_name(&self) -> &str {
-            "fail-first"
-        }
-
-        fn is_healthy(&self) -> bool {
-            true
-        }
+        assert_eq!(server.request_count(), 2);
     }
 
     #[tokio::test]
     async fn failed_embed_is_not_cached() {
-        let flaky = Arc::new(FailFirstEmbedder::new());
-        let cached = CachedEmbedder::new(flaky.clone());
+        let server = MockEmbeddingServer::start();
+        server.queue_response(MockResponse::RateLimit);
+        server.queue_response(MockResponse::Success { dimension: 3 });
 
-        // The failure must surface to the caller.
+        let embedder = create_test_embedder(&server);
+        let cached = CachedEmbedder::new(embedder);
+
         let err = cached
             .embed_one("flaky query")
             .await
             .expect_err("first call fails");
-        assert_eq!(err.error_code(), "LLM_INTERNAL_ERROR");
+        assert_eq!(err.error_code(), "LLM_RATE_LIMIT_EXCEEDED");
 
-        // The retry goes back to the remote instead of replaying the error.
         let vector = cached.embed_one("flaky query").await.expect("retry embed");
-        assert_eq!(vector, vec![1.0, 2.0, 3.0]);
+        assert_eq!(vector, vec![0.5, 0.5, 0.5]);
 
-        // The successful result is now memoized.
         let _ = cached.embed_one("flaky query").await.expect("cached embed");
         assert_eq!(
-            flaky.calls.load(std::sync::atomic::Ordering::Relaxed),
+            server.request_count(),
             2,
             "failure must not be cached; success must be"
         );
     }
 
-    /// Inner embedder that counts invocations and delays each response so
-    /// concurrent lookups can pile up on one in-flight remote call.
-    struct SlowEmbedder {
-        calls: std::sync::atomic::AtomicUsize,
-    }
-
-    impl SlowEmbedder {
-        fn new() -> Self {
-            Self {
-                calls: std::sync::atomic::AtomicUsize::new(0),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl Embedder for SlowEmbedder {
-        async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-            Ok(EmbeddingResult {
-                embeddings: texts.iter().map(|_| vec![0.0; 3]).collect(),
-                prompt_tokens: 0,
-                total_tokens: 0,
-            })
-        }
-
-        async fn embed_one(&self, _text: &str) -> Result<Vec<f32>, LlmError> {
-            self.calls
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tokio::time::sleep(Duration::from_millis(20)).await;
-            Ok(vec![7.0, 8.0, 9.0])
-        }
-
-        async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-            Ok(texts.iter().map(|_| vec![0.0; 3]).collect())
-        }
-
-        fn dimension(&self) -> usize {
-            3
-        }
-
-        fn model_name(&self) -> &str {
-            "slow"
-        }
-
-        fn is_healthy(&self) -> bool {
-            true
-        }
-    }
-
     #[tokio::test]
     async fn concurrent_identical_texts_share_one_remote_call() {
-        let slow = Arc::new(SlowEmbedder::new());
-        let cached = Arc::new(CachedEmbedder::new(slow.clone()));
+        let server = MockEmbeddingServer::start();
+        server.queue_response(MockResponse::Delayed {
+            delay: Duration::from_millis(20),
+            dimension: 3,
+        });
+
+        let embedder = create_test_embedder(&server);
+        let cached = Arc::new(CachedEmbedder::new(embedder));
 
         let mut handles = Vec::new();
         for _ in 0..8 {
@@ -310,7 +175,7 @@ mod tests {
         }
 
         assert_eq!(
-            slow.calls.load(std::sync::atomic::Ordering::Relaxed),
+            server.request_count(),
             1,
             "concurrent identical texts must coalesce into a single remote call"
         );
@@ -318,15 +183,16 @@ mod tests {
 
     #[tokio::test]
     async fn expired_entry_is_reembedded() {
-        let counting = Arc::new(CountingEmbedder::new());
-        let cached = CachedEmbedder::with_ttl(counting.clone(), Duration::from_millis(50));
+        let server = MockEmbeddingServer::start();
+        let embedder = create_test_embedder(&server);
+        let cached = CachedEmbedder::with_ttl(embedder, Duration::from_millis(50));
 
         let _ = cached.embed_one("aging query").await.expect("first embed");
         tokio::time::sleep(Duration::from_millis(150)).await;
         let _ = cached.embed_one("aging query").await.expect("second embed");
 
         assert_eq!(
-            counting.calls.load(std::sync::atomic::Ordering::Relaxed),
+            server.request_count(),
             2,
             "expired entry must trigger a fresh remote call"
         );
@@ -334,9 +200,11 @@ mod tests {
 
     #[tokio::test]
     async fn metadata_delegates_to_inner() {
-        let cached = CachedEmbedder::new(Arc::new(CountingEmbedder::new()));
+        let server = MockEmbeddingServer::start();
+        let embedder = create_test_embedder(&server);
+        let cached = CachedEmbedder::new(embedder);
         assert_eq!(cached.dimension(), 3);
-        assert_eq!(cached.model_name(), "counting");
+        assert_eq!(cached.model_name(), "test-model");
         assert!(cached.is_healthy());
 
         let result = cached.embed(&["a", "b"]).await.expect("batch embed");

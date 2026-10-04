@@ -5,6 +5,8 @@ pub mod provider;
 pub mod response_parser;
 pub mod types;
 
+pub mod mock_server;
+
 pub(crate) mod preprocessor;
 
 pub use handler::EmbeddingRequestHandler;

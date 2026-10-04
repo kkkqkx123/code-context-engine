@@ -243,49 +243,9 @@ impl HotUpdateOperationRuntime {
         // 1. Remove hash records for deleted files so the next scan does not
         //    re-discover them as stale entries.
         if !deleted_paths.is_empty() {
-            let db = self.change_detector.db();
-            let conn = db.write_connection().map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to get connection: {}", e))
-            })?;
-            let project_id = self.change_detector.project_id();
-            let manifest =
-                cce_storage_sqlite::ProjectIndexManifestRepository::get_active(&conn, project_id)
-                    .map_err(|error| {
-                    HotUpdateError::hot_update(format!(
-                        "Failed to read active project manifest: {error}"
-                    ))
-                })?;
-            let active_epoch = match manifest {
-                Some(manifest) => manifest.data_epoch,
-                // No manifest means the data generation was never published; a
-                // missing legacy meta row is the legitimate default 0, while
-                // real DB failures are propagated instead of silently
-                // deleting hashes from the wrong epoch.
-                None => cce_storage_sqlite::ProjectRepository::meta_get_int_optional(
-                    &conn,
-                    project_id,
-                    "active_epoch",
-                )
-                .map_err(|error| {
-                    HotUpdateError::hot_update(format!("Failed to read active_epoch meta: {error}"))
-                })?
-                .unwrap_or(0),
-            };
-            let tx = conn.unchecked_transaction().map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to start transaction: {}", e))
-            })?;
-            for path in deleted_paths {
-                cce_storage_sqlite::repo::file_repo::FileRepository::delete_by_path_at_epoch(
-                    &tx,
-                    &path.to_string_lossy(),
-                    project_id,
-                    active_epoch,
-                )
-                .map_err(|e| HotUpdateError::hot_update(format!("Failed to delete hash: {}", e)))?;
-            }
-            tx.commit().map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to commit deletion: {}", e))
-            })?;
+            let cache = self.change_detector.cache();
+            let epoch = cache.write_epoch()?;
+            cache.remove(epoch, deleted_paths)?;
         }
 
         if paths.is_empty() {

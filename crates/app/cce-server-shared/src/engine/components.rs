@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use super::EngineError;
 use super::project_cache::ProjectCache;
-use cce_llm::Embedder;
+use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache};
 use cce_storage_bm25::Bm25Client;
 use cce_storage_qdrant::QdrantClient;
@@ -46,12 +46,12 @@ impl super::CodeContextEngine {
     }
 
     /// Get a reference to the embedder
-    pub fn embedder(&self) -> &Arc<dyn Embedder> {
+    pub fn embedder(&self) -> &Arc<OpenAICompatibleProvider> {
         &self.embedder
     }
 
     /// Get a clone of the embedder
-    pub fn embedder_clone(&self) -> Arc<dyn Embedder> {
+    pub fn embedder_clone(&self) -> Arc<OpenAICompatibleProvider> {
         self.embedder.clone()
     }
 

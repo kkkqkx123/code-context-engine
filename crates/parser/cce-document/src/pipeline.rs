@@ -504,19 +504,15 @@ mod tests {
     }
 
     #[test]
-    fn test_global_singleton() {
-        // Get global instance twice - should be the same instance
-        let router1 = PipelineRouter::global();
-        let router2 = PipelineRouter::global();
+    fn router_instances_produce_equal_results() {
+        let router1 = PipelineRouter::new();
+        let router2 = PipelineRouter::new();
 
-        // Both references should point to the same instance
-        // (We can't compare references directly, but we can verify they work)
         let config = ChunkingConfig::default();
         let content = "# Test\n\nContent";
         let result1 = router1.process(content, "test.md", &config, OutputMode::default());
         let result2 = router2.process(content, "test.md", &config, OutputMode::default());
 
-        // Both should succeed and produce the same result
         assert!(result1.is_ok());
         assert!(result2.is_ok());
         assert_eq!(result1.unwrap().0.len(), result2.unwrap().0.len());

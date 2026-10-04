@@ -10,8 +10,8 @@ use std::sync::Arc;
 use crate::query::boost::{BoostAggregationConfig, BoostContribution};
 use crate::query::error::{QueryError, Result};
 use crate::query::types::{SearchConfig, SearchResult};
-use cce_llm::Embedder;
 use cce_llm_client::LlmError;
+use cce_llm_client::OpenAICompatibleProvider;
 use cce_storage_common::{DenseSearchQuery, SearchFilter};
 use cce_storage_qdrant::QdrantRetrieval;
 use cce_types::PointKind;
@@ -24,14 +24,14 @@ use cce_types::error::common::HttpError;
 #[derive(Clone)]
 pub struct SummaryBoost {
     qdrant: Arc<QdrantRetrieval>,
-    embedder: Arc<dyn Embedder>,
+    embedder: Arc<OpenAICompatibleProvider>,
     project_group_id: String,
 }
 
 impl SummaryBoost {
     pub fn new(
         qdrant: Arc<QdrantRetrieval>,
-        embedder: Arc<dyn Embedder>,
+        embedder: Arc<OpenAICompatibleProvider>,
         project_group_id: String,
     ) -> Self {
         Self {

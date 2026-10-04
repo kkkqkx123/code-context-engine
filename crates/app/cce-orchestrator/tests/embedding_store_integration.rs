@@ -6,10 +6,10 @@
 //! the Qdrant client rather than pure in-process logic.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use cce_config::modules::{DistanceMetric, QdrantConfig};
-use cce_llm::{Embedder, EmbeddingResult, LlmError};
+use cce_llm_client::OpenAICompatibleProvider;
+use cce_llm_client::services::embedding::mock_server::{MockEmbeddingServer, MockResponse};
 use cce_orchestrator::OrchestratorError;
 use cce_orchestrator::index::StorageCoordinator;
 use cce_parser::ast_to_nl::chunker::{
@@ -21,8 +21,6 @@ use cce_types::ast_to_nl::FileCategory;
 use cce_types::entity::{EntityId, EntityKind};
 use cce_types::{Language, Span};
 
-/// Minimal in-process Qdrant stand-in: answers every request with a
-/// successful upsert response.
 async fn spawn_mock_qdrant_url() -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -51,8 +49,6 @@ async fn spawn_mock_qdrant_url() -> String {
     format!("http://{addr}")
 }
 
-/// Build a Qdrant client pointed at a mock server (`2`-dimensional vectors,
-/// matching the stub embedders used here).
 fn mock_qdrant_client(url: &str) -> Arc<QdrantClient> {
     let qdrant_config = QdrantConfig {
         url: url.to_string(),
@@ -67,79 +63,11 @@ fn mock_qdrant_client(url: &str) -> Arc<QdrantClient> {
     Arc::new(QdrantClient::new(qdrant_config, ".").expect("qdrant client must build"))
 }
 
-/// Embedder stub: rate-limits the first `rate_limit_calls` invocations and
-/// succeeds afterwards with fixed-dimension vectors.
-struct StubEmbedder {
-    calls: AtomicU32,
-    rate_limit_calls: u32,
-}
-
-#[async_trait::async_trait]
-impl Embedder for StubEmbedder {
-    async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        if call < self.rate_limit_calls {
-            return Err(LlmError::rate_limit_exceeded(5));
-        }
-        Ok(EmbeddingResult {
-            embeddings: texts.iter().map(|_| vec![0.5_f32, 0.5_f32]).collect(),
-            prompt_tokens: 0,
-            total_tokens: 0,
-        })
-    }
-
-    async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
-        self.embed(&[text])
-            .await
-            .map(|r| r.embeddings.first().cloned().unwrap_or_default())
-    }
-
-    async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-        self.embed(texts).await.map(|r| r.embeddings)
-    }
-
-    fn dimension(&self) -> usize {
-        2
-    }
-
-    fn model_name(&self) -> &str {
-        "stub-embedder"
-    }
-
-    fn is_healthy(&self) -> bool {
-        true
-    }
-}
-
-/// Embedder stub that never answers: proves the stage deadline fires.
-struct HangingEmbedder;
-
-#[async_trait::async_trait]
-impl Embedder for HangingEmbedder {
-    async fn embed(&self, _texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-        unreachable!("the deadline must cancel this call first")
-    }
-
-    async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
-        self.embed(&[text]).await.map(|r| r.embeddings[0].clone())
-    }
-
-    async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-        self.embed(texts).await.map(|r| r.embeddings)
-    }
-
-    fn dimension(&self) -> usize {
-        2
-    }
-
-    fn model_name(&self) -> &str {
-        "hanging-embedder"
-    }
-
-    fn is_healthy(&self) -> bool {
-        true
-    }
+fn create_test_embedder(server: &MockEmbeddingServer) -> Arc<OpenAICompatibleProvider> {
+    let config = server.app_config("test-model", 2);
+    let provider =
+        OpenAICompatibleProvider::from_model(&config, "test-model").expect("create embedder");
+    Arc::new(provider)
 }
 
 fn embedding_chunk(id: &str, text: &str) -> ChunkedResult {
@@ -183,7 +111,7 @@ fn stored_record(id: &str) -> (ChunkRecord, u8) {
     )
 }
 
-fn storage_with(qdrant_url: &str, embedder: Arc<dyn Embedder>) -> StorageCoordinator {
+fn storage_with(qdrant_url: &str, embedder: Arc<OpenAICompatibleProvider>) -> StorageCoordinator {
     StorageCoordinator::new(7)
         .expect("valid project ID")
         .with_project_group_id("project-7-root")
@@ -194,12 +122,11 @@ fn storage_with(qdrant_url: &str, embedder: Arc<dyn Embedder>) -> StorageCoordin
 #[tokio::test]
 async fn rate_limited_batch_is_deferred_and_retried_after_other_batches() {
     let qdrant_url = spawn_mock_qdrant_url().await;
-    let stub = Arc::new(StubEmbedder {
-        calls: AtomicU32::new(0),
-        rate_limit_calls: 1,
-    });
-    let embedder: Arc<dyn Embedder> = stub.clone();
-    let storage = storage_with(&qdrant_url, embedder.clone());
+    let server = MockEmbeddingServer::start();
+    server.queue_response(MockResponse::RateLimit);
+
+    let embedder = create_test_embedder(&server);
+    let storage = storage_with(&qdrant_url, embedder);
 
     let chunks = [
         embedding_chunk("a", "first"),
@@ -210,11 +137,9 @@ async fn rate_limited_batch_is_deferred_and_retried_after_other_batches() {
         .await
         .expect("store must succeed");
 
-    // Batch "a" was rate limited on its first attempt, deferred, and
-    // retried after batch "b"; both batches end up stored.
     assert_eq!(stored, 2);
     assert_eq!(
-        stub.calls.load(Ordering::SeqCst),
+        server.request_count(),
         3,
         "expected: batch a (429) + batch b + batch a retry"
     );
@@ -223,7 +148,13 @@ async fn rate_limited_batch_is_deferred_and_retried_after_other_batches() {
 #[tokio::test]
 async fn embedding_stage_deadline_surfaces_as_identifiable_error() {
     let qdrant_url = spawn_mock_qdrant_url().await;
-    let embedder: Arc<dyn Embedder> = Arc::new(HangingEmbedder);
+    let server = MockEmbeddingServer::start();
+    server.queue_response(MockResponse::Delayed {
+        delay: std::time::Duration::from_secs(3600),
+        dimension: 2,
+    });
+
+    let embedder = create_test_embedder(&server);
     let mut storage = storage_with(&qdrant_url, embedder);
     storage.set_embedding_stage_timeout(1);
 
@@ -243,13 +174,14 @@ async fn embedding_stage_deadline_surfaces_as_identifiable_error() {
 #[tokio::test]
 async fn rate_limited_retry_failure_surfaces_as_batch_error() {
     let qdrant_url = spawn_mock_qdrant_url().await;
-    // Both the initial attempt and the deferred retry are rate limited.
-    let stub = Arc::new(StubEmbedder {
-        calls: AtomicU32::new(0),
-        rate_limit_calls: 3,
-    });
-    let embedder: Arc<dyn Embedder> = stub.clone();
-    let storage = storage_with(&qdrant_url, embedder.clone());
+    let server = MockEmbeddingServer::start();
+    server.queue_response(MockResponse::RateLimit);
+    server.queue_response(MockResponse::RateLimit);
+    server.queue_response(MockResponse::RateLimit);
+    server.queue_response(MockResponse::Success { dimension: 2 });
+
+    let embedder = create_test_embedder(&server);
+    let storage = storage_with(&qdrant_url, embedder);
 
     let chunks = [
         embedding_chunk("a", "first"),
@@ -257,14 +189,9 @@ async fn rate_limited_retry_failure_surfaces_as_batch_error() {
     ];
     let result = storage.store_vectors_batched(&chunks, 1, 0).await;
 
-    // Both batches are rate limited on the first pass and deferred. On the
-    // retry pass batch "a" fails again while batch "b" succeeds. The
-    // retry-pass failure must not be reported as Ok: the caller stops
-    // advancing the checkpoint boundary so the uncommitted work unit is
-    // replayed on resume.
     assert!(result.is_err(), "deferred retry failure must surface");
     assert_eq!(
-        stub.calls.load(Ordering::SeqCst),
+        server.request_count(),
         4,
         "expected: batch a (429) + batch b (429) + both retries"
     );
@@ -273,11 +200,9 @@ async fn rate_limited_retry_failure_surfaces_as_batch_error() {
 #[tokio::test]
 async fn reembed_vectors_from_records_upserts_every_chunk() {
     let qdrant_url = spawn_mock_qdrant_url().await;
-    let stub = Arc::new(StubEmbedder {
-        calls: AtomicU32::new(0),
-        rate_limit_calls: 0,
-    });
-    let embedder: Arc<dyn Embedder> = stub.clone();
+    let server = MockEmbeddingServer::start();
+
+    let embedder = create_test_embedder(&server);
     let storage = storage_with(&qdrant_url, embedder);
 
     let records = [stored_record("a"), stored_record("b")];
@@ -287,9 +212,5 @@ async fn reembed_vectors_from_records_upserts_every_chunk() {
         .expect("re-embed must succeed");
 
     assert_eq!(stored, 2);
-    assert_eq!(
-        stub.calls.load(Ordering::SeqCst),
-        2,
-        "one call per microbatch"
-    );
+    assert_eq!(server.request_count(), 2, "one call per microbatch");
 }

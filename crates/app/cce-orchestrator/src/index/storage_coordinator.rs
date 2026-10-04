@@ -27,11 +27,10 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 use crate::CheckpointManager;
-use cce_llm::Embedder;
+use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
 use cce_storage_qdrant::QdrantClient;
-use cce_storage_sqlite::ProjectIndexManifestRepository;
 use cce_storage_sqlite::SqliteClient;
 
 use super::super::error::OrchestratorError;
@@ -52,7 +51,7 @@ pub use mapping::build_bm25_documents;
 pub struct StorageCoordinator {
     qdrant: Option<Arc<QdrantClient>>,
     bm25: Option<Arc<tokio::sync::Mutex<Bm25Client>>>,
-    embedder: Option<Arc<dyn Embedder>>,
+    embedder: Option<Arc<OpenAICompatibleProvider>>,
     metadata_store: Option<Arc<SqliteClient>>,
     project_group_id: String,
     project_id: i64,
@@ -133,7 +132,7 @@ impl StorageCoordinator {
     }
 
     /// Set embedder
-    pub fn with_embedder(mut self, embedder: Arc<dyn Embedder>) -> Self {
+    pub fn with_embedder(mut self, embedder: Arc<OpenAICompatibleProvider>) -> Self {
         self.embedder = Some(embedder);
         self
     }
@@ -207,19 +206,11 @@ impl StorageCoordinator {
     /// sweeps must target the active generation. Returns `None` when the
     /// project was never indexed.
     pub(crate) fn active_data_epoch(&self) -> Result<Option<i64>, OrchestratorError> {
-        let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) else {
+        let Some(client) = self.metadata_store.clone() else {
             return Ok(None);
         };
-        let conn = client
-            .read_connection()
-            .map_err(OrchestratorError::Storage)?;
-        if let Some(manifest) = ProjectIndexManifestRepository::get_active(&conn, self.project_id)
-            .map_err(OrchestratorError::Storage)?
-        {
-            return Ok(Some(manifest.data_epoch));
-        }
-        client
-            .project_meta_get_int_optional(self.project_id, "active_epoch")
+        cce_storage_sqlite::cache::FileHashCache::new(client, self.project_id)
+            .active_epoch()
             .map_err(OrchestratorError::Storage)
     }
 
@@ -282,7 +273,7 @@ impl StorageCoordinator {
     }
 
     /// Get the configured embedder, if any.
-    pub fn embedder(&self) -> Option<&Arc<dyn Embedder>> {
+    pub fn embedder(&self) -> Option<&Arc<OpenAICompatibleProvider>> {
         self.embedder.as_ref()
     }
 

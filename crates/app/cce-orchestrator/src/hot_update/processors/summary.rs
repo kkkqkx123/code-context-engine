@@ -31,6 +31,8 @@ pub struct SummaryUpdateProcessor {
     summary_fingerprint: String,
     /// Checkpoint manager used to persist per-file summary progress markers.
     checkpoint_manager: Option<Arc<CheckpointManager>>,
+    /// Document pipeline whose summarize stage feeds document-route files.
+    doc_pipeline: PipelineRouter,
 }
 
 impl SummaryUpdateProcessor {
@@ -45,6 +47,7 @@ impl SummaryUpdateProcessor {
             enabled: Arc::new(AtomicBool::new(true)),
             summary_fingerprint: String::new(),
             checkpoint_manager: None,
+            doc_pipeline: PipelineRouter::new(),
         }
     }
 
@@ -150,7 +153,7 @@ impl UpdateProcessor for SummaryUpdateProcessor {
                 // full index uses — so both paths produce identical
                 // category/language/heading encodings. The generic generator
                 // only backs the failure case.
-                match PipelineRouter::global().summarize_only(
+                match self.doc_pipeline.summarize_only(
                     &parse_result.parsed_file.source,
                     &parse_result.parsed_file.path,
                 ) {

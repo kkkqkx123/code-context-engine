@@ -314,9 +314,9 @@ impl HotUpdateOperationRuntime {
     }
 
     /// Get change-detection statistics for monitoring.
-    pub async fn change_detection_stats(&self) -> super::ChangeDetectionStats {
-        let stored_files = self.change_detector.count_stored_files().await.unwrap_or(0);
-        super::ChangeDetectionStats { stored_files }
+    pub async fn change_detection_stats(&self) -> Result<super::ChangeDetectionStats> {
+        let stored_files = self.change_detector.count_stored_files().await?;
+        Ok(super::ChangeDetectionStats { stored_files })
     }
 
     // ==================== Operation lifecycle ====================

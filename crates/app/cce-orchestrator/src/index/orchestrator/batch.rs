@@ -19,7 +19,7 @@ use cce_types::{OutputMode, ParsedFile};
 use super::checkpoint::persist_parsed_checkpoint;
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
-use crate::index::file_processor::read_verified_utf8_for_entry;
+use cce_scanner::read_verified_utf8_for_entry;
 
 use crate::index::options::IndexOptions;
 use crate::index_state::{IndexPhase, ModuleType, ModuleUpdateState, TrackerFailure};

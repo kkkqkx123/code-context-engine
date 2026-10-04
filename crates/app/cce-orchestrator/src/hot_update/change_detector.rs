@@ -14,9 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use cce_scanner::{FSScanner, FileEntry, ScanOptions};
 use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::repo::{
-    FileRepository, GenerationOverrideRepository, ProjectIndexManifestRepository,
-};
+use cce_storage_sqlite::cache::FileHashCache;
 
 use super::error::HotUpdateError;
 use super::exclude_rules::ExcludeRules;
@@ -25,10 +23,6 @@ use super::exclude_rules::ExcludeRules;
 /// the mtime-based incremental scan (a file modified twice within the mtime
 /// granularity with the same size would otherwise be invisible to reuse).
 const FULL_SCAN_INTERVAL: u32 = 10;
-
-/// Depth bound of the inheritance chain consulted for stored-state lookups,
-/// mirroring the GC protection window of the zero-copy generation model.
-const GENERATION_VIEW_DEPTH: usize = 2;
 
 /// In-memory state backing the incremental scan.
 #[derive(Debug)]
@@ -120,14 +114,9 @@ impl ChangeDetector {
         self.scan_options.root_path = root_path.to_string();
     }
 
-    /// Get reference to the underlying database
-    pub fn db(&self) -> &Arc<SqliteClient> {
-        &self.db
-    }
-
-    /// Get the current project ID
-    pub fn project_id(&self) -> i64 {
-        self.project_id
+    /// Content-hash cache scoped to the configured project.
+    pub fn cache(&self) -> FileHashCache {
+        FileHashCache::new(Arc::clone(&self.db), self.project_id)
     }
 
     /// Update scan options (for config reload)
@@ -203,57 +192,63 @@ impl ChangeDetector {
     /// Check if there are file changes (without updating)
     ///
     /// Performs a quick scan to detect if any files have changed or been deleted.
+    ///
+    /// An unreadable state is reported as "changed" rather than "unchanged":
+    /// unknown is not no-change, and the caller then runs the authoritative
+    /// [`Self::scan_and_detect`] whose failure surfaces instead of leaving
+    /// the index silently stale.
     pub async fn check_changes(&self) -> bool {
-        match self.scan_entries().await {
-            Ok(entries) => {
-                let mut disk_count = 0usize;
-                let mut current_paths = HashSet::with_capacity(entries.len());
-                // Entries without a content hash are invisible to the per-file
-                // comparison below, so a deletion could hide behind balanced
-                // counts when an unhashable file appears in the same scan.
-                let mut saw_unhashable = false;
-                for entry in &entries {
-                    if let Some(rules) = &self.exclude_rules {
-                        if rules.should_exclude(entry) {
-                            continue;
-                        }
-                    }
-                    disk_count += 1;
-                    current_paths.insert(entry.relative_path.clone());
-
-                    match &entry.content_hash {
-                        Some(hash) => {
-                            let stored_hash = self.get_stored_hash(&entry.relative_path).await;
-                            if stored_hash.as_deref() != Some(hash.as_str()) {
-                                return true;
-                            }
-                        }
-                        None => saw_unhashable = true,
-                    }
-                }
-
-                // O(1) fast negative: equal counts with every disk file
-                // hashed and matched imply the path sets coincide. Any other
-                // combination (count mismatch, or an unhashable file that can
-                // mask a balanced add+delete batch) is settled by the exact
-                // set difference used by scan_and_detect.
-                if let Ok(db_count) = self.count_stored_files().await {
-                    if db_count != disk_count || saw_unhashable {
-                        if let Ok(removed) = self.find_removed_files(&current_paths).await {
-                            if !removed.is_empty() {
-                                return true;
-                            }
-                        }
-                    }
-                }
-
-                false
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to scan for file changes");
-                false
+        match self.scan_and_check().await {
+            Ok(has_changes) => has_changes,
+            Err(error) => {
+                tracing::error!(%error, "Failed to check for file changes");
+                true
             }
         }
+    }
+
+    /// Resolve the change question against the cache, propagating storage
+    /// failures to [`Self::check_changes`].
+    async fn scan_and_check(&self) -> Result<bool, HotUpdateError> {
+        let entries = self.scan_entries().await?;
+        let cache = self.cache();
+
+        let mut disk_count = 0usize;
+        let mut current_paths = HashSet::with_capacity(entries.len());
+        // Entries without a content hash are invisible to the per-file
+        // comparison below, so a deletion could hide behind balanced
+        // counts when an unhashable file appears in the same scan.
+        let mut saw_unhashable = false;
+        for entry in &entries {
+            if let Some(rules) = &self.exclude_rules {
+                if rules.should_exclude(entry) {
+                    continue;
+                }
+            }
+            disk_count += 1;
+            current_paths.insert(entry.relative_path.clone());
+
+            match &entry.content_hash {
+                Some(hash) => {
+                    if cache.stored_hash(&entry.relative_path)?.as_deref() != Some(hash.as_str()) {
+                        return Ok(true);
+                    }
+                }
+                None => saw_unhashable = true,
+            }
+        }
+
+        // Equal counts with every disk file hashed and matched imply the
+        // path sets coincide. Any other combination (count mismatch, or an
+        // unhashable file that can mask a balanced add+delete batch) is
+        // settled by the exact set difference used by scan_and_detect.
+        let visible = cache.visible_paths()?;
+        if visible.len() == disk_count && !saw_unhashable {
+            return Ok(false);
+        }
+        Ok(visible
+            .into_iter()
+            .any(|path| !current_paths.contains(&path)))
     }
 
     /// Scan files and detect changes
@@ -322,66 +317,33 @@ impl ChangeDetector {
     pub async fn initialize(&self) -> Result<usize, HotUpdateError> {
         let entries = self.scan_entries().await?;
 
-        // Apply exclude rules
-        let filtered_entries: Vec<_> = entries
+        let filtered = entries
             .iter()
-            .filter(|entry| {
-                if let Some(rules) = &self.exclude_rules {
-                    !rules.should_exclude(entry)
-                } else {
-                    true
-                }
+            .filter(|entry| match &self.exclude_rules {
+                Some(rules) => !rules.should_exclude(entry),
+                None => true,
             })
-            .cloned()
-            .collect();
+            .collect::<Vec<_>>();
 
         // Store every file's hash in SQLite so subsequent scan_and_detect()
         // sees them as "unchanged" rather than "added".
-        let conn = self
-            .db
-            .write_connection()
-            .map_err(|e| HotUpdateError::hot_update(format!("Failed to get connection: {}", e)))?;
-        let tx = conn.unchecked_transaction().map_err(|e| {
-            HotUpdateError::hot_update(format!("Failed to start transaction: {}", e))
-        })?;
+        let hashes = filtered
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .content_hash
+                    .as_ref()
+                    .map(|hash| (entry.relative_path.clone(), hash.clone()))
+            })
+            .collect::<Vec<_>>();
 
-        let project_id = self.project_id;
+        let cache = self.cache();
+        cache.ensure_project(&self.scan_options.root_path)?;
+        cache.record(cache.write_epoch()?, &hashes)?;
 
-        // Ensure project exists before inserting file records (FK constraint)
-        let root_path = &self.scan_options.root_path;
-        tx.execute(
-            "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?4)",
-            rusqlite::params![
-                project_id,
-                format!("project_{}", project_id),
-                root_path,
-                chrono::Utc::now().timestamp(),
-            ],
-        )
-        .map_err(|e| {
-            HotUpdateError::hot_update(format!("Failed to ensure project exists: {}", e))
-        })?;
+        tracing::info!(count = filtered.len(), "Change detector initialized");
 
-        for entry in &filtered_entries {
-            if let Some(hash) = &entry.content_hash {
-                FileRepository::upsert_or_update_hash(&tx, &entry.relative_path, hash, project_id)
-                    .map_err(|e| {
-                        HotUpdateError::hot_update(format!("Failed to store hash: {}", e))
-                    })?;
-            }
-        }
-
-        tx.commit().map_err(|e| {
-            HotUpdateError::hot_update(format!("Failed to commit transaction: {}", e))
-        })?;
-
-        tracing::info!(
-            count = filtered_entries.len(),
-            "Change detector initialized"
-        );
-
-        Ok(filtered_entries.len())
+        Ok(filtered.len())
     }
 
     /// Update file cache with new hashes after processing
@@ -397,216 +359,41 @@ impl ChangeDetector {
         &self,
         entries: &[cce_scanner::FileEntry],
     ) -> Result<(), HotUpdateError> {
-        if entries.is_empty() {
+        let hashes = entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .content_hash
+                    .as_ref()
+                    .map(|hash| (entry.relative_path.clone(), hash.clone()))
+            })
+            .collect::<Vec<_>>();
+        if hashes.is_empty() {
             return Ok(());
         }
 
-        let conn = self
-            .db
-            .write_connection()
-            .map_err(|e| HotUpdateError::hot_update(format!("Failed to get connection: {}", e)))?;
+        let cache = self.cache();
         // Baseline hashes are recorded against the active generation's own
         // epoch: unchanged files keep resolving through the inheritance chain.
-        let epoch = Self::generation_view(&conn, self.project_id)?.0;
-        let tx = conn.unchecked_transaction().map_err(|e| {
-            HotUpdateError::hot_update(format!("Failed to start transaction: {}", e))
-        })?;
+        cache.record(cache.write_epoch()?, &hashes)?;
 
-        let project_id = self.project_id;
-        for entry in entries {
-            if let Some(hash) = &entry.content_hash {
-                FileRepository::insert_hash_for_epoch(
-                    &tx,
-                    &entry.relative_path,
-                    hash,
-                    project_id,
-                    epoch,
-                )
-                .map_err(|e| HotUpdateError::hot_update(format!("Failed to update hash: {}", e)))?;
-            }
-        }
-
-        tx.commit().map_err(|e| {
-            HotUpdateError::hot_update(format!("Failed to commit transaction: {}", e))
-        })?;
-
-        tracing::trace!(
-            count = entries.len(),
-            "Updated {} file hashes in cache",
-            entries.len()
-        );
+        tracing::trace!(count = hashes.len(), "Updated file hashes in cache");
         Ok(())
     }
 
-    /// Get stored hash for a file path from SQLite
     /// Load every visible `(path, content_hash)` pair of the active
     /// generation view in a single pass.
     ///
-    /// Under zero-copy inheritance the visible set is `own rows ∪ ancestor
-    /// rows − overridden files`: nearer generations overwrite ancestor rows
-    /// for the same path, and files registered as replaced/deleted in the own
-    /// generation never resolve against an ancestor. Used by
-    /// [`Self::scan_and_detect`] so per-file comparison touches the database
-    /// once per round (and resolves the epoch view once) instead of once per
-    /// file. Rows without a content hash are skipped: a file whose stored hash
-    /// is NULL is indistinguishable from an absent record and is treated as
-    /// "added", matching the single-point lookup semantics.
+    /// Used by [`Self::scan_and_detect`] so per-file comparison touches the
+    /// database once per round (and resolves the epoch view once) instead of
+    /// once per file.
     async fn load_stored_hashes(&self) -> Result<HashMap<PathBuf, String>, HotUpdateError> {
-        let conn = self
-            .db
-            .read_connection()
-            .map_err(|e| HotUpdateError::hot_update(format!("Failed to get connection: {}", e)))?;
-
-        let project_id = self.project_id;
-        let (own_epoch, ancestors, excluded_files) = Self::generation_view(&conn, project_id)?;
-
-        let mut stored = HashMap::new();
-        // Ancestor generations oldest-first so nearer generations win for
-        // paths that exist in more than one generation of the chain.
-        for epoch in ancestors.iter().rev() {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT path, content_hash FROM files
-                     WHERE project_id = ?1 AND epoch = ?2 AND content_hash IS NOT NULL",
-                )
-                .map_err(|e| {
-                    HotUpdateError::hot_update(format!("Failed to prepare statement: {}", e))
-                })?;
-
-            let rows = stmt
-                .query_map(rusqlite::params![project_id, epoch], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(|e| HotUpdateError::hot_update(format!("Failed to query files: {}", e)))?;
-
-            for row in rows {
-                let (path, hash) = row.map_err(|e| {
-                    HotUpdateError::hot_update(format!("Failed to read file row: {}", e))
-                })?;
-                stored.insert(PathBuf::from(path), hash);
-            }
-        }
-
-        // Overridden files' *inherited* rows are invisible; this only ever
-        // drops entries resolved from an ancestor. A replaced file always
-        // owns newer rows in its own generation.
-        for path in &excluded_files {
-            stored.remove(&PathBuf::from(path));
-        }
-
-        // Own-generation rows are applied last and are never masked by
-        // overrides: an override means "do not resolve against ancestors",
-        // not "this file is invisible in its own generation".
-        let mut stmt = conn
-            .prepare(
-                "SELECT path, content_hash FROM files
-                 WHERE project_id = ?1 AND epoch = ?2 AND content_hash IS NOT NULL",
-            )
-            .map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to prepare statement: {}", e))
-            })?;
-        let rows = stmt
-            .query_map(rusqlite::params![project_id, own_epoch], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| HotUpdateError::hot_update(format!("Failed to query files: {}", e)))?;
-        for row in rows {
-            let (path, hash) = row.map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to read file row: {}", e))
-            })?;
-            stored.insert(PathBuf::from(path), hash);
-        }
-
-        Ok(stored)
-    }
-
-    /// Get the visible stored hash for a file path.
-    ///
-    /// Resolves the generation view "own first, miss → ancestor": a hit in
-    /// the own generation always wins; an own-generation override hides the
-    /// ancestors (replaced without own rows must not surface, and deleted
-    /// files are invisible everywhere).
-    async fn get_stored_hash(&self, path: &std::path::Path) -> Option<String> {
-        let conn = match self.db.read_connection() {
-            Ok(c) => c,
-            Err(_) => return None,
-        };
-
-        let project_id = self.project_id;
-        let path_str = path.to_str()?;
-        let Ok((own_epoch, ancestors, excluded_files)) = Self::generation_view(&conn, project_id)
-        else {
-            return None;
-        };
-        let mut epochs = Vec::with_capacity(ancestors.len() + 1);
-        if !excluded_files.iter().any(|excluded| excluded == path_str) {
-            epochs.extend(ancestors);
-        }
-        epochs.push(own_epoch);
-
-        for epoch in epochs {
-            match FileRepository::get_content_hash_by_path_at_epoch(
-                &conn, path_str, project_id, epoch,
-            ) {
-                Ok(Some(hash)) => return Some(hash),
-                Ok(None) => continue,
-                Err(e) => {
-                    tracing::trace!(path = %path.display(), error = %e, "Failed to get stored hash");
-                    return None;
-                }
-            }
-        }
-        None
+        Ok(self.cache().stored_hashes()?)
     }
 
     /// Count file records visible from the active generation view.
     pub async fn count_stored_files(&self) -> Result<usize, HotUpdateError> {
-        let conn = self
-            .db
-            .read_connection()
-            .map_err(|e| HotUpdateError::hot_update(format!("Failed to get connection: {}", e)))?;
-        let (own_epoch, ancestors, excluded_files) = Self::generation_view(&conn, self.project_id)?;
-
-        // Own rows win over inherited rows for duplicated paths; overridden
-        // files' ancestor rows are hidden, their own rows never are.
-        let mut visible: HashSet<String> = HashSet::new();
-        for epoch in ancestors.iter().rev() {
-            let mut stmt = conn
-                .prepare("SELECT DISTINCT path FROM files WHERE project_id = ?1 AND epoch = ?2")
-                .map_err(|e| {
-                    HotUpdateError::hot_update(format!("Failed to prepare statement: {}", e))
-                })?;
-            let rows = stmt
-                .query_map(rusqlite::params![self.project_id, epoch], |row| {
-                    row.get::<_, String>(0)
-                })
-                .map_err(|e| {
-                    HotUpdateError::hot_update(format!("Failed to count stored files: {}", e))
-                })?;
-            for path in rows.into_iter().flatten() {
-                visible.insert(path);
-            }
-        }
-        for path in &excluded_files {
-            visible.remove(path);
-        }
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT path FROM files WHERE project_id = ?1 AND epoch = ?2")
-            .map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to prepare statement: {}", e))
-            })?;
-        let rows = stmt
-            .query_map(rusqlite::params![self.project_id, own_epoch], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to count stored files: {}", e))
-            })?;
-        for path in rows.into_iter().flatten() {
-            visible.insert(path);
-        }
-
-        Ok(visible.len())
+        Ok(self.cache().visible_paths()?.len())
     }
 
     /// Find removed files (visible in the generation view but not on disk)
@@ -614,119 +401,12 @@ impl ChangeDetector {
         &self,
         current_paths: &HashSet<PathBuf>,
     ) -> Result<Vec<PathBuf>, HotUpdateError> {
-        let conn = self
-            .db
-            .read_connection()
-            .map_err(|e| HotUpdateError::hot_update(format!("Failed to get connection: {}", e)))?;
-
-        let project_id = self.project_id;
-        let (own_epoch, ancestors, excluded_files) = Self::generation_view(&conn, project_id)?;
-
-        // Visible path set: ancestor rows − overridden files, then the own
-        // generation's rows on top (overrides never mask own rows).
-        let mut visible: HashSet<PathBuf> = HashSet::new();
-        for epoch in ancestors.iter().rev() {
-            let mut stmt = conn
-                .prepare("SELECT path FROM files WHERE project_id = ?1 AND epoch = ?2")
-                .map_err(|e| {
-                    HotUpdateError::hot_update(format!("Failed to prepare statement: {}", e))
-                })?;
-
-            let rows = stmt
-                .query_map(rusqlite::params![project_id, epoch], |row| {
-                    row.get::<_, String>(0)
-                })
-                .map_err(|e| HotUpdateError::hot_update(format!("Failed to query files: {}", e)))?;
-
-            for path_str in rows.into_iter().flatten() {
-                visible.insert(PathBuf::from(path_str));
-            }
-        }
-        for path in &excluded_files {
-            visible.remove(&PathBuf::from(path));
-        }
-        let mut stmt = conn
-            .prepare("SELECT path FROM files WHERE project_id = ?1 AND epoch = ?2")
-            .map_err(|e| {
-                HotUpdateError::hot_update(format!("Failed to prepare statement: {}", e))
-            })?;
-        let rows = stmt
-            .query_map(rusqlite::params![project_id, own_epoch], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|e| HotUpdateError::hot_update(format!("Failed to query files: {}", e)))?;
-        for path_str in rows.into_iter().flatten() {
-            visible.insert(PathBuf::from(path_str));
-        }
-
-        let mut removed = Vec::new();
-        for path in visible {
-            if !current_paths.contains(&path) {
-                removed.push(path);
-            }
-        }
-
-        Ok(removed)
-    }
-
-    /// Resolve the visible generations of the active publication:
-    /// `(own epoch, ancestor epochs oldest-first, overridden file paths)`.
-    ///
-    /// Under zero-copy inheritance the published generation owns rows only
-    /// for its changed files; unchanged files stay in its ancestors, and the
-    /// files registered in `generation_overrides` must not resolve against
-    /// them. Projects without a manifest fall back to the legacy
-    /// `active_epoch` meta key as a parent-free full generation.
-    fn generation_view(
-        conn: &rusqlite::Connection,
-        project_id: i64,
-    ) -> Result<(i64, Vec<i64>, Vec<String>), HotUpdateError> {
-        let manifest =
-            ProjectIndexManifestRepository::get_active(conn, project_id).map_err(|error| {
-                HotUpdateError::hot_update(format!(
-                    "Failed to read active project manifest: {error}"
-                ))
-            })?;
-        let Some(manifest) = manifest else {
-            // No manifest means the data generation was never published; a
-            // missing legacy meta row is the legitimate default 0, while real
-            // DB failures are propagated instead of silently operating on epoch 0.
-            let epoch = cce_storage_sqlite::ProjectRepository::meta_get_int_optional(
-                conn,
-                project_id,
-                "active_epoch",
-            )
-            .map_err(|error| {
-                HotUpdateError::hot_update(format!("Failed to read active_epoch meta: {error}"))
-            })
-            .map(|value| value.unwrap_or(0))?;
-            return Ok((epoch, Vec::new(), Vec::new()));
-        };
-
-        let own_epoch = manifest.data_epoch;
-        let mut ancestors = Vec::new();
-        let mut current = manifest.parent_data_epoch;
-        while ancestors.len() < GENERATION_VIEW_DEPTH
-            && let Some(epoch) = current
-            && epoch > 0
-        {
-            ancestors.push(epoch);
-            current = ProjectIndexManifestRepository::parent_data_epoch_of(conn, project_id, epoch)
-                .map_err(|error| {
-                    HotUpdateError::hot_update(format!("Failed to walk inheritance chain: {error}"))
-                })?;
-        }
-        let excluded_files =
-            GenerationOverrideRepository::list_for_generation(conn, project_id, own_epoch)
-                .map_err(|error| {
-                    HotUpdateError::hot_update(format!(
-                        "Failed to read generation overrides: {error}"
-                    ))
-                })?
-                .into_iter()
-                .map(|entry| entry.file_path)
-                .collect();
-        Ok((own_epoch, ancestors, excluded_files))
+        Ok(self
+            .cache()
+            .visible_paths()?
+            .into_iter()
+            .filter(|path| !current_paths.contains(path))
+            .collect())
     }
 }
 
@@ -771,7 +451,7 @@ mod tests {
                 rusqlite::params![1, "test", &tmp.to_string_lossy().to_string(), 0],
             )
             .unwrap();
-            FileRepository::upsert_or_update_hash(&tx, &PathBuf::from("deleted.rs"), "hash1", 1)
+            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("deleted.rs"), "hash1", 1, 0)
                 .unwrap();
             tx.commit().unwrap();
         }
@@ -796,11 +476,12 @@ mod tests {
                 rusqlite::params![1, "test", "/tmp", 0],
             )
             .unwrap();
-            FileRepository::upsert_or_update_hash(
+            FileRepository::insert_hash_for_epoch(
                 &tx,
                 &std::path::PathBuf::from("deleted.rs"),
                 "hash1",
                 1,
+                0,
             )
             .unwrap();
             tx.commit().unwrap();
@@ -965,9 +646,9 @@ mod tests {
                 rusqlite::params![1, "test", &tmp.to_string_lossy().to_string(), 0],
             )
             .unwrap();
-            FileRepository::upsert_or_update_hash(&tx, &PathBuf::from("kept.rs"), &kept_hash, 1)
+            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("kept.rs"), &kept_hash, 1, 0)
                 .unwrap();
-            FileRepository::upsert_or_update_hash(&tx, &PathBuf::from("deleted.rs"), "h1", 1)
+            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("deleted.rs"), "h1", 1, 0)
                 .unwrap();
             tx.commit().unwrap();
         }
@@ -1099,14 +780,15 @@ mod tests {
             )
             .unwrap();
             // Unchanged: hash matches the disk content.
-            FileRepository::upsert_or_update_hash(&tx, &PathBuf::from("mod.rs"), &mod_hash, 1)
+            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("mod.rs"), &mod_hash, 1, 0)
                 .unwrap();
             // Modified: stored hash differs from the disk content.
-            FileRepository::upsert_or_update_hash(
+            FileRepository::insert_hash_for_epoch(
                 &tx,
                 &PathBuf::from("changed.rs"),
                 "stale-hash",
                 1,
+                0,
             )
             .unwrap();
             // new.rs exists only in a non-active epoch (1): the active epoch
@@ -1156,7 +838,12 @@ mod tests {
         )
         .unwrap();
         ProjectIndexManifestRepository::activate(&tx, 1, 1, 0, "gen-1", None).unwrap();
-        for path in ["src/keep.rs", "src/gone.rs", "src/removed.rs"] {
+        for path in [
+            "src/keep.rs",
+            "src/gone.rs",
+            "src/removed.rs",
+            "src/changed.rs",
+        ] {
             FileRepository::insert_hash_for_epoch(
                 &tx,
                 &PathBuf::from(path),
@@ -1211,6 +898,42 @@ mod tests {
         assert!(
             !stored.contains_key(Path::new("src/gone.rs")),
             "deleted files' parent rows must stay hidden"
+        );
+    }
+
+    #[tokio::test]
+    async fn stored_hash_resolves_own_generation_before_ancestors() {
+        use std::path::Path;
+
+        let db = Arc::new(SqliteClient::in_memory().unwrap());
+        seed_inherited_view(&db);
+        let mut detector = ChangeDetector::new(db.clone(), ScanOptions::default());
+        detector.set_project_id(1);
+        let cache = detector.cache();
+
+        // src/changed.rs owns rows in both generations with different
+        // hashes: the own-generation row must win, or a reverted file would
+        // read as unchanged while scan_and_detect classifies it as modified.
+        assert_eq!(
+            cache
+                .stored_hash(Path::new("src/changed.rs"))
+                .unwrap()
+                .as_deref(),
+            Some("hash-changed"),
+            "own-generation rows win over inherited rows"
+        );
+        assert_eq!(
+            cache
+                .stored_hash(Path::new("src/keep.rs"))
+                .unwrap()
+                .as_deref(),
+            Some("hash-src/keep.rs"),
+            "unchanged files resolve against the inherited parent"
+        );
+        assert_eq!(
+            cache.stored_hash(Path::new("src/gone.rs")).unwrap(),
+            None,
+            "overridden files must not resolve against an ancestor"
         );
     }
 

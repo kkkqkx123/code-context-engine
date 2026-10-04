@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 
 use crate::runtime::RelationRuntime;
 use cce_config::{AppConfig, Settings};
-use cce_llm::Embedder;
+
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{
     AggregationConfig, LlmRetryMetrics, MetricsAggregator, MetricsRegistry, ProgressTracker,
@@ -63,7 +63,7 @@ pub enum EngineError {
 pub struct CodeContextEngine {
     qdrant: Arc<QdrantClient>,
     bm25: Arc<Mutex<Bm25Client>>,
-    embedder: Arc<dyn Embedder>,
+    embedder: Arc<OpenAICompatibleProvider>,
 
     /// SQLite metadata store for persistent storage
     metadata_store: Option<Arc<SqliteClient>>,

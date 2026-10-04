@@ -14,12 +14,12 @@
 //!
 //! # Usage
 //!
-//! Use `PipelineRouter::global()` to access the shared pipeline router:
+//! Build a [`PipelineRouter`] and inject it where document files are processed:
 //!
 //! ```ignore
 //! use cce_parser::document::PipelineRouter;
 //!
-//! let router = PipelineRouter::global();
+//! let router = PipelineRouter::new();
 //! // let (chunks, summary) = router.process(content, "file.md", &config)?;
 //! ```
 

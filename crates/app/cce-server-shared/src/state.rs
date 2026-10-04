@@ -117,7 +117,7 @@ impl AppState {
     }
 
     /// Get a clone of the embedder
-    pub fn embedder_clone(&self) -> Arc<dyn cce_llm::Embedder> {
+    pub fn embedder_clone(&self) -> Arc<cce_llm_client::OpenAICompatibleProvider> {
         self.engine.embedder_clone()
     }
 
