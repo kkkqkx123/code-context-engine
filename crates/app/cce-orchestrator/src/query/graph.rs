@@ -8,5 +8,8 @@
 pub mod model;
 pub mod service;
 
-pub use model::{Confidence, GraphEdge, GraphNode, SubGraph, confidence_of};
+pub use model::{
+    Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedSubGraph, SubGraph,
+    confidence_of,
+};
 pub use service::{GraphDirection, GraphService};

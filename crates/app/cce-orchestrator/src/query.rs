@@ -144,7 +144,10 @@ pub use searcher::{Searcher, SearcherBuilder};
 pub use relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationSearcher};
 
 // Re-export graph path
-pub use graph::{Confidence, GraphDirection, GraphEdge, GraphNode, GraphService, SubGraph};
+pub use graph::{
+    Confidence, GraphDirection, GraphEdge, GraphFilter, GraphNode, GraphPagination, GraphService,
+    PagedSubGraph, SubGraph,
+};
 
 // Re-export query coordinator
 pub use coordinator::QueryCoordinator;

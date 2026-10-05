@@ -190,16 +190,15 @@ impl<'a, I: SnapshotQueryIndex> CallChainTraverser<'a, I> {
                 ));
             }
             TraversalDirection::Backward => {
-                let callers = self.index.get_callers_by_callee_entity(start_id);
-
-                for caller_id in callers {
+                for relation in self.index.get_relations_to_entity(start_id) {
+                    let call_line = relation.span.line_range_opt().map(|(s, _)| s).unwrap_or(0);
                     queue.push_back((
-                        caller_id,
+                        relation.caller,
                         1,
-                        RelationType::DirectCall,
-                        None,
-                        None,
-                        CallContext::Direct,
+                        relation.relation_type,
+                        Some(call_line),
+                        relation.owner_type.clone(),
+                        relation.call_context.clone(),
                     ));
                 }
             }
@@ -283,15 +282,16 @@ impl<'a, I: SnapshotQueryIndex> CallChainTraverser<'a, I> {
                         }
                     }
                     TraversalDirection::Backward => {
-                        let callers = self.index.get_callers_by_callee_entity(current_id);
-                        for caller_id in callers {
+                        for relation in self.index.get_relations_to_entity(current_id) {
+                            let call_line =
+                                relation.span.line_range_opt().map(|(s, _)| s).unwrap_or(0);
                             queue.push_back((
-                                caller_id,
+                                relation.caller,
                                 depth + 1,
-                                RelationType::DirectCall,
-                                None,
-                                None,
-                                CallContext::Direct,
+                                relation.relation_type,
+                                Some(call_line),
+                                relation.owner_type.clone(),
+                                relation.call_context.clone(),
                             ));
                         }
                     }
@@ -500,12 +500,12 @@ impl CallChainQuery {
 
     /// Get callees (functions called by this function) by EntityId
     ///
-    /// Returns an error if the entity doesn't exist or the query fails.
+    /// Missing entities report not found. Existing entities without outgoing
+    /// edges return an empty list.
     pub fn get_callees_by_entity(
         &self,
         entity_id: EntityId,
     ) -> Result<Vec<ResolvedRelation>, RelationQueryError> {
-        // Check if entity exists
         if !self.index.contains_function(entity_id) {
             return Err(RelationQueryError::not_found(format!(
                 "Entity not found: {:?}",
@@ -513,80 +513,15 @@ impl CallChainQuery {
             )));
         }
 
-        // Get relations
-        self.index
+        Ok(self
+            .index
             .get_resolved_relations_by_caller(entity_id)
-            .ok_or_else(|| {
-                RelationQueryError::internal(format!(
-                    "Failed to get relations for entity: {:?}",
-                    entity_id
-                ))
-            })
+            .unwrap_or_default())
     }
 
     /// Get callers (functions that call this function) by EntityId
     pub fn get_callers_by_entity(&self, entity_id: EntityId) -> Vec<EntityId> {
-        // Get callers (this method always returns a Vec, empty if not found)
         self.index.get_callers_by_callee_entity(entity_id)
-    }
-
-    /// Get callees with detailed error logging
-    ///
-    /// This method provides enhanced debugging information through structured logging.
-    pub fn get_callees_by_entity_with_logging(
-        &self,
-        entity_id: EntityId,
-    ) -> Result<Vec<ResolvedRelation>, RelationQueryError> {
-        let span = tracing::span!(
-            tracing::Level::DEBUG,
-            "get_callees",
-            entity_id = ?entity_id
-        );
-        let _enter = span.enter();
-
-        // Check if entity exists
-        if !self.index.contains_function(entity_id) {
-            tracing::warn!(
-                entity_id = ?entity_id,
-                "Entity not found in function index"
-            );
-            return Err(RelationQueryError::not_found(format!(
-                "Entity not found: {:?}",
-                entity_id
-            )));
-        }
-
-        // Get relations
-        match self.index.get_resolved_relations_by_caller(entity_id) {
-            Some(relations) => Ok(relations),
-            None => {
-                tracing::warn!(
-                    entity_id = ?entity_id,
-                    "No relations found for existing entity"
-                );
-                Err(RelationQueryError::internal(format!(
-                    "Failed to get relations for entity: {:?}",
-                    entity_id
-                )))
-            }
-        }
-    }
-
-    /// Get callees with fallback
-    ///
-    /// Returns an empty vector on error instead of failing, with a warning log.
-    pub fn get_callees_by_entity_safe(&self, entity_id: EntityId) -> Vec<ResolvedRelation> {
-        match self.get_callees_by_entity(entity_id) {
-            Ok(relations) => relations,
-            Err(e) => {
-                tracing::warn!(
-                    entity_id = ?entity_id,
-                    error = %e,
-                    "Failed to get callees, returning empty"
-                );
-                Vec::new()
-            }
-        }
     }
 
     // ========== Inheritance and Implementation Query Methods ==========
@@ -732,12 +667,15 @@ impl CallChainQuery {
     /// Get change impact analysis for a file.
     pub fn get_change_impact(&self, file_path: &str) -> crate::dependency_graph::ImpactAnalysis {
         use crate::index::view::RelationIndexView;
-        let direct_dependents = self.index.dependents_of(file_path);
-        let transitive_dependents = self.index.collect_transitive_dependents(file_path, 10);
-        let impact_score = if transitive_dependents.is_empty() {
+        let mut direct_dependents = self.index.dependents_of(file_path);
+        let mut transitive_dependents = self.index.collect_transitive_dependents(file_path, 10);
+        direct_dependents.sort();
+        transitive_dependents.sort();
+        let combined = direct_dependents.len() as f64 * 2.0 + transitive_dependents.len() as f64;
+        let impact_score = if combined <= 0.0 {
             0.0
         } else {
-            (transitive_dependents.len() as f64 * 10.0).min(100.0)
+            100.0 * combined / (combined + 10.0)
         };
         crate::dependency_graph::ImpactAnalysis {
             changed_file: file_path.to_string(),
@@ -811,177 +749,7 @@ impl CallChainQuery {
     }
 }
 
-impl CallChainQuery {
-    /// Get callees (functions called by this function) - simplified wrapper.
-    pub fn get_callees(&self, entity_id: EntityId) -> Vec<ResolvedRelation> {
-        self.get_callees_by_entity(entity_id).unwrap_or_default()
-    }
-
-    /// Get callers (functions that call this function) - simplified wrapper.
-    pub fn get_callers(&self, entity_id: EntityId) -> Vec<EntityId> {
-        self.get_callers_by_entity(entity_id)
-    }
-
-    /// Query forward call chain (caller -> callees) with simplified return.
-    pub fn query_forward(
-        &self,
-        entity_id: EntityId,
-        max_depth: usize,
-    ) -> Vec<crate::index::core::CallChainNode> {
-        self.query_forward_by_entity(entity_id, max_depth)
-            .unwrap_or_default()
-    }
-
-    /// Query backward call chain (callee -> callers) with simplified return.
-    pub fn query_backward(
-        &self,
-        entity_id: EntityId,
-        max_depth: usize,
-    ) -> Vec<crate::index::core::CallChainNode> {
-        self.query_backward_by_entity(entity_id, max_depth)
-            .unwrap_or_default()
-    }
-
-    /// Build a call graph (forward traversal collecting nodes and edges).
-    pub fn build_call_graph(
-        &self,
-        start_id: EntityId,
-        max_depth: usize,
-    ) -> crate::types::CallChainGraph {
-        let nodes = self.query_forward(start_id, max_depth);
-        let mut edges = Vec::new();
-        for node in &nodes {
-            if let Ok(callees) = self.get_callees_by_entity(node.function_id) {
-                for callee in callees {
-                    if let Some(callee_id) = callee.callee_id {
-                        edges.push((node.function_id, callee_id, callee.relation_type));
-                    }
-                }
-            }
-        }
-        crate::types::CallChainGraph { nodes, edges }
-    }
-
-    /// Find dependency path between two entities.
-    pub fn find_dependency_path(
-        &self,
-        start_id: EntityId,
-        target_id: EntityId,
-    ) -> Option<Vec<crate::index::core::CallChainNode>> {
-        self.find_call_chain(start_id, target_id, 10)
-            .unwrap_or(None)
-    }
-}
-
 impl Default for CallChainQuery {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Unified call chain query over a `UnifiedSnapshotIndex`.
-///
-/// Mirrors `CallChainQuery` but directly uses the unified snapshot.
-pub struct UnifiedCallChainQuery {
-    index: Arc<crate::index::unified_snapshot::UnifiedSnapshotIndex>,
-}
-
-impl UnifiedCallChainQuery {
-    pub fn new() -> Self {
-        Self {
-            index: Arc::new(crate::index::unified_snapshot::UnifiedSnapshotIndex::empty()),
-        }
-    }
-
-    pub fn from_snapshot(index: Arc<crate::index::unified_snapshot::UnifiedSnapshotIndex>) -> Self {
-        Self { index }
-    }
-
-    pub fn from_relation_index(index: &RelationIndex) -> Self {
-        Self {
-            index: Arc::new(
-                crate::index::unified_snapshot::UnifiedSnapshotIndex::from_relation_index(index),
-            ),
-        }
-    }
-
-    pub fn index(&self) -> &crate::index::unified_snapshot::UnifiedSnapshotIndex {
-        &self.index
-    }
-
-    pub fn get_callees_by_entity(
-        &self,
-        entity_id: EntityId,
-    ) -> Result<Vec<ResolvedRelation>, RelationQueryError> {
-        use crate::index::snapshot_query::SnapshotRelationQueryOps;
-        if !self.index.contains_function(entity_id) {
-            return Err(RelationQueryError::not_found(format!(
-                "Entity not found: {:?}",
-                entity_id
-            )));
-        }
-        self.index
-            .get_resolved_relations_by_caller(entity_id)
-            .ok_or_else(|| {
-                RelationQueryError::internal(format!(
-                    "Failed to get relations for entity: {:?}",
-                    entity_id
-                ))
-            })
-    }
-
-    pub fn get_callers_by_entity(&self, entity_id: EntityId) -> Vec<EntityId> {
-        use crate::index::snapshot_query::SnapshotRelationQueryOps;
-        self.index.get_callers_by_callee_entity(entity_id)
-    }
-
-    pub fn get_callees(&self, entity_id: EntityId) -> Vec<ResolvedRelation> {
-        self.get_callees_by_entity(entity_id).unwrap_or_default()
-    }
-
-    pub fn get_callers(&self, entity_id: EntityId) -> Vec<EntityId> {
-        self.get_callers_by_entity(entity_id)
-    }
-
-    pub fn query_forward(
-        &self,
-        entity_id: EntityId,
-        max_depth: usize,
-    ) -> Result<Vec<crate::index::core::CallChainNode>, RelationQueryError> {
-        let config = TraversalConfig::new()
-            .with_max_depth(max_depth)
-            .with_include_start_node(false)
-            .with_stop_on_cycles(true)
-            .with_direction(TraversalDirection::Forward);
-        let traverser = CallChainTraverser::new(self.index.as_ref(), config);
-        traverser.traverse_from(entity_id)
-    }
-
-    pub fn query_backward(
-        &self,
-        entity_id: EntityId,
-        max_depth: usize,
-    ) -> Result<Vec<crate::index::core::CallChainNode>, RelationQueryError> {
-        use crate::index::snapshot_query::SnapshotEntityQueryOps;
-        self.index
-            .get_function_by_entity_id(entity_id)
-            .ok_or_else(|| {
-                RelationQueryError::not_found(format!(
-                    "Function not found for EntityId: {:?}",
-                    entity_id
-                ))
-            })?;
-        let config = TraversalConfig::new()
-            .with_max_depth(max_depth)
-            .with_include_start_node(false)
-            .with_stop_on_cycles(true)
-            .with_direction(TraversalDirection::Backward);
-        let traverser = CallChainTraverser::new(self.index.as_ref(), config);
-        traverser.traverse_from(entity_id)
-    }
-}
-
-impl Default for UnifiedCallChainQuery {
     fn default() -> Self {
         Self::new()
     }

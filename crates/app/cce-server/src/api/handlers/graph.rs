@@ -12,10 +12,10 @@ use cce_api::models::{
     GraphNode, GraphPathQuery, GraphPathResponse, GraphSubgraphResponse, ImpactQuery,
     SubgraphQuery, error_codes,
 };
-use cce_orchestrator::query::{GraphDirection, GraphService, SubGraph};
-use cce_relation::index::snapshot_query::{
-    SnapshotEntityQueryOps, SnapshotSymbolQueryOps,
+use cce_orchestrator::query::{
+    GraphDirection, GraphFilter, GraphPagination, GraphService, SubGraph,
 };
+use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
 
 use crate::api::response::ApiResult;
 
@@ -86,6 +86,33 @@ fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)
             .map_err(|msg| ErrorResponse::new(error_codes::INTERNAL_ERROR, msg))?;
     }
     Ok((nodes, edges))
+}
+
+fn parse_graph_filter(domains: &str, include_external: bool) -> GraphFilter {
+    let relation_domains: Vec<String> = domains
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| part.to_lowercase())
+        .collect();
+    GraphFilter {
+        relation_domains,
+        include_external,
+    }
+}
+
+fn parse_graph_pagination(offset: usize, limit: usize) -> GraphPagination {
+    GraphPagination { offset, limit }
+}
+
+fn convert_paged_subgraph(
+    graph: &cce_orchestrator::query::PagedSubGraph,
+) -> Result<(Vec<GraphNode>, Vec<GraphEdge>), ErrorResponse> {
+    let staged = SubGraph {
+        nodes: graph.nodes.clone(),
+        edges: graph.edges.clone(),
+    };
+    convert_subgraph(&staged)
 }
 
 fn parse_direction(raw: &str) -> Result<GraphDirection, ErrorResponse> {
@@ -219,7 +246,10 @@ fn resolve_entity(
         let details = serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string());
         ErrorResponse::with_details(
             error_codes::AMBIGUOUS_SYMBOL,
-            format!("Symbol seed '{seed}' matches {} entities; pass one of the candidate stable IDs", candidates.len()),
+            format!(
+                "Symbol seed '{seed}' matches {} entities; pass one of the candidate stable IDs",
+                candidates.len()
+            ),
             details,
         )
     };
@@ -237,13 +267,12 @@ fn resolve_entity(
             let mut candidates: Vec<SymbolCandidate> = Vec::new();
             for key in index.stable_symbol_keys() {
                 let file_matches = key.file_path == normalized
-                    || (file.is_empty()
-                        && last_scoped_segment(&key.scoped_name) == name);
+                    || (file.is_empty() && last_scoped_segment(&key.scoped_name) == name);
                 if !file_matches {
                     continue;
                 }
-                let name_matches = key.scoped_name == name
-                    || last_scoped_segment(&key.scoped_name) == name;
+                let name_matches =
+                    key.scoped_name == name || last_scoped_segment(&key.scoped_name) == name;
                 if !name_matches {
                     continue;
                 }
@@ -345,7 +374,15 @@ pub async fn handle_graph_ego(
         Err(e) => return ApiResult::Error(e),
     };
     let service = GraphService::new(searcher);
-    let graph = match service.ego_graph(entity_id, params.depth.min(max_depth), direction) {
+    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
+    let graph = match service.ego_graph_with_options(
+        entity_id,
+        params.depth.min(max_depth),
+        direction,
+        &filter,
+        pagination,
+    ) {
         Ok(graph) => graph,
         Err(e) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -354,7 +391,7 @@ pub async fn handle_graph_ego(
             ));
         }
     };
-    let (nodes, edges) = match convert_subgraph(&graph) {
+    let (nodes, edges) = match convert_paged_subgraph(&graph) {
         Ok(v) => v,
         Err(e) => return ApiResult::Error(e),
     };
@@ -363,6 +400,8 @@ pub async fn handle_graph_ego(
         relation_epoch: snapshot.relation_epoch,
         nodes,
         edges,
+        total_nodes: graph.total_nodes,
+        total_edges: graph.total_edges,
         relation_info: stale_relation_info(&runtime).await,
     })
 }
@@ -470,7 +509,9 @@ pub async fn handle_graph_subgraph(
         }
     }
     let service = GraphService::new(searcher);
-    let graph = match service.subgraph(&entity_ids) {
+    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
+    let graph = match service.subgraph_with_options(&entity_ids, &filter, pagination) {
         Ok(graph) => graph,
         Err(e) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -479,7 +520,7 @@ pub async fn handle_graph_subgraph(
             ));
         }
     };
-    let (nodes, edges) = match convert_subgraph(&graph) {
+    let (nodes, edges) = match convert_paged_subgraph(&graph) {
         Ok(v) => v,
         Err(e) => return ApiResult::Error(e),
     };
@@ -488,6 +529,8 @@ pub async fn handle_graph_subgraph(
         relation_epoch: snapshot.relation_epoch,
         nodes,
         edges,
+        total_nodes: graph.total_nodes,
+        total_edges: graph.total_edges,
         relation_info: stale_relation_info(&runtime).await,
     })
 }
@@ -574,7 +617,9 @@ pub async fn handle_graph_export(
         ));
     }
     let service = GraphService::new(searcher);
-    let graph = match service.export_full(params.limit) {
+    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
+    let graph = match service.export_full_with_options(params.limit, &filter, pagination) {
         Ok(graph) => graph,
         Err(e) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -583,7 +628,7 @@ pub async fn handle_graph_export(
             ));
         }
     };
-    let (nodes, edges) = match convert_subgraph(&graph) {
+    let (nodes, edges) = match convert_paged_subgraph(&graph) {
         Ok(v) => v,
         Err(e) => return ApiResult::Error(e),
     };
@@ -592,6 +637,8 @@ pub async fn handle_graph_export(
         relation_epoch: snapshot.relation_epoch,
         nodes,
         edges,
+        total_nodes: graph.total_nodes,
+        total_edges: graph.total_edges,
         relation_info: stale_relation_info(&runtime).await,
     })
 }

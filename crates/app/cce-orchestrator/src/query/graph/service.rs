@@ -11,12 +11,13 @@ use std::sync::Arc;
 use cce_relation::RelationQueryError;
 use cce_relation::index::{
     RelationIndexView,
-    snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps},
+    snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps, SnapshotSymbolQueryOps},
 };
 use cce_types::{Entity, EntityId, Span};
 
 use super::model::{
-    Confidence, GraphEdge, GraphNode, SubGraph, confidence_of, kind_label, relation_domain,
+    Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedSubGraph, SubGraph,
+    confidence_of, kind_label, relation_domain,
 };
 use crate::query::error::{QueryError, Result};
 use crate::query::relation_searcher::{PathQueryOptions, RelationSearcher};
@@ -83,6 +84,7 @@ impl GraphService {
     ///
     /// A missing endpoint is reported as no path (`Ok(None)`) rather than an
     /// error, matching the graph contract where reachability is the question.
+    /// Edges preserve the true relation type and call context from traversal.
     pub fn shortest_path(
         &self,
         start: EntityId,
@@ -98,18 +100,31 @@ impl GraphService {
         let Some(nodes) = nodes else { return Ok(None) };
         let index = self.searcher.query().index();
         let mut builder = SubGraphBuilder::new(index);
-        let mut previous: Option<String> = None;
+        let mut previous: Option<EntityId> = None;
         for node in &nodes {
-            let id = builder.insert_call_node(node);
-            if let Some(prev) = previous.replace(id.clone()) {
-                builder.insert_raw_edge(prev, id, node.relation_type.to_string());
+            builder.insert_call_node(node);
+            if let Some(prev) = previous {
+                builder.insert_path_edge(prev, node);
             }
+            previous = Some(node.function_id);
         }
         Ok(Some(builder.finish()))
     }
 
     /// Induced subgraph over an explicit entity set.
     pub fn subgraph(&self, ids: &[EntityId]) -> Result<SubGraph> {
+        Ok(self
+            .subgraph_with_options(ids, &GraphFilter::allow_all(), GraphPagination::default())?
+            .into_subgraph())
+    }
+
+    /// Induced subgraph with relation filtering and pagination.
+    pub fn subgraph_with_options(
+        &self,
+        ids: &[EntityId],
+        filter: &GraphFilter,
+        pagination: GraphPagination,
+    ) -> Result<PagedSubGraph> {
         let index = self.searcher.query().index();
         let mut builder = SubGraphBuilder::new(index);
         let wanted: HashSet<EntityId> = ids.iter().copied().collect();
@@ -118,14 +133,19 @@ impl GraphService {
         }
         for id in &wanted {
             for relation in self.searcher.get_callees(*id) {
+                if !Self::relation_passes_filter(&relation, filter) {
+                    continue;
+                }
                 if let Some(target) = relation.callee_id {
                     if wanted.contains(&target) {
                         builder.insert_relation(*id, &relation);
                     }
+                } else if filter.include_external {
+                    builder.insert_relation(*id, &relation);
                 }
             }
         }
-        Ok(builder.finish())
+        Ok(paginate_graph(builder.finish(), filter, pagination))
     }
 
     /// Connected components over internal edges (union-find).
@@ -170,16 +190,130 @@ impl GraphService {
         Ok(components)
     }
 
-    /// Full project export capped at `limit` nodes in entity order.
-    pub fn export_full(&self, limit: usize) -> Result<SubGraph> {
+    /// Ego neighborhood with relation filtering and pagination.
+    pub fn ego_graph_with_options(
+        &self,
+        root: EntityId,
+        depth: usize,
+        direction: GraphDirection,
+        filter: &GraphFilter,
+        pagination: GraphPagination,
+    ) -> Result<PagedSubGraph> {
         let index = self.searcher.query().index();
-        let mut ids: Vec<EntityId> = Vec::new();
-        index.for_each_function(|id, _| ids.push(id));
-        ids.sort();
-        ids.truncate(limit);
-        self.subgraph(&ids)
+        let mut builder = SubGraphBuilder::new(index);
+        builder.insert_entity(root);
+
+        let mut visited: HashSet<EntityId> = HashSet::from([root]);
+        let mut frontier: VecDeque<(EntityId, usize)> = VecDeque::from([(root, 0)]);
+        while let Some((current, hops)) = frontier.pop_front() {
+            if hops >= depth || builder.len() >= MAX_GRAPH_NODES {
+                continue;
+            }
+            for (neighbor, edge) in self.neighbors(current, direction) {
+                let (_, relation) = &edge;
+                if !Self::relation_passes_filter(relation, filter) {
+                    continue;
+                }
+                builder.insert_edge(edge);
+                if visited.insert(neighbor) {
+                    builder.insert_entity(neighbor);
+                    frontier.push_back((neighbor, hops + 1));
+                }
+            }
+        }
+        Ok(paginate_graph(builder.finish(), filter, pagination))
     }
 
+    /// Full project export capped at `limit` nodes in entity order.
+    pub fn export_full(&self, limit: usize) -> Result<SubGraph> {
+        Ok(self
+            .export_full_with_options(limit, &GraphFilter::allow_all(), GraphPagination::default())?
+            .into_subgraph())
+    }
+
+    /// Full project export with hub-first ordering, filtering and pagination.
+    pub fn export_full_with_options(
+        &self,
+        limit: usize,
+        filter: &GraphFilter,
+        pagination: GraphPagination,
+    ) -> Result<PagedSubGraph> {
+        let index = self.searcher.query().index();
+        let mut degrees: HashMap<EntityId, usize> = HashMap::new();
+        index.for_each_function(|id, _| {
+            degrees.insert(id, 0);
+        });
+        index.for_each_resolved_relation(|caller, relations| {
+            if let Some(count) = degrees.get_mut(&caller) {
+                *count = relations.len();
+            }
+        });
+        let mut ids: Vec<EntityId> = degrees.keys().copied().collect();
+        ids.sort_by(|left, right| {
+            degrees
+                .get(right)
+                .copied()
+                .unwrap_or_default()
+                .cmp(&degrees.get(left).copied().unwrap_or_default())
+                .then_with(|| left.cmp(right))
+        });
+        ids.truncate(limit);
+        self.subgraph_with_options(&ids, filter, pagination)
+    }
+
+    /// Whether a stored relation survives the graph filter.
+    fn relation_passes_filter(
+        relation: &cce_types::ResolvedRelation,
+        filter: &GraphFilter,
+    ) -> bool {
+        if !filter.include_external && relation.is_external {
+            return false;
+        }
+        if filter.relation_domains.is_empty() {
+            return true;
+        }
+        let domain = relation_domain(&relation.relation_type);
+        filter.relation_domains.iter().any(|d| d == domain)
+    }
+}
+
+/// Apply relation filtering then pagination to a materialized subgraph.
+fn paginate_graph(
+    graph: SubGraph,
+    filter: &GraphFilter,
+    pagination: GraphPagination,
+) -> PagedSubGraph {
+    let edges: Vec<GraphEdge> = graph
+        .edges
+        .into_iter()
+        .filter(|edge| filter.matches_edge(edge))
+        .collect();
+    let total_nodes = graph.nodes.len();
+    let total_edges = edges.len();
+    let nodes: Vec<GraphNode> = graph
+        .nodes
+        .into_iter()
+        .skip(pagination.offset)
+        .take(pagination.limit)
+        .collect();
+    let surviving: HashSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
+    let edges: Vec<GraphEdge> = edges
+        .into_iter()
+        .filter(|edge| {
+            surviving.contains(edge.source.as_str()) && surviving.contains(edge.target.as_str())
+        })
+        .skip(pagination.offset)
+        .take(pagination.limit)
+        .collect();
+    PagedSubGraph {
+        nodes,
+        edges,
+        total_nodes,
+        total_edges,
+    }
+}
+
+impl GraphService {
     /// Direct neighbors of one entity with their edges.
     fn neighbors(
         &self,
@@ -198,13 +332,9 @@ impl GraphService {
             }
         }
         if direction == GraphDirection::Backward || direction == GraphDirection::Both {
-            for caller in self.searcher.get_callers(entity) {
-                for relation in self.searcher.get_callees(caller) {
-                    if relation.callee_id == Some(entity) {
-                        out.push((caller, (caller, relation)));
-                        break;
-                    }
-                }
+            let index = self.searcher.query().index();
+            for relation in index.get_relations_to_entity(entity) {
+                out.push((relation.caller, (relation.caller, relation)));
             }
         }
         out
@@ -245,8 +375,7 @@ impl<'a> SubGraphBuilder<'a> {
         if !self.seen.insert(node_id.clone()) {
             return;
         }
-        let (label, kind, file, location, scoped_name, signature) = match self.entity_metadata(id)
-        {
+        let (label, kind, file, location, scoped_name, signature) = match self.entity_metadata(id) {
             Some(entity) => {
                 let file = self.index.get_file_path_by_entity(id).unwrap_or_default();
                 (
@@ -330,6 +459,27 @@ impl<'a> SubGraphBuilder<'a> {
     fn insert_edge(&mut self, edge: (EntityId, cce_types::ResolvedRelation)) {
         let (caller, relation) = edge;
         self.insert_relation(caller, &relation);
+    }
+
+    fn insert_path_edge(&mut self, source: EntityId, target: &cce_relation::CallChainNode) {
+        let confidence = if target.relation_type.is_call()
+            && matches!(
+                target.call_context,
+                cce_types::relation::CallContext::Direct
+            ) {
+            Confidence::Extracted
+        } else {
+            Confidence::Inferred
+        };
+        self.edges.push(GraphEdge {
+            source: self.node_id(source),
+            target: self.node_id(target.function_id),
+            relation: target.relation_type.to_string(),
+            domain: relation_domain(&target.relation_type).to_string(),
+            confidence,
+            call_context: Some(format!("{:?}", target.call_context).to_lowercase()),
+            is_external: false,
+        });
     }
 
     fn insert_raw_edge(&mut self, source: String, target: String, relation: String) {

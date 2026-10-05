@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 
+use super::HybridFusionConfig;
 use super::aligner::{
     FusionAlignmentStats, alignment_key, best_per_key, compute_alignment_coverage,
     expand_multi_entity_results,
 };
 use super::normalizer::{normalize_by_key, normalize_path_scores};
-use super::HybridFusionConfig;
 use crate::query::types::SearchResult;
 use cce_config::modules::search::RecallFusionAlgorithm;
 
@@ -369,14 +369,8 @@ impl RankContext {
         }
     }
 
-    fn get(
-        &self,
-        key: &str,
-    ) -> (Option<&(usize, u32)>, Option<&(usize, u32)>) {
-        (
-            self.vector_ranks.get(key),
-            self.bm25_ranks.get(key),
-        )
+    fn get(&self, key: &str) -> (Option<&(usize, u32)>, Option<&(usize, u32)>) {
+        (self.vector_ranks.get(key), self.bm25_ranks.get(key))
     }
 
     fn vector_result(&self, index: usize) -> &SearchResult {

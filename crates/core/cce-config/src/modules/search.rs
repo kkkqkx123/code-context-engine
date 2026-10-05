@@ -133,9 +133,7 @@ pub enum RecallFusionAlgorithm {
     WeightedMinMax,
     /// Reciprocal Rank Fusion: score = w_v/(k+rank_v) + w_b/(k+rank_b), using
     /// ranks only, so the result is robust to raw score distribution skew.
-    Rrf {
-        k: u32,
-    },
+    Rrf { k: u32 },
     /// Weight-aware Borda count: each path awards `(key_count - rank + 1) /
     /// key_count` normalized points per alignment key (rank starts at 1, best
     /// key first) and the fused score is the weighted point sum, on the same
@@ -1003,7 +1001,10 @@ mod tests {
         assert_eq!(config.result.limit, 10);
         assert!(config.boost.enabled);
         assert!((config.boost.max_addition - 0.5).abs() < f32::EPSILON);
-        assert_eq!(config.fusion.algorithm, RecallFusionAlgorithm::WeightedMinMax);
+        assert_eq!(
+            config.fusion.algorithm,
+            RecallFusionAlgorithm::WeightedMinMax
+        );
         assert!((config.boost.cap_for("summary") - 0.15).abs() < f32::EPSILON);
         assert!((config.boost.cap_for("unknown_source") - 0.3).abs() < f32::EPSILON);
     }
@@ -1063,7 +1064,10 @@ mod tests {
             serde_json::from_str("\"linear_weighted\"").expect("deserialize");
         assert_eq!(deser, RerankFusionStrategy::LinearWeighted { alpha: 0.7 });
         let deser: RerankFusionStrategy = serde_json::from_str("\"rrf\"").expect("deserialize");
-        assert_eq!(deser, RerankFusionStrategy::ReciprocalRankFusion { k: 60.0 });
+        assert_eq!(
+            deser,
+            RerankFusionStrategy::ReciprocalRankFusion { k: 60.0 }
+        );
     }
 
     #[test]

@@ -138,6 +138,14 @@ pub struct EgoQuery {
     pub depth: usize,
     #[serde(default = "default_ego_direction")]
     pub direction: String,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default = "default_graph_page_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub domains: String,
+    #[serde(default = "default_true")]
+    pub include_external: bool,
 }
 
 /// Two-point path query parameters.
@@ -155,6 +163,14 @@ pub struct GraphPathQuery {
 #[into_params(parameter_in = Query)]
 pub struct SubgraphQuery {
     pub ids: String,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default = "default_graph_page_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub domains: String,
+    #[serde(default = "default_true")]
+    pub include_external: bool,
 }
 
 /// Full export query parameters.
@@ -163,6 +179,12 @@ pub struct SubgraphQuery {
 pub struct ExportQuery {
     #[serde(default = "default_export_limit")]
     pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
+    pub domains: String,
+    #[serde(default = "default_true")]
+    pub include_external: bool,
 }
 
 /// File impact query parameters.
@@ -179,6 +201,10 @@ pub struct GraphSubgraphResponse {
     pub relation_epoch: i64,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+    #[serde(default)]
+    pub total_nodes: usize,
+    #[serde(default)]
+    pub total_edges: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relation_info: Option<serde_json::Value>,
 }
@@ -234,4 +260,12 @@ fn default_path_depth() -> usize {
 
 fn default_export_limit() -> usize {
     2000
+}
+
+fn default_graph_page_limit() -> usize {
+    2000
+}
+
+fn default_true() -> bool {
+    true
 }

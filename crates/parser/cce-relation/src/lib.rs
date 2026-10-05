@@ -36,7 +36,7 @@ pub use index::{
     core::{CallChainNode, CallChainPath, ExportInfo, ExportType, RelationIndex},
     unified_snapshot::{SnapshotManager, UnifiedSnapshotIndex},
 };
-pub use query::{CallChainQuery, ThreadSafeQuery, UnifiedCallChainQuery};
+pub use query::{CallChainQuery, ThreadSafeQuery};
 pub use symbol_table::{
     LocalSymbolTable, ModuleSymbolTable, PackageSymbolTable, ProjectSymbolTable, ResolutionContext,
 };

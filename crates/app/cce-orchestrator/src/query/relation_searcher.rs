@@ -31,6 +31,12 @@ pub struct RelationQueryOptions {
     pub exclude_content_types: Vec<ExcludableContentType>,
     /// Exact file paths to exclude (normalized project paths)
     pub excluded_files: Vec<String>,
+    /// Keep only relations in these coarse domains
+    /// (`call`, `dependency`, `structural`, `reference`, `template`, `other`).
+    /// Empty means no domain filtering.
+    pub relation_domains: Vec<String>,
+    /// Whether to keep edges pointing outside the indexed project.
+    pub include_external: bool,
 }
 
 impl Default for RelationQueryOptions {
@@ -43,6 +49,8 @@ impl Default for RelationQueryOptions {
             directory_prefix: None,
             exclude_content_types: Vec::new(),
             excluded_files: Vec::new(),
+            relation_domains: Vec::new(),
+            include_external: true,
         }
     }
 }
@@ -100,6 +108,35 @@ impl RelationQueryOptions {
         self.excluded_files = files;
         self
     }
+
+    /// Keep only relations in the given coarse domains.
+    pub fn with_relation_domains(mut self, domains: Vec<String>) -> Self {
+        self.relation_domains = domains;
+        self
+    }
+
+    /// Set whether external edges are kept.
+    pub fn with_include_external(mut self, include: bool) -> Self {
+        self.include_external = include;
+        self
+    }
+}
+
+/// Coarse domain name for a relation type, mirroring the graph model.
+fn relation_domain_name(relation_type: &cce_types::RelationType) -> &'static str {
+    if relation_type.is_call() {
+        "call"
+    } else if relation_type.is_dependency() {
+        "dependency"
+    } else if relation_type.is_structural() {
+        "structural"
+    } else if relation_type.is_reference() {
+        "reference"
+    } else if relation_type.is_template_relation() {
+        "template"
+    } else {
+        "other"
+    }
 }
 
 /// File-level post-filter derived from `RelationQueryOptions`.
@@ -114,6 +151,8 @@ struct RelationFileFilter {
     directory_prefix: Option<String>,
     exclude_tests: bool,
     excluded_files: HashSet<String>,
+    relation_domains: HashSet<String>,
+    include_external: bool,
 }
 
 impl RelationFileFilter {
@@ -131,11 +170,28 @@ impl RelationFileFilter {
                 .iter()
                 .map(|f| cce_types::normalize_project_path(f))
                 .collect(),
+            relation_domains: options.relation_domains.iter().cloned().collect(),
+            include_external: options.include_external,
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.directory_prefix.is_none() && !self.exclude_tests && self.excluded_files.is_empty()
+        self.directory_prefix.is_none()
+            && !self.exclude_tests
+            && self.excluded_files.is_empty()
+            && self.relation_domains.is_empty()
+            && self.include_external
+    }
+
+    fn matches_relation(&self, relation: &ResolvedRelation) -> bool {
+        if !self.include_external && relation.is_external {
+            return false;
+        }
+        if self.relation_domains.is_empty() {
+            return true;
+        }
+        self.relation_domains
+            .contains(relation_domain_name(&relation.relation_type))
     }
 
     /// Whether a file path passes the filter. An unknown path is only kept
@@ -272,7 +328,7 @@ impl RelationSearcher {
             .collect()
     }
 
-    /// Get callees after applying the file-level filter (pre-pagination).
+    /// Get callees after applying file and relation filters (pre-pagination).
     pub fn filter_callees(
         &self,
         entity_id: EntityId,
@@ -285,14 +341,19 @@ impl RelationSearcher {
         }
         callees
             .into_iter()
-            .filter(|relation| match relation.callee_id {
-                Some(callee_id) => filter.matches_path(
-                    self.query
-                        .index()
-                        .get_file_path_by_entity(callee_id)
-                        .as_deref(),
-                ),
-                None => filter.matches_path(None),
+            .filter(|relation| {
+                if !filter.matches_relation(relation) {
+                    return false;
+                }
+                match relation.callee_id {
+                    Some(callee_id) => filter.matches_path(
+                        self.query
+                            .index()
+                            .get_file_path_by_entity(callee_id)
+                            .as_deref(),
+                    ),
+                    None => filter.matches_path(None),
+                }
             })
             .collect()
     }
@@ -338,7 +399,7 @@ impl RelationSearcher {
 
     /// Query forward call chain (caller -> callees) with caching
     ///
-    /// When the options carry a file filter the result is filtered
+    /// When the options carry a filter the result is filtered
     /// post-traversal and the shared cache is bypassed (its key does not
     /// include filter state).
     pub fn query_forward(
@@ -353,7 +414,16 @@ impl RelationSearcher {
             }
             nodes
                 .into_iter()
-                .filter(|node| filter.matches_path(Some(&node.file_path)))
+                .filter(|node| {
+                    if !filter.relation_domains.is_empty()
+                        && !filter
+                            .relation_domains
+                            .contains(relation_domain_name(&node.relation_type))
+                    {
+                        return false;
+                    }
+                    filter.matches_path(Some(&node.file_path))
+                })
                 .collect()
         };
         if !filter.is_empty() {
@@ -393,7 +463,16 @@ impl RelationSearcher {
             }
             nodes
                 .into_iter()
-                .filter(|node| filter.matches_path(Some(&node.file_path)))
+                .filter(|node| {
+                    if !filter.relation_domains.is_empty()
+                        && !filter
+                            .relation_domains
+                            .contains(relation_domain_name(&node.relation_type))
+                    {
+                        return false;
+                    }
+                    filter.matches_path(Some(&node.file_path))
+                })
                 .collect()
         };
         if !filter.is_empty() {

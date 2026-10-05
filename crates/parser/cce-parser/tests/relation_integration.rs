@@ -758,10 +758,6 @@ fn test_call_chain_query_get_callees_and_callers() {
     assert_eq!(callers.len(), 1);
     assert_eq!(callers[0], EntityId(2));
 
-    // Safe get for non-existing entity
-    let safe = query.get_callees_by_entity_safe(EntityId(999));
-    assert!(safe.is_empty());
-
     // Error for non-existing entity in checked API
     let result = query.get_callees_by_entity(EntityId(999));
     assert!(result.is_err());

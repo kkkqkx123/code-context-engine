@@ -15,8 +15,8 @@
 pub use cce_config::modules::rerank::RerankConfig;
 pub use cce_config::modules::search::{
     Bm25RetrievalConfig, BoostAggregationConfig, HybridFusionConfig, HybridWeightConfig,
-    PluginSearchConfig, QueryIntentWeights, RelationAnnotationConfig, ResultFilterConfig,
-    RerankFusionStrategy, ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
+    PluginSearchConfig, QueryIntentWeights, RelationAnnotationConfig, RerankFusionStrategy,
+    ResultFilterConfig, ScoreNormalizationConfig, SummaryBoostConfig, VectorRetrievalConfig,
 };
 
 // ============================================================================

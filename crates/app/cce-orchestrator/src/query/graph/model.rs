@@ -121,6 +121,84 @@ pub struct SubGraph {
     pub edges: Vec<GraphEdge>,
 }
 
+/// Filter for graph expansion and materialization.
+#[derive(Debug, Clone, Default)]
+pub struct GraphFilter {
+    /// Keep only relations in these coarse domains. Empty means no filtering.
+    pub relation_domains: Vec<String>,
+    /// Whether to keep edges pointing outside the indexed project.
+    pub include_external: bool,
+}
+
+impl GraphFilter {
+    /// Create a filter that keeps everything.
+    pub fn allow_all() -> Self {
+        Self {
+            relation_domains: Vec::new(),
+            include_external: true,
+        }
+    }
+
+    /// Whether the filter drops nothing.
+    pub fn is_empty(&self) -> bool {
+        self.relation_domains.is_empty() && self.include_external
+    }
+
+    /// Whether a materialized edge passes the filter.
+    pub fn matches_edge(&self, edge: &GraphEdge) -> bool {
+        if !self.include_external && edge.is_external {
+            return false;
+        }
+        if self.relation_domains.is_empty() {
+            return true;
+        }
+        self.relation_domains
+            .iter()
+            .any(|domain| domain == &edge.domain)
+    }
+}
+
+/// Pagination over a materialized subgraph.
+#[derive(Debug, Clone, Copy)]
+pub struct GraphPagination {
+    /// Number of leading nodes and edges to skip.
+    pub offset: usize,
+    /// Maximum number of nodes and edges to keep.
+    pub limit: usize,
+}
+
+impl Default for GraphPagination {
+    fn default() -> Self {
+        Self {
+            offset: 0,
+            limit: usize::MAX,
+        }
+    }
+}
+
+/// A subgraph slice with totals before pagination.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PagedSubGraph {
+    /// Nodes after pagination.
+    pub nodes: Vec<GraphNode>,
+    /// Edges after pagination, restricted to surviving nodes.
+    pub edges: Vec<GraphEdge>,
+    /// Node count before pagination.
+    pub total_nodes: usize,
+    /// Edge count before pagination.
+    pub total_edges: usize,
+}
+
+impl PagedSubGraph {
+    /// Drop pagination metadata, keeping only the materialized slice.
+    pub fn into_subgraph(self) -> SubGraph {
+        SubGraph {
+            nodes: self.nodes,
+            edges: self.edges,
+        }
+    }
+}
+
 impl SubGraph {
     /// Serialize the subgraph to node-link JSON bytes.
     pub fn to_node_link_json(&self) -> serde_json::Result<Vec<u8>> {

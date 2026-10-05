@@ -12,8 +12,8 @@ use cce_llm::RerankProvider;
 pub use handler::RerankRequestHandler;
 pub use provider::{CohereRerankProvider, GenerativeRerankProvider};
 pub use types::{
-    RerankCandidate, RerankRequest, RerankResult, RerankRuntimeConfig, RerankedCandidate,
-    RerankFusionStrategy,
+    RerankCandidate, RerankFusionStrategy, RerankRequest, RerankResult, RerankRuntimeConfig,
+    RerankedCandidate,
 };
 
 /// Rerank handler used by the production generative LLM provider.

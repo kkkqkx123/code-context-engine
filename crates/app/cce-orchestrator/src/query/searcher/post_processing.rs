@@ -296,7 +296,9 @@ fn convert_plugin_algorithm(
                 Some(RecallFusionAlgorithm::Rrf { k })
             }
         }
-        cce_types::plugin::PluginFusionAlgorithm::BordaCount => Some(RecallFusionAlgorithm::BordaCount),
+        cce_types::plugin::PluginFusionAlgorithm::BordaCount => {
+            Some(RecallFusionAlgorithm::BordaCount)
+        }
     }
 }
 
