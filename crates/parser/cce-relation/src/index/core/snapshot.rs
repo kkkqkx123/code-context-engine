@@ -219,7 +219,6 @@ impl RelationIndex {
             file_symbol_keys,
             file_entities_by_start,
             generation: Arc::new(SnapshotGeneration::new()),
-            last_affected_files: std::sync::Mutex::new(None),
         }
     }
 }

@@ -94,6 +94,8 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
              stdlib_category_json TEXT,
              call_context_json TEXT,
              owner_type TEXT,
+             overload_signature TEXT,
+             callee_symbol_json TEXT,
             FOREIGN KEY(project_id, relation_epoch)
                 REFERENCES relation_snapshot_manifest(project_id, relation_epoch)
                 ON DELETE CASCADE,

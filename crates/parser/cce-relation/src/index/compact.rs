@@ -161,8 +161,7 @@ impl CompactRelationIndex {
 
     /// Apply a `SnapshotDelta` to this compact index in place.
     ///
-    /// Used by `UnifiedSnapshotIndex::merge_all` to materialize the merged view.
-    /// This is a lightweight in-memory mutation that mirrors `RelationIndex::apply_delta`
+    /// Lightweight in-memory mutation that mirrors `RelationIndex::apply_delta`
     /// semantics without touching concurrent maps.
     pub fn apply_delta(&mut self, delta: &cce_types::SnapshotDelta) {
         use crate::index::delta::RelationDeltaOps;

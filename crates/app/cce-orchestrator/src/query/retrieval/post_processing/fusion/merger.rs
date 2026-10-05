@@ -4,8 +4,7 @@ use std::collections::HashMap;
 
 use super::HybridFusionConfig;
 use super::aligner::{
-    FusionAlignmentStats, alignment_key, best_per_key, compute_alignment_coverage,
-    expand_multi_entity_results,
+    FusionAlignmentStats, best_per_key, compute_alignment_coverage, expand_multi_entity_results,
 };
 use super::normalizer::{normalize_by_key, normalize_path_scores};
 use crate::query::types::SearchResult;
@@ -339,6 +338,9 @@ fn fuse_weighted_minmax(
     (finish_fused(fused, config.dedup_by_chunk), stats)
 }
 
+/// Rank pair for a single key: (rank, score) from vector and BM25 respectively.
+type RankPair<'a> = (Option<&'a (usize, u32)>, Option<&'a (usize, u32)>);
+
 /// Rank context shared by rank-based fusion algorithms (RRF, Borda).
 ///
 /// Encapsulates the per-path ranking and key union so individual algorithms
@@ -369,7 +371,7 @@ impl RankContext {
         }
     }
 
-    fn get(&self, key: &str) -> (Option<&(usize, u32)>, Option<&(usize, u32)>) {
+    fn get(&self, key: &str) -> RankPair<'_> {
         (self.vector_ranks.get(key), self.bm25_ranks.get(key))
     }
 

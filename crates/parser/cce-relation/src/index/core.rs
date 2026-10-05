@@ -203,13 +203,6 @@ pub struct RelationIndex {
     /// Incremented on every mutation; snapshots record the generation at
     /// creation time so callers can detect stale snapshots.
     pub(super) generation: Arc<SnapshotGeneration>,
-
-    /// Tracks which files were affected by the most recent mutation(s).
-    /// Written by mutating entry points; read and cleared by
-    /// `CowLayeredSnapshot::refresh()` to enable selective CoW copy.
-    /// `None` means no file-level information is available (fallback to
-    /// full copy).
-    pub(super) last_affected_files: std::sync::Mutex<Option<HashSet<String>>>,
 }
 
 impl Clone for RelationIndex {
@@ -234,7 +227,6 @@ impl Clone for RelationIndex {
             file_symbol_keys: Arc::clone(&self.file_symbol_keys),
             file_entities_by_start: Arc::clone(&self.file_entities_by_start),
             generation: Arc::clone(&self.generation),
-            last_affected_files: std::sync::Mutex::new(None),
         }
     }
 }
@@ -272,7 +264,6 @@ impl RelationIndex {
             file_symbol_keys: Arc::new(RwLock::new(HashMap::new())),
             file_entities_by_start: Arc::new(RwLock::new(HashMap::new())),
             generation: Arc::new(SnapshotGeneration::new()),
-            last_affected_files: std::sync::Mutex::new(None),
         }
     }
 
@@ -317,33 +308,6 @@ impl RelationIndex {
     /// source after this call do not affect the returned value.
     pub fn take_compact_snapshot(&self) -> super::compact::CompactRelationIndex {
         super::compact::CompactRelationIndex::from_relation_index(self)
-    }
-
-    /// Record that the given files were affected by a mutation.
-    /// Called from mutating entry points to support selective CoW copy.
-    pub(super) fn record_affected_files(&self, files: impl IntoIterator<Item = String>) {
-        if let Ok(mut guard) = self.last_affected_files.lock() {
-            match guard.as_mut() {
-                Some(set) => {
-                    for f in files {
-                        set.insert(f);
-                    }
-                }
-                None => {
-                    *guard = Some(files.into_iter().collect());
-                }
-            }
-        }
-    }
-
-    /// Take the accumulated affected files set, clearing it.
-    /// Returns `None` if no file-level information was recorded
-    /// (e.g., entity-only mutations), signalling that a full copy is needed.
-    pub(super) fn take_affected_files(&self) -> Option<HashSet<String>> {
-        self.last_affected_files
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take())
     }
 
     /// Create a CoW-aware snapshot: zero-copy, with active-reader tracking.
@@ -632,7 +596,6 @@ impl RelationIndex {
             file_symbol_keys: cloned_symbols.file_symbol_keys,
             file_entities_by_start: cloned_entities.file_entities_by_start,
             generation: Arc::new(SnapshotGeneration::new()),
-            last_affected_files: std::sync::Mutex::new(None),
         }
     }
 
@@ -744,7 +707,6 @@ impl RelationIndex {
             file_symbol_keys,
             file_entities_by_start,
             generation: Arc::new(SnapshotGeneration::new()),
-            last_affected_files: std::sync::Mutex::new(None),
         }
     }
 
@@ -753,10 +715,6 @@ impl RelationIndex {
     pub(super) fn remove_function(&self, entity_id: &EntityId) -> Option<Entity> {
         // Capture file path before the entity_file_index is cleared by caller.
         let file_path = self.entity_file_index.get(entity_id).map(|v| v.clone());
-        // Record the file for selective CoW refresh.
-        if let Some(ref fp) = file_path {
-            self.record_affected_files(std::iter::once(fp.clone()));
-        }
         // Capture symbol key for file_symbol_keys cleanup before map removal.
         let symbol_key = self.entity_to_symbol_key.read().get(entity_id).cloned();
         let removed = self.function_index.remove(entity_id).map(|(_, e)| e);
@@ -860,11 +818,6 @@ impl RelationIndex {
             self.track_reverse_caller(callee_id, caller);
         }
 
-        // Record the caller's file for selective CoW refresh.
-        if let Some(file) = self.entity_file_index.get(&caller).map(|v| v.clone()) {
-            self.record_affected_files(std::iter::once(file));
-        }
-
         self.bump_version();
 
         // Build entity-level dependency graph incrementally.
@@ -896,7 +849,6 @@ impl RelationIndex {
         let inserted = set.insert(relation);
         drop(set);
         if inserted {
-            self.record_affected_files(std::iter::once(file_path.to_string()));
             self.bump_version();
             self.track_file_caller(callee_id, file_path);
         }

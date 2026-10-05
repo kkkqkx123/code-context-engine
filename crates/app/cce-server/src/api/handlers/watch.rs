@@ -282,12 +282,36 @@ pub async fn handle_watch_status(
         Err(_) => None,
     };
 
+    // Best-effort data generation epoch from the durable manifest so callers
+    // can align watch progress with semantic index versions.
+    let data_epoch = state
+        .metadata_store_clone()
+        .and_then(|sqlite| {
+            sqlite
+                .with_transaction(|tx| {
+                    cce_storage_sqlite::repo::ProjectIndexManifestRepository::get_active(
+                        tx, project_id,
+                    )
+                })
+                .ok()
+                .flatten()
+                .map(|manifest| manifest.data_epoch)
+                .or_else(|| {
+                    sqlite
+                        .project_meta_get_int_optional(project_id, "active_epoch")
+                        .ok()
+                        .flatten()
+                })
+        })
+        .filter(|epoch| *epoch > 0);
+
     let watch_status = WatchStatus {
         active: tracker.active,
         watched_dirs: tracker.watched_dirs.clone(),
         events_processed,
         started_at: tracker.started_at.map(|t| t.to_rfc3339()),
         relation_epoch,
+        data_epoch,
     };
 
     let response = WatchStatusResponse {

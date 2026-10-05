@@ -33,7 +33,6 @@ impl FileIndexOps for RelationIndex {
             .entry(file_id.clone())
             .or_default()
             .info = file;
-        self.record_affected_files(std::iter::once(file_id));
         self.bump_version();
     }
 
@@ -77,7 +76,6 @@ impl ImportIndexOps for RelationIndex {
             .entry(file_id.clone())
             .or_default()
             .imports = import_table;
-        self.record_affected_files(std::iter::once(file_id));
         self.bump_version();
     }
 
@@ -121,7 +119,6 @@ impl ExportIndexOps for RelationIndex {
             .entry(file_id.clone())
             .or_default()
             .exports = exports.into();
-        self.record_affected_files(std::iter::once(file_id));
         self.bump_version();
     }
 
@@ -132,7 +129,6 @@ impl ExportIndexOps for RelationIndex {
             .or_default()
             .exports
             .push(export);
-        self.record_affected_files(std::iter::once(file_id.to_string()));
         self.bump_version();
     }
 
@@ -215,9 +211,6 @@ impl FileLevelOps for RelationIndex {
     }
 
     fn remove_file(&self, file_id: &str) {
-        // Record the file for selective CoW refresh before removal.
-        self.record_affected_files(std::iter::once(file_id.to_string()));
-
         // 1. Get all entity IDs belonging to this file
         let entities_to_remove = self.get_entity_ids_by_file(file_id);
 

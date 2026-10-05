@@ -30,6 +30,7 @@ use super::{
 };
 use crate::error::IndexError;
 use crate::index::core::{RelationIndex, SymbolKey};
+use crate::index::relation_query::MAX_REVERSE_FANIN;
 use crate::types::ExportInfo;
 
 // ---------------------------------------------------------------------------
@@ -100,25 +101,35 @@ impl SnapshotRelationQueryOps for RelationIndex {
         if !self.function_index.contains_key(&caller_id) {
             return Err(IndexError::entity_not_found(caller_id));
         }
-        self.resolved_relation_index
+        Ok(self
+            .resolved_relation_index
             .get(&caller_id)
             .map(|entry| entry.edges.clone())
-            .ok_or_else(|| {
-                IndexError::inconsistent_state(format!(
-                    "Entity {:?} exists but has no relation entry",
-                    caller_id
-                ))
-            })
+            .unwrap_or_default())
     }
 
     fn get_callers_by_callee_entity(&self, callee_id: EntityId) -> Vec<EntityId> {
         if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            return callers.clone();
+            let mut result = callers.clone();
+            result.sort();
+            result.dedup();
+            result.truncate(MAX_REVERSE_FANIN);
+            return result;
+        }
+        if !self.function_index.contains_key(&callee_id) {
+            return Vec::new();
+        }
+        if !self.reverse_callee_index.is_empty() {
+            return Vec::new();
         }
         if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
             let callers = entry.callers();
             if !callers.is_empty() {
-                return callers.to_vec();
+                let mut result = callers.to_vec();
+                result.sort();
+                result.dedup();
+                result.truncate(MAX_REVERSE_FANIN);
+                return result;
             }
         }
         let mut result: Vec<EntityId> = self
@@ -129,6 +140,7 @@ impl SnapshotRelationQueryOps for RelationIndex {
             .collect();
         result.sort();
         result.dedup();
+        result.truncate(MAX_REVERSE_FANIN);
         result
     }
 
@@ -136,6 +148,9 @@ impl SnapshotRelationQueryOps for RelationIndex {
         &self,
         callee_id: EntityId,
     ) -> Result<Vec<EntityId>, IndexError> {
+        if !self.function_index.contains_key(&callee_id) {
+            return Err(IndexError::entity_not_found(callee_id));
+        }
         Ok(self.get_callers_by_callee_entity(callee_id))
     }
 
@@ -144,45 +159,17 @@ impl SnapshotRelationQueryOps for RelationIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<EntityId> {
-        if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            return callers
-                .iter()
-                .filter(|caller_id| {
-                    self.resolved_relation_index
-                        .get(*caller_id)
-                        .is_some_and(|relations| {
-                            relations.iter().any(|r| {
-                                r.callee_id == Some(callee_id) && r.relation_type == relation_type
-                            })
-                        })
-                })
-                .copied()
-                .collect();
+        if !self.function_index.contains_key(&callee_id)
+            && self.reverse_callee_index.get(&callee_id).is_none()
+        {
+            return Vec::new();
         }
         let mut callers = Vec::new();
-        if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            for caller_id in entry.callers() {
-                if self
-                    .resolved_relation_index
-                    .get(caller_id)
-                    .is_some_and(|relations| {
-                        relations.iter().any(|r| {
-                            r.callee_id == Some(callee_id) && r.relation_type == relation_type
-                        })
-                    })
-                {
-                    callers.push(*caller_id);
-                }
-            }
-        }
-        if callers.is_empty() {
-            for entry in self.resolved_relation_index.iter() {
-                if entry
-                    .value()
-                    .iter()
-                    .any(|r| r.callee_id == Some(callee_id) && r.relation_type == relation_type)
-                {
-                    callers.push(*entry.key());
+        for relation in self.get_relations_to_entity_by_type(callee_id, relation_type) {
+            if !callers.contains(&relation.caller) {
+                callers.push(relation.caller);
+                if callers.len() >= MAX_REVERSE_FANIN {
+                    break;
                 }
             }
         }

@@ -205,8 +205,8 @@ impl RelationSnapshotRepository {
             project_id, relation_epoch, caller_symbol_id, target_symbol_id,
             target_state, raw_target, relation_type_json, span_json,
             external_type_json, unresolved_reason, stdlib_category_json,
-            call_context_json, owner_type
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)";
+            call_context_json, owner_type, overload_signature, callee_symbol_json
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)";
         {
             let relation_type_json: Vec<String> = snapshot
                 .relations
@@ -233,6 +233,16 @@ impl RelationSnapshotRepository {
                 .iter()
                 .map(|relation| relation.owner_type.clone())
                 .collect();
+            let overload_signatures: Vec<Option<String>> = snapshot
+                .relations
+                .iter()
+                .map(|relation| relation.overload_signature.clone())
+                .collect();
+            let callee_symbols: Vec<Option<String>> = snapshot
+                .relations
+                .iter()
+                .map(|relation| optional_json(&relation.callee_symbol))
+                .collect::<Result<_, _>>()?;
             let target_ids: Vec<Option<i64>> = snapshot
                 .relations
                 .iter()
@@ -289,6 +299,8 @@ impl RelationSnapshotRepository {
                     &stdlib_category_json[i],
                     &call_context_json[i],
                     &owner_types[i],
+                    &overload_signatures[i],
+                    &callee_symbols[i],
                 ]);
             }
             execute_insert_batch(tx, relation_sql, &rows, "relation_snapshot_relations")?;

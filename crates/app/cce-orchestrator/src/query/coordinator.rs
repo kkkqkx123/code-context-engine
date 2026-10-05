@@ -772,7 +772,10 @@ impl QueryCoordinator {
     // ========== Relation Queries ==========
     // These methods delegate to RelationSearcher for consistent behavior
 
-    /// Get callees (functions called by this function)
+    /// Get callees (functions called by this function).
+    ///
+    /// Missing entities report not found; existing entities without outgoing
+    /// edges return an empty list.
     pub fn get_callees(
         &self,
         entity_id: cce_types::EntityId,
@@ -780,7 +783,9 @@ impl QueryCoordinator {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }
-        Ok(self.relation_searcher.get_callees(entity_id))
+        self.relation_searcher
+            .get_callees_checked(entity_id)
+            .map_err(QueryError::from)
     }
 
     /// Get callers (functions that call this function)

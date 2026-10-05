@@ -36,7 +36,7 @@ pub struct Cli {
 }
 
 /// Output format options
-#[derive(clap::ValueEnum, Clone, Default)]
+#[derive(clap::ValueEnum, Clone, Copy, Default)]
 pub enum OutputFormat {
     #[default]
     Table,
@@ -442,6 +442,22 @@ pub enum GraphCommands {
         #[arg(long, default_value = "both")]
         direction: String,
 
+        /// Pagination offset
+        #[arg(long, default_value = "0")]
+        offset: usize,
+
+        /// Pagination limit
+        #[arg(long, default_value = "2000")]
+        limit: usize,
+
+        /// Comma-separated relation domains (call,dependency,structural,reference,template,other)
+        #[arg(long, default_value = "")]
+        domains: String,
+
+        /// Include external edges
+        #[arg(long, default_value = "true")]
+        include_external: bool,
+
         /// Project ID
         #[arg(long)]
         project_id: i64,
@@ -471,6 +487,22 @@ pub enum GraphCommands {
         /// Comma-separated stable symbol IDs
         ids: String,
 
+        /// Pagination offset
+        #[arg(long, default_value = "0")]
+        offset: usize,
+
+        /// Pagination limit
+        #[arg(long, default_value = "2000")]
+        limit: usize,
+
+        /// Comma-separated relation domains
+        #[arg(long, default_value = "")]
+        domains: String,
+
+        /// Include external edges
+        #[arg(long, default_value = "true")]
+        include_external: bool,
+
         /// Project ID
         #[arg(long)]
         project_id: i64,
@@ -488,6 +520,18 @@ pub enum GraphCommands {
         /// Maximum nodes
         #[arg(long, default_value = "2000")]
         limit: usize,
+
+        /// Pagination offset
+        #[arg(long, default_value = "0")]
+        offset: usize,
+
+        /// Comma-separated relation domains
+        #[arg(long, default_value = "")]
+        domains: String,
+
+        /// Include external edges
+        #[arg(long, default_value = "true")]
+        include_external: bool,
 
         /// Project ID
         #[arg(long)]
@@ -901,8 +945,7 @@ impl Cli {
         match &self.command {
             Commands::Index(cmd) => commands::index::execute(cmd, &self.server, self.verbose).await,
             Commands::Search(cmd) => {
-                commands::search::execute(cmd, &self.server, self.verbose, self.format.clone())
-                    .await
+                commands::search::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::AggSearch(cmd) => {
                 let client = crate::client::ApiClient::new(&self.server)?;
@@ -912,11 +955,10 @@ impl Cli {
                 commands::project::execute(cmd, &self.server, self.verbose).await
             }
             Commands::Entity(cmd) => {
-                commands::entity::execute(cmd, &self.server, self.verbose, self.format.clone())
-                    .await
+                commands::entity::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::Graph(cmd) => {
-                commands::graph::execute(cmd, &self.server, self.verbose, self.format.clone()).await
+                commands::graph::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::Watch(cmd) => commands::watch::execute(cmd, &self.server, self.verbose).await,
             Commands::Storage(cmd) => {
@@ -931,7 +973,7 @@ impl Cli {
             Commands::Metrics(cmd) => self.execute_metrics(cmd).await,
             Commands::Health(cmd) => self.execute_health(cmd).await,
             Commands::Status => {
-                commands::status::execute(&self.server, self.verbose, self.format.clone()).await
+                commands::status::execute(&self.server, self.verbose, self.format).await
             }
             Commands::Mcp(cmd) => commands::mcp::execute(cmd).await,
         }
@@ -1050,7 +1092,6 @@ impl Cli {
             HealthCommands::QueueProcess => commands::health::HealthCommand::QueueProcess,
             HealthCommands::QueueClear => commands::health::HealthCommand::QueueClear,
         };
-        commands::health::execute(&health_cmd, &self.server, self.verbose, self.format.clone())
-            .await
+        commands::health::execute(&health_cmd, &self.server, self.verbose, self.format).await
     }
 }

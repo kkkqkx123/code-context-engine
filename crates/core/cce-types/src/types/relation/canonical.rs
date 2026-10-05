@@ -659,6 +659,11 @@ pub fn fingerprint_from_components(components: &FingerprintComponents) -> String
     let mut relations = components.relations.to_vec();
     let mut dependencies = components.dependencies.to_vec();
     sort_components(&mut files, &mut entities, &mut relations, &mut dependencies);
+    // callee_symbol carries a volatile runtime symbol_id that differs between
+    // build paths (streamed vs complete); exclude it from the fingerprint.
+    for relation in relations.iter_mut() {
+        relation.callee_symbol = None;
+    }
     let payload = FingerprintPayload {
         schema_version: components.schema_version,
         parser_version: components.parser_version,

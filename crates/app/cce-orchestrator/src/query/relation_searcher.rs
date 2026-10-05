@@ -3,7 +3,7 @@
 //! Provides a unified interface for relation queries with pagination
 //! and error handling.
 
-use cce_relation::index::SnapshotEntityQueryOps;
+use cce_relation::index::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
 use cce_relation::query::QueryCache;
 use cce_relation::{CallChainNode, CallChainQuery};
 use cce_types::{EntityId, ResolvedRelation, TestInfo, language::LanguageInfo};
@@ -156,6 +156,32 @@ struct RelationFileFilter {
 }
 
 impl RelationFileFilter {
+    /// Deterministic fingerprint for cache keys covering all filter state.
+    fn fingerprint(options: &RelationQueryOptions) -> String {
+        let mut domains: Vec<&str> = options
+            .relation_domains
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        domains.sort_unstable();
+        let mut excluded: Vec<&str> = options.excluded_files.iter().map(|s| s.as_str()).collect();
+        excluded.sort_unstable();
+        let mut content_types: Vec<String> = options
+            .exclude_content_types
+            .iter()
+            .map(|c| format!("{c:?}"))
+            .collect();
+        content_types.sort();
+        format!(
+            "dir={:?}|tests={}|excl={:?}|domains={:?}|ext={}",
+            options.directory_prefix,
+            content_types.join(","),
+            excluded,
+            domains,
+            options.include_external
+        )
+    }
+
     fn from_options(options: &RelationQueryOptions) -> Self {
         Self {
             directory_prefix: options
@@ -298,11 +324,21 @@ impl RelationSearcher {
 
     // ========== Direct Relation Queries ==========
 
-    /// Get callees (functions called by this function)
+    /// Get callees for traversal expansion.
+    ///
+    /// Missing entities yield an empty neighbor list so graph expansion can
+    /// proceed without special-casing unknown ids. Direct lookups that need
+    /// to distinguish missing from empty must use `get_callees_checked`.
     pub fn get_callees(&self, entity_id: EntityId) -> Vec<ResolvedRelation> {
-        self.query
-            .get_callees_by_entity(entity_id)
-            .unwrap_or_default()
+        self.get_callees_checked(entity_id).unwrap_or_default()
+    }
+
+    /// Get callees with explicit missing-entity errors.
+    pub fn get_callees_checked(
+        &self,
+        entity_id: EntityId,
+    ) -> std::result::Result<Vec<ResolvedRelation>, cce_relation::RelationQueryError> {
+        self.query.get_callees_by_entity(entity_id)
     }
 
     /// Get callers (functions that call this function) with caching
@@ -371,7 +407,7 @@ impl RelationSearcher {
             .collect()
     }
 
-    /// Get callers after applying the file-level filter (pre-pagination).
+    /// Get callers after applying the file and relation filters (pre-pagination).
     pub fn filter_callers(
         &self,
         entity_id: EntityId,
@@ -385,33 +421,61 @@ impl RelationSearcher {
         callers
             .into_iter()
             .filter(|caller_id| {
-                filter.matches_path(
+                if !filter.matches_path(
                     self.query
                         .index()
                         .get_file_path_by_entity(*caller_id)
                         .as_deref(),
-                )
+                ) {
+                    return false;
+                }
+                // Domain/external filtering needs the edge, not just the id.
+                // Keep the caller when any edge to this callee passes.
+                if filter.relation_domains.is_empty() && filter.include_external {
+                    return true;
+                }
+                self.query
+                    .index()
+                    .get_resolved_relations_by_caller(*caller_id)
+                    .is_some_and(|relations| {
+                        relations.iter().any(|relation| {
+                            relation.callee_id == Some(entity_id)
+                                && filter.matches_relation(relation)
+                        })
+                    })
             })
             .collect()
     }
 
     // ========== Call Chain Queries ==========
 
-    /// Query forward call chain (caller -> callees) with caching
+    /// Query forward call chain (caller -> callees) with caching.
     ///
-    /// When the options carry a filter the result is filtered
-    /// post-traversal and the shared cache is bypassed (its key does not
-    /// include filter state).
+    /// The cache key includes the filter fingerprint so filtered queries never
+    /// reuse unfiltered results.
     pub fn query_forward(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Result<Vec<CallChainNode>> {
         let filter = RelationFileFilter::from_options(options);
-        let apply = |nodes: Vec<CallChainNode>| -> Vec<CallChainNode> {
-            if filter.is_empty() {
-                return nodes;
-            }
+        let fingerprint = RelationFileFilter::fingerprint(options);
+        let cache_key = (entity_id, options.max_depth, false, fingerprint);
+        if let Some(cached) = self
+            .cache
+            .write()
+            .get_call_chain(cache_key.clone())
+            .cloned()
+        {
+            return Ok(cached);
+        }
+        let nodes = self
+            .query
+            .query_forward_by_entity(entity_id, options.max_depth)
+            .map_err(crate::query::error::QueryError::from)?;
+        let filtered: Vec<CallChainNode> = if filter.is_empty() {
+            nodes
+        } else {
             nodes
                 .into_iter()
                 .filter(|node| {
@@ -426,41 +490,38 @@ impl RelationSearcher {
                 })
                 .collect()
         };
-        if !filter.is_empty() {
-            let result = self
-                .query
-                .query_forward_by_entity(entity_id, options.max_depth)?;
-            return Ok(apply(result));
-        }
-        let cache_key = (entity_id, options.max_depth, false);
-        if let Some(cached) = self.cache.write().get_call_chain(cache_key).cloned() {
-            return Ok(cached);
-        }
-        let result = self
-            .query
-            .query_forward_by_entity(entity_id, options.max_depth);
-
-        let converted: std::result::Result<Vec<CallChainNode>, crate::query::error::QueryError> =
-            result.map_err(Into::into);
-        if let Ok(ref nodes) = converted {
-            self.cache.write().put_call_chain(cache_key, nodes.clone());
-        }
-        converted
+        self.cache
+            .write()
+            .put_call_chain(cache_key, filtered.clone());
+        Ok(filtered)
     }
 
-    /// Query backward call chain (callee -> callers) with caching
+    /// Query backward call chain (callee -> callers) with caching.
     ///
-    /// Filtered queries bypass the shared cache (see `query_forward`).
+    /// The cache key includes the filter fingerprint (see `query_forward`).
     pub fn query_backward(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
     ) -> Result<Vec<CallChainNode>> {
         let filter = RelationFileFilter::from_options(options);
-        let apply = |nodes: Vec<CallChainNode>| -> Vec<CallChainNode> {
-            if filter.is_empty() {
-                return nodes;
-            }
+        let fingerprint = RelationFileFilter::fingerprint(options);
+        let cache_key = (entity_id, options.max_depth, true, fingerprint);
+        if let Some(cached) = self
+            .cache
+            .write()
+            .get_call_chain(cache_key.clone())
+            .cloned()
+        {
+            return Ok(cached);
+        }
+        let nodes = self
+            .query
+            .query_backward_by_entity(entity_id, options.max_depth)
+            .map_err(crate::query::error::QueryError::from)?;
+        let filtered: Vec<CallChainNode> = if filter.is_empty() {
+            nodes
+        } else {
             nodes
                 .into_iter()
                 .filter(|node| {
@@ -475,26 +536,10 @@ impl RelationSearcher {
                 })
                 .collect()
         };
-        if !filter.is_empty() {
-            let result = self
-                .query
-                .query_backward_by_entity(entity_id, options.max_depth)?;
-            return Ok(apply(result));
-        }
-        let cache_key = (entity_id, options.max_depth, true);
-        if let Some(cached) = self.cache.write().get_call_chain(cache_key).cloned() {
-            return Ok(cached);
-        }
-        let result = self
-            .query
-            .query_backward_by_entity(entity_id, options.max_depth);
-
-        let converted: std::result::Result<Vec<CallChainNode>, crate::query::error::QueryError> =
-            result.map_err(Into::into);
-        if let Ok(ref nodes) = converted {
-            self.cache.write().put_call_chain(cache_key, nodes.clone());
-        }
-        converted
+        self.cache
+            .write()
+            .put_call_chain(cache_key, filtered.clone());
+        Ok(filtered)
     }
 
     /// Query forward call chain with pagination

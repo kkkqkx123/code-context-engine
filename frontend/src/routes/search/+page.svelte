@@ -129,6 +129,19 @@
 				</div>
 			{/if}
 
+			{#if $searchState.relationStale}
+				<div class="warn-banner">
+					Relation snapshot is stale
+					{#if $searchState.relationEpoch !== null}
+						<span>(epoch {$searchState.relationEpoch})</span>
+					{/if}
+					— results may be outdated. Re-run the search after indexing catches
+					up.
+				</div>
+			{:else if $searchState.relationEpoch !== null}
+				<div class="relation-meta">Relation epoch: {$searchState.relationEpoch}</div>
+			{/if}
+
 			<div class="results-list">
 				{#each paginatedResults as result, i ((result.entity_ids ?? []).join(',') + '-' + i)}
 					<ResultCard {result} onNavigate={handleNavigate} />

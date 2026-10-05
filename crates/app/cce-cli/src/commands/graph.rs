@@ -9,6 +9,18 @@ use cce_api::models::{
     GraphComponentsResponse, GraphImpactResponse, GraphPathResponse, GraphSubgraphResponse,
 };
 
+struct GraphQueryParams {
+    offset: usize,
+    limit: usize,
+    domains: String,
+    include_external: bool,
+}
+
+struct OutputParams {
+    verbose: bool,
+    format: crate::cli::OutputFormat,
+}
+
 pub async fn execute(
     cmd: &GraphCommands,
     server: &str,
@@ -22,22 +34,71 @@ pub async fn execute(
             id,
             depth,
             direction,
+            offset,
+            limit,
+            domains,
+            include_external,
             project_id,
-        } => get_ego(&client, *project_id, id, *depth, direction, verbose, format).await,
+        } => {
+            let params = GraphQueryParams {
+                offset: *offset,
+                limit: *limit,
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            let output = OutputParams { verbose, format };
+            get_ego(
+                &client,
+                *project_id,
+                id,
+                *depth,
+                direction,
+                &params,
+                &output,
+            )
+            .await
+        }
         GraphCommands::Path {
             from,
             to,
             depth,
             project_id,
         } => get_path(&client, *project_id, from, to, *depth, verbose, format).await,
-        GraphCommands::Subgraph { ids, project_id } => {
-            get_subgraph(&client, *project_id, ids, verbose, format).await
+        GraphCommands::Subgraph {
+            ids,
+            offset,
+            limit,
+            domains,
+            include_external,
+            project_id,
+        } => {
+            let params = GraphQueryParams {
+                offset: *offset,
+                limit: *limit,
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            let output = OutputParams { verbose, format };
+            get_subgraph(&client, *project_id, ids, &params, &output).await
         }
         GraphCommands::Components { project_id } => {
             get_components(&client, *project_id, verbose, format).await
         }
-        GraphCommands::Export { limit, project_id } => {
-            export_graph(&client, *project_id, *limit, verbose, format).await
+        GraphCommands::Export {
+            limit,
+            offset,
+            domains,
+            include_external,
+            project_id,
+        } => {
+            let params = GraphQueryParams {
+                offset: *offset,
+                limit: *limit,
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            let output = OutputParams { verbose, format };
+            export_graph(&client, *project_id, &params, &output).await
         }
         GraphCommands::Impact { file, project_id } => {
             get_impact(&client, *project_id, file, verbose, format).await
@@ -47,9 +108,11 @@ pub async fn execute(
 
 fn print_subgraph(response: &GraphSubgraphResponse) {
     print_success(&format!(
-        "Graph: {} nodes, {} edges (epoch {})",
+        "Graph: {} nodes (total {}), {} edges (total {}) (epoch {})",
         response.nodes.len(),
+        response.total_nodes,
         response.edges.len(),
+        response.total_edges,
         response.relation_epoch
     ));
     println!();
@@ -76,18 +139,19 @@ async fn get_ego(
     id: &str,
     depth: usize,
     direction: &str,
-    verbose: bool,
-    format: crate::cli::OutputFormat,
+    params: &GraphQueryParams,
+    output: &OutputParams,
 ) -> Result<()> {
-    if verbose {
+    if output.verbose {
         println!("Fetching ego graph: {id}");
     }
     let path = format!(
-        "/api/project/{project_id}/graph/ego?entity_id={id}&depth={depth}&direction={direction}"
+        "/api/project/{project_id}/graph/ego?entity_id={id}&depth={depth}&direction={direction}&offset={}&limit={}&domains={}&include_external={}",
+        params.offset, params.limit, params.domains, params.include_external
     );
     let response: GraphSubgraphResponse = client.get(&path).await?;
-    if matches!(format, crate::cli::OutputFormat::Json) {
-        print_output(format, &response);
+    if matches!(output.format, crate::cli::OutputFormat::Json) {
+        print_output(output.format, &response);
     } else if response.success {
         print_subgraph(&response);
     } else {
@@ -137,16 +201,19 @@ async fn get_subgraph(
     client: &ApiClient,
     project_id: i64,
     ids: &str,
-    verbose: bool,
-    format: crate::cli::OutputFormat,
+    params: &GraphQueryParams,
+    output: &OutputParams,
 ) -> Result<()> {
-    if verbose {
+    if output.verbose {
         println!("Fetching subgraph: {ids}");
     }
-    let path = format!("/api/project/{project_id}/graph/subgraph?ids={ids}");
+    let path = format!(
+        "/api/project/{project_id}/graph/subgraph?ids={ids}&offset={}&limit={}&domains={}&include_external={}",
+        params.offset, params.limit, params.domains, params.include_external
+    );
     let response: GraphSubgraphResponse = client.get(&path).await?;
-    if matches!(format, crate::cli::OutputFormat::Json) {
-        print_output(format, &response);
+    if matches!(output.format, crate::cli::OutputFormat::Json) {
+        print_output(output.format, &response);
     } else if response.success {
         print_subgraph(&response);
     } else {
@@ -186,17 +253,19 @@ async fn get_components(
 async fn export_graph(
     client: &ApiClient,
     project_id: i64,
-    limit: usize,
-    verbose: bool,
-    format: crate::cli::OutputFormat,
+    params: &GraphQueryParams,
+    output: &OutputParams,
 ) -> Result<()> {
-    if verbose {
-        println!("Exporting graph (limit {limit})");
+    if output.verbose {
+        println!("Exporting graph (limit {})", params.limit);
     }
-    let path = format!("/api/project/{project_id}/graph/export?limit={limit}");
+    let path = format!(
+        "/api/project/{project_id}/graph/export?limit={}&offset={}&domains={}&include_external={}",
+        params.limit, params.offset, params.domains, params.include_external
+    );
     let response: GraphSubgraphResponse = client.get(&path).await?;
-    if matches!(format, crate::cli::OutputFormat::Json) {
-        print_output(format, &response);
+    if matches!(output.format, crate::cli::OutputFormat::Json) {
+        print_output(output.format, &response);
     } else if response.success {
         print_subgraph(&response);
     } else {

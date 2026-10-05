@@ -34,9 +34,8 @@ pub use index::{
     builder::{IndexBuilder, SymbolTableBuilder},
     compact::CompactRelationIndex,
     core::{CallChainNode, CallChainPath, ExportInfo, ExportType, RelationIndex},
-    unified_snapshot::{SnapshotManager, UnifiedSnapshotIndex},
 };
-pub use query::{CallChainQuery, ThreadSafeQuery};
+pub use query::CallChainQuery;
 pub use symbol_table::{
     LocalSymbolTable, ModuleSymbolTable, PackageSymbolTable, ProjectSymbolTable, ResolutionContext,
 };

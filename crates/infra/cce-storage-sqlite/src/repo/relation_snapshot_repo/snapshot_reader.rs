@@ -129,7 +129,7 @@ fn read_relations(
             "SELECT caller_symbol_id, target_symbol_id, target_state, raw_target,
                     relation_type_json, span_json, external_type_json,
                     unresolved_reason, stdlib_category_json,
-                    call_context_json, owner_type
+                    call_context_json, owner_type, overload_signature, callee_symbol_json
              FROM relation_snapshot_relations
              WHERE project_id = ?1 AND relation_epoch = ?2 ORDER BY id",
         )
@@ -184,10 +184,8 @@ fn read_relations(
             relation_type: from_json(&row.get::<_, String>(4).map_err(query_error)?)?,
             span: from_json(&row.get::<_, String>(5).map_err(query_error)?)?,
             stdlib_category: optional_from_json(row.get(8).map_err(query_error)?)?,
-            // The SQLite schema carries no overload column; rows read back
-            // as single-candidate edges and re-resolution re-annotates them.
-            overload_signature: None,
-            callee_symbol: None,
+            overload_signature: row.get(11).map_err(query_error)?,
+            callee_symbol: optional_from_json(row.get(12).map_err(query_error)?)?,
             owner_type: row.get(10).map_err(query_error)?,
             call_context,
         });

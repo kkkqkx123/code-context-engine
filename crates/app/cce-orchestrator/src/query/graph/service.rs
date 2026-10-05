@@ -232,6 +232,10 @@ impl GraphService {
     }
 
     /// Full project export with hub-first ordering, filtering and pagination.
+    ///
+    /// `limit` caps the hub set before filtering; `pagination` slices the
+    /// materialized subgraph afterwards. Totals reflect the filtered hub set
+    /// before pagination.
     pub fn export_full_with_options(
         &self,
         limit: usize,

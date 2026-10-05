@@ -35,7 +35,6 @@ pub mod cache;
 pub use cache::QueryCache;
 
 use super::error::RelationQueryError;
-use super::index::ThreadSafeIndex;
 use super::index::core::{CallChainNode, RelationIndex};
 use super::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
 use super::index::snapshot_query::{
@@ -750,43 +749,6 @@ impl CallChainQuery {
 }
 
 impl Default for CallChainQuery {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Thread-safe call chain query
-///
-/// Provides thread-safe access to call chain queries.
-pub struct ThreadSafeQuery {
-    index: ThreadSafeIndex,
-}
-
-impl ThreadSafeQuery {
-    /// Create a new thread-safe query
-    pub fn new() -> Self {
-        Self {
-            index: ThreadSafeIndex::new(),
-        }
-    }
-
-    /// Create from an existing thread-safe index
-    pub fn from_index(index: ThreadSafeIndex) -> Self {
-        Self { index }
-    }
-
-    /// Get a reference to the underlying index
-    pub fn index(&self) -> &ThreadSafeIndex {
-        &self.index
-    }
-
-    /// Get a clone of the index for sharing
-    pub fn share_index(&self) -> ThreadSafeIndex {
-        self.index.clone()
-    }
-}
-
-impl Default for ThreadSafeQuery {
     fn default() -> Self {
         Self::new()
     }

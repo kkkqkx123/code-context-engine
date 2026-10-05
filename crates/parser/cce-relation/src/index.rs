@@ -37,7 +37,6 @@
 pub mod builder;
 pub mod compact;
 pub mod core;
-pub mod cow_snapshot;
 pub mod delta;
 pub mod dependency_index;
 pub mod entity_index;
@@ -50,7 +49,6 @@ pub mod snapshot_loader;
 pub mod snapshot_query;
 pub mod snapshot_view;
 pub mod stores;
-pub mod unified_snapshot;
 pub mod view;
 
 #[cfg(test)]
@@ -60,12 +58,10 @@ mod test_support;
 pub use builder::IndexBuilder;
 pub use compact::CompactRelationIndex;
 pub use core::{CallChainNode, CallChainPath, ExportInfo, ExportType, RelationIndex, SymbolKey};
-pub use cow_snapshot::{CoWRelationSnapshot, CowLayeredSnapshot};
 pub use delta::RelationDeltaOps;
 pub use dependency_index::{DependencyIndex, IndexStats};
 pub use entity_index::EntityIndexOps;
 pub use file_index::{ExportIndexOps, FileIndexOps, FileLevelOps, ImportIndexOps};
-pub use unified_snapshot::{SnapshotManager, UnifiedSnapshotIndex};
 // LocalCallResolver is defined in cce-parser-core (the canonical copy)
 // and re-exported here for backward compatibility.
 pub use cce_parser_core::{LocalCall, LocalCallResolver, LocalCallResolverConfig};

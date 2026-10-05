@@ -152,14 +152,6 @@ impl RelationDeltaOps for RelationIndex {
     }
 
     fn apply_delta(&self, delta: &SnapshotDelta) {
-        let affected: Vec<String> = delta
-            .removed_files
-            .iter()
-            .chain(delta.added_files.iter().map(|f| &f.path))
-            .cloned()
-            .collect();
-        self.record_affected_files(affected);
-
         for path in &delta.removed_files {
             self.file_records.write().remove(path.as_str());
             self.dependency_graph.remove_file(path);

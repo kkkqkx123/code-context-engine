@@ -19,6 +19,10 @@ pub struct WatchStatus {
     /// Lets callers align watch progress with graph query versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relation_epoch: Option<i64>,
+    /// Active data generation epoch from the durable manifest.
+    /// Lets callers align watch progress with semantic index versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_epoch: Option<i64>,
 }
 
 /// Watch status response

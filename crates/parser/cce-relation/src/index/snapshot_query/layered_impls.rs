@@ -31,6 +31,7 @@ use super::{
 use crate::error::IndexError;
 use crate::index::core::SymbolKey;
 use crate::index::delta::relation_identity;
+use crate::index::relation_query::MAX_REVERSE_FANIN;
 use crate::index::snapshot_index::LayeredSnapshotIndex;
 use crate::types::ExportInfo;
 
@@ -177,13 +178,9 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
         if !self.contains_function(caller_id) {
             return Err(IndexError::entity_not_found(caller_id));
         }
-        self.get_resolved_relations_by_caller(caller_id)
-            .ok_or_else(|| {
-                IndexError::inconsistent_state(format!(
-                    "Entity {:?} exists but has no relation entry",
-                    caller_id
-                ))
-            })
+        Ok(self
+            .get_resolved_relations_by_caller(caller_id)
+            .unwrap_or_default())
     }
 
     fn get_callers_by_callee_entity(&self, callee_id: EntityId) -> Vec<EntityId> {
@@ -222,6 +219,9 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
                 }
             }
         }
+        callers.sort();
+        callers.dedup();
+        callers.truncate(MAX_REVERSE_FANIN);
         callers
     }
 
@@ -229,7 +229,14 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
         &self,
         callee_id: EntityId,
     ) -> Result<Vec<EntityId>, IndexError> {
-        Ok(self.get_callers_by_callee_entity(callee_id))
+        if !self.contains_function(callee_id) {
+            return Err(IndexError::entity_not_found(callee_id));
+        }
+        let mut callers = self.get_callers_by_callee_entity(callee_id);
+        callers.sort();
+        callers.dedup();
+        callers.truncate(MAX_REVERSE_FANIN);
+        Ok(callers)
     }
 
     fn get_callers_by_callee_and_type(

@@ -248,4 +248,3 @@ mod mutable_impls;
 mod snapshot_impls;
 #[cfg(test)]
 mod tests;
-mod unified_impls;

@@ -12,6 +12,9 @@ import { currentProjectId, onProjectChange } from './project';
 export interface WatchState {
 	status: WatchStatus | null;
 	isWatching: boolean;
+	// Local event feed is intentionally empty: there is no streaming channel.
+	// The server-side `events_processed` counter in `status` is the source of
+	// truth and is refreshed by `loadStatus` polling.
 	events: Array<{
 		timestamp: Date;
 		eventType: 'create' | 'modify' | 'delete';
@@ -119,16 +122,6 @@ export const watchActions = {
 			clearInterval(versionPollTimer);
 			versionPollTimer = null;
 		}
-	},
-
-	addEvent(event: Omit<WatchState['events'][0], 'timestamp'>) {
-		watchState.update((state) => ({
-			...state,
-			events: [
-				{ ...event, timestamp: new Date() },
-				...state.events.slice(0, 99), // Keep last 100 events
-			],
-		}));
 	},
 
 	clearEvents() {

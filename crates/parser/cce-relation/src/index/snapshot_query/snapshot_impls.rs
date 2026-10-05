@@ -30,6 +30,7 @@ use super::{
 };
 use crate::error::IndexError;
 use crate::index::core::SymbolKey;
+use crate::index::relation_query::MAX_REVERSE_FANIN;
 use crate::index::snapshot_index::RelationSnapshotIndex;
 use crate::types::ExportInfo;
 
@@ -104,29 +105,41 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
         if !self.function_index.contains_key(&caller_id) {
             return Err(IndexError::entity_not_found(caller_id));
         }
-        self.resolved_relation_index
-            .get(&caller_id)
-            .map(|entry| entry.edges.clone())
-            .ok_or_else(|| {
-                IndexError::inconsistent_state(format!(
-                    "Entity {:?} exists but has no relation entry",
-                    caller_id
-                ))
-            })
+        Ok(self
+            .get_resolved_relations_by_caller(caller_id)
+            .unwrap_or_default())
     }
 
     fn get_callers_by_callee_entity(&self, callee_id: EntityId) -> Vec<EntityId> {
         if let Some(callers) = self.query_optimized.get_callers(callee_id) {
-            return callers.clone();
+            let mut result = callers.clone();
+            result.sort();
+            result.dedup();
+            result.truncate(MAX_REVERSE_FANIN);
+            return result;
         }
         if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            return callers.clone();
+            let mut result = callers.clone();
+            result.sort();
+            result.dedup();
+            result.truncate(MAX_REVERSE_FANIN);
+            return result;
+        }
+        if !self.function_index.contains_key(&callee_id) {
+            return Vec::new();
+        }
+        if !self.reverse_callee_index.is_empty() {
+            return Vec::new();
         }
         // Fallback: check the embedded callers list.
         if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
             let callers = entry.callers();
             if !callers.is_empty() {
-                return callers.to_vec();
+                let mut result = callers.to_vec();
+                result.sort();
+                result.dedup();
+                result.truncate(MAX_REVERSE_FANIN);
+                return result;
             }
         }
         // For callee-only entities, scan all entries.
@@ -138,6 +151,7 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
             .collect();
         result.sort();
         result.dedup();
+        result.truncate(MAX_REVERSE_FANIN);
         result
     }
 
@@ -145,6 +159,9 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
         &self,
         callee_id: EntityId,
     ) -> Result<Vec<EntityId>, IndexError> {
+        if !self.function_index.contains_key(&callee_id) {
+            return Err(IndexError::entity_not_found(callee_id));
+        }
         Ok(self.get_callers_by_callee_entity(callee_id))
     }
 
@@ -153,60 +170,19 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<EntityId> {
-        if let Some(callers) = self.query_optimized.get_callers(callee_id) {
-            return callers
-                .iter()
-                .filter(|caller_id| {
-                    self.resolved_relation_index
-                        .get(*caller_id)
-                        .is_some_and(|relations| {
-                            relations.iter().any(|r| {
-                                r.callee_id == Some(callee_id) && r.relation_type == relation_type
-                            })
-                        })
-                })
-                .copied()
-                .collect();
-        }
-        if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            return callers
-                .iter()
-                .filter(|caller_id| {
-                    self.resolved_relation_index
-                        .get(*caller_id)
-                        .is_some_and(|relations| {
-                            relations.iter().any(|r| {
-                                r.callee_id == Some(callee_id) && r.relation_type == relation_type
-                            })
-                        })
-                })
-                .copied()
-                .collect();
+        // Single merged edge walk with in-memory type filtering.
+        if !self.function_index.contains_key(&callee_id)
+            && self.query_optimized.get_callers(callee_id).is_none()
+            && self.reverse_callee_index.get(&callee_id).is_none()
+        {
+            return Vec::new();
         }
         let mut callers = Vec::new();
-        if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            for caller_id in entry.callers() {
-                if self
-                    .resolved_relation_index
-                    .get(caller_id)
-                    .is_some_and(|relations| {
-                        relations.iter().any(|r| {
-                            r.callee_id == Some(callee_id) && r.relation_type == relation_type
-                        })
-                    })
-                {
-                    callers.push(*caller_id);
-                }
-            }
-        }
-        if callers.is_empty() {
-            for entry in self.resolved_relation_index.iter() {
-                if entry
-                    .value()
-                    .iter()
-                    .any(|r| r.callee_id == Some(callee_id) && r.relation_type == relation_type)
-                {
-                    callers.push(*entry.key());
+        for relation in self.get_relations_to_entity_by_type(callee_id, relation_type) {
+            if !callers.contains(&relation.caller) {
+                callers.push(relation.caller);
+                if callers.len() >= MAX_REVERSE_FANIN {
+                    break;
                 }
             }
         }
@@ -214,6 +190,13 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
     }
 
     fn get_relations_to_entity(&self, callee_id: EntityId) -> Vec<ResolvedRelation> {
+        if !self.function_index.contains_key(&callee_id)
+            && self.query_optimized.get_callers(callee_id).is_none()
+            && self.reverse_callee_index.get(&callee_id).is_none()
+            && self.resolved_relation_index.get(&callee_id).is_none()
+        {
+            return Vec::new();
+        }
         self.get_callers_by_callee_entity(callee_id)
             .into_iter()
             .flat_map(|caller| {
@@ -230,14 +213,9 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<ResolvedRelation> {
-        self.get_callers_by_callee_entity(callee_id)
+        self.get_relations_to_entity(callee_id)
             .into_iter()
-            .flat_map(|caller| {
-                self.get_resolved_relations_by_caller(caller)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|r| r.callee_id == Some(callee_id) && r.relation_type == relation_type)
-            })
+            .filter(|r| r.relation_type == relation_type)
             .collect()
     }
 

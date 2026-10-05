@@ -75,10 +75,12 @@ where
 /// Query result cache.
 ///
 /// Caches reference lookups, definition lookups, and call-chain traversals.
+/// Call-chain keys include a filter fingerprint so filtered queries never
+/// reuse unfiltered results.
 #[derive(Debug)]
 pub struct QueryCache {
     reference_cache: LruCache<(EntityId, String), Vec<ResolvedRelation>>,
-    call_chain_cache: LruCache<(EntityId, usize, bool), Vec<CallChainNode>>,
+    call_chain_cache: LruCache<(EntityId, usize, bool, String), Vec<CallChainNode>>,
     callers_cache: LruCache<EntityId, Vec<EntityId>>,
 }
 
@@ -99,11 +101,18 @@ impl QueryCache {
         self.reference_cache.put(key, value);
     }
 
-    pub fn get_call_chain(&mut self, key: (EntityId, usize, bool)) -> Option<&Vec<CallChainNode>> {
+    pub fn get_call_chain(
+        &mut self,
+        key: (EntityId, usize, bool, String),
+    ) -> Option<&Vec<CallChainNode>> {
         self.call_chain_cache.get(&key)
     }
 
-    pub fn put_call_chain(&mut self, key: (EntityId, usize, bool), value: Vec<CallChainNode>) {
+    pub fn put_call_chain(
+        &mut self,
+        key: (EntityId, usize, bool, String),
+        value: Vec<CallChainNode>,
+    ) {
         self.call_chain_cache.put(key, value);
     }
 
@@ -164,9 +173,13 @@ mod tests {
     #[test]
     fn call_chain_cache_roundtrip() {
         let mut cache = QueryCache::new(4);
-        let key = (EntityId(10), 3, true);
+        let key = (EntityId(10), 3, true, String::new());
         let nodes = vec![];
         cache.put_call_chain(key, nodes);
-        assert!(cache.get_call_chain((EntityId(10), 3, true)).is_some());
+        assert!(
+            cache
+                .get_call_chain((EntityId(10), 3, true, String::new()))
+                .is_some()
+        );
     }
 }

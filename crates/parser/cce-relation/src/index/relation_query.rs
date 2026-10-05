@@ -9,6 +9,13 @@ use dashmap::DashMap;
 
 use super::core::{RelationEdgeSet, RelationIndex};
 
+/// Upper bound for reverse fan-in materialization.
+///
+/// Reverse lookups with extremely large caller sets are truncated to keep
+/// query memory bounded; callers beyond the cap are dropped deterministically
+/// after sorting. No type-partition table is built.
+pub const MAX_REVERSE_FANIN: usize = 10_000;
+
 /// Relation query operations extension trait
 ///
 /// Provides methods for querying relations in the index.
@@ -89,28 +96,40 @@ impl RelationQueryOps for RelationIndex {
             return Err(IndexError::entity_not_found(caller_id));
         }
 
-        // Get relations
-        self.resolved_relation_index
+        // Existing entities without outgoing edges return an empty list.
+        Ok(self
+            .resolved_relation_index
             .get(&caller_id)
             .map(|r| r.edges.clone())
-            .ok_or_else(|| {
-                IndexError::inconsistent_state(format!(
-                    "Entity {:?} exists but has no relation entry",
-                    caller_id
-                ))
-            })
+            .unwrap_or_default())
     }
 
     fn get_callers_by_callee_entity(&self, callee_id: EntityId) -> Vec<EntityId> {
         if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            return callers.clone();
+            let mut result = callers.clone();
+            result.sort();
+            result.dedup();
+            result.truncate(MAX_REVERSE_FANIN);
+            return result;
+        }
+        // Empty early exit: unknown entities never have callers.
+        if !self.function_index.contains_key(&callee_id) {
+            return Vec::new();
+        }
+        // Authoritative reverse index with no entry means no callers.
+        if !self.reverse_callee_index.is_empty() {
+            return Vec::new();
         }
         // Fallback: legacy embedded list for indexes built before reverse
         // was introduced (e.g. deserialized snapshots).
         if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
             let callers = entry.callers();
             if !callers.is_empty() {
-                return callers.to_vec();
+                let mut result = callers.to_vec();
+                result.sort();
+                result.dedup();
+                result.truncate(MAX_REVERSE_FANIN);
+                return result;
             }
         }
         // For callee-only entities without reverse entry, scan.
@@ -122,6 +141,7 @@ impl RelationQueryOps for RelationIndex {
             .collect();
         result.sort();
         result.dedup();
+        result.truncate(MAX_REVERSE_FANIN);
         result
     }
 
@@ -129,6 +149,9 @@ impl RelationQueryOps for RelationIndex {
         &self,
         callee_id: EntityId,
     ) -> Result<Vec<EntityId>, IndexError> {
+        if !self.function_index.contains_key(&callee_id) {
+            return Err(IndexError::entity_not_found(callee_id));
+        }
         Ok(self.get_callers_by_callee_entity(callee_id))
     }
 
@@ -137,43 +160,20 @@ impl RelationQueryOps for RelationIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<EntityId> {
-        // Prefer reverse index O(1) lookup, filter by type without full scan.
-        if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            return callers
-                .iter()
-                .filter(|caller_id| {
-                    self.resolved_relation_index
-                        .get(*caller_id)
-                        .is_some_and(|relations| {
-                            relations.iter().any(|r| {
-                                r.callee_id == Some(callee_id) && r.relation_type == relation_type
-                            })
-                        })
-                })
-                .copied()
-                .collect();
+        // Single merged edge walk: derive callers from full edges filtered by
+        // type instead of reverse-list plus per-caller forward re-verification.
+        // Empty early exit avoids full scans for unknown callees.
+        if !self.function_index.contains_key(&callee_id)
+            && self.reverse_callee_index.get(&callee_id).is_none()
+        {
+            return Vec::new();
         }
         let mut callers = Vec::new();
-        if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            for caller_id in entry.callers() {
-                if let Some(relations) = self.resolved_relation_index.get(caller_id) {
-                    if relations
-                        .iter()
-                        .any(|r| r.callee_id == Some(callee_id) && r.relation_type == relation_type)
-                    {
-                        callers.push(*caller_id);
-                    }
-                }
-            }
-        }
-        if callers.is_empty() {
-            for entry in self.resolved_relation_index.iter() {
-                if entry
-                    .value()
-                    .iter()
-                    .any(|r| r.callee_id == Some(callee_id) && r.relation_type == relation_type)
-                {
-                    callers.push(*entry.key());
+        for relation in self.get_relations_to_entity_by_type(callee_id, relation_type) {
+            if !callers.contains(&relation.caller) {
+                callers.push(relation.caller);
+                if callers.len() >= MAX_REVERSE_FANIN {
+                    break;
                 }
             }
         }
@@ -182,8 +182,19 @@ impl RelationQueryOps for RelationIndex {
 
     fn get_relations_to_entity(&self, callee_id: EntityId) -> Vec<ResolvedRelation> {
         // Use reverse index to enumerate callers O(k) without full scan.
+        // Unknown callees return empty without scanning.
+        if !self.function_index.contains_key(&callee_id)
+            && self.reverse_callee_index.get(&callee_id).is_none()
+            && self.resolved_relation_index.get(&callee_id).is_none()
+        {
+            return Vec::new();
+        }
         let callers: Vec<EntityId> = if let Some(v) = self.reverse_callee_index.get(&callee_id) {
-            v.clone()
+            let mut limited = v.clone();
+            limited.sort();
+            limited.dedup();
+            limited.truncate(MAX_REVERSE_FANIN);
+            limited
         } else if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
             let c = entry.callers();
             if !c.is_empty() {
@@ -195,6 +206,20 @@ impl RelationQueryOps for RelationIndex {
             Vec::new()
         };
         if !callers.is_empty() {
+            // Authoritative reverse hit: resolve edges directly, no fallback scan.
+            if self.reverse_callee_index.get(&callee_id).is_some() {
+                let mut result = Vec::new();
+                for caller_id in callers {
+                    if let Some(relations) = self.resolved_relation_index.get(&caller_id) {
+                        for r in relations.iter() {
+                            if r.callee_id == Some(callee_id) {
+                                result.push(r.clone());
+                            }
+                        }
+                    }
+                }
+                return result;
+            }
             let mut result = Vec::new();
             for caller_id in callers {
                 if let Some(relations) = self.resolved_relation_index.get(&caller_id) {
@@ -208,8 +233,10 @@ impl RelationQueryOps for RelationIndex {
             if !result.is_empty() {
                 return result;
             }
+        } else if !self.reverse_callee_index.is_empty() {
+            return Vec::new();
         }
-        // Fallback full scan for legacy indexes.
+        // Fallback full scan for legacy indexes without a populated reverse map.
         let mut result = Vec::new();
         for entry in self.resolved_relation_index.iter() {
             for r in entry.value().iter() {
@@ -226,42 +253,11 @@ impl RelationQueryOps for RelationIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<ResolvedRelation> {
-        let callers: Vec<EntityId> = if let Some(v) = self.reverse_callee_index.get(&callee_id) {
-            v.clone()
-        } else if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            let c = entry.callers();
-            if !c.is_empty() {
-                c.to_vec()
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
-        if !callers.is_empty() {
-            let mut result = Vec::new();
-            for caller_id in callers {
-                if let Some(relations) = self.resolved_relation_index.get(&caller_id) {
-                    for r in relations.iter() {
-                        if r.callee_id == Some(callee_id) && r.relation_type == relation_type {
-                            result.push(r.clone());
-                        }
-                    }
-                }
-            }
-            if !result.is_empty() {
-                return result;
-            }
-        }
-        let mut result = Vec::new();
-        for entry in self.resolved_relation_index.iter() {
-            for r in entry.value().iter() {
-                if r.callee_id == Some(callee_id) && r.relation_type == relation_type {
-                    result.push(r.clone());
-                }
-            }
-        }
-        result
+        // Single merged edge walk with in-memory type filtering.
+        self.get_relations_to_entity(callee_id)
+            .into_iter()
+            .filter(|r| r.relation_type == relation_type)
+            .collect()
     }
 
     fn get_relations_from_entity_by_type(
