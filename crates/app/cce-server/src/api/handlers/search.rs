@@ -526,6 +526,9 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
         end_line: item.end_line,
         entity_type,
         entity_names: Vec::new(),
+        entity_ids: item.entity_ids.iter().map(|id| id.0 as i64).collect(),
+        score: item.score,
+        sources: item.sources,
         content_state,
     }
 }

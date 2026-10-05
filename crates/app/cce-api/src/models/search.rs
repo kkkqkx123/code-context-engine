@@ -84,6 +84,15 @@ pub struct SearchResultItem {
     pub entity_type: Option<String>,
     #[serde(default)]
     pub entity_names: Vec<String>,
+    /// All entity IDs associated with this result (a chunk may contain
+    /// multiple entities).
+    #[serde(default)]
+    pub entity_ids: Vec<i64>,
+    /// Unified relevance score (post-fusion).
+    pub score: f32,
+    /// Retrieval sources that contributed to this result (e.g. "vector", "bm25").
+    #[serde(default)]
+    pub sources: Vec<String>,
     /// Whether `code_chunk` is the full body or a reference.
     #[serde(default)]
     pub content_state: ContentStateDto,

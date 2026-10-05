@@ -99,6 +99,17 @@
 		</a>
 		<a
 			class="quick-tile"
+			href={resolve('/graph')}
+			onclick={(e) => {
+				e.preventDefault();
+				goto(resolve('/graph'));
+			}}
+		>
+			<h3>Graph Explorer</h3>
+			<p>Visualize calls, dependencies, and impact analysis</p>
+		</a>
+		<a
+			class="quick-tile"
 			href={resolve('/storage')}
 			onclick={(e) => {
 				e.preventDefault();

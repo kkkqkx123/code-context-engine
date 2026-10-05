@@ -123,7 +123,7 @@ export const projectApi = {
 	getProject: (id: string): Promise<ProjectDetailResponse> =>
 		call(
 			client.GET('/api/project/{id}', {
-				params: { path: { id } },
+				params: { path: { id: Number(id) } },
 			}),
 		),
 
@@ -147,7 +147,7 @@ export const projectApi = {
 	deleteProject: (id: string): Promise<ProjectDeleteResponse> =>
 		call(
 			client.DELETE('/api/project/{id}', {
-				params: { path: { id } },
+				params: { path: { id: Number(id) } },
 			}),
 		),
 
@@ -155,7 +155,7 @@ export const projectApi = {
 	indexProject: (id: string): Promise<ProjectIndexResponse> =>
 		call(
 			client.POST('/api/project/{id}/index', {
-				params: { path: { id } },
+				params: { path: { id: Number(id) } },
 			}),
 		),
 
@@ -163,7 +163,7 @@ export const projectApi = {
 	reloadProject: (id: string): Promise<ProjectConfigReloadResponse> =>
 		call(
 			client.POST('/api/project/{id}/reload', {
-				params: { path: { id } },
+				params: { path: { id: Number(id) } },
 			}),
 		),
 
@@ -174,7 +174,7 @@ export const projectApi = {
 	): Promise<ProjectConfigUpdateResponse> =>
 		call(
 			client.PUT('/api/project/{id}/config', {
-				params: { path: { id } },
+				params: { path: { id: Number(id) } },
 				body: { config },
 			}),
 		),

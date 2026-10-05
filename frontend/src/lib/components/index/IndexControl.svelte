@@ -2,6 +2,8 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import type { IndexRequest } from '$lib/api/index';
 	import { indexState, indexActions, selectedProject } from '$lib/stores/index';
+	import { currentProjectId } from '$lib/stores/project';
+	import { get } from 'svelte/store';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
 	import Input from '../ui/Input.svelte';
@@ -33,8 +35,8 @@
 
 		const data: IndexRequest = {
 			path: indexPath,
-			force: forceReindex,
-			gitignore: respectGitignore,
+			project_id: get(currentProjectId)!,
+			respect_gitignore: respectGitignore,
 		};
 
 		if (extensions) {
@@ -45,7 +47,7 @@
 		}
 
 		if (excludePatterns) {
-			data.exclude = excludePatterns
+			data.exclude_dirs = excludePatterns
 				.split(',')
 				.map((e) => e.trim())
 				.filter(Boolean);
@@ -53,7 +55,10 @@
 
 		try {
 			if (isIncremental) {
-				await indexActions.startIncrementalIndex(data);
+				await indexActions.startIncrementalIndex({
+					...data,
+					force_reindex: forceReindex,
+				});
 			} else {
 				await indexActions.startIndex(data);
 			}

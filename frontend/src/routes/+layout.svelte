@@ -11,8 +11,23 @@
 	import { projects, loadProjects } from '$lib/stores/index';
 	import { currentProjectId } from '$lib/stores/project';
 
+	type NavHref =
+		| '/'
+		| '/projects'
+		| '/index'
+		| '/watch'
+		| '/search'
+		| '/entities'
+		| '/graph'
+		| '/summary'
+		| '/storage'
+		| '/health'
+		| '/metrics'
+		| '/tools'
+		| '/config';
+
 	interface NavItem {
-		href: string;
+		href: NavHref;
 		label: string;
 	}
 	interface NavGroup {

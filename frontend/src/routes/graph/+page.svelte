@@ -92,7 +92,7 @@
 			impactFile = queryFile;
 			await graphActions.loadImpact(queryFile);
 		}
-		await graphActions.loadComponents();
+		await graphActions.loadComponentsIfStale();
 	});
 
 	async function runSeed() {
@@ -116,7 +116,7 @@
 		} else {
 			await graphActions.loadOverview(400);
 		}
-		await graphActions.loadComponents();
+		await graphActions.loadComponentsIfStale();
 	}
 
 	function handleSeedKeydown(event: KeyboardEvent) {
@@ -221,9 +221,19 @@
 		);
 	}
 
+	let prevProjectId: number | null = null;
 	$effect(() => {
-		// Reset accumulated graph state when the selected project changes.
-		void projectId;
+		// Reset accumulated graph state when the selected project changes, so
+		// nodes/edges from the previous project never linger in the canvas.
+		// First run only records the baseline and never resets.
+		if (prevProjectId === null) {
+			prevProjectId = projectId;
+			return;
+		}
+		if (projectId !== prevProjectId) {
+			prevProjectId = projectId;
+			graphActions.reset(projectId);
+		}
 	});
 </script>
 

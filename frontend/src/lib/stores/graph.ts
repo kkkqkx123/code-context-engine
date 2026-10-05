@@ -58,6 +58,8 @@ export interface GraphMeta {
 	focusId: string | null;
 	/** Component id (index into `components`) per node id. */
 	communities: Record<string, number>;
+	/** Relation epoch at which `communities` was last fetched. */
+	communitiesEpoch: number;
 	/** Direct dependents of the analyzed file. */
 	impactDirect: string[];
 	/** Transitive dependents of the analyzed file. */
@@ -111,6 +113,7 @@ const initialState: GraphState = {
 		epoch: 0,
 		focusId: null,
 		communities: {},
+		communitiesEpoch: 0,
 		impactDirect: [],
 		impactTransitive: [],
 		impactFile: null,
@@ -422,7 +425,7 @@ export const graphActions = {
 			});
 			graphState.update((state) => ({
 				...state,
-				meta: { ...state.meta, communities },
+				meta: { ...state.meta, communities, communitiesEpoch: response.relation_epoch },
 			}));
 			return { ok: true, value: response };
 		} catch (error) {
@@ -430,6 +433,25 @@ export const graphActions = {
 			graphState.update((state) => ({ ...state, error: ge }));
 			return { ok: false, error: ge };
 		}
+	},
+
+	/**
+	 * Fetch connected components only when the relation index has moved past
+	 * the epoch the current community data was built from. A no-op when the
+	 * graph data is unchanged, so repeated seed loads do not re-fetch the
+	 * full component list.
+	 */
+	async loadComponentsIfStale(
+		projectId?: number,
+	): Promise<GraphActionResult<GraphComponentsResponse>> {
+		const state = get(graphState);
+		if (state.meta.communitiesEpoch >= state.meta.epoch) {
+			return {
+				ok: true,
+				value: { components: [], relation_epoch: state.meta.epoch, success: true },
+			};
+		}
+		return graphActions.loadComponents(projectId);
 	},
 
 	/** Run impact analysis for a changed file and record the result. */

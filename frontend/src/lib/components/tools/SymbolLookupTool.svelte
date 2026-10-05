@@ -5,7 +5,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import { currentProjectId } from '$lib/stores/project';
-	import type { GetSymbolsResponse, FileSymbolResult } from '$lib/api/tools';
+	import type { GetSymbolsResult, FileSymbolResult } from '$lib/api/tools';
 
 	interface Props {
 		filePath?: string;
@@ -15,7 +15,7 @@
 	let { filePath = $bindable(''), language = $bindable('typescript') }: Props =
 		$props();
 
-	let result: GetSymbolsResponse | null = $state(null);
+	let result: GetSymbolsResult | null = $state(null);
 	let loading = $state(false);
 	let error: string | null = $state(null);
 
@@ -82,8 +82,8 @@
 		</div>
 	</div>
 
-	{#if result?.result?.results}
-		{@const symbols = result.result.results.flatMap(
+	{#if result?.results}
+		{@const symbols = result.results.flatMap(
 			(r: FileSymbolResult) => r.symbols ?? [],
 		)}
 		<div class="symbols-results">

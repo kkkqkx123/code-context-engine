@@ -131,7 +131,7 @@
 						<div class="no-issues">No issues found ✓</div>
 					{:else}
 						<div class="issues-list">
-							{#each result.diagnostics as diagnostic (diagnostic.id || diagnostic.message)}
+							{#each result.diagnostics as diagnostic (diagnostic.message + diagnostic.position.row + ':' + diagnostic.position.column)}
 								<div
 									class="issue-card"
 									style="border-left-color: {getSeverityBordercolor(

@@ -8215,7 +8215,8 @@
           "file_path",
           "code_chunk",
           "start_line",
-          "end_line"
+          "end_line",
+          "score"
         ],
         "properties": {
           "code_chunk": {
@@ -8229,6 +8230,14 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "entity_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "All entity IDs associated with this result (a chunk may contain\nmultiple entities)."
           },
           "entity_names": {
             "type": "array",
@@ -8244,6 +8253,18 @@
           },
           "file_path": {
             "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "float",
+            "description": "Unified relevance score (post-fusion)."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Retrieval sources that contributed to this result (e.g. \"vector\", \"bm25\")."
           },
           "start_line": {
             "type": "integer",
