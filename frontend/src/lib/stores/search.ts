@@ -16,7 +16,7 @@ import {
 	type QueryType,
 	type SubQuery,
 } from '../api/search';
-import { currentProjectId } from './project';
+import { currentProjectId, onProjectChange } from './project';
 import { errorMessage } from '$lib/utils/errors';
 
 export const QUERY_TYPES: readonly QueryType[] = [
@@ -182,7 +182,11 @@ function syncUrl(state: SearchState) {
 		params.set('rerank', state.filters.enable_rerank ? 'on' : 'off');
 	if (state.filters.rerank_max_candidates !== null)
 		params.set('rerank_n', String(state.filters.rerank_max_candidates));
-	window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
+	window.history.replaceState(
+		null,
+		'',
+		`${window.location.pathname}?${params}`,
+	);
 }
 
 function buildCommonFilterFields(state: SearchState) {
@@ -195,8 +199,7 @@ function buildCommonFilterFields(state: SearchState) {
 		exclude_patterns: parseGlobs(state.filters.exclude_patterns),
 		include_patterns: parseGlobs(state.filters.include_patterns),
 		enable_rerank: state.filters.enable_rerank ?? undefined,
-		rerank_max_candidates:
-			state.filters.rerank_max_candidates ?? undefined,
+		rerank_max_candidates: state.filters.rerank_max_candidates ?? undefined,
 	};
 }
 
@@ -240,6 +243,20 @@ export const searchActions = {
 		autoSearchTimer = setTimeout(() => {
 			if (get(searchState).stale) void this.executeSearch();
 		}, 400);
+	},
+
+	/** Drop the result set and re-run it under the newly selected project. */
+	markProjectChanged() {
+		searchState.update((state) => ({
+			...state,
+			results: [],
+			total: 0,
+			elapsedMs: null,
+			sourcesUsed: [],
+			failedSubQueries: [],
+			stale: true,
+		}));
+		this.scheduleAutoSearch();
 	},
 
 	async executeSearch(page = 1) {
@@ -324,9 +341,17 @@ export const searchActions = {
 	/** Total number of client-side pages given the fetched result set. */
 	totalPages(): number {
 		const state = get(searchState);
-		return Math.max(1, Math.ceil(state.results.length / state.pagination.pageSize));
+		return Math.max(
+			1,
+			Math.ceil(state.results.length / state.pagination.pageSize),
+		);
 	},
 };
+
+// Results belong to the project that was selected when they were fetched.
+onProjectChange(() => {
+	searchActions.markProjectChanged();
+});
 
 async function buildAggregatedRequest(
 	projectId: number | null,

@@ -5,7 +5,7 @@ import { errorMessage } from '../utils/errors';
  * Manages storage operations and status
  */
 
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { storageApi, type StorageStatusDetail } from '../api/storage';
 import { indexApi } from '../api/index';
 import { currentProjectId } from './project';
@@ -55,10 +55,7 @@ export const storageActions = {
 		}));
 
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
-
-			await indexApi.clearIndex(pid!);
+			await indexApi.clearIndex(get(currentProjectId));
 
 			storageState.update((state) => ({
 				...state,

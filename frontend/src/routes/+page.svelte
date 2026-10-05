@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { metricsState, metricsActions } from '$lib/stores/metrics';
-	import { projects } from '$lib/stores/index';
+	import { projects } from '$lib/stores/project';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	onMount(() => {

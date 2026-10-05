@@ -3,7 +3,9 @@
 	import type { Component } from 'svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { entityState, entityActions } from '$lib/stores/entities';
+	import { onProjectChange } from '$lib/stores/project';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 
@@ -19,20 +21,26 @@
 	let entityId = $derived(page.params.id);
 	let currentTab = $state('details');
 
-	onMount(async () => {
-		if (entityId) {
-			// Load entity data first
-			await Promise.all([
-				// Try loading as function first, fallback to class
-				entityActions.loadFunction(entityId).then(() => {
-					if (!$entityState.currentEntity) {
-						return entityActions.loadClass(entityId);
-					}
-				}),
-			]);
-			// EntityDetail will be loaded when details tab is activated
+	async function loadEntity() {
+		if (!entityId) return;
+		await entityActions.loadFunction(entityId);
+		if (!get(entityState).currentEntity) {
+			await entityActions.loadClass(entityId);
 		}
+	}
+
+	onMount(() => {
+		void loadEntity();
 	});
+
+	// Entity ids resolve inside one project; after a switch nothing from the
+	// previous project may stay on screen, so clear first and reload.
+	$effect(() =>
+		onProjectChange(() => {
+			entityActions.clear();
+			void loadEntity();
+		}),
+	);
 
 	async function loadEntityDetailComponent() {
 		if (!entityDetailLoaded) {

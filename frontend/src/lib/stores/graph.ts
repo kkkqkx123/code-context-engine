@@ -425,7 +425,11 @@ export const graphActions = {
 			});
 			graphState.update((state) => ({
 				...state,
-				meta: { ...state.meta, communities, communitiesEpoch: response.relation_epoch },
+				meta: {
+					...state.meta,
+					communities,
+					communitiesEpoch: response.relation_epoch,
+				},
 			}));
 			return { ok: true, value: response };
 		} catch (error) {
@@ -448,7 +452,11 @@ export const graphActions = {
 		if (state.meta.communitiesEpoch >= state.meta.epoch) {
 			return {
 				ok: true,
-				value: { components: [], relation_epoch: state.meta.epoch, success: true },
+				value: {
+					components: [],
+					relation_epoch: state.meta.epoch,
+					success: true,
+				},
 			};
 		}
 		return graphActions.loadComponents(projectId);

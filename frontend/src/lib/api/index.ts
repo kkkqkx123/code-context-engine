@@ -8,8 +8,6 @@ import { call, client } from './client';
 import type { components } from './schema';
 
 export type Project = components['schemas']['ProjectConfig'];
-export type IndexRequest = components['schemas']['IndexRequest'];
-export type IndexResponse = components['schemas']['IndexResponse'];
 export type IncrementalIndexRequest =
 	components['schemas']['IncrementalIndexRequest'];
 export type IncrementalIndexResponse =
@@ -43,10 +41,6 @@ export type ProjectConfigUpdateResponse =
 	components['schemas']['ProjectConfigUpdateResponse'];
 
 export const indexApi = {
-	// Full directory indexing
-	runIndex: (data: IndexRequest): Promise<IndexResponse> =>
-		call(client.POST('/api/index', { body: data })),
-
 	// Incremental indexing
 	incrementalIndex: (
 		data: IncrementalIndexRequest,

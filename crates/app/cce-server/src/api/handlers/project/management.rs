@@ -273,15 +273,7 @@ pub async fn handle_update_project(
     };
 
     // Convert to ProjectConfig
-    let project = match record_to_config(&record) {
-        Ok(p) => p,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                format!("Failed to convert project data: {}", e),
-            ));
-        }
-    };
+    let project = record_to_config(&record);
 
     ApiResult::Success(ProjectDetailResponse {
         success: true,
@@ -358,9 +350,12 @@ pub async fn handle_delete_project(
 }
 
 /// Convert ProjectRecord to ProjectConfig
+///
+/// The list columns are optional JSON arrays written by this module; a column
+/// that is absent or unreadable is treated as an empty list.
 pub(crate) fn record_to_config(
     record: &cce_storage_sqlite::ProjectRecord,
-) -> Result<cce_api::models::ProjectConfig, serde_json::Error> {
+) -> cce_api::models::ProjectConfig {
     use cce_api::models::ProjectConfig;
 
     let parse_json_list = |val: &Option<String>| -> Vec<String> {
@@ -369,7 +364,7 @@ pub(crate) fn record_to_config(
         })
     };
 
-    Ok(ProjectConfig {
+    ProjectConfig {
         id: record.id.to_string(),
         name: record.name.clone(),
         root_path: record.root_path.clone(),
@@ -379,5 +374,5 @@ pub(crate) fn record_to_config(
         ignore_patterns: parse_json_list(&record.ignore_patterns),
         created_at: record.created_at.to_string(),
         last_indexed: record.last_indexed.clone(),
-    })
+    }
 }

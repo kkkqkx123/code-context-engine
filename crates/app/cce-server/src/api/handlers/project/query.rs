@@ -49,15 +49,7 @@ pub async fn handle_list_projects(
     };
 
     // Convert to ProjectConfig
-    let mut projects = Vec::new();
-    for record in records {
-        match record_to_config(&record) {
-            Ok(config) => projects.push(config),
-            Err(e) => {
-                tracing::warn!("Failed to convert project record: {}", e);
-            }
-        }
-    }
+    let projects: Vec<_> = records.iter().map(record_to_config).collect();
 
     let total = projects.len();
 
@@ -114,15 +106,7 @@ pub async fn handle_get_project(
     };
 
     // Convert to ProjectConfig
-    let project = match record_to_config(&record) {
-        Ok(p) => p,
-        Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                format!("Failed to convert project data: {}", e),
-            ));
-        }
-    };
+    let project = record_to_config(&record);
 
     ApiResult::Success(ProjectDetailResponse {
         success: true,

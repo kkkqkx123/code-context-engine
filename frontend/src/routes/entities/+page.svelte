@@ -4,7 +4,8 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { searchApi, type EntitySearchResultItem } from '$lib/api/search';
-	import { currentProjectId } from '$lib/stores/project';
+	import { currentProjectId, onProjectChange } from '$lib/stores/project';
+	import { get } from 'svelte/store';
 	import { errorMessage } from '$lib/utils/errors';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -40,7 +41,7 @@
 		try {
 			const response = await searchApi.entitySearch({
 				query: trimmed,
-				project_id: $currentProjectId,
+				project_id: get(currentProjectId),
 				kind_filter: kindFilter || undefined,
 				limit,
 			});
@@ -54,6 +55,16 @@
 			loading = false;
 		}
 	}
+
+	// Listed entities belong to the project they were searched under.
+	$effect(() =>
+		onProjectChange(() => {
+			results = [];
+			searched = false;
+			error = null;
+			if (query.trim()) void runSearch();
+		}),
+	);
 
 	function kindBadgeVariant(
 		kind: string,

@@ -2,18 +2,16 @@ import { errorMessage } from '../utils/errors';
 
 /**
  * Index State Store
- * Manages indexing operations and project state
+ * Manages indexing operations
  */
 
-import { writable, derived, get } from 'svelte/store';
+import { writable } from 'svelte/store';
 import {
 	indexApi,
 	projectApi,
-	type Project,
-	type IndexRequest,
 	type IncrementalIndexRequest,
 } from '../api/index';
-import { currentProjectId } from './project';
+import { loadProjects } from './project';
 
 export interface IndexState {
 	isIndexing: boolean;
@@ -33,28 +31,14 @@ export const indexState = writable<IndexState>({
 	lastError: null,
 });
 
-// Projects store
-export const projects = writable<Project[]>([]);
-export const selectedProject = writable<Project | null>(null);
-
-// Load projects on initialization
-export async function loadProjects() {
-	try {
-		const response = await projectApi.listProjects();
-		projects.set(response.projects);
-	} catch (error) {
-		console.error('Failed to load projects:', error);
-	}
-}
-
-// Derived store for active projects
-export const activeProjects = derived(projects, ($projects) =>
-	$projects.filter((p) => p.id),
-);
-
 // Actions
 export const indexActions = {
-	async startIndex(data: IndexRequest) {
+	/**
+	 * Index a project from its registered configuration (root path, extensions,
+	 * excludes, ignore rules). The project record is the single source of truth
+	 * for what gets indexed.
+	 */
+	async startProjectIndex(projectId: string) {
 		indexState.update((state) => ({
 			...state,
 			isIndexing: true,
@@ -63,7 +47,8 @@ export const indexActions = {
 		}));
 
 		try {
-			await indexApi.runIndex(data);
+			await projectApi.indexProject(projectId);
+			await loadProjects();
 			indexState.update((state) => ({
 				...state,
 				isIndexing: false,
@@ -89,8 +74,7 @@ export const indexActions = {
 		}));
 
 		try {
-			const pid = get(currentProjectId);
-			await indexApi.incrementalIndex({ ...data, project_id: pid });
+			await indexApi.incrementalIndex(data);
 			indexState.update((state) => ({
 				...state,
 				isIndexing: false,

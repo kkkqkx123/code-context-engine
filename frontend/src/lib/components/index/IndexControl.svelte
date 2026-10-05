@@ -1,82 +1,37 @@
 <script lang="ts">
-	import { errorMessage } from '$lib/utils/errors';
-	import type { IndexRequest } from '$lib/api/index';
-	import { indexState, indexActions, selectedProject } from '$lib/stores/index';
-	import { currentProjectId } from '$lib/stores/project';
-	import { get } from 'svelte/store';
+	import { indexState, indexActions } from '$lib/stores/index';
+	import { currentProject } from '$lib/stores/project';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
-	import Input from '../ui/Input.svelte';
 	import ProgressBar from '../ui/ProgressBar.svelte';
 	import Badge from '../ui/Badge.svelte';
 
 	// Form state
-	let indexPath = $state('');
-	let extensions = $state('');
-	let excludePatterns = $state('');
+	let incremental = $state(false);
 	let forceReindex = $state(false);
-	let respectGitignore = $state(true);
-	let isIncremental = $state(false);
 
 	function resetForm() {
-		indexPath = '';
-		extensions = '';
-		excludePatterns = '';
+		incremental = false;
 		forceReindex = false;
-		respectGitignore = true;
-		isIncremental = false;
+	}
+
+	function goToProjects() {
+		goto(resolve('/projects'));
 	}
 
 	async function handleIndex() {
-		if (!indexPath) {
-			alert('Directory path is required');
-			return;
-		}
+		const project = $currentProject;
+		if (!project) return;
 
-		const data: IndexRequest = {
-			path: indexPath,
-			project_id: get(currentProjectId)!,
-			respect_gitignore: respectGitignore,
-		};
-
-		if (extensions) {
-			data.extensions = extensions
-				.split(',')
-				.map((e) => e.trim())
-				.filter(Boolean);
-		}
-
-		if (excludePatterns) {
-			data.exclude_dirs = excludePatterns
-				.split(',')
-				.map((e) => e.trim())
-				.filter(Boolean);
-		}
-
-		try {
-			if (isIncremental) {
-				await indexActions.startIncrementalIndex({
-					...data,
-					force_reindex: forceReindex,
-				});
-			} else {
-				await indexActions.startIndex(data);
-			}
-			resetForm();
-		} catch (error) {
-			alert(`Failed to start indexing: ${errorMessage(error)}`);
-		}
-	}
-
-	function handleCancel() {
-		indexActions.stopIndex();
-	}
-
-	function useSelectedProject() {
-		if ($selectedProject) {
-			indexPath = $selectedProject.root_path;
-			extensions = $selectedProject.extensions?.join(', ') || '';
-			excludePatterns = $selectedProject.exclude_dirs?.join(', ') || '';
+		if (incremental) {
+			await indexActions.startIncrementalIndex({
+				project_id: Number(project.id),
+				force_reindex: forceReindex,
+			});
+		} else {
+			await indexActions.startProjectIndex(project.id);
 		}
 	}
 </script>
@@ -108,79 +63,70 @@
 			{/if}
 
 			<div class="progress-actions">
-				<Button variant="danger" onclick={handleCancel}>Cancel Indexing</Button>
+				<Button variant="danger" onclick={indexActions.stopIndex}>
+					Cancel Indexing
+				</Button>
 			</div>
 		</div>
 	{:else}
 		<div class="form-section">
 			<div class="form-header">
 				<h3>Configure Index Operation</h3>
-				{#if $selectedProject}
-					<Button variant="secondary" size="sm" onclick={useSelectedProject}>
-						Use Selected Project
-					</Button>
-				{/if}
 			</div>
 
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					handleIndex();
-				}}
-			>
-				<Input
-					label="Directory Path"
-					type="text"
-					bind:value={indexPath}
-					required={true}
-					placeholder="/path/to/directory"
-				/>
-
-				<Input
-					label="File Extensions (comma-separated)"
-					type="text"
-					bind:value={extensions}
-					placeholder="rs, ts, js, py, go"
-				/>
-
-				<Input
-					label="Exclude Patterns (comma-separated)"
-					type="text"
-					bind:value={excludePatterns}
-					placeholder="node_modules, target, .git, dist"
-				/>
-
-				<div class="toggle-group">
-					<label class="toggle-item">
-						<input type="checkbox" bind:checked={forceReindex} />
-						<span class="toggle-label">Force Re-index</span>
-						<span class="toggle-description"
-							>Ignore cache and re-parse all files</span
-						>
-					</label>
-
-					<label class="toggle-item">
-						<input type="checkbox" bind:checked={respectGitignore} />
-						<span class="toggle-label">Respect .gitignore</span>
-						<span class="toggle-description"
-							>Skip files listed in .gitignore</span
-						>
-					</label>
-
-					<label class="toggle-item">
-						<input type="checkbox" bind:checked={isIncremental} />
-						<span class="toggle-label">Incremental Mode</span>
-						<span class="toggle-description">Only process changed files</span>
-					</label>
+			{#if $currentProject}
+				<div class="target-project">
+					<span class="target-label">Target</span>
+					<span class="target-name">{$currentProject.name}</span>
+					<span class="target-path" title={$currentProject.root_path}
+						>{$currentProject.root_path}</span
+					>
 				</div>
 
-				<div class="form-actions">
-					<Button type="submit" variant="primary">Start Indexing</Button>
-					<Button type="button" variant="secondary" onclick={resetForm}>
-						Reset
+				<form
+					onsubmit={(e) => {
+						e.preventDefault();
+						handleIndex();
+					}}
+				>
+					<div class="toggle-group">
+						<label class="toggle-item">
+							<input type="checkbox" bind:checked={incremental} />
+							<span class="toggle-label">Incremental Mode</span>
+							<span class="toggle-description">Only process changed files</span>
+						</label>
+
+						{#if incremental}
+							<label class="toggle-item">
+								<input type="checkbox" bind:checked={forceReindex} />
+								<span class="toggle-label">Force Re-index</span>
+								<span class="toggle-description"
+									>Ignore cache and re-parse all files</span
+								>
+							</label>
+						{/if}
+					</div>
+
+					<p class="config-hint">
+						Path, extensions, excluded directories and ignore rules come from
+						the project configuration.
+					</p>
+
+					<div class="form-actions">
+						<Button type="submit" variant="primary">Start Indexing</Button>
+						<Button type="button" variant="secondary" onclick={resetForm}>
+							Reset
+						</Button>
+					</div>
+				</form>
+			{:else}
+				<div class="empty-state">
+					<p>No project selected. Create a project to start indexing.</p>
+					<Button variant="primary" onclick={goToProjects}>
+						Go to Projects
 					</Button>
 				</div>
-			</form>
+			{/if}
 		</div>
 	{/if}
 </Card>
@@ -273,6 +219,61 @@
 		gap: 1.5rem;
 	}
 
+	.target-project {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		padding: 1rem;
+		border: 1px solid var(--gray-200);
+		background: var(--gray-100);
+		min-width: 0;
+	}
+
+	.target-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+	}
+
+	.target-name {
+		font-family: 'Space Grotesk', sans-serif;
+		font-weight: 700;
+		font-size: 1rem;
+	}
+
+	.target-path {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+		color: var(--gray-600);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.config-hint {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+		color: var(--gray-500);
+		margin: 0;
+	}
+
+	.empty-state {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 1rem;
+		padding: 1.5rem;
+		border: 1px dashed var(--gray-300);
+		background: var(--gray-100);
+	}
+
+	.empty-state p {
+		margin: 0;
+		color: var(--gray-600);
+	}
+
 	.toggle-group {
 		display: flex;
 		flex-direction: column;
@@ -310,6 +311,5 @@
 	.form-actions {
 		display: flex;
 		gap: 1rem;
-		margin-top: 1rem;
 	}
 </style>

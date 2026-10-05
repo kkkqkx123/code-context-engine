@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { errorMessage } from '$lib/utils/errors';
-	import { onMount } from 'svelte';
-	import { projects, selectedProject, loadProjects } from '$lib/stores/index';
+	import {
+		projects,
+		currentProject,
+		currentProjectId,
+		loadProjects,
+	} from '$lib/stores/project';
 	import { projectApi, type Project } from '$lib/api/index';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
@@ -17,10 +21,6 @@
 	let projectPath = $state('');
 	let extensions = $state('');
 	let excludePatterns = $state('');
-
-	onMount(() => {
-		loadProjects();
-	});
 
 	function resetForm() {
 		projectName = '';
@@ -123,7 +123,7 @@
 	}
 
 	function selectProject(project: Project) {
-		selectedProject.set(project);
+		currentProjectId.set(Number(project.id));
 	}
 </script>
 
@@ -202,7 +202,7 @@
 			{#each $projects as project (project.id)}
 				<div
 					class="project-item"
-					class:selected={$selectedProject?.id === project.id}
+					class:selected={$currentProject?.id === project.id}
 					onclick={() => selectProject(project)}
 					role="button"
 					tabindex="0"

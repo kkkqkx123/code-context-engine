@@ -56,11 +56,7 @@
 	function handleRerankChange(event: Event) {
 		const target = event.target as HTMLSelectElement;
 		const value =
-			target.value === 'on'
-				? true
-				: target.value === 'off'
-					? false
-					: null;
+			target.value === 'on' ? true : target.value === 'off' ? false : null;
 		searchActions.updateFilter('enable_rerank', value);
 	}
 
@@ -140,7 +136,9 @@
 	</div>
 
 	<div class="filter-section">
-		<label class="section-label" for="min-score-range">Min Score Threshold</label>
+		<label class="section-label" for="min-score-range"
+			>Min Score Threshold</label
+		>
 		<div class="range-row">
 			<input
 				id="min-score-range"
@@ -151,7 +149,9 @@
 				value={$searchState.filters.min_score}
 				oninput={handleMinScoreChange}
 			/>
-			<span class="range-value">{$searchState.filters.min_score.toFixed(1)}</span>
+			<span class="range-value"
+				>{$searchState.filters.min_score.toFixed(1)}</span
+			>
 		</div>
 	</div>
 
@@ -224,7 +224,11 @@
 	<div class="filter-grid">
 		<div class="filter-section">
 			<label class="section-label" for="rerank-select">Rerank</label>
-			<select id="rerank-select" value={rerankValue()} onchange={handleRerankChange}>
+			<select
+				id="rerank-select"
+				value={rerankValue()}
+				onchange={handleRerankChange}
+			>
 				{#each RERANK_CHOICES as choice (choice.value)}
 					<option value={choice.value}>{choice.label}</option>
 				{/each}

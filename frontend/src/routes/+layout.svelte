@@ -5,11 +5,11 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
+	import ProjectSelector from '$lib/components/ui/ProjectSelector.svelte';
 	import { isOnline } from '$lib/stores/network';
 	import { healthActions } from '$lib/stores/health';
 	import { metricsState, metricsActions } from '$lib/stores/metrics';
-	import { projects, loadProjects } from '$lib/stores/index';
-	import { currentProjectId } from '$lib/stores/project';
+	import { loadProjects } from '$lib/stores/project';
 
 	type NavHref =
 		| '/'
@@ -116,11 +116,6 @@
 		}
 	}
 
-	function onProjectChange(event: Event) {
-		const target = event.currentTarget as HTMLSelectElement;
-		currentProjectId.set(Number(target.value));
-	}
-
 	onMount(() => {
 		loadProjects();
 		healthActions.startAutoRefresh(15000);
@@ -165,27 +160,7 @@
 					>{serverOk ? 'Server Online' : 'Server Offline'}</span
 				>
 			</div>
-			<label class="project-label" for="project-select">Current Project</label>
-			<select
-				id="project-select"
-				class="project-select"
-				onchange={onProjectChange}
-			>
-				{#if $projects.length === 0}
-					<option value={$currentProjectId} selected
-						>{`#${$currentProjectId}`}</option
-					>
-				{:else}
-					{#each $projects as project (project.id)}
-						<option
-							value={Number(project.id)}
-							selected={Number(project.id) === $currentProjectId}
-						>
-							{project.name || `#${project.id}`}
-						</option>
-					{/each}
-				{/if}
-			</select>
+			<ProjectSelector variant="sidebar" />
 		</div>
 
 		<nav class="nav" aria-label="Main navigation">
@@ -251,6 +226,9 @@
 			</nav>
 
 			<div class="topbar-right">
+				<div class="topbar-project">
+					<ProjectSelector variant="topbar" />
+				</div>
 				<div class="health-dots" title="Storage component health">
 					{#if $metricsState.storageStatus}
 						{@const s = $metricsState.storageStatus}
@@ -362,27 +340,8 @@
 		color: var(--gray-300);
 	}
 
-	.project-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-500);
-	}
-
-	.project-select {
-		width: 100%;
-		padding: 0.5rem 0.5rem;
-		background: var(--gray-900);
-		color: var(--white);
-		border: 1px solid var(--gray-700);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.8rem;
-	}
-
-	.project-select:focus {
-		outline: none;
-		border-color: var(--accent);
+	.topbar-project {
+		display: none;
 	}
 
 	.nav {
@@ -604,6 +563,17 @@
 
 		.menu-toggle {
 			display: flex;
+		}
+
+		/* The sidebar is a drawer here, so the project selector moves to the
+		   topbar; secondary readouts give up their space for it. */
+		.topbar-project {
+			display: block;
+		}
+
+		.health-dots,
+		.clock {
+			display: none;
 		}
 	}
 </style>

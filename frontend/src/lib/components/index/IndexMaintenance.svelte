@@ -8,8 +8,9 @@
 		type IndexStatsResponse,
 		type DeleteFileResponse,
 	} from '$lib/api/index';
-	import { currentProjectId } from '$lib/stores/project';
+	import { currentProjectId, onProjectChange } from '$lib/stores/project';
 	import { get } from 'svelte/store';
+	import { onMount } from 'svelte';
 
 	// ─── Stats ───────────────────────────────────────────────────
 	let stats = $state<IndexStatsResponse['statistics'] | null>(null);
@@ -20,6 +21,7 @@
 	async function loadStats() {
 		statsLoading = true;
 		statsError = '';
+		stats = null;
 		try {
 			const response = await indexApi.getStats(get(currentProjectId));
 			stats = response.statistics;
@@ -30,6 +32,13 @@
 			statsLoading = false;
 		}
 	}
+
+	onMount(() => {
+		void loadStats();
+	});
+
+	// Statistics are project-scoped; never keep the previous project's counts.
+	$effect(() => onProjectChange(() => void loadStats()));
 
 	// ─── Delete file ─────────────────────────────────────────────
 	let deleteFilePath = $state('');
@@ -151,6 +160,8 @@
 		</div>
 		{#if statsError}
 			<div class="inline-error">{statsError}</div>
+		{:else if statsLoading}
+			<p class="stats-loading">Loading statistics...</p>
 		{:else if stats}
 			<div class="stats-grid">
 				<div class="stat-item">
@@ -427,6 +438,13 @@
 		padding: 0.6rem 0.75rem;
 		border: 1px solid var(--danger);
 		color: var(--danger);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.72rem;
+	}
+
+	.stats-loading {
+		margin-top: 0.75rem;
+		color: var(--gray-500);
 		font-family: 'Space Mono', monospace;
 		font-size: 0.72rem;
 	}

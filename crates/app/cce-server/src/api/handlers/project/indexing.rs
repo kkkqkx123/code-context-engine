@@ -4,6 +4,7 @@
 
 use axum::extract::{Path, State};
 
+use super::management::record_to_config;
 use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
 use cce_api::models::{DeadLetterRetryResponse, ErrorResponse, ProjectIndexResponse};
@@ -55,16 +56,16 @@ pub async fn handle_project_index(
         }
     };
 
-    // Build IndexOptions from project config
-    let extensions: Vec<String> = vec![]; // Default extensions
-    let exclude_dirs: Vec<String> = vec![]; // Default exclude dirs
-    let ignore_patterns: Vec<String> = vec![]; // Default ignore patterns
+    // Build IndexOptions from the project record so indexing follows the
+    // configuration registered for this project (root path, extensions,
+    // excludes, ignore patterns, gitignore handling).
+    let config = record_to_config(&record);
 
-    let index_options = cce_orchestrator::IndexOptions::new(&record.root_path)
-        .with_extensions(extensions)
-        .with_exclude_dirs(exclude_dirs)
-        .with_gitignore(true)
-        .with_ignore_patterns(ignore_patterns);
+    let index_options = cce_orchestrator::IndexOptions::new(&config.root_path)
+        .with_extensions(config.extensions)
+        .with_exclude_dirs(config.exclude_dirs)
+        .with_gitignore(config.respect_gitignore)
+        .with_ignore_patterns(config.ignore_patterns);
 
     // Execute indexing using engine's index method with project_id
     let result = match state.engine.index(id, index_options).await {

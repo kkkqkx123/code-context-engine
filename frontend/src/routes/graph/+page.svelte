@@ -26,7 +26,7 @@
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
 	import GraphFilterPanel from '$lib/components/graph/GraphFilterPanel.svelte';
 	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
-	import { currentProjectId } from '$lib/stores/project';
+	import { onProjectChange } from '$lib/stores/project';
 	import type { GraphDirection } from '$lib/api/graph';
 	import {
 		CONFIDENCE_META,
@@ -77,15 +77,17 @@
 				),
 	);
 
-	let projectId = $derived($currentProjectId);
-
-	onMount(async () => {
+	/** Seed the canvas from the URL the way a fresh visit does. */
+	async function loadInitialGraph() {
 		if (queryEntity) {
 			seedMode = 'focus';
 			seedId = queryEntity;
 			await graphActions.loadEgo(queryEntity, egoDepth, egoDirection);
 			selectedId = queryEntity;
 		} else {
+			// Nothing seeded from the URL: show the whole project graph and keep
+			// the seed mode in sync so a project switch re-loads the same view.
+			seedMode = 'overview';
 			await graphActions.loadOverview(400);
 		}
 		if (queryFile) {
@@ -93,7 +95,20 @@
 			await graphActions.loadImpact(queryFile);
 		}
 		await graphActions.loadComponentsIfStale();
+	}
+
+	onMount(async () => {
+		await loadInitialGraph();
 	});
+
+	// The canvas only ever holds one project's nodes: clear the previous working
+	// set and re-run the current seed against the newly selected project.
+	$effect(() =>
+		onProjectChange((projectId) => {
+			graphActions.reset(projectId);
+			void runSeed();
+		}),
+	);
 
 	async function runSeed() {
 		const id = seedId.trim();
@@ -220,21 +235,6 @@
 			{ duration: 250 },
 		);
 	}
-
-	let prevProjectId: number | null = null;
-	$effect(() => {
-		// Reset accumulated graph state when the selected project changes, so
-		// nodes/edges from the previous project never linger in the canvas.
-		// First run only records the baseline and never resets.
-		if (prevProjectId === null) {
-			prevProjectId = projectId;
-			return;
-		}
-		if (projectId !== prevProjectId) {
-			prevProjectId = projectId;
-			graphActions.reset(projectId);
-		}
-	});
 </script>
 
 <svelte:head>

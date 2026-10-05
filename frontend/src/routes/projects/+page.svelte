@@ -5,9 +5,12 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
-	import { projects, selectedProject, loadProjects } from '$lib/stores/index';
+	import {
+		projects,
+		loadProjects,
+		currentProjectId,
+	} from '$lib/stores/project';
 	import { projectApi, type Project } from '$lib/api/index';
-	import { currentProjectId } from '$lib/stores/project';
 
 	let loading = $state(false);
 	let error = $state<string | null>(null);
@@ -156,7 +159,6 @@
 	}
 
 	function selectProject(project: Project) {
-		selectedProject.set(project);
 		detailProject = project;
 		currentProjectId.set(Number(project.id));
 	}

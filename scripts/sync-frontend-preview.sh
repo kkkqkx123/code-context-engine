@@ -36,25 +36,26 @@ cp "$FRONTEND_DIR/src/app.html" "$PREVIEW_DIR/src/"
 cp "$FRONTEND_DIR/src/app.css" "$PREVIEW_DIR/src/"
 cp "$FRONTEND_DIR/src/app.d.ts" "$PREVIEW_DIR/src/"
 
-# Sync all components (ui, index, search, entities, tools)
+# Sync all components (ui, index, search, entities, tools, graph)
 echo "Syncing components..."
 mkdir -p "$PREVIEW_DIR/src/lib/components"
-cp -r "$FRONTEND_DIR/src/lib/components/"* "$PREVIEW_DIR/src/lib/components/"
+cp -r "$FRONTEND_DIR/src/lib/components/." "$PREVIEW_DIR/src/lib/components/"
 
 # Sync stores
 echo "Syncing stores..."
 mkdir -p "$PREVIEW_DIR/src/lib/stores"
-cp "$FRONTEND_DIR/src/lib/stores/"*.ts "$PREVIEW_DIR/src/lib/stores/"
+cp -r "$FRONTEND_DIR/src/lib/stores/." "$PREVIEW_DIR/src/lib/stores/"
 
 # Sync shared utils (graph presentation model, formatters)
 echo "Syncing utils..."
 mkdir -p "$PREVIEW_DIR/src/lib/utils"
-cp "$FRONTEND_DIR/src/lib/utils/"*.ts "$PREVIEW_DIR/src/lib/utils/"
+cp -r "$FRONTEND_DIR/src/lib/utils/." "$PREVIEW_DIR/src/lib/utils/"
 
 # Sync API modules (but preserve mock-enabled client.ts)
 echo "Syncing API modules..."
 mkdir -p "$PREVIEW_DIR/src/lib/api"
 for file in "$FRONTEND_DIR/src/lib/api/"*.ts; do
+    [ -e "$file" ] || continue
     basename=$(basename "$file")
     # Skip client.ts - we have a mock-enabled version
     if [ "$basename" != "client.ts" ]; then
@@ -65,12 +66,15 @@ done
 # Sync ambient type declarations (e.g. third-party module shims)
 echo "Syncing types..."
 mkdir -p "$PREVIEW_DIR/src/types"
-cp "$FRONTEND_DIR/src/types/"*.d.ts "$PREVIEW_DIR/src/types/"
+for file in "$FRONTEND_DIR/src/types/"*.d.ts; do
+    [ -e "$file" ] || continue
+    cp "$file" "$PREVIEW_DIR/src/types/"
+done
 
 # Sync routes (but NOT the preview-specific mock files)
 echo "Syncing routes..."
 mkdir -p "$PREVIEW_DIR/src/routes"
-cp -r "$FRONTEND_DIR/src/routes/"* "$PREVIEW_DIR/src/routes/"
+cp -r "$FRONTEND_DIR/src/routes/." "$PREVIEW_DIR/src/routes/"
 
 # Sync package.json dependencies (preserve preview name and mock .env)
 echo "Syncing dependencies..."
@@ -86,6 +90,7 @@ echo "  - static/**/* (all static assets, e.g. favicon.png)"
 echo "  - src/app.html, src/app.css, src/app.d.ts"
 echo "  - src/lib/components/**/* (all components)"
 echo "  - src/lib/stores/*.ts (all stores)"
+echo "  - src/lib/utils/*.ts (all utils)"
 echo "  - src/lib/api/*.ts (except client.ts - mock-enabled)"
 echo "  - src/types/*.d.ts (ambient declarations)"
 echo "  - src/routes/**/* (all routes)"

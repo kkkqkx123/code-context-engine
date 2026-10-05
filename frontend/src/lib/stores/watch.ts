@@ -5,9 +5,9 @@ import { errorMessage } from '../utils/errors';
  * Manages file watching operations
  */
 
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { watchApi, type WatchStatus } from '../api/watch';
-import { currentProjectId } from './project';
+import { currentProjectId, onProjectChange } from './project';
 
 export interface WatchState {
 	status: WatchStatus | null;
@@ -36,10 +36,9 @@ export const watchActions = {
 		watchState.update((state) => ({ ...state, isLoading: true, error: null }));
 
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
+			const pid = get(currentProjectId);
 
-			await watchApi.startWatch(pid!, {
+			await watchApi.startWatch(pid, {
 				path,
 				extensions,
 				debounce_ms: debounceMs,
@@ -64,10 +63,9 @@ export const watchActions = {
 		watchState.update((state) => ({ ...state, isLoading: true, error: null }));
 
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
+			const pid = get(currentProjectId);
 
-			await watchApi.stopWatch(pid!);
+			await watchApi.stopWatch(pid);
 			await watchActions.loadStatus();
 
 			watchState.update((state) => ({
@@ -86,10 +84,9 @@ export const watchActions = {
 
 	async loadStatus() {
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
+			const pid = get(currentProjectId);
 
-			const response = await watchApi.getStatus(pid!);
+			const response = await watchApi.getStatus(pid);
 			watchState.update((state) => ({
 				...state,
 				status: response.status,
@@ -114,3 +111,8 @@ export const watchActions = {
 		watchState.update((state) => ({ ...state, events: [] }));
 	},
 };
+
+// Watch status is scoped to one project, so re-read it after a switch.
+onProjectChange(() => {
+	void watchActions.loadStatus();
+});

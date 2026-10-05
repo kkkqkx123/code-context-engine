@@ -3,7 +3,7 @@
  * Manages entity details and relationship exploration
  */
 
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import {
 	entityApi,
 	type FunctionInfo,
@@ -48,13 +48,11 @@ export const entityState = writable<EntityState>({
 
 // Actions
 export const entityActions = {
-	async loadFunction(id: string, projectId?: number) {
+	async loadFunction(id: string) {
 		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
 
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
-			const projId = projectId ?? pid!;
+			const projId = get(currentProjectId);
 
 			const [func, calls, callers] = await Promise.all([
 				entityApi.getFunction(projId, id),
@@ -79,13 +77,11 @@ export const entityActions = {
 		}
 	},
 
-	async loadClass(id: string, projectId?: number) {
+	async loadClass(id: string) {
 		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
 
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
-			const projId = projectId ?? pid!;
+			const projId = get(currentProjectId);
 
 			const [inheritance, implementations] = await Promise.all([
 				entityApi.getInheritance(projId, id),
@@ -109,15 +105,9 @@ export const entityActions = {
 		}
 	},
 
-	async loadCallChain(
-		id: string,
-		direction: 'up' | 'down' = 'down',
-		projectId?: number,
-	) {
+	async loadCallChain(id: string, direction: 'up' | 'down' = 'down') {
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
-			const projId = projectId ?? pid!;
+			const projId = get(currentProjectId);
 
 			const response = await entityApi.getCallChain(projId, id, direction);
 			entityState.update((s) => ({ ...s, callChain: response.call_chain }));
@@ -131,12 +121,7 @@ export const entityActions = {
 	 * stored so the UI can distinguish "no path exists" from "request failed";
 	 * a previous path is cleared either way.
 	 */
-	async loadCallPath(
-		fromId: string,
-		toId: string,
-		maxDepth = 10,
-		projectId?: number,
-	) {
+	async loadCallPath(fromId: string, toId: string, maxDepth = 10) {
 		entityState.update((s) => ({
 			...s,
 			isLoading: true,
@@ -147,9 +132,7 @@ export const entityActions = {
 		}));
 
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
-			const projId = projectId ?? pid!;
+			const projId = get(currentProjectId);
 
 			const response = await entityApi.getCallPath(
 				projId,
