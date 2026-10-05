@@ -217,7 +217,7 @@ pub enum SearchCommands {
         #[arg(short, long)]
         query: String,
 
-        /// Query type: vector, bm25, hybrid, hierarchical
+        /// Query type: vector, bm25, hybrid, summary
         #[arg(short = 't', long, default_value = "hybrid")]
         query_type: String,
 

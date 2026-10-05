@@ -7,7 +7,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { metricsApi, type AggregatedMetric } from '$lib/api/metrics';
-	import { currentProjectId } from '$lib/stores/project';
+	import { currentProjectId, onProjectChange } from '$lib/stores/project';
 
 	// ─── History query state ──────────────────────────────────────
 	function toLocalInput(date: Date): string {
@@ -41,6 +41,13 @@
 			historyLoading = false;
 		}
 	}
+
+	// History scoped to the current project must be re-read after a switch.
+	$effect(() =>
+		onProjectChange(() => {
+			if (scopeProject && historyLoaded) void loadHistory();
+		}),
+	);
 
 	function formatNumber(value: number | null | undefined): string {
 		if (value === null || value === undefined) return '-';

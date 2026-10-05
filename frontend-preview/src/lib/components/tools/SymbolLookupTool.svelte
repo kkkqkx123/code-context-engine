@@ -3,6 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import { get } from 'svelte/store';
 	import { toolsApi } from '$lib/api/tools';
 	import { currentProjectId } from '$lib/stores/project';
 	import type { GetSymbolsResult, FileSymbolResult } from '$lib/api/tools';
@@ -27,11 +28,8 @@
 		result = null;
 
 		try {
-			let projectId: number;
-			currentProjectId.subscribe((v) => (projectId = v))();
-
 			result = await toolsApi.getSymbols({
-				project_id: projectId!,
+				project_id: get(currentProjectId),
 				paths: [filePath],
 			});
 		} catch (err) {

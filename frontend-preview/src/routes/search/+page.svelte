@@ -9,7 +9,6 @@
 		AGGREGATED_TYPE,
 	} from '$lib/stores/search';
 	import SearchInput from '$lib/components/search/SearchInput.svelte';
-	import type { SearchResultItem } from '$lib/api/search';
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
@@ -50,8 +49,14 @@
 	// Get paginated results for display
 	let paginatedResults = $derived(searchActions.getPaginatedResults());
 	let totalPages = $derived(searchActions.totalPages());
+	// Backend returns at most `page * pageSize` rows (top-K, no offset), so a
+	// next page exists only when we already hold that many rows. `total` is the
+	// truncated count; once we've reached it there is nothing more to fetch.
 	let hasMore = $derived(
-		$searchState.results.length > $searchState.pagination.page * $searchState.pagination.pageSize,
+		$searchState.results.length >
+			$searchState.pagination.page * $searchState.pagination.pageSize &&
+			$searchState.total >
+				$searchState.pagination.page * $searchState.pagination.pageSize,
 	);
 </script>
 
@@ -102,14 +107,18 @@
 						<span class="elapsed">· {$searchState.elapsedMs}ms</span>
 					{/if}
 					{#if $searchState.mode === AGGREGATED_TYPE && $searchState.sourcesUsed.length > 0}
-						<span class="elapsed">· sources: {$searchState.sourcesUsed.join(', ')}</span>
+						<span class="elapsed"
+							>· sources: {$searchState.sourcesUsed.join(', ')}</span
+						>
 					{/if}
 				</h2>
 			</Toolbar>
 
 			{#if $searchState.failedSubQueries.length > 0}
 				<div class="warn-banner">
-					Sub-queries failed (partial results): {$searchState.failedSubQueries.join(', ')}
+					Sub-queries failed (partial results): {$searchState.failedSubQueries.join(
+						', ',
+					)}
 				</div>
 			{/if}
 
@@ -138,11 +147,7 @@
 					<span class="page-info">
 						Page {$searchState.pagination.page} of {hasMore ? '?' : totalPages}
 					</span>
-					<Button
-						variant="secondary"
-						onclick={nextPage}
-						disabled={!hasMore}
-					>
+					<Button variant="secondary" onclick={nextPage} disabled={!hasMore}>
 						Next
 					</Button>
 				</div>

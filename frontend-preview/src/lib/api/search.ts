@@ -7,13 +7,7 @@
 import { call, client } from './client';
 import type { components } from './schema';
 
-export type QueryType =
-	| 'vector'
-	| 'bm25'
-	| 'hybrid'
-	| 'summary'
-	| 'hierarchical'
-	| 'semantic_with_relations';
+export type QueryType = 'vector' | 'bm25' | 'hybrid' | 'summary';
 
 export type SearchRequest = components['schemas']['SearchRequest'];
 export type SubQuery = components['schemas']['SubQueryRequest'];

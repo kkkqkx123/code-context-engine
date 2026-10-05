@@ -10,7 +10,8 @@
 		type ConfigValidateResponse,
 	} from '$lib/api/config';
 	import { projectApi, type ProjectConfigUpdateResponse } from '$lib/api';
-	import { currentProjectId } from '$lib/stores/project';
+	import { currentProjectId, onProjectChange } from '$lib/stores/project';
+	import { get } from 'svelte/store';
 	import { errorMessage } from '$lib/utils/errors';
 
 	let activeTab = $state<'info' | 'validate' | 'reload' | 'project'>('info');
@@ -33,7 +34,7 @@
 		projectConfigLoading = true;
 		projectConfigError = null;
 		try {
-			const detail = await projectApi.getProject(String($currentProjectId));
+			const detail = await projectApi.getProject(String(get(currentProjectId)));
 			const project = detail.project;
 			// Only expose user-editable fields; identity and bookkeeping fields
 			// are managed by the backend.
@@ -92,6 +93,13 @@
 		await loadValidate();
 	});
 
+	// The editor holds one project's config; reload it after a switch.
+	$effect(() =>
+		onProjectChange(() => {
+			if (projectConfigLoaded) void loadProjectConfig();
+		}),
+	);
+
 	async function loadInfo() {
 		loading = true;
 		error = null;
@@ -117,9 +125,8 @@
 		error = null;
 		reloadResult = null;
 		try {
-			let pid: number;
-			currentProjectId.subscribe((v) => (pid = v))();
-			reloadResult = await configApi.reload(pid!);
+			const pid = get(currentProjectId);
+			reloadResult = await configApi.reload(pid);
 		} catch (e) {
 			error = errorMessage(e);
 		} finally {

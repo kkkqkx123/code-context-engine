@@ -37,6 +37,12 @@ export const mockClient = {
 		if (endpoint === '/api/health/bm25') return mockData.mockBm25Health as T;
 		if (endpoint === '/api/retry-queue') return mockData.mockRetryQueueStatus as T;
 		if (endpoint.startsWith('/api/index/stats')) return mockData.mockIndexStats as T;
+		if (endpoint.match(/\/api\/project\/\w+\/graph\/ego$/)) return mockData.mockGraphEgo as T;
+		if (endpoint.match(/\/api\/project\/\w+\/graph\/path$/)) return mockData.mockGraphPath as T;
+		if (endpoint.match(/\/api\/project\/\w+\/graph\/subgraph$/)) return mockData.mockGraphExport as T;
+		if (endpoint.match(/\/api\/project\/\w+\/graph\/components$/)) return mockData.mockGraphComponents as T;
+		if (endpoint.match(/\/api\/project\/\w+\/graph\/export$/)) return mockData.mockGraphExport as T;
+		if (endpoint.match(/\/api\/project\/\w+\/graph\/impact$/)) return mockData.mockGraphImpact as T;
 		if (endpoint === '/api/project') return { success: true, projects: mockData.mockProjects, total: mockData.mockProjects.length } as T;
 		if (endpoint.match(/\/api\/project\/\w+$/)) return { success: true, project: mockData.mockProjects[0] } as T;
 		if (endpoint.match(/\/api\/project\/\w+\/function\/\w+$/)) return mockData.mockFunctionDetail as T;

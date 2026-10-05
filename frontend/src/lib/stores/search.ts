@@ -24,13 +24,28 @@ export const QUERY_TYPES: readonly QueryType[] = [
 	'bm25',
 	'hybrid',
 	'summary',
-	'hierarchical',
-	'semantic_with_relations',
 ];
 
-/** Pseudo query type: fan out into BM25 + Vector sub-queries via /aggregated */
+/** Query types a sub-query may use (backend validates: vector, bm25, hybrid, summary) */
+export const SUB_QUERY_TYPES: readonly QueryType[] = [
+	'vector',
+	'bm25',
+	'hybrid',
+	'summary',
+];
+
+/** Pseudo query type: fan out into weighted sub-queries via /aggregated */
 export const AGGREGATED_TYPE = 'aggregated' as const;
 export type SearchMode = QueryType | typeof AGGREGATED_TYPE;
+
+/** Backend rejects aggregated requests with more than this many sub-queries */
+export const MAX_SUB_QUERIES = 10;
+
+export interface SubQueryDraft {
+	text: string;
+	query_type: QueryType;
+	weight: number;
+}
 
 export interface SearchFilters {
 	directory_prefix: string;
@@ -48,11 +63,8 @@ export interface SearchFilters {
 export interface SearchState {
 	query: string;
 	mode: SearchMode;
-	/** Aggregated-mode advanced sub-query texts (empty = auto-decompose) */
-	bm25Query: string;
-	vectorQuery: string;
-	bm25Weight: number;
-	vectorWeight: number;
+	/** Aggregated-mode sub-queries; empty list = auto-decompose from the main query */
+	subQueries: SubQueryDraft[];
 	results: SearchResultItem[];
 	total: number;
 	elapsedMs: number | null;
@@ -126,21 +138,18 @@ function filtersFromUrl(): SearchFilters {
 }
 
 function modeFromUrl(): SearchMode {
-	if (typeof window === 'undefined') return 'hybrid';
+	if (typeof window === 'undefined') return AGGREGATED_TYPE;
 	const mode = new URLSearchParams(window.location.search).get('mode');
 	if (mode === AGGREGATED_TYPE) return AGGREGATED_TYPE;
 	return (QUERY_TYPES as readonly string[]).includes(mode ?? '')
 		? (mode as QueryType)
-		: 'hybrid';
+		: AGGREGATED_TYPE;
 }
 
 export const searchState = writable<SearchState>({
 	query: '',
 	mode: modeFromUrl(),
-	bm25Query: '',
-	vectorQuery: '',
-	bm25Weight: 1.2,
-	vectorWeight: 1.0,
+	subQueries: [],
 	results: [],
 	total: 0,
 	elapsedMs: null,
@@ -214,12 +223,12 @@ export const searchActions = {
 		this.scheduleAutoSearch();
 	},
 
-	setAggSubQuery(which: 'bm25' | 'vector', text: string) {
-		if (which === 'bm25') {
-			searchState.update((s) => ({ ...s, bm25Query: text, stale: true }));
-		} else {
-			searchState.update((s) => ({ ...s, vectorQuery: text, stale: true }));
-		}
+	setAggSubQueries(subQueries: SubQueryDraft[]) {
+		searchState.update((s) => ({
+			...s,
+			subQueries: subQueries.slice(0, MAX_SUB_QUERIES),
+			stale: true,
+		}));
 		this.scheduleAutoSearch();
 	},
 
@@ -360,27 +369,19 @@ async function buildAggregatedRequest(
 	limit: number,
 	filterFields: ReturnType<typeof buildCommonFilterFields>,
 ) {
-	const subQueries: SubQuery[] = [];
-	if (state.bm25Query.trim()) {
-		subQueries.push({
-			text: state.bm25Query.trim(),
-			query_type: 'bm25',
-			weight: state.bm25Weight,
-		});
-	}
-	if (state.vectorQuery.trim()) {
-		subQueries.push({
-			text: state.vectorQuery.trim(),
-			query_type: 'vector',
-			weight: state.vectorWeight,
-		});
-	}
-	if (subQueries.length === 0) {
-		subQueries.push(
-			{ text: query, query_type: 'bm25', weight: state.bm25Weight },
-			{ text: query, query_type: 'vector', weight: state.vectorWeight },
-		);
-	}
+	// Non-empty drafts become weighted sub-queries; an empty draft list falls
+	// back to a BM25 + vector decomposition of the main query.
+	const drafts = state.subQueries.filter((sq) => sq.text.trim());
+	const subQueries: SubQuery[] = drafts.length
+		? drafts.map((sq) => ({
+				text: sq.text.trim(),
+				query_type: sq.query_type,
+				weight: sq.weight,
+			}))
+		: [
+				{ text: query, query_type: 'bm25', weight: 1.2 },
+				{ text: query, query_type: 'vector', weight: 1.0 },
+			];
 	return searchApi.aggregatedSearch({
 		project_id: projectId,
 		sub_queries: subQueries,

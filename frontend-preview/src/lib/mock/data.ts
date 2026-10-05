@@ -245,6 +245,121 @@ export const mockClassImplementations = {
 	implementing_classes: []
 };
 
+// ─── Graph Mock Data ───────────────────────────────────────────────
+// A self-contained mini project graph: one main connected component
+// (parser pipeline) plus two small ones (storage, config), covering
+// every relation domain and confidence level.
+
+export const mockGraphNodes = [
+	{ id: '101', kind: 'function', label: 'group_entities', source_file: 'crates/cce-parser/src/grouper.rs', source_location: '45:0' },
+	{ id: '102', kind: 'function', label: 'process_chunk', source_file: 'crates/cce-parser/src/chunker.rs', source_location: '20:0' },
+	{ id: '103', kind: 'function', label: 'calculate_similarity', source_file: 'crates/cce-parser/src/similarity.rs', source_location: '15:0' },
+	{ id: '104', kind: 'function', label: 'normalize_text', source_file: 'crates/cce-parser/src/utils.rs', source_location: '22:0' },
+	{ id: '105', kind: 'function', label: 'parse_file', source_file: 'crates/cce-parser/src/lib.rs', source_location: '34:0' },
+	{ id: '106', kind: 'function', label: 'batch_parse', source_file: 'crates/cce-parser/src/batch.rs', source_location: '67:0' },
+	{ id: '107', kind: 'function', label: 'split_entities', source_file: 'crates/cce-parser/src/splitter.rs', source_location: '10:0' },
+	{ id: '108', kind: 'struct', label: 'EntityGroup', source_file: 'crates/cce-types/src/group.rs', source_location: '8:0' },
+	{ id: '109', kind: 'struct', label: 'Entity', source_file: 'crates/cce-types/src/entity.rs', source_location: '12:0' },
+	{ id: '110', kind: 'class', label: 'Grouper', source_file: 'crates/cce-parser/src/grouper.rs', source_location: '120:0' },
+	{ id: '111', kind: 'interface', label: 'ChunkStrategy', source_file: 'crates/cce-parser/src/chunker.rs', source_location: '5:0' },
+	{ id: '112', kind: 'class', label: 'ParagraphChunker', source_file: 'crates/cce-parser/src/chunker.rs', source_location: '40:0' },
+	{ id: '201', kind: 'class', label: 'StorageManager', source_file: 'crates/cce-storage/src/manager.rs', source_location: '30:0' },
+	{ id: '202', kind: 'class', label: 'BaseManager', source_file: 'crates/cce-storage/src/base.rs', source_location: '10:0' },
+	{ id: '203', kind: 'class', label: 'IndexedStorageManager', source_file: 'crates/cce-storage/src/indexed.rs', source_location: '18:0' },
+	{ id: '204', kind: 'interface', label: 'Storable', source_file: 'crates/cce-storage/src/traits.rs', source_location: '3:0' },
+	{ id: '205', kind: 'interface', label: 'Queryable', source_file: 'crates/cce-storage/src/traits.rs', source_location: '9:0' },
+	{ id: '206', kind: 'struct', label: 'StorageConfig', source_file: 'crates/cce-storage/src/config.rs', source_location: '6:0' },
+	{ id: '301', kind: 'function', label: 'load_config', source_file: 'crates/cce-config/src/lib.rs', source_location: '14:0' },
+	{ id: '302', kind: 'function', label: 'validate_config', source_file: 'crates/cce-config/src/validate.rs', source_location: '25:0' },
+	{ id: '303', kind: 'struct', label: 'Config', source_file: 'crates/cce-config/src/model.rs', source_location: '4:0' }
+];
+
+export const mockGraphEdges = [
+	// main component: parser pipeline
+	{ source: '106', target: '105', relation: 'calls', confidence: 'extracted' },
+	{ source: '105', target: '107', relation: 'calls', confidence: 'extracted' },
+	{ source: '105', target: '101', relation: 'calls', confidence: 'extracted' },
+	{ source: '101', target: '102', relation: 'calls', confidence: 'extracted' },
+	{ source: '101', target: '103', relation: 'calls', confidence: 'extracted' },
+	{ source: '102', target: '104', relation: 'calls', confidence: 'extracted' },
+	{ source: '103', target: '104', relation: 'calls', confidence: 'extracted' },
+	{ source: '101', target: '108', relation: 'uses', confidence: 'extracted' },
+	{ source: '107', target: '109', relation: 'uses', confidence: 'extracted' },
+	{ source: '110', target: '101', relation: 'contains', confidence: 'extracted' },
+	{ source: '112', target: '102', relation: 'contains', confidence: 'extracted' },
+	{ source: '112', target: '111', relation: 'implements', confidence: 'extracted' },
+	{ source: '110', target: '112', relation: 'imports', confidence: 'inferred' },
+	{ source: '101', target: '104', relation: 'calls', confidence: 'inferred' },
+	// bridge from parser to storage (external edge)
+	{ source: '106', target: '201', relation: 'calls', confidence: 'external' },
+	// storage component
+	{ source: '203', target: '202', relation: 'inherits', confidence: 'extracted' },
+	{ source: '201', target: '202', relation: 'inherits', confidence: 'extracted' },
+	{ source: '201', target: '204', relation: 'implements', confidence: 'extracted' },
+	{ source: '203', target: '205', relation: 'implements', confidence: 'extracted' },
+	{ source: '201', target: '206', relation: 'uses', confidence: 'extracted' },
+	{ source: '201', target: '203', relation: 'contains', confidence: 'extracted' },
+	// config component
+	{ source: '301', target: '302', relation: 'calls', confidence: 'extracted' },
+	{ source: '301', target: '303', relation: 'uses', confidence: 'extracted' },
+	{ source: '302', target: '303', relation: 'uses', confidence: 'extracted' },
+	// cross-component config usage
+	{ source: '206', target: '303', relation: 'imports', confidence: 'inferred' }
+];
+
+const graphBase = { success: true, relation_epoch: 1 };
+
+/** Full export — drives the default "project overview" seed. */
+export const mockGraphExport = {
+	...graphBase,
+	nodes: mockGraphNodes,
+	edges: mockGraphEdges
+};
+
+/** Ego neighborhood around group_entities (101), depth 2, both directions. */
+export const mockGraphEgo = {
+	...graphBase,
+	nodes: mockGraphNodes.filter((n) =>
+		['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(n.id)
+	),
+	edges: mockGraphEdges.filter(
+		(e) => ['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(e.source) &&
+			['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(e.target)
+	)
+};
+
+/** Shortest path from batch_parse (106) to normalize_text (104). */
+export const mockGraphPath = {
+	...graphBase,
+	path_found: true,
+	nodes: mockGraphNodes.filter((n) => ['106', '105', '101', '104'].includes(n.id)),
+	edges: mockGraphEdges.filter(
+		(e) =>
+			(e.source === '106' && e.target === '105') ||
+			(e.source === '105' && e.target === '101') ||
+			(e.source === '101' && e.target === '104')
+	)
+};
+
+/** Connected components: parser pipeline, storage, config. */
+export const mockGraphComponents = {
+	...graphBase,
+	components: [
+		['101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112'],
+		['201', '202', '203', '204', '205', '206'],
+		['301', '302', '303']
+	]
+};
+
+/** Impact of changing grouper.rs. */
+export const mockGraphImpact = {
+	...graphBase,
+	changed_file: 'crates/cce-parser/src/grouper.rs',
+	direct_dependents: ['105', '106', '110'],
+	transitive_dependents: ['105', '106', '110', '112'],
+	impact_score: 0.42
+};
+
 // ─── Storage Mock Data ─────────────────────────────────────────────
 
 export const mockStorageStatus = {

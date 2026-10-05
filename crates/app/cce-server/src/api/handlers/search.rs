@@ -114,7 +114,6 @@ pub async fn handle_search(
         "vector" => SearchSources::none().with_vector(),
         "bm25" => SearchSources::none().with_bm25(),
         "hybrid" => SearchSources::default(), // vector + bm25
-        "hierarchical" => SearchSources::default(),
         "summary" => SearchSources::none().with_summary(),
         _ => {
             return SearchApiResponse::Error(ErrorResponse::new(
