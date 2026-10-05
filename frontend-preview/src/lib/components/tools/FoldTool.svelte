@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -32,10 +33,10 @@
 				language: language,
 				file_name: fileName || undefined,
 				max_tokens: maxTokens,
-				mode: mode
+				mode: mode,
 			});
-		} catch (err: any) {
-			error = err.message;
+		} catch (err) {
+			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}
@@ -53,7 +54,11 @@
 				<div class="input-row">
 					<div class="input-field">
 						<label class="field-label" for="fold-language">Language</label>
-						<select id="fold-language" bind:value={language} class="select-input">
+						<select
+							id="fold-language"
+							bind:value={language}
+							class="select-input"
+						>
 							<option value="rust">Rust</option>
 							<option value="python">Python</option>
 							<option value="typescript">TypeScript</option>
@@ -63,7 +68,9 @@
 						</select>
 					</div>
 					<div class="input-field flex-1">
-						<label class="field-label" for="fold-filename">File Name (optional)</label>
+						<label class="field-label" for="fold-filename"
+							>File Name (optional)</label
+						>
 						<input
 							id="fold-filename"
 							type="text"
@@ -96,8 +103,7 @@
 				<textarea
 					bind:value={text}
 					placeholder="Enter code to fold into a symbol skeleton..."
-					class="code-textarea"
-				></textarea>
+					class="code-textarea"></textarea>
 				<div class="tool-actions">
 					<Button onclick={handleFold} disabled={!text.trim() || loading}>
 						{#if loading}Folding...{:else}Fold{/if}

@@ -1,21 +1,30 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import { summaryApi, type SummaryResponse, type FileSummaryItem } from '$lib/api/summary';
+	import {
+		summaryApi,
+		type SummaryResponse,
+		type SummaryRequest,
+	} from '$lib/api/summary';
 
 	let activeTab = $state<'single' | 'batch' | 'directory'>('single');
 	let filePath = $state('');
-	let language = $state('');
 	let result = $state<SummaryResponse | null>(null);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
 	// Batch mode
 	let filePathsText = $state('');
-	let filePaths = $derived(filePathsText.split('\n').map(s => s.trim()).filter(s => s));
+	let filePaths = $derived(
+		filePathsText
+			.split('\n')
+			.map((s) => s.trim())
+			.filter((s) => s),
+	);
 
 	// Directory mode
 	let directoryPath = $state('');
@@ -29,7 +38,7 @@
 		result = null;
 
 		try {
-			const request: any = {};
+			const request: SummaryRequest = {};
 
 			if (activeTab === 'single') {
 				request.file_paths = [filePath];
@@ -47,14 +56,20 @@
 					return;
 				}
 				request.directory_paths = [directoryPath];
-				request.extensions = directoryExtensions.split(',').map(s => s.trim()).filter(s => s);
-				request.exclude_dirs = directoryExcludeDirs.split(',').map(s => s.trim()).filter(s => s);
+				request.extensions = directoryExtensions
+					.split(',')
+					.map((s) => s.trim())
+					.filter((s) => s);
+				request.exclude_dirs = directoryExcludeDirs
+					.split(',')
+					.map((s) => s.trim())
+					.filter((s) => s);
 				request.respect_gitignore = respectGitignore;
 			}
 
 			result = await summaryApi.generate(request);
-		} catch (e: any) {
-			error = e.message || 'Failed to generate summary';
+		} catch (e) {
+			error = errorMessage(e) || 'Failed to generate summary';
 		} finally {
 			loading = false;
 		}
@@ -72,37 +87,43 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Summary Generator" subtitle="Generate natural language summaries of code files" />
+		<PageHeader
+			title="Summary Generator"
+			subtitle="Generate natural language summaries of code files"
+		/>
 
 		{#if error}
 			<div class="error-banner">
 				<span>{error}</span>
-				<button class="dismiss-btn" onclick={() => error = null}>×</button>
+				<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
 			</div>
 		{/if}
 
 		<!-- Input Card -->
-		<Card title="Summary Input" subtitle="Select files or directories to summarize">
+		<Card
+			title="Summary Input"
+			subtitle="Select files or directories to summarize"
+		>
 			<!-- Tab Navigation -->
 			<div class="input-tabs">
 				<button
 					class="input-tab"
 					class:active={activeTab === 'single'}
-					onclick={() => activeTab = 'single'}
+					onclick={() => (activeTab = 'single')}
 				>
 					Single File
 				</button>
 				<button
 					class="input-tab"
 					class:active={activeTab === 'batch'}
-					onclick={() => activeTab = 'batch'}
+					onclick={() => (activeTab = 'batch')}
 				>
 					Batch Files
 				</button>
 				<button
 					class="input-tab"
 					class:active={activeTab === 'directory'}
-					onclick={() => activeTab = 'directory'}
+					onclick={() => (activeTab = 'directory')}
 				>
 					Directory Scan
 				</button>
@@ -124,14 +145,15 @@
 			<!-- Batch Mode -->
 			{#if activeTab === 'batch'}
 				<div class="input-group">
-					<label class="field-label" for="file-paths">File Paths (one per line)</label>
+					<label class="field-label" for="file-paths"
+						>File Paths (one per line)</label
+					>
 					<textarea
 						id="file-paths"
 						class="textarea-input"
 						bind:value={filePathsText}
-						placeholder={"/path/to/file1.rs\n/path/to/file2.ts"}
-						rows="6"
-					></textarea>
+						placeholder="/path/to/file1.rs\n/path/to/file2.ts"
+						rows="6"></textarea>
 					<span class="field-hint">{filePaths.length} file(s) entered</span>
 				</div>
 			{/if}
@@ -149,7 +171,9 @@
 				</div>
 				<div class="input-row">
 					<div class="input-group">
-						<label class="field-label" for="dir-ext">Extensions (comma-separated)</label>
+						<label class="field-label" for="dir-ext"
+							>Extensions (comma-separated)</label
+						>
 						<Input
 							id="dir-ext"
 							type="text"
@@ -158,7 +182,9 @@
 						/>
 					</div>
 					<div class="input-group">
-						<label class="field-label" for="dir-exclude">Exclude Dirs (comma-separated)</label>
+						<label class="field-label" for="dir-exclude"
+							>Exclude Dirs (comma-separated)</label
+						>
 						<Input
 							id="dir-exclude"
 							type="text"
@@ -184,7 +210,10 @@
 
 		<!-- Results -->
 		{#if result}
-			<Card title="Summary Results" subtitle={`${result.success_count} of ${result.total_files} files succeeded`}>
+			<Card
+				title="Summary Results"
+				subtitle={`${result.success_count} of ${result.total_files} files succeeded`}
+			>
 				<div class="result-summary">
 					<div class="result-stat">
 						<span class="stat-label">Success</span>
@@ -204,7 +233,7 @@
 					<div class="warnings-section">
 						<h3 class="section-title">Warnings</h3>
 						<ul class="warnings-list">
-							{#each result.warnings ?? [] as warn}
+							{#each result.warnings ?? [] as warn (warn)}
 								<li class="warning-item">{warn}</li>
 							{/each}
 						</ul>
@@ -213,7 +242,7 @@
 
 				{#if result.summaries.length > 0}
 					<div class="summary-list">
-						{#each result.summaries as item}
+						{#each result.summaries as item (item.file_path)}
 							<details class="summary-item">
 								<summary class="summary-header">
 									<span class="summary-file">{item.file_path}</span>
@@ -225,7 +254,8 @@
 								<div class="summary-body">
 									{#if !item.success && item.error}
 										<div class="error-message">
-											<strong>Error:</strong> {item.error}
+											<strong>Error:</strong>
+											{item.error}
 										</div>
 									{:else}
 										<p class="summary-text">{item.summary}</p>
@@ -241,7 +271,7 @@
 											<div class="summary-entities">
 												<h4>Entities</h4>
 												<ul>
-													{#each item.main_entities as entity}
+													{#each item.main_entities as entity (entity)}
 														<li>{entity}</li>
 													{/each}
 												</ul>
@@ -251,11 +281,13 @@
 											<div class="summary-entities">
 												<h4>Imports</h4>
 												<ul>
-													{#each item.imports.slice(0, 20) as imp}
+													{#each item.imports.slice(0, 20) as imp (imp)}
 														<li>{imp}</li>
 													{/each}
 													{#if item.imports.length > 20}
-														<li class="more">... and {item.imports.length - 20} more</li>
+														<li class="more">
+															... and {item.imports.length - 20} more
+														</li>
 													{/if}
 												</ul>
 											</div>

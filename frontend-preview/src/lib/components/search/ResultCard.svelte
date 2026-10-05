@@ -8,14 +8,14 @@
 		onNavigate?: (id: string) => void;
 	}
 
-	let {
-		result,
-		onNavigate = () => {}
-	}: Props = $props();
+	let { result, onNavigate = () => {} }: Props = $props();
 
-	function formatScore(score: number): string {
+	function formatScore(score: number | undefined): string {
+		if (typeof score !== 'number' || Number.isNaN(score)) return 'n/a';
 		return (score * 100).toFixed(1);
 	}
+
+	const hasScore = $derived(typeof result.score === 'number');
 
 	function handleNavigate() {
 		onNavigate(String(result.entity_ids?.[0] ?? ''));
@@ -29,20 +29,34 @@
 	}
 </script>
 
-<div class="result-card" role="button" tabindex="0" onclick={handleNavigate} onkeydown={handleKeydown}>
+<div
+	class="result-card"
+	role="button"
+	tabindex="0"
+	onclick={handleNavigate}
+	onkeydown={handleKeydown}
+>
 	<div class="result-header">
 		<div class="result-meta">
 			<span class="file-path">{result.file_path}</span>
-			<span class="line-numbers">:{result.start_line}{result.end_line ? `-${result.end_line}` : ''}</span>
+			<span class="line-numbers"
+				>:{result.start_line}{result.end_line
+					? `-${result.end_line}`
+					: ''}</span
+			>
 		</div>
 		<div class="result-badges">
-			<Badge variant={result.score > 0.8 ? 'active' : 'default'}>
-				Score: {formatScore(result.score)}%
-			</Badge>
+			{#if hasScore}
+				<Badge variant={result.score > 0.8 ? 'active' : 'default'}>
+					Score: {formatScore(result.score)}%
+				</Badge>
+			{/if}
 			{#if result.entity_type}
 				<Badge variant="default">{result.entity_type}</Badge>
 			{/if}
-			<Badge variant="default">{result.source}</Badge>
+			{#if result.sources && result.sources.length > 0}
+				<Badge variant="default">{result.sources.join('+')}</Badge>
+			{/if}
 		</div>
 	</div>
 

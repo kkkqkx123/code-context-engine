@@ -1,17 +1,20 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import type { Component } from 'svelte';
 	import Toolbar from '$lib/components/ui/Toolbar.svelte';
 	import { onMount } from 'svelte';
-	import { searchState, searchActions } from '$lib/stores/search';
+	import {
+		searchState,
+		searchActions,
+		AGGREGATED_TYPE,
+	} from '$lib/stores/search';
 	import SearchInput from '$lib/components/search/SearchInput.svelte';
-	import AggSearchBox from '$lib/components/search/AggSearchBox.svelte';
 	import type { SearchResultItem } from '$lib/api/search';
 	import ResultCard from '$lib/components/search/ResultCard.svelte';
-	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
 	// Lazy load FilterPanel component
-	let FilterPanel: any = $state(null);
+	let FilterPanel: Component | null = $state(null);
 	let filterPanelLoaded = $state(false);
 	let filterPanelVisible = $state(false);
 
@@ -23,13 +26,7 @@
 	});
 
 	function handleSearch() {
-		searchActions.executeSearch();
-	}
-
-	let sortBy = $state<'relevance' | 'file_path' | 'entity_type'>('relevance');
-
-	function handleAggSearch(response: { items: SearchResultItem[]; total: number }) {
-		searchActions.setExternalResults(response);
+		void searchActions.executeSearch(1);
 	}
 
 	function toggleFilterPanel() {
@@ -42,31 +39,20 @@
 
 	function prevPage() {
 		if ($searchState.pagination.page > 1) {
-			const newPage = $searchState.pagination.page - 1;
-			searchActions.setPage(newPage);
+			searchActions.setPage($searchState.pagination.page - 1);
 		}
 	}
 
 	function nextPage() {
-		const totalPages = Math.ceil($searchState.results.length / $searchState.pagination.limit);
-		if ($searchState.pagination.page < totalPages) {
-			const newPage = $searchState.pagination.page + 1;
-			searchActions.setPage(newPage);
-		}
+		searchActions.setPage($searchState.pagination.page + 1);
 	}
 
 	// Get paginated results for display
 	let paginatedResults = $derived(searchActions.getPaginatedResults());
-	let sortedResults = $derived.by(() => {
-		if (sortBy === 'relevance') return paginatedResults;
-		const key = sortBy;
-		return [...paginatedResults].sort((a, b) => {
-			const av = (a[key] ?? '') as string;
-			const bv = (b[key] ?? '') as string;
-			return av.localeCompare(bv);
-		});
-	});
-	let displayedTotal = $derived(paginatedResults.length);
+	let totalPages = $derived(searchActions.totalPages());
+	let hasMore = $derived(
+		$searchState.results.length > $searchState.pagination.page * $searchState.pagination.pageSize,
+	);
 </script>
 
 <svelte:head>
@@ -75,17 +61,12 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Code Search" subtitle="Semantic and keyword-based code search across indexed projects" />
+		<PageHeader
+			title="Code Search"
+			subtitle="Semantic and keyword-based code search across indexed projects"
+		/>
 
 		<SearchInput onSearch={handleSearch} />
-
-		<div class="agg-search">
-			<h2 class="agg-title">Aggregated Search</h2>
-			<p class="agg-hint">
-				Run BM25 and Vector sub-queries in a single call and merge the ranked results.
-			</p>
-			<AggSearchBox onSearch={handleAggSearch} />
-		</div>
 
 		<div class="filter-toggle">
 			<button
@@ -105,32 +86,47 @@
 			{/if}
 		{/if}
 
+		{#if $searchState.error}
+			<div class="error-banner">Search failed: {$searchState.error}</div>
+		{/if}
+
 		{#if $searchState.isSearching}
 			<div class="loading-indicator">
 				<p>Searching...</p>
 			</div>
 		{:else if $searchState.results.length > 0}
-		<Toolbar>
-			<h2 class="results-title">Results ({ $searchState.results.length } total, showing { displayedTotal })</h2>
-			{#snippet actions()}
-				<div class="sort-controls">
-					<label class="sort-label" for="sort-select">Sort by:</label>
-					<select id="sort-select" bind:value={sortBy}>
-						<option value="relevance">Relevance</option>
-						<option value="file_path">File Path</option>
-						<option value="entity_type">Entity Type</option>
-					</select>
+			<Toolbar>
+				<h2 class="results-title">
+					Results ({$searchState.total} total)
+					{#if $searchState.elapsedMs !== null}
+						<span class="elapsed">· {$searchState.elapsedMs}ms</span>
+					{/if}
+					{#if $searchState.mode === AGGREGATED_TYPE && $searchState.sourcesUsed.length > 0}
+						<span class="elapsed">· sources: {$searchState.sourcesUsed.join(', ')}</span>
+					{/if}
+				</h2>
+			</Toolbar>
+
+			{#if $searchState.failedSubQueries.length > 0}
+				<div class="warn-banner">
+					Sub-queries failed (partial results): {$searchState.failedSubQueries.join(', ')}
 				</div>
-			{/snippet}
-		</Toolbar>
+			{/if}
+
+			{#if $searchState.stale}
+				<div class="stale-banner">
+					Filters or query mode changed — results may be outdated. Re-run the
+					search to apply.
+				</div>
+			{/if}
 
 			<div class="results-list">
-				{#each sortedResults as result ((result.entity_ids ?? []).join(','))}
+				{#each paginatedResults as result, i ((result.entity_ids ?? []).join(',') + '-' + i)}
 					<ResultCard {result} onNavigate={handleNavigate} />
 				{/each}
 			</div>
 
-			{#if $searchState.results.length > $searchState.pagination.limit}
+			{#if totalPages > 1 || hasMore}
 				<div class="pagination">
 					<Button
 						variant="secondary"
@@ -140,18 +136,18 @@
 						Previous
 					</Button>
 					<span class="page-info">
-						Page {$searchState.pagination.page} of {Math.ceil($searchState.results.length / $searchState.pagination.limit)}
+						Page {$searchState.pagination.page} of {hasMore ? '?' : totalPages}
 					</span>
 					<Button
 						variant="secondary"
 						onclick={nextPage}
-						disabled={$searchState.pagination.page >= Math.ceil($searchState.results.length / $searchState.pagination.limit)}
+						disabled={!hasMore}
 					>
 						Next
 					</Button>
 				</div>
 			{/if}
-		{:else if $searchState.query}
+		{:else if $searchState.query && !$searchState.error}
 			<div class="no-results">
 				<p>No results found for "{$searchState.query}"</p>
 				<p class="hint">Try adjusting your filters or search terms</p>
@@ -161,25 +157,6 @@
 </div>
 
 <style>
-	.agg-search {
-		margin-bottom: 1.5rem;
-		padding: 1.25rem;
-		border: 1px dashed var(--gray-300);
-	}
-
-	.agg-title {
-		font-size: 1rem;
-		font-weight: 700;
-		letter-spacing: -0.02em;
-		margin-bottom: 0.25rem;
-	}
-
-	.agg-hint {
-		font-size: 0.85rem;
-		color: var(--gray-600);
-		margin-bottom: 1rem;
-	}
-
 	.filter-toggle {
 		margin-bottom: 1.5rem;
 	}
@@ -231,29 +208,39 @@
 		letter-spacing: -0.03em;
 	}
 
-	.sort-controls {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-	}
-
-	.sort-label {
+	.elapsed {
 		font-family: 'Space Mono', monospace;
-		text-transform: uppercase;
-		font-size: 0.65rem;
-		letter-spacing: 0.1em;
-		color: var(--gray-600);
+		font-size: 0.75rem;
+		font-weight: 400;
+		color: var(--gray-500);
 	}
 
-	select {
-		padding: 0.5rem;
-		border: 1px solid var(--gray-200);
-		font-family: 'Space Grotesk', sans-serif;
-		outline: none;
+	.error-banner {
+		padding: 1rem;
+		margin-bottom: 1.5rem;
+		background: var(--danger-bg);
+		border-left: 4px solid var(--danger);
+		color: var(--danger);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.85rem;
 	}
 
-	select:focus {
-		border-color: var(--accent);
+	.warn-banner {
+		padding: 0.75rem 1rem;
+		margin-bottom: 1rem;
+		background: var(--warning-bg, var(--gray-100));
+		border-left: 4px solid var(--warning, var(--gray-400));
+		color: var(--gray-700);
+		font-size: 0.85rem;
+	}
+
+	.stale-banner {
+		padding: 0.75rem 1rem;
+		margin-bottom: 1rem;
+		background: var(--info-bg);
+		border-left: 4px solid var(--info);
+		color: var(--gray-700);
+		font-size: 0.85rem;
 	}
 
 	.results-list {

@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi, type GotoDefinitionResult } from '$lib/api/tools';
 	import { currentProjectId } from '$lib/stores/project';
 	import { get } from 'svelte/store';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 
 	let filePath = $state('');
 	let line = $state(1);
@@ -25,10 +28,10 @@
 				path,
 				line,
 				column,
-				include_body: includeBody
+				include_body: includeBody,
 			});
-		} catch (e: any) {
-			error = e?.message ?? 'Goto definition failed';
+		} catch (e) {
+			error = errorMessage(e) ?? 'Goto definition failed';
 		} finally {
 			loading = false;
 		}
@@ -43,7 +46,12 @@
 	<div class="form-row">
 		<label class="field field-wide">
 			<span class="field-label">File Path</span>
-			<input class="text-input" type="text" bind:value={filePath} placeholder="/path/to/file.ts" />
+			<input
+				class="text-input"
+				type="text"
+				bind:value={filePath}
+				placeholder="/path/to/file.ts"
+			/>
 		</label>
 		<label class="field field-narrow">
 			<span class="field-label">Line</span>
@@ -78,7 +86,14 @@
 					{/if}
 					<p class="def-location mono">
 						{def.location.path}:{def.location.line}
-						<a class="def-link" href={`/entities/${def.location.entity_id}`}>open entity</a>
+						<a
+							class="def-link"
+							href={resolve(`/entities/${def.location.entity_id}`)}
+							onclick={(e) => {
+								e.preventDefault();
+								goto(resolve(`/entities/${def.location.entity_id}`));
+							}}>open entity</a
+						>
 					</p>
 					{#if def.code}
 						<pre class="def-code">{def.code}</pre>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import { indexApi, type ParseResult } from '$lib/api/index';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
@@ -24,8 +25,8 @@
 		try {
 			const result = await indexApi.parseFile(filePath);
 			parseResult = result;
-		} catch (err: any) {
-			error = err.message || 'Failed to parse file';
+		} catch (err) {
+			error = errorMessage(err) || 'Failed to parse file';
 		} finally {
 			isLoading = false;
 		}
@@ -38,9 +39,17 @@
 	}
 </script>
 
-<Card title="File Parser Preview" subtitle="Parse single file and view extracted entities">
+<Card
+	title="File Parser Preview"
+	subtitle="Parse single file and view extracted entities"
+>
 	<div class="parser-section">
-		<form onsubmit={(e) => { e.preventDefault(); handleParse(); }}>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleParse();
+			}}
+		>
 			<Input
 				label="File Path"
 				type="text"
@@ -77,7 +86,9 @@
 				<h3>Parse Results</h3>
 				<div class="result-meta">
 					<Badge variant="active">{parseResult.language}</Badge>
-					<span class="entity-count">{parseResult.entities.length} entities found</span>
+					<span class="entity-count"
+						>{parseResult.entities.length} entities found</span
+					>
 				</div>
 			</div>
 
@@ -91,7 +102,7 @@
 				{#if parseResult.entities.length === 0}
 					<p class="no-entities">No entities found in this file</p>
 				{:else}
-					{#each parseResult.entities as entity, index}
+					{#each parseResult.entities as entity (entity.id || entity.name)}
 						<div class="entity-item">
 							<div class="entity-header">
 								<span class="entity-type">{entity.kind || 'Unknown'}</span>
@@ -118,7 +129,10 @@
 			{#if parseResult.entities.length > 0}
 				<div class="raw-data">
 					<h4>Raw JSON Output</h4>
-					<CodeBlock language="json" code={JSON.stringify(parseResult.entities, null, 2)} />
+					<CodeBlock
+						language="json"
+						code={JSON.stringify(parseResult.entities, null, 2)}
+					/>
 				</div>
 			{/if}
 		</div>

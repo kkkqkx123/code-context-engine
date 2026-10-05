@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi, type FindReferencesResult } from '$lib/api/tools';
@@ -25,10 +26,10 @@
 				path,
 				line,
 				column,
-				symbol: symbol.trim() || undefined
+				symbol: symbol.trim() || undefined,
 			});
-		} catch (e: any) {
-			error = e?.message ?? 'Find references failed';
+		} catch (e) {
+			error = errorMessage(e) ?? 'Find references failed';
 		} finally {
 			loading = false;
 		}
@@ -43,7 +44,12 @@
 	<div class="form-row">
 		<label class="field field-wide">
 			<span class="field-label">File Path</span>
-			<input class="text-input" type="text" bind:value={filePath} placeholder="/path/to/file.ts" />
+			<input
+				class="text-input"
+				type="text"
+				bind:value={filePath}
+				placeholder="/path/to/file.ts"
+			/>
 		</label>
 		<label class="field field-narrow">
 			<span class="field-label">Line</span>
@@ -55,7 +61,12 @@
 		</label>
 		<label class="field field-narrow">
 			<span class="field-label">Symbol (optional)</span>
-			<input class="text-input" type="text" bind:value={symbol} placeholder="authenticate" />
+			<input
+				class="text-input"
+				type="text"
+				bind:value={symbol}
+				placeholder="authenticate"
+			/>
 		</label>
 		<Button onclick={handleFind} disabled={!filePath.trim() || loading}>
 			{#if loading}Searching...{:else}Find References{/if}
@@ -77,7 +88,9 @@
 					{#each group.references as ref, i (i)}
 						<li class="ref-item">
 							<span class="mono">
-								L{ref.line}{ref.end_line && ref.end_line !== ref.line ? `-${ref.end_line}` : ''}:C{ref.column}
+								L{ref.line}{ref.end_line && ref.end_line !== ref.line
+									? `-${ref.end_line}`
+									: ''}:C{ref.column}
 							</span>
 							{#if ref.caller_entity}
 								<span class="ref-caller">in {ref.caller_entity}</span>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -23,7 +24,7 @@
 			const resp = await qdrantApi.getStatus();
 			qdrantManaged = resp.managed;
 			qdrantStatus = resp.status;
-		} catch (e: any) {
+		} catch {
 			qdrantManaged = false;
 		}
 	}
@@ -32,11 +33,16 @@
 		qdrantLoading = true;
 		qdrantError = null;
 		try {
-			const fn = action === 'start' ? qdrantApi.start : action === 'stop' ? qdrantApi.stop : qdrantApi.restart;
+			const fn =
+				action === 'start'
+					? qdrantApi.start
+					: action === 'stop'
+						? qdrantApi.stop
+						: qdrantApi.restart;
 			const resp = await fn();
 			qdrantStatus = resp.status;
-		} catch (e: any) {
-			qdrantError = e.message || `Failed to ${action} Qdrant process`;
+		} catch (e) {
+			qdrantError = errorMessage(e) || `Failed to ${action} Qdrant process`;
 		} finally {
 			qdrantLoading = false;
 		}
@@ -75,12 +81,17 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Storage Management" subtitle="Monitor storage health and manage index data" />
+		<PageHeader
+			title="Storage Management"
+			subtitle="Monitor storage health and manage index data"
+		/>
 
 		{#if $storageState.error}
 			<div class="error-banner">
 				<span>{$storageState.error}</span>
-				<button class="dismiss-btn" onclick={storageActions.clearError}>×</button>
+				<button class="dismiss-btn" onclick={storageActions.clearError}
+					>×</button
+				>
 			</div>
 		{/if}
 
@@ -92,8 +103,12 @@
 						<div class="spec-label">Vector DB</div>
 						<div class="spec-value">
 							<Badge
-								label={$storageState.status.vector_storage.connected ? 'Connected' : 'Disconnected'}
-								variant={$storageState.status.vector_storage.connected ? 'active' : 'inactive'}
+								label={$storageState.status.vector_storage.connected
+									? 'Connected'
+									: 'Disconnected'}
+								variant={$storageState.status.vector_storage.connected
+									? 'active'
+									: 'inactive'}
 							/>
 						</div>
 						{#if $storageState.status.vector_storage.item_count > 0}
@@ -112,8 +127,12 @@
 						<div class="spec-label">BM25 Index</div>
 						<div class="spec-value">
 							<Badge
-								label={$storageState.status.bm25_storage.connected ? 'Connected' : 'Disconnected'}
-								variant={$storageState.status.bm25_storage.connected ? 'active' : 'inactive'}
+								label={$storageState.status.bm25_storage.connected
+									? 'Connected'
+									: 'Disconnected'}
+								variant={$storageState.status.bm25_storage.connected
+									? 'active'
+									: 'inactive'}
 							/>
 						</div>
 						{#if $storageState.status.bm25_storage.item_count > 0}
@@ -127,8 +146,12 @@
 						<div class="spec-label">Relations</div>
 						<div class="spec-value">
 							<Badge
-								label={$storageState.status.relation_storage.connected ? 'Connected' : 'Disconnected'}
-								variant={$storageState.status.relation_storage.connected ? 'active' : 'inactive'}
+								label={$storageState.status.relation_storage.connected
+									? 'Connected'
+									: 'Disconnected'}
+								variant={$storageState.status.relation_storage.connected
+									? 'active'
+									: 'inactive'}
 							/>
 						</div>
 						{#if $storageState.status.relation_storage.item_count > 0}
@@ -145,7 +168,9 @@
 			{#if $storageState.status && $storageState.status.total_disk_usage_mb > 0}
 				<div class="disk-usage">
 					<span class="label">Total Disk Usage:</span>
-					<span class="value">{$storageState.status.total_disk_usage_mb.toFixed(1)} MB</span>
+					<span class="value"
+						>{$storageState.status.total_disk_usage_mb.toFixed(1)} MB</span
+					>
 				</div>
 			{/if}
 		</Card>
@@ -192,15 +217,16 @@
 		{/if}
 
 		<!-- Clear Index -->
-		<Card title="Clear Index" subtitle="Remove all index data for the current project">
+		<Card
+			title="Clear Index"
+			subtitle="Remove all index data for the current project"
+		>
 			<p class="clear-warning">
-				This action will permanently delete all index data for the current project. This cannot be undone.
+				This action will permanently delete all index data for the current
+				project. This cannot be undone.
 			</p>
 			<div class="clear-actions">
-				<Button
-					onclick={handleClearIndex}
-					disabled={$storageState.isLoading}
-				>
+				<Button onclick={handleClearIndex} disabled={$storageState.isLoading}>
 					{#if $storageState.isLoading}Clearing...{:else}Clear All Index Data{/if}
 				</Button>
 			</div>
@@ -238,7 +264,8 @@
 		>
 			<h2 id="dialog-title">Confirm Clear Operation</h2>
 			<p id="dialog-description" class="dialog-warning">
-				This action will permanently delete all index data for the current project. This cannot be undone.
+				This action will permanently delete all index data for the current
+				project. This cannot be undone.
 			</p>
 			<div class="dialog-actions">
 				<Button variant="secondary" onclick={cancelClear}>Cancel</Button>

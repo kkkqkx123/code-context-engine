@@ -33,11 +33,14 @@ cd scripts && ./sync-frontend-preview.sh
 | `frontend/static/**/*` | `frontend-preview/static/**/*` | 所有静态资源（favicon、图片等） |
 | `frontend/src/app.html` | `frontend-preview/src/app.html` | HTML 模板 |
 | `frontend/src/app.css` | `frontend-preview/src/app.css` | 全局样式和设计系统 |
+| `frontend/src/app.d.ts` | `frontend-preview/src/app.d.ts` | SvelteKit 类型声明 |
 | `frontend/src/lib/components/**/*` | `frontend-preview/src/lib/components/**/*` | 所有组件（ui、index、search、entities、tools） |
 | `frontend/src/lib/stores/*.ts` | `frontend-preview/src/lib/stores/*.ts` | 所有 store |
+| `frontend/src/lib/utils/*.ts` | `frontend-preview/src/lib/utils/*.ts` | 共享工具（图展示模型、格式化等） |
 | `frontend/src/lib/api/*.ts` | `frontend-preview/src/lib/api/*.ts` | API 模块（跳过 client.ts） |
+| `frontend/src/types/*.d.ts` | `frontend-preview/src/types/*.d.ts` | 环境类型声明（第三方模块 shim 等） |
 | `frontend/src/routes/**/*` | `frontend-preview/src/routes/**/*` | 所有路由页面 |
-| `frontend/package.json` | `frontend-preview/package.json` | 仅同步 devDependencies |
+| `frontend/package.json` | `frontend-preview/package.json` | 仅同步 dependencies 和 devDependencies |
 
 ## 保留内容（不覆盖）
 

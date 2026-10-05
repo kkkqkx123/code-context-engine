@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { searchState, searchActions } from '$lib/stores/search';
+	import { searchActions } from '$lib/stores/search';
 	import Button from '../ui/Button.svelte';
 
 	interface Props {
@@ -10,16 +10,15 @@
 
 	let query = $state('');
 
-	function handleKeydown(event: KeyboardEvent) {
-		if (event.key === 'Enter') {
-			searchActions.setQuery(query);
-			onSearch();
-		}
+	function submit() {
+		const trimmed = query.trim();
+		if (!trimmed) return;
+		searchActions.setQuery(trimmed);
+		onSearch();
 	}
 
-	function handleSearch() {
-		searchActions.setQuery(query);
-		onSearch();
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') submit();
 	}
 </script>
 
@@ -31,7 +30,7 @@
 		bind:value={query}
 		onkeydown={handleKeydown}
 	/>
-	<Button variant="primary" onclick={handleSearch}>
+	<Button variant="primary" onclick={submit} disabled={!query.trim()}>
 		Search
 	</Button>
 </div>
@@ -41,7 +40,7 @@
 		display: grid;
 		grid-template-columns: 1fr auto;
 		gap: 1rem;
-		margin-bottom: 2rem;
+		margin-bottom: 1.5rem;
 	}
 
 	.search-input {

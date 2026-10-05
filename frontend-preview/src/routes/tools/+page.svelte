@@ -1,21 +1,29 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import type { Component } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 
 	// Tab state
 	let activeTab = $state<
-		'compress' | 'diagnose' | 'fold' | 'symbols' | 'references' | 'definition' | 'keyword' | 'batch'
+		| 'compress'
+		| 'diagnose'
+		| 'fold'
+		| 'symbols'
+		| 'references'
+		| 'definition'
+		| 'keyword'
+		| 'batch'
 	>('compress');
 
 	// Lazy loaded components
-	let CompressionTool: any = $state(null);
-	let DiagnosisTool: any = $state(null);
-	let FoldTool: any = $state(null);
-	let SymbolLookupTool: any = $state(null);
-	let ReferencesTool: any = $state(null);
-	let DefinitionTool: any = $state(null);
-	let KeywordSearchTool: any = $state(null);
-	let BatchCompressTool: any = $state(null);
+	let CompressionTool: Component | null = $state(null);
+	let DiagnosisTool: Component | null = $state(null);
+	let FoldTool: Component | null = $state(null);
+	let SymbolLookupTool: Component | null = $state(null);
+	let ReferencesTool: Component | null = $state(null);
+	let DefinitionTool: Component | null = $state(null);
+	let KeywordSearchTool: Component | null = $state(null);
+	let BatchCompressTool: Component | null = $state(null);
 
 	// Component props
 	let compressLanguage = $state('typescript');
@@ -27,7 +35,8 @@
 	// Load components on-demand
 	async function loadCompressionTool() {
 		if (!CompressionTool) {
-			const module = await import('$lib/components/tools/CompressionTool.svelte');
+			const module =
+				await import('$lib/components/tools/CompressionTool.svelte');
 			CompressionTool = module.default;
 		}
 	}
@@ -48,35 +57,40 @@
 
 	async function loadSymbolLookupTool() {
 		if (!SymbolLookupTool) {
-			const module = await import('$lib/components/tools/SymbolLookupTool.svelte');
+			const module =
+				await import('$lib/components/tools/SymbolLookupTool.svelte');
 			SymbolLookupTool = module.default;
 		}
 	}
 
 	async function loadReferencesTool() {
 		if (!ReferencesTool) {
-			const module = await import('$lib/components/tools/ReferencesTool.svelte');
+			const module =
+				await import('$lib/components/tools/ReferencesTool.svelte');
 			ReferencesTool = module.default;
 		}
 	}
 
 	async function loadDefinitionTool() {
 		if (!DefinitionTool) {
-			const module = await import('$lib/components/tools/DefinitionTool.svelte');
+			const module =
+				await import('$lib/components/tools/DefinitionTool.svelte');
 			DefinitionTool = module.default;
 		}
 	}
 
 	async function loadKeywordSearchTool() {
 		if (!KeywordSearchTool) {
-			const module = await import('$lib/components/tools/KeywordSearchTool.svelte');
+			const module =
+				await import('$lib/components/tools/KeywordSearchTool.svelte');
 			KeywordSearchTool = module.default;
 		}
 	}
 
 	async function loadBatchCompressTool() {
 		if (!BatchCompressTool) {
-			const module = await import('$lib/components/tools/BatchCompressTool.svelte');
+			const module =
+				await import('$lib/components/tools/BatchCompressTool.svelte');
 			BatchCompressTool = module.default;
 		}
 	}
@@ -109,59 +123,66 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Developer Tools" subtitle="Code analysis utilities and helpers" />
+		<PageHeader
+			title="Developer Tools"
+			subtitle="Code analysis utilities and helpers"
+		/>
 
 		<!-- Tab Navigation -->
 		<div class="tab-nav">
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'compress'}
-				onclick={() => activeTab = 'compress'}
+				onclick={() => (activeTab = 'compress')}
 			>
 				Code Compression
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'diagnose'}
-				onclick={() => activeTab = 'diagnose'}
+				onclick={() => (activeTab = 'diagnose')}
 			>
 				Code Diagnosis
 			</button>
-			<button class="tab-btn" class:active={activeTab === 'fold'} onclick={() => activeTab = 'fold'}>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'fold'}
+				onclick={() => (activeTab = 'fold')}
+			>
 				File Fold
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'symbols'}
-				onclick={() => activeTab = 'symbols'}
+				onclick={() => (activeTab = 'symbols')}
 			>
 				Symbol Lookup
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'references'}
-				onclick={() => activeTab = 'references'}
+				onclick={() => (activeTab = 'references')}
 			>
 				References
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'definition'}
-				onclick={() => activeTab = 'definition'}
+				onclick={() => (activeTab = 'definition')}
 			>
 				Definition
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'keyword'}
-				onclick={() => activeTab = 'keyword'}
+				onclick={() => (activeTab = 'keyword')}
 			>
 				Keyword Search
 			</button>
 			<button
 				class="tab-btn"
 				class:active={activeTab === 'batch'}
-				onclick={() => activeTab = 'batch'}
+				onclick={() => (activeTab = 'batch')}
 			>
 				Batch Compress
 			</button>
@@ -169,7 +190,10 @@
 
 		<!-- Code Compression Tool -->
 		{#if activeTab === 'compress'}
-			<Card title="Code Compression" subtitle="Reduce token count for LLM efficiency">
+			<Card
+				title="Code Compression"
+				subtitle="Reduce token count for LLM efficiency"
+			>
 				{#if CompressionTool}
 					<CompressionTool language={compressLanguage} />
 				{:else}
@@ -191,7 +215,10 @@
 
 		<!-- File Fold Tool -->
 		{#if activeTab === 'fold'}
-			<Card title="File Fold" subtitle="Extract a symbol skeleton from raw text">
+			<Card
+				title="File Fold"
+				subtitle="Extract a symbol skeleton from raw text"
+			>
 				{#if FoldTool}
 					<FoldTool language={foldLanguage} />
 				{:else}
@@ -216,7 +243,10 @@
 
 		<!-- References Tool -->
 		{#if activeTab === 'references'}
-			<Card title="Find References" subtitle="Position-based reference lookup across the project">
+			<Card
+				title="Find References"
+				subtitle="Position-based reference lookup across the project"
+			>
 				{#if ReferencesTool}
 					<ReferencesTool />
 				{:else}
@@ -227,7 +257,10 @@
 
 		<!-- Definition Tool -->
 		{#if activeTab === 'definition'}
-			<Card title="Goto Definition" subtitle="Resolve the symbol under a position">
+			<Card
+				title="Goto Definition"
+				subtitle="Resolve the symbol under a position"
+			>
 				{#if DefinitionTool}
 					<DefinitionTool />
 				{:else}
@@ -238,7 +271,10 @@
 
 		<!-- Keyword Search Tool -->
 		{#if activeTab === 'keyword'}
-			<Card title="Keyword Search" subtitle="BM25 keyword search over indexed chunks">
+			<Card
+				title="Keyword Search"
+				subtitle="BM25 keyword search over indexed chunks"
+			>
 				{#if KeywordSearchTool}
 					<KeywordSearchTool />
 				{:else}
@@ -249,7 +285,10 @@
 
 		<!-- Batch Compress Tool -->
 		{#if activeTab === 'batch'}
-			<Card title="Batch Compress" subtitle="Compress multiple files in one request">
+			<Card
+				title="Batch Compress"
+				subtitle="Compress multiple files in one request"
+			>
 				{#if BatchCompressTool}
 					<BatchCompressTool />
 				{:else}

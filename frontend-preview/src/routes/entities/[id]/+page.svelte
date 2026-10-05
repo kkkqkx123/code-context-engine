@@ -1,5 +1,6 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import type { Component } from 'svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { entityState, entityActions } from '$lib/stores/entities';
@@ -7,10 +8,10 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 
 	// Lazy load all heavy components
-	let EntityDetail: any = $state(null);
-	let CallGraph: any = $state(null);
-	let InheritanceTree: any = $state(null);
-	
+	let EntityDetail: Component | null = $state(null);
+	let CallGraph: Component | null = $state(null);
+	let InheritanceTree: Component | null = $state(null);
+
 	let entityDetailLoaded = $state(false);
 	let callGraphLoaded = $state(false);
 	let inheritanceTreeLoaded = $state(false);
@@ -27,7 +28,7 @@
 					if (!$entityState.currentEntity) {
 						return entityActions.loadClass(entityId);
 					}
-				})
+				}),
 			]);
 			// EntityDetail will be loaded when details tab is activated
 		}
@@ -35,7 +36,8 @@
 
 	async function loadEntityDetailComponent() {
 		if (!entityDetailLoaded) {
-			const module = await import('$lib/components/entities/EntityDetail.svelte');
+			const module =
+				await import('$lib/components/entities/EntityDetail.svelte');
 			EntityDetail = module.default;
 			entityDetailLoaded = true;
 		}
@@ -84,7 +86,8 @@
 
 	async function loadInheritanceTreeComponent() {
 		if (!inheritanceTreeLoaded) {
-			const module = await import('$lib/components/entities/InheritanceTree.svelte');
+			const module =
+				await import('$lib/components/entities/InheritanceTree.svelte');
 			InheritanceTree = module.default;
 			inheritanceTreeLoaded = true;
 		}
@@ -106,12 +109,15 @@
 				<p>{$entityState.error}</p>
 			</div>
 		{:else if $entityState.currentEntity}
-			<PageHeader title="Entity Details" subtitle="Viewing entity: {$entityState.currentEntity.name}" />
+			<PageHeader
+				title="Entity Details"
+				subtitle="Viewing entity: {$entityState.currentEntity.name}"
+			/>
 
 			<!-- Tab Navigation -->
 			<div class="tab-navigation">
-				<button 
-					class="tab" 
+				<button
+					class="tab"
 					class:active={currentTab === 'details'}
 					onclick={() => {
 						currentTab = 'details';
@@ -120,8 +126,8 @@
 				>
 					Details
 				</button>
-				<button 
-					class="tab" 
+				<button
+					class="tab"
 					class:active={currentTab === 'call-graph'}
 					onclick={() => {
 						currentTab = 'call-graph';
@@ -131,8 +137,8 @@
 				>
 					Call Graph
 				</button>
-				<button 
-					class="tab" 
+				<button
+					class="tab"
 					class:active={currentTab === 'inheritance'}
 					onclick={() => {
 						currentTab = 'inheritance';
@@ -141,8 +147,8 @@
 				>
 					Inheritance
 				</button>
-				<button 
-					class="tab" 
+				<button
+					class="tab"
 					class:active={currentTab === 'call-chain'}
 					onclick={() => {
 						currentTab = 'call-chain';
@@ -172,8 +178,8 @@
 						onNavigate={handleNavigate}
 					/>
 				{:else}
-					<button 
-						class="loading-spinner-button" 
+					<button
+						class="loading-spinner-button"
 						onclick={loadEntityDetailComponent}
 						aria-label="Load entity details"
 					>
@@ -183,7 +189,11 @@
 			{:else if currentTab === 'call-graph'}
 				<Card title="Call Graph" subtitle="Visual relationship map">
 					<div class="graph-actions">
-						<button type="button" class="graph-action-btn" onclick={() => openInGraph(String(entityId))}>
+						<button
+							type="button"
+							class="graph-action-btn"
+							onclick={() => openInGraph(String(entityId))}
+						>
 							Open in Graph Explorer
 						</button>
 					</div>
@@ -215,8 +225,8 @@
 				<Card title="Call Chain" subtitle="Linear execution path">
 					{#if $entityState.callChain.length > 0}
 						<div class="call-chain-list">
-							{#each $entityState.callChain as node, i}
-								<div 
+							{#each $entityState.callChain as node, i (node.function_id)}
+								<div
 									class="chain-item"
 									role="button"
 									tabindex="0"
@@ -226,9 +236,15 @@
 									<span class="chain-number">{i + 1}</span>
 									<div class="chain-content">
 										<h4 class="chain-name">{node.function_name}</h4>
-										<p class="chain-location">{node.file_path}{#if node.call_line}:{node.call_line}{/if}</p>
+										<p class="chain-location">
+											{node.file_path}{#if node.call_line}:{node.call_line}{/if}
+										</p>
 									</div>
-									<Badge variant={node.relation_type === 'caller' ? 'default' : 'active'}>
+									<Badge
+										variant={node.relation_type === 'caller'
+											? 'default'
+											: 'active'}
+									>
 										{node.relation_type === 'caller' ? 'CALLER' : 'CALLEE'}
 									</Badge>
 								</div>
@@ -239,7 +255,10 @@
 					{/if}
 				</Card>
 			{:else if currentTab === 'call-path'}
-				<Card title="Two-point Call Path" subtitle="Shortest call path between two functions">
+				<Card
+					title="Two-point Call Path"
+					subtitle="Shortest call path between two functions"
+				>
 					<div class="path-form">
 						<input
 							class="path-input"
@@ -272,7 +291,7 @@
 
 					{#if $entityState.callPath.length > 0}
 						<div class="call-chain-list">
-							{#each $entityState.callPath as node, i}
+							{#each $entityState.callPath as node, i (node.function_id)}
 								<div
 									class="chain-item"
 									role="button"
@@ -283,9 +302,15 @@
 									<span class="chain-number">{i + 1}</span>
 									<div class="chain-content">
 										<h4 class="chain-name">{node.function_name}</h4>
-										<p class="chain-location">{node.file_path}{#if node.call_line}:{node.call_line}{/if}</p>
+										<p class="chain-location">
+											{node.file_path}{#if node.call_line}:{node.call_line}{/if}
+										</p>
 									</div>
-									<Badge variant={node.relation_type === 'caller' ? 'default' : 'active'}>
+									<Badge
+										variant={node.relation_type === 'caller'
+											? 'default'
+											: 'active'}
+									>
 										{node.relation_type === 'caller' ? 'CALLER' : 'CALLEE'}
 									</Badge>
 								</div>
@@ -293,7 +318,9 @@
 						</div>
 						<p class="path-meta">{$entityState.callPathLength} hop(s)</p>
 					{:else if !$entityState.callPathFound && !$entityState.isLoading}
-						<p class="placeholder-text">No call path found between the two functions.</p>
+						<p class="placeholder-text">
+							No call path found between the two functions.
+						</p>
 					{/if}
 				</Card>
 			{/if}

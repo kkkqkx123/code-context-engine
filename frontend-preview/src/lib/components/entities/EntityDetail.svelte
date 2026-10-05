@@ -15,7 +15,7 @@
 		func = null,
 		calls = [],
 		callers = [],
-		onNavigate = () => {}
+		onNavigate = () => {},
 	}: Props = $props();
 
 	function handleNavigate(id: string) {
@@ -69,8 +69,7 @@
 		<div class="relationships-section">
 			<h3 class="section-title">Called By ({callers.length})</h3>
 			<div class="relationship-list">
-				{#each callers.slice(0, 10) as caller}
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
+				{#each callers.slice(0, 10) as caller (caller.function_id)}
 					<div
 						class="relationship-item"
 						onclick={() => handleNavigate(caller.function_id)}
@@ -79,7 +78,9 @@
 						role="button"
 					>
 						<span class="item-name">{caller.function_name}</span>
-						<span class="item-location">{caller.file_path}:{caller.call_line ?? ''}</span>
+						<span class="item-location"
+							>{caller.file_path}:{caller.call_line ?? ''}</span
+						>
 					</div>
 				{/each}
 				{#if callers.length > 10}
@@ -93,8 +94,7 @@
 		<div class="relationships-section">
 			<h3 class="section-title">Calls ({calls.length})</h3>
 			<div class="relationship-list">
-				{#each calls.slice(0, 10) as call}
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
+				{#each calls.slice(0, 10) as call (call.function_id)}
 					<div
 						class="relationship-item"
 						onclick={() => handleNavigate(call.function_id)}
@@ -103,7 +103,9 @@
 						role="button"
 					>
 						<span class="item-name">{call.function_name}</span>
-						<span class="item-location">{call.file_path}:{call.call_line ?? ''}</span>
+						<span class="item-location"
+							>{call.file_path}:{call.call_line ?? ''}</span
+						>
 					</div>
 				{/each}
 				{#if calls.length > 10}

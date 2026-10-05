@@ -30,10 +30,11 @@ echo "Syncing static assets..."
 mkdir -p "$PREVIEW_DIR/static"
 cp -r "$FRONTEND_DIR/static/." "$PREVIEW_DIR/static/"
 
-# Sync global styles and HTML template
-echo "Syncing global styles and HTML template..."
+# Sync global styles, HTML template, and ambient type declarations
+echo "Syncing global styles, HTML template, and ambient type declarations..."
 cp "$FRONTEND_DIR/src/app.html" "$PREVIEW_DIR/src/"
 cp "$FRONTEND_DIR/src/app.css" "$PREVIEW_DIR/src/"
+cp "$FRONTEND_DIR/src/app.d.ts" "$PREVIEW_DIR/src/"
 
 # Sync all components (ui, index, search, entities, tools)
 echo "Syncing components..."
@@ -82,7 +83,7 @@ echo "=== Sync complete ==="
 echo ""
 echo "Files synced:"
 echo "  - static/**/* (all static assets, e.g. favicon.png)"
-echo "  - src/app.html, src/app.css"
+echo "  - src/app.html, src/app.css, src/app.d.ts"
 echo "  - src/lib/components/**/* (all components)"
 echo "  - src/lib/stores/*.ts (all stores)"
 echo "  - src/lib/api/*.ts (except client.ts - mock-enabled)"

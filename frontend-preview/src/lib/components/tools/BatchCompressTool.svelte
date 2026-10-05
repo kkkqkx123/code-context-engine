@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi, type BatchCompressResponse } from '$lib/api/tools';
@@ -25,10 +26,10 @@
 				file_paths: paths,
 				include_entities: includeEntities,
 				include_groups: includeGroups,
-				max_concurrency: maxConcurrency
+				max_concurrency: maxConcurrency,
 			});
-		} catch (e: any) {
-			error = e?.message ?? 'Batch compress failed';
+		} catch (e) {
+			error = errorMessage(e) ?? 'Batch compress failed';
 		} finally {
 			loading = false;
 		}
@@ -46,9 +47,8 @@
 			class="paths-input"
 			rows="6"
 			bind:value={pathsText}
-			placeholder={'src/auth/login.ts\nsrc/utils/token.ts'}
-			spellcheck="false"
-		></textarea>
+			placeholder="src/auth/login.ts\nsrc/utils/token.ts"
+			spellcheck="false"></textarea>
 	</label>
 
 	<div class="options-row">
@@ -62,7 +62,13 @@
 		</label>
 		<label class="field field-narrow">
 			<span class="field-label">Max concurrency</span>
-			<input class="text-input" type="number" min="1" max="16" bind:value={maxConcurrency} />
+			<input
+				class="text-input"
+				type="number"
+				min="1"
+				max="16"
+				bind:value={maxConcurrency}
+			/>
 		</label>
 		<Button onclick={handleBatch} disabled={loading || !pathsText.trim()}>
 			{#if loading}Compressing...{:else}Batch Compress{/if}
@@ -72,17 +78,24 @@
 	{#if result}
 		<div class="result-head">
 			<Badge label={`${result.successes.length} ok`} variant="success" />
-			<Badge label={`${result.failures.length} failed`} variant={result.failures.length > 0 ? 'danger' : 'default'} />
+			<Badge
+				label={`${result.failures.length} failed`}
+				variant={result.failures.length > 0 ? 'danger' : 'default'}
+			/>
 		</div>
 
 		{#each result.successes as item (item.path)}
 			<div class="entry">
 				<div class="entry-head">
 					<span class="mono path">{item.path}</span>
-					<Badge label={item.result.from_cache ? 'cached' : 'fresh'} variant="info" />
+					<Badge
+						label={item.result.from_cache ? 'cached' : 'fresh'}
+						variant="info"
+					/>
 				</div>
 				<p class="entry-detail mono">
-					{item.result.language} · {item.result.semantic_text.length} chars semantic text
+					{item.result.language} · {item.result.semantic_text.length} chars semantic
+					text
 				</p>
 			</div>
 		{/each}

@@ -11,13 +11,13 @@
 import type { CallChainNode } from '$lib/api/search';
 import type {
 	ClassImplementationsResponse,
-	ClassInheritanceResponse
+	ClassInheritanceResponse,
 } from '$lib/api/entities';
 import {
 	edgeElementId,
 	toElementEdge,
 	toElementNode,
-	type GraphElement
+	type GraphElement,
 } from './graph-style';
 import type { GraphEdge, GraphNode } from '$lib/api/graph';
 
@@ -52,7 +52,7 @@ export function callChainToElements(nodes: CallChainNode[]): GraphElement[] {
 			label: node.function_name,
 			kind: 'function',
 			source_file: node.file_path,
-			source_location: callLocation(node)
+			source_location: callLocation(node),
 		});
 	}
 
@@ -66,7 +66,7 @@ export function callChainToElements(nodes: CallChainNode[]): GraphElement[] {
 			source,
 			target,
 			relation: CALL_RELATION,
-			confidence: 'extracted'
+			confidence: 'extracted',
 		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) continue;
@@ -74,7 +74,10 @@ export function callChainToElements(nodes: CallChainNode[]): GraphElement[] {
 		graphEdges.push(edge);
 	}
 
-	return [...[...graphNodes.values()].map(toElementNode), ...graphEdges.map(toElementEdge)];
+	return [
+		...[...graphNodes.values()].map(toElementNode),
+		...graphEdges.map(toElementEdge),
+	];
 }
 
 export interface InheritanceElementsInput {
@@ -93,7 +96,9 @@ export interface InheritanceElementsInput {
  * point at their base, a class points at the interfaces it implements, and
  * implementing classes point at the inspected interface.
  */
-export function inheritanceToElements(input: InheritanceElementsInput): GraphElement[] {
+export function inheritanceToElements(
+	input: InheritanceElementsInput,
+): GraphElement[] {
 	const { inheritance, implementations, fallbackId, fallbackName } = input;
 	const centerId =
 		inheritance?.class_id ?? implementations?.class_id ?? fallbackId ?? null;
@@ -112,7 +117,7 @@ export function inheritanceToElements(input: InheritanceElementsInput): GraphEle
 			label,
 			kind,
 			source_file: file,
-			source_location: file
+			source_location: file,
 		});
 	};
 
@@ -122,7 +127,12 @@ export function inheritanceToElements(input: InheritanceElementsInput): GraphEle
 	const seenEdges = new Set<string>();
 	const addEdge = (source: string, target: string, relation: string) => {
 		if (!source || !target || source === target) return;
-		const edge: GraphEdge = { source, target, relation, confidence: 'extracted' };
+		const edge: GraphEdge = {
+			source,
+			target,
+			relation,
+			confidence: 'extracted',
+		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) return;
 		seenEdges.add(id);
@@ -138,7 +148,12 @@ export function inheritanceToElements(input: InheritanceElementsInput): GraphEle
 		addEdge(derived.class_id, centerId, INHERITANCE_RELATION);
 	}
 	for (const iface of implementations?.implemented_interfaces ?? []) {
-		addNode(iface.interface_id, iface.interface_name, 'interface', iface.file_path);
+		addNode(
+			iface.interface_id,
+			iface.interface_name,
+			'interface',
+			iface.file_path,
+		);
 		addEdge(centerId, iface.interface_id, IMPLEMENTATION_RELATION);
 	}
 	for (const impl of implementations?.implementing_classes ?? []) {
@@ -146,12 +161,20 @@ export function inheritanceToElements(input: InheritanceElementsInput): GraphEle
 		addEdge(impl.class_id, centerId, IMPLEMENTATION_RELATION);
 	}
 
-	return [...[...graphNodes.values()].map(toElementNode), ...graphEdges.map(toElementEdge)];
+	return [
+		...[...graphNodes.values()].map(toElementNode),
+		...graphEdges.map(toElementEdge),
+	];
 }
 
 /** Resolve the center id used for focus highlight in inheritance graphs. */
-export function inheritanceFocusId(input: InheritanceElementsInput): string | null {
+export function inheritanceFocusId(
+	input: InheritanceElementsInput,
+): string | null {
 	return (
-		input.inheritance?.class_id ?? input.implementations?.class_id ?? input.fallbackId ?? null
+		input.inheritance?.class_id ??
+		input.implementations?.class_id ??
+		input.fallbackId ??
+		null
 	);
 }

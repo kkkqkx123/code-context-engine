@@ -4,7 +4,14 @@
  */
 
 import { writable } from 'svelte/store';
-import { entityApi, type FunctionInfo, type FunctionCallsResponse, type FunctionCallersResponse, type ClassInheritanceResponse, type ClassImplementationsResponse } from '../api/entities';
+import {
+	entityApi,
+	type FunctionInfo,
+	type FunctionCallsResponse,
+	type FunctionCallersResponse,
+	type ClassInheritanceResponse,
+	type ClassImplementationsResponse,
+} from '../api/entities';
 import { type CallChainNode } from '../api/search';
 import { currentProjectId } from './project';
 
@@ -42,11 +49,11 @@ export const entityState = writable<EntityState>({
 // Actions
 export const entityActions = {
 	async loadFunction(id: string, projectId?: number) {
-		entityState.update(s => ({ ...s, isLoading: true, error: null }));
+		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
 
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 			const projId = projectId ?? pid!;
 
 			const [func, calls, callers] = await Promise.all([
@@ -55,7 +62,7 @@ export const entityActions = {
 				entityApi.getCallers(projId, id),
 			]);
 
-			entityState.update(s => ({
+			entityState.update((s) => ({
 				...s,
 				currentEntity: func.function,
 				calls,
@@ -64,7 +71,7 @@ export const entityActions = {
 			}));
 		} catch (error) {
 			console.error('Failed to load function:', error);
-			entityState.update(s => ({
+			entityState.update((s) => ({
 				...s,
 				isLoading: false,
 				error: 'Failed to load function details',
@@ -73,11 +80,11 @@ export const entityActions = {
 	},
 
 	async loadClass(id: string, projectId?: number) {
-		entityState.update(s => ({ ...s, isLoading: true, error: null }));
+		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
 
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 			const projId = projectId ?? pid!;
 
 			const [inheritance, implementations] = await Promise.all([
@@ -85,7 +92,7 @@ export const entityActions = {
 				entityApi.getImplementations(projId, id),
 			]);
 
-			entityState.update(s => ({
+			entityState.update((s) => ({
 				...s,
 				currentEntity: null,
 				inheritance,
@@ -94,7 +101,7 @@ export const entityActions = {
 			}));
 		} catch (error) {
 			console.error('Failed to load class:', error);
-			entityState.update(s => ({
+			entityState.update((s) => ({
 				...s,
 				isLoading: false,
 				error: 'Failed to load class details',
@@ -102,14 +109,18 @@ export const entityActions = {
 		}
 	},
 
-	async loadCallChain(id: string, direction: 'up' | 'down' = 'down', projectId?: number) {
+	async loadCallChain(
+		id: string,
+		direction: 'up' | 'down' = 'down',
+		projectId?: number,
+	) {
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 			const projId = projectId ?? pid!;
 
 			const response = await entityApi.getCallChain(projId, id, direction);
-			entityState.update(s => ({ ...s, callChain: response.call_chain }));
+			entityState.update((s) => ({ ...s, callChain: response.call_chain }));
 		} catch (error) {
 			console.error('Failed to load call chain:', error);
 		}
@@ -120,27 +131,46 @@ export const entityActions = {
 	 * stored so the UI can distinguish "no path exists" from "request failed";
 	 * a previous path is cleared either way.
 	 */
-	async loadCallPath(fromId: string, toId: string, maxDepth = 10, projectId?: number) {
-		entityState.update(s => ({ ...s, isLoading: true, error: null, callPath: [], callPathFound: false, callPathLength: 0 }));
+	async loadCallPath(
+		fromId: string,
+		toId: string,
+		maxDepth = 10,
+		projectId?: number,
+	) {
+		entityState.update((s) => ({
+			...s,
+			isLoading: true,
+			error: null,
+			callPath: [],
+			callPathFound: false,
+			callPathLength: 0,
+		}));
 
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 			const projId = projectId ?? pid!;
 
-			const response = await entityApi.getCallPath(projId, fromId, toId, maxDepth);
-			entityState.update(s => ({
+			const response = await entityApi.getCallPath(
+				projId,
+				fromId,
+				toId,
+				maxDepth,
+			);
+			entityState.update((s) => ({
 				...s,
 				callPathFound: response.path_found,
 				callPath: response.path ?? [],
 				callPathLength: response.path_length ?? 0,
 				isLoading: false,
-				error: response.path_found ? null : 'No call path found between the given functions',
+				error: response.path_found
+					? null
+					: 'No call path found between the given functions',
 			}));
 			return response;
 		} catch (error) {
 			console.error('Failed to load call path:', error);
-			entityState.update(s => ({
+			entityState.update((s) => ({
 				...s,
 				isLoading: false,
 				error: 'Failed to load call path',
@@ -150,7 +180,7 @@ export const entityActions = {
 	},
 
 	clear() {
-		entityState.update(s => ({
+		entityState.update((s) => ({
 			...s,
 			currentEntity: null,
 			calls: null,

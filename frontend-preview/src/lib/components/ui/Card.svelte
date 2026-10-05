@@ -18,11 +18,7 @@
 	}: Props = $props();
 </script>
 
-<div
-	class="card"
-	class:card-clickable={clickable}
-	{...rest}
->
+<div class="card" class:card-clickable={clickable} {...rest}>
 	{#if title || subtitle}
 		<div class="card-header">
 			{#if title}

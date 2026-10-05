@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { metricsState, metricsActions } from '$lib/stores/metrics';
 	import { projects } from '$lib/stores/index';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
@@ -12,11 +14,19 @@
 		metricsActions.stopAutoRefresh();
 	});
 
-	let vectorCount = $derived($metricsState.storageStatus?.vector_storage.item_count ?? 0);
-	let bm25Count = $derived($metricsState.storageStatus?.bm25_storage.item_count ?? 0);
-	let serverOk = $derived($metricsState.lastUpdated != null && !$metricsState.error);
+	let vectorCount = $derived(
+		$metricsState.storageStatus?.vector_storage.item_count ?? 0,
+	);
+	let bm25Count = $derived(
+		$metricsState.storageStatus?.bm25_storage.item_count ?? 0,
+	);
+	let serverOk = $derived(
+		$metricsState.lastUpdated != null && !$metricsState.error,
+	);
 	let lastUpdatedText = $derived(
-		$metricsState.lastUpdated ? $metricsState.lastUpdated.toLocaleTimeString() : '—'
+		$metricsState.lastUpdated
+			? $metricsState.lastUpdated.toLocaleTimeString()
+			: '—',
 	);
 </script>
 
@@ -25,7 +35,10 @@
 </svelte:head>
 
 <div class="page">
-	<PageHeader title="Dashboard" subtitle="Code indexing, search, and analysis console" />
+	<PageHeader
+		title="Dashboard"
+		subtitle="Code indexing, search, and analysis console"
+	/>
 
 	<div class="kpi-grid">
 		<div class="kpi-card">
@@ -51,19 +64,58 @@
 	</div>
 
 	<div class="quick-grid">
-		<a class="quick-tile" href="/index">
+		<a
+			class="quick-tile"
+			href={resolve('/index')}
+			onclick={(e) => {
+				e.preventDefault();
+				goto(resolve('/index'));
+			}}
+		>
 			<h3>Manage Index</h3>
 			<p>Create projects, trigger indexing, monitor progress</p>
 		</a>
-		<a class="quick-tile" href="/search">
+		<a
+			class="quick-tile"
+			href={resolve('/search')}
+			onclick={(e) => {
+				e.preventDefault();
+				goto(resolve('/search'));
+			}}
+		>
 			<h3>Search Code</h3>
 			<p>Semantic and keyword-based code search</p>
 		</a>
-		<a class="quick-tile" href="/entities">
+		<a
+			class="quick-tile"
+			href={resolve('/entities')}
+			onclick={(e) => {
+				e.preventDefault();
+				goto(resolve('/entities'));
+			}}
+		>
 			<h3>Explore Entities</h3>
 			<p>Browse functions, classes, and relationships</p>
 		</a>
-		<a class="quick-tile" href="/storage">
+		<a
+			class="quick-tile"
+			href={resolve('/graph')}
+			onclick={(e) => {
+				e.preventDefault();
+				goto(resolve('/graph'));
+			}}
+		>
+			<h3>Graph Explorer</h3>
+			<p>Visualize calls, dependencies, and impact analysis</p>
+		</a>
+		<a
+			class="quick-tile"
+			href={resolve('/storage')}
+			onclick={(e) => {
+				e.preventDefault();
+				goto(resolve('/storage'));
+			}}
+		>
 			<h3>Manage Storage</h3>
 			<p>View statistics and clean up indexes</p>
 		</a>

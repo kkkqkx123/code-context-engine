@@ -3,10 +3,14 @@
 
 	function getIcon(type: string): string {
 		switch (type) {
-			case 'success': return '✓';
-			case 'error': return '✕';
-			case 'warning': return '⚠';
-			default: return 'ℹ';
+			case 'success':
+				return '✓';
+			case 'error':
+				return '✕';
+			case 'warning':
+				return '⚠';
+			default:
+				return 'ℹ';
 		}
 	}
 </script>

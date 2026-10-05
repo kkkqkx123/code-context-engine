@@ -14,5 +14,5 @@ export type SummaryResponse = components['schemas']['SummaryResponse'];
 export const summaryApi = {
 	/** POST /api/summary — generate file summaries */
 	generate: (request: SummaryRequest): Promise<SummaryResponse> =>
-		call(client.POST('/api/summary', { body: request }))
+		call(client.POST('/api/summary', { body: request })),
 };

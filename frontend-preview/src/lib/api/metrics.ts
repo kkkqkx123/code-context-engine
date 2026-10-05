@@ -9,11 +9,13 @@ import type { components } from './schema';
 
 export type MetricsData = Record<string, unknown>;
 export type AggregatedMetric = components['schemas']['AggregatedMetric'];
-export type CleanupMetricsResponse = components['schemas']['MetricsCleanupResponse'];
+export type CleanupMetricsResponse =
+	components['schemas']['MetricsCleanupResponse'];
 
 export const metricsApi = {
 	// Get metrics in JSON format
-	getJsonMetrics: (): Promise<MetricsData> => call(client.GET('/api/metrics/json')),
+	getJsonMetrics: (): Promise<MetricsData> =>
+		call(client.GET('/api/metrics/json')),
 
 	// Get metrics in Prometheus format.
 	// Non-JSON exception: the endpoint answers with Prometheus text exposition,
@@ -38,21 +40,24 @@ export const metricsApi = {
 						to: params.to,
 						metric: params.metric,
 						project_id: params.project_id,
-						operation_type: params.operation_type
-					}
-				}
-			})
+						operation_type: params.operation_type,
+					},
+				},
+			}),
 		),
 
 	// Cleanup metrics
-	cleanup: (params: { all?: boolean; before?: string }): Promise<CleanupMetricsResponse> => {
+	cleanup: (params: {
+		all?: boolean;
+		before?: string;
+	}): Promise<CleanupMetricsResponse> => {
 		const query: { all?: boolean; before?: string } = {};
 		if (params.all !== undefined) query.all = params.all;
 		if (params.before !== undefined) query.before = params.before;
 		return call(
 			client.DELETE('/api/metrics/cleanup', {
-				params: { query }
-			})
+				params: { query },
+			}),
 		);
-	}
+	},
 };

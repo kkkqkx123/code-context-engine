@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -31,11 +32,11 @@
 				from: new Date(historyFrom).toISOString(),
 				to: new Date(historyTo).toISOString(),
 				metric: metricFilter.trim() || undefined,
-				project_id: scopeProject ? get(currentProjectId) : undefined
+				project_id: scopeProject ? get(currentProjectId) : undefined,
 			});
 			historyLoaded = true;
-		} catch (e: any) {
-			historyError = e?.message ?? 'Failed to load metric history';
+		} catch (e) {
+			historyError = errorMessage(e) ?? 'Failed to load metric history';
 		} finally {
 			historyLoading = false;
 		}
@@ -62,8 +63,8 @@
 		prometheusError = null;
 		try {
 			prometheusText = await metricsApi.getPrometheusMetrics();
-		} catch (e: any) {
-			prometheusError = e?.message ?? 'Failed to load Prometheus metrics';
+		} catch (e) {
+			prometheusError = errorMessage(e) ?? 'Failed to load Prometheus metrics';
 		} finally {
 			prometheusLoading = false;
 		}
@@ -93,14 +94,17 @@
 		try {
 			const response = await metricsApi.cleanup({
 				all: cleanupAll || undefined,
-				before: !cleanupAll && cleanupBefore ? new Date(cleanupBefore).toISOString() : undefined
+				before:
+					!cleanupAll && cleanupBefore
+						? new Date(cleanupBefore).toISOString()
+						: undefined,
 			});
 			cleanupMessage = `Deleted ${response.deleted_count} metric records`;
 			cleanupConfirmOpen = false;
 			historyLoaded = false;
 			historyRows = [];
-		} catch (e: any) {
-			cleanupError = e?.message ?? 'Failed to clean up metrics';
+		} catch (e) {
+			cleanupError = errorMessage(e) ?? 'Failed to clean up metrics';
 		} finally {
 			cleanupBusy = false;
 		}
@@ -117,27 +121,50 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Metrics" subtitle="Historical aggregates, Prometheus export and retention" />
+		<PageHeader
+			title="Metrics"
+			subtitle="Historical aggregates, Prometheus export and retention"
+		/>
 
-		<Card title="Metric History" subtitle="Aggregated metric windows over a time range">
+		<Card
+			title="Metric History"
+			subtitle="Aggregated metric windows over a time range"
+		>
 			<div class="filter-bar">
 				<label class="filter-field">
 					<span class="filter-label">From</span>
-					<input class="filter-input" type="datetime-local" bind:value={historyFrom} />
+					<input
+						class="filter-input"
+						type="datetime-local"
+						bind:value={historyFrom}
+					/>
 				</label>
 				<label class="filter-field">
 					<span class="filter-label">To</span>
-					<input class="filter-input" type="datetime-local" bind:value={historyTo} />
+					<input
+						class="filter-input"
+						type="datetime-local"
+						bind:value={historyTo}
+					/>
 				</label>
 				<label class="filter-field">
 					<span class="filter-label">Metric name</span>
-					<input class="filter-input" type="text" bind:value={metricFilter} placeholder="e.g. index_duration" />
+					<input
+						class="filter-input"
+						type="text"
+						bind:value={metricFilter}
+						placeholder="e.g. index_duration"
+					/>
 				</label>
 				<label class="filter-check">
 					<input type="checkbox" bind:checked={scopeProject} />
 					<span>Current project only</span>
 				</label>
-				<Button variant="secondary" onclick={loadHistory} disabled={historyLoading}>
+				<Button
+					variant="secondary"
+					onclick={loadHistory}
+					disabled={historyLoading}
+				>
 					{historyLoading ? 'Loading...' : 'Query'}
 				</Button>
 			</div>
@@ -146,7 +173,9 @@
 				<div class="inline-error">{historyError}</div>
 			{:else if historyRows.length === 0}
 				<p class="loading-text">
-					{historyLoaded ? 'No metric records in the selected range' : 'Loading metric history...'}
+					{historyLoaded
+						? 'No metric records in the selected range'
+						: 'Loading metric history...'}
 				</p>
 			{:else}
 				<div class="table-wrap">
@@ -168,7 +197,12 @@
 							{#each historyRows as row (row.metric_name + row.timestamp + row.operation_type)}
 								<tr>
 									<td class="cell-name">{row.metric_name}</td>
-									<td><Badge label={row.metric_type} variant={typeBadgeVariant(row.metric_type)} /></td>
+									<td
+										><Badge
+											label={row.metric_type}
+											variant={typeBadgeVariant(row.metric_type)}
+										/></td
+									>
 									<td class="cell-mono">{row.operation_type ?? '-'}</td>
 									<td>{row.count}</td>
 									<td>{formatNumber(row.avg)}</td>
@@ -185,9 +219,16 @@
 			{/if}
 		</Card>
 
-		<Card title="Prometheus Export" subtitle="Text exposition format for scraping">
+		<Card
+			title="Prometheus Export"
+			subtitle="Text exposition format for scraping"
+		>
 			<div class="prom-actions">
-				<Button variant="secondary" onclick={loadPrometheus} disabled={prometheusLoading}>
+				<Button
+					variant="secondary"
+					onclick={loadPrometheus}
+					disabled={prometheusLoading}
+				>
 					{prometheusLoading ? 'Loading...' : 'Load Metrics'}
 				</Button>
 				{#if prometheusText}
@@ -199,13 +240,16 @@
 			{:else if prometheusText}
 				<pre class="prom-output">{prometheusText}</pre>
 			{:else}
-				<p class="loading-text">Load the current Prometheus payload to inspect or copy it.</p>
+				<p class="loading-text">
+					Load the current Prometheus payload to inspect or copy it.
+				</p>
 			{/if}
 		</Card>
 
 		<Card title="Retention Cleanup" subtitle="Delete historical metric records">
 			<p class="cleanup-warning">
-				Deleted metric history cannot be recovered. Live system metrics are unaffected.
+				Deleted metric history cannot be recovered. Live system metrics are
+				unaffected.
 			</p>
 			<div class="cleanup-form">
 				<label class="filter-check">
@@ -268,7 +312,9 @@
 					: `All metric records before ${cleanupBefore} will be permanently deleted.`}
 			</p>
 			<div class="dialog-actions">
-				<Button variant="secondary" onclick={() => (cleanupConfirmOpen = false)}>Cancel</Button>
+				<Button variant="secondary" onclick={() => (cleanupConfirmOpen = false)}
+					>Cancel</Button
+				>
 				<Button variant="danger" onclick={runCleanup} disabled={cleanupBusy}>
 					{cleanupBusy ? 'Cleaning...' : 'Confirm Cleanup'}
 				</Button>

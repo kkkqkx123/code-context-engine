@@ -33,7 +33,7 @@
 		onReset = () => {},
 		onRelayout = () => {},
 		onLayoutChange = () => {},
-		onExportPng = () => {}
+		onExportPng = () => {},
 	}: Props = $props();
 
 	const layouts: Array<{ value: GraphLayoutName; label: string }> = [
@@ -41,11 +41,12 @@
 		{ value: 'cose', label: 'Force (basic)' },
 		{ value: 'breadthfirst', label: 'Hierarchy' },
 		{ value: 'concentric', label: 'Concentric' },
-		{ value: 'grid', label: 'Grid' }
+		{ value: 'grid', label: 'Grid' },
 	];
 
 	function handleLayoutChange(event: Event) {
-		const value = (event.currentTarget as HTMLSelectElement).value as GraphLayoutName;
+		const value = (event.currentTarget as HTMLSelectElement)
+			.value as GraphLayoutName;
 		layout = value;
 		onLayoutChange(value);
 	}
@@ -53,23 +54,60 @@
 
 <div class="graph-toolbar">
 	<div class="toolbar-group">
-		<button type="button" class="tool-btn" onclick={onZoomOut} aria-label="Zoom out" title="Zoom out">−</button>
-		<button type="button" class="tool-btn" onclick={onZoomIn} aria-label="Zoom in" title="Zoom in">+</button>
-		<button type="button" class="tool-btn wide" onclick={onFit} title="Fit graph to viewport">Fit</button>
-		<button type="button" class="tool-btn wide" onclick={onReset} title="Reset viewport">Reset</button>
+		<button
+			type="button"
+			class="tool-btn"
+			onclick={onZoomOut}
+			aria-label="Zoom out"
+			title="Zoom out">−</button
+		>
+		<button
+			type="button"
+			class="tool-btn"
+			onclick={onZoomIn}
+			aria-label="Zoom in"
+			title="Zoom in">+</button
+		>
+		<button
+			type="button"
+			class="tool-btn wide"
+			onclick={onFit}
+			title="Fit graph to viewport">Fit</button
+		>
+		<button
+			type="button"
+			class="tool-btn wide"
+			onclick={onReset}
+			title="Reset viewport">Reset</button
+		>
 	</div>
 
 	<div class="toolbar-group">
 		<label class="tool-label" for="graph-layout">Layout</label>
-		<select id="graph-layout" class="tool-select" value={layout} onchange={handleLayoutChange}>
+		<select
+			id="graph-layout"
+			class="tool-select"
+			value={layout}
+			onchange={handleLayoutChange}
+		>
 			{#each layouts as item (item.value)}
 				<option value={item.value}>{item.label}</option>
 			{/each}
 		</select>
-		<button type="button" class="tool-btn wide" onclick={onRelayout} title="Re-run the current layout">
+		<button
+			type="button"
+			class="tool-btn wide"
+			onclick={onRelayout}
+			title="Re-run the current layout"
+		>
 			Re-layout
 		</button>
-		<button type="button" class="tool-btn wide" onclick={onExportPng} title="Export the current view as PNG">
+		<button
+			type="button"
+			class="tool-btn wide"
+			onclick={onExportPng}
+			title="Export the current view as PNG"
+		>
 			Export PNG
 		</button>
 	</div>

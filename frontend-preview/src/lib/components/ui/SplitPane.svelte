@@ -15,7 +15,7 @@
 		minLeftWidth = 20,
 		minRightWidth = 20,
 		left,
-		right
+		right,
 	}: Props = $props();
 
 	let container: HTMLDivElement | undefined = $state();
@@ -33,7 +33,7 @@
 		const rect = container.getBoundingClientRect();
 		const newLeftWidth = ((e.clientX - rect.left) / rect.width) * 100;
 
-		if (newLeftWidth >= minLeftWidth && newLeftWidth <= (100 - minRightWidth)) {
+		if (newLeftWidth >= minLeftWidth && newLeftWidth <= 100 - minRightWidth) {
 			leftWidth = newLeftWidth;
 		}
 	}

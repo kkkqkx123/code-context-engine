@@ -1561,6 +1561,11 @@ export interface components {
             /** @description Suggested action to resolve the warning */
             suggestion: string;
         };
+        /**
+         * @description Whether a result carries its full body or a file-and-range reference.
+         * @enum {string}
+         */
+        ContentStateDto: "full" | "reference_over_limit" | "reference_file_missing" | "reference_file_level";
         /** @description Create project request */
         CreateProjectRequest: {
             /** @description Directories to exclude */
@@ -2140,6 +2145,8 @@ export interface components {
              * @description Optional epoch for version-aware filtering
              */
             epoch?: number | null;
+            /** @description Number of results to skip (for pagination) */
+            offset?: number;
             /**
              * Format: int64
              * @description Project ID for scoped search
@@ -2419,14 +2426,25 @@ export interface components {
         /** @description Search result item */
         SearchResultItem: {
             code_chunk: string;
+            /** @description Whether `code_chunk` is the full body or a reference. */
+            content_state?: components["schemas"]["ContentStateDto"];
             /** Format: int32 */
             end_line: number;
+            /**
+             * @description All entity IDs associated with this result (a chunk may contain
+             *     multiple entities).
+             */
             entity_ids?: number[];
+            entity_names?: string[];
             entity_type?: string | null;
             file_path: string;
-            /** Format: float */
+            /**
+             * Format: float
+             * @description Unified relevance score (post-fusion).
+             */
             score: number;
-            source: string;
+            /** @description Retrieval sources that contributed to this result (e.g. "vector", "bm25"). */
+            sources?: string[];
             /** Format: int32 */
             start_line: number;
         };
@@ -2519,7 +2537,9 @@ export interface components {
             text: string;
             /**
              * Format: float
-             * @description Weight for weighted score fusion
+             * @description Weight applied to this sub-query's candidate scores before the
+             *     cross-query merge (`score *= weight`, then dedup keeps the highest
+             *     weighted score per alignment key). Must be finite and >= 0.
              */
             weight?: number;
         };

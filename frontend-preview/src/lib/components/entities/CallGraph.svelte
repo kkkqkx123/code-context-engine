@@ -49,7 +49,7 @@
 		</div>
 
 		{#if viewMode === 'graph'}
-			<EntityGraphView {elements} focusId={effectiveFocusId} onNavigate={onNavigate} />
+			<EntityGraphView {elements} focusId={effectiveFocusId} {onNavigate} />
 			<div class="graph-legend">
 				<div class="legend-item">
 					<span class="legend-box"></span>
@@ -58,9 +58,8 @@
 			</div>
 		{:else}
 			<ol class="chain-list">
-				{#each nodes as node, i}
+				{#each nodes as node, i (node.function_id)}
 					<li>
-						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<div
 							class="chain-item"
 							tabindex="0"
@@ -70,7 +69,9 @@
 						>
 							<span class="chain-number">{i + 1}</span>
 							<span class="chain-name">{node.function_name}</span>
-							<span class="chain-location">{node.file_path.split('/').pop()}:{node.call_line ?? ''}</span>
+							<span class="chain-location"
+								>{node.file_path.split('/').pop()}:{node.call_line ?? ''}</span
+							>
 						</div>
 					</li>
 				{/each}

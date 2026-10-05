@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
@@ -13,7 +14,11 @@
 
 	let code = $state('');
 	let fileName = $state('');
-	let result: { language: string; is_valid: boolean; diagnostics: Diagnostic[] } | null = $state(null);
+	let result: {
+		language: string;
+		is_valid: boolean;
+		diagnostics: Diagnostic[];
+	} | null = $state(null);
 	let loading = $state(false);
 	let error: string | null = $state(null);
 
@@ -30,16 +35,23 @@
 				language: language,
 				file_name: fileName || undefined,
 			});
-		} catch (err: any) {
-			error = err.message;
+		} catch (err) {
+			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}
 	}
 
-	function getSeverityVariant(kind: string): 'danger' | 'warning' | 'info' | 'success' | 'default' {
+	function getSeverityVariant(
+		kind: string,
+	): 'danger' | 'warning' | 'info' | 'success' | 'default' {
 		const lowerKind = kind.toLowerCase();
-		if (lowerKind.includes('error') || lowerKind.includes('missing') || lowerKind.includes('unclosed') || lowerKind.includes('illegal')) {
+		if (
+			lowerKind.includes('error') ||
+			lowerKind.includes('missing') ||
+			lowerKind.includes('unclosed') ||
+			lowerKind.includes('illegal')
+		) {
 			return 'danger';
 		}
 		if (lowerKind.includes('incomplete') || lowerKind.includes('indentation')) {
@@ -74,7 +86,11 @@
 				<div class="input-row">
 					<div class="input-field">
 						<label class="field-label" for="diagnose-language">Language</label>
-						<select id="diagnose-language" bind:value={language} class="select-input">
+						<select
+							id="diagnose-language"
+							bind:value={language}
+							class="select-input"
+						>
 							<option value="typescript">TypeScript</option>
 							<option value="javascript">JavaScript</option>
 							<option value="rust">Rust</option>
@@ -84,7 +100,9 @@
 						</select>
 					</div>
 					<div class="input-field flex-1">
-						<label class="field-label" for="diagnose-filename">File Name (optional)</label>
+						<label class="field-label" for="diagnose-filename"
+							>File Name (optional)</label
+						>
 						<input
 							id="diagnose-filename"
 							type="text"
@@ -97,13 +115,9 @@
 				<textarea
 					bind:value={code}
 					placeholder="Enter code to diagnose..."
-					class="code-textarea"
-				></textarea>
+					class="code-textarea"></textarea>
 				<div class="tool-actions">
-					<Button
-						onclick={handleDiagnose}
-						disabled={!code.trim() || loading}
-					>
+					<Button onclick={handleDiagnose} disabled={!code.trim() || loading}>
 						{#if loading}Diagnosing...{:else}Diagnose{/if}
 					</Button>
 				</div>
@@ -117,10 +131,12 @@
 						<div class="no-issues">No issues found ✓</div>
 					{:else}
 						<div class="issues-list">
-							{#each result.diagnostics as diagnostic}
+							{#each result.diagnostics as diagnostic (diagnostic.message + diagnostic.position.row + ':' + diagnostic.position.column)}
 								<div
 									class="issue-card"
-									style="border-left-color: {getSeverityBordercolor(diagnostic.kind)}"
+									style="border-left-color: {getSeverityBordercolor(
+										diagnostic.kind,
+									)}"
 								>
 									<div class="issue-header">
 										<Badge
@@ -128,7 +144,8 @@
 											variant={getSeverityVariant(diagnostic.kind)}
 										/>
 										<span class="issue-location">
-											Line {diagnostic.position.row + 1}:{diagnostic.position.column + 1}
+											Line {diagnostic.position.row + 1}:{diagnostic.position
+												.column + 1}
 										</span>
 									</div>
 									<p class="issue-message">{diagnostic.message}</p>

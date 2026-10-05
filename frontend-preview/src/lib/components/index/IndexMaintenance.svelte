@@ -1,8 +1,13 @@
 <script lang="ts">
+	import { errorMessage } from '$lib/utils/errors';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import { indexApi, type IndexStatsResponse, type DeleteFileResponse } from '$lib/api/index';
+	import {
+		indexApi,
+		type IndexStatsResponse,
+		type DeleteFileResponse,
+	} from '$lib/api/index';
 	import { currentProjectId } from '$lib/stores/project';
 	import { get } from 'svelte/store';
 
@@ -19,8 +24,8 @@
 			const response = await indexApi.getStats(get(currentProjectId));
 			stats = response.statistics;
 			statsElapsedMs = response.elapsed_ms;
-		} catch (e: any) {
-			statsError = e?.message ?? 'Failed to load index statistics';
+		} catch (e) {
+			statsError = errorMessage(e) ?? 'Failed to load index statistics';
 		} finally {
 			statsLoading = false;
 		}
@@ -47,8 +52,8 @@
 			deleteFileArmed = false;
 			deleteFilePath = '';
 			await loadStats();
-		} catch (e: any) {
-			deleteFileError = e?.message ?? 'Failed to delete file';
+		} catch (e) {
+			deleteFileError = errorMessage(e) ?? 'Failed to delete file';
 		} finally {
 			deleteFileBusy = false;
 		}
@@ -79,8 +84,8 @@
 			deleteEntityArmed = false;
 			deleteEntityId = '';
 			await loadStats();
-		} catch (e: any) {
-			deleteEntityError = e?.message ?? 'Failed to delete entity';
+		} catch (e) {
+			deleteEntityError = errorMessage(e) ?? 'Failed to delete entity';
 		} finally {
 			deleteEntityBusy = false;
 		}
@@ -91,7 +96,10 @@
 	let batchEntitiesText = $state('');
 	let batchArmed = $state(false);
 	let batchBusy = $state(false);
-	let batchResult = $state<{ files_deleted: number; entities_deleted: number } | null>(null);
+	let batchResult = $state<{
+		files_deleted: number;
+		entities_deleted: number;
+	} | null>(null);
 	let batchError = $state('');
 
 	async function runBatchDelete() {
@@ -116,15 +124,18 @@
 		try {
 			const response = await indexApi.batchDelete(get(currentProjectId), {
 				file_paths: filePaths.length > 0 ? filePaths : undefined,
-				entity_ids: entityIds.length > 0 ? entityIds : undefined
+				entity_ids: entityIds.length > 0 ? entityIds : undefined,
 			});
-			batchResult = { files_deleted: response.files_deleted, entities_deleted: response.entities_deleted };
+			batchResult = {
+				files_deleted: response.files_deleted,
+				entities_deleted: response.entities_deleted,
+			};
 			batchArmed = false;
 			batchFilesText = '';
 			batchEntitiesText = '';
 			await loadStats();
-		} catch (e: any) {
-			batchError = e?.message ?? 'Batch delete failed';
+		} catch (e) {
+			batchError = errorMessage(e) ?? 'Batch delete failed';
 		} finally {
 			batchBusy = false;
 		}
@@ -148,11 +159,14 @@
 				</div>
 				<div class="stat-item">
 					<span class="stat-label">Entities</span>
-					<span class="stat-value">{stats.total_entities.toLocaleString()}</span>
+					<span class="stat-value">{stats.total_entities.toLocaleString()}</span
+					>
 				</div>
 				<div class="stat-item">
 					<span class="stat-label">Relations</span>
-					<span class="stat-value">{stats.total_relations.toLocaleString()}</span>
+					<span class="stat-value"
+						>{stats.total_relations.toLocaleString()}</span
+					>
 				</div>
 				<div class="stat-item">
 					<span class="stat-label">Vectors</span>
@@ -160,16 +174,23 @@
 				</div>
 				<div class="stat-item">
 					<span class="stat-label">BM25 Docs</span>
-					<span class="stat-value">{stats.total_bm25_documents.toLocaleString()}</span>
+					<span class="stat-value"
+						>{stats.total_bm25_documents.toLocaleString()}</span
+					>
 				</div>
 			</div>
 			<p class="stats-meta mono">query took {statsElapsedMs} ms</p>
 		{:else}
-			<p class="placeholder">Load the current statistics for the selected project.</p>
+			<p class="placeholder">
+				Load the current statistics for the selected project.
+			</p>
 		{/if}
 	</Card>
 
-	<Card title="Delete File" subtitle="Remove a file and its derived data from all backends">
+	<Card
+		title="Delete File"
+		subtitle="Remove a file and its derived data from all backends"
+	>
 		<div class="action-row">
 			<input
 				class="text-input"
@@ -183,20 +204,28 @@
 				onclick={runDeleteFile}
 				disabled={deleteFileBusy || !deleteFilePath.trim()}
 			>
-				{#if deleteFileBusy}Deleting...{:else if deleteFileArmed}Confirm Delete{:else}Delete File{/if}
+				{#if deleteFileBusy}Deleting...{:else if deleteFileArmed}Confirm Delete{:else}Delete
+					File{/if}
 			</Button>
 		</div>
 		{#if deleteFileArmed}
-			<p class="arm-warning">Click again to permanently delete this file's index data.</p>
+			<p class="arm-warning">
+				Click again to permanently delete this file's index data.
+			</p>
 		{/if}
 		{#if deleteFileError}
 			<div class="inline-error">{deleteFileError}</div>
 		{/if}
 		{#if deleteFileResult}
 			<div class="result-row">
-				<Badge label={deleteFileResult.success ? 'Deleted' : 'Failed'} variant={deleteFileResult.success ? 'success' : 'danger'} />
+				<Badge
+					label={deleteFileResult.success ? 'Deleted' : 'Failed'}
+					variant={deleteFileResult.success ? 'success' : 'danger'}
+				/>
 				<span class="mono">
-					{deleteFileResult.vectors_deleted} vectors · {deleteFileResult.bm25_documents_deleted} BM25 docs · {deleteFileResult.relations_deleted} relations · {deleteFileResult.elapsed_ms} ms
+					{deleteFileResult.vectors_deleted} vectors · {deleteFileResult.bm25_documents_deleted}
+					BM25 docs · {deleteFileResult.relations_deleted} relations · {deleteFileResult.elapsed_ms}
+					ms
 				</span>
 			</div>
 		{/if}
@@ -216,7 +245,8 @@
 				onclick={runDeleteEntity}
 				disabled={deleteEntityBusy || !deleteEntityId.trim()}
 			>
-				{#if deleteEntityBusy}Deleting...{:else if deleteEntityArmed}Confirm Delete{:else}Delete Entity{/if}
+				{#if deleteEntityBusy}Deleting...{:else if deleteEntityArmed}Confirm
+					Delete{:else}Delete Entity{/if}
 			</Button>
 		</div>
 		{#if deleteEntityArmed}
@@ -233,26 +263,43 @@
 		{/if}
 	</Card>
 
-	<Card title="Batch Delete" subtitle="Delete multiple files and entities in one request">
+	<Card
+		title="Batch Delete"
+		subtitle="Delete multiple files and entities in one request"
+	>
 		<label class="field">
 			<span class="field-label">File paths (one per line)</span>
-			<textarea class="area-input" rows="4" bind:value={batchFilesText} spellcheck="false"></textarea>
+			<textarea
+				class="area-input"
+				rows="4"
+				bind:value={batchFilesText}
+				spellcheck="false"></textarea>
 		</label>
 		<label class="field">
-			<span class="field-label">Entity ids (separated by spaces or commas)</span>
-			<input class="text-input" type="text" bind:value={batchEntitiesText} placeholder="12 34 56" />
+			<span class="field-label">Entity ids (separated by spaces or commas)</span
+			>
+			<input
+				class="text-input"
+				type="text"
+				bind:value={batchEntitiesText}
+				placeholder="12 34 56"
+			/>
 		</label>
 		<div class="action-row">
 			<Button
 				variant={batchArmed ? 'danger' : 'secondary'}
 				onclick={runBatchDelete}
-				disabled={batchBusy || (!batchFilesText.trim() && !batchEntitiesText.trim())}
+				disabled={batchBusy ||
+					(!batchFilesText.trim() && !batchEntitiesText.trim())}
 			>
-				{#if batchBusy}Deleting...{:else if batchArmed}Confirm Batch Delete{:else}Batch Delete{/if}
+				{#if batchBusy}Deleting...{:else if batchArmed}Confirm Batch Delete{:else}Batch
+					Delete{/if}
 			</Button>
 		</div>
 		{#if batchArmed}
-			<p class="arm-warning">Click again to permanently delete the listed items.</p>
+			<p class="arm-warning">
+				Click again to permanently delete the listed items.
+			</p>
 		{/if}
 		{#if batchError}
 			<div class="inline-error">{batchError}</div>
@@ -260,7 +307,10 @@
 		{#if batchResult}
 			<div class="result-row">
 				<Badge label={`${batchResult.files_deleted} files`} variant="success" />
-				<Badge label={`${batchResult.entities_deleted} entities`} variant="success" />
+				<Badge
+					label={`${batchResult.entities_deleted} entities`}
+					variant="success"
+				/>
 			</div>
 		{/if}
 	</Card>

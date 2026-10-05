@@ -11,7 +11,7 @@
 	import type { Core } from 'cytoscape';
 	import GraphCanvas, {
 		layoutOptions,
-		type GraphLayoutName
+		type GraphLayoutName,
 	} from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
 	import type { GraphElement } from '$lib/utils/graph-style';
@@ -29,7 +29,7 @@
 		focusId = null,
 		initialLayout = 'breadthfirst',
 		minHeight = 360,
-		onNavigate = () => {}
+		onNavigate = () => {},
 	}: Props = $props();
 
 	let cy = $state<Core | null>(null);
@@ -37,7 +37,9 @@
 	let layout = $state<GraphLayoutName>(initialLayout);
 	let showEdgeLabels = $state(false);
 
-	let nodeCount = $derived(elements.filter((element) => !('source' in element.data)).length);
+	let nodeCount = $derived(
+		elements.filter((element) => !('source' in element.data)).length,
+	);
 	let edgeCount = $derived(elements.length - nodeCount);
 
 	function fitViewport() {
@@ -48,7 +50,7 @@
 		if (!cy) return;
 		cy.zoom({
 			level: Math.min(3, Math.max(0.15, cy.zoom() + delta)),
-			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
 		});
 	}
 
@@ -95,7 +97,9 @@
 		onNodeSelect={onNavigate}
 		onNodeActivate={onNavigate}
 	/>
-	<p class="canvas-hint">Click a node to open the entity · Drag to pan · Ctrl/Cmd + wheel to zoom</p>
+	<p class="canvas-hint">
+		Click a node to open the entity · Drag to pan · Ctrl/Cmd + wheel to zoom
+	</p>
 </div>
 
 <style>

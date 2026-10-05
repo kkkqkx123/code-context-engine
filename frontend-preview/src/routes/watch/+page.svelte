@@ -1,5 +1,6 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import type { Component } from 'svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -8,7 +9,7 @@
 	import { watchState, watchActions } from '$lib/stores/watch';
 
 	// Lazy load LogViewer component
-	let LogViewer: any = $state(null);
+	let LogViewer: Component | null = $state(null);
 	let logViewerLoaded = $state(false);
 
 	let watchPath = $state('');
@@ -24,7 +25,10 @@
 
 	async function handleStartWatch() {
 		if (!watchPath) return;
-		const extArray = extensions.split(',').map(e => e.trim()).filter(e => e);
+		const extArray = extensions
+			.split(',')
+			.map((e) => e.trim())
+			.filter((e) => e);
 		await watchActions.startWatch(watchPath, extArray, debounceMs);
 	}
 
@@ -55,12 +59,19 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="File Watcher" subtitle="Monitor file system changes for automatic incremental indexing" />
+		<PageHeader
+			title="File Watcher"
+			subtitle="Monitor file system changes for automatic incremental indexing"
+		/>
 
 		{#if $watchState.error}
 			<div class="error-banner">
 				<span>{$watchState.error}</span>
-				<button class="dismiss-btn" onclick={() => watchState.update(s => ({...s, error: null}))}>×</button>
+				<button
+					class="dismiss-btn"
+					onclick={() => watchState.update((s) => ({ ...s, error: null }))}
+					>×</button
+				>
 			</div>
 		{/if}
 
@@ -79,7 +90,9 @@
 				</div>
 
 				<div class="control-group">
-					<label class="field-label" for="file-extensions">File Extensions (comma-separated)</label>
+					<label class="field-label" for="file-extensions"
+						>File Extensions (comma-separated)</label
+					>
 					<Input
 						id="file-extensions"
 						type="text"
@@ -90,7 +103,9 @@
 				</div>
 
 				<div class="control-group">
-					<label class="field-label" for="debounce-interval">Debounce Interval (ms)</label>
+					<label class="field-label" for="debounce-interval"
+						>Debounce Interval (ms)</label
+					>
 					<input
 						id="debounce-interval"
 						type="number"
@@ -105,11 +120,18 @@
 
 				<div class="control-group control-actions">
 					{#if $watchState.isWatching}
-						<Button variant="secondary" onclick={handleStopWatch} disabled={$watchState.isLoading}>
+						<Button
+							variant="secondary"
+							onclick={handleStopWatch}
+							disabled={$watchState.isLoading}
+						>
 							{#if $watchState.isLoading}Stopping...{:else}Stop Watching{/if}
 						</Button>
 					{:else}
-						<Button onclick={handleStartWatch} disabled={!watchPath || $watchState.isLoading}>
+						<Button
+							onclick={handleStartWatch}
+							disabled={!watchPath || $watchState.isLoading}
+						>
 							{#if $watchState.isLoading}Starting...{:else}Start Watching{/if}
 						</Button>
 					{/if}
@@ -126,12 +148,20 @@
 						/>
 					</div>
 					<div class="status-info">
-						<span class="info-item">Events: {$watchState.status.events_processed}</span>
+						<span class="info-item"
+							>Events: {$watchState.status.events_processed}</span
+						>
 						{#if $watchState.status.watched_dirs && $watchState.status.watched_dirs.length > 0}
-							<span class="info-item">Watching: {$watchState.status.watched_dirs.length} dir(s)</span>
+							<span class="info-item"
+								>Watching: {$watchState.status.watched_dirs.length} dir(s)</span
+							>
 						{/if}
 						{#if $watchState.status.started_at}
-							<span class="info-item">Started: {new Date($watchState.status.started_at).toLocaleString()}</span>
+							<span class="info-item"
+								>Started: {new Date(
+									$watchState.status.started_at,
+								).toLocaleString()}</span
+							>
 						{/if}
 					</div>
 				</div>
@@ -141,18 +171,10 @@
 		<!-- Live Event Feed -->
 		<Card title="Event Feed" subtitle="Real-time file system events">
 			<div class="feed-controls">
-				<Button
-					variant="secondary"
-					onclick={togglePause}
-				>
+				<Button variant="secondary" onclick={togglePause}>
 					{isPaused ? 'Resume' : 'Pause'}
 				</Button>
-				<Button
-					variant="secondary"
-					onclick={clearEvents}
-				>
-					Clear
-				</Button>
+				<Button variant="secondary" onclick={clearEvents}>Clear</Button>
 				<span class="event-count">{$watchState.events.length} events</span>
 			</div>
 
@@ -260,7 +282,8 @@
 	}
 
 	@keyframes pulse {
-		0%, 100% {
+		0%,
+		100% {
 			opacity: 1;
 		}
 		50% {

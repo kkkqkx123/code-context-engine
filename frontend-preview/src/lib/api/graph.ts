@@ -14,9 +14,11 @@ import type { components } from './schema';
 
 export type GraphNode = components['schemas']['GraphNode'];
 export type GraphEdge = components['schemas']['GraphEdge'];
-export type GraphSubgraphResponse = components['schemas']['GraphSubgraphResponse'];
+export type GraphSubgraphResponse =
+	components['schemas']['GraphSubgraphResponse'];
 export type GraphPathResponse = components['schemas']['GraphPathResponse'];
-export type GraphComponentsResponse = components['schemas']['GraphComponentsResponse'];
+export type GraphComponentsResponse =
+	components['schemas']['GraphComponentsResponse'];
 export type GraphImpactResponse = components['schemas']['GraphImpactResponse'];
 
 /** Traversal direction for ego queries. */
@@ -48,7 +50,10 @@ export const graphApi = {
 	 * Neighborhood around a single entity. `depth` is clamped by the backend
 	 * against the project's configured relation max depth.
 	 */
-	getEgo: (projectId: number, options: EgoOptions): Promise<GraphSubgraphResponse> =>
+	getEgo: (
+		projectId: number,
+		options: EgoOptions,
+	): Promise<GraphSubgraphResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/graph/ego', {
 				params: {
@@ -56,14 +61,17 @@ export const graphApi = {
 					query: {
 						entity_id: options.entityId,
 						depth: options.depth ?? DEFAULT_EGO_DEPTH,
-						direction: options.direction ?? DEFAULT_EGO_DIRECTION
-					}
-				}
-			})
+						direction: options.direction ?? DEFAULT_EGO_DIRECTION,
+					},
+				},
+			}),
 		),
 
 	/** Shortest relation path between two entities. */
-	getPath: (projectId: number, options: GraphPathOptions): Promise<GraphPathResponse> =>
+	getPath: (
+		projectId: number,
+		options: GraphPathOptions,
+	): Promise<GraphPathResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/graph/path', {
 				params: {
@@ -71,22 +79,27 @@ export const graphApi = {
 					query: {
 						start: options.start,
 						end: options.end,
-						max_depth: options.maxDepth ?? DEFAULT_PATH_DEPTH
-					}
-				}
-			})
+						max_depth: options.maxDepth ?? DEFAULT_PATH_DEPTH,
+					},
+				},
+			}),
 		),
 
 	/** Subgraph for an explicit set of stable entity ids. */
-	getSubgraph: (projectId: number, ids: string[]): Promise<GraphSubgraphResponse> => {
-		const limited = ids.filter((id) => id.trim().length > 0).slice(0, MAX_SUBGRAPH_IDS);
+	getSubgraph: (
+		projectId: number,
+		ids: string[],
+	): Promise<GraphSubgraphResponse> => {
+		const limited = ids
+			.filter((id) => id.trim().length > 0)
+			.slice(0, MAX_SUBGRAPH_IDS);
 		return call(
 			client.GET('/api/project/{project_id}/graph/subgraph', {
 				params: {
 					path: { project_id: projectId },
-					query: { ids: limited.join(',') }
-				}
-			})
+					query: { ids: limited.join(',') },
+				},
+			}),
 		);
 	},
 
@@ -94,22 +107,25 @@ export const graphApi = {
 	getComponents: (projectId: number): Promise<GraphComponentsResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/graph/components', {
-				params: { path: { project_id: projectId } }
-			})
+				params: { path: { project_id: projectId } },
+			}),
 		),
 
 	/**
 	 * Bulk graph export. The backend defaults to a bounded limit, so callers
 	 * should not assume this returns the entire project graph.
 	 */
-	exportGraph: (projectId: number, limit?: number): Promise<GraphSubgraphResponse> =>
+	exportGraph: (
+		projectId: number,
+		limit?: number,
+	): Promise<GraphSubgraphResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/graph/export', {
 				params: {
 					path: { project_id: projectId },
-					query: limit === undefined ? {} : { limit }
-				}
-			})
+					query: limit === undefined ? {} : { limit },
+				},
+			}),
 		),
 
 	/** Dependent entities and impact score for a changed file. */
@@ -118,8 +134,8 @@ export const graphApi = {
 			client.GET('/api/project/{project_id}/graph/impact', {
 				params: {
 					path: { project_id: projectId },
-					query: { file }
-				}
-			})
-		)
+					query: { file },
+				},
+			}),
+		),
 };

@@ -19,7 +19,8 @@
 	});
 
 	function serviceBadge(healthy: boolean | undefined) {
-		if (healthy === undefined) return { label: 'Unknown', variant: 'inactive' as const };
+		if (healthy === undefined)
+			return { label: 'Unknown', variant: 'inactive' as const };
 		return healthy
 			? { label: 'Healthy', variant: 'success' as const }
 			: { label: 'Unhealthy', variant: 'danger' as const };
@@ -42,12 +43,17 @@
 
 <div class="page">
 	<div class="container">
-		<PageHeader title="Service Health" subtitle="External service reachability and retry queue state">
-			{#snippet children()}
-				<Button variant="secondary" onclick={() => healthActions.loadAll()} disabled={$healthState.isLoading}>
-					Refresh
-				</Button>
-			{/snippet}
+		<PageHeader
+			title="Service Health"
+			subtitle="External service reachability and retry queue state"
+		>
+			<Button
+				variant="secondary"
+				onclick={() => healthActions.loadAll()}
+				disabled={$healthState.isLoading}
+			>
+				Refresh
+			</Button>
 		</PageHeader>
 
 		{#if $healthState.error}
@@ -56,7 +62,10 @@
 			</div>
 		{/if}
 
-		<Card title="Unified Status" subtitle="Aggregated health across all external services">
+		<Card
+			title="Unified Status"
+			subtitle="Aggregated health across all external services"
+		>
 			{#if $healthState.unified}
 				<div class="service-grid">
 					<div class="service-item">
@@ -70,41 +79,57 @@
 						<div class="service-label">Qdrant</div>
 						<Badge
 							label={serviceBadge($healthState.unified.qdrant?.reachable).label}
-							variant={serviceBadge($healthState.unified.qdrant?.reachable).variant}
+							variant={serviceBadge($healthState.unified.qdrant?.reachable)
+								.variant}
 						/>
 						{#if $healthState.unified.qdrant?.message}
-							<div class="service-detail">{$healthState.unified.qdrant.message}</div>
+							<div class="service-detail">
+								{$healthState.unified.qdrant.message}
+							</div>
 						{/if}
 					</div>
 					<div class="service-item">
 						<div class="service-label">Embedding</div>
 						<Badge
-							label={serviceBadge($healthState.unified.embedding?.reachable).label}
-							variant={serviceBadge($healthState.unified.embedding?.reachable).variant}
+							label={serviceBadge($healthState.unified.embedding?.reachable)
+								.label}
+							variant={serviceBadge($healthState.unified.embedding?.reachable)
+								.variant}
 						/>
 						{#if $healthState.unified.embedding?.message}
-							<div class="service-detail">{$healthState.unified.embedding.message}</div>
+							<div class="service-detail">
+								{$healthState.unified.embedding.message}
+							</div>
 						{/if}
 					</div>
 					<div class="service-item">
 						<div class="service-label">BM25</div>
 						<Badge
 							label={serviceBadge($healthState.unified.bm25?.reachable).label}
-							variant={serviceBadge($healthState.unified.bm25?.reachable).variant}
+							variant={serviceBadge($healthState.unified.bm25?.reachable)
+								.variant}
 						/>
 						{#if $healthState.unified.bm25?.message}
-							<div class="service-detail">{$healthState.unified.bm25.message}</div>
+							<div class="service-detail">
+								{$healthState.unified.bm25.message}
+							</div>
 						{/if}
 					</div>
 				</div>
 				{#if $healthState.lastUpdated}
 					<div class="updated-row">
 						<span class="updated-label">Last updated</span>
-						<span class="updated-value">{$healthState.lastUpdated.toLocaleTimeString()}</span>
+						<span class="updated-value"
+							>{$healthState.lastUpdated.toLocaleTimeString()}</span
+						>
 					</div>
 				{/if}
 			{:else}
-				<p class="loading-text">{$healthState.isLoading ? 'Loading health status...' : 'No health data yet'}</p>
+				<p class="loading-text">
+					{$healthState.isLoading
+						? 'Loading health status...'
+						: 'No health data yet'}
+				</p>
 			{/if}
 		</Card>
 
@@ -115,34 +140,46 @@
 						<div class="kv-row">
 							<span class="kv-label">Reachable</span>
 							<Badge
-								label={serviceBadge($healthState.qdrant.diagnostic?.reachable).label}
-								variant={serviceBadge($healthState.qdrant.diagnostic?.reachable).variant}
+								label={serviceBadge($healthState.qdrant.diagnostic?.reachable)
+									.label}
+								variant={serviceBadge($healthState.qdrant.diagnostic?.reachable)
+									.variant}
 							/>
 						</div>
 						{#if $healthState.qdrant.diagnostic?.version}
 							<div class="kv-row">
 								<span class="kv-label">Version</span>
-								<span class="kv-value">{$healthState.qdrant.diagnostic.version}</span>
+								<span class="kv-value"
+									>{$healthState.qdrant.diagnostic.version}</span
+								>
 							</div>
 						{/if}
 						{#if $healthState.qdrant.diagnostic?.collection_exists !== undefined}
 							<div class="kv-row">
 								<span class="kv-label">Collection</span>
 								<Badge
-									label={$healthState.qdrant.diagnostic.collection_exists ? 'Present' : 'Missing'}
-									variant={$healthState.qdrant.diagnostic.collection_exists ? 'active' : 'warning'}
+									label={$healthState.qdrant.diagnostic.collection_exists
+										? 'Present'
+										: 'Missing'}
+									variant={$healthState.qdrant.diagnostic.collection_exists
+										? 'active'
+										: 'warning'}
 								/>
 							</div>
 						{/if}
 						{#if $healthState.qdrant.diagnostic?.points_count !== undefined}
 							<div class="kv-row">
 								<span class="kv-label">Points</span>
-								<span class="kv-value">{$healthState.qdrant.diagnostic.points_count.toLocaleString()}</span>
+								<span class="kv-value"
+									>{$healthState.qdrant.diagnostic.points_count.toLocaleString()}</span
+								>
 							</div>
 						{/if}
 						<div class="kv-row">
 							<span class="kv-label">Circuit breaker</span>
-							<span class="kv-value">{$healthState.qdrant.circuit_breaker ?? 'unknown'}</span>
+							<span class="kv-value"
+								>{$healthState.qdrant.circuit_breaker ?? 'unknown'}</span
+							>
 						</div>
 						{#if $healthState.qdrant.diagnostic?.error}
 							<div class="kv-error">{$healthState.qdrant.diagnostic.error}</div>
@@ -166,7 +203,8 @@
 						{#if $healthState.embedding.model_name}
 							<div class="kv-row">
 								<span class="kv-label">Model</span>
-								<span class="kv-value">{$healthState.embedding.model_name}</span>
+								<span class="kv-value">{$healthState.embedding.model_name}</span
+								>
 							</div>
 						{/if}
 						{#if $healthState.embedding.message}
@@ -187,7 +225,9 @@
 						<div class="kv-row">
 							<span class="kv-label">Connected</span>
 							<Badge
-								label={$healthState.bm25.connected ? 'Connected' : 'Disconnected'}
+								label={$healthState.bm25.connected
+									? 'Connected'
+									: 'Disconnected'}
 								variant={$healthState.bm25.connected ? 'success' : 'danger'}
 							/>
 						</div>
@@ -203,7 +243,8 @@
 						{#if $healthState.bm25.index_path}
 							<div class="kv-row">
 								<span class="kv-label">Index path</span>
-								<span class="kv-value mono">{$healthState.bm25.index_path}</span>
+								<span class="kv-value mono">{$healthState.bm25.index_path}</span
+								>
 							</div>
 						{/if}
 					</div>
@@ -218,7 +259,9 @@
 				<div class="retry-row">
 					<div class="retry-stat">
 						<span class="kv-label">Pending operations</span>
-						<span class="retry-count">{$healthState.retryQueue.pending_count}</span>
+						<span class="retry-count"
+							>{$healthState.retryQueue.pending_count}</span
+						>
 					</div>
 					<Badge
 						label={$healthState.retryQueue.is_empty ? 'Empty' : 'Backlog'}
@@ -272,11 +315,18 @@
 		>
 			<h2 id="retry-dialog-title">Clear Retry Queue</h2>
 			<p class="dialog-warning">
-				All pending retry operations will be discarded. Data they were meant to write will not be retried.
+				All pending retry operations will be discarded. Data they were meant to
+				write will not be retried.
 			</p>
 			<div class="dialog-actions">
-				<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}>Cancel</Button>
-				<Button variant="danger" onclick={() => runAction(() => healthActions.clearRetryQueue())} disabled={actionBusy}>
+				<Button variant="secondary" onclick={() => (clearConfirmOpen = false)}
+					>Cancel</Button
+				>
+				<Button
+					variant="danger"
+					onclick={() => runAction(() => healthActions.clearRetryQueue())}
+					disabled={actionBusy}
+				>
 					{actionBusy ? 'Clearing...' : 'Clear Queue'}
 				</Button>
 			</div>

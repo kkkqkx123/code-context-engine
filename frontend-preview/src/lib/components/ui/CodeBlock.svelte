@@ -5,11 +5,7 @@
 		showLineNumbers?: boolean;
 	}
 
-	let {
-		code = '',
-		language = '',
-		showLineNumbers = false
-	}: Props = $props();
+	let { code = '', language = '' }: Props = $props();
 </script>
 
 <div class="code-block">

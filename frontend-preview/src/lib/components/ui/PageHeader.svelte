@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	/**
 	 * Consistent page header: title + one-line description on the left,
 	 * optional action slot on the right. Replaces the legacy giant hero.
@@ -10,7 +11,7 @@
 	}: {
 		title: string;
 		subtitle?: string;
-		children?: any;
+		children?: Snippet;
 	} = $props();
 </script>
 

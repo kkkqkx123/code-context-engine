@@ -2,16 +2,19 @@
 	import type { Snippet } from 'svelte';
 
 	interface Props {
-		variant?: 'default' | 'active' | 'inactive' | 'info' | 'success' | 'warning' | 'danger';
+		variant?:
+			| 'default'
+			| 'active'
+			| 'inactive'
+			| 'info'
+			| 'success'
+			| 'warning'
+			| 'danger';
 		label?: string;
 		children?: Snippet;
 	}
 
-	let {
-		variant = 'default',
-		label = '',
-		children
-	}: Props = $props();
+	let { variant = 'default', label = '', children }: Props = $props();
 </script>
 
 <span

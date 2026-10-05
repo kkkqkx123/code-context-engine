@@ -1,3 +1,5 @@
+import { errorMessage } from '../utils/errors';
+
 /**
  * Storage State Store
  * Manages storage operations and status
@@ -23,49 +25,57 @@ export const storageState = writable<StorageState>({
 // Actions
 export const storageActions = {
 	async loadStatus() {
-		storageState.update(state => ({ ...state, isLoading: true, error: null }));
+		storageState.update((state) => ({
+			...state,
+			isLoading: true,
+			error: null,
+		}));
 
 		try {
 			const response = await storageApi.getStatus();
-			storageState.update(state => ({
+			storageState.update((state) => ({
 				...state,
 				status: response.status,
 				isLoading: false,
 			}));
-		} catch (error: any) {
-			storageState.update(state => ({
+		} catch (error) {
+			storageState.update((state) => ({
 				...state,
 				isLoading: false,
-				error: error.message,
+				error: errorMessage(error),
 			}));
 		}
 	},
 
 	async clearIndex() {
-		storageState.update(state => ({ ...state, isLoading: true, error: null }));
+		storageState.update((state) => ({
+			...state,
+			isLoading: true,
+			error: null,
+		}));
 
 		try {
 			let pid: number;
-			currentProjectId.subscribe(v => pid = v)();
+			currentProjectId.subscribe((v) => (pid = v))();
 
 			await indexApi.clearIndex(pid!);
 
-			storageState.update(state => ({
+			storageState.update((state) => ({
 				...state,
 				isLoading: false,
 			}));
 
 			await storageActions.loadStatus();
-		} catch (error: any) {
-			storageState.update(state => ({
+		} catch (error) {
+			storageState.update((state) => ({
 				...state,
 				isLoading: false,
-				error: error.message,
+				error: errorMessage(error),
 			}));
 		}
 	},
 
 	clearError() {
-		storageState.update(state => ({ ...state, error: null }));
+		storageState.update((state) => ({ ...state, error: null }));
 	},
 };
