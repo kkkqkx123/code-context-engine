@@ -180,6 +180,7 @@ fn read_relations(
             // The SQLite schema carries no overload column; rows read back
             // as single-candidate edges and re-resolution re-annotates them.
             overload_signature: None,
+            callee_symbol: None,
         });
     }
     Ok(())

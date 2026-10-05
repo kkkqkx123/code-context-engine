@@ -60,6 +60,12 @@ pub struct GraphNode {
     pub source_file: String,
     /// Source location (`L<line>`, empty when unknown).
     pub source_location: String,
+    /// Scoped symbol name from the symbol table (`Module::item`), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoped_name: Option<String>,
+    /// Formatted signature of the defining entity, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 /// Coarse relation domain carried alongside the raw relation string.
@@ -98,6 +104,12 @@ pub struct GraphEdge {
     pub domain: String,
     /// Edge confidence.
     pub confidence: Confidence,
+    /// How the call site invokes the target (`direct`, `instance_method`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_context: Option<String>,
+    /// True when the edge points outside the indexed project.
+    #[serde(default)]
+    pub is_external: bool,
 }
 
 /// A materialized subgraph: nodes plus induced edges.
@@ -175,6 +187,8 @@ mod tests {
                 kind: "function".to_string(),
                 source_file: "src/a.rs".to_string(),
                 source_location: "L1".to_string(),
+                scoped_name: None,
+                signature: None,
             }],
             edges: vec![],
         };

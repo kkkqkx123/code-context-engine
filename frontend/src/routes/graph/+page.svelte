@@ -28,6 +28,7 @@
 	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
 	import { onProjectChange } from '$lib/stores/project';
 	import type { GraphDirection } from '$lib/api/graph';
+	import type { SymbolCandidate } from '$lib/api/client';
 	import {
 		CONFIDENCE_META,
 		RELATION_DOMAINS,
@@ -139,6 +140,31 @@
 			event.preventDefault();
 			runSeed();
 		}
+	}
+
+	// Disambiguation candidates shown when a symbol-name seed matches multiple
+	// entities (backend AMBIGUOUS_SYMBOL). Picking one retries with its stable id.
+	let candidates: SymbolCandidate[] = $derived(store.error?.candidates ?? []);
+
+	function useCandidate(candidate: SymbolCandidate) {
+		// Replace whichever ambiguous seed the candidate resolves, then re-run.
+		const ambiguousNames = new Set(candidates.map((c) => c.scoped_name));
+		const swap = (seed: string) =>
+			seed.trim() === candidate.scoped_name || ambiguousNames.has(seed.trim())
+				? candidate.stable_id
+				: seed;
+		if (seedMode === 'focus') {
+			seedId = swap(seedId);
+		} else if (seedMode === 'path') {
+			pathStart = swap(pathStart);
+			pathEnd = swap(pathEnd);
+		} else if (seedMode === 'subgraph') {
+			subgraphIds = subgraphIds
+				.split(',')
+				.map(swap)
+				.join(',');
+		}
+		runSeed();
 	}
 
 	/** Double click on a node pulls in its immediate neighborhood. */
@@ -288,7 +314,7 @@
 				<input
 					class="seed-input"
 					type="text"
-					placeholder="Entity id…"
+					placeholder="Symbol name, path#name or id…"
 					bind:value={seedId}
 					onkeydown={handleSeedKeydown}
 					aria-label="Entity id to focus on"
@@ -377,6 +403,25 @@
 			<div class="error-banner">
 				<span>{store.error.message}</span>
 			</div>
+			{#if candidates.length > 0}
+				<div class="candidate-panel" aria-label="Symbol candidates">
+					<p class="candidate-hint">Multiple symbols match this name — pick one:</p>
+					<ul class="candidate-list">
+						{#each candidates as candidate (candidate.stable_id)}
+							<li>
+								<button
+									type="button"
+									class="candidate-btn"
+									onclick={() => useCandidate(candidate)}
+								>
+									<span class="candidate-name mono">{candidate.scoped_name}</span>
+									<span class="candidate-meta">{candidate.kind} · {candidate.file_path}</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
 		{/if}
 
 		{#if store.truncated}
@@ -690,6 +735,59 @@
 		border-color: var(--warning);
 		background: var(--warning-bg);
 		color: var(--warning);
+	}
+
+	.candidate-panel {
+		padding: 0.6rem 0.75rem;
+		margin-bottom: 1rem;
+		border: 1px solid var(--gray-300);
+	}
+
+	.candidate-hint {
+		margin: 0 0 0.5rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-500);
+	}
+
+	.candidate-list {
+		list-style: none;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0;
+	}
+
+	.candidate-btn {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		width: 100%;
+		padding: 0.4rem 0.5rem;
+		background: var(--white);
+		border: 1px solid var(--gray-300);
+		cursor: pointer;
+		text-align: left;
+		transition: all 0.15s;
+	}
+
+	.candidate-btn:hover {
+		border-color: var(--black);
+		background: var(--gray-100);
+	}
+
+	.candidate-name {
+		color: var(--black);
+	}
+
+	.candidate-meta {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		color: var(--gray-500);
+		word-break: break-all;
 	}
 
 	.workspace {

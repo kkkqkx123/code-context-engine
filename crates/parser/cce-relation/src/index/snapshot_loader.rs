@@ -336,7 +336,7 @@ impl RelationSnapshotLoader {
                         span: canonical.span,
                         is_external,
                         external_type,
-                        callee_symbol: None,
+                        callee_symbol: canonical.callee_symbol.clone(),
                         stdlib_category: canonical.stdlib_category,
                         owner_type: None,
                         call_context: CallContext::Direct,
@@ -354,7 +354,7 @@ impl RelationSnapshotLoader {
                 span: canonical.span,
                 is_external,
                 external_type,
-                callee_symbol: None,
+                callee_symbol: canonical.callee_symbol.clone(),
                 stdlib_category: canonical.stdlib_category,
                 owner_type: None,
                 call_context: CallContext::Direct,
@@ -823,6 +823,7 @@ mod tests {
             span: Span::default(),
             stdlib_category: None,
             overload_signature: None,
+            callee_symbol: None,
         });
         snapshot.normalize();
         snapshot

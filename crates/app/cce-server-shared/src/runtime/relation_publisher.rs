@@ -739,6 +739,7 @@ mod tests {
             span: Span::default(),
             stdlib_category: None,
             overload_signature: None,
+            callee_symbol: None,
         });
         snapshot
     }

@@ -146,6 +146,7 @@ impl RelationSnapshotIndex {
                     span: relation.span,
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
+                    callee_symbol: relation.callee_symbol.clone(),
                 });
             }
         }
@@ -176,6 +177,7 @@ impl RelationSnapshotIndex {
                     span: relation.span,
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
+                    callee_symbol: relation.callee_symbol.clone(),
                 });
             }
         }
@@ -492,6 +494,7 @@ impl LayeredSnapshotIndex {
                     span: relation.span,
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
+                    callee_symbol: relation.callee_symbol.clone(),
                 });
             }
         }
@@ -560,6 +563,7 @@ impl LayeredSnapshotIndex {
                     span: relation.span,
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
+                    callee_symbol: relation.callee_symbol.clone(),
                 });
             }
         }

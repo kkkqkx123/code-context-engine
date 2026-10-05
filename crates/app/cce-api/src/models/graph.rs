@@ -32,6 +32,12 @@ pub struct GraphNode {
     pub kind: String,
     pub source_file: String,
     pub source_location: String,
+    /// Scoped symbol name from the symbol table, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoped_name: Option<String>,
+    /// Formatted signature of the defining entity, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 /// An edge in a returned subgraph.
@@ -48,6 +54,13 @@ pub struct GraphEdge {
     /// classification, frontend must not re-derive it from `relation`.
     pub domain: String,
     pub confidence: String,
+    /// How the call site invokes the target (`direct`, `instance_method`, ...),
+    /// when the edge carries call context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_context: Option<String>,
+    /// True when the edge points outside the indexed project.
+    #[serde(default)]
+    pub is_external: bool,
 }
 
 impl GraphNode {

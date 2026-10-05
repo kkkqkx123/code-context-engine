@@ -233,6 +233,7 @@ mod tests {
             span: cce_types::Span::default(),
             stdlib_category: None,
             overload_signature: None,
+            callee_symbol: None,
         });
         assert!(validate_snapshot(&snapshot).is_err());
     }

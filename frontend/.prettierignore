@@ -3,6 +3,5 @@ dist
 build
 coverage
 .svelte-kit
-openapi.json
 stats.html
 package-lock.json

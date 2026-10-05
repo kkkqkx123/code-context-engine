@@ -3,7 +3,7 @@
 //! `ApiDoc` collects every `#[utoipa::path]` annotation into a single
 //! document. Referenced schemas are pulled in automatically by the derive,
 //! so this module only lists paths and tags. Two tests pin the contract:
-//! the serialized snapshot under `frontend/openapi.json` must match, and
+//! the serialized snapshot under `tools/openapi-codegen/openapi.json` must match, and
 //! every route registered in `router.rs` must have a matching annotation.
 
 use std::sync::OnceLock;
@@ -127,7 +127,7 @@ mod tests {
 
     const SNAPSHOT: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../frontend/openapi.json"
+        "/../../../tools/openapi-codegen/openapi.json"
     );
     const REFRESH_ENV: &str = "CCE_REFRESH_OPENAPI";
 

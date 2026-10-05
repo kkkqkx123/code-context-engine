@@ -409,6 +409,12 @@ pub struct CanonicalRelation {
     /// loading; absent signatures simply mean single-candidate edges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overload_signature: Option<String>,
+    /// Symbol-level snapshot of the callee, carried through snapshot
+    /// round-trips so external/unresolved targets keep a presentable identity.
+    ///
+    /// Optional so snapshots written before this field keep loading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee_symbol: Option<super::resolved::RelationSymbolRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -922,6 +928,7 @@ mod tests {
             span: Span::default(),
             stdlib_category: None,
             overload_signature: Some("parse(String) -> Integer".to_string()),
+            callee_symbol: None,
         };
         let json = serde_json::to_string(&relation).expect("serialize");
         assert!(json.contains("parse(String) -> Integer"));
@@ -944,6 +951,7 @@ mod tests {
             span: Span::default(),
             stdlib_category: None,
             overload_signature: None,
+            callee_symbol: None,
         };
         let json = serde_json::to_string(&relation).expect("serialize");
         assert!(!json.contains("overload_signature"));
@@ -993,6 +1001,7 @@ mod tests {
             span: Span::default(),
             stdlib_category: None,
             overload_signature: None,
+            callee_symbol: None,
         });
         snapshot.dependencies.push(CanonicalDependency {
             source_file: "./src/lib.rs".to_string(),

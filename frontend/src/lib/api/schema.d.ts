@@ -1956,7 +1956,20 @@ export interface components {
          *     lowercase snake_case (`"extracted"`, `"inferred"`, `"external"`).
          */
         GraphEdge: {
+            /**
+             * @description How the call site invokes the target (`direct`, `instance_method`, ...),
+             *     when the edge carries call context.
+             */
+            call_context?: string | null;
             confidence: string;
+            /**
+             * @description Coarse relation domain derived by the backend (`call`, `dependency`,
+             *     `structural`, `reference`, `template`, `other`); authoritative
+             *     classification, frontend must not re-derive it from `relation`.
+             */
+            domain: string;
+            /** @description True when the edge points outside the indexed project. */
+            is_external?: boolean;
             relation: string;
             source: string;
             target: string;
@@ -1985,6 +1998,10 @@ export interface components {
             id: string;
             kind: string;
             label: string;
+            /** @description Scoped symbol name from the symbol table, when known. */
+            scoped_name?: string | null;
+            /** @description Formatted signature of the defining entity, when known. */
+            signature?: string | null;
             source_file: string;
             source_location: string;
         };

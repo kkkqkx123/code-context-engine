@@ -245,7 +245,8 @@ impl<'a> SubGraphBuilder<'a> {
         if !self.seen.insert(node_id.clone()) {
             return;
         }
-        let (label, kind, file, location) = match self.entity_metadata(id) {
+        let (label, kind, file, location, scoped_name, signature) = match self.entity_metadata(id)
+        {
             Some(entity) => {
                 let file = self.index.get_file_path_by_entity(id).unwrap_or_default();
                 (
@@ -253,6 +254,8 @@ impl<'a> SubGraphBuilder<'a> {
                     kind_label(&entity.kind),
                     file,
                     location_of(&entity.span),
+                    Some(entity.name.clone()),
+                    (!entity.signature.is_empty()).then_some(entity.signature.clone()),
                 )
             }
             None => (
@@ -260,6 +263,8 @@ impl<'a> SubGraphBuilder<'a> {
                 "unknown".to_string(),
                 String::new(),
                 String::new(),
+                None,
+                None,
             ),
         };
         self.nodes.push(GraphNode {
@@ -268,6 +273,8 @@ impl<'a> SubGraphBuilder<'a> {
             kind,
             source_file: file,
             source_location: location,
+            scoped_name,
+            signature,
         });
     }
 
@@ -288,6 +295,8 @@ impl<'a> SubGraphBuilder<'a> {
                 kind,
                 source_file: node.file_path.clone(),
                 source_location: location,
+                scoped_name: Some(node.function_name.clone()),
+                signature: None,
             });
         }
         node_id
@@ -312,6 +321,8 @@ impl<'a> SubGraphBuilder<'a> {
                 relation: relation.relation_type.to_string(),
                 domain: relation_domain(&relation.relation_type).to_string(),
                 confidence: confidence_of(relation),
+                call_context: Some(format!("{:?}", relation.call_context).to_lowercase()),
+                is_external: false,
             });
         }
     }
@@ -330,6 +341,8 @@ impl<'a> SubGraphBuilder<'a> {
             // RelationType) cannot be classified further.
             domain: "other".to_string(),
             confidence: Confidence::Inferred,
+            call_context: None,
+            is_external: true,
         });
     }
 
@@ -341,6 +354,8 @@ impl<'a> SubGraphBuilder<'a> {
                 kind: "external".to_string(),
                 source_file: String::new(),
                 source_location: String::new(),
+                scoped_name: None,
+                signature: None,
             });
         }
     }

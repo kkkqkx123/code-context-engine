@@ -24,7 +24,7 @@
 [cce-server openapi.rs]  #[utoipa::path] × 66 端点 + ApiDoc 聚合
    ├──► 运行时 GET /api-docs/openapi.json（仅 debug 构建，人工调试）
    └──► cargo test openapi_snapshot_matches
-          ├─ 默认：与 frontend/openapi.json 逐字节比对，漂移即红
+          ├─ 默认：与 tools/openapi-codegen/openapi.json 逐字节比对，漂移即红
           └─ CCE_REFRESH_OPENAPI=1：刷新快照（提交入库）
                     │
                     ▼
@@ -64,13 +64,13 @@
 - workspace 引入 utoipa 5（本地 cargo 缓存已有 5.5.0），依赖仅加在 cce-api 与 cce-server 两处。
 - cce-api 全部 wire 模型加 ToSchema（查询参数结构加 IntoParams）；serde_json::Value 字段按自由对象文档化（config info、metrics/json、classification relations 等逃生舱，语义为"如实的未定型"）。
 - 66 个 handler 加 #[utoipa::path]；openapi.rs 的 ApiDoc 聚合 paths/components/tags/security 为空（无鉴权面）。
-- 快照测试 openapi_snapshot_matches：默认逐字节比对 frontend/openapi.json，CCE_REFRESH_OPENAPI=1 时写入。
+- 快照测试 openapi_snapshot_matches：默认逐字节比对 tools/openapi-codegen/openapi.json，CCE_REFRESH_OPENAPI=1 时写入。
 - 路由一致性测试：解析 router.rs 的 .route( 注册集合，与 openapi.json 的 (method, path) 集合比对，拦截"只加路由不加注解"。
 - debug 构建挂载 GET /api-docs/openapi.json（cfg!(debug_assertions)），release 无文档面，无 Swagger UI。
 
 ## 5. Phase 2：codegen 与前端切换
 
-- 新建 tools/openapi-codegen：独立 npm 小包（openapi-typescript 7 + typescript 5），gen 脚本读 ../../frontend/openapi.json 输出 schema.d.ts，人工复制到 frontend/src/lib/api/schema.d.ts 入库（与 wf-agent 相同流程，node_modules 不入库）。
+- 新建 tools/openapi-codegen：独立 npm 小包（openapi-typescript 7 + typescript 5），gen 脚本读 ./openapi.json 输出 schema.d.ts，人工复制到 frontend/src/lib/api/schema.d.ts 入库（与 wf-agent 相同流程，node_modules 不入库）。
 - 前端 13 个 api 文件删除手写 interface，改为从 schema.d.ts 导出类型别名（components['schemas']），apiClient（重试/退避/错误解包）保留手写——路径类型化调用（openapi-fetch）不在本期范围，收益主要是编译期路径检查，代价是重写传输层重试语义。
 - 组件适配变更的 wire 形状：DiagnosisTool（result 信封）、CompressTool（result 信封）、keyword-search 请求（epoch 数值化、term_operator）、batch compress 条目、QdrantProcessStatus 内部标签形态、watch start/stop 响应。
 - frontend-preview 由 sync 脚本重同步；mock 数据按新形状修正。

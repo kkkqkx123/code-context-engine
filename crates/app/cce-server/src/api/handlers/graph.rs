@@ -13,7 +13,9 @@ use cce_api::models::{
     SubgraphQuery, error_codes,
 };
 use cce_orchestrator::query::{GraphDirection, GraphService, SubGraph};
-use cce_relation::index::snapshot_query::SnapshotSymbolQueryOps;
+use cce_relation::index::snapshot_query::{
+    SnapshotEntityQueryOps, SnapshotSymbolQueryOps,
+};
 
 use crate::api::response::ApiResult;
 
@@ -54,6 +56,8 @@ fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)
             kind: node.kind.clone(),
             source_file: node.source_file.clone(),
             source_location: node.source_location.clone(),
+            scoped_name: node.scoped_name.clone(),
+            signature: node.signature.clone(),
         })
         .collect::<Vec<_>>();
     let edges = graph
@@ -65,6 +69,8 @@ fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)
             relation: edge.relation.clone(),
             domain: edge.domain.clone(),
             confidence: edge.confidence.to_string(),
+            call_context: edge.call_context.clone(),
+            is_external: edge.is_external,
         })
         .collect::<Vec<_>>();
 
@@ -152,19 +158,157 @@ async fn graph_context(
     Ok((snapshot, searcher, runtime))
 }
 
+/// A human-readable candidate shown to the caller when a symbol seed is
+/// ambiguous. Carries the stable id the client must retry with.
+#[derive(Debug, serde::Serialize)]
+struct SymbolCandidate {
+    stable_id: String,
+    file_path: String,
+    scoped_name: String,
+    kind: String,
+}
+
+/// Kind of seed the caller supplied, used for error messages.
+enum SeedRef {
+    StableId,
+    FileQualified { file: String, name: String },
+    BareName(String),
+}
+
+fn parse_seed(raw: &str) -> SeedRef {
+    if let Some((file, name)) = raw.split_once('#') {
+        return SeedRef::FileQualified {
+            file: file.trim().to_string(),
+            name: name.trim().to_string(),
+        };
+    }
+    // Stable ids always start with `sym_`; anything else is a bare symbol name.
+    if raw.starts_with("sym_") {
+        return SeedRef::StableId;
+    }
+    SeedRef::BareName(raw.to_string())
+}
+
+/// Last segment of a scoped name (split on common separators), for bare-name matching.
+fn last_scoped_segment(scoped_name: &str) -> &str {
+    scoped_name
+        .rsplit([':', '.', '/'])
+        .next()
+        .unwrap_or(scoped_name)
+}
+
+/// Multi-stage seed resolution.
+///
+/// Order: exact stable id → `file#name` (or `#name`) via symbol-key reverse
+/// lookup → bare name via the function name index, then scoped-name scan.
+/// A single hit resolves directly; multiple hits yield `AMBIGUOUS_SYMBOL`
+/// with the candidate list so the client can disambiguate.
 fn resolve_entity(
     snapshot: &crate::runtime::PublishedSnapshot,
-    stable_id: &str,
+    seed: &str,
 ) -> Result<cce_types::EntityId, ErrorResponse> {
-    snapshot
-        .index
-        .get_entity_id_by_stable_symbol_id(stable_id)
-        .ok_or_else(|| {
-            ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                format!("Unknown stable symbol ID: {stable_id}"),
-            )
-        })
+    let index = &snapshot.index;
+    let not_found = |seed: &str| {
+        ErrorResponse::with_details(
+            error_codes::ENTITY_NOT_FOUND,
+            format!("Unknown symbol seed: {seed}"),
+            "Seed must be a stable symbol ID (sym_…), 'path/to/file#name', '#name', or a bare symbol name.",
+        )
+    };
+    let ambiguous = |seed: &str, candidates: Vec<SymbolCandidate>| {
+        let details = serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string());
+        ErrorResponse::with_details(
+            error_codes::AMBIGUOUS_SYMBOL,
+            format!("Symbol seed '{seed}' matches {} entities; pass one of the candidate stable IDs", candidates.len()),
+            details,
+        )
+    };
+
+    match parse_seed(seed) {
+        SeedRef::StableId => index
+            .get_entity_id_by_stable_symbol_id(seed)
+            .ok_or_else(|| not_found(seed)),
+        SeedRef::FileQualified { file, name } => {
+            if name.is_empty() {
+                return Err(not_found(seed));
+            }
+            let normalized = cce_types::normalize_project_path(&file);
+            let mut ids: Vec<cce_types::EntityId> = Vec::new();
+            let mut candidates: Vec<SymbolCandidate> = Vec::new();
+            for key in index.stable_symbol_keys() {
+                let file_matches = key.file_path == normalized
+                    || (file.is_empty()
+                        && last_scoped_segment(&key.scoped_name) == name);
+                if !file_matches {
+                    continue;
+                }
+                let name_matches = key.scoped_name == name
+                    || last_scoped_segment(&key.scoped_name) == name;
+                if !name_matches {
+                    continue;
+                }
+                if let Some(id) = index.get_entity_id_by_symbol_key(&key) {
+                    candidates.push(SymbolCandidate {
+                        stable_id: key.stable_id().0,
+                        file_path: key.file_path.clone(),
+                        scoped_name: key.scoped_name.clone(),
+                        kind: key.kind.to_string(),
+                    });
+                    ids.push(id);
+                }
+            }
+            match ids.len() {
+                0 => Err(not_found(seed)),
+                1 => Ok(ids[0]),
+                _ => Err(ambiguous(seed, candidates)),
+            }
+        }
+        SeedRef::BareName(name) => {
+            let ids = index.get_function_ids_by_name(&name);
+            match ids.len() {
+                0 => {
+                    // Fall back to a scoped-name scan so classes/types are
+                    // reachable by bare name too.
+                    let mut matched: Vec<SymbolCandidate> = Vec::new();
+                    for key in index.stable_symbol_keys() {
+                        if last_scoped_segment(&key.scoped_name) == name {
+                            if let Some(_id) = index.get_entity_id_by_symbol_key(&key) {
+                                matched.push(SymbolCandidate {
+                                    stable_id: key.stable_id().0,
+                                    file_path: key.file_path.clone(),
+                                    scoped_name: key.scoped_name.clone(),
+                                    kind: key.kind.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    match matched.len() {
+                        0 => Err(not_found(seed)),
+                        1 => index
+                            .get_entity_id_by_stable_symbol_id(&matched[0].stable_id)
+                            .ok_or_else(|| not_found(seed)),
+                        _ => Err(ambiguous(seed, matched)),
+                    }
+                }
+                1 => Ok(ids[0]),
+                _ => {
+                    let candidates = ids
+                        .iter()
+                        .filter_map(|id| {
+                            let key = index.get_symbol_key_by_entity_id(*id)?;
+                            Some(SymbolCandidate {
+                                stable_id: key.stable_id().0,
+                                file_path: key.file_path.clone(),
+                                scoped_name: key.scoped_name.clone(),
+                                kind: key.kind.to_string(),
+                            })
+                        })
+                        .collect();
+                    Err(ambiguous(seed, candidates))
+                }
+            }
+        }
+    }
 }
 
 /// Handle ego neighborhood request.

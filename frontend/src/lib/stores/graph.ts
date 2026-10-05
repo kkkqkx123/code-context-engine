@@ -17,6 +17,7 @@ import {
 	type GraphNode,
 	type GraphPathResponse,
 } from '../api/graph';
+import { ApiError, type SymbolCandidate } from '../api/client';
 import {
 	edgeElementId,
 	relationDomain,
@@ -41,6 +42,8 @@ export interface GraphError {
 	/** Optional structured detail such as HTTP status or the underlying thrown
 	 *  value, for debugging and for callers that need to react precisely. */
 	details?: unknown;
+	/** Disambiguation candidates for an AMBIGUOUS_SYMBOL seed error. */
+	candidates?: SymbolCandidate[];
 }
 
 /**
@@ -128,6 +131,17 @@ function toGraphError(
 	fallback = 'Graph request failed',
 ): GraphError {
 	// Preserve structured shape from fetch helpers.
+	if (error instanceof ApiError) {
+		const base: GraphError = {
+			code: error.code ?? statusToCode(error.status),
+			message: error.message,
+			details: { status: error.status },
+		};
+		if (error.code === 'AMBIGUOUS_SYMBOL') {
+			base.candidates = error.symbolCandidates();
+		}
+		return base;
+	}
 	if (error && typeof error === 'object') {
 		const obj = error as Record<string, unknown>;
 		if ('message' in obj && typeof obj.message === 'string') {

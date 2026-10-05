@@ -60,4 +60,6 @@ pub mod error_codes {
     pub const SERVICE_UNAVAILABLE: &str = "SERVICE_UNAVAILABLE";
     pub const CONFLICT: &str = "CONFLICT";
     pub const NOT_IMPLEMENTED: &str = "NOT_IMPLEMENTED";
+    /// A symbol-name seed matched multiple entities; retry with a candidate stable ID.
+    pub const AMBIGUOUS_SYMBOL: &str = "AMBIGUOUS_SYMBOL";
 }
