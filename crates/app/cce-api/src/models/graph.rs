@@ -43,6 +43,10 @@ pub struct GraphEdge {
     pub source: String,
     pub target: String,
     pub relation: String,
+    /// Coarse relation domain derived by the backend (`call`, `dependency`,
+    /// `structural`, `reference`, `template`, `other`); authoritative
+    /// classification, frontend must not re-derive it from `relation`.
+    pub domain: String,
     pub confidence: String,
 }
 

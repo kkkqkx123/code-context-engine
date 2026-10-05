@@ -15,7 +15,9 @@ use cce_relation::index::{
 };
 use cce_types::{Entity, EntityId, Span};
 
-use super::model::{Confidence, GraphEdge, GraphNode, SubGraph, confidence_of, kind_label};
+use super::model::{
+    Confidence, GraphEdge, GraphNode, SubGraph, confidence_of, kind_label, relation_domain,
+};
 use crate::query::error::{QueryError, Result};
 use crate::query::relation_searcher::{PathQueryOptions, RelationSearcher};
 
@@ -308,6 +310,7 @@ impl<'a> SubGraphBuilder<'a> {
                 source: self.node_id(caller),
                 target: self.node_id(target),
                 relation: relation.relation_type.to_string(),
+                domain: relation_domain(&relation.relation_type).to_string(),
                 confidence: confidence_of(relation),
             });
         }
@@ -323,6 +326,9 @@ impl<'a> SubGraphBuilder<'a> {
             source,
             target,
             relation,
+            // Raw string edges (external/plugin relations without a parsed
+            // RelationType) cannot be classified further.
+            domain: "other".to_string(),
             confidence: Confidence::Inferred,
         });
     }

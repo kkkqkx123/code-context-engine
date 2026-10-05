@@ -63,6 +63,7 @@ fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)
             source: edge.source.clone(),
             target: edge.target.clone(),
             relation: edge.relation.clone(),
+            domain: edge.domain.clone(),
             confidence: edge.confidence.to_string(),
         })
         .collect::<Vec<_>>();

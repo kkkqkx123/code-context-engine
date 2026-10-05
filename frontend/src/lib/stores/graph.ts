@@ -92,6 +92,7 @@ const ALL_DOMAINS: RelationDomain[] = [
 	'dependency',
 	'structural',
 	'reference',
+	'template',
 	'other',
 ];
 

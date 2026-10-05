@@ -394,7 +394,6 @@
 				{showEdgeLabels}
 				onToggleDomain={(domain) => {
 					graphActions.toggleDomain(domain);
-					relayout();
 				}}
 				onSearch={(value) => graphActions.setSearch(value)}
 				onToggleAmbiguous={toggleAmbiguous}

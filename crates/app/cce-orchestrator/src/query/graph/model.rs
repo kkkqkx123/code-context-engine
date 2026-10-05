@@ -62,6 +62,28 @@ pub struct GraphNode {
     pub source_location: String,
 }
 
+/// Coarse relation domain carried alongside the raw relation string.
+///
+/// Derived from `RelationType` so the frontend does not have to re-derive
+/// the classification from relation strings. Raw string edges without a
+/// parsed `RelationType` (for example plugin-provided relations) map to
+/// `"other"`.
+pub fn relation_domain(relation_type: &cce_types::RelationType) -> &'static str {
+    if relation_type.is_call() {
+        "call"
+    } else if relation_type.is_dependency() {
+        "dependency"
+    } else if relation_type.is_structural() {
+        "structural"
+    } else if relation_type.is_reference() {
+        "reference"
+    } else if relation_type.is_template_relation() {
+        "template"
+    } else {
+        "other"
+    }
+}
+
 /// An edge in the relation graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphEdge {
@@ -71,6 +93,9 @@ pub struct GraphEdge {
     pub target: String,
     /// Relation name (stable relation type string).
     pub relation: String,
+    /// Coarse domain of the relation (`call`, `dependency`, `structural`,
+    /// `reference`, `template`, `other`); authoritative classification.
+    pub domain: String,
     /// Edge confidence.
     pub confidence: Confidence,
 }

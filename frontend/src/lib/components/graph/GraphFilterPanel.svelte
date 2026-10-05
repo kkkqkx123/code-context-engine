@@ -33,6 +33,7 @@
 			'dependency',
 			'structural',
 			'reference',
+			'template',
 			'other',
 		],
 		search = $bindable(''),
@@ -50,6 +51,7 @@
 		'dependency',
 		'structural',
 		'reference',
+		'template',
 		'other',
 	];
 

@@ -29,9 +29,17 @@ export type NodeKind =
 	| 'package'
 	| 'unknown';
 
-/** Coarse grouping of the backend relation taxonomy. */
+/** Coarse grouping of the backend relation taxonomy.
+ *  Mirrors the backend `relation_domain` classification; the authoritative
+ *  value arrives on each edge as `domain`, and the string-based inference in
+ *  `relationDomain` is only a fallback for mock/legacy data. */
 export type RelationDomain =
-	'call' | 'dependency' | 'structural' | 'reference' | 'other';
+	| 'call'
+	| 'dependency'
+	| 'structural'
+	| 'reference'
+	| 'template'
+	| 'other';
 
 export interface RelationDomainMeta {
 	domain: RelationDomain;
@@ -65,13 +73,19 @@ export const RELATION_DOMAINS: Record<RelationDomain, RelationDomainMeta> = {
 	reference: {
 		domain: 'reference',
 		label: 'Reference',
-		description: 'Type reference / field access / template binding',
+		description: 'Type reference / field access',
 		color: '#0d9488',
+	},
+	template: {
+		domain: 'template',
+		label: 'Template',
+		description: 'Template / markup element relations',
+		color: '#d97706',
 	},
 	other: {
 		domain: 'other',
 		label: 'Other',
-		description: 'Any unclassified relation',
+		description: 'Unclassified relations, including plugin-provided ones',
 		color: '#475569',
 	},
 };
@@ -162,21 +176,48 @@ const STRUCTURAL_RELATIONS = new Set([
 const REFERENCE_RELATIONS = new Set([
 	'type_reference',
 	'field_access',
+]);
+
+/** Template/markup relation values (backend template domain). */
+const TEMPLATE_RELATIONS = new Set([
 	'contains.element',
 	'reference.template',
 	'parameter.binding',
 	'callback.event',
 ]);
 
-/** Map a raw backend relation string onto its presentation domain. */
+/** Map a raw backend relation string onto its presentation domain.
+ *  Fallback inference only — live data should use the backend-provided
+ *  `domain` field via `edgeDomain`. */
 export function relationDomain(relation: string): RelationDomain {
 	const value = (relation ?? '').trim();
 	if (!value) return 'other';
 	if (value.startsWith('call.')) return 'call';
 	if (value.startsWith('dependency.')) return 'dependency';
 	if (STRUCTURAL_RELATIONS.has(value)) return 'structural';
+	if (TEMPLATE_RELATIONS.has(value)) return 'template';
 	if (REFERENCE_RELATIONS.has(value)) return 'reference';
 	return 'other';
+}
+
+/** Resolve an edge's domain: trust the backend field, fall back to string
+ *  inference for mock or legacy payloads that lack it. */
+export function edgeDomain(edge: {
+	relation: string;
+	domain?: string | null;
+}): RelationDomain {
+	const value = (edge.domain ?? '').trim();
+	if (
+		value === 'call' ||
+		value === 'dependency' ||
+		value === 'structural' ||
+		value === 'reference' ||
+		value === 'template' ||
+		value === 'other'
+	) {
+		return value;
+	}
+	return relationDomain(edge.relation);
 }
 
 /**
@@ -193,7 +234,7 @@ export function relationLabel(relation: string): string {
 	return value.replace(/[._]/g, ' ');
 }
 
-/** Edge dash pattern per domain. Calls and structural edges read as solid. */
+/** Edge dash pattern per domain. Calls, structural and template edges read as solid. */
 export function relationLineStyle(
 	domain: RelationDomain,
 ): 'solid' | 'dashed' | 'dotted' {
@@ -337,7 +378,7 @@ export function toElementNode(node: GraphNode): GraphElementNode {
 }
 
 export function toElementEdge(edge: GraphEdge): GraphElementEdge {
-	const domain = relationDomain(edge.relation);
+	const domain = edgeDomain(edge);
 	const confidence = edgeConfidence(edge.confidence);
 	return {
 		data: {
@@ -448,6 +489,13 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'line-color': RELATION_DOMAINS.reference.color,
 			'target-arrow-color': RELATION_DOMAINS.reference.color,
 			'line-style': 'dotted',
+		},
+	},
+	{
+		selector: 'edge[domain = "template"]',
+		style: {
+			'line-color': RELATION_DOMAINS.template.color,
+			'target-arrow-color': RELATION_DOMAINS.template.color,
 		},
 	},
 	{
