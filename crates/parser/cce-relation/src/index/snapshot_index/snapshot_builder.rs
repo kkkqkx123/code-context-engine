@@ -6,7 +6,8 @@ use crate::index::delta::RelationDeltaOps;
 use cce_types::{
     AddedEntity, CanonicalDependency, CanonicalEntity, CanonicalExport, CanonicalFile,
     CanonicalRelation, CanonicalRelationSnapshot, CanonicalRelationTarget, EntityId, EntityKind,
-    FileInfo, ResolvedRelation, SnapshotBuildMetadata, normalize_project_path,
+    FileInfo, ResolvedRelation, SnapshotBuildMetadata, canonical_call_context,
+    canonical_owner_type, normalize_project_path,
 };
 
 use super::{LayeredSnapshotIndex, RelationSnapshotIndex};
@@ -147,6 +148,8 @@ impl RelationSnapshotIndex {
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
                     callee_symbol: relation.callee_symbol.clone(),
+                    owner_type: canonical_owner_type(&relation.owner_type),
+                    call_context: canonical_call_context(&relation.call_context),
                 });
             }
         }
@@ -178,6 +181,8 @@ impl RelationSnapshotIndex {
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
                     callee_symbol: relation.callee_symbol.clone(),
+                    owner_type: canonical_owner_type(&relation.owner_type),
+                    call_context: canonical_call_context(&relation.call_context),
                 });
             }
         }
@@ -495,6 +500,8 @@ impl LayeredSnapshotIndex {
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
                     callee_symbol: relation.callee_symbol.clone(),
+                    owner_type: canonical_owner_type(&relation.owner_type),
+                    call_context: canonical_call_context(&relation.call_context),
                 });
             }
         }
@@ -564,6 +571,8 @@ impl LayeredSnapshotIndex {
                     stdlib_category: relation.stdlib_category,
                     overload_signature: relation.overload_signature.clone(),
                     callee_symbol: relation.callee_symbol.clone(),
+                    owner_type: canonical_owner_type(&relation.owner_type),
+                    call_context: canonical_call_context(&relation.call_context),
                 });
             }
         }

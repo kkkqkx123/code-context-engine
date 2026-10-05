@@ -28,11 +28,10 @@ impl SnapshotEntityQueryOps for UnifiedSnapshotIndex {
 
     fn get_function_ids_by_name(&self, name: &str) -> Vec<EntityId> {
         self.merged_compact()
-            .function_index
-            .iter()
-            .filter(|(_, e)| e.name == name)
-            .map(|(id, _)| *id)
-            .collect()
+            .name_index
+            .get(name)
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn contains_function(&self, entity_id: EntityId) -> bool {
@@ -228,15 +227,7 @@ impl SnapshotRelationQueryOps for UnifiedSnapshotIndex {
     }
 
     fn get_classification_stats(&self) -> HashMap<ExternalCallType, usize> {
-        let mut stats = HashMap::new();
-        for set in self.merged_compact().resolved_relation_index.values() {
-            for r in set.iter() {
-                if let Some(ref ext) = r.external_type {
-                    *stats.entry(ext.clone()).or_insert(0) += 1;
-                }
-            }
-        }
-        stats
+        self.classification_stats_memoized()
     }
 }
 

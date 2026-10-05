@@ -30,6 +30,8 @@ use cce_types::{Entity, EntityId};
 #[derive(Debug, Clone, Default)]
 pub struct CompactRelationIndex {
     pub function_index: HashMap<EntityId, Entity>,
+    /// Exact entity-name lookup mirroring the live index behavior.
+    pub name_index: HashMap<String, Vec<EntityId>>,
     pub resolved_relation_index: HashMap<EntityId, RelationEdgeSet>,
     pub entity_file_index: HashMap<EntityId, String>,
     pub file_relation_index: HashMap<String, RelationEdgeSet>,
@@ -60,6 +62,12 @@ impl CompactRelationIndex {
             .function_index
             .iter()
             .map(|e| (*e.key(), e.value().clone()))
+            .collect::<HashMap<_, _>>();
+
+        let name_index = index
+            .name_index
+            .iter()
+            .map(|e| (e.key().clone(), e.value().to_vec()))
             .collect::<HashMap<_, _>>();
 
         let resolved_relation_index = index
@@ -112,6 +120,7 @@ impl CompactRelationIndex {
 
         Self {
             function_index,
+            name_index,
             resolved_relation_index,
             entity_file_index,
             file_relation_index,

@@ -740,6 +740,8 @@ mod tests {
             stdlib_category: None,
             overload_signature: None,
             callee_symbol: None,
+            owner_type: None,
+            call_context: Default::default(),
         });
         snapshot
     }

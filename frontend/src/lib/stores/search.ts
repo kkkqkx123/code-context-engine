@@ -70,6 +70,10 @@ export interface SearchState {
 	elapsedMs: number | null;
 	sourcesUsed: string[];
 	failedSubQueries: string[];
+	/** Relation epoch backing the last result set, when reported. */
+	relationEpoch: number | null;
+	/** True when the serving relation snapshot reported itself stale. */
+	relationStale: boolean;
 	isSearching: boolean;
 	error: string | null;
 	/** True when filters/mode changed after the last search */
@@ -155,6 +159,8 @@ export const searchState = writable<SearchState>({
 	elapsedMs: null,
 	sourcesUsed: [],
 	failedSubQueries: [],
+	relationEpoch: null,
+	relationStale: false,
 	isSearching: false,
 	error: null,
 	stale: false,
@@ -263,6 +269,8 @@ export const searchActions = {
 			elapsedMs: null,
 			sourcesUsed: [],
 			failedSubQueries: [],
+			relationEpoch: null,
+			relationStale: false,
 			stale: true,
 		}));
 		this.scheduleAutoSearch();
@@ -314,6 +322,8 @@ export const searchActions = {
 				elapsedMs: response.elapsed_ms,
 				sourcesUsed: response.sources_used ?? [],
 				failedSubQueries: response.failed_sub_queries ?? [],
+				relationEpoch: response.relation_epoch ?? null,
+				relationStale: response.relation_stale ?? false,
 				isSearching: false,
 				error: null,
 				stale: false,

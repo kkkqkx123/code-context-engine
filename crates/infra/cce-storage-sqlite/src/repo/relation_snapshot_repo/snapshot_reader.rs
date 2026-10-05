@@ -128,7 +128,8 @@ fn read_relations(
         .prepare(
             "SELECT caller_symbol_id, target_symbol_id, target_state, raw_target,
                     relation_type_json, span_json, external_type_json,
-                    unresolved_reason, stdlib_category_json
+                    unresolved_reason, stdlib_category_json,
+                    call_context_json, owner_type
              FROM relation_snapshot_relations
              WHERE project_id = ?1 AND relation_epoch = ?2 ORDER BY id",
         )
@@ -170,6 +171,12 @@ fn read_relations(
                 )));
             }
         };
+        // Newly written rows always carry call context; a missing value
+        // only occurs for rows predating the column and means direct call.
+        let call_context = match row.get::<_, Option<String>>(9).map_err(query_error)? {
+            Some(raw) => from_json(&raw)?,
+            None => cce_types::relation::CallContext::Direct,
+        };
         snapshot.relations.push(CanonicalRelation {
             caller: required(entities, &caller_id, "relation caller")?.clone(),
             target,
@@ -181,6 +188,8 @@ fn read_relations(
             // as single-candidate edges and re-resolution re-annotates them.
             overload_signature: None,
             callee_symbol: None,
+            owner_type: row.get(10).map_err(query_error)?,
+            call_context,
         });
     }
     Ok(())

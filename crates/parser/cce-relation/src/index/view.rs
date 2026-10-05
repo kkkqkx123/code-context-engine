@@ -23,8 +23,8 @@ use crate::types::ExportInfo;
 use cce_types::{
     CanonicalDependency, CanonicalEntity, CanonicalExport, CanonicalFile, CanonicalRelation,
     CanonicalRelationTarget, Entity, EntityId, EntityKind, FileInfo, FingerprintComponents,
-    ImportTable, ResolvedRelation, UnresolvedReason, fingerprint_from_components,
-    normalize_project_path,
+    ImportTable, ResolvedRelation, UnresolvedReason, canonical_call_context, canonical_owner_type,
+    fingerprint_from_components, normalize_project_path,
 };
 use dashmap::DashMap;
 
@@ -296,6 +296,8 @@ pub(super) fn fingerprint_in_files_from_maps(
                 stdlib_category: relation.stdlib_category,
                 overload_signature: relation.overload_signature.clone(),
                 callee_symbol: relation.callee_symbol.clone(),
+                owner_type: canonical_owner_type(&relation.owner_type),
+                call_context: canonical_call_context(&relation.call_context),
             });
         }
     }
@@ -336,6 +338,8 @@ pub(super) fn fingerprint_in_files_from_maps(
                 stdlib_category: relation.stdlib_category,
                 overload_signature: relation.overload_signature.clone(),
                 callee_symbol: relation.callee_symbol.clone(),
+                owner_type: canonical_owner_type(&relation.owner_type),
+                call_context: canonical_call_context(&relation.call_context),
             });
         }
     }

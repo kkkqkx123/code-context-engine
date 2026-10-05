@@ -15,6 +15,10 @@ pub struct WatchStatus {
     /// Started at timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
+    /// Active relation epoch, when a relation snapshot is available.
+    /// Lets callers align watch progress with graph query versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation_epoch: Option<i64>,
 }
 
 /// Watch status response

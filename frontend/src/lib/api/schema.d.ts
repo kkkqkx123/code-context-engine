@@ -2436,6 +2436,10 @@ export interface components {
              */
             failed_sub_queries?: string[];
             items: components["schemas"]["SearchResultItem"][];
+            /** @description Relation epoch the backing index was at when the query ran. */
+            relation_epoch?: number | null;
+            /** @description True when the serving relation snapshot reports itself stale. */
+            relation_stale?: boolean;
             sources_used?: string[];
             success: boolean;
             total: number;
@@ -2616,6 +2620,8 @@ export interface components {
             active: boolean;
             /** @description Number of events processed */
             events_processed: number;
+            /** @description Active relation epoch, when a relation snapshot is available. */
+            relation_epoch?: number | null;
             /** @description Started at timestamp */
             started_at?: string | null;
             /** @description Watched directories */

@@ -272,11 +272,22 @@ pub async fn handle_watch_status(
             tracker.events_processed as usize
         };
 
+    // Best-effort relation version so callers can align watch progress
+    // with graph query epochs. Absent when no snapshot was ever published.
+    let relation_epoch = match state.engine.get_relation_runtime(project_id).await {
+        Ok(runtime) => {
+            let epoch = runtime.get_relation_epoch().await;
+            (epoch > 0).then_some(epoch)
+        }
+        Err(_) => None,
+    };
+
     let watch_status = WatchStatus {
         active: tracker.active,
         watched_dirs: tracker.watched_dirs.clone(),
         events_processed,
         started_at: tracker.started_at.map(|t| t.to_rfc3339()),
+        relation_epoch,
     };
 
     let response = WatchStatusResponse {

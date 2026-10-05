@@ -68,13 +68,14 @@ pub use relation::{
     AddedEntity, CanonicalDependency, CanonicalEntity, CanonicalExport, CanonicalFile,
     CanonicalRelation, CanonicalRelationSnapshot, CanonicalRelationTarget, DependencyDiff,
     ExportDiff, ExternalCallType, FileRelationDiff, FingerprintComponents, ImportDiff,
-    RELATION_PARSER_VERSION, RELATION_PATH_NORMALIZATION_VERSION, RELATION_RESOLVER_VERSION,
-    RELATION_SNAPSHOT_SCHEMA_VERSION, Relation, RelationCapture, RelationLevel,
-    RelationSnapshotManifest, RelationSnapshotState, RelationSymbolLocation, RelationSymbolRecord,
-    RelationTarget, RelationType, RelationVerificationStatus, ResolvedRelation,
-    SYMBOL_KEY_CONFLICT_SAMPLE_CAP, SnapshotBuildMetadata, SnapshotDelta, StableSymbolId,
-    StableSymbolKey, SymbolKeyConflictRecord, UnresolvedReason, VirtualRelation, VirtualSymbolId,
-    fingerprint_from_components, normalize_project_path,
+    MAX_PERSISTED_TYPE_LEN, RELATION_PARSER_VERSION, RELATION_PATH_NORMALIZATION_VERSION,
+    RELATION_RESOLVER_VERSION, RELATION_SNAPSHOT_SCHEMA_VERSION, Relation, RelationCapture,
+    RelationLevel, RelationSnapshotManifest, RelationSnapshotState, RelationSymbolLocation,
+    RelationSymbolRecord, RelationTarget, RelationType, RelationVerificationStatus,
+    ResolvedRelation, SYMBOL_KEY_CONFLICT_SAMPLE_CAP, SnapshotBuildMetadata, SnapshotDelta,
+    StableSymbolId, StableSymbolKey, SymbolKeyConflictRecord, UnresolvedReason, VirtualRelation,
+    VirtualSymbolId, canonical_call_context, canonical_owner_type, fingerprint_from_components,
+    normalize_project_path,
 };
 
 pub use error::{ParseError, StorageError};

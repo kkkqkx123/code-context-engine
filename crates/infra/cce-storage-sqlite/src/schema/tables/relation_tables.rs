@@ -79,19 +79,21 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
          );
          CREATE INDEX IF NOT EXISTS idx_relation_snapshot_entities_scoped_name
             ON relation_snapshot_entities(project_id, relation_epoch, scoped_name);
-         CREATE TABLE IF NOT EXISTS relation_snapshot_relations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            relation_epoch INTEGER NOT NULL,
-            caller_symbol_id INTEGER NOT NULL,
-            target_symbol_id INTEGER,
-            target_state TEXT NOT NULL CHECK(target_state IN ('internal', 'external', 'unresolved')),
-            raw_target TEXT NOT NULL,
-            relation_type_json TEXT NOT NULL,
-            span_json TEXT NOT NULL,
-            external_type_json TEXT,
-            unresolved_reason TEXT,
-            stdlib_category_json TEXT,
+          CREATE TABLE IF NOT EXISTS relation_snapshot_relations (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             project_id INTEGER NOT NULL,
+             relation_epoch INTEGER NOT NULL,
+             caller_symbol_id INTEGER NOT NULL,
+             target_symbol_id INTEGER,
+             target_state TEXT NOT NULL CHECK(target_state IN ('internal', 'external', 'unresolved')),
+             raw_target TEXT NOT NULL,
+             relation_type_json TEXT NOT NULL,
+             span_json TEXT NOT NULL,
+             external_type_json TEXT,
+             unresolved_reason TEXT,
+             stdlib_category_json TEXT,
+             call_context_json TEXT,
+             owner_type TEXT,
             FOREIGN KEY(project_id, relation_epoch)
                 REFERENCES relation_snapshot_manifest(project_id, relation_epoch)
                 ON DELETE CASCADE,

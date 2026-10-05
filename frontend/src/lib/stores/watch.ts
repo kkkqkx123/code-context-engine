@@ -30,6 +30,16 @@ export const watchState = writable<WatchState>({
 	error: null,
 });
 
+/**
+ * Low-frequency version poll so watchers can align local state with the
+ * backend relation epoch. Pages start this when visible and stop it on
+ * teardown; no silent graph replacement happens here, callers decide how
+ * to surface a newer epoch.
+ */
+let versionPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const VERSION_POLL_MS = 10_000;
+
 // Actions
 export const watchActions = {
 	async startWatch(path: string, extensions?: string[], debounceMs?: number) {
@@ -94,6 +104,20 @@ export const watchActions = {
 			}));
 		} catch (error) {
 			console.error('Failed to load watch status:', error);
+		}
+	},
+
+	startVersionPoll() {
+		if (versionPollTimer !== null) return;
+		versionPollTimer = setInterval(() => {
+			void watchActions.loadStatus();
+		}, VERSION_POLL_MS);
+	},
+
+	stopVersionPoll() {
+		if (versionPollTimer !== null) {
+			clearInterval(versionPollTimer);
+			versionPollTimer = null;
 		}
 	},
 

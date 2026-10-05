@@ -26,6 +26,21 @@ use crate::api::response::ApiResult;
 /// Unified response type for search handlers
 pub type SearchApiResponse = ApiResult<SearchResponse>;
 
+/// Best-effort relation version for the project, used to stamp search
+/// responses so callers can judge freshness. Never fails the query.
+async fn relation_version(
+    state: &crate::api::state::AppState,
+    project_id: i64,
+) -> (Option<i64>, bool) {
+    let runtime = match state.engine.get_relation_runtime(project_id).await {
+        Ok(runtime) => runtime,
+        Err(_) => return (None, false),
+    };
+    let info = runtime.get_capability_info().await;
+    let epoch = (info.relation_epoch > 0).then_some(info.relation_epoch);
+    (epoch, info.stale)
+}
+
 /// Handle search request
 #[axum::debug_handler]
 #[utoipa::path(
@@ -208,6 +223,7 @@ pub async fn handle_search(
                 .map(convert_orchestrator_result)
                 .collect();
 
+            let (relation_epoch, relation_stale) = relation_version(&state, project_id).await;
             let response = SearchResponse {
                 success: true,
                 total: result.total,
@@ -215,6 +231,8 @@ pub async fn handle_search(
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 sources_used: result.sources,
                 failed_sub_queries: result.failed_sub_queries,
+                relation_epoch,
+                relation_stale,
             };
 
             SearchApiResponse::Success(response)
@@ -485,6 +503,7 @@ pub async fn handle_aggregated_search(
                 .map(convert_orchestrator_result)
                 .collect();
 
+            let (relation_epoch, relation_stale) = relation_version(&state, project_id).await;
             SearchApiResponse::Success(SearchResponse {
                 success: true,
                 total: result.total,
@@ -492,6 +511,8 @@ pub async fn handle_aggregated_search(
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 sources_used: result.sources,
                 failed_sub_queries: result.failed_sub_queries,
+                relation_epoch,
+                relation_stale,
             })
         }
         Err(e) => {

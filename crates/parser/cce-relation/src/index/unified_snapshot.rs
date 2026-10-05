@@ -5,10 +5,11 @@
 //! holds a compact base and an ordered delta chain. Query-optimized indexes
 //! are precomputed from the merged view so per-query work is O(1).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use cce_types::{EntityId, SnapshotDelta};
+use cce_types::{EntityId, ExternalCallType, SnapshotDelta};
+use parking_lot::RwLock;
 
 use super::compact::CompactRelationIndex;
 use super::core::RelationIndex;
@@ -30,6 +31,8 @@ pub struct UnifiedSnapshotIndex {
     pub query_optimized: Arc<QueryOptimizedIndex>,
     /// Precomputed transitive file deps over `merged`.
     pub transitive_deps: Arc<TransitiveFileDeps>,
+    /// Lazily computed external-call classification counts over `merged`.
+    classification_stats_cache: Arc<RwLock<Option<HashMap<ExternalCallType, usize>>>>,
 }
 
 impl UnifiedSnapshotIndex {
@@ -45,6 +48,7 @@ impl UnifiedSnapshotIndex {
             merged,
             query_optimized,
             transitive_deps,
+            classification_stats_cache: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -78,6 +82,7 @@ impl UnifiedSnapshotIndex {
             merged: Arc::new(merged),
             query_optimized,
             transitive_deps,
+            classification_stats_cache: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -143,6 +148,23 @@ impl UnifiedSnapshotIndex {
     /// Access the merged compact index.
     pub fn merged_compact(&self) -> &CompactRelationIndex {
         &self.merged
+    }
+
+    /// External-call classification counts over `merged`, computed once.
+    pub(super) fn classification_stats_memoized(&self) -> HashMap<ExternalCallType, usize> {
+        if let Some(cached) = self.classification_stats_cache.read().clone() {
+            return cached;
+        }
+        let mut stats = HashMap::new();
+        for set in self.merged.resolved_relation_index.values() {
+            for relation in set.iter() {
+                if let Some(ref ext) = relation.external_type {
+                    *stats.entry(ext.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        *self.classification_stats_cache.write() = Some(stats.clone());
+        stats
     }
 
     /// Compute fingerprint over the merged view.

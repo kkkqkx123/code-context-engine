@@ -204,8 +204,9 @@ impl RelationSnapshotRepository {
         let relation_sql = "INSERT INTO relation_snapshot_relations (
             project_id, relation_epoch, caller_symbol_id, target_symbol_id,
             target_state, raw_target, relation_type_json, span_json,
-            external_type_json, unresolved_reason, stdlib_category_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+            external_type_json, unresolved_reason, stdlib_category_json,
+            call_context_json, owner_type
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)";
         {
             let relation_type_json: Vec<String> = snapshot
                 .relations
@@ -222,6 +223,16 @@ impl RelationSnapshotRepository {
                 .iter()
                 .map(|relation| optional_json(&relation.stdlib_category))
                 .collect::<Result<_, _>>()?;
+            let call_context_json: Vec<String> = snapshot
+                .relations
+                .iter()
+                .map(|relation| to_json(&relation.call_context))
+                .collect::<Result<_, _>>()?;
+            let owner_types: Vec<Option<String>> = snapshot
+                .relations
+                .iter()
+                .map(|relation| relation.owner_type.clone())
+                .collect();
             let target_ids: Vec<Option<i64>> = snapshot
                 .relations
                 .iter()
@@ -276,6 +287,8 @@ impl RelationSnapshotRepository {
                     &externals[i],
                     &unresolveds[i],
                     &stdlib_category_json[i],
+                    &call_context_json[i],
+                    &owner_types[i],
                 ]);
             }
             execute_insert_batch(tx, relation_sql, &rows, "relation_snapshot_relations")?;

@@ -2686,6 +2686,40 @@
             }
           },
           {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "domains",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "project_id",
             "in": "path",
             "description": "Project id",
@@ -2765,6 +2799,31 @@
             "schema": {
               "type": "integer",
               "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "domains",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -3025,6 +3084,40 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "domains",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -6918,6 +7011,14 @@
           "relation_info": {},
           "success": {
             "type": "boolean"
+          },
+          "total_edges": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_nodes": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -8223,6 +8324,18 @@
               "$ref": "#/components/schemas/SearchResultItem"
             }
           },
+          "relation_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Relation epoch the backing index was at when the query ran, when a\nrelation snapshot is available. Lets callers judge result freshness\nagainst graph query versions."
+          },
+          "relation_stale": {
+            "type": "boolean",
+            "description": "True when the serving relation snapshot reports itself stale."
+          },
           "sources_used": {
             "type": "array",
             "items": {
@@ -8756,6 +8869,14 @@
             "type": "integer",
             "description": "Number of events processed",
             "minimum": 0
+          },
+          "relation_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Active relation epoch, when a relation snapshot is available.\nLets callers align watch progress with graph query versions."
           },
           "started_at": {
             "type": [

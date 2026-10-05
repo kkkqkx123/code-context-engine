@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use cce_types::entity::ParseStatus;
-use cce_types::relation::CallContext;
 use cce_types::relation::RelationSnapshotStore;
 use cce_types::{
     CanonicalEntity, CanonicalRelationSnapshot, CanonicalRelationTarget, Entity, EntityId,
@@ -338,8 +337,8 @@ impl RelationSnapshotLoader {
                         external_type,
                         callee_symbol: canonical.callee_symbol.clone(),
                         stdlib_category: canonical.stdlib_category,
-                        owner_type: None,
-                        call_context: CallContext::Direct,
+                        owner_type: canonical.owner_type.clone(),
+                        call_context: canonical.call_context.clone(),
                         overload_signature: canonical.overload_signature.clone(),
                     },
                 );
@@ -356,9 +355,9 @@ impl RelationSnapshotLoader {
                 external_type,
                 callee_symbol: canonical.callee_symbol.clone(),
                 stdlib_category: canonical.stdlib_category,
-                owner_type: None,
-                call_context: CallContext::Direct,
-                overload_signature: None,
+                owner_type: canonical.owner_type.clone(),
+                call_context: canonical.call_context.clone(),
+                overload_signature: canonical.overload_signature.clone(),
             });
         }
 
@@ -715,7 +714,7 @@ mod tests {
                 callee_symbol: None,
                 stdlib_category: None,
                 owner_type: None,
-                call_context: CallContext::Direct,
+                call_context: cce_types::relation::CallContext::Direct,
                 overload_signature: None,
             }],
             import_diffs: Vec::new(),
@@ -824,6 +823,8 @@ mod tests {
             stdlib_category: None,
             overload_signature: None,
             callee_symbol: None,
+            owner_type: None,
+            call_context: Default::default(),
         });
         snapshot.normalize();
         snapshot

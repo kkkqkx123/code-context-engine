@@ -32,11 +32,12 @@ pub mod target;
 pub use canonical::{
     AddedEntity, CanonicalDependency, CanonicalEntity, CanonicalExport, CanonicalFile,
     CanonicalRelation, CanonicalRelationSnapshot, CanonicalRelationTarget, DependencyDiff,
-    ExportDiff, FileRelationDiff, FingerprintComponents, ImportDiff, RELATION_PARSER_VERSION,
-    RELATION_PATH_NORMALIZATION_VERSION, RELATION_RESOLVER_VERSION,
+    ExportDiff, FileRelationDiff, FingerprintComponents, ImportDiff, MAX_PERSISTED_TYPE_LEN,
+    RELATION_PARSER_VERSION, RELATION_PATH_NORMALIZATION_VERSION, RELATION_RESOLVER_VERSION,
     RELATION_SNAPSHOT_SCHEMA_VERSION, SYMBOL_KEY_CONFLICT_SAMPLE_CAP, SnapshotBuildMetadata,
     SnapshotDelta, StableSymbolId, StableSymbolKey, SymbolKeyConflictRecord, UnresolvedReason,
-    fingerprint_from_components, normalize_project_path,
+    canonical_call_context, canonical_owner_type, fingerprint_from_components,
+    normalize_project_path,
 };
 pub use classification::{ExternalCallType, RelationLevel, RelationType};
 pub use resolution::{

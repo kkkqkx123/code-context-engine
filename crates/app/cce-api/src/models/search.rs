@@ -56,6 +56,14 @@ pub struct SearchResponse {
     /// single queries); makes partial degradation visible to the caller.
     #[serde(default)]
     pub failed_sub_queries: Vec<String>,
+    /// Relation epoch the backing index was at when the query ran, when a
+    /// relation snapshot is available. Lets callers judge result freshness
+    /// against graph query versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation_epoch: Option<i64>,
+    /// True when the serving relation snapshot reports itself stale.
+    #[serde(default)]
+    pub relation_stale: bool,
 }
 
 /// Whether a result carries its full body or a file-and-range reference.

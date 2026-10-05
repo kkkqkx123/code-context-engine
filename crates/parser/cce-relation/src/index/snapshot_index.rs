@@ -20,7 +20,7 @@ use crate::dependency_graph::FileDependencyGraph;
 use crate::index::core::{RelationEdgeSet, RelationIndex, SymbolKey};
 use crate::index::view::{RelationIndexView, active_file_set, fingerprint_in_files_from_maps};
 use crate::types::ExportInfo;
-use cce_types::{Entity, EntityId, ImportTable, ResolvedRelation};
+use cce_types::{Entity, EntityId, ExternalCallType, ImportTable, ResolvedRelation};
 use dashmap::DashMap;
 
 mod query_optimized;
@@ -64,6 +64,11 @@ pub struct RelationSnapshotIndex {
     pub(super) version: u64,
     pub(super) query_optimized: Arc<QueryOptimizedIndex>,
     pub(super) transitive_deps: Arc<TransitiveFileDeps>,
+    /// Lazily computed external-call classification counts.
+    ///
+    /// Snapshots are immutable, so the first computation stays valid for the
+    /// snapshot lifetime and repeat queries avoid a full relation scan.
+    pub(super) classification_stats_cache: Arc<RwLock<Option<HashMap<ExternalCallType, usize>>>>,
 }
 
 impl RelationSnapshotIndex {
@@ -120,6 +125,7 @@ impl RelationSnapshotIndex {
             version: index.version(),
             query_optimized,
             transitive_deps,
+            classification_stats_cache: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -150,6 +156,26 @@ impl RelationSnapshotIndex {
     /// with an explicit `SnapshotDelta`.
     pub fn cow_from_stale(source: &RelationIndex) -> Self {
         Self::from_index(source)
+    }
+
+    /// External-call classification counts, computed once per snapshot.
+    ///
+    /// The snapshot is immutable, so a cached result never goes stale within
+    /// the snapshot lifetime. Clone-on-read keeps query paths lock-free.
+    pub(super) fn classification_stats_memoized(&self) -> HashMap<ExternalCallType, usize> {
+        if let Some(cached) = self.classification_stats_cache.read().clone() {
+            return cached;
+        }
+        let mut stats = HashMap::new();
+        for entry in self.resolved_relation_index.iter() {
+            for relation in entry.iter() {
+                if let Some(ref ext_type) = relation.external_type {
+                    *stats.entry(ext_type.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        *self.classification_stats_cache.write() = Some(stats.clone());
+        stats
     }
 
     pub fn transitive_dependents_of(&self, file_path: &str) -> Vec<String> {

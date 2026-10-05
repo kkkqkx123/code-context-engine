@@ -13,10 +13,11 @@
 	 * Cytoscape methods directly on `cy` rather than going through wrapper
 	 * functions on the canvas component.
 	 */
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import type { Core } from 'cytoscape';
 	import { page } from '$app/state';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { watchState, watchActions } from '$lib/stores/watch';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import GraphCanvas, {
@@ -100,6 +101,12 @@
 
 	onMount(async () => {
 		await loadInitialGraph();
+		await watchActions.loadStatus();
+		watchActions.startVersionPoll();
+	});
+
+	onDestroy(() => {
+		watchActions.stopVersionPoll();
 	});
 
 	// The canvas only ever holds one project's nodes: clear the previous working
@@ -145,6 +152,13 @@
 	// Disambiguation candidates shown when a symbol-name seed matches multiple
 	// entities (backend AMBIGUOUS_SYMBOL). Picking one retries with its stable id.
 	let candidates: SymbolCandidate[] = $derived(store.error?.candidates ?? []);
+
+	// The backend advanced past the epoch this working set was built from.
+	// Banner only: reload stays explicit so in-progress expansion is never lost.
+	let watchEpoch = $derived($watchState.status?.relation_epoch ?? null);
+	let isStale = $derived(
+		watchEpoch !== null && store.meta.epoch !== 0 && watchEpoch > store.meta.epoch,
+	);
 
 	function useCandidate(candidate: SymbolCandidate) {
 		// Replace whichever ambiguous seed the candidate resolves, then re-run.
@@ -422,6 +436,16 @@
 					</ul>
 				</div>
 			{/if}
+		{/if}
+
+		{#if isStale}
+			<div class="warn-banner">
+				<span
+					>Relation index advanced to epoch {watchEpoch} (showing {store.meta
+						.epoch}).</span
+				>
+				<button type="button" class="ghost-btn" onclick={runSeed}>Reload</button>
+			</div>
 		{/if}
 
 		{#if store.truncated}

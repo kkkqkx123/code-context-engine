@@ -415,6 +415,57 @@ pub struct CanonicalRelation {
     /// Optional so snapshots written before this field keep loading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee_symbol: Option<super::resolved::RelationSymbolRecord>,
+    /// Owner type for method/constructor calls, carried through snapshot
+    /// round-trips so reloaded edges keep their receiver attribution.
+    ///
+    /// Optional so snapshots written before this field keep loading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_type: Option<String>,
+    /// How the call site invokes the target, carried through snapshot
+    /// round-trips so reloaded path assembly keeps its domain mapping.
+    ///
+    /// Defaults to direct for snapshots written before this field.
+    #[serde(default)]
+    pub call_context: super::CallContext,
+}
+
+/// Upper bound on persisted owner/receiver type strings.
+pub const MAX_PERSISTED_TYPE_LEN: usize = 256;
+
+/// Truncate an owner type for persistence, keeping the leading qualifier.
+pub fn canonical_owner_type(owner: &Option<String>) -> Option<String> {
+    owner.as_ref().map(|value| {
+        if value.len() > MAX_PERSISTED_TYPE_LEN {
+            value[..MAX_PERSISTED_TYPE_LEN].to_string()
+        } else {
+            value.clone()
+        }
+    })
+}
+
+/// Copy a call context for persistence, truncating embedded type names.
+pub fn canonical_call_context(context: &super::CallContext) -> super::CallContext {
+    let truncate = |value: &str| {
+        if value.len() > MAX_PERSISTED_TYPE_LEN {
+            value[..MAX_PERSISTED_TYPE_LEN].to_string()
+        } else {
+            value.to_string()
+        }
+    };
+    match context {
+        super::CallContext::Direct => super::CallContext::Direct,
+        super::CallContext::InstanceMethod { receiver_type } => {
+            super::CallContext::InstanceMethod {
+                receiver_type: truncate(receiver_type),
+            }
+        }
+        super::CallContext::StaticMethod { owner_type } => super::CallContext::StaticMethod {
+            owner_type: truncate(owner_type),
+        },
+        super::CallContext::Constructor { owner_type } => super::CallContext::Constructor {
+            owner_type: truncate(owner_type),
+        },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -929,6 +980,8 @@ mod tests {
             stdlib_category: None,
             overload_signature: Some("parse(String) -> Integer".to_string()),
             callee_symbol: None,
+            owner_type: None,
+            call_context: Default::default(),
         };
         let json = serde_json::to_string(&relation).expect("serialize");
         assert!(json.contains("parse(String) -> Integer"));
@@ -952,6 +1005,8 @@ mod tests {
             stdlib_category: None,
             overload_signature: None,
             callee_symbol: None,
+            owner_type: None,
+            call_context: Default::default(),
         };
         let json = serde_json::to_string(&relation).expect("serialize");
         assert!(!json.contains("overload_signature"));
@@ -1002,6 +1057,8 @@ mod tests {
             stdlib_category: None,
             overload_signature: None,
             callee_symbol: None,
+            owner_type: None,
+            call_context: Default::default(),
         });
         snapshot.dependencies.push(CanonicalDependency {
             source_file: "./src/lib.rs".to_string(),

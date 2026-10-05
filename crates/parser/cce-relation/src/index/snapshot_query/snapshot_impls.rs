@@ -282,15 +282,7 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
     }
 
     fn get_classification_stats(&self) -> HashMap<ExternalCallType, usize> {
-        let mut stats = HashMap::new();
-        for entry in self.resolved_relation_index.iter() {
-            for relation in entry.iter() {
-                if let Some(ref ext_type) = relation.external_type {
-                    *stats.entry(ext_type.clone()).or_insert(0) += 1;
-                }
-            }
-        }
-        stats
+        self.classification_stats_memoized()
     }
 }
 

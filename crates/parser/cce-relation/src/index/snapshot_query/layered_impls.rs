@@ -198,15 +198,19 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
 
         let mut callers = self.base.get_callers_by_callee_entity(callee_id);
 
-        // Apply each delta in order: remove then add.
+        // Apply each delta in order: remove then add. Removed pairs are
+        // materialized once per delta instead of rescanning the removed list
+        // for every caller.
         for d in &self.deltas {
             let removed_entities: HashSet<EntityId> = d.removed_entities.iter().copied().collect();
+            let removed_pairs: HashSet<(EntityId, Option<EntityId>)> = d
+                .removed_relations
+                .iter()
+                .map(|r| (r.caller, r.callee_id))
+                .collect();
             callers.retain(|caller| {
                 !removed_entities.contains(caller)
-                    && !d
-                        .removed_relations
-                        .iter()
-                        .any(|r| r.caller == *caller && r.callee_id == Some(callee_id))
+                    && !removed_pairs.contains(&(*caller, Some(callee_id)))
             });
             for relation in d
                 .added_relations
@@ -233,29 +237,38 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<EntityId> {
-        self.get_callers_by_callee_entity(callee_id)
-            .into_iter()
-            .filter(|caller| {
-                self.get_resolved_relations_by_caller(*caller)
-                    .is_some_and(|relations| {
-                        relations.iter().any(|r| {
-                            r.callee_id == Some(callee_id) && r.relation_type == relation_type
-                        })
-                    })
-            })
-            .collect()
+        // Derive from the single merged edge walk below instead of
+        // re-walking the delta chain once per caller. First appearance order
+        // is preserved for deterministic output.
+        let mut callers = Vec::new();
+        for relation in self.get_relations_to_entity_by_type(callee_id, relation_type) {
+            if !callers.contains(&relation.caller) {
+                callers.push(relation.caller);
+            }
+        }
+        callers
     }
 
     fn get_relations_to_entity(&self, callee_id: EntityId) -> Vec<ResolvedRelation> {
-        self.get_callers_by_callee_entity(callee_id)
-            .into_iter()
-            .flat_map(|caller| {
-                self.get_resolved_relations_by_caller(caller)
-                    .unwrap_or_default()
-                    .into_iter()
+        // Single merged walk: base edges plus one remove-then-add pass per
+        // delta. This avoids re-walking the chain for every caller while
+        // matching the per-caller merged view edge for edge.
+        let mut edges = self.base.get_relations_to_entity(callee_id);
+        for d in &self.deltas {
+            let removed_entities: HashSet<EntityId> = d.removed_entities.iter().copied().collect();
+            let removed: HashSet<_> = d.removed_relations.iter().map(relation_identity).collect();
+            edges.retain(|edge| {
+                !removed_entities.contains(&edge.caller)
+                    && !removed.contains(&relation_identity(edge))
+            });
+            edges.extend(
+                d.added_relations
+                    .iter()
                     .filter(|r| r.callee_id == Some(callee_id))
-            })
-            .collect()
+                    .cloned(),
+            );
+        }
+        edges
     }
 
     fn get_relations_to_entity_by_type(
@@ -263,14 +276,9 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<ResolvedRelation> {
-        self.get_callers_by_callee_entity(callee_id)
+        self.get_relations_to_entity(callee_id)
             .into_iter()
-            .flat_map(|caller| {
-                self.get_resolved_relations_by_caller(caller)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|r| r.callee_id == Some(callee_id) && r.relation_type == relation_type)
-            })
+            .filter(|r| r.relation_type == relation_type)
             .collect()
     }
 

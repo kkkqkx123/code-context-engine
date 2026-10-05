@@ -1,7 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import type { Component } from 'svelte';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -19,8 +19,13 @@
 
 	onMount(() => {
 		watchActions.loadStatus();
+		watchActions.startVersionPoll();
 		// Preload LogViewer component
 		loadLogViewerComponent();
+	});
+
+	onDestroy(() => {
+		watchActions.stopVersionPoll();
 	});
 
 	async function handleStartWatch() {
@@ -161,6 +166,11 @@
 								>Started: {new Date(
 									$watchState.status.started_at,
 								).toLocaleString()}</span
+							>
+						{/if}
+						{#if $watchState.status.relation_epoch !== undefined && $watchState.status.relation_epoch !== null}
+							<span class="info-item"
+								>Relation epoch: {$watchState.status.relation_epoch}</span
 							>
 						{/if}
 					</div>
