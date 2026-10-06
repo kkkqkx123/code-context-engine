@@ -316,6 +316,43 @@ impl BuildConfigParser {
         result
     }
 
+    /// Scan a filesystem-independent file-set view.
+    ///
+    /// The view is staged into a private directory and the existing
+    /// directory scan runs over the stage, so all language parsers keep one
+    /// implementation. Workspace member paths are remapped to the canonical
+    /// relative form afterwards; no staging path leaks into the parser
+    /// state. The stage is removed best-effort when the scan finishes.
+    pub fn scan_view(
+        &mut self,
+        view: &cce_types::supply::FileSetView,
+        max_depth: usize,
+    ) -> Result<(), ConfigParseError> {
+        let stage = stage_view_files(view)?;
+        let result = self.scan_project(&stage, max_depth);
+        remap_workspace_members_to_relative(&mut self.workspace_members, &stage);
+        let _ = std::fs::remove_dir_all(&stage);
+        result
+    }
+
+    /// Fill content hashes for discovered files from already-supplied bytes.
+    ///
+    /// Used with [`Self::scan_view`]: no filesystem read happens here, the
+    /// hash domain stays the full-content hash shared with the scanner.
+    pub fn fill_hashes_from_view(&mut self, view: &cce_types::supply::FileSetView) {
+        for rel in self.discovered_files.clone() {
+            if self.config_file_hashes.contains_key(&rel) {
+                continue;
+            }
+            if let Some(entry) = view.get(&rel)
+                && !entry.bytes.is_empty()
+            {
+                let hash = cce_utils::hash::calculate_hash(&entry.bytes);
+                self.config_file_hashes.insert(rel, hash);
+            }
+        }
+    }
+
     /// Ensure content hashes are populated for all discovered files.
     ///
     /// Uses the already-discovered file list and reads each file once to
@@ -629,6 +666,27 @@ impl BuildConfigParser {
             .collect()
     }
 
+    /// Build synthetic config parsed files from view bytes without disk reads.
+    ///
+    /// View-based counterpart of [`Self::synthetic_config_parsed_files`]:
+    /// files missing from the view fall back to empty content, matching the
+    /// unreadable-file behavior of the directory form.
+    pub fn synthetic_config_parsed_files_from_view(
+        &self,
+        view: &cce_types::supply::FileSetView,
+    ) -> Vec<cce_types::ParsedFile> {
+        self.discovered_files
+            .iter()
+            .map(|rel| {
+                let content = view
+                    .get(rel)
+                    .map(|entry| String::from_utf8_lossy(&entry.bytes).into_owned())
+                    .unwrap_or_default();
+                self.synthetic_parsed_file_from_content(rel, content)
+            })
+            .collect()
+    }
+
     // ========== Build System Metadata ==========
 
     /// Get metadata for all supported build systems
@@ -650,6 +708,62 @@ impl BuildConfigParser {
     /// Delegates to the canonical rule set in `cce_types::build_system`.
     pub fn is_build_config(filename: &str) -> bool {
         cce_types::build_system::is_build_config(filename)
+    }
+}
+
+/// Stage a file-set view into a private directory for directory-based parsing.
+///
+/// Only relative paths without parent escapes are staged; anything escaping
+/// the stage is skipped. The caller removes the stage when done.
+fn stage_view_files(
+    view: &cce_types::supply::FileSetView,
+) -> Result<std::path::PathBuf, ConfigParseError> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static STAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = STAGE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let stage = std::env::temp_dir().join(format!(
+        "cce-relation-view-{}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+        id
+    ));
+    std::fs::create_dir_all(&stage).map_err(|e| ConfigParseError::Io {
+        path: stage.clone(),
+        source: e,
+    })?;
+    for entry in &view.files {
+        let rel = entry.relative_path.to_string_lossy().replace('\\', "/");
+        if rel.is_empty() || rel.contains("..") || rel.starts_with('/') {
+            continue;
+        }
+        let target = stage.join(&rel);
+        if let Some(parent) = target.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(error) = std::fs::write(&target, &entry.bytes) {
+            tracing::warn!(
+                path = %target.display(),
+                error = %error,
+                "Failed to stage view file; skipping"
+            );
+        }
+    }
+    Ok(stage)
+}
+
+/// Rewrite workspace member paths recorded under a staging directory back to
+/// the canonical relative form so no staging path leaks into parser state.
+fn remap_workspace_members_to_relative(
+    members: &mut HashMap<String, std::path::PathBuf>,
+    stage: &Path,
+) {
+    for path in members.values_mut() {
+        if let Ok(rel) = path.strip_prefix(stage) {
+            *path = rel.to_path_buf();
+        }
     }
 }
 

@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 /// # Examples
 ///
 /// ```
-/// use cce_core::utils::hash::calculate_hash;
+/// use cce_utils::hash::calculate_hash;
 ///
 /// let content = b"hello world";
 /// let hash = calculate_hash(content);
@@ -50,7 +50,7 @@ pub fn hash_serializable<T: Serialize>(value: &T) -> String {
 /// # Examples
 ///
 /// ```
-/// use cce_core::utils::hash::calculate_hash_with_limit;
+/// use cce_utils::hash::calculate_hash_with_limit;
 ///
 /// let content = b"hello world";
 /// let hash = calculate_hash_with_limit(content, Some(5));

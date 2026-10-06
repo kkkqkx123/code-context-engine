@@ -34,7 +34,7 @@ pub enum TimeError {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::time::current_timestamp_ms;
+/// use cce_utils::time::current_timestamp_ms;
 ///
 /// let timestamp = current_timestamp_ms();
 /// assert!(timestamp > 0);
@@ -73,7 +73,7 @@ pub fn current_timestamp_secs() -> u64 {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::time::current_timestamp_ms_checked;
+/// use cce_utils::time::current_timestamp_ms_checked;
 ///
 /// match current_timestamp_ms_checked() {
 ///     Ok(ts) => println!("Current timestamp: {}", ts),

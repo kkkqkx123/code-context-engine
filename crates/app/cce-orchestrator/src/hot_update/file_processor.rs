@@ -120,6 +120,10 @@ impl FileProcessor {
     /// coordinator reads the file from its absolute on-disk location but must
     /// keep the relative path as the identity used by chunks, summaries and
     /// the `files` table.
+    ///
+    /// Thin local wrapper over [`Self::process_payload_content`]; gateway
+    /// events call the payload form directly with the same routing and
+    /// change-recording semantics.
     pub async fn process_file_change_at(
         &mut self,
         read_path: &Path,
@@ -141,16 +145,40 @@ impl FileProcessor {
                 ))
             })?;
 
+        self.process_payload_content(
+            parse_path,
+            &content,
+            change_type,
+            metadata_store,
+            project_id,
+        )
+        .await
+    }
+
+    /// Parse already-supplied content (local event or gateway push).
+    ///
+    /// Shared consumption core behind [`Self::process_file_change_at`] and
+    /// [`Self::reparse_payload`]: routing, tree-sitter parsing and entity
+    /// change recording depend only on the relative identity and the decoded
+    /// content, never on how the bytes were supplied.
+    pub async fn process_payload_content(
+        &mut self,
+        parse_path: &str,
+        content: &str,
+        change_type: FileChangeType,
+        metadata_store: &Option<Arc<SqliteClient>>,
+        project_id: i64,
+    ) -> Result<ParseResultWithChanges> {
         // Route like the full-index path: documentation/config/text files
         // carry no AST semantics and must not enter the tree-sitter pipeline
         // (their language is unsupported for AST parsing and would fail).
         if LanguageInfo::detect_from_path(parse_path).is_document_like() {
-            return Ok(self.process_document_content(parse_path, &content, change_type));
+            return Ok(self.process_document_content(parse_path, content, change_type));
         }
 
         let parsed_file = self
             .parser
-            .parse(parse_path, &content)
+            .parse(parse_path, content)
             .map_err(|e| HotUpdateError::parse(parse_path.to_string(), e.to_string()))?;
         self.count_parse();
 
@@ -172,6 +200,34 @@ impl FileProcessor {
         );
 
         Ok(result)
+    }
+
+    /// Parse a payload delivered by a remote gateway event.
+    ///
+    /// Bytes are verified against the payload hash and decoded through the
+    /// shared scanner core before entering [`Self::process_payload_content`],
+    /// so gateway pushes and local notifications produce identical results.
+    pub async fn process_gateway_payload(
+        &mut self,
+        payload: &cce_scanner::FileContentPayload,
+        change_type: FileChangeType,
+        metadata_store: &Option<Arc<SqliteClient>>,
+        project_id: i64,
+    ) -> Result<ParseResultWithChanges> {
+        let parse_path = payload.identity_key();
+        let content = cce_scanner::read_verified_payload(payload, None)
+            .await
+            .map_err(|e| {
+                HotUpdateError::file(format!("Failed to load payload {parse_path}: {e}"))
+            })?;
+        self.process_payload_content(
+            &parse_path,
+            &content,
+            change_type,
+            metadata_store,
+            project_id,
+        )
+        .await
     }
 
     /// Build a parse result for a non-code file (documentation, config, text).
@@ -248,6 +304,42 @@ impl FileProcessor {
             .with_license_config(self.license_header.clone());
         let parsed_file = parser
             .parse(parse_path, &content)
+            .map_err(|e| HotUpdateError::parse(parse_path.to_string(), e.to_string()))?;
+        self.count_parse();
+
+        let mut result = ParseResultWithChanges::new(
+            parse_path.into(),
+            parsed_file,
+            FileChangeType::Modified,
+            false,
+        );
+        result.content_hash = result.parsed_file.file_hash.clone();
+
+        Ok(result)
+    }
+
+    /// Re-parse already-supplied content without touching the filesystem.
+    ///
+    /// Gateway-driven relation rebuilds use this instead of
+    /// [`Self::reparse_file`]; change recording is skipped like the disk
+    /// form, keeping both paths equivalent.
+    pub async fn reparse_payload(
+        &self,
+        parse_path: &str,
+        content: &str,
+    ) -> Result<ParseResultWithChanges> {
+        if LanguageInfo::detect_from_path(parse_path).is_document_like() {
+            return Ok(self.process_document_content(
+                parse_path,
+                content,
+                FileChangeType::Modified,
+            ));
+        }
+
+        let mut parser = ParseCoordinator::with_entity_id_seed(self.entity_id_seed)
+            .with_license_config(self.license_header.clone());
+        let parsed_file = parser
+            .parse(parse_path, content)
             .map_err(|e| HotUpdateError::parse(parse_path.to_string(), e.to_string()))?;
         self.count_parse();
 

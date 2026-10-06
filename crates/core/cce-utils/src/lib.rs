@@ -5,8 +5,8 @@ pub use encoding::{Detector, Encoder, Error};
 
 pub mod file;
 pub use file::{
-    format_file_size, has_text_extension, is_text_file, read_file_to_utf8, read_file_to_utf8_async,
-    read_file_to_utf8_with_encoding_async,
+    decode_bytes_to_utf8, format_file_size, has_text_extension, is_text_bytes, is_text_file,
+    read_file_to_utf8, read_file_to_utf8_async, read_file_to_utf8_with_encoding_async,
 };
 
 pub mod text;

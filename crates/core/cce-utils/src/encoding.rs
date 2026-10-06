@@ -21,7 +21,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use cce_core::utils::encoding::{Detector, Encoder};
+//! use cce_utils::encoding::{Detector, Encoder};
 //! use std::path::Path;
 //!
 //! // Detect encoding

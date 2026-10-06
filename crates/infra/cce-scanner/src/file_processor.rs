@@ -94,6 +94,10 @@ impl FileProcessor {
         let relative_path = PathBuf::from(cce_types::path::relativize(root_path, path));
 
         let file_size = metadata.len();
+        let modified = metadata
+            .modified()
+            .map_err(|e| Self::io_error("failed to get modified time", path, e))?
+            .into();
 
         // The hash always covers the full file content: a prefix-only hash
         // would mask edits beyond the window through incremental (size+mtime
@@ -110,25 +114,89 @@ impl FileProcessor {
             (calculate_hash(&content), content)
         };
 
-        let is_text = Self::is_text_file(&sample, self.config.binary_check_size);
+        Ok(Self::build_entry(
+            path.to_path_buf(),
+            relative_path,
+            file_size,
+            modified,
+            content_hash,
+            &sample,
+            self.config.binary_check_size,
+        ))
+    }
 
-        let language_info = if is_text {
-            Some(LanguageInfo::detect_from_path(&path.to_string_lossy()))
+    /// Shared manifest construction from fingerprint parts.
+    ///
+    /// Both the local path-based scan and the remote bytes-based supply end
+    /// here, so language routing and the full-content hash domain stay
+    /// identical.
+    pub fn build_entry(
+        path: PathBuf,
+        relative_path: PathBuf,
+        size: u64,
+        modified: chrono::DateTime<chrono::Utc>,
+        content_hash: String,
+        sample: &[u8],
+        binary_check_size: usize,
+    ) -> FileEntry {
+        let language_info = Self::classify_bytes(sample, binary_check_size, &relative_path);
+
+        let mut entry = FileEntry::new(path, relative_path, size, modified).with_hash(content_hash);
+        if let Some(language_info) = language_info {
+            entry = entry.with_language_info(language_info);
+        }
+        entry
+    }
+
+    /// Pure byte classification shared by local and remote supply.
+    ///
+    /// Returns language info for text content and `None` for binary content.
+    /// Language is still derived from the relative path; only the
+    /// text/binary decision depends on the supplied bytes.
+    pub fn classify_bytes(
+        sample: &[u8],
+        binary_check_size: usize,
+        relative_path: &Path,
+    ) -> Option<LanguageInfo> {
+        if Self::is_text_file(sample, binary_check_size) {
+            Some(LanguageInfo::detect_from_path(
+                &relative_path.to_string_lossy(),
+            ))
         } else {
             None
-        };
+        }
+    }
 
-        Ok(FileEntry {
-            path: path.to_path_buf(),
+    /// Build a manifest entry from already-supplied bytes (remote form).
+    ///
+    /// No filesystem access happens here; the caller supplies the relative
+    /// identity, bytes, size and modification time. The recorded path falls
+    /// back to the relative form and serves display purposes only.
+    pub fn process_bytes(
+        &self,
+        relative_path: &Path,
+        bytes: &[u8],
+        size: u64,
+        modified: chrono::DateTime<chrono::Utc>,
+    ) -> FileEntry {
+        let content_hash = calculate_hash(bytes);
+        let sample_len = bytes.len().min(self.config.binary_check_size);
+        let language_info = Self::classify_bytes(
+            &bytes[..sample_len],
+            self.config.binary_check_size,
             relative_path,
-            size: file_size,
-            modified: metadata
-                .modified()
-                .map_err(|e| Self::io_error("failed to get modified time", path, e))?
-                .into(),
+        );
+        let normalized = PathBuf::from(cce_types::path::normalize_project_path(
+            &relative_path.to_string_lossy(),
+        ));
+        FileEntry {
+            path: normalized.clone(),
+            relative_path: normalized,
+            size,
+            modified,
             content_hash: Some(content_hash),
             language_info,
-        })
+        }
     }
 
     /// Check if content is likely a text file

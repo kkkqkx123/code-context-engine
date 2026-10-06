@@ -3,6 +3,9 @@
 
 [server]
 # Server host address
+# DEV/INTRANET ONLY: the wildcard exposes the service on all interfaces for
+# remote debugging inside a trusted network. Production must use
+# config.prod.toml (loopback) and CCE_ENV=prod, which rejects wildcards.
 host = "0.0.0.0"
 # Server port
 port = 9000

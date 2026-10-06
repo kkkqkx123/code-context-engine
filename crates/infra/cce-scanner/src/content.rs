@@ -12,6 +12,7 @@ use cce_types::error::ParseError;
 use cce_types::error::common::IoError;
 
 use crate::FileEntry;
+use crate::models::FileContentPayload;
 
 /// Check raw file bytes against the scan-phase content hash.
 ///
@@ -20,6 +21,28 @@ use crate::FileEntry;
 /// scanned snapshot.
 fn raw_bytes_match_scan_hash(bytes: &[u8], expected: &str) -> bool {
     cce_utils::hash::calculate_hash(bytes) == expected
+}
+
+/// Verify already-supplied bytes against the scan-phase hash, then decode.
+///
+/// This is the shared consumption core: local on-demand reads and remote
+/// ready bytes both end here, so verification and decoding stay identical.
+/// `display` only labels errors and never participates in storage keys.
+pub fn decode_verified_bytes(
+    bytes: &[u8],
+    expected_hash: Option<&str>,
+    display: &str,
+) -> Result<String, ParseError> {
+    if let Some(expected) = expected_hash
+        && !raw_bytes_match_scan_hash(bytes, expected)
+    {
+        return Err(ParseError::content_changed(format!(
+            "content of '{display}' changed between scan and processing (scan-time hash {expected} no longer matches); a re-scan is required"
+        )));
+    }
+    let display_path = Path::new(display);
+    cce_utils::file::decode_bytes_to_utf8(bytes, display_path)
+        .map_err(|e| ParseError::encoding(format!("{display}: {e}")))
 }
 
 /// Read a file, verify its raw bytes against the scan-phase content hash,
@@ -31,6 +54,9 @@ fn raw_bytes_match_scan_hash(bytes: &[u8], expected: &str) -> bool {
 /// checkpoints and the hot-update change baseline. Pass `None` when no scan
 /// baseline exists (event-driven reads); verification is skipped in that
 /// case.
+///
+/// Thin wrapper over [`decode_verified_bytes`]; prefer the payload form for
+/// new call sites.
 pub async fn read_verified_utf8(
     path: &Path,
     expected_hash: Option<&str>,
@@ -38,16 +64,8 @@ pub async fn read_verified_utf8(
     let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| ParseError::Io(IoError::from(e)))?;
-    if let Some(expected) = expected_hash
-        && !raw_bytes_match_scan_hash(&bytes, expected)
-    {
-        return Err(ParseError::content_changed(format!(
-            "content of '{}' changed between scan and processing (scan-time hash {expected} no longer matches); a re-scan is required",
-            path.display()
-        )));
-    }
-    cce_utils::file::decode_bytes_to_utf8(&bytes, path)
-        .map_err(|e| ParseError::encoding(format!("{}: {e}", path.display())))
+    let display = path.display().to_string();
+    decode_verified_bytes(&bytes, expected_hash, &display)
 }
 
 /// Whether the on-disk raw bytes of `path` still match the scan-phase hash.
@@ -68,6 +86,9 @@ pub async fn file_matches_scan_hash(path: &Path, expected: &str) -> bool {
 /// so the file is decoded directly without recomputing the full-content
 /// hash. Any fingerprint mismatch falls back to hash verification, which
 /// reports drift explicitly instead of silently indexing stale content.
+///
+/// Thin wrapper that stats the file first; callers that already hold the
+/// fingerprint use [`read_verified_utf8_for_entry_with_hint`] instead.
 pub async fn read_verified_utf8_for_entry(entry: &FileEntry) -> Result<String, ParseError> {
     let path = &entry.path;
     let fresh = tokio::fs::metadata(path)
@@ -85,10 +106,52 @@ pub async fn read_verified_utf8_for_entry(entry: &FileEntry) -> Result<String, P
         let bytes = tokio::fs::read(path)
             .await
             .map_err(|e| ParseError::Io(IoError::from(e)))?;
-        return cce_utils::file::decode_bytes_to_utf8(&bytes, path)
-            .map_err(|e| ParseError::encoding(format!("{}: {e}", path.display())));
+        return decode_verified_bytes(&bytes, None, &path.display().to_string());
     }
     read_verified_utf8(path, entry.content_hash.as_deref()).await
+}
+
+/// Entry read with a caller-supplied freshness hint instead of stat.
+///
+/// The caller passes the size and modification time it already observed;
+/// no filesystem metadata query happens inside. A matching hint decodes
+/// directly, otherwise the shared hash verification runs.
+pub async fn read_verified_utf8_for_entry_with_hint(
+    entry: &FileEntry,
+    known_size: Option<u64>,
+    known_modified: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<String, ParseError> {
+    let fresh = known_size.is_some_and(|size| size == entry.size)
+        && known_modified.is_some_and(|modified| modified == entry.modified);
+    if fresh {
+        let path = &entry.path;
+        let bytes = tokio::fs::read(path)
+            .await
+            .map_err(|e| ParseError::Io(IoError::from(e)))?;
+        return decode_verified_bytes(&bytes, None, &path.display().to_string());
+    }
+    read_verified_utf8(&entry.path, entry.content_hash.as_deref()).await
+}
+
+/// Consume a content payload with a single verification-and-decode core.
+///
+/// Ready payloads (bytes present) never touch the filesystem; on-demand
+/// payloads load from `local_path` exactly like the historical path-based
+/// read. Missing bytes without a local path is a supply error, not drift.
+pub async fn read_verified_payload(
+    payload: &FileContentPayload,
+    local_path: Option<&Path>,
+) -> Result<String, ParseError> {
+    let display = payload.identity_key();
+    if let Some(bytes) = payload.bytes.as_deref() {
+        return decode_verified_bytes(bytes, payload.expected_hash.as_deref(), &display);
+    }
+    let Some(path) = local_path else {
+        return Err(ParseError::content_changed(format!(
+            "content of '{display}' is not supplied and no local path is available"
+        )));
+    };
+    read_verified_utf8(path, payload.expected_hash.as_deref()).await
 }
 
 #[cfg(test)]

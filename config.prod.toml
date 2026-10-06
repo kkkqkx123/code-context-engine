@@ -1,0 +1,17 @@
+# Code Context Engine - Production Configuration (minimal overlay)
+#
+# Usage:
+#   CCE_ENV=prod CCE_CONFIG=config.prod.toml <server binary>
+#
+# Production never binds a wildcard address. `CCE_ENV=prod` makes the loader
+# and the server entry point reject `0.0.0.0`/`::` outright, so even a stale
+# wildcard value fails closed instead of exposing the service.
+#
+# All omitted sections fall back to code defaults; extend this file with the
+# sections you need (database, llm, scanner, ...) copied from config.toml.
+
+[server]
+# Loopback only: the service is not reachable from other machines.
+host = "127.0.0.1"
+# Server port
+port = 9000

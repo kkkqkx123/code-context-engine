@@ -18,7 +18,10 @@ use cce_parser::grouper::{PreprocessingPipeline, ProcessingResult};
 use cce_parser::parser::ParseCoordinator;
 use cce_parser::summary::FileCategory;
 use cce_plugin::PluginRegistry;
-use cce_scanner::{FileEntry, read_verified_utf8, read_verified_utf8_for_entry};
+use cce_scanner::{
+    FileContentPayload, FileEntry, read_verified_payload, read_verified_utf8,
+    read_verified_utf8_for_entry,
+};
 use cce_types::error::ParseError;
 use cce_types::{ContentRoute, LanguageInfo, OutputMode, ParsedFile};
 
@@ -259,6 +262,61 @@ impl FileProcessor {
                     OrchestratorError::index("parse", "parser coordinator lock poisoned")
                 })?;
                 coordinator.parse_with_language_info(relative_path, &content, &language_info)
+            }?;
+            let (chunks, _) = self.process_parsed_file(&parsed).await?;
+            Ok(Some(chunks))
+        }
+    }
+
+    /// Re-chunk one file from a content payload for chunking-drift sweeps.
+    ///
+    /// Semantics mirror [`Self::rechunk_file_from_disk`]: drifted or
+    /// unsupplied content yields `Ok(None)` and stays with the regular change
+    /// flow, while decoding failures surface as errors.
+    pub async fn rechunk_payload(
+        &mut self,
+        payload: &FileContentPayload,
+        local_path: Option<&std::path::Path>,
+        output_mode: OutputMode,
+    ) -> Result<Option<Vec<ChunkedResult>>, OrchestratorError> {
+        let relative_path = payload.relative_path.to_string_lossy().to_string();
+        let content = match read_verified_payload(payload, local_path).await {
+            Ok(content) => content,
+            Err(ParseError::ContentChanged(reason)) => {
+                tracing::warn!(
+                    path = %relative_path,
+                    %reason,
+                    "Chunking-drift sweep found drifted content; skipping"
+                );
+                return Ok(None);
+            }
+            Err(ParseError::Io(error)) => {
+                tracing::warn!(
+                    path = %relative_path,
+                    %error,
+                    "Chunking-drift sweep cannot load content; skipping"
+                );
+                return Ok(None);
+            }
+            Err(error) => return Err(OrchestratorError::Parse(error)),
+        };
+
+        let language_info = LanguageInfo::detect_from_path(&relative_path);
+        let route = ContentRoute::from_language_info(&language_info);
+        if route.is_document() {
+            let chunking_config = self
+                .document_chunking_config
+                .as_ref()
+                .unwrap_or(&self.chunking_config);
+            let (chunks, _, _) =
+                self.process_doc(&content, &relative_path, output_mode, chunking_config)?;
+            Ok(Some(chunks))
+        } else {
+            let parsed = {
+                let mut coordinator = self.coordinator.lock().map_err(|_| {
+                    OrchestratorError::index("parse", "parser coordinator lock poisoned")
+                })?;
+                coordinator.parse_with_language_info(&relative_path, &content, &language_info)
             }?;
             let (chunks, _) = self.process_parsed_file(&parsed).await?;
             Ok(Some(chunks))
@@ -526,6 +584,98 @@ impl FileProcessor {
             )))
         })?;
         Ok((content, ContentRoute::from_language_info(language_info)))
+    }
+
+    /// Read a content payload and resolve its processing route.
+    ///
+    /// Ready payloads never touch the filesystem; on-demand payloads load
+    /// from `local_path` exactly like the historical path-based read. The
+    /// route derives from the canonical relative identity, never from a
+    /// local absolute path.
+    pub(crate) async fn read_and_route_payload(
+        payload: &FileContentPayload,
+        local_path: Option<&std::path::Path>,
+    ) -> Result<(String, ContentRoute), OrchestratorError> {
+        let content = read_verified_payload(payload, local_path)
+            .await
+            .map_err(OrchestratorError::Parse)?;
+        let language_info =
+            LanguageInfo::detect_from_path(&payload.relative_path.to_string_lossy());
+        Ok((content, ContentRoute::from_language_info(&language_info)))
+    }
+
+    /// Process a content payload through the document/code pipeline.
+    ///
+    /// This is the supply-agnostic entry point: the payload carries the
+    /// identity and the expected hash, `local_path` serves the on-demand
+    /// form only. A transient manifest entry is built from the payload so
+    /// the document and code branches keep a single consumption shape.
+    pub async fn process_payload(
+        &mut self,
+        payload: &FileContentPayload,
+        local_path: Option<&std::path::Path>,
+        output_mode: OutputMode,
+    ) -> Result<FileProcessResult, OrchestratorError> {
+        let (content, route) = Self::read_and_route_payload(payload, local_path).await?;
+        let entry = Self::entry_from_payload(payload, &content, local_path);
+        if route.is_document() {
+            self.process_document_file(&entry, &content, output_mode)
+                .await
+        } else {
+            self.process_code_file(&entry, &content).await
+        }
+    }
+
+    /// Process a content payload with an explicit output mode.
+    pub async fn process_payload_complete(
+        &mut self,
+        payload: &FileContentPayload,
+        local_path: Option<&std::path::Path>,
+        output_mode: OutputMode,
+    ) -> Result<CompleteFileProcessResult, OrchestratorError> {
+        let (content, route) = Self::read_and_route_payload(payload, local_path).await?;
+        let entry = Self::entry_from_payload(payload, &content, local_path);
+        if route.is_document() {
+            self.process_document_file_complete(&entry, &content, output_mode)
+                .await
+        } else {
+            self.process_code_file_complete(&entry, &content, output_mode)
+                .await
+        }
+    }
+
+    /// Build the transient manifest entry backing payload processing.
+    ///
+    /// Identity, language and hash come from the payload; size and
+    /// modification time fall back to deterministic values when the supplier
+    /// did not state them, so remote payloads without stat stay stable.
+    fn entry_from_payload(
+        payload: &FileContentPayload,
+        content: &str,
+        local_path: Option<&std::path::Path>,
+    ) -> FileEntry {
+        let relative = payload.relative_path.to_string_lossy().to_string();
+        let language_info = LanguageInfo::detect_from_path(&relative);
+        let content_hash = payload
+            .expected_hash
+            .clone()
+            .unwrap_or_else(|| cce_utils::hash::calculate_hash(content.as_bytes()));
+        let size = payload.size.unwrap_or(content.len() as u64);
+        let modified = payload
+            .modified
+            .unwrap_or_else(|| std::time::UNIX_EPOCH.into());
+        let path = local_path.map_or_else(
+            || payload.relative_path.clone(),
+            |local| local.to_path_buf(),
+        );
+        FileEntry {
+            path,
+            relative_path: payload.relative_path.clone(),
+            size,
+            modified,
+            content_hash: Some(content_hash),
+            language_info: Some(language_info),
+        }
     }
 
     /// Process a file and return complete result including pre-processor output

@@ -43,7 +43,7 @@ impl TokenEstimator {
     /// # Example
     ///
     /// ```
-    /// use cce_core::utils::token_estimation::TokenEstimator;
+    /// use cce_utils::token_estimation::TokenEstimator;
     ///
     /// // Create estimator for models with different tokenization behavior
     /// let estimator = TokenEstimator::new(0.8, 0.3);
@@ -63,7 +63,7 @@ impl TokenEstimator {
     /// # Example
     ///
     /// ```
-    /// use cce_core::utils::token_estimation::TokenEstimator;
+    /// use cce_utils::token_estimation::TokenEstimator;
     ///
     /// let tokens = TokenEstimator::estimate("Hello world");
     /// ```

@@ -242,6 +242,7 @@ impl ConfigLoader {
     /// Validate configuration (static version)
     fn validate_static(config: &AppConfig) -> Result<(), ConfigError> {
         config.validate_structured()?;
+        config.validate_for_current_environment()?;
         Ok(())
     }
 
@@ -265,6 +266,7 @@ impl ConfigLoader {
     /// Validate configuration
     fn validate(&self, config: &AppConfig) -> Result<(), ConfigError> {
         config.validate_structured()?;
+        config.validate_for_current_environment()?;
         Ok(())
     }
 

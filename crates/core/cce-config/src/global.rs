@@ -177,9 +177,38 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            host: "0.0.0.0".to_string(),
+            host: "127.0.0.1".to_string(),
             port: 9000,
         }
+    }
+}
+
+impl ServerConfig {
+    /// Whether the listener binds all network interfaces.
+    ///
+    /// Only the dev/intranet configuration opts into this explicitly; the
+    /// code default is loopback so production never exposes the service by
+    /// accident.
+    pub fn is_wildcard_bind(&self) -> bool {
+        let host = self.host.trim().to_lowercase();
+        host == "0.0.0.0" || host == "::" || host == "[::]"
+    }
+
+    /// Reject a wildcard bind outside development environments.
+    ///
+    /// `environment` follows `CCE_ENV` (`dev` by default); values `prod` and
+    /// `production` (case-insensitive) require an explicit loopback or site
+    /// address instead of a wildcard.
+    pub fn validate_for_environment(&self, environment: &str) -> ValidationResult {
+        let env = environment.trim().to_lowercase();
+        if (env == "prod" || env == "production") && self.is_wildcard_bind() {
+            return Err(ConfigValidationError::invalid_field(
+                "server.host",
+                "wildcard bind (0.0.0.0 or ::) is not allowed in production; \
+                 set an explicit loopback or site address",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -282,6 +311,27 @@ impl Validate for AppConfig {
 }
 
 impl AppConfig {
+    /// Runtime environment name driving environment-sensitive validation.
+    ///
+    /// Read from `CCE_ENV` (`dev` when unset). Production deployments set
+    /// `CCE_ENV=prod` (or `production`).
+    pub fn runtime_environment() -> String {
+        match std::env::var("CCE_ENV") {
+            Ok(env) if !env.trim().is_empty() => env.trim().to_string(),
+            _ => "dev".to_string(),
+        }
+    }
+
+    /// Environment-sensitive validation (currently the server bind rule).
+    ///
+    /// Structural validation stays in [`Validate::validate_structured`];
+    /// this adds the deployment safeguard that a wildcard bind is only
+    /// acceptable in non-production environments.
+    pub fn validate_for_current_environment(&self) -> ValidationResult {
+        self.server
+            .validate_for_environment(&Self::runtime_environment())
+    }
+
     /// Validate configuration dependencies
     ///
     /// Returns a list of warnings for configuration issues where

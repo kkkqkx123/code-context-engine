@@ -3,6 +3,7 @@
 pub mod build_system;
 pub mod path;
 pub mod serialization;
+pub mod supply;
 pub mod types;
 
 pub use build_system::{

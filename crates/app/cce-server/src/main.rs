@@ -39,6 +39,16 @@ fn main() -> anyhow::Result<()> {
     let host = server_config.host.as_str();
     let port = server_config.port;
 
+    // Defense in depth: even if validation was bypassed (e.g. programmatic
+    // init), never serve a wildcard bind in production. Dev keeps 0.0.0.0
+    // for intranet remote debugging via the explicit config file value.
+    let environment = cce_config::AppConfig::runtime_environment();
+    if let Err(e) = server_config.validate_for_environment(&environment) {
+        return Err(anyhow::anyhow!(
+            "Refusing to start in environment '{environment}': {e}"
+        ));
+    }
+
     // Start HTTP server - create runtime first, then build engine inside it
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {

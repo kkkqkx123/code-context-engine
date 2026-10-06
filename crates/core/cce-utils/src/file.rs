@@ -85,11 +85,69 @@ const BINARY_EXTENSIONS: &[&str] = &[
     "iso", "img", "dmg", "nupkg",
 ];
 
+/// Byte-level text classification shared by local and remote supply paths.
+///
+/// Empty input counts as text. Content without NUL bytes counts as text.
+/// Content with NUL bytes counts as text only when it has the alternating-NUL
+/// shape of BOM-less UTF-16 text with printable ASCII on the other parity,
+/// matching the encoding detector so the pre-check and the decoder agree.
+pub fn is_text_bytes(data: &[u8]) -> bool {
+    if data.is_empty() {
+        return true;
+    }
+    let check_len = data.len().min(8192);
+    let sample = &data[..check_len];
+    if !sample.contains(&0) {
+        return true;
+    }
+    looks_like_utf16_without_bom(sample)
+}
+
+/// Alternating-NUL shape with printable ASCII on the other parity.
+///
+/// Thresholds mirror the encoding detector so wide text is not misclassified
+/// as binary.
+fn looks_like_utf16_without_bom(sample: &[u8]) -> bool {
+    if sample.len() < 4 {
+        return false;
+    }
+    let mut nul_even = 0usize;
+    let mut nul_odd = 0usize;
+    let mut printable = 0usize;
+    let mut checked = 0usize;
+    for pair in sample.chunks_exact(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if a == 0 {
+            nul_even += 1;
+        } else if matches!(a, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
+            printable += 1;
+        }
+        if b == 0 {
+            nul_odd += 1;
+        } else if matches!(b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
+            printable += 1;
+        }
+        checked += 1;
+    }
+    if checked == 0 {
+        return false;
+    }
+    let nul_total = nul_even + nul_odd;
+    if nul_total * 10 < checked * 4 {
+        return false;
+    }
+    if nul_even.max(nul_odd) * 10 < nul_total * 9 {
+        return false;
+    }
+    printable * 2 >= checked
+}
+
 /// Check if file is text file
 ///
 /// This function uses two strategies:
 /// 1. Check file extension against known text/binary extensions
-/// 2. If extension is unknown, check for null bytes in the first 8KB
+/// 2. If extension is unknown, read the file once and classify the bytes
+///    with [`is_text_bytes`].
 ///
 /// # Arguments
 ///
@@ -114,21 +172,9 @@ pub fn is_text_file(path: &Path) -> bool {
         }
     }
 
-    // Second check: check for null bytes in first 8KB
-    // Text files should not contain null bytes
+    // Second check: read once and classify the bytes with the shared core.
     match std::fs::read(path) {
-        Ok(content) => {
-            let check_size = content.len().min(8192);
-            let sample = &content[..check_size];
-
-            // Check for null bytes
-            if sample.contains(&0) {
-                return false;
-            }
-
-            // Check if content is valid UTF-8
-            std::str::from_utf8(sample).is_ok()
-        }
+        Ok(content) => is_text_bytes(&content),
         Err(_) => false,
     }
 }
@@ -332,5 +378,13 @@ mod tests {
         let result = read_file_to_utf8(Path::new("nonexistent_file.txt"));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Failed to read file"));
+    }
+
+    #[test]
+    fn test_is_text_bytes_core() {
+        assert!(is_text_bytes(b""));
+        assert!(is_text_bytes(b"Hello, World!\n"));
+        assert!(!is_text_bytes(b"Hello\x00World"));
+        assert!(!is_text_bytes(&[0u8; 100]));
     }
 }

@@ -5,13 +5,29 @@ use crate::project::ProjectAppConfig;
 #[test]
 fn test_default_config() {
     let config = AppConfig::default();
-    assert_eq!(config.server.host, "0.0.0.0");
+    assert_eq!(config.server.host, "127.0.0.1");
     assert_eq!(config.server.port, 9000);
     assert_eq!(config.database.sqlite.path, "metadata.db");
     assert_eq!(config.logger.level, LogLevel::Info);
     assert!(!config.rerank.enabled);
     assert_eq!(config.rerank.model, "gpt-4o-mini");
     assert_eq!(config.rerank.max_candidates, 50);
+}
+
+#[test]
+fn test_wildcard_bind_allowed_in_dev_rejected_in_prod() {
+    let mut config = AppConfig::default();
+    config.server.host = "0.0.0.0".to_string();
+    assert!(config.server.validate_for_environment("dev").is_ok());
+    assert!(config.server.validate_for_environment("prod").is_err());
+    assert!(
+        config
+            .server
+            .validate_for_environment("production")
+            .is_err()
+    );
+    config.server.host = "127.0.0.1".to_string();
+    assert!(config.server.validate_for_environment("prod").is_ok());
 }
 
 #[test]

@@ -8,7 +8,7 @@
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::text::normalize_whitespace;
+/// use cce_utils::text::normalize_whitespace;
 ///
 /// let text = "  hello   world  \n\t  test  ";
 /// assert_eq!(normalize_whitespace(text), "hello world test");
@@ -45,7 +45,7 @@ pub fn normalize_code_fragment(text: &str) -> String {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::text::normalize_whitespace_preserving_newlines;
+/// use cce_utils::text::normalize_whitespace_preserving_newlines;
 ///
 /// let text = "  line  one  \n  line   two  ";
 /// let result = normalize_whitespace_preserving_newlines(text);
@@ -65,7 +65,7 @@ pub fn normalize_whitespace_preserving_newlines(text: &str) -> String {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::text::is_blank;
+/// use cce_utils::text::is_blank;
 ///
 /// assert!(is_blank(""));
 /// assert!(is_blank("   "));
@@ -87,7 +87,7 @@ pub fn is_blank(text: &str) -> bool {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::text::split_camel_case;
+/// use cce_utils::text::split_camel_case;
 ///
 /// assert_eq!(split_camel_case("calculateTotal"), "calculate Total");
 /// assert_eq!(split_camel_case("XMLParser"), "XML Parser");
@@ -120,7 +120,7 @@ pub fn split_camel_case(text: &str) -> String {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::text::remove_quotes;
+/// use cce_utils::text::remove_quotes;
 ///
 /// assert_eq!(remove_quotes(r#"hello "world" `test`"#), "hello world test");
 /// assert_eq!(remove_quotes("no quotes"), "no quotes");
@@ -139,7 +139,7 @@ pub fn remove_quotes(text: &str) -> String {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::text::split_identifier;
+/// use cce_utils::text::split_identifier;
 ///
 /// assert_eq!(split_identifier("get_or_init"), vec!["get", "or", "init"]);
 /// assert_eq!(split_identifier("OnceCell"), vec!["once", "cell"]);
@@ -185,7 +185,7 @@ pub fn split_identifier(ident: &str) -> Vec<String> {
 /// # Example
 ///
 /// ```
-/// use cce_core::utils::text::split_camel_case_words;
+/// use cce_utils::text::split_camel_case_words;
 ///
 /// assert_eq!(split_camel_case_words("getUserById"), vec!["get", "user", "by", "id"]);
 /// assert_eq!(split_camel_case_words("XMLParser"), vec!["xml", "parser"]);
