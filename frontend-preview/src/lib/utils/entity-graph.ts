@@ -67,6 +67,7 @@ export function callChainToElements(nodes: CallChainNode[]): GraphElement[] {
 			target,
 			relation: CALL_RELATION,
 			confidence: 'extracted',
+			domain: 'call',
 		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) continue;
@@ -132,6 +133,7 @@ export function inheritanceToElements(
 			target,
 			relation,
 			confidence: 'extracted',
+			domain: 'structural',
 		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) return;

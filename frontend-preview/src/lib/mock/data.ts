@@ -276,35 +276,35 @@ export const mockGraphNodes = [
 
 export const mockGraphEdges = [
 	// main component: parser pipeline
-	{ source: '106', target: '105', relation: 'calls', confidence: 'extracted' },
-	{ source: '105', target: '107', relation: 'calls', confidence: 'extracted' },
-	{ source: '105', target: '101', relation: 'calls', confidence: 'extracted' },
-	{ source: '101', target: '102', relation: 'calls', confidence: 'extracted' },
-	{ source: '101', target: '103', relation: 'calls', confidence: 'extracted' },
-	{ source: '102', target: '104', relation: 'calls', confidence: 'extracted' },
-	{ source: '103', target: '104', relation: 'calls', confidence: 'extracted' },
-	{ source: '101', target: '108', relation: 'uses', confidence: 'extracted' },
-	{ source: '107', target: '109', relation: 'uses', confidence: 'extracted' },
-	{ source: '110', target: '101', relation: 'contains', confidence: 'extracted' },
-	{ source: '112', target: '102', relation: 'contains', confidence: 'extracted' },
-	{ source: '112', target: '111', relation: 'implements', confidence: 'extracted' },
-	{ source: '110', target: '112', relation: 'imports', confidence: 'inferred' },
-	{ source: '101', target: '104', relation: 'calls', confidence: 'inferred' },
+	{ source: '106', target: '105', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '105', target: '107', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '105', target: '101', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '101', target: '102', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '101', target: '103', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '102', target: '104', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '103', target: '104', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '101', target: '108', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
+	{ source: '107', target: '109', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
+	{ source: '110', target: '101', relation: 'contains', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{ source: '112', target: '102', relation: 'contains', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{ source: '112', target: '111', relation: 'implementation', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{ source: '110', target: '112', relation: 'dependency.import.named', domain: 'dependency', confidence: 'inferred', weight: 0.6, cfg_condition: 'unix' },
+	{ source: '101', target: '104', relation: 'call.direct', domain: 'call', confidence: 'inferred', weight: 1 },
 	// bridge from parser to storage (external edge)
-	{ source: '106', target: '201', relation: 'calls', confidence: 'external' },
+	{ source: '106', target: '201', relation: 'call.direct', domain: 'call', confidence: 'external', weight: 1, is_external: true },
 	// storage component
-	{ source: '203', target: '202', relation: 'inherits', confidence: 'extracted' },
-	{ source: '201', target: '202', relation: 'inherits', confidence: 'extracted' },
-	{ source: '201', target: '204', relation: 'implements', confidence: 'extracted' },
-	{ source: '203', target: '205', relation: 'implements', confidence: 'extracted' },
-	{ source: '201', target: '206', relation: 'uses', confidence: 'extracted' },
-	{ source: '201', target: '203', relation: 'contains', confidence: 'extracted' },
+	{ source: '203', target: '202', relation: 'inheritance', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{ source: '201', target: '202', relation: 'inheritance', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{ source: '201', target: '204', relation: 'implementation', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{ source: '203', target: '205', relation: 'implementation', domain: 'structural', confidence: 'extracted', weight: 0.6 },
+	{ source: '201', target: '206', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
+	{ source: '201', target: '203', relation: 'contains', domain: 'structural', confidence: 'extracted', weight: 0.6 },
 	// config component
-	{ source: '301', target: '302', relation: 'calls', confidence: 'extracted' },
-	{ source: '301', target: '303', relation: 'uses', confidence: 'extracted' },
-	{ source: '302', target: '303', relation: 'uses', confidence: 'extracted' },
+	{ source: '301', target: '302', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
+	{ source: '301', target: '303', relation: 'parameter.binding', domain: 'template', confidence: 'extracted', weight: 0.6 },
+	{ source: '302', target: '303', relation: 'type_reference', domain: 'reference', confidence: 'extracted', weight: 0.3 },
 	// cross-component config usage
-	{ source: '206', target: '303', relation: 'imports', confidence: 'inferred' }
+	{ source: '206', target: '303', relation: 'dependency.import.named', domain: 'dependency', confidence: 'inferred', weight: 0.6 }
 ];
 
 const graphBase = { success: true, relation_epoch: 1 };

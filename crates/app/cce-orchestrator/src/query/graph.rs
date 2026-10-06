@@ -10,6 +10,6 @@ pub mod service;
 
 pub use model::{
     Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedComponents, PagedSubGraph,
-    SubGraph, confidence_of, relation_domain,
+    SubGraph, confidence_of,
 };
 pub use service::{GraphDirection, GraphService};

@@ -12,6 +12,9 @@ import { currentProjectId, onProjectChange } from './project';
 export interface WatchState {
 	status: WatchStatus | null;
 	isWatching: boolean;
+	// Local event feed is intentionally empty: there is no streaming channel.
+	// The server-side `events_processed` counter in `status` is the source of
+	// truth and is refreshed by `loadStatus` polling.
 	events: Array<{
 		timestamp: Date;
 		eventType: 'create' | 'modify' | 'delete';
@@ -29,6 +32,16 @@ export const watchState = writable<WatchState>({
 	isLoading: false,
 	error: null,
 });
+
+/**
+ * Low-frequency version poll so watchers can align local state with the
+ * backend relation epoch. Pages start this when visible and stop it on
+ * teardown; no silent graph replacement happens here, callers decide how
+ * to surface a newer epoch.
+ */
+let versionPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const VERSION_POLL_MS = 10_000;
 
 // Actions
 export const watchActions = {
@@ -97,14 +110,18 @@ export const watchActions = {
 		}
 	},
 
-	addEvent(event: Omit<WatchState['events'][0], 'timestamp'>) {
-		watchState.update((state) => ({
-			...state,
-			events: [
-				{ ...event, timestamp: new Date() },
-				...state.events.slice(0, 99), // Keep last 100 events
-			],
-		}));
+	startVersionPoll() {
+		if (versionPollTimer !== null) return;
+		versionPollTimer = setInterval(() => {
+			void watchActions.loadStatus();
+		}, VERSION_POLL_MS);
+	},
+
+	stopVersionPoll() {
+		if (versionPollTimer !== null) {
+			clearInterval(versionPollTimer);
+			versionPollTimer = null;
+		}
 	},
 
 	clearEvents() {

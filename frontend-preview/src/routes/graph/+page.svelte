@@ -13,10 +13,11 @@
 	 * Cytoscape methods directly on `cy` rather than going through wrapper
 	 * functions on the canvas component.
 	 */
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import type { Core } from 'cytoscape';
 	import { page } from '$app/state';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { watchState, watchActions } from '$lib/stores/watch';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import GraphCanvas, {
@@ -27,13 +28,18 @@
 	import GraphFilterPanel from '$lib/components/graph/GraphFilterPanel.svelte';
 	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
 	import { onProjectChange } from '$lib/stores/project';
-	import type { GraphDirection } from '$lib/api/graph';
+	import type { GraphDirection, GraphEdge } from '$lib/api/graph';
+	import type { SymbolCandidate } from '$lib/api/client';
 	import {
 		CONFIDENCE_META,
+		NODE_KINDS,
+		NODE_SHAPE_LEGEND,
 		RELATION_DOMAINS,
 		edgeConfidence,
-		relationDomain,
+		edgeDomain,
+		normalizeNodeKind,
 		relationLabel,
+		relationLineStyle,
 	} from '$lib/utils/graph-style';
 
 	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
@@ -60,11 +66,6 @@
 	let nodes = $derived(store.nodes);
 	let edges = $derived(store.edges);
 	let availableDomains = $derived([...activeDomains(edges)]);
-	let visibleEdges = $derived(
-		store.filters.hideAmbiguous
-			? edges.filter((edge) => edgeConfidence(edge.confidence) !== 'ambiguous')
-			: edges,
-	);
 
 	let selectedNode = $derived(
 		nodes.find((node) => node.id === selectedId) ?? null,
@@ -99,6 +100,12 @@
 
 	onMount(async () => {
 		await loadInitialGraph();
+		await watchActions.loadStatus();
+		watchActions.startVersionPoll();
+	});
+
+	onDestroy(() => {
+		watchActions.stopVersionPoll();
 	});
 
 	// The canvas only ever holds one project's nodes: clear the previous working
@@ -141,6 +148,37 @@
 		}
 	}
 
+	// Disambiguation candidates shown when a symbol-name seed matches multiple
+	// entities (backend AMBIGUOUS_SYMBOL). Picking one retries with its stable id.
+	let candidates: SymbolCandidate[] = $derived(store.error?.candidates ?? []);
+
+	// The backend advanced past the epoch this working set was built from.
+	// Banner only: reload stays explicit so in-progress expansion is never lost.
+	let watchEpoch = $derived($watchState.status?.relation_epoch ?? null);
+	let isStale = $derived(
+		watchEpoch !== null &&
+			store.meta.epoch !== 0 &&
+			watchEpoch > store.meta.epoch,
+	);
+
+	function useCandidate(candidate: SymbolCandidate) {
+		// Replace whichever ambiguous seed the candidate resolves, then re-run.
+		const ambiguousNames = new Set(candidates.map((c) => c.scoped_name));
+		const swap = (seed: string) =>
+			seed.trim() === candidate.scoped_name || ambiguousNames.has(seed.trim())
+				? candidate.stable_id
+				: seed;
+		if (seedMode === 'focus') {
+			seedId = swap(seedId);
+		} else if (seedMode === 'path') {
+			pathStart = swap(pathStart);
+			pathEnd = swap(pathEnd);
+		} else if (seedMode === 'subgraph') {
+			subgraphIds = subgraphIds.split(',').map(swap).join(',');
+		}
+		runSeed();
+	}
+
 	/** Double click on a node pulls in its immediate neighborhood. */
 	async function handleNodeActivate(nodeId: string) {
 		await graphActions.expand(nodeId, 1, egoDirection);
@@ -169,12 +207,8 @@
 		graphActions.clearImpact();
 	}
 
-	function toggleAmbiguous() {
-		graphActions.setFilters({ hideAmbiguous: !store.filters.hideAmbiguous });
-	}
-
-	function domainLabel(relation: string) {
-		return RELATION_DOMAINS[relationDomain(relation)].label;
+	function domainLabel(edge: GraphEdge) {
+		return RELATION_DOMAINS[edgeDomain(edge)].label;
 	}
 
 	let communities = $derived.by(() => {
@@ -288,7 +322,7 @@
 				<input
 					class="seed-input"
 					type="text"
-					placeholder="Entity id…"
+					placeholder="Symbol name, path#name or id…"
 					bind:value={seedId}
 					onkeydown={handleSeedKeydown}
 					aria-label="Entity id to focus on"
@@ -377,6 +411,42 @@
 			<div class="error-banner">
 				<span>{store.error.message}</span>
 			</div>
+			{#if candidates.length > 0}
+				<div class="candidate-panel" aria-label="Symbol candidates">
+					<p class="candidate-hint">
+						Multiple symbols match this name — pick one:
+					</p>
+					<ul class="candidate-list">
+						{#each candidates as candidate (candidate.stable_id)}
+							<li>
+								<button
+									type="button"
+									class="candidate-btn"
+									onclick={() => useCandidate(candidate)}
+								>
+									<span class="candidate-name mono"
+										>{candidate.scoped_name}</span
+									>
+									<span class="candidate-meta"
+										>{candidate.kind} · {candidate.file_path}</span
+									>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+		{/if}
+
+		{#if isStale}
+			<div class="warn-banner">
+				<span
+					>Relation index advanced to epoch {watchEpoch} (showing {store.meta
+						.epoch}).</span
+				>
+				<button type="button" class="ghost-btn" onclick={runSeed}>Reload</button
+				>
+			</div>
 		{/if}
 
 		{#if store.truncated}
@@ -390,20 +460,18 @@
 				domains={store.filters.domains}
 				{availableDomains}
 				search={store.filters.search}
-				hideAmbiguous={store.filters.hideAmbiguous}
 				{showEdgeLabels}
 				onToggleDomain={(domain) => {
 					graphActions.toggleDomain(domain);
 				}}
 				onSearch={(value) => graphActions.setSearch(value)}
-				onToggleAmbiguous={toggleAmbiguous}
 				onToggleEdgeLabels={() => (showEdgeLabels = !showEdgeLabels)}
 			/>
 
 			<div class="canvas-column">
 				<GraphToolbar
 					nodeCount={nodes.length}
-					edgeCount={visibleEdges.length}
+					edgeCount={edges.length}
 					{layout}
 					loading={store.loading}
 					onZoomIn={() => zoomViewport(0.2)}
@@ -438,7 +506,13 @@
 					<h4 class="inspector-title">{selectedNode.label}</h4>
 					<dl class="meta-list">
 						<dt>Kind</dt>
-						<dd>{selectedNode.kind}</dd>
+						<dd>
+							{selectedNode.kind}
+							<span class="kind-note"
+								>{NODE_KINDS[normalizeNodeKind(selectedNode.kind)]
+									.description}</span
+							>
+						</dd>
 						<dt>Location</dt>
 						<dd class="mono">
 							{selectedNode.source_file}:{selectedNode.source_location}
@@ -481,9 +555,7 @@
 									<Badge variant={outgoing ? 'active' : 'default'}>
 										{outgoing ? 'OUT' : 'IN'}
 									</Badge>
-									<span class="relation-domain"
-										>{domainLabel(edge.relation)}</span
-									>
+									<span class="relation-domain">{domainLabel(edge)}</span>
 								</div>
 								<p class="relation-name">{relationLabel(edge.relation)}</p>
 								<p class="relation-target mono">
@@ -495,6 +567,14 @@
 								>
 									{CONFIDENCE_META[confidence].label}
 								</p>
+								{#if edge.cfg_condition}
+									<p
+										class="relation-guard mono"
+										title="Conditional-compilation guard"
+									>
+										cfg({edge.cfg_condition})
+									</p>
+								{/if}
 							</li>
 						{/each}
 						{#if selectedEdges.length === 0}
@@ -539,14 +619,28 @@
 		<div class="legend">
 			{#each Object.values(RELATION_DOMAINS) as domain (domain.domain)}
 				<div class="legend-item">
-					<span class="legend-line" style="--line: {domain.color}"></span>
+					<span
+						class="legend-line"
+						style="--line: {domain.color}; --dash: {relationLineStyle(
+							domain.domain,
+						) === 'solid'
+							? '0'
+							: '3 2'}"
+					></span>
 					<span class="legend-label">{domain.label}</span>
 				</div>
 			{/each}
-			<div class="legend-item">
-				<span class="legend-node"></span>
-				<span class="legend-label">Entity</span>
-			</div>
+			<div class="legend-separator">Nodes</div>
+			{#each NODE_SHAPE_LEGEND as entry (entry.label)}
+				<div class="legend-item">
+					<span
+						class="legend-node"
+						data-shape={entry.shape}
+						class:external={entry.external}
+					></span>
+					<span class="legend-label">{entry.label}</span>
+				</div>
+			{/each}
 		</div>
 	</div>
 </div>
@@ -692,6 +786,59 @@
 		color: var(--warning);
 	}
 
+	.candidate-panel {
+		padding: 0.6rem 0.75rem;
+		margin-bottom: 1rem;
+		border: 1px solid var(--gray-300);
+	}
+
+	.candidate-hint {
+		margin: 0 0 0.5rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-500);
+	}
+
+	.candidate-list {
+		list-style: none;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+		gap: 0.4rem;
+		margin: 0;
+		padding: 0;
+	}
+
+	.candidate-btn {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		width: 100%;
+		padding: 0.4rem 0.5rem;
+		background: var(--white);
+		border: 1px solid var(--gray-300);
+		cursor: pointer;
+		text-align: left;
+		transition: all 0.15s;
+	}
+
+	.candidate-btn:hover {
+		border-color: var(--black);
+		background: var(--gray-100);
+	}
+
+	.candidate-name {
+		color: var(--black);
+	}
+
+	.candidate-meta {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		color: var(--gray-500);
+		word-break: break-all;
+	}
+
 	.workspace {
 		display: grid;
 		grid-template-columns: 220px minmax(0, 1fr) 280px;
@@ -824,6 +971,19 @@
 		color: var(--gray-400);
 	}
 
+	.relation-guard {
+		margin: 0.15rem 0 0;
+		font-size: 0.6rem;
+		color: var(--gray-400);
+		word-break: break-all;
+	}
+
+	.kind-note {
+		display: block;
+		color: var(--gray-400);
+		font-size: 0.7rem;
+	}
+
 	.relation-empty,
 	.inspector-empty {
 		font-size: 0.78rem;
@@ -932,14 +1092,55 @@
 
 	.legend-line {
 		width: 22px;
-		border-top: 2px solid var(--line);
+		border-top: 2px var(--dash, 0) var(--line);
 	}
 
+	.legend-separator {
+		width: 100%;
+		margin-top: 0.35rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-400);
+	}
+
+	/* Mirrors the Cytoscape silhouettes closely enough to read as the same
+	   vocabulary; a hexagon is the one shape CSS cannot express with a radius,
+	   so it is clipped into a polygon instead. */
 	.legend-node {
-		width: 12px;
-		height: 12px;
+		width: 14px;
+		height: 14px;
 		border: 1.5px solid var(--black);
 		background: var(--white);
+		box-sizing: border-box;
+	}
+
+	.legend-node[data-shape='rectangle'] {
+		border-radius: 0;
+	}
+
+	.legend-node[data-shape='round-rectangle'] {
+		border-radius: 4px;
+	}
+
+	.legend-node[data-shape='hexagon'] {
+		clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+	}
+
+	.legend-node[data-shape='diamond'] {
+		transform: rotate(45deg) scale(0.82);
+		background: var(--white);
+	}
+
+	.legend-node.external {
+		border-style: dashed;
+		border-color: var(--gray-500);
+		background: var(--gray-100);
+	}
+
+	.legend-node[data-shape='diamond'].external {
+		background: var(--gray-100);
 	}
 
 	.legend-label {

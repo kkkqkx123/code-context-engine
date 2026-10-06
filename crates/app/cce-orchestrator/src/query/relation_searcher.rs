@@ -125,23 +125,6 @@ impl RelationQueryOptions {
     }
 }
 
-/// Coarse domain name for a relation type, mirroring the graph model.
-fn relation_domain_name(relation_type: &cce_types::RelationType) -> &'static str {
-    if relation_type.is_call() {
-        "call"
-    } else if relation_type.is_dependency() {
-        "dependency"
-    } else if relation_type.is_structural() {
-        "structural"
-    } else if relation_type.is_reference() {
-        "reference"
-    } else if relation_type.is_template_relation() {
-        "template"
-    } else {
-        "other"
-    }
-}
-
 /// File-level post-filter derived from `RelationQueryOptions`.
 ///
 /// The relation snapshot is a pure in-memory index (no storage-layer filter
@@ -220,7 +203,7 @@ impl RelationFileFilter {
             return true;
         }
         self.relation_domains
-            .contains(relation_domain_name(&relation.relation_type))
+            .contains(relation.relation_type.domain())
     }
 
     /// Whether a file path passes the filter. An unknown path is only kept
@@ -485,7 +468,7 @@ impl RelationSearcher {
                     if !filter.relation_domains.is_empty()
                         && !filter
                             .relation_domains
-                            .contains(relation_domain_name(&node.relation_type))
+                            .contains(node.relation_type.domain())
                     {
                         return false;
                     }
@@ -531,7 +514,7 @@ impl RelationSearcher {
                     if !filter.relation_domains.is_empty()
                         && !filter
                             .relation_domains
-                            .contains(relation_domain_name(&node.relation_type))
+                            .contains(node.relation_type.domain())
                     {
                         return false;
                     }

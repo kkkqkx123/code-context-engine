@@ -149,7 +149,7 @@ pub use relation_searcher::{
 // Re-export graph path
 pub use graph::{
     Confidence, GraphDirection, GraphEdge, GraphFilter, GraphNode, GraphPagination, GraphService,
-    PagedComponents, PagedSubGraph, SubGraph, relation_domain,
+    PagedComponents, PagedSubGraph, SubGraph,
 };
 
 // Re-export query coordinator

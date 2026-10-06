@@ -63,12 +63,12 @@ export function callChainToElements(nodes: CallChainNode[]): GraphElement[] {
 		const target = nodes[i + 1].function_id;
 		if (!source || !target || source === target) continue;
 		const edge: GraphEdge = {
-		    source,
-		    target,
-		    relation: CALL_RELATION,
-		    confidence: 'extracted',
-		    domain: 'call',
-		   };
+			source,
+			target,
+			relation: CALL_RELATION,
+			confidence: 'extracted',
+			domain: 'call',
+		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) continue;
 		seenEdges.add(id);
@@ -129,12 +129,12 @@ export function inheritanceToElements(
 	const addEdge = (source: string, target: string, relation: string) => {
 		if (!source || !target || source === target) return;
 		const edge: GraphEdge = {
-		    source,
-		    target,
-		    relation,
-		    confidence: 'extracted',
-		    domain: 'structural',
-		   };
+			source,
+			target,
+			relation,
+			confidence: 'extracted',
+			domain: 'structural',
+		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) return;
 		seenEdges.add(id);

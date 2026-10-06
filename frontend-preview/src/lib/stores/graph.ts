@@ -17,9 +17,11 @@ import {
 	type GraphNode,
 	type GraphPathResponse,
 } from '../api/graph';
+import { ApiError, type SymbolCandidate } from '../api/client';
 import {
+	edgeDomain,
 	edgeElementId,
-	relationDomain,
+	RELATION_DOMAIN_ORDER,
 	toElementEdge,
 	toElementNode,
 	type GraphElement,
@@ -41,6 +43,8 @@ export interface GraphError {
 	/** Optional structured detail such as HTTP status or the underlying thrown
 	 *  value, for debugging and for callers that need to react precisely. */
 	details?: unknown;
+	/** Disambiguation candidates for an AMBIGUOUS_SYMBOL seed error. */
+	candidates?: SymbolCandidate[];
 }
 
 /**
@@ -69,10 +73,10 @@ export interface GraphMeta {
 }
 
 export interface GraphFilters {
+	/** Relation domains left visible; edges in the others are hidden. */
 	domains: RelationDomain[];
 	kinds: string[];
 	search: string;
-	hideAmbiguous: boolean;
 }
 
 export interface GraphState {
@@ -87,15 +91,6 @@ export interface GraphState {
 	meta: GraphMeta;
 }
 
-const ALL_DOMAINS: RelationDomain[] = [
-	'call',
-	'dependency',
-	'structural',
-	'reference',
-	'template',
-	'other',
-];
-
 const initialState: GraphState = {
 	projectId: get(currentProjectId),
 	nodes: [],
@@ -105,10 +100,9 @@ const initialState: GraphState = {
 	error: null,
 	truncated: false,
 	filters: {
-		domains: [...ALL_DOMAINS],
+		domains: [...RELATION_DOMAIN_ORDER],
 		kinds: [],
 		search: '',
-		hideAmbiguous: false,
 	},
 	meta: {
 		epoch: 0,
@@ -128,6 +122,17 @@ function toGraphError(
 	fallback = 'Graph request failed',
 ): GraphError {
 	// Preserve structured shape from fetch helpers.
+	if (error instanceof ApiError) {
+		const base: GraphError = {
+			code: error.code ?? statusToCode(error.status),
+			message: error.message,
+			details: { status: error.status },
+		};
+		if (error.code === 'AMBIGUOUS_SYMBOL') {
+			base.candidates = error.symbolCandidates();
+		}
+		return base;
+	}
 	if (error && typeof error === 'object') {
 		const obj = error as Record<string, unknown>;
 		if ('message' in obj && typeof obj.message === 'string') {
@@ -477,7 +482,7 @@ export const graphActions = {
 					...state.meta,
 					impactFile: response.changed_file,
 					impactDirect: response.direct_dependents,
-					impactTransitive: response.transitive_dependents,
+					impactTransitive: response.indirect_dependents,
 				},
 			}));
 			return { ok: true, value: response };
@@ -529,16 +534,24 @@ export const graphActions = {
 		graphState.set({
 			...initialState,
 			projectId: projectId ?? get(currentProjectId),
-			filters: { ...initialState.filters, domains: [...ALL_DOMAINS] },
+			filters: {
+				...initialState.filters,
+				domains: [...RELATION_DOMAIN_ORDER],
+			},
 		});
 	},
 };
 
-/** Distinct relation domains present in the current edge set. */
+/**
+ * Distinct relation domains present in the current edge set.
+ *
+ * Uses the same resolution as the renderer elements so the filter panel's
+ * notion of "present" can never disagree with how an edge is actually drawn.
+ */
 export function activeDomains(edges: GraphEdge[]): Set<RelationDomain> {
 	const domains = new Set<RelationDomain>();
 	for (const edge of edges) {
-		domains.add(relationDomain(edge.relation));
+		domains.add(edgeDomain(edge));
 	}
 	return domains;
 }

@@ -61,8 +61,9 @@ pub struct GraphEdge {
     /// True when the edge points outside the indexed project.
     #[serde(default)]
     pub is_external: bool,
-    /// Traversal weight: the relation type's base confidence multiplied by
-    /// how many call sites the caller uses to reach the target.
+    /// Structural bearing: the relation type's intrinsic link strength scaled
+    /// by how many call sites the caller uses to reach the target. Not a
+    /// confidence level — confidence is carried on its own field.
     #[serde(default = "default_edge_weight")]
     pub weight: f32,
     /// Conditional-compilation guard the calling entity carries, when it has

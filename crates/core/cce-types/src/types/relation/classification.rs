@@ -531,7 +531,12 @@ impl RelationType {
         matches!(self, RelationType::ConstructorCall)
     }
 
-    /// Get the domain name for this relation type
+    /// Coarse domain this relation belongs to, as a stable wire label.
+    ///
+    /// The five category predicates are mutually exclusive and cover every
+    /// variant, so the `other` arm only ever fires for a variant added later
+    /// that has not been assigned to a domain yet — it is a deliberate honest
+    /// fallback, not a live classification.
     pub fn domain(&self) -> &'static str {
         if self.is_call() {
             "call"
@@ -541,8 +546,10 @@ impl RelationType {
             "structural"
         } else if self.is_template_relation() {
             "template"
-        } else {
+        } else if self.is_reference() {
             "reference"
+        } else {
+            "other"
         }
     }
 }
@@ -608,6 +615,79 @@ mod tests {
         assert_eq!(RelationType::TypeReference.domain(), "reference");
         assert_eq!(RelationType::ElementContains.domain(), "template");
         assert_eq!(RelationType::EventCallback.domain(), "template");
+    }
+
+    #[test]
+    fn every_variant_has_exactly_one_domain_and_none_is_other() {
+        // The wire strings are the authoritative variant list: each is the
+        // inverse of `Display`. A variant the five category predicates all miss
+        // would fall through to `other`, so this test is the guard that forces a
+        // newly added relation type to be assigned to a real domain.
+        let wire = [
+            "call.direct",
+            "call.method",
+            "call.method.static",
+            "call.method.chained",
+            "call.constructor",
+            "call.pointer",
+            "call.callback",
+            "call.generic",
+            "call.macro",
+            "call.goroutine",
+            "call.deferred",
+            "call.async",
+            "call.higher_order",
+            "dependency.include",
+            "dependency.import.standard",
+            "dependency.import.named",
+            "dependency.import.default",
+            "dependency.import.namespace",
+            "dependency.import.dynamic",
+            "dependency.use",
+            "dependency.using",
+            "dependency.macro",
+            "dependency.module",
+            "inheritance",
+            "implementation",
+            "trait_bound",
+            "contains",
+            "impl_association",
+            "embedding",
+            "mixin",
+            "trait_inheritance",
+            "protocol_implementation",
+            "type_reference",
+            "field_access",
+            "contains.element",
+            "reference.template",
+            "parameter.binding",
+            "callback.event",
+        ];
+        let known_domains = ["call", "dependency", "structural", "reference", "template"];
+        for name in wire {
+            let kind = RelationType::from_str(name).expect("wire string must parse");
+            // Round-trips back to the same wire label, so the list stays exact.
+            assert_eq!(kind.to_string(), name);
+            let in_categories = [
+                kind.is_call(),
+                kind.is_dependency(),
+                kind.is_structural(),
+                kind.is_reference(),
+                kind.is_template_relation(),
+            ]
+            .iter()
+            .filter(|holds| **holds)
+            .count();
+            assert_eq!(
+                in_categories, 1,
+                "{name} must belong to exactly one relation category"
+            );
+            assert!(
+                known_domains.contains(&kind.domain()),
+                "{name} landed in the {other} fallback",
+                other = kind.domain()
+            );
+        }
     }
 
     #[test]

@@ -185,24 +185,6 @@ impl TraversalConfig {
     }
 }
 
-/// Coarse domain name of a relation type, matching the graph edge taxonomy
-/// (`call`, `dependency`, `structural`, `reference`, `template`, `other`).
-fn relation_domain(relation_type: &RelationType) -> &'static str {
-    if relation_type.is_call() {
-        "call"
-    } else if relation_type.is_dependency() {
-        "dependency"
-    } else if relation_type.is_structural() {
-        "structural"
-    } else if relation_type.is_reference() {
-        "reference"
-    } else if relation_type.is_template_relation() {
-        "template"
-    } else {
-        "other"
-    }
-}
-
 /// Whether a stored relation survives the traversal filter.
 fn relation_passes_filter(relation: &ResolvedRelation, config: &TraversalConfig) -> bool {
     if !config.include_external && relation.is_external {
@@ -212,7 +194,7 @@ fn relation_passes_filter(relation: &ResolvedRelation, config: &TraversalConfig)
         && !config
             .relation_domains
             .iter()
-            .any(|domain| domain == relation_domain(&relation.relation_type))
+            .any(|domain| *domain == relation.relation_type.domain())
     {
         return false;
     }

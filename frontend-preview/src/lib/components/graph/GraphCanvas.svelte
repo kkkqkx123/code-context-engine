@@ -84,6 +84,7 @@
 	import type { Core, ElementDefinition, StylesheetStyle } from 'cytoscape';
 	import {
 		graphStylesheet,
+		RELATION_DOMAIN_ORDER,
 		type GraphElement,
 		type RelationDomain,
 	} from '$lib/utils/graph-style';
@@ -121,7 +122,7 @@
 		elements = [],
 		layout = 'cose-bilkent',
 		focusId = null,
-		visibleDomains = ['call', 'dependency', 'structural', 'reference', 'other'],
+		visibleDomains = RELATION_DOMAIN_ORDER,
 		impactDirect = [],
 		impactTransitive = [],
 		search = '',
@@ -134,13 +135,6 @@
 
 	let container: HTMLDivElement | null = null;
 	let bilkentRegistered = false;
-	const ALL_RELATION_DOMAINS: RelationDomain[] = [
-		'call',
-		'dependency',
-		'structural',
-		'reference',
-		'other',
-	];
 
 	/** Resolve the requested layout to a registered one. Falls back to plain `cose`
 	 *  when the CoseBilkent extension did not load, so cy.layout() never receives a
@@ -155,9 +149,7 @@
 		if (!cy) return;
 
 		cy.batch(() => {
-			cy!
-				.elements()
-				.removeClass('focus dimmed impact impact-transitive highlighted');
+			cy!.elements().removeClass('focus dimmed impact impact-transitive');
 
 			const direct = new Set(impactDirect);
 			const transitive = new Set(impactTransitive);
@@ -178,11 +170,13 @@
 		});
 	}
 
-	/** Show or hide edges by relation domain using selector batch operations. */
+	/** Show or hide edges by relation domain using selector batch operations.
+	 *  Built from the full domain vocabulary so a newly introduced domain is
+	 *  hideable the moment it exists, with no list to keep in step here. */
 	function applyDomainFilter() {
 		if (!cy) return;
 		const allowed = new Set(visibleDomains);
-		const hideSelector = ALL_RELATION_DOMAINS.filter((d) => !allowed.has(d))
+		const hideSelector = RELATION_DOMAIN_ORDER.filter((d) => !allowed.has(d))
 			.map((d) => `edge[domain = "${d}"]`)
 			.join(', ');
 		cy.batch(() => {

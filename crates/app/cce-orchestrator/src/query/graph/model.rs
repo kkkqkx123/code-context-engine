@@ -68,28 +68,6 @@ pub struct GraphNode {
     pub signature: Option<String>,
 }
 
-/// Coarse relation domain carried alongside the raw relation string.
-///
-/// Derived from `RelationType` so the frontend does not have to re-derive
-/// the classification from relation strings. Raw string edges without a
-/// parsed `RelationType` (for example plugin-provided relations) map to
-/// `"other"`.
-pub fn relation_domain(relation_type: &cce_types::RelationType) -> &'static str {
-    if relation_type.is_call() {
-        "call"
-    } else if relation_type.is_dependency() {
-        "dependency"
-    } else if relation_type.is_structural() {
-        "structural"
-    } else if relation_type.is_reference() {
-        "reference"
-    } else if relation_type.is_template_relation() {
-        "template"
-    } else {
-        "other"
-    }
-}
-
 /// An edge in the relation graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphEdge {
@@ -110,7 +88,8 @@ pub struct GraphEdge {
     /// True when the edge points outside the indexed project.
     #[serde(default)]
     pub is_external: bool,
-    /// Edge weight for weighted traversal (1.0 for unweighted).
+    /// Structural bearing for weighted traversal: relation strength scaled by
+    /// call heat (1.0 when neither applies).
     #[serde(default = "default_edge_weight")]
     pub weight: f32,
     /// Conditional-compilation guard the caller entity carries. The edge

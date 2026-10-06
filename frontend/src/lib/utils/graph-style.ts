@@ -13,28 +13,57 @@
 import type { StylesheetStyle } from 'cytoscape';
 import type { GraphEdge, GraphNode } from '$lib/api/graph';
 
-/** Supported entity kinds in the codebase. */
+/**
+ * Entity kinds that earn a silhouette of their own. Every other backend kind
+ * collapses onto one of these through `normalizeNodeKind`.
+ */
 export type NodeKind =
-	| 'function'
-	| 'method'
-	| 'constructor'
 	| 'class'
 	| 'struct'
 	| 'enum'
+	| 'union'
+	| 'type_alias'
 	| 'interface'
 	| 'trait'
+	| 'trait_impl'
+	| 'function'
+	| 'method'
+	| 'constructor'
+	| 'destructor'
+	| 'operator'
 	| 'variable'
 	| 'constant'
 	| 'module'
 	| 'package'
+	| 'external'
 	| 'unknown';
 
 /** Coarse grouping of the backend relation taxonomy.
- *  Mirrors the backend `relation_domain` classification; the authoritative
+ *  Mirrors `RelationType::domain`; the authoritative
  *  value arrives on each edge as `domain`, and the string-based inference in
  *  `relationDomain` is only a fallback for mock/legacy data. */
 export type RelationDomain =
 	'call' | 'dependency' | 'structural' | 'reference' | 'template' | 'other';
+
+/**
+ * Every domain, in display order. The single source of the domain vocabulary:
+ * the store's default selection, the filter panel's row order and the canvas's
+ * hide-selector all derive from this list, so adding a domain to
+ * `RELATION_DOMAINS` makes it filterable everywhere without a second edit.
+ */
+export const RELATION_DOMAIN_ORDER: RelationDomain[] = [
+	'call',
+	'dependency',
+	'structural',
+	'reference',
+	'template',
+	'other',
+];
+
+/** Whether a string names a known domain. */
+export function isRelationDomain(value: string): value is RelationDomain {
+	return (RELATION_DOMAIN_ORDER as string[]).includes(value);
+}
 
 export interface RelationDomainMeta {
 	domain: RelationDomain;
@@ -87,10 +116,21 @@ export const RELATION_DOMAINS: Record<RelationDomain, RelationDomainMeta> = {
 
 export interface NodeKindMeta {
 	kind: NodeKind;
-	shape: 'round-rectangle' | 'rectangle' | 'diamond' | 'hexagon';
+	shape: NodeShape;
+	/** Whether the node sits outside the indexed project. */
+	external?: boolean;
 	description: string;
 }
 
+/**
+ * Silhouette for every entity kind the graph can carry.
+ *
+ * Shape encodes how a definition behaves, not which language it came from:
+ * a callable body is a rounded rectangle, a type definition a plain
+ * rectangle, an interface or trait a hexagon, and anything that only holds or
+ * names other things a diamond. The backend reports 50-odd kinds; each is
+ * listed here so no kind silently falls back to an arbitrary default.
+ */
 export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
 	function: {
 		kind: 'function',
@@ -107,6 +147,16 @@ export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
 		shape: 'round-rectangle',
 		description: 'Constructor or initializer',
 	},
+	destructor: {
+		kind: 'destructor',
+		shape: 'round-rectangle',
+		description: 'Destructor or finalizer',
+	},
+	operator: {
+		kind: 'operator',
+		shape: 'round-rectangle',
+		description: 'Operator overload',
+	},
 	class: { kind: 'class', shape: 'rectangle', description: 'Class definition' },
 	struct: {
 		kind: 'struct',
@@ -114,16 +164,31 @@ export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
 		description: 'Structure definition',
 	},
 	enum: { kind: 'enum', shape: 'rectangle', description: 'Enumeration' },
+	union: {
+		kind: 'union',
+		shape: 'rectangle',
+		description: 'Union or variant definition',
+	},
+	type_alias: {
+		kind: 'type_alias',
+		shape: 'rectangle',
+		description: 'Type alias or typedef',
+	},
 	interface: {
 		kind: 'interface',
 		shape: 'hexagon',
 		description: 'Interface or protocol',
 	},
 	trait: { kind: 'trait', shape: 'hexagon', description: 'Trait or mixin' },
+	trait_impl: {
+		kind: 'trait_impl',
+		shape: 'hexagon',
+		description: 'Trait or protocol implementation',
+	},
 	variable: {
 		kind: 'variable',
 		shape: 'diamond',
-		description: 'Variable or field',
+		description: 'Variable, field or property',
 	},
 	constant: {
 		kind: 'constant',
@@ -140,18 +205,99 @@ export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
 		shape: 'diamond',
 		description: 'Package or workspace',
 	},
+	external: {
+		kind: 'external',
+		shape: 'diamond',
+		external: true,
+		description: 'Symbol resolved outside the indexed project',
+	},
 	unknown: {
 		kind: 'unknown',
-		shape: 'diamond',
-		description: 'Unknown entity type',
+		shape: 'ellipse',
+		description: 'Entity of a kind the graph does not classify',
 	},
 };
 
-/** Map a backend kind string to a known NodeKind, fallback to unknown. */
+/**
+ * One legend entry per silhouette, naming what the shape means rather than
+ * which backend kinds map onto it. Keeping it here means the legend can never
+ * drift from the shapes the stylesheet actually applies.
+ */
+export const NODE_SHAPE_LEGEND: {
+	shape: NodeShape;
+	label: string;
+	external?: boolean;
+}[] = [
+	{ shape: 'rectangle', label: 'Type definition' },
+	{ shape: 'round-rectangle', label: 'Callable' },
+	{ shape: 'hexagon', label: 'Contract' },
+	{ shape: 'diamond', label: 'Holder or name' },
+	{ shape: 'diamond', label: 'Outside the project', external: true },
+];
+
+/**
+ * Backend kinds that carry no silhouette of their own, collapsed onto the kind
+ * they most resemble. Grouping mirrors the backend's `EntityKind::domain`, so
+ * the whole backend vocabulary lands somewhere intentional instead of falling
+ * through to an arbitrary default. Kinds already present in `NODE_KINDS` are
+ * absent here by design.
+ */
+const ENTITY_KIND_GROUPS: Record<string, NodeKind> = {
+	// Code domain
+	inherent_impl: 'class',
+	enum_variant: 'constant',
+	annotation: 'trait',
+	macro: 'function',
+	field: 'variable',
+	property: 'variable',
+	// Module domain
+	namespace: 'module',
+	import: 'module',
+	require: 'module',
+	include: 'module',
+	export: 'module',
+	// Template domain
+	element: 'variable',
+	attribute: 'variable',
+	expression: 'variable',
+	component: 'class',
+	template: 'class',
+	directive: 'function',
+	control_flow: 'unknown',
+	animation: 'unknown',
+	binding: 'variable',
+	action: 'function',
+	at_rule: 'unknown',
+	event_handler: 'function',
+	// Style domain
+	style_rule: 'function',
+	style_selector: 'variable',
+	style_property: 'constant',
+	keyframe: 'class',
+	// Test domain
+	test_suite: 'class',
+	test_case: 'function',
+	test_hook: 'function',
+	assertion: 'function',
+	mock: 'trait',
+	// Inline payloads with no meaning of their own
+	script_content: 'unknown',
+	style_content: 'unknown',
+	embedded_block: 'unknown',
+};
+
+/**
+ * Map a backend entity kind onto a kind with a dedicated silhouette.
+ *
+ * Kinds that carry no useful shape distinction of their own collapse onto a
+ * related one rather than falling through to a default, so the whole backend
+ * vocabulary lands somewhere intentional.
+ */
 export function normalizeNodeKind(kind?: string | null): NodeKind {
 	const value = (kind ?? '').trim().toLowerCase();
 	if (!value) return 'unknown';
-	return NODE_KINDS[value as NodeKind] ? (value as NodeKind) : 'unknown';
+	if (NODE_KINDS[value as NodeKind]) return value as NodeKind;
+	return ENTITY_KIND_GROUPS[value] ?? 'unknown';
 }
 
 /** Exact structural relation values (these carry no dotted prefix). */
@@ -178,9 +324,14 @@ const TEMPLATE_RELATIONS = new Set([
 	'callback.event',
 ]);
 
-/** Map a raw backend relation string onto its presentation domain.
- *  Fallback inference only — live data should use the backend-provided
- *  `domain` field via `edgeDomain`. */
+/**
+ * Map a raw backend relation string onto its presentation domain.
+ *
+ * This is a protocol fallback for payloads that arrive without the backend's
+ * authoritative `domain` field, not a second source of classification. The
+ * authoritative mapping lives in `RelationType::domain` on the server; keep
+ * the two tables in step when a relation type is added there.
+ */
 export function relationDomain(relation: string): RelationDomain {
 	const value = (relation ?? '').trim();
 	if (!value) return 'other';
@@ -193,23 +344,13 @@ export function relationDomain(relation: string): RelationDomain {
 }
 
 /** Resolve an edge's domain: trust the backend field, fall back to string
- *  inference for mock or legacy payloads that lack it. */
+ *  inference only when the payload omits or misspells it. */
 export function edgeDomain(edge: {
 	relation: string;
 	domain?: string | null;
 }): RelationDomain {
-	const value = (edge.domain ?? '').trim();
-	if (
-		value === 'call' ||
-		value === 'dependency' ||
-		value === 'structural' ||
-		value === 'reference' ||
-		value === 'template' ||
-		value === 'other'
-	) {
-		return value;
-	}
-	return relationDomain(edge.relation);
+	const value = (edge.domain ?? '').trim().toLowerCase();
+	return isRelationDomain(value) ? value : relationDomain(edge.relation);
 }
 
 /**
@@ -236,21 +377,15 @@ export function relationLineStyle(
 }
 
 /**
- * Confidence values mirror the extraction pipeline. Ambiguous relations are
- * rendered as a warning because they are expected to be reviewed by a human;
- * external relations point outside the project into a dependency manifest.
+ * Confidence values mirror the extraction pipeline's `Confidence` enum:
+ * relationships stated in the source, relationships deduced during
+ * resolution, and relationships pointing outside the indexed project.
  */
-export type EdgeConfidence =
-	'extracted' | 'inferred' | 'ambiguous' | 'external' | 'unknown';
+export type EdgeConfidence = 'extracted' | 'inferred' | 'external' | 'unknown';
 
 export function edgeConfidence(confidence: string): EdgeConfidence {
 	const value = (confidence ?? '').trim().toLowerCase();
-	if (
-		value === 'extracted' ||
-		value === 'inferred' ||
-		value === 'ambiguous' ||
-		value === 'external'
-	) {
+	if (value === 'extracted' || value === 'inferred' || value === 'external') {
 		return value;
 	}
 	return 'unknown';
@@ -279,13 +414,6 @@ export const CONFIDENCE_META: Record<EdgeConfidence, ConfidenceMeta> = {
 		opacity: 0.55,
 		color: null,
 	},
-	ambiguous: {
-		confidence: 'ambiguous',
-		label: 'Ambiguous',
-		description: 'Relationship is uncertain and flagged for review',
-		opacity: 0.85,
-		color: '#8a6d00',
-	},
 	external: {
 		confidence: 'external',
 		label: 'External',
@@ -302,26 +430,9 @@ export const CONFIDENCE_META: Record<EdgeConfidence, ConfidenceMeta> = {
 	},
 };
 
-/** Node kinds that are rendered with a distinct silhouette. */
-export type NodeShape = 'round-rectangle' | 'rectangle' | 'diamond' | 'hexagon';
-
-export function nodeShape(kind: string): NodeShape {
-	switch ((kind ?? '').trim().toLowerCase()) {
-		case 'function':
-		case 'method':
-		case 'constructor':
-			return 'round-rectangle';
-		case 'class':
-		case 'struct':
-		case 'enum':
-			return 'rectangle';
-		case 'interface':
-		case 'trait':
-			return 'hexagon';
-		default:
-			return 'diamond';
-	}
-}
+/** Silhouettes available to entity nodes. */
+export type NodeShape =
+	'round-rectangle' | 'rectangle' | 'diamond' | 'hexagon' | 'ellipse';
 
 /** Deterministic, collision-free renderer id for an edge. */
 export function edgeElementId(
@@ -335,11 +446,28 @@ export interface GraphElementNode {
 	data: {
 		id: string;
 		label: string;
+		/** Backend kind string, kept verbatim for the detail panel. */
 		kind: string;
+		/** Silhouette, carried as data so the stylesheet needs no per-kind rules. */
+		shape: NodeShape;
+		external: 0 | 1;
 		sourceFile: string;
 		sourceLocation: string;
 	};
+	/** Body size, sized to the label so long symbol names stay readable. */
+	width: number;
+	height: number;
 }
+
+/** Base node area in square pixels, and the area a node gains per label char.
+ *  Holding area roughly constant keeps the layout's repulsion balanced, so a
+ *  long symbol name widens its node instead of overlapping its neighbours. */
+const NODE_BASE_AREA = 26 * 26;
+const NODE_AREA_PER_CHAR = 34;
+/** Label band height reserved below the node body. */
+const NODE_LABEL_HEIGHT = 13;
+const NODE_MIN_SIZE = 22;
+const NODE_MAX_WIDTH = 150;
 
 /** Renderer element for a backend edge. */
 export interface GraphElementEdge {
@@ -353,10 +481,10 @@ export interface GraphElementEdge {
 		confidence: EdgeConfidence;
 		lineStyle: string;
 		/**
-		 * Traversal weight from the backend: the relation type's base
-		 * confidence multiplied by how many call sites the caller uses to
-		 * reach the target. Drives edge width, so a heavily repeated edge
-		 * reads as structurally more load-bearing than a one-off call.
+		 * Structural load from the backend: how strongly the relation type
+		 * binds caller to callee, scaled by how many call sites reach the
+		 * target. Drives edge width, so a heavily referenced edge reads as
+		 * carrying more of the surrounding code than a one-off link.
 		 */
 		weight: number;
 		/** 1 when the caller carries a `cfg` predicate, so the edge only
@@ -370,21 +498,48 @@ export interface GraphElementEdge {
 
 export type GraphElement = GraphElementNode | GraphElementEdge;
 
+/**
+ * Node body sized to its label.
+ *
+ * A fixed 26px body truncates every long symbol to an ellipsis, which defeats
+ * the label being the primary way to read a graph. Growing the body with the
+ * label keeps the name legible, and scaling both axes against a constant area
+ * stops long names from shoving their neighbours around during layout.
+ */
+function nodeSize(label: string): { width: number; height: number } {
+	const chars = Math.max((label ?? '').trim().length, 3);
+	const width = Math.min(
+		NODE_MAX_WIDTH,
+		Math.max(NODE_MIN_SIZE, Math.round(Math.sqrt(chars * NODE_AREA_PER_CHAR))),
+	);
+	const height = Math.max(
+		NODE_MIN_SIZE,
+		Math.round((NODE_BASE_AREA + chars * NODE_AREA_PER_CHAR) / width),
+	);
+	return { width, height: height + NODE_LABEL_HEIGHT };
+}
+
 export function toElementNode(node: GraphNode): GraphElementNode {
+	const meta = NODE_KINDS[normalizeNodeKind(node.kind)];
+	const { width, height } = nodeSize(node.label);
 	return {
 		data: {
 			id: node.id,
 			label: node.label,
 			kind: node.kind,
+			shape: meta.shape,
+			external: meta.external ? 1 : 0,
 			sourceFile: node.source_file,
 			sourceLocation: node.source_location,
 		},
+		width,
+		height,
 	};
 }
 
 /** Weight assumed when the backend omits it. The field carries a server-side
- *  default, so a payload without it is a single-call-site edge of neutral
- *  confidence; `mapData` clamps out-of-range values, and a missing one would
+ *  default, so a payload without it is a single-call-site edge of ordinary
+ *  binding; `mapData` clamps out-of-range values, and a missing one would
  *  render as no width at all. */
 const DEFAULT_EDGE_WEIGHT = 1;
 
@@ -408,12 +563,6 @@ export function toElementEdge(edge: GraphEdge): GraphElementEdge {
 	};
 }
 
-export function isNodeElement(
-	element: GraphElement,
-): element is GraphElementNode {
-	return 'label' in element.data;
-}
-
 /**
  * Renderer stylesheet rules.
  *
@@ -430,11 +579,11 @@ export function isNodeElement(
  *  domain and a second dashed variant would be ambiguous. */
 const CONDITIONAL_EDGE_OPACITY = 0.45;
 
-/** Weight range the edge-width mapping spans. The backend emits the relation
- *  type's base confidence (0.3 for a type reference up to 1.0 for a direct
- *  call) multiplied by the hotness factor `1 + log2(call_site_count)`, which is
- *  1.0 for a single call site. Anything at or beyond the upper bound is a
- *  hub edge many call sites converge on. */
+/** Weight range the edge-width mapping spans. The backend emits how strongly
+ *  the relation type binds the two endpoints (0.3 for a type reference up to
+ *  1.0 for a direct call) multiplied by the reach factor
+ *  `1 + log2(call_site_count)`, which is 1.0 for a single call site. Anything
+ *  at or beyond the upper bound is a hub edge many call sites converge on. */
 const WEIGHT_RANGE = { min: 0.3, max: 4 };
 const WEIGHT_WIDTH = { min: 1, max: 4.5 };
 
@@ -452,27 +601,50 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'text-valign': 'bottom',
 			'text-halign': 'center',
 			'text-margin-y': 4,
-			'text-max-width': '110px',
+			'text-max-width': '150px',
 			'text-wrap': 'ellipsis',
-			width: 26,
-			height: 26,
+			// Sizing comes from the element so long symbol names stay readable.
+			width: 'data(width)',
+			height: 'data(height)',
+			shape: 'round-rectangle',
 			'overlay-opacity': 0,
 		},
 	},
-	{ selector: 'node[kind = "class"]', style: { shape: 'rectangle' } },
-	{ selector: 'node[kind = "struct"]', style: { shape: 'rectangle' } },
-	{ selector: 'node[kind = "enum"]', style: { shape: 'rectangle' } },
-	{ selector: 'node[kind = "function"]', style: { shape: 'round-rectangle' } },
-	{ selector: 'node[kind = "method"]', style: { shape: 'round-rectangle' } },
-	{ selector: 'node[kind = "interface"]', style: { shape: 'hexagon' } },
-	{ selector: 'node[kind = "trait"]', style: { shape: 'hexagon' } },
+	{
+		// Silhouette per kind group. A `data(shape)` mapper is runtime-only and
+		// the typings reject it, so each shape stays a literal override rule.
+		selector: 'node[shape = "rectangle"]',
+		style: { shape: 'rectangle' },
+	},
+	{
+		selector: 'node[shape = "hexagon"]',
+		style: { shape: 'hexagon' },
+	},
+	{
+		selector: 'node[shape = "diamond"]',
+		style: { shape: 'diamond' },
+	},
+	{
+		selector: 'node[shape = "ellipse"]',
+		style: { shape: 'ellipse' },
+	},
+	{
+		// Nodes resolved outside the project carry no source location, so a
+		// dashed outline distinguishes them from entities defined in-tree.
+		selector: 'node[external = 1]',
+		style: {
+			'border-style': 'dashed',
+			'background-color': '#f5f5f5',
+			'border-color': '#525252',
+		},
+	},
 	{
 		selector: 'edge',
 		style: {
-			// Width encodes how load-bearing the edge is, not which relation
-			// family it belongs to: colour and line style already carry the
-			// domain, so a per-domain width would be a third encoding of the
-			// same fact.
+			// Width encodes how much the surrounding code leans on the link,
+			// not which relation family it belongs to: colour and line style
+			// already carry the domain, so a per-domain width would be a third
+			// encoding of the same fact.
 			width: `mapData(weight, ${WEIGHT_RANGE.min}, ${WEIGHT_RANGE.max}, ${WEIGHT_WIDTH.min}, ${WEIGHT_WIDTH.max})`,
 			'line-color': RELATION_DOMAINS.other.color,
 			'target-arrow-color': RELATION_DOMAINS.other.color,
@@ -536,14 +708,10 @@ export const graphStylesheet: StylesheetStyle[] = [
 		style: { opacity: CONFIDENCE_META.inferred.opacity },
 	},
 	{
-		selector: 'edge[confidence = "ambiguous"]',
-		style: {
-			opacity: CONFIDENCE_META.ambiguous.opacity,
-			'line-color':
-				CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color,
-			'target-arrow-color':
-				CONFIDENCE_META.ambiguous.color ?? RELATION_DOMAINS.other.color,
-		},
+		// Deductions link entities the source never names directly, so they are
+		// drawn faintly rather than at full strength.
+		selector: 'edge[confidence = "external"]',
+		style: { opacity: CONFIDENCE_META.external.opacity },
 	},
 	{
 		selector: 'node.focus',
@@ -575,15 +743,6 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'border-color': '#2563eb',
 			'border-style': 'dashed',
 			'border-width': 2,
-		},
-	},
-	{
-		selector: 'edge.highlighted',
-		style: {
-			width: 3,
-			opacity: 1,
-			'line-color': '#e63600',
-			'target-arrow-color': '#e63600',
 		},
 	},
 ];

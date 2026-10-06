@@ -2,12 +2,11 @@
 	/**
 	 * Relation domain and node search controls.
 	 *
-	 * Domain toggles drive edge visibility, the search box highlights matching
-	 * nodes and dims the rest, and the ambiguous toggle hides relations the
-	 * extraction pipeline flagged as uncertain.
+	 * Domain toggles drive edge visibility and the search box highlights
+	 * matching nodes while dimming the rest.
 	 */
 	import {
-		CONFIDENCE_META,
+		RELATION_DOMAIN_ORDER,
 		RELATION_DOMAINS,
 		relationLineStyle,
 		type RelationDomain,
@@ -18,42 +17,23 @@
 		/** Domains actually present in the current graph, used to disable empty toggles. */
 		availableDomains?: RelationDomain[];
 		search?: string;
-		hideAmbiguous?: boolean;
 		showEdgeLabels?: boolean;
 		onToggleDomain?: (domain: RelationDomain) => void;
 		onSearch?: (value: string) => void;
-		onToggleAmbiguous?: () => void;
 		onToggleEdgeLabels?: () => void;
 	}
 
 	let {
 		domains = [],
-		availableDomains = [
-			'call',
-			'dependency',
-			'structural',
-			'reference',
-			'template',
-			'other',
-		],
+		availableDomains = RELATION_DOMAIN_ORDER,
 		search = $bindable(''),
-		hideAmbiguous = $bindable(false),
 		showEdgeLabels = $bindable(false),
 		onToggleDomain = () => {},
 		onSearch = () => {},
-		onToggleAmbiguous = () => {},
 		onToggleEdgeLabels = () => {},
 	}: Props = $props();
 
 	let available = $derived(new Set(availableDomains));
-	const domainOrder: RelationDomain[] = [
-		'call',
-		'dependency',
-		'structural',
-		'reference',
-		'template',
-		'other',
-	];
 
 	function handleSearchInput(event: Event) {
 		const value = (event.currentTarget as HTMLInputElement).value;
@@ -78,7 +58,7 @@
 	<div class="panel-section">
 		<h4 class="panel-title">Relation domains</h4>
 		<ul class="domain-list">
-			{#each domainOrder as domain (domain)}
+			{#each RELATION_DOMAIN_ORDER as domain (domain)}
 				{@const meta = RELATION_DOMAINS[domain]}
 				{@const enabled = domains.includes(domain)}
 				{@const present = available.has(domain)}
@@ -112,19 +92,6 @@
 	</div>
 
 	<div class="panel-section">
-		<h4 class="panel-title">Confidence</h4>
-		<label class="checkbox-row">
-			<input
-				type="checkbox"
-				checked={hideAmbiguous}
-				onchange={() => onToggleAmbiguous()}
-			/>
-			<span>Hide ambiguous relations</span>
-		</label>
-		<p class="hint">{CONFIDENCE_META.ambiguous.description}</p>
-	</div>
-
-	<div class="panel-section">
 		<h4 class="panel-title">Labels</h4>
 		<label class="checkbox-row">
 			<input
@@ -137,6 +104,24 @@
 		<p class="hint">
 			Render the relation type on each edge. Disable on large graphs to reduce
 			clutter.
+		</p>
+	</div>
+
+	<div class="panel-section">
+		<h4 class="panel-title">Reading the graph</h4>
+		<p class="hint">
+			Edge width is how much the code leans on the link: a strong relation type
+			scaled up by how many call sites reach the target. A thick edge is one the
+			surrounding code depends on from many places.
+		</p>
+		<p class="hint">
+			Faint edges were deduced during resolution rather than named directly in
+			the source. Edges pointing outside the project are drawn faded too.
+		</p>
+		<p class="hint">
+			Faded flat edges sit behind a conditional-compilation guard, so they only
+			exist under that predicate. Dashed node outlines mark symbols resolved
+			outside the project.
 		</p>
 	</div>
 </aside>

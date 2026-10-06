@@ -796,8 +796,7 @@ pub async fn handle_graph_structural(
                 .unwrap_or_else(|| format!("entity:{}", relation.entity_id.0)),
             label: relation.label,
             relation: relation.relation_type.to_string(),
-            domain: cce_orchestrator::query::graph::relation_domain(&relation.relation_type)
-                .to_string(),
+            domain: relation.relation_type.domain().to_string(),
             source_file: snapshot
                 .index
                 .as_ref()
@@ -866,7 +865,7 @@ pub async fn handle_graph_module(
                 .unwrap_or_default(),
             target: relation.callee_name,
             relation: relation.relation_type.to_string(),
-            domain: cce_orchestrator::query::relation_domain(&relation.relation_type).to_string(),
+            domain: relation.relation_type.domain().to_string(),
         })
         .collect();
     ApiResult::Success(GraphModuleResponse {

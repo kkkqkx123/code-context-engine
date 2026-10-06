@@ -1,7 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import type { Component } from 'svelte';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -19,8 +19,13 @@
 
 	onMount(() => {
 		watchActions.loadStatus();
+		watchActions.startVersionPoll();
 		// Preload LogViewer component
 		loadLogViewerComponent();
+	});
+
+	onDestroy(() => {
+		watchActions.stopVersionPoll();
 	});
 
 	async function handleStartWatch() {
@@ -163,13 +168,26 @@
 								).toLocaleString()}</span
 							>
 						{/if}
+						{#if $watchState.status.relation_epoch !== undefined && $watchState.status.relation_epoch !== null}
+							<span class="info-item"
+								>Relation epoch: {$watchState.status.relation_epoch}</span
+							>
+						{/if}
+						{#if ($watchState.status as unknown as { data_epoch?: number | null }).data_epoch !== undefined && ($watchState.status as unknown as { data_epoch?: number | null }).data_epoch !== null}
+							<span class="info-item"
+								>Data epoch: {($watchState.status as unknown as { data_epoch?: number | null }).data_epoch}</span
+							>
+						{/if}
 					</div>
 				</div>
 			{/if}
 		</Card>
 
 		<!-- Live Event Feed -->
-		<Card title="Event Feed" subtitle="Real-time file system events">
+		<Card
+			title="Event Feed"
+			subtitle="No live stream by design — progress comes from status polling (events_processed + epochs)"
+		>
 			<div class="feed-controls">
 				<Button variant="secondary" onclick={togglePause}>
 					{isPaused ? 'Resume' : 'Pause'}

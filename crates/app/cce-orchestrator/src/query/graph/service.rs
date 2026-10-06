@@ -17,7 +17,7 @@ use cce_types::{Entity, EntityId, Span};
 
 use super::model::{
     Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedComponents, PagedSubGraph,
-    SubGraph, confidence_of, kind_label, relation_domain,
+    SubGraph, confidence_of, kind_label,
 };
 use crate::query::error::{QueryError, Result};
 use crate::query::relation_searcher::{PathQueryOptions, RelationSearcher};
@@ -342,7 +342,7 @@ impl GraphService {
         if filter.relation_domains.is_empty() {
             return true;
         }
-        let domain = relation_domain(&relation.relation_type);
+        let domain = relation.relation_type.domain();
         filter.relation_domains.iter().any(|d| d == domain)
     }
 }
@@ -511,31 +511,30 @@ impl<'a> SubGraphBuilder<'a> {
     }
 
     fn insert_relation(&mut self, caller: EntityId, relation: &cce_types::ResolvedRelation) {
-        if relation.is_external {
-            let target = self.external_id(&relation.callee_name);
-            self.insert_external(&target, &relation.callee_name);
-            self.insert_raw_edge(
-                self.node_id(caller),
-                target,
-                relation.relation_type.to_string(),
-            );
+        // External and internal links differ only in the target node: the
+        // classification, confidence and bearing all derive from the same
+        // parsed relation type, so they must not diverge by endpoint.
+        let (target, is_external) = if relation.is_external {
+            let id = self.external_id(&relation.callee_name);
+            self.insert_external(&id, &relation.callee_name);
+            (id, true)
+        } else if let Some(callee) = relation.callee_id {
+            self.insert_entity(callee);
+            (self.node_id(callee), false)
+        } else {
             return;
-        }
-        if let Some(target) = relation.callee_id {
-            self.insert_entity(target);
-            self.edges.push(GraphEdge {
-                source: self.node_id(caller),
-                target: self.node_id(target),
-                relation: relation.relation_type.to_string(),
-                domain: relation_domain(&relation.relation_type).to_string(),
-                confidence: confidence_of(relation),
-                call_context: Some(relation.call_context.tag().to_string()),
-                is_external: false,
-                weight: edge_weight(&relation.relation_type)
-                    * call_frequency_weight(relation.call_frequency),
-                cfg_condition: relation.cfg_condition.clone(),
-            });
-        }
+        };
+        self.edges.push(GraphEdge {
+            source: self.node_id(caller),
+            target,
+            relation: relation.relation_type.to_string(),
+            domain: relation.relation_type.domain().to_string(),
+            confidence: confidence_of(relation),
+            call_context: Some(relation.call_context.tag().to_string()),
+            is_external,
+            weight: edge_load(&relation.relation_type, relation.call_frequency),
+            cfg_condition: relation.cfg_condition.clone(),
+        });
     }
 
     fn insert_edge(&mut self, edge: (EntityId, cce_types::ResolvedRelation)) {
@@ -556,27 +555,13 @@ impl<'a> SubGraphBuilder<'a> {
             source: self.node_id(source),
             target: self.node_id(target.function_id),
             relation: target.relation_type.to_string(),
-            domain: relation_domain(&target.relation_type).to_string(),
+            domain: target.relation_type.domain().to_string(),
             confidence,
             call_context: Some(target.call_context.tag().to_string()),
             is_external: false,
-            weight: edge_weight(&target.relation_type),
-            cfg_condition: None,
-        });
-    }
-
-    fn insert_raw_edge(&mut self, source: String, target: String, relation: String) {
-        self.edges.push(GraphEdge {
-            source,
-            target,
-            relation,
-            // Raw string edges (external/plugin relations without a parsed
-            // RelationType) cannot be classified further.
-            domain: "other".to_string(),
-            confidence: Confidence::Inferred,
-            call_context: None,
-            is_external: true,
-            weight: 1.0,
+            // A path node records the traversal step, not a per-site tally, so
+            // the heat factor stays neutral; the bearing is the type's own.
+            weight: edge_load(&target.relation_type, 0),
             cfg_condition: None,
         });
     }
@@ -620,10 +605,13 @@ fn location_of(span: &Span) -> String {
     }
 }
 
-/// Compute edge weight based on relation type.
+/// Structural strength intrinsic to a relation type.
 ///
-/// Direct calls have the strongest weight (1.0), method calls slightly less
-/// (0.9), field access moderate (0.5), and type references weakest (0.3).
+/// This is how firmly one entity leans on another, not how believable the link
+/// is: a direct call anchors the caller on its target (1.0), a method call
+/// slightly less (0.9), field access is moderate (0.5) and a bare type reference
+/// is the lightest link (0.3). Confidence is a separate axis carried on the
+/// edge itself.
 pub fn edge_weight(relation_type: &cce_types::RelationType) -> f32 {
     use cce_types::RelationType::*;
     match relation_type {
@@ -650,6 +638,16 @@ pub fn call_frequency_weight(call_frequency: u64) -> f32 {
         return 1.0;
     }
     1.0 + call_frequency.max(2).ilog2() as f32
+}
+
+/// Bearing of an edge: its structural strength scaled by call heat.
+///
+/// Every edge construction path funnels through here so the same relation
+/// between the same endpoints weighs the same regardless of how it was reached.
+/// A `call_frequency` of zero (a traversal step that records no per-site tally)
+/// leaves the type weight untouched.
+pub fn edge_load(relation_type: &cce_types::RelationType, call_frequency: u64) -> f32 {
+    edge_weight(relation_type) * call_frequency_weight(call_frequency)
 }
 
 #[cfg(test)]
@@ -948,6 +946,60 @@ mod tests {
             thrice > once,
             "a repeated call site must outweigh a single one"
         );
+    }
+
+    #[test]
+    fn edge_load_composes_strength_and_heat_across_paths() {
+        // The single formula every construction path funnels through.
+        assert_eq!(
+            edge_load(&RelationType::DirectCall, 3),
+            edge_weight(&RelationType::DirectCall) * call_frequency_weight(3),
+        );
+        // A traversal step that records no tally keeps the neutral factor,
+        // matching how path edges are built.
+        assert_eq!(edge_load(&RelationType::TypeReference, 0), 0.3);
+    }
+
+    #[test]
+    fn external_edge_carries_true_domain_and_load() {
+        use cce_relation::index::EntityIndexOps;
+
+        let service = {
+            let base = cce_relation::RelationIndex::new();
+            base.add_function_with_path(EntityId(1), entity(1, "a"), "src/lib.rs".into());
+            base.add_resolved_relation(cce_types::ResolvedRelation {
+                caller: EntityId(1),
+                callee_id: None,
+                callee_name: "printf".to_string(),
+                relation_type: RelationType::DirectCall,
+                span: Span::default(),
+                is_external: true,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: cce_types::relation::CallContext::Direct,
+                overload_signature: None,
+                call_frequency: 4,
+                cfg_condition: None,
+            });
+            GraphService::new(Arc::new(RelationSearcher::new(Arc::new(
+                CallChainQuery::from_index(base),
+            ))))
+        };
+        let graph = service
+            .ego_graph(EntityId(1), 1, GraphDirection::Both)
+            .expect("ego");
+        let edge = graph
+            .edges
+            .iter()
+            .find(|e| e.is_external)
+            .expect("external edge");
+        // No longer hardcoded: an external direct call is a `call` with
+        // `EXTERNAL` confidence and the same heat-scaled bearing as internal.
+        assert_eq!(edge.domain, "call");
+        assert_eq!(edge.confidence, Confidence::External);
+        assert_eq!(edge.weight, edge_load(&RelationType::DirectCall, 4));
     }
 
     #[test]
