@@ -110,7 +110,7 @@ export const RELATION_DOMAINS: Record<RelationDomain, RelationDomainMeta> = {
 		domain: 'other',
 		label: 'Other',
 		description: 'Unclassified relations, including plugin-provided ones',
-		color: '#475569',
+		color: '#be123c',
 	},
 };
 
@@ -127,8 +127,10 @@ export interface NodeKindMeta {
  *
  * Shape encodes how a definition behaves, not which language it came from:
  * a callable body is a rounded rectangle, a type definition a plain
- * rectangle, an interface or trait a hexagon, and anything that only holds or
- * names other things a diamond. The backend reports 50-odd kinds; each is
+ * rectangle, an interface or trait a hexagon, a value an ellipse, a
+ * container an octagon, and anything outside the project a diamond.
+ * Unclassified entities use a pentagon so they never share a silhouette
+ * with a classified value. The backend reports 50-odd kinds; each is
  * listed here so no kind silently falls back to an arbitrary default.
  */
 export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
@@ -187,22 +189,22 @@ export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
 	},
 	variable: {
 		kind: 'variable',
-		shape: 'diamond',
+		shape: 'ellipse',
 		description: 'Variable, field or property',
 	},
 	constant: {
 		kind: 'constant',
-		shape: 'diamond',
+		shape: 'ellipse',
 		description: 'Constant or macro',
 	},
 	module: {
 		kind: 'module',
-		shape: 'diamond',
+		shape: 'octagon',
 		description: 'Module or namespace',
 	},
 	package: {
 		kind: 'package',
-		shape: 'diamond',
+		shape: 'octagon',
 		description: 'Package or workspace',
 	},
 	external: {
@@ -213,7 +215,7 @@ export const NODE_KINDS: Record<NodeKind, NodeKindMeta> = {
 	},
 	unknown: {
 		kind: 'unknown',
-		shape: 'ellipse',
+		shape: 'pentagon',
 		description: 'Entity of a kind the graph does not classify',
 	},
 };
@@ -231,8 +233,10 @@ export const NODE_SHAPE_LEGEND: {
 	{ shape: 'rectangle', label: 'Type definition' },
 	{ shape: 'round-rectangle', label: 'Callable' },
 	{ shape: 'hexagon', label: 'Contract' },
-	{ shape: 'diamond', label: 'Holder or name' },
+	{ shape: 'ellipse', label: 'Value' },
+	{ shape: 'octagon', label: 'Container' },
 	{ shape: 'diamond', label: 'Outside the project', external: true },
+	{ shape: 'pentagon', label: 'Unclassified' },
 ];
 
 /**
@@ -432,7 +436,28 @@ export const CONFIDENCE_META: Record<EdgeConfidence, ConfidenceMeta> = {
 
 /** Silhouettes available to entity nodes. */
 export type NodeShape =
-	'round-rectangle' | 'rectangle' | 'diamond' | 'hexagon' | 'ellipse';
+	| 'round-rectangle'
+	| 'rectangle'
+	| 'diamond'
+	| 'hexagon'
+	| 'ellipse'
+	| 'octagon'
+	| 'pentagon';
+
+/** Fill and border per silhouette so shape groups stay distinguishable
+ *  without relying on outline alone. External keeps its own grey dashed
+ *  treatment and is absent here by design. */
+export const NODE_SHAPE_STYLE: Record<
+	Exclude<NodeShape, 'diamond'>,
+	{ background: string; border: string }
+> = {
+	'round-rectangle': { background: '#eff6ff', border: '#1e40af' },
+	rectangle: { background: '#f5f3ff', border: '#5b21b6' },
+	hexagon: { background: '#ecfdf5', border: '#065f46' },
+	ellipse: { background: '#fffbeb', border: '#92400e' },
+	octagon: { background: '#f8fafc', border: '#334155' },
+	pentagon: { background: '#fafafa', border: '#0a0a0a' },
+};
 
 /** Deterministic, collision-free renderer id for an edge. */
 export function edgeElementId(
@@ -613,24 +638,62 @@ export const graphStylesheet: StylesheetStyle[] = [
 	{
 		// Silhouette per kind group. A `data(shape)` mapper is runtime-only and
 		// the typings reject it, so each shape stays a literal override rule.
+		// Fills come from NODE_SHAPE_STYLE so legend and canvas share values.
 		selector: 'node[shape = "rectangle"]',
-		style: { shape: 'rectangle' },
+		style: {
+			shape: 'rectangle',
+			'background-color': NODE_SHAPE_STYLE.rectangle.background,
+			'border-color': NODE_SHAPE_STYLE.rectangle.border,
+		},
+	},
+	{
+		selector: 'node[shape = "round-rectangle"]',
+		style: {
+			shape: 'round-rectangle',
+			'background-color': NODE_SHAPE_STYLE['round-rectangle'].background,
+			'border-color': NODE_SHAPE_STYLE['round-rectangle'].border,
+		},
 	},
 	{
 		selector: 'node[shape = "hexagon"]',
-		style: { shape: 'hexagon' },
+		style: {
+			shape: 'hexagon',
+			'background-color': NODE_SHAPE_STYLE.hexagon.background,
+			'border-color': NODE_SHAPE_STYLE.hexagon.border,
+		},
+	},
+	{
+		selector: 'node[shape = "ellipse"]',
+		style: {
+			shape: 'ellipse',
+			'background-color': NODE_SHAPE_STYLE.ellipse.background,
+			'border-color': NODE_SHAPE_STYLE.ellipse.border,
+		},
+	},
+	{
+		selector: 'node[shape = "octagon"]',
+		style: {
+			shape: 'octagon',
+			'background-color': NODE_SHAPE_STYLE.octagon.background,
+			'border-color': NODE_SHAPE_STYLE.octagon.border,
+		},
+	},
+	{
+		selector: 'node[shape = "pentagon"]',
+		style: {
+			shape: 'pentagon',
+			'background-color': NODE_SHAPE_STYLE.pentagon.background,
+			'border-color': NODE_SHAPE_STYLE.pentagon.border,
+		},
 	},
 	{
 		selector: 'node[shape = "diamond"]',
 		style: { shape: 'diamond' },
 	},
 	{
-		selector: 'node[shape = "ellipse"]',
-		style: { shape: 'ellipse' },
-	},
-	{
 		// Nodes resolved outside the project carry no source location, so a
 		// dashed outline distinguishes them from entities defined in-tree.
+		// Diamond is reserved for this case, never for in-tree values.
 		selector: 'node[external = 1]',
 		style: {
 			'border-style': 'dashed',
@@ -649,7 +712,7 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'line-color': RELATION_DOMAINS.other.color,
 			'target-arrow-color': RELATION_DOMAINS.other.color,
 			'target-arrow-shape': 'triangle',
-			'arrow-scale': 0.8,
+			'arrow-scale': 1,
 			'curve-style': 'bezier',
 			opacity: 0.8,
 			'overlay-opacity': 0,
@@ -660,6 +723,12 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'text-background-opacity': 0.85,
 			'text-background-padding': '1px',
 			'text-rotation': 'autorotate',
+		},
+	},
+	{
+		selector: 'edge.show-label',
+		style: {
+			label: 'data(relationLabel)',
 		},
 	},
 	{
@@ -697,6 +766,15 @@ export const graphStylesheet: StylesheetStyle[] = [
 		style: {
 			'line-color': RELATION_DOMAINS.template.color,
 			'target-arrow-color': RELATION_DOMAINS.template.color,
+			'target-arrow-shape': 'circle',
+		},
+	},
+	{
+		selector: 'edge[domain = "other"]',
+		style: {
+			'line-color': RELATION_DOMAINS.other.color,
+			'target-arrow-color': RELATION_DOMAINS.other.color,
+			'target-arrow-shape': 'vee',
 		},
 	},
 	{
@@ -714,12 +792,18 @@ export const graphStylesheet: StylesheetStyle[] = [
 		style: { opacity: CONFIDENCE_META.external.opacity },
 	},
 	{
-		selector: 'node.focus',
-		style: {
-			'border-width': 3,
-			'border-color': '#e63600',
-			'background-color': '#fef2f0',
-		},
+		// A guarded deduction carries both attenuations, so the combined
+		// selectors below must win over either single-axis rule.
+		selector: 'edge[conditional = 1][confidence = "inferred"]',
+		style: { opacity: 0.25 },
+	},
+	{
+		selector: 'edge[conditional = 1][confidence = "external"]',
+		style: { opacity: 0.27 },
+	},
+	{
+		selector: 'edge[conditional = 1][confidence = "unknown"]',
+		style: { opacity: 0.34 },
 	},
 	{
 		selector: 'node.dimmed',
@@ -738,11 +822,50 @@ export const graphStylesheet: StylesheetStyle[] = [
 		},
 	},
 	{
+		// Solid outline on purpose: dashed is reserved for external nodes.
 		selector: 'node.impact-transitive',
 		style: {
 			'border-color': '#2563eb',
-			'border-style': 'dashed',
+			'border-style': 'solid',
 			'border-width': 2,
+			'background-color': '#f8fafc',
+		},
+	},
+	{
+		selector: 'node.selected',
+		style: {
+			'border-width': 3,
+			'border-color': '#0a0a0a',
+		},
+	},
+	{
+		selector: 'edge.incident',
+		style: { opacity: 1 },
+	},
+	{
+		selector: 'node.focus',
+		style: {
+			'border-width': 3,
+			'border-color': '#e63600',
+			'background-color': '#fef2f0',
+		},
+	},
+	{
+		// Focus wins over impact: the seed stays readable while the impact
+		// fill still shows through on directly affected nodes.
+		selector: 'node.focus.impact',
+		style: {
+			'border-width': 3,
+			'border-color': '#e63600',
+			'background-color': '#eff6ff',
+		},
+	},
+	{
+		selector: 'node.focus.impact-transitive',
+		style: {
+			'border-width': 3,
+			'border-color': '#e63600',
+			'border-style': 'solid',
 		},
 	},
 ];

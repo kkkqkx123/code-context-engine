@@ -41,6 +41,7 @@
 		relationLabel,
 		relationLineStyle,
 	} from '$lib/utils/graph-style';
+	import { steppedZoom } from '$lib/utils/graph-viewport';
 
 	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
 
@@ -242,10 +243,10 @@
 		cy?.fit(undefined, 40);
 	}
 
-	function zoomViewport(delta: number) {
+	function zoomViewport(direction: number) {
 		if (!cy) return;
 		cy.zoom({
-			level: Math.min(3, Math.max(0.15, cy.zoom() + delta)),
+			level: steppedZoom(cy.zoom(), direction),
 			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
 		});
 	}
@@ -474,8 +475,8 @@
 					edgeCount={edges.length}
 					{layout}
 					loading={store.loading}
-					onZoomIn={() => zoomViewport(0.2)}
-					onZoomOut={() => zoomViewport(-0.2)}
+					onZoomIn={() => zoomViewport(1)}
+					onZoomOut={() => zoomViewport(-1)}
 					onFit={fitViewport}
 					onReset={resetViewport}
 					onRelayout={relayout}
@@ -487,6 +488,7 @@
 					elements={$graphState.elements}
 					{layout}
 					focusId={store.meta.focusId}
+					selectedId={selectedId}
 					visibleDomains={store.filters.domains}
 					search={store.filters.search}
 					impactDirect={store.meta.impactDirect}
@@ -515,7 +517,9 @@
 						</dd>
 						<dt>Location</dt>
 						<dd class="mono">
-							{selectedNode.source_file}:{selectedNode.source_location}
+							{selectedNode.source_file || selectedNode.source_location
+								? `${selectedNode.source_file || '—'}:${selectedNode.source_location || ''}`
+								: '—'}
 						</dd>
 						<dt>Community</dt>
 						<dd>{store.meta.communities[selectedNode.id] ?? '—'}</dd>
@@ -621,11 +625,9 @@
 				<div class="legend-item">
 					<span
 						class="legend-line"
-						style="--line: {domain.color}; --dash: {relationLineStyle(
+						style="--line: {domain.color}; --line-style: {relationLineStyle(
 							domain.domain,
-						) === 'solid'
-							? '0'
-							: '3 2'}"
+						)}"
 					></span>
 					<span class="legend-label">{domain.label}</span>
 				</div>
@@ -1092,7 +1094,9 @@
 
 	.legend-line {
 		width: 22px;
-		border-top: 2px var(--dash, 0) var(--line);
+		border-top-width: 2px;
+		border-top-color: var(--line);
+		border-top-style: var(--line-style, solid);
 	}
 
 	.legend-separator {
@@ -1106,8 +1110,8 @@
 	}
 
 	/* Mirrors the Cytoscape silhouettes closely enough to read as the same
-	   vocabulary; a hexagon is the one shape CSS cannot express with a radius,
-	   so it is clipped into a polygon instead. */
+	   vocabulary; polygons CSS cannot express with a radius are clipped
+	   instead. */
 	.legend-node {
 		width: 14px;
 		height: 14px;
@@ -1118,14 +1122,45 @@
 
 	.legend-node[data-shape='rectangle'] {
 		border-radius: 0;
+		background: #f5f3ff;
+		border-color: #5b21b6;
 	}
 
 	.legend-node[data-shape='round-rectangle'] {
 		border-radius: 4px;
+		background: #eff6ff;
+		border-color: #1e40af;
 	}
 
 	.legend-node[data-shape='hexagon'] {
 		clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+		background: #ecfdf5;
+		border-color: #065f46;
+	}
+
+	.legend-node[data-shape='ellipse'] {
+		border-radius: 50%;
+		background: #fffbeb;
+		border-color: #92400e;
+	}
+
+	.legend-node[data-shape='octagon'] {
+		clip-path: polygon(
+			30% 0,
+			70% 0,
+			100% 30%,
+			100% 70%,
+			70% 100%,
+			30% 100%,
+			0 70%,
+			0 30%
+		);
+		background: #f8fafc;
+		border-color: #334155;
+	}
+
+	.legend-node[data-shape='pentagon'] {
+		clip-path: polygon(50% 0, 100% 38%, 82% 100%, 18% 100%, 0 38%);
 	}
 
 	.legend-node[data-shape='diamond'] {

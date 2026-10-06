@@ -77,11 +77,9 @@
 					>
 						<span
 							class="swatch"
-							style="--swatch: {meta.color}; --dash: {relationLineStyle(
+							style="--swatch: {meta.color}; --line-style: {relationLineStyle(
 								domain,
-							) === 'solid'
-								? '0'
-								: '3 2'}"
+							)}"
 						></span>
 						<span class="domain-name">{meta.label}</span>
 						<span class="domain-state">{enabled ? 'ON' : 'OFF'}</span>
@@ -117,11 +115,13 @@
 		<p class="hint">
 			Faint edges were deduced during resolution rather than named directly in
 			the source. Edges pointing outside the project are drawn faded too.
+			Guarded edges combine both attenuations and render faintest.
 		</p>
 		<p class="hint">
 			Faded flat edges sit behind a conditional-compilation guard, so they only
 			exist under that predicate. Dashed node outlines mark symbols resolved
-			outside the project.
+			outside the project; transitive impact uses a solid outline so the two
+			are never confused.
 		</p>
 	</div>
 </aside>
@@ -214,8 +214,9 @@
 		display: block;
 		width: 18px;
 		height: 0;
-		border-top: 3px var(--dash, 0) var(--swatch);
-		border-top-style: solid;
+		border-top-width: 3px;
+		border-top-color: var(--swatch);
+		border-top-style: var(--line-style, solid);
 	}
 
 	.checkbox-row {

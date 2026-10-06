@@ -15,6 +15,7 @@ import type {
 } from '$lib/api/entities';
 import {
 	edgeElementId,
+	relationDomain,
 	toElementEdge,
 	toElementNode,
 	type GraphElement,
@@ -62,12 +63,13 @@ export function callChainToElements(nodes: CallChainNode[]): GraphElement[] {
 		const source = nodes[i].function_id;
 		const target = nodes[i + 1].function_id;
 		if (!source || !target || source === target) continue;
+		const relation = nodes[i + 1].relation_type?.trim() || CALL_RELATION;
 		const edge: GraphEdge = {
 			source,
 			target,
-			relation: CALL_RELATION,
+			relation,
 			confidence: 'extracted',
-			domain: 'call',
+			domain: relationDomain(relation),
 		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) continue;

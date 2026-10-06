@@ -81,6 +81,7 @@
 	 * instance and calls Cytoscape methods directly via bind:cy.
 	 */
 	import { onMount } from 'svelte';
+	import { GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM } from '$lib/utils/graph-viewport';
 	import type { Core, ElementDefinition, StylesheetStyle } from 'cytoscape';
 	import {
 		graphStylesheet,
@@ -97,6 +98,8 @@
 		layout?: GraphLayoutName;
 		/** Node id to highlight; typically the entity the graph is centered on. */
 		focusId?: string | null;
+		/** Node id the inspector is showing; its neighborhood stays emphasized. */
+		selectedId?: string | null;
 		/** Domains to keep visible; edges outside the list are hidden. */
 		visibleDomains?: RelationDomain[];
 		/** Node ids flagged as direct impact of a changed file. */
@@ -122,6 +125,7 @@
 		elements = [],
 		layout = 'cose-bilkent',
 		focusId = null,
+		selectedId = null,
 		visibleDomains = RELATION_DOMAIN_ORDER,
 		impactDirect = [],
 		impactTransitive = [],
@@ -149,7 +153,7 @@
 		if (!cy) return;
 
 		cy.batch(() => {
-			cy!.elements().removeClass('focus dimmed impact impact-transitive');
+			cy!.elements().removeClass('focus dimmed impact impact-transitive selected incident');
 
 			const direct = new Set(impactDirect);
 			const transitive = new Set(impactTransitive);
@@ -160,13 +164,44 @@
 				else if (transitive.has(id)) node.addClass('impact-transitive');
 
 				if (focusId && id === focusId) node.addClass('focus');
-
-				if (search && search.trim().length >= 2) {
-					const needle = search.trim().toLowerCase();
-					const label = String(node.data('label') ?? '').toLowerCase();
-					if (!label.includes(needle)) node.addClass('dimmed');
-				}
+				if (selectedId && id === selectedId) node.addClass('selected');
 			});
+
+			const needle = search?.trim().toLowerCase() ?? '';
+			const searching = needle.length >= 2;
+			const matched = new Set<string>();
+			if (searching) {
+				cy!.nodes().forEach((node) => {
+					const label = String(node.data('label') ?? '').toLowerCase();
+					if (label.includes(needle)) matched.add(node.id());
+					else node.addClass('dimmed');
+				});
+				cy!.edges().forEach((edge) => {
+					if (!matched.has(edge.source().id()) && !matched.has(edge.target().id())) {
+						edge.addClass('dimmed');
+					}
+				});
+			}
+
+			if (selectedId) {
+				const selected = cy!.getElementById(selectedId);
+				if (selected.length > 0) {
+					selected.connectedEdges().forEach((edge) => {
+						if (edge.style('display') === 'none') return;
+						if (searching && edge.hasClass('dimmed')) return;
+						edge.addClass('incident');
+					});
+				}
+			}
+		});
+	}
+
+	/** Apply the edge-label class so newly added edges pick it up too. */
+	function applyEdgeLabels() {
+		if (!cy) return;
+		cy.batch(() => {
+			if (showEdgeLabels) cy!.edges().addClass('show-label');
+			else cy!.edges().removeClass('show-label');
 		});
 	}
 
@@ -195,6 +230,8 @@
 			style: graphStylesheet as StylesheetStyle[],
 			layout: layoutOptions(effectiveLayoutName(layout)),
 			wheelSensitivity: 0.25,
+			minZoom: GRAPH_MIN_ZOOM,
+			maxZoom: GRAPH_MAX_ZOOM,
 			boxSelectionEnabled: false,
 			selectionType: 'single',
 		});
@@ -275,6 +312,7 @@
 			cy.layout(layoutOptions(effectiveLayoutName(layout))).run();
 		}
 		applyDomainFilter();
+		applyEdgeLabels();
 		applyDecorations();
 	});
 
@@ -289,6 +327,7 @@
 		// Track filter inputs so decoration stays current.
 		void visibleDomains;
 		void focusId;
+		void selectedId;
 		void search;
 		void impactDirect;
 		void impactTransitive;
@@ -299,10 +338,10 @@
 	});
 
 	$effect(() => {
-		// Toggle edge relation labels without rebuilding the instance.
-		if (!cy) return;
+		// Toggle edge relation labels via a stylesheet class; data() mappers
+		// only resolve in stylesheet rules, not inline styles.
 		void showEdgeLabels;
-		cy.edges().style('label', showEdgeLabels ? 'data(relationLabel)' : '');
+		applyEdgeLabels();
 	});
 </script>
 

@@ -15,6 +15,7 @@
 	} from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
 	import type { GraphElement } from '$lib/utils/graph-style';
+	import { steppedZoom } from '$lib/utils/graph-viewport';
 
 	interface Props {
 		elements?: GraphElement[];
@@ -46,10 +47,10 @@
 		cy?.fit(undefined, 40);
 	}
 
-	function zoomViewport(delta: number) {
+	function zoomViewport(direction: number) {
 		if (!cy) return;
 		cy.zoom({
-			level: Math.min(3, Math.max(0.15, cy.zoom() + delta)),
+			level: steppedZoom(cy.zoom(), direction),
 			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
 		});
 	}
@@ -79,8 +80,8 @@
 		{nodeCount}
 		{edgeCount}
 		{layout}
-		onZoomIn={() => zoomViewport(0.2)}
-		onZoomOut={() => zoomViewport(-0.2)}
+		onZoomIn={() => zoomViewport(1)}
+		onZoomOut={() => zoomViewport(-1)}
 		onFit={fitViewport}
 		onReset={resetViewport}
 		onRelayout={relayout}
