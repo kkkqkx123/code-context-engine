@@ -39,6 +39,8 @@ export type ProjectConfigUpdateRequest =
 	components['schemas']['ProjectConfigUpdateRequest'];
 export type ProjectConfigUpdateResponse =
 	components['schemas']['ProjectConfigUpdateResponse'];
+export type ProjectConfigGetResponse =
+	components['schemas']['ProjectConfigGetResponse'];
 
 export const indexApi = {
 	// Incremental indexing
@@ -161,7 +163,15 @@ export const projectApi = {
 			}),
 		),
 
-	// Update project configuration
+	// Read merged project configuration (global defaults plus project overrides)
+	getProjectConfig: (id: string): Promise<ProjectConfigGetResponse> =>
+		call(
+			client.GET('/api/project/{id}/config', {
+				params: { path: { id: Number(id) } },
+			}),
+		),
+
+	// Update project configuration (full runtime config document)
 	updateProjectConfig: (
 		id: string,
 		config: Record<string, unknown>,

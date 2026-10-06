@@ -226,24 +226,25 @@ pub async fn handle_config_reload(
 )]
 pub async fn handle_config_info() -> ApiResult<ConfigInfoResponse> {
     let initialized = Settings::is_initialized();
-    let (database, embedder, project_count) = if initialized {
+    let (database, embedder, full_config, project_count) = if initialized {
         match Settings::global() {
             Ok(config) => {
                 let db = serde_json::to_value(&config.database).unwrap_or_default();
                 let emb = serde_json::to_value(&config.embedder).unwrap_or_default();
-                let pcount = 1;
-                (db, emb, pcount)
+                let full = serde_json::to_value(&config).unwrap_or_default();
+                (db, emb, full, 1)
             }
-            Err(_) => (json!(null), json!(null), 0),
+            Err(_) => (json!(null), json!(null), json!(null), 0),
         }
     } else {
-        (json!(null), json!(null), 0)
+        (json!(null), json!(null), json!(null), 0)
     };
 
     ApiResult::Success(ConfigInfoResponse {
         initialized,
         database,
         embedder,
+        config: full_config,
         project_count,
     })
 }

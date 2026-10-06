@@ -99,7 +99,8 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/api/project/{id}/config",
-            put(handlers::project::handle_update_project_config),
+            get(handlers::project::handle_get_project_config)
+                .put(handlers::project::handle_update_project_config),
         )
         // Project-scoped entity queries
         .route(

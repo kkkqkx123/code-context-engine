@@ -1548,6 +1548,67 @@
       }
     },
     "/api/project/{id}/config": {
+      "get": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle read merged project config request",
+        "operationId": "handle_get_project_config",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConfigGetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "tags": [
           "Project"
@@ -6214,9 +6275,13 @@
           "initialized",
           "database",
           "embedder",
+          "config",
           "project_count"
         ],
         "properties": {
+          "config": {
+            "description": "Full active global configuration snapshot (read-only, free-form)"
+          },
           "database": {
             "description": "Active database configuration (free-form)"
           },
@@ -8821,6 +8886,33 @@
           "root_path": {
             "type": "string",
             "description": "Root directory path"
+          }
+        }
+      },
+      "ProjectConfigGetResponse": {
+        "type": "object",
+        "description": "Response for reading the merged project configuration",
+        "required": [
+          "success",
+          "project_id",
+          "config_version",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "description": "Merged runtime configuration (global defaults plus project overrides)"
+          },
+          "config_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "success": {
+            "type": "boolean"
           }
         }
       },

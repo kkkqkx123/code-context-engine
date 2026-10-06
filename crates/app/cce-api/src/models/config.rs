@@ -26,6 +26,8 @@ pub struct ConfigInfoResponse {
     pub database: serde_json::Value,
     /// Active embedder configuration (free-form)
     pub embedder: serde_json::Value,
+    /// Full active global configuration snapshot (read-only, free-form)
+    pub config: serde_json::Value,
     pub project_count: usize,
 }
 
@@ -64,6 +66,16 @@ pub struct ProjectConfigUpdateResponse {
     pub success: bool,
     pub hot_reload_applied: bool,
     pub message: String,
+}
+
+/// Response for reading the merged project configuration
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ProjectConfigGetResponse {
+    pub success: bool,
+    pub project_id: i64,
+    pub config_version: u64,
+    /// Merged runtime configuration (global defaults plus project overrides)
+    pub config: serde_json::Value,
 }
 
 /// Response for reloading project config from file

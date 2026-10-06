@@ -112,10 +112,12 @@ impl super::CodeContextEngine {
             .state_tracker()
             .acknowledge_dead_letter(Path::new(file_path), module)
             .await
-            .map_err(|e| EngineError::Index(cce_orchestrator::OrchestratorError::index(
-                "dead_letter_acknowledge",
-                e.to_string(),
-            )))
+            .map_err(|e| {
+                EngineError::Index(cce_orchestrator::OrchestratorError::index(
+                    "dead_letter_acknowledge",
+                    e.to_string(),
+                ))
+            })
     }
 
     /// Perform startup recovery for a project

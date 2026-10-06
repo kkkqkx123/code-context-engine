@@ -450,7 +450,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Handle read merged project config request */
+        get: operations["handle_get_project_config"];
         /** Handle update project config request */
         put: operations["handle_update_project_config"];
         post?: never;
@@ -1685,6 +1686,8 @@ export interface components {
         };
         /** @description Config info response */
         ConfigInfoResponse: {
+            /** @description Full active global configuration snapshot (read-only, free-form) */
+            config: unknown;
             /** @description Active database configuration (free-form) */
             database: unknown;
             /** @description Active embedder configuration (free-form) */
@@ -2553,6 +2556,16 @@ export interface components {
             respect_gitignore?: boolean;
             /** @description Root directory path */
             root_path: string;
+        };
+        /** @description Response for reading the merged project configuration */
+        ProjectConfigGetResponse: {
+            /** @description Merged runtime configuration (global defaults plus project overrides) */
+            config: unknown;
+            /** Format: int64 */
+            config_version: number;
+            /** Format: int64 */
+            project_id: number;
+            success: boolean;
         };
         /** @description Response for reloading project config from file */
         ProjectConfigReloadResponse: {
@@ -4221,6 +4234,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectDeleteResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_get_project_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectConfigGetResponse"];
                 };
             };
             /** @description Invalid request */

@@ -267,7 +267,10 @@ pub async fn handle_retry_queue_dead_clear(
     let cleared = state.engine.clear_all_retry_queue_dead().await;
     ApiResult::Success(RetryQueueDeadClearResponse {
         cleared,
-        message: format!("Retry queue dead list cleared, {} entries discarded", cleared),
+        message: format!(
+            "Retry queue dead list cleared, {} entries discarded",
+            cleared
+        ),
     })
 }
 

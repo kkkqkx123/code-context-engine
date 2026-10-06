@@ -11,7 +11,9 @@ pub mod indexing;
 pub mod management;
 pub mod query;
 
-pub use config::{handle_reload_project_config, handle_update_project_config};
+pub use config::{
+    handle_get_project_config, handle_reload_project_config, handle_update_project_config,
+};
 pub use indexing::{
     handle_dead_letter_acknowledge, handle_dead_letter_files_retry, handle_dead_letter_list,
     handle_dead_letter_retry, handle_project_index,

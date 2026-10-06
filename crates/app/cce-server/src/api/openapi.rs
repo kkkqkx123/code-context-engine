@@ -41,6 +41,7 @@ use super::handlers;
         handlers::project::indexing::handle_dead_letter_files_retry,
         handlers::project::indexing::handle_dead_letter_acknowledge,
         handlers::project::config::handle_reload_project_config,
+        handlers::project::config::handle_get_project_config,
         handlers::project::config::handle_update_project_config,
         handlers::entity::detail::handle_function_detail,
         handlers::entity::calls::handle_function_calls,

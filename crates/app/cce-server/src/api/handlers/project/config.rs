@@ -10,8 +10,8 @@ use axum::{
 use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
 use cce_api::models::{
-    ErrorResponse, ProjectConfigReloadResponse, ProjectConfigUpdateRequest,
-    ProjectConfigUpdateResponse,
+    ErrorResponse, ProjectConfigGetResponse, ProjectConfigReloadResponse,
+    ProjectConfigUpdateRequest, ProjectConfigUpdateResponse,
 };
 use cce_config::global::AppConfig;
 use cce_config::project_registry::RegistryError;
@@ -132,6 +132,60 @@ pub async fn handle_update_project_config(
             "Configuration updated, but hot reload failed. Manual restart may be required for some components.".to_string()
         },
     })
+}
+
+/// Handle read merged project config request
+#[utoipa::path(
+    get, path = "/api/project/{id}/config", tag = "Project",
+    params(("id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = ProjectConfigGetResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_get_project_config(
+    State(state): State<crate::api::state::AppState>,
+    Path(project_id): Path<i64>,
+) -> ApiResult<ProjectConfigGetResponse> {
+    let registry = state.engine.project_registry();
+    match registry.get_or_load(project_id).await {
+        Ok(entry) => {
+            let config = serde_json::to_value(&entry.config).unwrap_or_default();
+            ApiResult::Success(ProjectConfigGetResponse {
+                success: true,
+                project_id,
+                config_version: entry.version,
+                config,
+            })
+        }
+        Err(e) => {
+            let (code, message) = match e {
+                RegistryError::ProjectNotFound(_) => (
+                    error_codes::ENTITY_NOT_FOUND,
+                    format!("Project {} not found", project_id),
+                ),
+                RegistryError::Configuration(msg) | RegistryError::Validation(msg) => {
+                    (error_codes::INVALID_INPUT, msg)
+                }
+                RegistryError::Io(err) => (error_codes::STORAGE_ERROR, err.to_string()),
+                RegistryError::Database(err) => (error_codes::STORAGE_ERROR, err),
+                RegistryError::PathNotFound(path) => (
+                    error_codes::ENTITY_NOT_FOUND,
+                    format!("Path does not exist: {}", path),
+                ),
+                RegistryError::DuplicatePath(path) => (
+                    error_codes::CONFLICT,
+                    format!("Path already registered: {}", path),
+                ),
+                RegistryError::Serialization(msg) | RegistryError::Deserialization(msg) => {
+                    (error_codes::INVALID_INPUT, msg)
+                }
+            };
+            ApiResult::Error(ErrorResponse::new(code, message))
+        }
+    }
 }
 
 /// Handle reload project config request (hot reload)

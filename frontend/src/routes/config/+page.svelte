@@ -4,6 +4,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import Input from '$lib/components/ui/Input.svelte';
+	import Toggle from '$lib/components/ui/Toggle.svelte';
 	import {
 		configApi,
 		type ConfigInfoResponse,
@@ -14,91 +16,46 @@
 	import { get } from 'svelte/store';
 	import { errorMessage } from '$lib/utils/errors';
 
-	let activeTab = $state<'info' | 'validate' | 'reload' | 'project'>('info');
+	// Scope-based navigation: global state is read-only, project state is editable.
+	// Edit, validation feedback and reload live in the same scope so no tab switch
+	// is needed to confirm an applied change.
+	let activeScope = $state<'global' | 'project'>('global');
 	let configInfo = $state<ConfigInfoResponse | null>(null);
 	let validateResult = $state<ConfigValidateResponse | null>(null);
-	let reloadResult = $state<{ success: boolean; message: string } | null>(null);
 	let loading = $state(false);
+	let validating = $state(false);
 	let error = $state<string | null>(null);
 
-	// ─── Project config editor state ─────────────────────────────
-	let projectConfigText = $state('');
-	let projectConfigLoaded = $state(false);
-	let projectConfigLoading = $state(false);
-	let projectConfigError = $state<string | null>(null);
-	let projectConfigResult = $state<ProjectConfigUpdateResponse | null>(null);
-	let projectConfigSaving = $state(false);
-	let validateBeforeSave = $state(true);
+	// ─── Project basic metadata (SQLite-backed, via PUT /api/project/{id}) ──
+	let basicLoaded = $state(false);
+	let basicLoading = $state(false);
+	let basicError = $state<string | null>(null);
+	let basicResult = $state<string | null>(null);
+	let basicSaving = $state(false);
+	let rootPath = $state('');
+	let basicName = $state('');
+	let basicExtensions = $state('');
+	let basicExcludeDirs = $state('');
+	let basicIgnorePatterns = $state('');
+	let basicRespectGitignore = $state(true);
 
-	async function loadProjectConfig() {
-		projectConfigLoading = true;
-		projectConfigError = null;
-		try {
-			const detail = await projectApi.getProject(String(get(currentProjectId)));
-			const project = detail.project;
-			// Only expose user-editable fields; identity and bookkeeping fields
-			// are managed by the backend.
-			const editable = {
-				name: project.name,
-				root_path: project.root_path,
-				extensions: project.extensions ?? [],
-				exclude_dirs: project.exclude_dirs ?? [],
-				ignore_patterns: project.ignore_patterns ?? [],
-				respect_gitignore: project.respect_gitignore ?? true,
-			};
-			projectConfigText = JSON.stringify(editable, null, 2);
-			projectConfigLoaded = true;
-			projectConfigResult = null;
-		} catch (e) {
-			projectConfigError = errorMessage(e);
-		} finally {
-			projectConfigLoading = false;
-		}
+	// ─── Project runtime config (merged AppConfig, via /api/project/{id}/config) ──
+	let runtimeText = $state('');
+	let runtimeLoaded = $state(false);
+	let runtimeLoading = $state(false);
+	let runtimeError = $state<string | null>(null);
+	let runtimeResult = $state<ProjectConfigUpdateResponse | null>(null);
+	let runtimeSaving = $state(false);
+	let runtimeVersion = $state<number | null>(null);
+	let reloadMessage = $state<string | null>(null);
+	let reloading = $state(false);
+
+	function parseList(value: string): string[] {
+		return value
+			.split(',')
+			.map((item) => item.trim())
+			.filter(Boolean);
 	}
-
-	async function saveProjectConfig() {
-		projectConfigError = null;
-		projectConfigResult = null;
-
-		let parsed: Record<string, unknown>;
-		try {
-			parsed = JSON.parse(projectConfigText);
-		} catch {
-			projectConfigError = 'Invalid JSON: fix syntax errors before saving';
-			return;
-		}
-
-		projectConfigSaving = true;
-		try {
-			if (validateBeforeSave) {
-				const validation = await configApi.validate();
-				if (!validation.valid) {
-					projectConfigError = `Global config validation failed: ${validation.errors.join('; ') || 'unknown errors'}`;
-					return;
-				}
-			}
-			projectConfigResult = await projectApi.updateProjectConfig(
-				String($currentProjectId),
-				parsed,
-			);
-		} catch (e) {
-			projectConfigError = errorMessage(e);
-		} finally {
-			projectConfigSaving = false;
-		}
-	}
-
-	onMount(async () => {
-		await loadInfo();
-		await loadValidate();
-	});
-
-	// The editor holds one project's config; reload it after a switch.
-	$effect(() =>
-		onProjectChange(() => {
-			if (projectConfigLoaded) void loadProjectConfig();
-		}),
-	);
 
 	async function loadInfo() {
 		loading = true;
@@ -113,26 +70,156 @@
 	}
 
 	async function loadValidate() {
+		validating = true;
 		try {
 			validateResult = await configApi.validate();
 		} catch {
-			// silent
+			// Validation is advisory; the page stays usable without it.
+		} finally {
+			validating = false;
 		}
 	}
 
-	async function handleReload() {
-		loading = true;
-		error = null;
-		reloadResult = null;
+	async function loadProjectBasics() {
+		basicLoading = true;
+		basicError = null;
 		try {
-			const pid = get(currentProjectId);
-			reloadResult = await configApi.reload(pid);
+			const detail = await projectApi.getProject(String(get(currentProjectId)));
+			const project = detail.project;
+			rootPath = project.root_path;
+			basicName = project.name;
+			basicExtensions = (project.extensions ?? []).join(', ');
+			basicExcludeDirs = (project.exclude_dirs ?? []).join(', ');
+			basicIgnorePatterns = (project.ignore_patterns ?? []).join(', ');
+			basicRespectGitignore = project.respect_gitignore ?? true;
+			basicLoaded = true;
+			basicResult = null;
 		} catch (e) {
-			error = errorMessage(e);
+			basicError = errorMessage(e);
 		} finally {
-			loading = false;
+			basicLoading = false;
 		}
 	}
+
+	async function loadProjectRuntime() {
+		runtimeLoading = true;
+		runtimeError = null;
+		try {
+			const response = await projectApi.getProjectConfig(
+				String(get(currentProjectId)),
+			);
+			runtimeText = JSON.stringify(response.config, null, 2);
+			runtimeVersion = response.config_version;
+			runtimeLoaded = true;
+			runtimeResult = null;
+		} catch (e) {
+			runtimeError = errorMessage(e);
+		} finally {
+			runtimeLoading = false;
+		}
+	}
+
+	function ensureProjectLoaded() {
+		if (!basicLoaded && !basicLoading) void loadProjectBasics();
+		if (!runtimeLoaded && !runtimeLoading) void loadProjectRuntime();
+	}
+
+	async function saveProjectBasics() {
+		basicError = null;
+		basicResult = null;
+		if (!basicName.trim()) {
+			basicError = 'Project name is required';
+			return;
+		}
+		basicSaving = true;
+		try {
+			await projectApi.updateProject(String($currentProjectId), {
+				name: basicName.trim(),
+				extensions: parseList(basicExtensions),
+				exclude_dirs: parseList(basicExcludeDirs),
+				respect_gitignore: basicRespectGitignore,
+				ignore_patterns: parseList(basicIgnorePatterns),
+			});
+			basicResult = 'Project metadata saved';
+		} catch (e) {
+			basicError = errorMessage(e);
+		} finally {
+			basicSaving = false;
+		}
+	}
+
+	async function saveProjectRuntime() {
+		runtimeError = null;
+		runtimeResult = null;
+
+		let parsed: Record<string, unknown>;
+		try {
+			parsed = JSON.parse(runtimeText);
+		} catch {
+			runtimeError = 'Invalid JSON: fix syntax errors before saving';
+			return;
+		}
+
+		runtimeSaving = true;
+		try {
+			runtimeResult = await projectApi.updateProjectConfig(
+				String($currentProjectId),
+				parsed,
+			);
+			// Refresh the version stamp and the global validation summary next
+			// to the editor so the effect of the save is visible in place.
+			void loadProjectRuntimeVersion();
+			void loadValidate();
+		} catch (e) {
+			runtimeError = errorMessage(e);
+		} finally {
+			runtimeSaving = false;
+		}
+	}
+
+	async function loadProjectRuntimeVersion() {
+		try {
+			const response = await projectApi.getProjectConfig(
+				String(get(currentProjectId)),
+			);
+			runtimeVersion = response.config_version;
+		} catch {
+			// Version refresh is best-effort; the save result already landed.
+		}
+	}
+
+	async function handleReloadFromFile() {
+		reloading = true;
+		runtimeError = null;
+		reloadMessage = null;
+		try {
+			const response = await projectApi.reloadProject(
+				String(get(currentProjectId)),
+			);
+			runtimeVersion = response.config_version;
+			reloadMessage = response.message;
+			// Reloading from disk can change both panes, refresh them together.
+			void loadProjectBasics();
+			void loadProjectRuntime();
+		} catch (e) {
+			runtimeError = errorMessage(e);
+		} finally {
+			reloading = false;
+		}
+	}
+
+	onMount(async () => {
+		await loadInfo();
+		await loadValidate();
+	});
+
+	// Both project panes track one project; reload them after a switch.
+	$effect(() =>
+		onProjectChange(() => {
+			if (basicLoaded) void loadProjectBasics();
+			if (runtimeLoaded) void loadProjectRuntime();
+		}),
+	);
 </script>
 
 <svelte:head>
@@ -143,7 +230,7 @@
 	<div class="container">
 		<PageHeader
 			title="Configuration"
-			subtitle="Manage application settings and environment variables"
+			subtitle="Global state is read-only; project state is editable per project"
 		/>
 
 		{#if error}
@@ -153,45 +240,29 @@
 			</div>
 		{/if}
 
-		<!-- Tab Navigation -->
+		<!-- Scope Navigation -->
 		<div class="tab-nav">
 			<button
 				class="tab-btn"
-				class:active={activeTab === 'info'}
-				onclick={() => (activeTab = 'info')}
+				class:active={activeScope === 'global'}
+				onclick={() => (activeScope = 'global')}
 			>
-				Config Info
+				Global
 			</button>
 			<button
 				class="tab-btn"
-				class:active={activeTab === 'validate'}
-				onclick={() => (activeTab = 'validate')}
-			>
-				Validate
-			</button>
-			<button
-				class="tab-btn"
-				class:active={activeTab === 'reload'}
-				onclick={() => (activeTab = 'reload')}
-			>
-				Reload
-			</button>
-			<button
-				class="tab-btn"
-				class:active={activeTab === 'project'}
+				class:active={activeScope === 'project'}
 				onclick={() => {
-					activeTab = 'project';
-					if (!projectConfigLoaded && !projectConfigLoading)
-						loadProjectConfig();
+					activeScope = 'project';
+					ensureProjectLoaded();
 				}}
 			>
-				Project Config
+				Project #{ $currentProjectId }
 			</button>
 		</div>
 
-		<!-- Config Info Tab -->
-		{#if activeTab === 'info'}
-			<Card title="Configuration Info" subtitle="Current active configuration">
+		{#if activeScope === 'global'}
+			<Card title="Global Configuration" subtitle="Active server snapshot (read-only)">
 				{#if loading && !configInfo}
 					<p class="placeholder-text">Loading configuration...</p>
 				{:else if configInfo}
@@ -226,18 +297,32 @@
 								2,
 							)}</pre>
 					</div>
+
+					<div class="config-section">
+						<h3 class="section-title">Full Snapshot</h3>
+						<p class="reload-description">
+							Complete merged server configuration including scanner, grouper,
+							orchestrator, relation, LLM and plugin sections. Edit the
+							configuration file on the server host and restart to change it.
+						</p>
+						<pre class="config-json">{JSON.stringify(
+								(configInfo as Record<string, unknown>).config ?? {},
+								null,
+								2,
+							)}</pre>
+					</div>
+
+					<div class="reload-actions">
+						<Button onclick={loadInfo} disabled={loading}>
+							{#if loading}Refreshing...{:else}Refresh Snapshot{/if}
+						</Button>
+					</div>
 				{:else}
 					<p class="placeholder-text">No configuration data available</p>
 				{/if}
 			</Card>
-		{/if}
 
-		<!-- Validate Tab -->
-		{#if activeTab === 'validate'}
-			<Card
-				title="Configuration Validation"
-				subtitle="Check configuration for issues"
-			>
+			<Card title="Global Validation" subtitle="Cross-module checks for the active config">
 				{#if validateResult}
 					<div class="validate-status">
 						<span class="validate-label">Status</span>
@@ -245,6 +330,10 @@
 							label={validateResult.valid ? 'Valid' : 'Invalid'}
 							variant={validateResult.valid ? 'active' : 'inactive'}
 						/>
+						<span class="validate-spacer"></span>
+						<Button onclick={loadValidate} disabled={validating}>
+							{#if validating}Checking...{:else}Re-validate{/if}
+						</Button>
 					</div>
 
 					{#if validateResult.errors.length > 0}
@@ -301,86 +390,133 @@
 			</Card>
 		{/if}
 
-		<!-- Reload Tab -->
-		{#if activeTab === 'reload'}
+		{#if activeScope === 'project'}
 			<Card
-				title="Reload Configuration"
-				subtitle="Trigger a configuration reload"
+				title="Project Basics"
+				subtitle="Identity and file filters stored in the project registry"
 			>
-				<p class="reload-description">
-					This will reload the configuration for the current project from disk.
-					Any pending changes to configuration files will be applied.
-				</p>
-
-				<div class="reload-actions">
-					<Button onclick={handleReload} disabled={loading}>
-						{#if loading}Reloading...{:else}Reload Configuration{/if}
-					</Button>
-				</div>
-
-				{#if reloadResult}
-					<div class="reload-result">
-						<Badge
-							label={reloadResult.success ? 'Success' : 'Failed'}
-							variant={reloadResult.success ? 'active' : 'inactive'}
-						/>
-						<span class="reload-message">{reloadResult.message}</span>
-					</div>
-				{/if}
-			</Card>
-		{/if}
-		<!-- Project Config Tab -->
-		{#if activeTab === 'project'}
-			<Card
-				title="Project Configuration"
-				subtitle="Edit and hot-reload the current project config"
-			>
-				{#if projectConfigLoading}
-					<p class="placeholder-text">Loading project config...</p>
+				{#if basicLoading && !basicLoaded}
+					<p class="placeholder-text">Loading project...</p>
 				{:else}
 					<p class="reload-description">
-						Edit the JSON below and save. The backend applies hot-reloadable
-						fields immediately. Project id: <code>#{$currentProjectId}</code>
+						Root path is managed at creation time and cannot be changed here:
+						<code>{rootPath || '—'}</code>
 					</p>
-					<textarea
-						class="config-editor"
-						bind:value={projectConfigText}
-						spellcheck="false"
-						aria-label="Project configuration JSON"></textarea>
-
-					<label class="validate-check">
-						<input type="checkbox" bind:checked={validateBeforeSave} />
-						<span>Validate global config before saving</span>
-					</label>
+					<div class="form-grid">
+						<label class="form-field">
+							<span class="form-label">Name</span>
+							<Input bind:value={basicName} placeholder="Project name" />
+						</label>
+						<label class="form-field">
+							<span class="form-label">Extensions (comma separated)</span>
+							<Input bind:value={basicExtensions} placeholder="rs, py, ts" />
+						</label>
+						<label class="form-field">
+							<span class="form-label">Exclude dirs (comma separated)</span>
+							<Input bind:value={basicExcludeDirs} placeholder="target, node_modules" />
+						</label>
+						<label class="form-field">
+							<span class="form-label">Ignore patterns (comma separated)</span>
+							<Input bind:value={basicIgnorePatterns} placeholder="*.log, dist" />
+						</label>
+					</div>
+					<div class="toggle-row">
+						<Toggle
+							checked={basicRespectGitignore}
+							label="Respect .gitignore"
+							onchange={(e) => (basicRespectGitignore = e.checked)}
+						/>
+					</div>
 
 					<div class="reload-actions">
-						<Button
-							onclick={saveProjectConfig}
-							disabled={projectConfigSaving || projectConfigLoading}
-						>
-							{#if projectConfigSaving}Saving...{:else}Save Config{/if}
+						<Button onclick={saveProjectBasics} disabled={basicSaving || basicLoading}>
+							{#if basicSaving}Saving...{:else}Save Basics{/if}
 						</Button>
 					</div>
 
-					{#if projectConfigError}
-						<div class="editor-error">{projectConfigError}</div>
+					{#if basicError}
+						<div class="editor-error">{basicError}</div>
+					{/if}
+					{#if basicResult}
+						<div class="reload-result">
+							<Badge label="Saved" variant="active" />
+							<span class="reload-message">{basicResult}</span>
+						</div>
+					{/if}
+				{/if}
+			</Card>
+
+			<Card
+				title="Project Runtime Config"
+				subtitle="Merged global defaults plus project overrides (full document)"
+			>
+				{#if runtimeLoading && !runtimeLoaded}
+					<p class="placeholder-text">Loading runtime config...</p>
+				{:else}
+					<div class="version-row">
+						<span class="config-label">Project #{ $currentProjectId }</span>
+						{#if runtimeVersion !== null}
+							<Badge label={`v${runtimeVersion}`} variant="active" />
+						{/if}
+						{#if validateResult}
+							<Badge
+								label={validateResult.valid ? 'Global Valid' : 'Global Invalid'}
+								variant={validateResult.valid ? 'active' : 'inactive'}
+							/>
+						{/if}
+						<span class="validate-spacer"></span>
+						<Button onclick={loadValidate} disabled={validating}>
+							{#if validating}Checking...{:else}Re-validate{/if}
+						</Button>
+					</div>
+					<textarea
+						class="config-editor"
+						bind:value={runtimeText}
+						spellcheck="false"
+						aria-label="Project runtime configuration JSON"></textarea>
+
+					<div class="reload-actions split">
+						<Button
+							onclick={handleReloadFromFile}
+							disabled={reloading || runtimeLoading}
+							variant="secondary"
+						>
+							{#if reloading}Reloading...{:else}Reload From File{/if}
+						</Button>
+						<Button
+							onclick={saveProjectRuntime}
+							disabled={runtimeSaving || runtimeLoading}
+						>
+							{#if runtimeSaving}Saving...{:else}Save Runtime Config{/if}
+						</Button>
+					</div>
+
+					{#if runtimeError}
+						<div class="editor-error">{runtimeError}</div>
 					{/if}
 
-					{#if projectConfigResult}
+					{#if runtimeResult}
 						<div class="reload-result">
 							<Badge
-								label={projectConfigResult.success ? 'Success' : 'Failed'}
-								variant={projectConfigResult.success ? 'active' : 'inactive'}
+								label={runtimeResult.success ? 'Success' : 'Failed'}
+								variant={runtimeResult.success ? 'active' : 'inactive'}
 							/>
 							<Badge
-								label={projectConfigResult.hot_reload_applied
+								label={runtimeResult.hot_reload_applied
 									? 'Hot Reload'
 									: 'Restart Needed'}
-								variant={projectConfigResult.hot_reload_applied
+								variant={runtimeResult.hot_reload_applied
 									? 'success'
 									: 'warning'}
 							/>
-							<span class="reload-message">{projectConfigResult.message}</span>
+							<span class="reload-message">{runtimeResult.message}</span>
+						</div>
+					{/if}
+
+					{#if reloadMessage}
+						<div class="reload-result">
+							<Badge label="Reloaded" variant="active" />
+							<span class="reload-message">{reloadMessage}</span>
 						</div>
 					{/if}
 				{/if}
@@ -410,7 +546,7 @@
 		line-height: 1;
 	}
 
-	/* Tab Navigation */
+	/* Scope Navigation */
 	.tab-nav {
 		display: flex;
 		gap: 0;
@@ -493,6 +629,8 @@
 		overflow-x: auto;
 		white-space: pre-wrap;
 		line-height: 1.5;
+		max-height: 480px;
+		overflow-y: auto;
 	}
 
 	.placeholder-text {
@@ -515,6 +653,10 @@
 		text-transform: uppercase;
 		letter-spacing: 0.1em;
 		color: var(--gray-600);
+	}
+
+	.validate-spacer {
+		flex: 1;
 	}
 
 	.issue-section {
@@ -562,17 +704,54 @@
 		margin-bottom: 1.5rem;
 	}
 
+	.reload-actions.split {
+		justify-content: space-between;
+	}
+
 	.reload-result {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		padding: 1rem;
 		border: 1px solid var(--gray-200);
+		margin-top: 1rem;
 	}
 
 	.reload-message {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.85rem;
+	}
+
+	.version-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+	}
+
+	.form-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.form-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.form-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+	}
+
+	.toggle-row {
+		margin: 0.5rem 0 1rem;
 	}
 
 	.config-editor {
@@ -591,15 +770,6 @@
 	.config-editor:focus {
 		outline: none;
 		border-color: var(--accent);
-	}
-
-	.validate-check {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		margin-top: 0.75rem;
-		font-size: 0.85rem;
-		color: var(--gray-600);
 	}
 
 	.editor-error {

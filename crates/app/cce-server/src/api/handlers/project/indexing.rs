@@ -8,9 +8,9 @@ use super::management::record_to_config;
 use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
 use cce_api::models::{
-    DeadLetterActionResponse, DeadLetterAcknowledgeRequest, DeadLetterFileEntry,
-    DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest,
-    DeadLetterRetryResponse, ErrorResponse, ProjectIndexResponse,
+    DeadLetterAcknowledgeRequest, DeadLetterActionResponse, DeadLetterFileEntry,
+    DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest, DeadLetterRetryResponse,
+    ErrorResponse, ProjectIndexResponse,
 };
 use cce_storage_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
@@ -152,7 +152,11 @@ pub async fn handle_dead_letter_files_retry(
     Path(id): Path<i64>,
     axum::Json(body): axum::Json<DeadLetterRetryRequest>,
 ) -> ApiResult<DeadLetterActionResponse> {
-    match state.engine.retry_dead_letters_for_files(id, &body.files).await {
+    match state
+        .engine
+        .retry_dead_letters_for_files(id, &body.files)
+        .await
+    {
         Ok(report) => ApiResult::Success(DeadLetterActionResponse {
             success: true,
             affected: report.retried,
@@ -256,7 +260,10 @@ pub async fn handle_dead_letter_list(
                     updated_at: s.updated_at.to_rfc3339(),
                 })
                 .collect();
-            ApiResult::Success(DeadLetterListResponse { project_id: id, files })
+            ApiResult::Success(DeadLetterListResponse {
+                project_id: id,
+                files,
+            })
         }
         Err(e) => ApiResult::Error(ErrorResponse::new(
             error_codes::INTERNAL_ERROR,
