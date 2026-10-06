@@ -228,7 +228,7 @@ fn test_index_builder_add_single_file_via_process_file() {
     assert!(!index.contains_file("nonexistent"));
     assert!(index.contains_file("test.rs"));
     assert_eq!(index.function_count(), 2);
-    assert_eq!(index.call_count(), 1);
+    assert_eq!(index.resolved_relation_count(), 1);
 }
 
 #[test]
@@ -328,10 +328,22 @@ fn test_relation_query_checked() {
     assert!(callers.is_ok());
     assert_eq!(callers.unwrap().len(), 1);
 
-    // Unknown callee returns empty (not error)
-    let callers = index.get_callers_by_callee_entity_checked(EntityId(999));
+    // A known callee with no callers is empty, not an error.
+    let callers = index.get_callers_by_callee_entity_checked(EntityId(1));
     assert!(callers.is_ok());
     assert!(callers.unwrap().is_empty());
+
+    // An unknown callee is an error: the checked variant distinguishes a
+    // missing entity from an entity that simply has no callers.
+    let callers = index.get_callers_by_callee_entity_checked(EntityId(999));
+    assert!(callers.is_err());
+    assert!(matches!(
+        callers.unwrap_err(),
+        IndexError::EntityNotFound(_)
+    ));
+
+    // The unchecked variant reports no callers for the same unknown id.
+    assert!(index.get_callers_by_callee_entity(EntityId(999)).is_empty());
 }
 
 #[test]
@@ -787,12 +799,12 @@ fn test_call_chain_query_inheritance() {
     // Inheritance hierarchy (ancestors)
     let ancestors = query.get_inheritance_hierarchy(EntityId(2), 5);
     assert_eq!(ancestors.len(), 1);
-    assert_eq!(ancestors[0], EntityId(1));
+    assert_eq!(ancestors[0], (EntityId(1), 1));
 
     // All derived classes
     let all_derived = query.get_all_derived_classes(EntityId(1), 5);
     assert_eq!(all_derived.len(), 1);
-    assert_eq!(all_derived[0], EntityId(2));
+    assert_eq!(all_derived[0], (EntityId(2), 1));
 }
 
 // ============================================================
@@ -1093,12 +1105,12 @@ fn test_relation_index_clear() {
     let index = build_test_index();
 
     assert_eq!(index.function_count(), 3);
-    assert_eq!(index.call_count(), 2);
+    assert_eq!(index.resolved_relation_count(), 2);
 
     index.clear();
 
     assert_eq!(index.function_count(), 0);
-    assert_eq!(index.call_count(), 0);
+    assert_eq!(index.resolved_relation_count(), 0);
     assert_eq!(index.file_count(), 0);
 }
 

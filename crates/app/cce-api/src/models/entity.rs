@@ -168,6 +168,13 @@ pub struct RelationFilterParams {
     /// Exact file paths to exclude
     #[serde(default)]
     pub excluded_files: Option<Vec<String>>,
+    /// Keep only relations in these coarse domains (`call`, `dependency`,
+    /// `structural`, `reference`, `template`, `other`).
+    #[serde(default)]
+    pub domains: Option<String>,
+    /// Whether relations pointing outside the project are kept.
+    #[serde(default = "default_include_external")]
+    pub include_external: bool,
 }
 
 /// Query parameters for callees/callers queries
@@ -189,6 +196,13 @@ pub struct CallChainQueryParams {
     /// Exact file paths to exclude
     #[serde(default)]
     pub excluded_files: Option<Vec<String>>,
+    /// Keep only relations in these coarse domains (`call`, `dependency`,
+    /// `structural`, `reference`, `template`, `other`).
+    #[serde(default)]
+    pub domains: Option<String>,
+    /// Whether relations pointing outside the project are kept.
+    #[serde(default = "default_include_external")]
+    pub include_external: bool,
 }
 
 /// Query parameters for call chain direction queries
@@ -212,6 +226,13 @@ pub struct CallChainDirectionParams {
     /// Exact file paths to exclude
     #[serde(default)]
     pub excluded_files: Option<Vec<String>>,
+    /// Keep only relations in these coarse domains (`call`, `dependency`,
+    /// `structural`, `reference`, `template`, `other`).
+    #[serde(default)]
+    pub domains: Option<String>,
+    /// Whether relations pointing outside the project are kept.
+    #[serde(default = "default_include_external")]
+    pub include_external: bool,
 }
 
 /// Query parameters for classification filtering
@@ -290,6 +311,10 @@ fn default_query_max_depth() -> usize {
 
 fn default_query_limit() -> usize {
     20
+}
+
+fn default_include_external() -> bool {
+    true
 }
 
 fn default_direction() -> String {

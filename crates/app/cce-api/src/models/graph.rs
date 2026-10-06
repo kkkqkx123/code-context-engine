@@ -156,6 +156,10 @@ pub struct GraphPathQuery {
     pub end: String,
     #[serde(default = "default_path_depth")]
     pub max_depth: usize,
+    #[serde(default)]
+    pub domains: String,
+    #[serde(default = "default_true")]
+    pub include_external: bool,
 }
 
 /// Explicit entity set query parameters (comma-separated stable ids).
@@ -187,11 +191,64 @@ pub struct ExportQuery {
     pub include_external: bool,
 }
 
+/// Connected component query parameters.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ComponentsQuery {
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default = "default_graph_page_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub domains: String,
+    #[serde(default = "default_true")]
+    pub include_external: bool,
+}
+
 /// File impact query parameters.
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ImpactQuery {
     pub file: String,
+}
+
+/// Entity impact query parameters.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct EntityImpactQuery {
+    pub entity_id: String,
+    #[serde(default = "default_impact_depth")]
+    pub max_depth: usize,
+}
+
+/// Dependency cycle query parameters.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CyclesQuery {
+    /// `entity` or `file`.
+    #[serde(default = "default_cycle_level")]
+    pub level: String,
+    #[serde(default = "default_cycle_limit")]
+    pub limit: usize,
+}
+
+/// Structural relation query parameters.
+///
+/// Selects one of the typed structural/frontend relation families rooted at an
+/// entity.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct StructuralQuery {
+    pub entity_id: String,
+    /// Relation family: `trait_bound`, `child_elements`, `parent_element`,
+    /// `event_handlers`, `handler_elements`, `parameter_bindings`,
+    /// `template_references`, `template_ref_owners`.
+    pub kind: String,
+    /// `out` follows the family forward, `in` follows it in reverse.
+    #[serde(default = "default_structural_direction")]
+    pub direction: String,
+    #[serde(default = "default_structural_limit")]
+    pub limit: usize,
 }
 
 /// Subgraph response (ego, subgraph, export).
@@ -229,6 +286,9 @@ pub struct GraphComponentsResponse {
     pub success: bool,
     pub relation_epoch: i64,
     pub components: Vec<Vec<String>>,
+    /// Component count before pagination.
+    #[serde(default)]
+    pub total_components: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relation_info: Option<serde_json::Value>,
 }
@@ -239,9 +299,86 @@ pub struct GraphImpactResponse {
     pub success: bool,
     pub relation_epoch: i64,
     pub changed_file: String,
+    /// Dependents exactly one hop away.
     pub direct_dependents: Vec<String>,
-    pub transitive_dependents: Vec<String>,
+    /// Dependents two or more hops away; disjoint from `direct_dependents`.
+    pub indirect_dependents: Vec<String>,
     pub impact_score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relation_info: Option<serde_json::Value>,
+}
+
+/// Entity impact response.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GraphEntityImpactResponse {
+    pub success: bool,
+    pub relation_epoch: i64,
+    pub changed_entity: String,
+    /// Callers exactly one hop away.
+    pub direct_dependents: Vec<String>,
+    /// Callers two or more hops away; disjoint from `direct_dependents`.
+    pub indirect_dependents: Vec<String>,
+    pub impact_score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relation_info: Option<serde_json::Value>,
+}
+
+/// One dependency cycle: the members in traversal order, last member calling
+/// back into the first.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GraphCycle {
+    /// Stable symbol ids for `level=entity`, project paths for `level=file`.
+    pub members: Vec<String>,
+}
+
+/// Dependency cycles response.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GraphCyclesResponse {
+    pub success: bool,
+    pub relation_epoch: i64,
+    pub level: String,
+    pub cycles: Vec<GraphCycle>,
+    /// Cycle count reported, before the `limit` cap.
+    #[serde(default)]
+    pub total_cycles: usize,
+    /// Whether more cycles exist than were reported.
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relation_info: Option<serde_json::Value>,
+}
+
+/// One relation inside a structural answer.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StructuralRelation {
+    /// Stable symbol id of the counterparty.
+    pub entity_id: String,
+    /// Human-readable name of the counterparty.
+    pub label: String,
+    /// Relation type string (`trait_bound`, `contains.element`, ...).
+    pub relation: String,
+    /// Coarse relation domain of `relation`.
+    pub domain: String,
+    /// Source file of the counterparty.
+    pub source_file: String,
+}
+
+/// One structural relation family resolved for an entity.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GraphStructuralResponse {
+    pub success: bool,
+    pub relation_epoch: i64,
+    /// The requested relation family.
+    pub kind: String,
+    /// The requested direction (`out` or `in`).
+    pub direction: String,
+    pub relations: Vec<StructuralRelation>,
+    /// Relation count before the `limit` cap.
+    #[serde(default)]
+    pub total_relations: usize,
+    /// Whether more relations exist than were returned.
+    #[serde(default)]
+    pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relation_info: Option<serde_json::Value>,
 }
@@ -258,6 +395,26 @@ fn default_path_depth() -> usize {
     10
 }
 
+fn default_impact_depth() -> usize {
+    10
+}
+
+fn default_cycle_level() -> String {
+    "entity".to_string()
+}
+
+fn default_cycle_limit() -> usize {
+    100
+}
+
+fn default_structural_direction() -> String {
+    "out".to_string()
+}
+
+fn default_structural_limit() -> usize {
+    200
+}
+
 fn default_export_limit() -> usize {
     2000
 }
@@ -268,4 +425,42 @@ fn default_graph_page_limit() -> usize {
 
 fn default_true() -> bool {
     true
+}
+
+/// File module relation query parameters.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ModuleQuery {
+    pub file: String,
+}
+
+/// One module-level relation of a file.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ModuleRelation {
+    /// Stable symbol id of the imported/calling entity, or empty for edges
+    /// that originate at the file itself.
+    #[serde(default)]
+    pub entity_id: String,
+    /// Raw relation target as written in the source.
+    pub target: String,
+    /// Relation type string (`dependency.import.standard`, `call.direct`, ...).
+    pub relation: String,
+    /// Coarse relation domain of `relation`.
+    pub domain: String,
+}
+
+/// File module relations response.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GraphModuleResponse {
+    pub success: bool,
+    pub relation_epoch: i64,
+    pub file: String,
+    /// Stable symbol ids exported by the file.
+    pub exports: Vec<String>,
+    /// Files whose module-level edges target this file.
+    pub caller_files: Vec<String>,
+    /// Module-level edges originating at the file.
+    pub imports: Vec<ModuleRelation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relation_info: Option<serde_json::Value>,
 }

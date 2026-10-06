@@ -24,6 +24,6 @@ pub use delete::{
 pub use error::Bm25Error;
 pub use manager::IndexManager;
 pub use metrics::Bm25Metrics;
-pub use retrieval::Bm25Retrieval;
+pub use retrieval::{Bm25Retrieval, expand_query_tokens};
 pub use schema::IndexSchema;
 pub use types::{Bm25Document, Bm25SearchOptions, Bm25SearchResult, TermOperator};

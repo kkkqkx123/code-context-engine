@@ -8,15 +8,18 @@ use axum::extract::{Path, Query as QueryParams, State};
 use std::sync::Arc;
 
 use cce_api::models::{
-    EgoQuery, ErrorResponse, ExportQuery, GraphComponentsResponse, GraphEdge, GraphImpactResponse,
-    GraphNode, GraphPathQuery, GraphPathResponse, GraphSubgraphResponse, ImpactQuery,
-    SubgraphQuery, error_codes,
+    ComponentsQuery, CyclesQuery, EgoQuery, EntityImpactQuery, ErrorResponse, ExportQuery,
+    GraphComponentsResponse, GraphCycle, GraphCyclesResponse, GraphEdge, GraphEntityImpactResponse,
+    GraphImpactResponse, GraphModuleResponse, GraphNode, GraphPathQuery, GraphPathResponse,
+    GraphStructuralResponse, GraphSubgraphResponse, ImpactQuery, ModuleQuery, ModuleRelation,
+    StructuralQuery, StructuralRelation, SubgraphQuery, error_codes,
 };
 use cce_orchestrator::query::{
     GraphDirection, GraphFilter, GraphPagination, GraphService, SubGraph,
 };
 use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
 
+use crate::api::handlers::entity::seed::resolve_symbol_seed;
 use crate::api::response::ApiResult;
 
 /// Return the relation capability info as a JSON map when the served
@@ -185,161 +188,6 @@ async fn graph_context(
     Ok((snapshot, searcher, runtime))
 }
 
-/// A human-readable candidate shown to the caller when a symbol seed is
-/// ambiguous. Carries the stable id the client must retry with.
-#[derive(Debug, serde::Serialize)]
-struct SymbolCandidate {
-    stable_id: String,
-    file_path: String,
-    scoped_name: String,
-    kind: String,
-}
-
-/// Kind of seed the caller supplied, used for error messages.
-enum SeedRef {
-    StableId,
-    FileQualified { file: String, name: String },
-    BareName(String),
-}
-
-fn parse_seed(raw: &str) -> SeedRef {
-    if let Some((file, name)) = raw.split_once('#') {
-        return SeedRef::FileQualified {
-            file: file.trim().to_string(),
-            name: name.trim().to_string(),
-        };
-    }
-    // Stable ids always start with `sym_`; anything else is a bare symbol name.
-    if raw.starts_with("sym_") {
-        return SeedRef::StableId;
-    }
-    SeedRef::BareName(raw.to_string())
-}
-
-/// Last segment of a scoped name (split on common separators), for bare-name matching.
-fn last_scoped_segment(scoped_name: &str) -> &str {
-    scoped_name
-        .rsplit([':', '.', '/'])
-        .next()
-        .unwrap_or(scoped_name)
-}
-
-/// Multi-stage seed resolution.
-///
-/// Order: exact stable id → `file#name` (or `#name`) via symbol-key reverse
-/// lookup → bare name via the function name index, then scoped-name scan.
-/// A single hit resolves directly; multiple hits yield `AMBIGUOUS_SYMBOL`
-/// with the candidate list so the client can disambiguate.
-fn resolve_entity(
-    snapshot: &crate::runtime::PublishedSnapshot,
-    seed: &str,
-) -> Result<cce_types::EntityId, ErrorResponse> {
-    let index = &snapshot.index;
-    let not_found = |seed: &str| {
-        ErrorResponse::with_details(
-            error_codes::ENTITY_NOT_FOUND,
-            format!("Unknown symbol seed: {seed}"),
-            "Seed must be a stable symbol ID (sym_…), 'path/to/file#name', '#name', or a bare symbol name.",
-        )
-    };
-    let ambiguous = |seed: &str, candidates: Vec<SymbolCandidate>| {
-        let details = serde_json::to_string(&candidates).unwrap_or_else(|_| "[]".to_string());
-        ErrorResponse::with_details(
-            error_codes::AMBIGUOUS_SYMBOL,
-            format!(
-                "Symbol seed '{seed}' matches {} entities; pass one of the candidate stable IDs",
-                candidates.len()
-            ),
-            details,
-        )
-    };
-
-    match parse_seed(seed) {
-        SeedRef::StableId => index
-            .get_entity_id_by_stable_symbol_id(seed)
-            .ok_or_else(|| not_found(seed)),
-        SeedRef::FileQualified { file, name } => {
-            if name.is_empty() {
-                return Err(not_found(seed));
-            }
-            let normalized = cce_types::normalize_project_path(&file);
-            let mut ids: Vec<cce_types::EntityId> = Vec::new();
-            let mut candidates: Vec<SymbolCandidate> = Vec::new();
-            for key in index.stable_symbol_keys() {
-                let file_matches = key.file_path == normalized
-                    || (file.is_empty() && last_scoped_segment(&key.scoped_name) == name);
-                if !file_matches {
-                    continue;
-                }
-                let name_matches =
-                    key.scoped_name == name || last_scoped_segment(&key.scoped_name) == name;
-                if !name_matches {
-                    continue;
-                }
-                if let Some(id) = index.get_entity_id_by_symbol_key(&key) {
-                    candidates.push(SymbolCandidate {
-                        stable_id: key.stable_id().0,
-                        file_path: key.file_path.clone(),
-                        scoped_name: key.scoped_name.clone(),
-                        kind: key.kind.to_string(),
-                    });
-                    ids.push(id);
-                }
-            }
-            match ids.len() {
-                0 => Err(not_found(seed)),
-                1 => Ok(ids[0]),
-                _ => Err(ambiguous(seed, candidates)),
-            }
-        }
-        SeedRef::BareName(name) => {
-            let ids = index.get_function_ids_by_name(&name);
-            match ids.len() {
-                0 => {
-                    // Fall back to a scoped-name scan so classes/types are
-                    // reachable by bare name too.
-                    let mut matched: Vec<SymbolCandidate> = Vec::new();
-                    for key in index.stable_symbol_keys() {
-                        if last_scoped_segment(&key.scoped_name) == name {
-                            if let Some(_id) = index.get_entity_id_by_symbol_key(&key) {
-                                matched.push(SymbolCandidate {
-                                    stable_id: key.stable_id().0,
-                                    file_path: key.file_path.clone(),
-                                    scoped_name: key.scoped_name.clone(),
-                                    kind: key.kind.to_string(),
-                                });
-                            }
-                        }
-                    }
-                    match matched.len() {
-                        0 => Err(not_found(seed)),
-                        1 => index
-                            .get_entity_id_by_stable_symbol_id(&matched[0].stable_id)
-                            .ok_or_else(|| not_found(seed)),
-                        _ => Err(ambiguous(seed, matched)),
-                    }
-                }
-                1 => Ok(ids[0]),
-                _ => {
-                    let candidates = ids
-                        .iter()
-                        .filter_map(|id| {
-                            let key = index.get_symbol_key_by_entity_id(*id)?;
-                            Some(SymbolCandidate {
-                                stable_id: key.stable_id().0,
-                                file_path: key.file_path.clone(),
-                                scoped_name: key.scoped_name.clone(),
-                                kind: key.kind.to_string(),
-                            })
-                        })
-                        .collect();
-                    Err(ambiguous(seed, candidates))
-                }
-            }
-        }
-    }
-}
-
 /// Handle ego neighborhood request.
 #[utoipa::path(
     get, path = "/api/project/{project_id}/graph/ego", tag = "Graph",
@@ -369,7 +217,7 @@ pub async fn handle_graph_ego(
         Ok(direction) => direction,
         Err(e) => return ApiResult::Error(e),
     };
-    let entity_id = match resolve_entity(&snapshot, &params.entity_id) {
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.entity_id) {
         Ok(id) => id,
         Err(e) => return ApiResult::Error(e),
     };
@@ -431,16 +279,22 @@ pub async fn handle_graph_path(
         Ok(depth) => depth,
         Err(e) => return ApiResult::Error(e),
     };
-    let start = match resolve_entity(&snapshot, &params.start) {
+    let start = match resolve_symbol_seed(snapshot.index.as_ref(), &params.start) {
         Ok(id) => id,
         Err(e) => return ApiResult::Error(e),
     };
-    let end = match resolve_entity(&snapshot, &params.end) {
+    let end = match resolve_symbol_seed(snapshot.index.as_ref(), &params.end) {
         Ok(id) => id,
         Err(e) => return ApiResult::Error(e),
     };
     let service = GraphService::new(searcher);
-    let path = match service.shortest_path(start, end, params.max_depth.min(max_depth)) {
+    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let path = match service.shortest_path_with_options(
+        start,
+        end,
+        params.max_depth.min(max_depth),
+        &filter,
+    ) {
         Ok(path) => path,
         Err(e) => {
             return ApiResult::Error(ErrorResponse::new(
@@ -503,7 +357,7 @@ pub async fn handle_graph_subgraph(
     }
     let mut entity_ids = Vec::with_capacity(raw_ids.len());
     for raw in &raw_ids {
-        match resolve_entity(&snapshot, raw) {
+        match resolve_symbol_seed(snapshot.index.as_ref(), raw) {
             Ok(id) => entity_ids.push(id),
             Err(e) => return ApiResult::Error(e),
         }
@@ -538,7 +392,7 @@ pub async fn handle_graph_subgraph(
 /// Handle connected components request.
 #[utoipa::path(
     get, path = "/api/project/{project_id}/graph/components", tag = "Graph",
-    params(("project_id" = i64, Path, description = "Project id")),
+    params(ComponentsQuery, ("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = GraphComponentsResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),
@@ -550,14 +404,24 @@ pub async fn handle_graph_subgraph(
 pub async fn handle_graph_components(
     State(state): State<crate::api::state::AppState>,
     Path(project_id): Path<i64>,
+    QueryParams(params): QueryParams<ComponentsQuery>,
 ) -> ApiResult<GraphComponentsResponse> {
+    const MAX_COMPONENTS: usize = 5_000;
     let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
         Ok(ctx) => ctx,
         Err(e) => return ApiResult::Error(e),
     };
+    if params.limit == 0 || params.limit > MAX_COMPONENTS {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("limit must be within 1-{MAX_COMPONENTS}"),
+        ));
+    }
     let service = GraphService::new(searcher);
-    let components = match service.connected_components() {
-        Ok(components) => components,
+    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let pagination = parse_graph_pagination(params.offset, params.limit);
+    let paged = match service.connected_components_with_options(&filter, pagination) {
+        Ok(paged) => paged,
         Err(e) => {
             return ApiResult::Error(ErrorResponse::new(
                 error_codes::INTERNAL_ERROR,
@@ -565,7 +429,8 @@ pub async fn handle_graph_components(
             ));
         }
     };
-    let groups = components
+    let groups = paged
+        .components
         .into_iter()
         .map(|group| {
             group
@@ -584,6 +449,7 @@ pub async fn handle_graph_components(
         success: true,
         relation_epoch: snapshot.relation_epoch,
         components: groups,
+        total_components: paged.total_components,
         relation_info: stale_relation_info(&runtime).await,
     })
 }
@@ -674,10 +540,323 @@ pub async fn handle_graph_impact(
     ApiResult::Success(GraphImpactResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
-        changed_file: impact.changed_file,
+        changed_file: impact.changed,
         direct_dependents: impact.direct_dependents,
-        transitive_dependents: impact.transitive_dependents,
+        indirect_dependents: impact.indirect_dependents,
         impact_score: impact.impact_score,
+        relation_info: stale_relation_info(&runtime).await,
+    })
+}
+
+/// Handle entity impact request.
+///
+/// Reports which entities break when one entity changes, split into disjoint
+/// first-hop callers and deeper callers.
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/graph/entity-impact", tag = "Graph",
+    params(EntityImpactQuery, ("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = GraphEntityImpactResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_graph_entity_impact(
+    State(state): State<crate::api::state::AppState>,
+    Path(project_id): Path<i64>,
+    QueryParams(params): QueryParams<EntityImpactQuery>,
+) -> ApiResult<GraphEntityImpactResponse> {
+    const MAX_IMPACT_DEPTH: usize = 50;
+    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
+        Ok(ctx) => ctx,
+        Err(e) => return ApiResult::Error(e),
+    };
+    if params.max_depth == 0 || params.max_depth > MAX_IMPACT_DEPTH {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("max_depth must be within 1-{MAX_IMPACT_DEPTH}"),
+        ));
+    }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.entity_id) {
+        Ok(id) => id,
+        Err(e) => return ApiResult::Error(e),
+    };
+    let impact = searcher.get_entity_impact(entity_id, params.max_depth);
+    let name_of = |id: cce_types::EntityId| {
+        snapshot
+            .index
+            .get_symbol_key_by_entity_id(id)
+            .map(|key| key.stable_id().0)
+            .unwrap_or_else(|| format!("entity:{}", id.0))
+    };
+    ApiResult::Success(GraphEntityImpactResponse {
+        success: true,
+        relation_epoch: snapshot.relation_epoch,
+        changed_entity: name_of(impact.changed),
+        direct_dependents: impact
+            .direct_dependents
+            .iter()
+            .copied()
+            .map(name_of)
+            .collect(),
+        indirect_dependents: impact
+            .indirect_dependents
+            .iter()
+            .copied()
+            .map(name_of)
+            .collect(),
+        impact_score: impact.impact_score,
+        relation_info: stale_relation_info(&runtime).await,
+    })
+}
+
+/// Handle dependency cycle request.
+///
+/// Reports cycles in the call graph (`level=entity`) or in the file dependency
+/// graph (`level=file`).
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/graph/cycles", tag = "Graph",
+    params(CyclesQuery, ("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = GraphCyclesResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_graph_cycles(
+    State(state): State<crate::api::state::AppState>,
+    Path(project_id): Path<i64>,
+    QueryParams(params): QueryParams<CyclesQuery>,
+) -> ApiResult<GraphCyclesResponse> {
+    /// Hard ceiling; the detector stops early at this count.
+    const MAX_CYCLES: usize = 5_000;
+    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
+        Ok(ctx) => ctx,
+        Err(e) => return ApiResult::Error(e),
+    };
+    let level = params.level.to_lowercase();
+    if level != "entity" && level != "file" {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "level must be one of entity, file".to_string(),
+        ));
+    }
+    if params.limit == 0 || params.limit > MAX_CYCLES {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("limit must be within 1-{MAX_CYCLES}"),
+        ));
+    }
+    // Ask for one more than requested so `truncated` reflects reality instead
+    // of assuming the page happened to be the last one.
+    let probe = params.limit + 1;
+    let cycles = if level == "entity" {
+        searcher
+            .find_entity_cycles(probe)
+            .into_iter()
+            .map(|members| GraphCycle {
+                members: members
+                    .into_iter()
+                    .map(|id| {
+                        snapshot
+                            .index
+                            .get_symbol_key_by_entity_id(id)
+                            .map(|key| key.stable_id().0)
+                            .unwrap_or_else(|| format!("entity:{}", id.0))
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        searcher
+            .find_file_cycles(probe)
+            .into_iter()
+            .map(|members| GraphCycle { members })
+            .collect::<Vec<_>>()
+    };
+    let truncated = cycles.len() > params.limit;
+    let total_cycles = cycles.len();
+    let cycles = cycles.into_iter().take(params.limit).collect();
+    ApiResult::Success(GraphCyclesResponse {
+        success: true,
+        relation_epoch: snapshot.relation_epoch,
+        level,
+        cycles,
+        total_cycles,
+        truncated,
+        relation_info: stale_relation_info(&runtime).await,
+    })
+}
+
+/// Handle structural / frontend relation request.
+///
+/// Typed access to the relation families that the generic `domains` filter can
+/// only approximate: Rust trait bounds and the markup relation set (element
+/// containment, event callbacks, parameter bindings, template references).
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/graph/structural", tag = "Graph",
+    params(StructuralQuery, ("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = GraphStructuralResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_graph_structural(
+    State(state): State<crate::api::state::AppState>,
+    Path(project_id): Path<i64>,
+    QueryParams(params): QueryParams<StructuralQuery>,
+) -> ApiResult<GraphStructuralResponse> {
+    use cce_orchestrator::query::{StructuralDirection, StructuralKind};
+
+    const MAX_STRUCTURAL: usize = 2_000;
+    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
+        Ok(ctx) => ctx,
+        Err(e) => return ApiResult::Error(e),
+    };
+    let kind = match StructuralKind::parse(&params.kind) {
+        Some(kind) => kind,
+        None => {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                format!(
+                    "unknown kind '{}'; expected one of: {}",
+                    params.kind,
+                    StructuralKind::labels().join(", ")
+                ),
+            ));
+        }
+    };
+    let direction = match params.direction.to_lowercase().as_str() {
+        "out" | "outgoing" | "forward" => StructuralDirection::Outgoing,
+        "in" | "incoming" | "backward" => StructuralDirection::Incoming,
+        other => {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                format!("direction must be out or in, got '{other}'"),
+            ));
+        }
+    };
+    if params.limit == 0 || params.limit > MAX_STRUCTURAL {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            format!("limit must be within 1-{MAX_STRUCTURAL}"),
+        ));
+    }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.entity_id) {
+        Ok(id) => id,
+        Err(e) => return ApiResult::Error(e),
+    };
+    let resolved = searcher.structural_relations(entity_id, kind, direction);
+    let total_relations = resolved.len();
+    let truncated = total_relations > params.limit;
+    let relations = resolved
+        .into_iter()
+        .take(params.limit)
+        .map(|relation| StructuralRelation {
+            entity_id: snapshot
+                .index
+                .get_symbol_key_by_entity_id(relation.entity_id)
+                .map(|key| key.stable_id().0)
+                .unwrap_or_else(|| format!("entity:{}", relation.entity_id.0)),
+            label: relation.label,
+            relation: relation.relation_type.to_string(),
+            domain: cce_orchestrator::query::graph::relation_domain(&relation.relation_type)
+                .to_string(),
+            source_file: snapshot
+                .index
+                .as_ref()
+                .get_file_path_by_entity(relation.entity_id)
+                .unwrap_or_default(),
+        })
+        .collect();
+    ApiResult::Success(GraphStructuralResponse {
+        success: true,
+        relation_epoch: snapshot.relation_epoch,
+        kind: params.kind,
+        direction: params.direction,
+        relations,
+        total_relations,
+        truncated,
+        relation_info: stale_relation_info(&runtime).await,
+    })
+}
+
+/// Handle file module relations request.
+///
+/// Reports what a file pulls in (module-level imports/uses), what it exposes
+/// (exports), and which files reach into it.
+#[utoipa::path(
+    get, path = "/api/project/{project_id}/graph/module", tag = "Graph",
+    params(ModuleQuery, ("project_id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = GraphModuleResponse, description = "Success"),
+        (status = 400, body = ErrorResponse, description = "Invalid request"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 503, body = ErrorResponse, description = "Index unavailable"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_graph_module(
+    State(state): State<crate::api::state::AppState>,
+    Path(project_id): Path<i64>,
+    QueryParams(params): QueryParams<ModuleQuery>,
+) -> ApiResult<GraphModuleResponse> {
+    const MAX_MODULE_EDGES: usize = 5_000;
+    let (snapshot, searcher, runtime) = match graph_context(&state, project_id).await {
+        Ok(ctx) => ctx,
+        Err(e) => return ApiResult::Error(e),
+    };
+    if params.file.trim().is_empty() {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "file must not be empty".to_string(),
+        ));
+    }
+    let modules = searcher.get_module_relations(&params.file);
+    let imports = modules
+        .imports
+        .into_iter()
+        .take(MAX_MODULE_EDGES)
+        .map(|relation| ModuleRelation {
+            entity_id: relation
+                .callee_id
+                .map(|id| {
+                    snapshot
+                        .index
+                        .get_symbol_key_by_entity_id(id)
+                        .map(|key| key.stable_id().0)
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default(),
+            target: relation.callee_name,
+            relation: relation.relation_type.to_string(),
+            domain: cce_orchestrator::query::relation_domain(&relation.relation_type).to_string(),
+        })
+        .collect();
+    ApiResult::Success(GraphModuleResponse {
+        success: true,
+        relation_epoch: snapshot.relation_epoch,
+        file: params.file,
+        exports: modules
+            .exports
+            .into_iter()
+            .map(|id| {
+                snapshot
+                    .index
+                    .get_symbol_key_by_entity_id(id)
+                    .map(|key| key.stable_id().0)
+                    .unwrap_or_else(|| format!("entity:{}", id.0))
+            })
+            .collect(),
+        caller_files: modules.callers,
+        imports,
         relation_info: stale_relation_info(&runtime).await,
     })
 }

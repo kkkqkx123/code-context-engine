@@ -18,7 +18,7 @@
 //! by the type system (snapshots hold only `Arc` maps) rather than by
 //! convention.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cce_types::{
     Entity, EntityId, ExternalCallType, FileInfo, ImportTable, RelationType, ResolvedRelation,
@@ -111,44 +111,16 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
     }
 
     fn get_callers_by_callee_entity(&self, callee_id: EntityId) -> Vec<EntityId> {
-        if let Some(callers) = self.query_optimized.get_callers(callee_id) {
-            let mut result = callers.clone();
-            result.sort();
-            result.dedup();
-            result.truncate(MAX_REVERSE_FANIN);
-            return result;
-        }
-        if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            let mut result = callers.clone();
-            result.sort();
-            result.dedup();
-            result.truncate(MAX_REVERSE_FANIN);
-            return result;
-        }
-        if !self.function_index.contains_key(&callee_id) {
+        // Both reverse maps are built from the resolved relation set and are
+        // therefore authoritative: a miss means no callers. Never fall back to
+        // the callee's own outgoing edges — that answers a different question.
+        let mut result = if let Some(callers) = self.query_optimized.get_callers(callee_id) {
+            callers.clone()
+        } else if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
+            callers.clone()
+        } else {
             return Vec::new();
-        }
-        if !self.reverse_callee_index.is_empty() {
-            return Vec::new();
-        }
-        // Fallback: check the embedded callers list.
-        if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            let callers = entry.callers();
-            if !callers.is_empty() {
-                let mut result = callers.to_vec();
-                result.sort();
-                result.dedup();
-                result.truncate(MAX_REVERSE_FANIN);
-                return result;
-            }
-        }
-        // For callee-only entities, scan all entries.
-        let mut result: Vec<EntityId> = self
-            .resolved_relation_index
-            .iter()
-            .filter(|entry| entry.value().iter().any(|r| r.callee_id == Some(callee_id)))
-            .map(|entry| *entry.key())
-            .collect();
+        };
         result.sort();
         result.dedup();
         result.truncate(MAX_REVERSE_FANIN);
@@ -171,15 +143,10 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
         relation_type: RelationType,
     ) -> Vec<EntityId> {
         // Single merged edge walk with in-memory type filtering.
-        if !self.function_index.contains_key(&callee_id)
-            && self.query_optimized.get_callers(callee_id).is_none()
-            && self.reverse_callee_index.get(&callee_id).is_none()
-        {
-            return Vec::new();
-        }
+        let mut seen: HashSet<EntityId> = HashSet::new();
         let mut callers = Vec::new();
         for relation in self.get_relations_to_entity_by_type(callee_id, relation_type) {
-            if !callers.contains(&relation.caller) {
+            if seen.insert(relation.caller) {
                 callers.push(relation.caller);
                 if callers.len() >= MAX_REVERSE_FANIN {
                     break;
@@ -190,13 +157,6 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
     }
 
     fn get_relations_to_entity(&self, callee_id: EntityId) -> Vec<ResolvedRelation> {
-        if !self.function_index.contains_key(&callee_id)
-            && self.query_optimized.get_callers(callee_id).is_none()
-            && self.reverse_callee_index.get(&callee_id).is_none()
-            && self.resolved_relation_index.get(&callee_id).is_none()
-        {
-            return Vec::new();
-        }
         self.get_callers_by_callee_entity(callee_id)
             .into_iter()
             .flat_map(|caller| {
@@ -238,10 +198,6 @@ impl SnapshotRelationQueryOps for RelationSnapshotIndex {
 
     fn resolved_relation_count(&self) -> usize {
         RelationSnapshotIndex::resolved_relation_count(self)
-    }
-
-    fn call_count(&self) -> usize {
-        self.resolved_relation_count()
     }
 
     fn get_relations_by_classification(

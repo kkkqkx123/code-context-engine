@@ -19,7 +19,7 @@
 | 自定义分词器 | `MixedTokenizer`（jieba 中文分词 + 代码感知切分，见 `cce-text`），通过 tantivy `Tokenizer` trait 注册为 `mixed`，title/content/keywords 三字段共用 | 不可行。FTS5 自定义分词器须以 C 实现并编译进 SQLite，Rust 侧 jieba 逻辑需跨 FFI 重写 |
 | BM25 参数可调 | fork 新增 `IndexSettings.bm25_params`，k1/b 全局可配（代码搜索场景 b=0.6） | 不可行。FTS5 仅支持按列配置 `bm25()` 权重，k1/b 固定 |
 | 零得分污染过滤 | epoch/project/category 过滤以 `BoostQuery(0.0)` 包裹，过滤约束不改变 BM25 排名，保证与离线基准评分器逐分对齐及跨 epoch 排名一致 | 部分可行。FTS5 可在 SQL 层过滤，但得分语义需自行重建 |
-| 多字段加权与 term 级 operator | `field_weights` 按 field 加权、`TermOperator`（AND/OR）、split-token 降权、raw+clean 双表单查询 | 部分可行。FTS5 无原生多字段加权查询，需手写评分逻辑 |
+| 多字段加权与 term 级 operator | `field_weights` 按 field 加权、`TermOperator`（AND/OR）、whole/split token 扩展与 split-token 降权 | 部分可行。FTS5 无原生多字段加权查询，需手写评分逻辑 |
 | 评分可复现性 | 离线差分测试（e2e `bm25_parity`）要求基准评分器与生产检索逐分一致（idf 全局 doc 数、fieldnorm 量化等） | 不可行。迁移等于重写离线评分器与全部 parity 测试 |
 
 其中"k1/b 可调 + 多字段加权 + 自定义分词"正是 fork tantivy 的直接原因，说明 tantivy 已是深度定制组件而非随意选型。

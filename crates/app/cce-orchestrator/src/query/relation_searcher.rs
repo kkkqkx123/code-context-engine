@@ -3,15 +3,18 @@
 //! Provides a unified interface for relation queries with pagination
 //! and error handling.
 
-use cce_relation::index::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
+use cce_relation::index::{
+    SnapshotEntityQueryOps, SnapshotHierarchyQueryOps, SnapshotRelationQueryOps,
+};
 use cce_relation::query::QueryCache;
 use cce_relation::{CallChainNode, CallChainQuery};
-use cce_types::{EntityId, ResolvedRelation, TestInfo, language::LanguageInfo};
+use cce_types::{EntityId, RelationType, ResolvedRelation, TestInfo, language::LanguageInfo};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::error::Result;
+use super::graph::GraphFilter;
 use super::types::ExcludableContentType;
 
 /// Relation query options
@@ -115,7 +118,7 @@ impl RelationQueryOptions {
         self
     }
 
-    /// Set whether external edges are kept.
+    /// Set whether edges pointing outside the project are kept.
     pub fn with_include_external(mut self, include: bool) -> Self {
         self.include_external = include;
         self
@@ -579,9 +582,9 @@ impl RelationSearcher {
         end_id: EntityId,
         options: &PathQueryOptions,
     ) -> Result<Option<Vec<CallChainNode>>> {
-        let result = self
-            .query
-            .find_call_chain(start_id, end_id, options.max_depth);
+        let result =
+            self.query
+                .find_call_chain(start_id, end_id, options.max_depth, options.max_nodes);
 
         let converted: std::result::Result<
             Option<Vec<CallChainNode>>,
@@ -589,6 +592,26 @@ impl RelationSearcher {
         > = result.map_err(Into::into);
 
         converted
+    }
+
+    /// Find call chain path crossing only edges accepted by the filter.
+    pub fn find_path_filtered(
+        &self,
+        start_id: EntityId,
+        end_id: EntityId,
+        options: &PathQueryOptions,
+        filter: &GraphFilter,
+    ) -> Result<Option<Vec<CallChainNode>>> {
+        self.query
+            .find_call_chain_in_domains(
+                start_id,
+                end_id,
+                options.max_depth,
+                options.max_nodes,
+                filter.relation_domains.clone(),
+                filter.include_external,
+            )
+            .map_err(Into::into)
     }
 
     // ========== Inheritance Queries ==========
@@ -613,13 +636,21 @@ impl RelationSearcher {
         self.query.get_implementing_classes(interface_id)
     }
 
-    /// Get inheritance hierarchy (all ancestors)
-    pub fn get_inheritance_hierarchy(&self, class_id: EntityId, max_depth: usize) -> Vec<EntityId> {
+    /// Get inheritance hierarchy (all ancestors), each with its hop distance.
+    pub fn get_inheritance_hierarchy(
+        &self,
+        class_id: EntityId,
+        max_depth: usize,
+    ) -> Vec<(EntityId, usize)> {
         self.query.get_inheritance_hierarchy(class_id, max_depth)
     }
 
-    /// Get all derived classes (transitive closure)
-    pub fn get_all_derived_classes(&self, class_id: EntityId, max_depth: usize) -> Vec<EntityId> {
+    /// Get all derived classes (transitive closure), each with its hop distance.
+    pub fn get_all_derived_classes(
+        &self,
+        class_id: EntityId,
+        max_depth: usize,
+    ) -> Vec<(EntityId, usize)> {
         self.query.get_all_derived_classes(class_id, max_depth)
     }
 
@@ -659,6 +690,9 @@ impl RelationSearcher {
         }
     }
 
+    /// Default traversal depth for inheritance closures.
+    pub const INHERITANCE_MAX_DEPTH: usize = 10;
+
     /// Get interface implementation hierarchy.
     pub fn get_interface_hierarchy(&self, interface_id: EntityId) -> InterfaceHierarchy {
         InterfaceHierarchy {
@@ -675,10 +709,11 @@ pub struct ModuleRelations {
     pub callers: Vec<String>,
 }
 
-/// Inheritance tree with ancestors and descendants.
+/// Inheritance tree with ancestors and descendants, each tagged with its hop
+/// distance from the queried class.
 pub struct InheritanceTree {
-    pub ancestors: Vec<EntityId>,
-    pub descendants: Vec<EntityId>,
+    pub ancestors: Vec<(EntityId, usize)>,
+    pub descendants: Vec<(EntityId, usize)>,
 }
 
 /// Interface hierarchy with implementors.
@@ -706,12 +741,214 @@ impl RelationSearcher {
 // ========== Impact Analysis ==========
 
 impl RelationSearcher {
+    /// Default traversal depth for impact analysis.
+    const IMPACT_MAX_DEPTH: usize = 10;
+
     /// Get change impact analysis for a file.
-    pub fn get_change_impact(
+    pub fn get_change_impact(&self, file_path: &str) -> cce_relation::ImpactAnalysis<String> {
+        self.query
+            .get_change_impact(file_path, Self::IMPACT_MAX_DEPTH)
+    }
+
+    /// Get change impact analysis for an entity.
+    pub fn get_entity_impact(
         &self,
-        file_path: &str,
-    ) -> cce_relation::dependency_graph::ImpactAnalysis {
-        self.query.get_change_impact(file_path)
+        entity_id: EntityId,
+        max_depth: usize,
+    ) -> cce_relation::ImpactAnalysis<EntityId> {
+        self.query.get_entity_impact(entity_id, max_depth)
+    }
+
+    /// Dependency cycles among entities.
+    pub fn find_entity_cycles(&self, max_cycles: usize) -> Vec<Vec<EntityId>> {
+        self.query.find_entity_cycles(max_cycles)
+    }
+
+    /// Dependency cycles among files.
+    pub fn find_file_cycles(&self, max_cycles: usize) -> Vec<Vec<String>> {
+        self.query.find_file_cycles(max_cycles)
+    }
+}
+
+// ========== Structural and Frontend Relations ==========
+
+/// Direction of a structural relation family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralDirection {
+    /// Counterparties this entity points at.
+    Outgoing,
+    /// Counterparties pointing at this entity.
+    Incoming,
+}
+
+/// One resolved structural or frontend relation.
+#[derive(Debug, Clone)]
+pub struct StructuralRelation {
+    pub entity_id: EntityId,
+    pub label: String,
+    pub relation_type: RelationType,
+}
+
+/// The structural / frontend relation families reachable from an entity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralKind {
+    /// Types carrying this entity as a trait bound.
+    TraitBound,
+    /// Child elements of a component or element.
+    ChildElements,
+    /// Parent of an element.
+    ParentElement,
+    /// Event handlers bound by an element.
+    EventHandlers,
+    /// Elements bound to an event handler.
+    HandlerElements,
+    /// Parameter (prop) bindings declared by a component.
+    ParameterBindings,
+    /// Template references issued by an element.
+    TemplateReferences,
+    /// Components issuing a template reference to this entity.
+    TemplateRefOwners,
+}
+
+impl StructuralKind {
+    /// Label used on the wire.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::TraitBound => "trait_bound",
+            Self::ChildElements => "child_elements",
+            Self::ParentElement => "parent_element",
+            Self::EventHandlers => "event_handlers",
+            Self::HandlerElements => "handler_elements",
+            Self::ParameterBindings => "parameter_bindings",
+            Self::TemplateReferences => "template_references",
+            Self::TemplateRefOwners => "template_ref_owners",
+        }
+    }
+
+    /// Parse a wire label.
+    pub fn parse(label: &str) -> Option<Self> {
+        match label {
+            "trait_bound" => Some(Self::TraitBound),
+            "child_elements" => Some(Self::ChildElements),
+            "parent_element" => Some(Self::ParentElement),
+            "event_handlers" => Some(Self::EventHandlers),
+            "handler_elements" => Some(Self::HandlerElements),
+            "parameter_bindings" => Some(Self::ParameterBindings),
+            "template_references" => Some(Self::TemplateReferences),
+            "template_ref_owners" => Some(Self::TemplateRefOwners),
+            _ => None,
+        }
+    }
+
+    /// All accepted labels, in documentation order.
+    pub fn labels() -> &'static [&'static str] {
+        &[
+            "trait_bound",
+            "child_elements",
+            "parent_element",
+            "event_handlers",
+            "handler_elements",
+            "parameter_bindings",
+            "template_references",
+            "template_ref_owners",
+        ]
+    }
+}
+
+impl RelationSearcher {
+    /// Resolve one structural / frontend relation family for an entity.
+    ///
+    /// Families with several edges per pair (`event_handlers`,
+    /// `parameter_bindings`, `template_references`) keep one entry per edge;
+    /// the rest collapse to distinct counterparties.
+    pub fn structural_relations(
+        &self,
+        entity_id: EntityId,
+        kind: StructuralKind,
+        direction: StructuralDirection,
+    ) -> Vec<StructuralRelation> {
+        use cce_relation::index::snapshot_query::SnapshotFrontendQueryOps;
+
+        let index = self.query.index();
+        let outgoing = |relations: Vec<cce_types::ResolvedRelation>| {
+            relations
+                .into_iter()
+                .filter_map(|relation| {
+                    relation.callee_id.map(|callee| StructuralRelation {
+                        entity_id: callee,
+                        label: relation.callee_name,
+                        relation_type: relation.relation_type,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let incoming = |ids: Vec<EntityId>, relation_type: RelationType| {
+            ids.into_iter()
+                .map(|id| StructuralRelation {
+                    entity_id: id,
+                    label: index
+                        .get_function_by_entity_id(id)
+                        .map(|entity| entity.name)
+                        .unwrap_or_default(),
+                    relation_type,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        match (kind, direction) {
+            (StructuralKind::TraitBound, _) => incoming(
+                index.get_types_with_trait_bound(entity_id),
+                RelationType::TraitBound,
+            ),
+            (StructuralKind::ChildElements, StructuralDirection::Outgoing) => incoming(
+                index.get_child_elements(entity_id),
+                RelationType::ElementContains,
+            ),
+            (StructuralKind::ChildElements, StructuralDirection::Incoming) => outgoing(
+                index.get_relations_from_entity_by_type(entity_id, RelationType::ElementContains),
+            ),
+            (StructuralKind::ParentElement, StructuralDirection::Outgoing) => incoming(
+                index.get_parent_element(entity_id),
+                RelationType::ElementContains,
+            ),
+            (StructuralKind::ParentElement, StructuralDirection::Incoming) => outgoing(
+                index.get_relations_to_entity_by_type(entity_id, RelationType::ElementContains),
+            ),
+            (StructuralKind::EventHandlers, StructuralDirection::Outgoing) => {
+                outgoing(index.get_event_handlers(entity_id))
+            }
+            (StructuralKind::EventHandlers, StructuralDirection::Incoming) => incoming(
+                index.get_elements_by_handler(entity_id),
+                RelationType::EventCallback,
+            ),
+            (StructuralKind::HandlerElements, StructuralDirection::Outgoing) => incoming(
+                index.get_elements_by_handler(entity_id),
+                RelationType::EventCallback,
+            ),
+            (StructuralKind::HandlerElements, StructuralDirection::Incoming) => {
+                outgoing(index.get_event_handlers(entity_id))
+            }
+            (StructuralKind::ParameterBindings, StructuralDirection::Outgoing) => {
+                outgoing(index.get_parameter_bindings(entity_id))
+            }
+            (StructuralKind::ParameterBindings, StructuralDirection::Incoming) => outgoing(
+                index.get_relations_to_entity_by_type(entity_id, RelationType::ParameterBinding),
+            ),
+            (StructuralKind::TemplateReferences, StructuralDirection::Outgoing) => {
+                outgoing(index.get_template_references(entity_id))
+            }
+            (StructuralKind::TemplateReferences, StructuralDirection::Incoming) => incoming(
+                index.get_elements_by_template_ref(entity_id),
+                RelationType::TemplateReference,
+            ),
+            (StructuralKind::TemplateRefOwners, StructuralDirection::Outgoing) => incoming(
+                index.get_elements_by_template_ref(entity_id),
+                RelationType::TemplateReference,
+            ),
+            (StructuralKind::TemplateRefOwners, StructuralDirection::Incoming) => {
+                outgoing(index.get_template_references(entity_id))
+            }
+        }
     }
 }
 

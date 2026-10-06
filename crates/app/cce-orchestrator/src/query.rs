@@ -141,12 +141,15 @@ pub use error::{QueryError, Result};
 pub use searcher::{Searcher, SearcherBuilder};
 
 // Re-export relation searcher
-pub use relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationSearcher};
+pub use relation_searcher::{
+    PathQueryOptions, RelationQueryOptions, RelationSearcher, StructuralDirection, StructuralKind,
+    StructuralRelation,
+};
 
 // Re-export graph path
 pub use graph::{
     Confidence, GraphDirection, GraphEdge, GraphFilter, GraphNode, GraphPagination, GraphService,
-    PagedSubGraph, SubGraph,
+    PagedComponents, PagedSubGraph, SubGraph, relation_domain,
 };
 
 // Re-export query coordinator

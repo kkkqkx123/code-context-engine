@@ -45,7 +45,7 @@ use super::snapshot_generation::{CoWSnapshotGuard, SnapshotGeneration};
 use super::stores::FileRecord;
 use super::stores::diagnostics::RelationDiagnostics;
 
-use crate::dependency_graph::{EntityDependencyGraph, FileDependencyGraph};
+use crate::dependency_graph::FileDependencyGraph;
 use crate::index::snapshot_index::RelationSnapshotIndex;
 use crate::index::view::{RelationIndexView, active_file_set};
 use cce_metrics::domain::pipeline::RelationMetrics;
@@ -160,7 +160,6 @@ pub struct RelationIndex {
     pub dependency_graph: Arc<FileDependencyGraph>,
 
     /// Entity-level dependency graph for precise impact analysis.
-    pub entity_dependency_graph: Arc<RwLock<EntityDependencyGraph>>,
 
     /// Symbol key -> EntityId mapping (stable cross-session identifier)
     /// Populated during index building and snapshot loading.
@@ -217,7 +216,6 @@ impl Clone for RelationIndex {
             file_callers_by_callee: Arc::clone(&self.file_callers_by_callee),
             file_records: Arc::clone(&self.file_records),
             dependency_graph: Arc::clone(&self.dependency_graph),
-            entity_dependency_graph: Arc::clone(&self.entity_dependency_graph),
             symbol_key_to_entity: Arc::clone(&self.symbol_key_to_entity),
             entity_to_symbol_key: Arc::clone(&self.entity_to_symbol_key),
             stable_id_to_entity: Arc::clone(&self.stable_id_to_entity),
@@ -254,7 +252,6 @@ impl RelationIndex {
             file_callers_by_callee: Arc::new(DashMap::new()),
             file_records: Arc::new(RwLock::new(HashMap::new())),
             dependency_graph: Arc::new(FileDependencyGraph::new()),
-            entity_dependency_graph: Arc::new(RwLock::new(EntityDependencyGraph::new())),
             symbol_key_to_entity: Arc::new(RwLock::new(HashMap::new())),
             entity_to_symbol_key: Arc::new(RwLock::new(HashMap::new())),
             stable_id_to_entity: Arc::new(RwLock::new(HashMap::new())),
@@ -584,9 +581,6 @@ impl RelationIndex {
             file_callers_by_callee: cloned_relations.file_callers_by_callee,
             file_records: cloned_files.file_records,
             dependency_graph: Arc::new((*self.dependency_graph).clone()),
-            entity_dependency_graph: Arc::new(RwLock::new(
-                self.entity_dependency_graph.read().clone(),
-            )),
             symbol_key_to_entity: cloned_symbols.symbol_key_to_entity,
             entity_to_symbol_key: cloned_symbols.entity_to_symbol_key,
             stable_id_to_entity: cloned_symbols.stable_id_to_entity,
@@ -643,9 +637,6 @@ impl RelationIndex {
 
         let dependency_graph = Arc::new((*self.dependency_graph).clone());
         self.dependency_graph = Arc::new(FileDependencyGraph::new());
-        let entity_dependency_graph =
-            Arc::new(RwLock::new(self.entity_dependency_graph.read().clone()));
-        *self.entity_dependency_graph.write() = EntityDependencyGraph::new();
 
         // Take diagnostics counters and samples.
         let diagnostics = Arc::new(RelationDiagnostics::new());
@@ -697,7 +688,6 @@ impl RelationIndex {
             file_callers_by_callee,
             file_records,
             dependency_graph,
-            entity_dependency_graph,
             symbol_key_to_entity,
             entity_to_symbol_key,
             stable_id_to_entity,
@@ -802,7 +792,6 @@ impl RelationIndex {
     pub fn add_resolved_relation(&self, relation: ResolvedRelation) {
         let caller = relation.caller;
         let callee = relation.callee_id;
-        let rel_type = relation.relation_type;
 
         // Insert into forward index (caller -> edges). The entry guard is
         // dropped before we touch the reverse index to avoid a deadlock
@@ -819,12 +808,6 @@ impl RelationIndex {
         }
 
         self.bump_version();
-
-        // Build entity-level dependency graph incrementally.
-        if let Some(callee_id) = callee {
-            let mut graph = self.entity_dependency_graph.write();
-            graph.add_dependency(caller, callee_id, rel_type);
-        }
     }
 
     /// Add multiple resolved relations
@@ -1202,7 +1185,6 @@ impl RelationIndex {
             .store(0, Ordering::Relaxed);
         self.file_symbol_keys.write().clear();
         self.file_entities_by_start.write().clear();
-        self.entity_dependency_graph.write().clear();
         self.dependency_graph.clear();
     }
 }

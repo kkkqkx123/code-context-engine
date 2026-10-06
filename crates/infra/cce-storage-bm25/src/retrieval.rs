@@ -310,23 +310,18 @@ impl Bm25Retrieval {
     ) -> Box<dyn tantivy::query::Query> {
         let (phrase_segments, remaining) = extract_phrases(query_text);
         let mut clauses: Vec<(tantivy::query::Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
-        let mut doc_freq_cache: HashMap<String, u64> = HashMap::new();
 
         for phrase in phrase_segments {
-            let phrase_query = build_phrase_query(
-                &phrase,
-                schema,
-                &mut tokenizer,
-                searcher,
-                &mut doc_freq_cache,
-            );
+            let phrase_query = build_phrase_query(&phrase, schema, &mut tokenizer, searcher);
             if let Some(q) = phrase_query {
                 clauses.push((occur_for(operator), q));
             }
         }
 
         let tokens = collect_tokens(&mut tokenizer, &remaining);
-        for (token, scale) in expand_query_tokens(&tokens, schema, searcher, &mut doc_freq_cache) {
+        for (token, scale) in
+            expand_query_tokens(&tokens, |text| field_doc_freq(searcher, schema, text))
+        {
             let Some(clause) = build_token_query_with_scale(
                 token,
                 schema,
@@ -440,11 +435,10 @@ fn build_phrase_query(
     schema: &IndexSchema,
     tokenizer: &mut TextAnalyzer,
     searcher: &tantivy::Searcher,
-    doc_freq_cache: &mut HashMap<String, u64>,
 ) -> Option<Box<dyn tantivy::query::Query>> {
     let tokens = collect_tokens(tokenizer, phrase);
     let expanded_terms: Vec<String> =
-        expand_query_tokens(&tokens, schema, searcher, doc_freq_cache)
+        expand_query_tokens(&tokens, |text| field_doc_freq(searcher, schema, text))
             .into_iter()
             .map(|(token, _)| token.text)
             .collect();
@@ -525,30 +519,37 @@ fn is_query_stopword(text: &str) -> bool {
     matches!(text, "method" | "on" | "in" | "constructor" | "function")
 }
 
-fn whole_term_doc_freq(
-    searcher: &tantivy::Searcher,
-    schema: &IndexSchema,
-    text: &str,
-    cache: &mut HashMap<String, u64>,
-) -> u64 {
-    if let Some(&cached) = cache.get(text) {
-        return cached;
-    }
+fn field_doc_freq(searcher: &tantivy::Searcher, schema: &IndexSchema, text: &str) -> u64 {
     let mut total = 0u64;
     for field in [schema.title, schema.content, schema.keywords] {
         let term = tantivy::Term::from_field_text(field, text);
         total += searcher.doc_freq(&term).unwrap_or(0);
     }
+    total
+}
+
+fn whole_term_doc_freq<D>(doc_freq: &mut D, cache: &mut HashMap<String, u64>, text: &str) -> u64
+where
+    D: FnMut(&str) -> u64,
+{
+    if let Some(&cached) = cache.get(text) {
+        return cached;
+    }
+    let total = doc_freq(text);
     cache.insert(text.to_string(), total);
     total
 }
 
-fn expand_query_tokens(
-    tokens: &[MixedToken],
-    schema: &IndexSchema,
-    searcher: &tantivy::Searcher,
-    doc_freq_cache: &mut HashMap<String, u64>,
-) -> Vec<(MixedToken, f32)> {
+/// Expand tokenizer output into production BM25 query clauses.
+///
+/// The caller supplies a document-frequency callback for the indexed BM25
+/// text fields. Split tokens are auxiliary matches: they are down-weighted when
+/// the whole token exists, promoted when only the split parts are indexed, and
+/// emitted at half weight when no whole token is present.
+pub fn expand_query_tokens<D>(tokens: &[MixedToken], mut doc_freq: D) -> Vec<(MixedToken, f32)>
+where
+    D: FnMut(&str) -> u64,
+{
     use std::collections::BTreeMap;
 
     let mut by_position: BTreeMap<u32, Vec<&MixedToken>> = BTreeMap::new();
@@ -560,6 +561,7 @@ fn expand_query_tokens(
     }
 
     let mut expanded = Vec::new();
+    let mut cache: HashMap<String, u64> = HashMap::new();
     for (_, group) in by_position {
         let whole = group.iter().find(|t| t.position_length == 1).copied();
         let splits: Vec<&MixedToken> = group
@@ -572,7 +574,7 @@ fn expand_query_tokens(
             if is_query_stopword(whole_token.text.as_str()) {
                 continue;
             }
-            if whole_term_doc_freq(searcher, schema, whole_token.text.as_str(), doc_freq_cache) == 0
+            if whole_term_doc_freq(&mut doc_freq, &mut cache, whole_token.text.as_str()) == 0
                 && !splits.is_empty()
             {
                 for split in splits {

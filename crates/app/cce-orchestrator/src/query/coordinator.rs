@@ -935,12 +935,12 @@ impl QueryCoordinator {
             .get_implementing_classes(interface_id))
     }
 
-    /// Get inheritance hierarchy (all ancestors)
+    /// Get inheritance hierarchy (all ancestors), each with its hop distance.
     pub fn get_inheritance_hierarchy(
         &self,
         class_id: cce_types::EntityId,
         max_depth: usize,
-    ) -> Result<Vec<cce_types::EntityId>> {
+    ) -> Result<Vec<(cce_types::EntityId, usize)>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }
@@ -949,12 +949,12 @@ impl QueryCoordinator {
             .get_inheritance_hierarchy(class_id, max_depth))
     }
 
-    /// Get all derived classes (transitive closure)
+    /// Get all derived classes (transitive closure), each with its hop distance.
     pub fn get_all_derived_classes(
         &self,
         class_id: cce_types::EntityId,
         max_depth: usize,
-    ) -> Result<Vec<cce_types::EntityId>> {
+    ) -> Result<Vec<(cce_types::EntityId, usize)>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }

@@ -196,8 +196,6 @@ impl RelationIndex {
         }
 
         let dependency_graph = Arc::new((*self.dependency_graph).clone());
-        let entity_dependency_graph =
-            Arc::new(RwLock::new(self.entity_dependency_graph.read().clone()));
 
         Self {
             function_index,
@@ -209,7 +207,6 @@ impl RelationIndex {
             file_callers_by_callee,
             file_records,
             dependency_graph,
-            entity_dependency_graph,
             symbol_key_to_entity,
             entity_to_symbol_key,
             stable_id_to_entity,

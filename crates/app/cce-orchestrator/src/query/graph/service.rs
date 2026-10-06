@@ -16,8 +16,8 @@ use cce_relation::index::{
 use cce_types::{Entity, EntityId, Span};
 
 use super::model::{
-    Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedSubGraph, SubGraph,
-    confidence_of, kind_label, relation_domain,
+    Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedComponents, PagedSubGraph,
+    SubGraph, confidence_of, kind_label, relation_domain,
 };
 use crate::query::error::{QueryError, Result};
 use crate::query::relation_searcher::{PathQueryOptions, RelationSearcher};
@@ -85,14 +85,32 @@ impl GraphService {
     /// A missing endpoint is reported as no path (`Ok(None)`) rather than an
     /// error, matching the graph contract where reachability is the question.
     /// Edges preserve the true relation type and call context from traversal.
+    ///
+    /// The filter constrains traversal itself, not just the returned edges:
+    /// an edge the filter rejects is never crossed, so `domains=call` yields a
+    /// call-only path rather than a path trimmed after the fact.
     pub fn shortest_path(
         &self,
         start: EntityId,
         end: EntityId,
         max_depth: usize,
     ) -> Result<Option<SubGraph>> {
+        self.shortest_path_with_options(start, end, max_depth, &GraphFilter::allow_all())
+    }
+
+    /// Shortest path with relation filtering.
+    pub fn shortest_path_with_options(
+        &self,
+        start: EntityId,
+        end: EntityId,
+        max_depth: usize,
+        filter: &GraphFilter,
+    ) -> Result<Option<SubGraph>> {
         let options = PathQueryOptions::new().with_max_depth(max_depth);
-        let nodes = match self.searcher.find_path(start, end, &options) {
+        let nodes = match self
+            .searcher
+            .find_path_filtered(start, end, &options, filter)
+        {
             Ok(nodes) => nodes,
             Err(QueryError::Relation(RelationQueryError::NotFound(_))) => return Ok(None),
             Err(other) => return Err(other),
@@ -149,7 +167,28 @@ impl GraphService {
     }
 
     /// Connected components over internal edges (union-find).
+    ///
+    /// Unfiltered and uncapped; prefer [`Self::connected_components_with_options`]
+    /// on projects large enough for the whole component list to matter.
     pub fn connected_components(&self) -> Result<Vec<Vec<EntityId>>> {
+        Ok(self
+            .connected_components_with_options(
+                &GraphFilter::allow_all(),
+                GraphPagination::default(),
+            )?
+            .components)
+    }
+
+    /// Connected components with relation filtering and pagination.
+    ///
+    /// Only edges accepted by the filter join two entities into the same
+    /// component, so `domains=call` yields the call-graph decomposition rather
+    /// than the same partition with cosmetic changes.
+    pub fn connected_components_with_options(
+        &self,
+        filter: &GraphFilter,
+        pagination: GraphPagination,
+    ) -> Result<PagedComponents> {
         let index = self.searcher.query().index();
         let mut parent: HashMap<EntityId, EntityId> = HashMap::new();
         index.for_each_function(|id, _| {
@@ -165,6 +204,9 @@ impl GraphService {
         }
         index.for_each_resolved_relation(|caller, relations| {
             for relation in relations {
+                if !Self::relation_passes_filter(relation, filter) {
+                    continue;
+                }
                 if let Some(callee) = relation.callee_id {
                     if parent.contains_key(&caller) && parent.contains_key(&callee) {
                         let a = find(&mut parent, caller);
@@ -186,8 +228,24 @@ impl GraphService {
         for component in &mut components {
             component.sort();
         }
-        components.sort_by_key(|component| component.first().copied());
-        Ok(components)
+        // Largest first so a truncated page keeps the structurally significant
+        // components; ties break on the smallest member for determinism.
+        components.sort_by(|left, right| {
+            right
+                .len()
+                .cmp(&left.len())
+                .then_with(|| left.first().cmp(&right.first()))
+        });
+        let total = components.len();
+        let components = components
+            .into_iter()
+            .skip(pagination.offset)
+            .take(pagination.limit)
+            .collect();
+        Ok(PagedComponents {
+            components,
+            total_components: total,
+        })
     }
 
     /// Ego neighborhood with relation filtering and pagination.
@@ -282,18 +340,29 @@ impl GraphService {
 }
 
 /// Apply relation filtering then pagination to a materialized subgraph.
+///
+/// Pagination addresses nodes only. The returned edges are every filtered edge
+/// induced on the returned node page, so each page is a self-consistent
+/// subgraph a client can render without stitching pages together. Offsetting
+/// and limiting the edge list independently would both break that invariant
+/// (a page could carry edges pointing at absent nodes) and silently drop
+/// every edge on any page past the first.
+///
+/// `total_nodes` counts filtered nodes before pagination; `total_edges` counts
+/// filtered edges over that whole node set, i.e. the edges the full graph
+/// would yield.
 fn paginate_graph(
     graph: SubGraph,
     filter: &GraphFilter,
     pagination: GraphPagination,
 ) -> PagedSubGraph {
-    let edges: Vec<GraphEdge> = graph
+    let filtered_edges: Vec<GraphEdge> = graph
         .edges
         .into_iter()
         .filter(|edge| filter.matches_edge(edge))
         .collect();
     let total_nodes = graph.nodes.len();
-    let total_edges = edges.len();
+    let total_edges = filtered_edges.len();
     let nodes: Vec<GraphNode> = graph
         .nodes
         .into_iter()
@@ -301,13 +370,11 @@ fn paginate_graph(
         .take(pagination.limit)
         .collect();
     let surviving: HashSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
-    let edges: Vec<GraphEdge> = edges
+    let edges: Vec<GraphEdge> = filtered_edges
         .into_iter()
         .filter(|edge| {
             surviving.contains(edge.source.as_str()) && surviving.contains(edge.target.as_str())
         })
-        .skip(pagination.offset)
-        .take(pagination.limit)
         .collect();
     PagedSubGraph {
         nodes,
@@ -543,11 +610,272 @@ fn location_of(span: &Span) -> String {
 mod tests {
     use super::*;
     use cce_relation::CallChainQuery;
+    use cce_types::{Entity, EntityKind, RelationType, Span};
+    use std::collections::HashMap;
 
     fn empty_service() -> GraphService {
         GraphService::new(Arc::new(RelationSearcher::new(Arc::new(
             CallChainQuery::new(),
         ))))
+    }
+
+    fn entity(id: u64, name: &str) -> Entity {
+        Entity {
+            id: EntityId(id),
+            kind: EntityKind::Function,
+            name: name.to_string(),
+            signature: String::new(),
+            parameters: Vec::new(),
+            return_type: None,
+            span: Span::default(),
+            depth: 0,
+            parent: None,
+            children: Vec::new(),
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: HashMap::new(),
+            metadata: HashMap::new(),
+            is_stdlib: false,
+            subtype: None,
+            stdlib_category: None,
+        }
+    }
+
+    /// Service over a chain `a -> b -> c -> d` of direct calls.
+    fn chain_service() -> GraphService {
+        use cce_relation::index::EntityIndexOps;
+
+        let index = cce_relation::CallChainQuery::from_index({
+            let base = cce_relation::RelationIndex::new();
+            for (id, name) in [(1u64, "a"), (2, "b"), (3, "c"), (4, "d")] {
+                base.add_function_with_path(EntityId(id), entity(id, name), "src/lib.rs".into());
+            }
+            for (from, to) in [(1u64, 2u64), (2, 3), (3, 4)] {
+                base.add_resolved_relation(cce_types::ResolvedRelation {
+                    caller: EntityId(from),
+                    callee_id: Some(EntityId(to)),
+                    callee_name: format!("fn{to}"),
+                    relation_type: RelationType::DirectCall,
+                    span: Span::default(),
+                    is_external: false,
+                    external_type: None,
+                    callee_symbol: None,
+                    stdlib_category: None,
+                    owner_type: None,
+                    call_context: cce_types::relation::CallContext::Direct,
+                    overload_signature: None,
+                });
+            }
+            base
+        });
+        GraphService::new(Arc::new(RelationSearcher::new(Arc::new(index))))
+    }
+
+    #[test]
+    fn pagination_addresses_nodes_only() {
+        // Two independent edges over four nodes.
+        let graph = SubGraph {
+            nodes: (0..4)
+                .map(|index| GraphNode {
+                    id: format!("n{index}"),
+                    label: format!("n{index}"),
+                    kind: "function".to_string(),
+                    source_file: String::new(),
+                    source_location: String::new(),
+                    scoped_name: None,
+                    signature: None,
+                })
+                .collect(),
+            edges: vec![
+                edge("n0", "n1", "call.direct"),
+                edge("n2", "n3", "call.direct"),
+            ],
+        };
+
+        let page = paginate_graph(
+            graph,
+            &GraphFilter::allow_all(),
+            GraphPagination {
+                offset: 0,
+                limit: 2,
+            },
+        );
+        assert_eq!(page.total_nodes, 4);
+        assert_eq!(page.total_edges, 2);
+        assert_eq!(page.nodes.len(), 2);
+        // Every edge on the page is retained: the edge list follows the node
+        // page instead of being offset independently.
+        assert_eq!(page.edges.len(), 1);
+        assert_eq!(page.edges[0].source, "n0");
+
+        let page = paginate_graph(
+            SubGraph {
+                nodes: (0..4)
+                    .map(|index| GraphNode {
+                        id: format!("n{index}"),
+                        label: format!("n{index}"),
+                        kind: "function".to_string(),
+                        source_file: String::new(),
+                        source_location: String::new(),
+                        scoped_name: None,
+                        signature: None,
+                    })
+                    .collect(),
+                edges: vec![
+                    edge("n0", "n1", "call.direct"),
+                    edge("n2", "n3", "call.direct"),
+                ],
+            },
+            &GraphFilter::allow_all(),
+            GraphPagination {
+                offset: 2,
+                limit: 2,
+            },
+        );
+        assert_eq!(page.nodes.len(), 2);
+        assert_eq!(page.edges.len(), 1);
+        assert_eq!(page.edges[0].source, "n2");
+    }
+
+    #[test]
+    fn pagination_never_yields_dangling_edges() {
+        let graph = SubGraph {
+            nodes: (0..3)
+                .map(|index| GraphNode {
+                    id: format!("n{index}"),
+                    label: format!("n{index}"),
+                    kind: "function".to_string(),
+                    source_file: String::new(),
+                    source_location: String::new(),
+                    scoped_name: None,
+                    signature: None,
+                })
+                .collect(),
+            edges: vec![
+                edge("n0", "n1", "call.direct"),
+                edge("n1", "n2", "call.direct"),
+            ],
+        };
+        let page = paginate_graph(
+            graph,
+            &GraphFilter::allow_all(),
+            GraphPagination {
+                offset: 0,
+                limit: 1,
+            },
+        );
+        let present: HashSet<&str> = page.nodes.iter().map(|node| node.id.as_str()).collect();
+        for edge in &page.edges {
+            assert!(present.contains(edge.source.as_str()));
+            assert!(present.contains(edge.target.as_str()));
+        }
+    }
+
+    #[test]
+    fn filtered_path_refuses_to_cross_filtered_domains() {
+        let service = chain_service();
+        // The chain is call-only, so restricting to the structural domain
+        // leaves no traversable edge and no path.
+        let structural_only = GraphFilter {
+            relation_domains: vec!["structural".to_string()],
+            include_external: true,
+        };
+        assert!(
+            service
+                .shortest_path_with_options(EntityId(1), EntityId(4), 5, &structural_only)
+                .expect("path")
+                .is_none()
+        );
+        // Unfiltered, the same query resolves.
+        assert!(
+            service
+                .shortest_path(EntityId(1), EntityId(4), 5)
+                .expect("path")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn components_are_ordered_largest_first() {
+        let service = chain_service();
+        let paged = service
+            .connected_components_with_options(
+                &GraphFilter::allow_all(),
+                GraphPagination {
+                    offset: 0,
+                    limit: 10,
+                },
+            )
+            .expect("components");
+        assert_eq!(paged.total_components, 1);
+        assert_eq!(paged.components.len(), 1);
+        assert_eq!(paged.components[0].len(), 4);
+    }
+
+    #[test]
+    fn components_pagination_reports_totals() {
+        let service = chain_service();
+        let paged = service
+            .connected_components_with_options(
+                &GraphFilter::allow_all(),
+                GraphPagination {
+                    offset: 5,
+                    limit: 10,
+                },
+            )
+            .expect("components");
+        assert_eq!(paged.total_components, 1);
+        assert!(paged.components.is_empty());
+    }
+
+    #[test]
+    fn domain_filter_splits_components() {
+        // An inheritance edge between two of the chain's functions must not
+        // join them into one component once `domains=call` is applied.
+        let service = {
+            use cce_relation::index::EntityIndexOps;
+
+            let base = cce_relation::RelationIndex::new();
+            for (id, name) in [(1u64, "a"), (2, "b")] {
+                base.add_function_with_path(EntityId(id), entity(id, name), "src/lib.rs".into());
+            }
+            base.add_resolved_relation(cce_types::ResolvedRelation {
+                caller: EntityId(1),
+                callee_id: Some(EntityId(2)),
+                callee_name: "b".to_string(),
+                relation_type: RelationType::Inheritance,
+                span: Span::default(),
+                is_external: false,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: cce_types::relation::CallContext::Direct,
+                overload_signature: None,
+            });
+            GraphService::new(Arc::new(RelationSearcher::new(Arc::new(
+                CallChainQuery::from_index(base),
+            ))))
+        };
+        let all = GraphFilter::allow_all();
+        assert_eq!(
+            service
+                .connected_components_with_options(&all, GraphPagination::default())
+                .expect("components")
+                .total_components,
+            1
+        );
+        let calls_only = GraphFilter {
+            relation_domains: vec!["call".to_string()],
+            include_external: true,
+        };
+        assert_eq!(
+            service
+                .connected_components_with_options(&calls_only, GraphPagination::default())
+                .expect("components")
+                .total_components,
+            2
+        );
     }
 
     #[test]
@@ -589,5 +917,17 @@ mod tests {
         assert_eq!(location_of(&Span::unavailable()), String::new());
         let span = Span::new(0, 10, 41, 0, 41, 10);
         assert_eq!(location_of(&span), "L42");
+    }
+
+    fn edge(source: &str, target: &str, relation: &str) -> GraphEdge {
+        GraphEdge {
+            source: source.to_string(),
+            target: target.to_string(),
+            relation: relation.to_string(),
+            domain: "call".to_string(),
+            confidence: Confidence::Extracted,
+            call_context: Some("direct".to_string()),
+            is_external: false,
+        }
     }
 }

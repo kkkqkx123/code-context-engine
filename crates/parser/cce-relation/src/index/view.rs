@@ -424,21 +424,11 @@ impl RelationIndexView for RelationIndex {
     }
 
     fn callers_of(&self, callee: EntityId) -> Vec<EntityId> {
-        if let Some(callers) = self.reverse_callee_index.get(&callee) {
-            return callers.clone();
-        }
-        if let Some(entry) = self.resolved_relation_index.get(&callee) {
-            let callers = entry.callers();
-            if !callers.is_empty() {
-                return callers.to_vec();
-            }
-        }
-        let mut result: Vec<EntityId> = self
-            .resolved_relation_index
-            .iter()
-            .filter(|entry| entry.value().iter().any(|r| r.callee_id == Some(callee)))
-            .map(|entry| *entry.key())
-            .collect();
+        // The reverse map is authoritative; a miss means no callers.
+        let Some(callers) = self.reverse_callee_index.get(&callee) else {
+            return Vec::new();
+        };
+        let mut result = callers.clone();
         result.sort();
         result.dedup();
         result

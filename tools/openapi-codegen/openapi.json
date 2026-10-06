@@ -1883,6 +1883,24 @@
             }
           },
           {
+            "name": "domains",
+            "in": "query",
+            "description": "Keep only relations in these coarse domains (`call`, `dependency`,\n`structural`, `reference`, `template`, `other`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "description": "Whether relations pointing outside the project are kept.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "project_id",
             "in": "path",
             "description": "Project id",
@@ -2367,6 +2385,24 @@
             }
           },
           {
+            "name": "domains",
+            "in": "query",
+            "description": "Keep only relations in these coarse domains (`call`, `dependency`,\n`structural`, `reference`, `template`, `other`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "description": "Whether relations pointing outside the project are kept.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "project_id",
             "in": "path",
             "description": "Project id",
@@ -2506,6 +2542,24 @@
             }
           },
           {
+            "name": "domains",
+            "in": "query",
+            "description": "Keep only relations in these coarse domains (`call`, `dependency`,\n`structural`, `reference`, `template`, `other`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "description": "Whether relations pointing outside the project are kept.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "project_id",
             "in": "path",
             "description": "Project id",
@@ -2588,6 +2642,40 @@
         "operationId": "handle_graph_components",
         "parameters": [
           {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "domains",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "project_id",
             "in": "path",
             "description": "Project id",
@@ -2605,6 +2693,98 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GraphComponentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/graph/cycles": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Handle dependency cycle request.",
+        "description": "Reports cycles in the call graph (`level=entity`) or in the file dependency\ngraph (`level=file`).",
+        "operationId": "handle_graph_cycles",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "description": "`entity` or `file`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphCyclesResponse"
                 }
               }
             }
@@ -2737,6 +2917,97 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GraphSubgraphResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/graph/entity-impact": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Handle entity impact request.",
+        "description": "Reports which entities break when one entity changes, split into disjoint\nfirst-hop callers and deeper callers.",
+        "operationId": "handle_graph_entity_impact",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphEntityImpactResponse"
                 }
               }
             }
@@ -2972,6 +3243,88 @@
         }
       }
     },
+    "/api/project/{project_id}/graph/module": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Handle file module relations request.",
+        "description": "Reports what a file pulls in (module-level imports/uses), what it exposes\n(exports), and which files reach into it.",
+        "operationId": "handle_graph_module",
+        "parameters": [
+          {
+            "name": "file",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphModuleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/project/{project_id}/graph/path": {
       "get": {
         "tags": [
@@ -3006,6 +3359,22 @@
             }
           },
           {
+            "name": "domains",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_external",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "project_id",
             "in": "path",
             "description": "Project id",
@@ -3023,6 +3392,115 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GraphPathResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/graph/structural": {
+      "get": {
+        "tags": [
+          "Graph"
+        ],
+        "summary": "Handle structural / frontend relation request.",
+        "description": "Typed access to the relation families that the generic `domains` filter can\nonly approximate: Rust trait bounds and the markup relation set (element\ncontainment, event callbacks, parameter bindings, template references).",
+        "operationId": "handle_graph_structural",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Relation family: `trait_bound`, `child_elements`, `parent_element`,\n`event_handlers`, `handler_elements`, `parameter_bindings`,\n`template_references`, `template_ref_owners`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "`out` follows the family forward, `in` follows it in reverse.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphStructuralResponse"
                 }
               }
             }
@@ -6822,6 +7300,65 @@
           "relation_info": {},
           "success": {
             "type": "boolean"
+          },
+          "total_components": {
+            "type": "integer",
+            "description": "Component count before pagination.",
+            "minimum": 0
+          }
+        }
+      },
+      "GraphCycle": {
+        "type": "object",
+        "description": "One dependency cycle: the members in traversal order, last member calling\nback into the first.",
+        "required": [
+          "members"
+        ],
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Stable symbol ids for `level=entity`, project paths for `level=file`."
+          }
+        }
+      },
+      "GraphCyclesResponse": {
+        "type": "object",
+        "description": "Dependency cycles response.",
+        "required": [
+          "success",
+          "relation_epoch",
+          "level",
+          "cycles"
+        ],
+        "properties": {
+          "cycles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphCycle"
+            }
+          },
+          "level": {
+            "type": "string"
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {},
+          "success": {
+            "type": "boolean"
+          },
+          "total_cycles": {
+            "type": "integer",
+            "description": "Cycle count reported, before the `limit` cap.",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether more cycles exist than were reported."
           }
         }
       },
@@ -6865,6 +7402,49 @@
           }
         }
       },
+      "GraphEntityImpactResponse": {
+        "type": "object",
+        "description": "Entity impact response.",
+        "required": [
+          "success",
+          "relation_epoch",
+          "changed_entity",
+          "direct_dependents",
+          "indirect_dependents",
+          "impact_score"
+        ],
+        "properties": {
+          "changed_entity": {
+            "type": "string"
+          },
+          "direct_dependents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Callers exactly one hop away."
+          },
+          "impact_score": {
+            "type": "number",
+            "format": "double"
+          },
+          "indirect_dependents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Callers two or more hops away; disjoint from `direct_dependents`."
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {},
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
       "GraphImpactResponse": {
         "type": "object",
         "description": "File impact response.",
@@ -6873,7 +7453,7 @@
           "relation_epoch",
           "changed_file",
           "direct_dependents",
-          "transitive_dependents",
+          "indirect_dependents",
           "impact_score"
         ],
         "properties": {
@@ -6884,11 +7464,19 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Dependents exactly one hop away."
           },
           "impact_score": {
             "type": "number",
             "format": "double"
+          },
+          "indirect_dependents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Dependents two or more hops away; disjoint from `direct_dependents`."
           },
           "relation_epoch": {
             "type": "integer",
@@ -6897,12 +7485,52 @@
           "relation_info": {},
           "success": {
             "type": "boolean"
-          },
-          "transitive_dependents": {
+          }
+        }
+      },
+      "GraphModuleResponse": {
+        "type": "object",
+        "description": "File module relations response.",
+        "required": [
+          "success",
+          "relation_epoch",
+          "file",
+          "exports",
+          "caller_files",
+          "imports"
+        ],
+        "properties": {
+          "caller_files": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Files whose module-level edges target this file."
+          },
+          "exports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Stable symbol ids exported by the file."
+          },
+          "file": {
+            "type": "string"
+          },
+          "imports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModuleRelation"
+            },
+            "description": "Module-level edges originating at the file."
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {},
+          "success": {
+            "type": "boolean"
           }
         }
       },
@@ -6979,6 +7607,50 @@
           "relation_info": {},
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "GraphStructuralResponse": {
+        "type": "object",
+        "description": "One structural relation family resolved for an entity.",
+        "required": [
+          "success",
+          "relation_epoch",
+          "kind",
+          "direction",
+          "relations"
+        ],
+        "properties": {
+          "direction": {
+            "type": "string",
+            "description": "The requested direction (`out` or `in`)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The requested relation family."
+          },
+          "relation_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation_info": {},
+          "relations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StructuralRelation"
+            }
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "total_relations": {
+            "type": "integer",
+            "description": "Relation count before the `limit` cap.",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether more relations exist than were returned."
           }
         }
       },
@@ -7509,6 +8181,33 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "ModuleRelation": {
+        "type": "object",
+        "description": "One module-level relation of a file.",
+        "required": [
+          "target",
+          "relation",
+          "domain"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Coarse relation domain of `relation`."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "Stable symbol id of the imported/calling entity, or empty for edges\nthat originate at the file itself."
+          },
+          "relation": {
+            "type": "string",
+            "description": "Relation type string (`dependency.import.standard`, `call.direct`, ...)."
+          },
+          "target": {
+            "type": "string",
+            "description": "Raw relation target as written in the source."
           }
         }
       },
@@ -8641,6 +9340,39 @@
           }
         }
       },
+      "StructuralRelation": {
+        "type": "object",
+        "description": "One relation inside a structural answer.",
+        "required": [
+          "entity_id",
+          "label",
+          "relation",
+          "domain",
+          "source_file"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "Coarse relation domain of `relation`."
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "Stable symbol id of the counterparty."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-readable name of the counterparty."
+          },
+          "relation": {
+            "type": "string",
+            "description": "Relation type string (`trait_bound`, `contains.element`, ...)."
+          },
+          "source_file": {
+            "type": "string",
+            "description": "Source file of the counterparty."
+          }
+        }
+      },
       "SubQueryRequest": {
         "type": "object",
         "description": "Sub-query definition for aggregated search",
@@ -8864,6 +9596,14 @@
           "active": {
             "type": "boolean",
             "description": "Whether watch is active"
+          },
+          "data_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Active data generation epoch from the durable manifest.\nLets callers align watch progress with semantic index versions."
           },
           "events_processed": {
             "type": "integer",

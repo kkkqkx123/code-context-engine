@@ -5,8 +5,8 @@
 use axum::extract::{Path, Query as QueryParams, State};
 use std::sync::Arc;
 
-use cce_orchestrator::query::RelationQueryOptions;
-use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
+use cce_orchestrator::query::{RelationQueryOptions, RelationSearcher};
+use cce_relation::index::snapshot_query::SnapshotEntityQueryOps;
 use cce_types::EntityId;
 
 use cce_api::models::{
@@ -14,6 +14,7 @@ use cce_api::models::{
     ClassImplementationsResponse, ClassInheritanceResponse, ErrorResponse, error_codes,
 };
 
+use super::seed::{resolve_symbol_seed, stable_id};
 use crate::api::response::ApiResult;
 
 /// Helper: get relation snapshot for a project
@@ -104,13 +105,6 @@ fn apply_filters(
     options
 }
 
-fn stable_id<I: SnapshotSymbolQueryOps>(index: &I, entity_id: EntityId) -> String {
-    index
-        .get_symbol_key_by_entity_id(entity_id)
-        .map(|key| key.stable_id().0)
-        .unwrap_or_default()
-}
-
 /// Handle call chain request
 #[utoipa::path(
     get, path = "/api/project/{project_id}/call-chain/{id}", tag = "Entity",
@@ -144,19 +138,9 @@ pub async fn handle_call_chain(
     }
     let max_depth = params.max_depth.min(relation_config.max_call_depth);
 
-    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
-        Some(eid) => eid,
-        None => {
-            // Try parsing as numeric ID for backwards compatibility
-            if let Ok(numeric_id) = id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
+        Ok(eid) => eid,
+        Err(error) => return ApiResult::Error(error),
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
@@ -173,6 +157,8 @@ pub async fn handle_call_chain(
             exclude_tests: params.exclude_tests,
             directory_prefix: params.directory_prefix,
             excluded_files: params.excluded_files,
+            domains: params.domains,
+            include_external: params.include_external,
         },
         RelationQueryOptions::new()
             .with_max_depth(max_depth)
@@ -254,37 +240,13 @@ pub async fn handle_call_path(
     }
 
     let max_depth = params.max_depth.min(relation_config.max_call_depth);
-    let start_id = match snapshot
-        .index
-        .get_entity_id_by_stable_symbol_id(&params.start_id)
-    {
-        Some(eid) => eid,
-        None => {
-            if let Ok(numeric_id) = params.start_id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown start stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let start_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.start_id) {
+        Ok(eid) => eid,
+        Err(error) => return ApiResult::Error(error),
     };
-    let end_id = match snapshot
-        .index
-        .get_entity_id_by_stable_symbol_id(&params.end_id)
-    {
-        Some(eid) => eid,
-        None => {
-            if let Ok(numeric_id) = params.end_id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown end stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let end_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.end_id) {
+        Ok(eid) => eid,
+        Err(error) => return ApiResult::Error(error),
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
@@ -364,19 +326,9 @@ pub async fn handle_class_inheritance(
         Err(e) => return ApiResult::Error(e),
     };
 
-    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
-        Some(eid) => eid,
-        None => {
-            // Try parsing as numeric ID for backwards compatibility
-            if let Ok(numeric_id) = id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
+        Ok(eid) => eid,
+        Err(error) => return ApiResult::Error(error),
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
@@ -387,68 +339,46 @@ pub async fn handle_class_inheritance(
             ));
         }
     };
-    let base_classes = searcher.get_base_classes(entity_id);
-    let derived_classes = searcher.get_derived_classes(entity_id);
+    // Transitive closure, so a client sees the whole hierarchy rather than
+    // only the immediate parents and children.
+    let tree = searcher.get_inheritance_tree(entity_id, RelationSearcher::INHERITANCE_MAX_DEPTH);
+    let index = searcher.query().index();
+    let describe = |id: EntityId, depth: usize| {
+        let (class_name, file_path) = index
+            .get_function_by_entity_id(id)
+            .map(|entity| {
+                let path = index
+                    .get_file_path_by_entity(id)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (entity.name.clone(), path)
+            })
+            .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
+
+        cce_api::models::ClassRelation {
+            class_id: stable_id(index, id),
+            class_name,
+            file_path,
+            depth,
+        }
+    };
 
     let response = ClassInheritanceResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
         class_id: id,
-        class_name: searcher
-            .query()
-            .index()
+        class_name: index
             .get_function_by_entity_id(entity_id)
             .map(|e| e.name.clone())
             .unwrap_or_else(|| "Unknown".to_string()),
-        base_classes: base_classes
-            .into_iter()
-            .map(|id| {
-                let (class_name, file_path) = searcher
-                    .query()
-                    .index()
-                    .get_function_by_entity_id(id)
-                    .map(|entity| {
-                        let path = searcher
-                            .query()
-                            .index()
-                            .get_file_path_by_entity(id)
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        (entity.name.clone(), path)
-                    })
-                    .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
-
-                cce_api::models::ClassRelation {
-                    class_id: stable_id(searcher.query().index(), id),
-                    class_name,
-                    file_path,
-                    depth: 0,
-                }
-            })
+        base_classes: tree
+            .ancestors
+            .iter()
+            .map(|(id, depth)| describe(*id, *depth))
             .collect(),
-        derived_classes: derived_classes
-            .into_iter()
-            .map(|id| {
-                let (class_name, file_path) = searcher
-                    .query()
-                    .index()
-                    .get_function_by_entity_id(id)
-                    .map(|entity| {
-                        let path = searcher
-                            .query()
-                            .index()
-                            .get_file_path_by_entity(id)
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        (entity.name.clone(), path)
-                    })
-                    .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
-
-                cce_api::models::ClassRelation {
-                    class_id: stable_id(searcher.query().index(), id),
-                    class_name,
-                    file_path,
-                    depth: 0,
-                }
-            })
+        derived_classes: tree
+            .descendants
+            .iter()
+            .map(|(id, depth)| describe(*id, *depth))
             .collect(),
         relation_info: stale_relation_info(&state, project_id).await,
     };
@@ -477,19 +407,9 @@ pub async fn handle_class_implementations(
         Err(e) => return ApiResult::Error(e),
     };
 
-    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
-        Some(eid) => eid,
-        None => {
-            // Try parsing as numeric ID for backwards compatibility
-            if let Ok(numeric_id) = id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
+        Ok(eid) => eid,
+        Err(error) => return ApiResult::Error(error),
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,

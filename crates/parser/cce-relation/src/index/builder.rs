@@ -624,7 +624,7 @@ impl IndexBuilder {
     /// Check if the index is empty
     pub fn is_empty(&self) -> bool {
         self.index.function_count() == 0
-            && self.index.call_count() == 0
+            && self.index.resolved_relation_count() == 0
             && self.index.file_count() == 0
     }
 
@@ -876,7 +876,7 @@ mod tests {
             overload_signature: None,
         });
         let index = builder.build();
-        assert_eq!(index.call_count(), 1);
+        assert_eq!(index.resolved_relation_count(), 1);
     }
 
     /// coordinator products carry `import_table`, so registering a
@@ -1161,7 +1161,7 @@ mod tests {
         let index = builder.build();
 
         assert_eq!(index.function_count(), 1);
-        assert_eq!(index.call_count(), 1);
+        assert_eq!(index.resolved_relation_count(), 1);
         assert_eq!(index.file_count(), 1);
     }
 

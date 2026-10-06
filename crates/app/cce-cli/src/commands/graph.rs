@@ -6,7 +6,8 @@ use crate::cli::GraphCommands;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::{
-    GraphComponentsResponse, GraphImpactResponse, GraphPathResponse, GraphSubgraphResponse,
+    GraphComponentsResponse, GraphCyclesResponse, GraphEntityImpactResponse, GraphImpactResponse,
+    GraphModuleResponse, GraphPathResponse, GraphStructuralResponse, GraphSubgraphResponse,
 };
 
 struct GraphQueryParams {
@@ -19,6 +20,12 @@ struct GraphQueryParams {
 struct OutputParams {
     verbose: bool,
     format: crate::cli::OutputFormat,
+}
+
+/// The two endpoints of a path query.
+struct PathSeeds<'a> {
+    from: &'a str,
+    to: &'a str,
 }
 
 pub async fn execute(
@@ -62,8 +69,27 @@ pub async fn execute(
             from,
             to,
             depth,
+            domains,
+            include_external,
             project_id,
-        } => get_path(&client, *project_id, from, to, *depth, verbose, format).await,
+        } => {
+            let params = GraphQueryParams {
+                offset: 0,
+                limit: 0,
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            let output = OutputParams { verbose, format };
+            get_path(
+                &client,
+                *project_id,
+                PathSeeds { from, to },
+                *depth,
+                &params,
+                &output,
+            )
+            .await
+        }
         GraphCommands::Subgraph {
             ids,
             offset,
@@ -81,8 +107,20 @@ pub async fn execute(
             let output = OutputParams { verbose, format };
             get_subgraph(&client, *project_id, ids, &params, &output).await
         }
-        GraphCommands::Components { project_id } => {
-            get_components(&client, *project_id, verbose, format).await
+        GraphCommands::Components {
+            offset,
+            limit,
+            domains,
+            include_external,
+            project_id,
+        } => {
+            let params = GraphQueryParams {
+                offset: *offset,
+                limit: *limit,
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            get_components(&client, *project_id, &params, verbose, format).await
         }
         GraphCommands::Export {
             limit,
@@ -102,6 +140,38 @@ pub async fn execute(
         }
         GraphCommands::Impact { file, project_id } => {
             get_impact(&client, *project_id, file, verbose, format).await
+        }
+        GraphCommands::EntityImpact {
+            entity_id,
+            max_depth,
+            project_id,
+        } => get_entity_impact(&client, *project_id, entity_id, *max_depth, verbose, format).await,
+        GraphCommands::Cycles {
+            level,
+            limit,
+            project_id,
+        } => get_cycles(&client, *project_id, level, *limit, verbose, format).await,
+        GraphCommands::Structural {
+            entity_id,
+            kind,
+            direction,
+            limit,
+            project_id,
+        } => {
+            let output = OutputParams { verbose, format };
+            get_structural(
+                &client,
+                *project_id,
+                entity_id,
+                kind,
+                direction,
+                *limit,
+                &output,
+            )
+            .await
+        }
+        GraphCommands::Module { file, project_id } => {
+            get_module(&client, *project_id, file, verbose, format).await
         }
     }
 }
@@ -163,17 +233,19 @@ async fn get_ego(
 async fn get_path(
     client: &ApiClient,
     project_id: i64,
-    from: &str,
-    to: &str,
+    seeds: PathSeeds<'_>,
     depth: usize,
-    verbose: bool,
-    format: crate::cli::OutputFormat,
+    params: &GraphQueryParams,
+    output: &OutputParams,
 ) -> Result<()> {
+    let (verbose, format) = (output.verbose, output.format);
     if verbose {
-        println!("Finding graph path: {from} -> {to}");
+        println!("Finding graph path: {} -> {}", seeds.from, seeds.to);
     }
-    let path =
-        format!("/api/project/{project_id}/graph/path?start={from}&end={to}&max_depth={depth}");
+    let path = format!(
+        "/api/project/{project_id}/graph/path?start={}&end={}&max_depth={depth}&domains={}&include_external={}",
+        seeds.from, seeds.to, params.domains, params.include_external
+    );
     let response: GraphPathResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);
@@ -225,20 +297,25 @@ async fn get_subgraph(
 async fn get_components(
     client: &ApiClient,
     project_id: i64,
+    params: &GraphQueryParams,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
     if verbose {
         println!("Fetching graph components");
     }
-    let path = format!("/api/project/{project_id}/graph/components");
+    let path = format!(
+        "/api/project/{project_id}/graph/components?offset={}&limit={}&domains={}&include_external={}",
+        params.offset, params.limit, params.domains, params.include_external
+    );
     let response: GraphComponentsResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);
     } else if response.success {
         print_success(&format!(
-            "{} components (epoch {})",
+            "{} components (total {}, epoch {})",
             response.components.len(),
+            response.total_components,
             response.relation_epoch
         ));
         for (i, group) in response.components.iter().enumerate() {
@@ -296,11 +373,160 @@ async fn get_impact(
         for dependent in &response.direct_dependents {
             println!("  direct: {dependent}");
         }
-        for dependent in &response.transitive_dependents {
-            println!("  transitive: {dependent}");
+        for dependent in &response.indirect_dependents {
+            println!("  indirect: {dependent}");
         }
     } else {
         print_error("Graph impact query failed");
+    }
+    Ok(())
+}
+
+async fn get_entity_impact(
+    client: &ApiClient,
+    project_id: i64,
+    entity_id: &str,
+    max_depth: usize,
+    verbose: bool,
+    format: crate::cli::OutputFormat,
+) -> Result<()> {
+    if verbose {
+        println!("Analyzing entity impact: {entity_id}");
+    }
+    let path = format!(
+        "/api/project/{project_id}/graph/entity-impact?entity_id={entity_id}&max_depth={max_depth}"
+    );
+    let response: GraphEntityImpactResponse = client.get(&path).await?;
+    if matches!(format, crate::cli::OutputFormat::Json) {
+        print_output(format, &response);
+    } else if response.success {
+        print_success(&format!(
+            "Impact of {} (score {:.1}, epoch {})",
+            response.changed_entity, response.impact_score, response.relation_epoch
+        ));
+        for dependent in &response.direct_dependents {
+            println!("  direct: {dependent}");
+        }
+        for dependent in &response.indirect_dependents {
+            println!("  indirect: {dependent}");
+        }
+    } else {
+        print_error("Graph entity impact query failed");
+    }
+    Ok(())
+}
+
+async fn get_cycles(
+    client: &ApiClient,
+    project_id: i64,
+    level: &str,
+    limit: usize,
+    verbose: bool,
+    format: crate::cli::OutputFormat,
+) -> Result<()> {
+    if verbose {
+        println!("Finding {level} dependency cycles");
+    }
+    let path = format!("/api/project/{project_id}/graph/cycles?level={level}&limit={limit}");
+    let response: GraphCyclesResponse = client.get(&path).await?;
+    if matches!(format, crate::cli::OutputFormat::Json) {
+        print_output(format, &response);
+    } else if response.success {
+        let truncated = if response.truncated {
+            ", truncated"
+        } else {
+            ""
+        };
+        print_success(&format!(
+            "{} of {} {}-level cycles{truncated} (epoch {})",
+            response.cycles.len(),
+            response.total_cycles,
+            response.level,
+            response.relation_epoch
+        ));
+        for (index, cycle) in response.cycles.iter().enumerate() {
+            println!("  cycle {index}: {}", cycle.members.join(" -> "));
+        }
+    } else {
+        print_error("Graph cycle query failed");
+    }
+    Ok(())
+}
+
+async fn get_structural(
+    client: &ApiClient,
+    project_id: i64,
+    entity_id: &str,
+    kind: &str,
+    direction: &str,
+    limit: usize,
+    output: &OutputParams,
+) -> Result<()> {
+    let (verbose, format) = (output.verbose, output.format);
+    if verbose {
+        println!("Fetching {kind} relations for {entity_id} ({direction})");
+    }
+    let path = format!(
+        "/api/project/{project_id}/graph/structural?entity_id={entity_id}&kind={kind}&direction={direction}&limit={limit}"
+    );
+    let response: GraphStructuralResponse = client.get(&path).await?;
+    if matches!(format, crate::cli::OutputFormat::Json) {
+        print_output(format, &response);
+    } else if response.success {
+        let truncated = if response.truncated {
+            ", truncated"
+        } else {
+            ""
+        };
+        print_success(&format!(
+            "{} of {} {}{truncated} (epoch {})",
+            response.relations.len(),
+            response.total_relations,
+            response.kind,
+            response.relation_epoch
+        ));
+        for relation in &response.relations {
+            println!(
+                "  {} [{}] {} {}",
+                relation.entity_id, relation.domain, relation.label, relation.source_file
+            );
+        }
+    } else {
+        print_error("Graph structural query failed");
+    }
+    Ok(())
+}
+
+async fn get_module(
+    client: &ApiClient,
+    project_id: i64,
+    file: &str,
+    verbose: bool,
+    format: crate::cli::OutputFormat,
+) -> Result<()> {
+    if verbose {
+        println!("Fetching module relations for {file}");
+    }
+    let path = format!("/api/project/{project_id}/graph/module?file={file}");
+    let response: GraphModuleResponse = client.get(&path).await?;
+    if matches!(format, crate::cli::OutputFormat::Json) {
+        print_output(format, &response);
+    } else if response.success {
+        print_success(&format!(
+            "{} imports, {} exports, {} caller files (epoch {})",
+            response.imports.len(),
+            response.exports.len(),
+            response.caller_files.len(),
+            response.relation_epoch
+        ));
+        for import in &response.imports {
+            println!("  -[{}]-> {}", import.relation, import.target);
+        }
+        for caller in &response.caller_files {
+            println!("  <- {caller}");
+        }
+    } else {
+        print_error("Graph module query failed");
     }
     Ok(())
 }

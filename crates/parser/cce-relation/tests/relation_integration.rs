@@ -197,7 +197,7 @@ fn test_index_builder_add_single_file_via_process_file() {
 
     assert!(index.contains_file("test.rs"));
     assert_eq!(index.function_count(), 2);
-    assert_eq!(index.call_count(), 1);
+    assert_eq!(index.resolved_relation_count(), 1);
 }
 
 #[test]

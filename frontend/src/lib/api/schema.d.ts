@@ -651,6 +651,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/project/{project_id}/graph/cycles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Handle dependency cycle request.
+         * @description Reports cycles in the call graph (`level=entity`) or in the file dependency
+         *     graph (`level=file`).
+         */
+        get: operations["handle_graph_cycles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/project/{project_id}/graph/ego": {
         parameters: {
             query?: never;
@@ -660,6 +681,27 @@ export interface paths {
         };
         /** Handle ego neighborhood request. */
         get: operations["handle_graph_ego"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/graph/entity-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Handle entity impact request.
+         * @description Reports which entities break when one entity changes, split into disjoint
+         *     first-hop callers and deeper callers.
+         */
+        get: operations["handle_graph_entity_impact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -702,6 +744,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/project/{project_id}/graph/module": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Handle file module relations request.
+         * @description Reports what a file pulls in (module-level imports/uses), what it exposes
+         *     (exports), and which files reach into it.
+         */
+        get: operations["handle_graph_module"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/project/{project_id}/graph/path": {
         parameters: {
             query?: never;
@@ -711,6 +774,28 @@ export interface paths {
         };
         /** Handle two-point path request. */
         get: operations["handle_graph_path"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/graph/structural": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Handle structural / frontend relation request.
+         * @description Typed access to the relation families that the generic `domains` filter can
+         *     only approximate: Rust trait bounds and the markup relation set (element
+         *     containment, event callbacks, parameter bindings, template references).
+         */
+        get: operations["handle_graph_structural"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1948,6 +2033,29 @@ export interface components {
             relation_epoch: number;
             relation_info?: unknown;
             success: boolean;
+            /** @description Component count before pagination. */
+            total_components?: number;
+        };
+        /**
+         * @description One dependency cycle: the members in traversal order, last member calling
+         *     back into the first.
+         */
+        GraphCycle: {
+            /** @description Stable symbol ids for `level=entity`, project paths for `level=file`. */
+            members: string[];
+        };
+        /** @description Dependency cycles response. */
+        GraphCyclesResponse: {
+            cycles: components["schemas"]["GraphCycle"][];
+            level: string;
+            /** Format: int64 */
+            relation_epoch: number;
+            relation_info?: unknown;
+            success: boolean;
+            /** @description Cycle count reported, before the `limit` cap. */
+            total_cycles?: number;
+            /** @description Whether more cycles exist than were reported. */
+            truncated?: boolean;
         };
         /**
          * @description An edge in a returned subgraph.
@@ -1974,17 +2082,47 @@ export interface components {
             source: string;
             target: string;
         };
-        /** @description File impact response. */
-        GraphImpactResponse: {
-            changed_file: string;
+        /** @description Entity impact response. */
+        GraphEntityImpactResponse: {
+            changed_entity: string;
+            /** @description Callers exactly one hop away. */
             direct_dependents: string[];
             /** Format: double */
             impact_score: number;
+            /** @description Callers two or more hops away; disjoint from `direct_dependents`. */
+            indirect_dependents: string[];
             /** Format: int64 */
             relation_epoch: number;
             relation_info?: unknown;
             success: boolean;
-            transitive_dependents: string[];
+        };
+        /** @description File impact response. */
+        GraphImpactResponse: {
+            changed_file: string;
+            /** @description Dependents exactly one hop away. */
+            direct_dependents: string[];
+            /** Format: double */
+            impact_score: number;
+            /** @description Dependents two or more hops away; disjoint from `direct_dependents`. */
+            indirect_dependents: string[];
+            /** Format: int64 */
+            relation_epoch: number;
+            relation_info?: unknown;
+            success: boolean;
+        };
+        /** @description File module relations response. */
+        GraphModuleResponse: {
+            /** @description Files whose module-level edges target this file. */
+            caller_files: string[];
+            /** @description Stable symbol ids exported by the file. */
+            exports: string[];
+            file: string;
+            /** @description Module-level edges originating at the file. */
+            imports: components["schemas"]["ModuleRelation"][];
+            /** Format: int64 */
+            relation_epoch: number;
+            relation_info?: unknown;
+            success: boolean;
         };
         /**
          * @description A node in a returned subgraph.
@@ -2015,6 +2153,22 @@ export interface components {
             relation_info?: unknown;
             success: boolean;
         };
+        /** @description One structural relation family resolved for an entity. */
+        GraphStructuralResponse: {
+            /** @description The requested direction (`out` or `in`). */
+            direction: string;
+            /** @description The requested relation family. */
+            kind: string;
+            /** Format: int64 */
+            relation_epoch: number;
+            relation_info?: unknown;
+            relations: components["schemas"]["StructuralRelation"][];
+            success: boolean;
+            /** @description Relation count before the `limit` cap. */
+            total_relations?: number;
+            /** @description Whether more relations exist than were returned. */
+            truncated?: boolean;
+        };
         /** @description Subgraph response (ego, subgraph, export). */
         GraphSubgraphResponse: {
             edges: components["schemas"]["GraphEdge"][];
@@ -2023,6 +2177,8 @@ export interface components {
             relation_epoch: number;
             relation_info?: unknown;
             success: boolean;
+            total_edges?: number;
+            total_nodes?: number;
         };
         /** @description References grouped by file */
         GroupedReferences: {
@@ -2194,6 +2350,20 @@ export interface components {
         MetricsCleanupResponse: {
             deleted_count: number;
             success: boolean;
+        };
+        /** @description One module-level relation of a file. */
+        ModuleRelation: {
+            /** @description Coarse relation domain of `relation`. */
+            domain: string;
+            /**
+             * @description Stable symbol id of the imported/calling entity, or empty for edges
+             *     that originate at the file itself.
+             */
+            entity_id?: string;
+            /** @description Relation type string (`dependency.import.standard`, `call.direct`, ...). */
+            relation: string;
+            /** @description Raw relation target as written in the source. */
+            target: string;
         };
         /** @description Parameter information */
         ParameterInfo: {
@@ -2436,7 +2606,12 @@ export interface components {
              */
             failed_sub_queries?: string[];
             items: components["schemas"]["SearchResultItem"][];
-            /** @description Relation epoch the backing index was at when the query ran. */
+            /**
+             * Format: int64
+             * @description Relation epoch the backing index was at when the query ran, when a
+             *     relation snapshot is available. Lets callers judge result freshness
+             *     against graph query versions.
+             */
             relation_epoch?: number | null;
             /** @description True when the serving relation snapshot reports itself stale. */
             relation_stale?: boolean;
@@ -2550,6 +2725,19 @@ export interface components {
             status: components["schemas"]["StorageStatus"];
             success: boolean;
         };
+        /** @description One relation inside a structural answer. */
+        StructuralRelation: {
+            /** @description Coarse relation domain of `relation`. */
+            domain: string;
+            /** @description Stable symbol id of the counterparty. */
+            entity_id: string;
+            /** @description Human-readable name of the counterparty. */
+            label: string;
+            /** @description Relation type string (`trait_bound`, `contains.element`, ...). */
+            relation: string;
+            /** @description Source file of the counterparty. */
+            source_file: string;
+        };
         /** @description Sub-query definition for aggregated search */
         SubQueryRequest: {
             /** @description Query type (vector, bm25, hybrid, summary) */
@@ -2618,9 +2806,19 @@ export interface components {
         WatchStatus: {
             /** @description Whether watch is active */
             active: boolean;
+            /**
+             * Format: int64
+             * @description Active data generation epoch from the durable manifest.
+             *     Lets callers align watch progress with semantic index versions.
+             */
+            data_epoch?: number | null;
             /** @description Number of events processed */
             events_processed: number;
-            /** @description Active relation epoch, when a relation snapshot is available. */
+            /**
+             * Format: int64
+             * @description Active relation epoch, when a relation snapshot is available.
+             *     Lets callers align watch progress with graph query versions.
+             */
             relation_epoch?: number | null;
             /** @description Started at timestamp */
             started_at?: string | null;
@@ -4109,6 +4307,13 @@ export interface operations {
                 directory_prefix?: string;
                 /** @description Exact file paths to exclude */
                 excluded_files?: string[];
+                /**
+                 * @description Keep only relations in these coarse domains (`call`, `dependency`,
+                 *     `structural`, `reference`, `template`, `other`).
+                 */
+                domains?: string;
+                /** @description Whether relations pointing outside the project are kept. */
+                include_external?: boolean;
             };
             header?: never;
             path: {
@@ -4426,6 +4631,13 @@ export interface operations {
                 directory_prefix?: string;
                 /** @description Exact file paths to exclude */
                 excluded_files?: string[];
+                /**
+                 * @description Keep only relations in these coarse domains (`call`, `dependency`,
+                 *     `structural`, `reference`, `template`, `other`).
+                 */
+                domains?: string;
+                /** @description Whether relations pointing outside the project are kept. */
+                include_external?: boolean;
             };
             header?: never;
             path: {
@@ -4497,6 +4709,13 @@ export interface operations {
                 directory_prefix?: string;
                 /** @description Exact file paths to exclude */
                 excluded_files?: string[];
+                /**
+                 * @description Keep only relations in these coarse domains (`call`, `dependency`,
+                 *     `structural`, `reference`, `template`, `other`).
+                 */
+                domains?: string;
+                /** @description Whether relations pointing outside the project are kept. */
+                include_external?: boolean;
             };
             header?: never;
             path: {
@@ -4558,7 +4777,12 @@ export interface operations {
     };
     handle_graph_components: {
         parameters: {
-            query?: never;
+            query?: {
+                offset?: number;
+                limit?: number;
+                domains?: string;
+                include_external?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Project id */
@@ -4615,12 +4839,79 @@ export interface operations {
             };
         };
     };
+    handle_graph_cycles: {
+        parameters: {
+            query?: {
+                /** @description `entity` or `file`. */
+                level?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphCyclesResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Index unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     handle_graph_ego: {
         parameters: {
             query: {
                 entity_id: string;
                 depth?: number;
                 direction?: string;
+                offset?: number;
+                limit?: number;
+                domains?: string;
+                include_external?: boolean;
             };
             header?: never;
             path: {
@@ -4678,10 +4969,75 @@ export interface operations {
             };
         };
     };
+    handle_graph_entity_impact: {
+        parameters: {
+            query: {
+                entity_id: string;
+                max_depth?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphEntityImpactResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Index unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     handle_graph_export: {
         parameters: {
             query?: {
                 limit?: number;
+                offset?: number;
+                domains?: string;
+                include_external?: boolean;
             };
             header?: never;
             path: {
@@ -4800,12 +5156,75 @@ export interface operations {
             };
         };
     };
+    handle_graph_module: {
+        parameters: {
+            query: {
+                file: string;
+            };
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphModuleResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Index unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     handle_graph_path: {
         parameters: {
             query: {
                 start: string;
                 end: string;
                 max_depth?: number;
+                domains?: string;
+                include_external?: boolean;
             };
             header?: never;
             path: {
@@ -4863,10 +5282,84 @@ export interface operations {
             };
         };
     };
+    handle_graph_structural: {
+        parameters: {
+            query: {
+                entity_id: string;
+                /**
+                 * @description Relation family: `trait_bound`, `child_elements`, `parent_element`,
+                 *     `event_handlers`, `handler_elements`, `parameter_bindings`,
+                 *     `template_references`, `template_ref_owners`.
+                 */
+                kind: string;
+                /** @description `out` follows the family forward, `in` follows it in reverse. */
+                direction?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphStructuralResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Index unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     handle_graph_subgraph: {
         parameters: {
             query: {
                 ids: string;
+                offset?: number;
+                limit?: number;
+                domains?: string;
+                include_external?: boolean;
             };
             header?: never;
             path: {

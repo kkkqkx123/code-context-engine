@@ -57,27 +57,15 @@ impl RelationIndexView for crate::index::snapshot_index::RelationSnapshotIndex {
     }
 
     fn callers_of(&self, callee: EntityId) -> Vec<EntityId> {
+        // Both reverse maps are built from the resolved relation set and are
+        // therefore authoritative: a miss means no callers.
         if let Some(callers) = self.reverse_callee_index.get(&callee) {
             return callers.clone();
         }
         if let Some(callers) = self.query_optimized.get_callers(callee) {
             return callers.clone();
         }
-        if let Some(entry) = self.resolved_relation_index.get(&callee) {
-            let callers = entry.callers();
-            if !callers.is_empty() {
-                return callers.to_vec();
-            }
-        }
-        let mut result: Vec<EntityId> = self
-            .resolved_relation_index
-            .iter()
-            .filter(|entry| entry.value().iter().any(|r| r.callee_id == Some(callee)))
-            .map(|entry| *entry.key())
-            .collect();
-        result.sort();
-        result.dedup();
-        result
+        Vec::new()
     }
 
     fn imports_of(&self, path: &str) -> Option<ImportTable> {

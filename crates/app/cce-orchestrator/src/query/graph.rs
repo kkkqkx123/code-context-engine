@@ -9,7 +9,7 @@ pub mod model;
 pub mod service;
 
 pub use model::{
-    Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedSubGraph, SubGraph,
-    confidence_of,
+    Confidence, GraphEdge, GraphFilter, GraphNode, GraphPagination, PagedComponents, PagedSubGraph,
+    SubGraph, confidence_of, relation_domain,
 };
 pub use service::{GraphDirection, GraphService};

@@ -18,7 +18,7 @@ use smallvec::SmallVec;
 
 use super::core::{RelationEdgeSet, RelationIndex};
 use super::stores::{FileRecord, diagnostics::RelationDiagnostics};
-use crate::dependency_graph::{EntityDependencyGraph, FileDependencyGraph};
+use crate::dependency_graph::FileDependencyGraph;
 use crate::index::core::SymbolKey;
 use cce_types::{Entity, EntityId};
 
@@ -47,7 +47,6 @@ pub struct CompactRelationIndex {
     /// Reverse edges of the file dependency graph.
     pub dependency_reverse: HashMap<String, HashSet<String>>,
     /// Entity-level dependency graph snapshot.
-    pub entity_dependency_graph: EntityDependencyGraph,
     /// Diagnostic counters snapshot (cloned, not shared).
     pub diagnostics_snapshot: Arc<RelationDiagnostics>,
 }
@@ -116,8 +115,6 @@ impl CompactRelationIndex {
             }
         }
 
-        let entity_dependency_graph = index.entity_dependency_graph.read().clone();
-
         Self {
             function_index,
             name_index,
@@ -133,7 +130,6 @@ impl CompactRelationIndex {
             file_entities_by_start,
             dependency_forward,
             dependency_reverse,
-            entity_dependency_graph,
             diagnostics_snapshot: Arc::clone(&index.diagnostics),
         }
     }
@@ -223,10 +219,7 @@ impl CompactRelationIndex {
                 index.dependency_graph.add_dependency(from, to);
             }
         }
-        {
-            let mut guard = index.entity_dependency_graph.write();
-            *guard = self.entity_dependency_graph.clone();
-        }
+        {}
         index
     }
 }

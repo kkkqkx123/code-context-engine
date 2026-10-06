@@ -25,9 +25,7 @@ pub use config_parser::{
     BuildConfigParser, DependencyCollection, Dev, DevDependency, External, ExternalDependency,
     Local, LocalDependency, PackageKind, UntypedDependency,
 };
-pub use dependency_graph::{
-    DependencyGraphError, EntityDependencyGraph, EntityImpactAnalysis, FileDependencyGraph,
-};
+pub use dependency_graph::{DependencyGraphError, FileDependencyGraph, ImpactAnalysis};
 pub use error::{IndexError, PersistenceError, RelationError, RelationQueryError, ResolutionError};
 pub use index::{
     LayeredSnapshotIndex, LocalCallResolver, ThreadSafeIndex,

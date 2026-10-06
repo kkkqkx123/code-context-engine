@@ -105,9 +105,6 @@ pub trait SnapshotRelationQueryOps {
     /// Get total number of resolved relations.
     fn resolved_relation_count(&self) -> usize;
 
-    /// Get total number of call relations.
-    fn call_count(&self) -> usize;
-
     /// Get all resolved relations matching a given external call classification.
     fn get_relations_by_classification(
         &self,

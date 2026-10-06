@@ -12,6 +12,7 @@ use cce_api::models::{
     FunctionCallsResponse, RelationFilterParams, error_codes,
 };
 
+use super::seed::resolve_symbol_seed;
 use crate::api::response::ApiResult;
 
 /// Apply the HTTP filter parameters onto query options.
@@ -26,7 +27,20 @@ fn apply_filters(
     if let Some(files) = filter.excluded_files {
         options = options.with_excluded_files(files);
     }
+    if let Some(domains) = filter.domains {
+        options = options.with_relation_domains(parse_domains(&domains));
+    }
+    options = options.with_include_external(filter.include_external);
     options
+}
+
+/// Split a comma-separated relation-domain list into trimmed lowercase names.
+fn parse_domains(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
 fn params_to_options(params: CallChainQueryParams) -> RelationQueryOptions {
@@ -35,6 +49,8 @@ fn params_to_options(params: CallChainQueryParams) -> RelationQueryOptions {
             exclude_tests: params.exclude_tests,
             directory_prefix: params.directory_prefix,
             excluded_files: params.excluded_files,
+            domains: params.domains,
+            include_external: params.include_external,
         },
         RelationQueryOptions::new()
             .with_max_depth(params.max_depth)
@@ -115,19 +131,9 @@ pub async fn handle_function_calls(
         }
     };
 
-    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
-        Some(eid) => eid,
-        None => {
-            // Try parsing as numeric ID for backwards compatibility
-            if let Ok(numeric_id) = id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
+        Ok(eid) => eid,
+        Err(error) => return ApiResult::Error(error),
     };
 
     // Use cached RelationSearcher (LRU) instead of per-request CallChainQuery
@@ -274,19 +280,9 @@ pub async fn handle_function_callers(
         }
     };
 
-    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
-        Some(eid) => eid,
-        None => {
-            // Try parsing as numeric ID for backwards compatibility
-            if let Ok(numeric_id) = id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
+        Ok(eid) => eid,
+        Err(error) => return ApiResult::Error(error),
     };
     let searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
@@ -373,6 +369,8 @@ mod tests {
             exclude_tests: Some(true),
             directory_prefix: Some("src/flask".to_string()),
             excluded_files: Some(vec!["src/flask/app.py".to_string()]),
+            domains: Some("call".to_string()),
+            include_external: false,
         };
         let opts: RelationQueryOptions = params_to_options(params);
         assert_eq!(opts.max_depth, 5);
@@ -384,5 +382,7 @@ mod tests {
         );
         assert_eq!(opts.directory_prefix.as_deref(), Some("src/flask"));
         assert_eq!(opts.excluded_files.len(), 1);
+        assert_eq!(opts.relation_domains, vec!["call".to_string()]);
+        assert!(!opts.include_external);
     }
 }

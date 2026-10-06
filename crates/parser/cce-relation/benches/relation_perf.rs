@@ -280,7 +280,7 @@ fn main() {
     });
     row("fanout fwd depth1", fanout_fwd_ms);
     let fanout_path_ms = bench_ms(5, || {
-        let _ = fanout_query.find_call_chain(EntityId(1), EntityId(2), 3);
+        let _ = fanout_query.find_call_chain(EntityId(1), EntityId(2), 3, 10_000);
     });
     row("fanout path hub->leaf", fanout_path_ms);
 }

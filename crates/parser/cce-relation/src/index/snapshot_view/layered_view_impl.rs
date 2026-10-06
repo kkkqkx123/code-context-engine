@@ -235,14 +235,16 @@ impl RelationIndexView for crate::index::snapshot_index::LayeredSnapshotIndex {
             .collect();
         let mut callers = self.base.callers_of(callee);
         callers.retain(|c| !removed_entities.contains(c));
+        let mut seen: HashSet<EntityId> = callers.iter().copied().collect();
         for d in &self.deltas {
             for removed in &d.removed_relations {
                 if removed.callee_id == Some(callee) {
                     callers.retain(|c| *c != removed.caller);
+                    seen.remove(&removed.caller);
                 }
             }
             for added in &d.added_relations {
-                if added.callee_id == Some(callee) && !callers.contains(&added.caller) {
+                if added.callee_id == Some(callee) && seen.insert(added.caller) {
                     callers.push(added.caller);
                 }
             }

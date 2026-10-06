@@ -308,10 +308,6 @@ impl SnapshotRelationQueryOps for LayeredSnapshotIndex {
         LayeredSnapshotIndex::resolved_relation_count(self)
     }
 
-    fn call_count(&self) -> usize {
-        self.resolved_relation_count()
-    }
-
     fn get_relations_by_classification(
         &self,
         classification: &ExternalCallType,

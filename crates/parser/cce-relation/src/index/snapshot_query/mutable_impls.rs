@@ -18,7 +18,7 @@
 //! by the type system (snapshots hold only `Arc` maps) rather than by
 //! convention.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cce_types::{
     Entity, EntityId, ExternalCallType, FileInfo, ImportTable, RelationType, ResolvedRelation,
@@ -109,35 +109,13 @@ impl SnapshotRelationQueryOps for RelationIndex {
     }
 
     fn get_callers_by_callee_entity(&self, callee_id: EntityId) -> Vec<EntityId> {
-        if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            let mut result = callers.clone();
-            result.sort();
-            result.dedup();
-            result.truncate(MAX_REVERSE_FANIN);
-            return result;
-        }
-        if !self.function_index.contains_key(&callee_id) {
+        // The reverse map is authoritative: an entry lists every caller, and a
+        // miss means no callers. Never derive callers from the callee's own
+        // outgoing edges — that answers a different question.
+        let Some(callers) = self.reverse_callee_index.get(&callee_id) else {
             return Vec::new();
-        }
-        if !self.reverse_callee_index.is_empty() {
-            return Vec::new();
-        }
-        if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            let callers = entry.callers();
-            if !callers.is_empty() {
-                let mut result = callers.to_vec();
-                result.sort();
-                result.dedup();
-                result.truncate(MAX_REVERSE_FANIN);
-                return result;
-            }
-        }
-        let mut result: Vec<EntityId> = self
-            .resolved_relation_index
-            .iter()
-            .filter(|entry| entry.value().iter().any(|r| r.callee_id == Some(callee_id)))
-            .map(|entry| *entry.key())
-            .collect();
+        };
+        let mut result = callers.clone();
         result.sort();
         result.dedup();
         result.truncate(MAX_REVERSE_FANIN);
@@ -159,14 +137,10 @@ impl SnapshotRelationQueryOps for RelationIndex {
         callee_id: EntityId,
         relation_type: RelationType,
     ) -> Vec<EntityId> {
-        if !self.function_index.contains_key(&callee_id)
-            && self.reverse_callee_index.get(&callee_id).is_none()
-        {
-            return Vec::new();
-        }
+        let mut seen: HashSet<EntityId> = HashSet::new();
         let mut callers = Vec::new();
         for relation in self.get_relations_to_entity_by_type(callee_id, relation_type) {
-            if !callers.contains(&relation.caller) {
+            if seen.insert(relation.caller) {
                 callers.push(relation.caller);
                 if callers.len() >= MAX_REVERSE_FANIN {
                     break;
@@ -226,10 +200,6 @@ impl SnapshotRelationQueryOps for RelationIndex {
             .iter()
             .map(|entry| entry.len())
             .sum()
-    }
-
-    fn call_count(&self) -> usize {
-        self.resolved_relation_count()
     }
 
     fn get_relations_by_classification(

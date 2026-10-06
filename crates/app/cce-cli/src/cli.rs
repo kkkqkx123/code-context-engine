@@ -465,17 +465,25 @@ pub enum GraphCommands {
 
     /// Shortest path between two entities
     Path {
-        /// Start stable symbol ID
+        /// Start symbol seed (stable ID, file#name, or bare name)
         #[arg(long)]
         from: String,
 
-        /// End stable symbol ID
+        /// End symbol seed (stable ID, file#name, or bare name)
         #[arg(long)]
         to: String,
 
         /// Maximum search depth
         #[arg(long, default_value = "10")]
         depth: usize,
+
+        /// Comma-separated relation domains (call,dependency,structural,reference,template,other)
+        #[arg(long, default_value = "")]
+        domains: String,
+
+        /// Include external edges
+        #[arg(long, default_value = "true")]
+        include_external: bool,
 
         /// Project ID
         #[arg(long)]
@@ -510,6 +518,22 @@ pub enum GraphCommands {
 
     /// Connected components over internal edges
     Components {
+        /// Pagination offset
+        #[arg(long, default_value = "0")]
+        offset: usize,
+
+        /// Maximum components
+        #[arg(long, default_value = "2000")]
+        limit: usize,
+
+        /// Comma-separated relation domains (call,dependency,structural,reference,template,other)
+        #[arg(long, default_value = "")]
+        domains: String,
+
+        /// Include external edges
+        #[arg(long, default_value = "true")]
+        include_external: bool,
+
         /// Project ID
         #[arg(long)]
         project_id: i64,
@@ -540,6 +564,67 @@ pub enum GraphCommands {
 
     /// File change impact analysis
     Impact {
+        /// File path
+        file: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Entity change impact analysis
+    EntityImpact {
+        /// Symbol seed (stable ID, file#name, or bare name)
+        entity_id: String,
+
+        /// Maximum dependent depth
+        #[arg(long, default_value = "10")]
+        max_depth: usize,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Dependency cycles in the call graph or file graph
+    Cycles {
+        /// Cycle level: entity or file
+        #[arg(long, default_value = "entity")]
+        level: String,
+
+        /// Maximum cycles to report
+        #[arg(long, default_value = "100")]
+        limit: usize,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Structural and frontend relations of one entity
+    Structural {
+        /// Symbol seed (stable ID, file#name, or bare name)
+        entity_id: String,
+
+        /// Relation family (see API docs for the full list)
+        #[arg(long)]
+        kind: String,
+
+        /// Direction: out or in
+        #[arg(long, default_value = "out")]
+        direction: String,
+
+        /// Maximum relations
+        #[arg(long, default_value = "200")]
+        limit: usize,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Module-level relations of one file
+    Module {
         /// File path
         file: String,
 

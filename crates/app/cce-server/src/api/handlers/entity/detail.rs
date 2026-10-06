@@ -4,10 +4,11 @@
 
 use axum::extract::{Path, State};
 
-use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
+use cce_relation::index::snapshot_query::SnapshotEntityQueryOps;
 
 use cce_api::models::{ErrorResponse, FunctionDetailResponse, FunctionInfo, error_codes};
 
+use super::seed::resolve_symbol_seed;
 use crate::api::response::ApiResult;
 
 /// Unified response type for detail handler
@@ -74,21 +75,9 @@ pub async fn handle_function_detail(
         }
     };
 
-    // Resolve stable symbol ID to entity_id
-    // This is the same resolution path used by calls.rs
-    let entity_id = match snapshot.index.get_entity_id_by_stable_symbol_id(&id) {
-        Some(eid) => eid,
-        None => {
-            // Try parsing as numeric ID for backwards compatibility
-            if let Ok(numeric_id) = id.parse::<u64>() {
-                cce_types::EntityId(numeric_id)
-            } else {
-                return DetailApiResponse::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    "Unknown stable symbol ID".to_string(),
-                ));
-            }
-        }
+    let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &id) {
+        Ok(eid) => eid,
+        Err(error) => return DetailApiResponse::Error(error),
     };
 
     // Get entity from function index (zero-copy read of the shared snapshot)

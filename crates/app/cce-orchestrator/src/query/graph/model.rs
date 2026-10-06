@@ -159,11 +159,14 @@ impl GraphFilter {
 }
 
 /// Pagination over a materialized subgraph.
+///
+/// Addresses nodes only: the resulting edges are every edge induced on the
+/// selected node page.
 #[derive(Debug, Clone, Copy)]
 pub struct GraphPagination {
-    /// Number of leading nodes and edges to skip.
+    /// Number of leading nodes to skip.
     pub offset: usize,
-    /// Maximum number of nodes and edges to keep.
+    /// Maximum number of nodes to keep.
     pub limit: usize,
 }
 
@@ -181,11 +184,11 @@ impl Default for GraphPagination {
 pub struct PagedSubGraph {
     /// Nodes after pagination.
     pub nodes: Vec<GraphNode>,
-    /// Edges after pagination, restricted to surviving nodes.
+    /// Every filtered edge whose endpoints are both present in `nodes`.
     pub edges: Vec<GraphEdge>,
     /// Node count before pagination.
     pub total_nodes: usize,
-    /// Edge count before pagination.
+    /// Filtered edge count before pagination, over the whole node set.
     pub total_edges: usize,
 }
 
@@ -197,6 +200,18 @@ impl PagedSubGraph {
             edges: self.edges,
         }
     }
+}
+
+/// A page of connected components with the total before pagination.
+///
+/// Components are ordered largest first so a truncated page keeps the
+/// structurally significant ones; members are sorted within each component.
+#[derive(Debug, Clone, Default)]
+pub struct PagedComponents {
+    /// Components after pagination.
+    pub components: Vec<Vec<cce_types::EntityId>>,
+    /// Component count before pagination.
+    pub total_components: usize,
 }
 
 impl SubGraph {

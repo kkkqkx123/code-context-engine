@@ -17,10 +17,11 @@
 //! 1. Determine which files need to be reprocessed when a file changes
 //! 2. Establish the correct order for processing files (dependencies first)
 //! 3. Detect and handle circular dependencies
-
-pub mod entity;
-
-pub use entity::{EntityDependencyGraph, EntityImpactAnalysis};
+//!
+//! Entity-level impact is not stored here: entity edges are already
+//! materialized in the relation index, so [`ImpactAnalysis`] over entities is
+//! derived from those edges at query time rather than mirrored into a second
+//! graph that would have to be kept in sync.
 
 use dashmap::DashMap;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -38,13 +39,57 @@ pub enum DependencyGraphError {
     InvalidOperation(String),
 }
 
-/// Impact analysis for a file change.
+/// Weight of a direct dependent relative to an indirect one when scoring.
+const DIRECT_WEIGHT: f64 = 2.0;
+
+/// Weighted dependent count at which the impact score reaches half its ceiling.
+const HALF_SATURATION: f64 = 20.0;
+
+/// Impact of a change at one dependency-graph node.
+///
+/// `direct_dependents` and `indirect_dependents` are disjoint: the indirect set
+/// holds dependents reached only after leaving the first hop, so summing them
+/// never double counts.
 #[derive(Debug, Clone)]
-pub struct ImpactAnalysis {
-    pub changed_file: String,
-    pub direct_dependents: Vec<String>,
-    pub transitive_dependents: Vec<String>,
+pub struct ImpactAnalysis<T> {
+    /// The node whose change was analyzed.
+    pub changed: T,
+    /// Dependents exactly one hop away.
+    pub direct_dependents: Vec<T>,
+    /// Dependents two or more hops away.
+    pub indirect_dependents: Vec<T>,
+    /// Relative impact in `[0, 100)`; higher means more dependents.
     pub impact_score: f64,
+}
+
+impl<T: Ord> ImpactAnalysis<T> {
+    /// Build an analysis from disjoint dependent sets, both sorted and deduped.
+    pub fn new(changed: T, mut direct: Vec<T>, mut indirect: Vec<T>) -> Self {
+        direct.sort();
+        direct.dedup();
+        indirect.sort();
+        indirect.dedup();
+        let impact_score = impact_score(direct.len(), indirect.len());
+        Self {
+            changed,
+            direct_dependents: direct,
+            indirect_dependents: indirect,
+            impact_score,
+        }
+    }
+}
+
+/// Saturation curve over the weighted dependent count.
+///
+/// Direct dependents count twice as much as indirect ones, and the score
+/// approaches 100 asymptotically so a single hub cannot pin every project at
+/// the ceiling.
+pub fn impact_score(direct_count: usize, indirect_count: usize) -> f64 {
+    let weight = DIRECT_WEIGHT * direct_count as f64 + indirect_count as f64;
+    if weight <= 0.0 {
+        return 0.0;
+    }
+    100.0 * weight / (weight + HALF_SATURATION)
 }
 
 /// File dependency graph
@@ -272,31 +317,6 @@ impl FileDependencyGraph {
         files.len()
     }
 
-    /// Analyze the impact of a file change.
-    pub fn analyze_impact(&self, changed_file: &str) -> ImpactAnalysis {
-        const MAX_IMPACT_DEPTH: usize = 10;
-        let direct_dependents = self.get_dependents(changed_file);
-        let transitive_dependents =
-            self.collect_transitive_dependents(changed_file, MAX_IMPACT_DEPTH);
-        let impact_score = self.calculate_impact_score(&transitive_dependents);
-        ImpactAnalysis {
-            changed_file: changed_file.to_string(),
-            direct_dependents,
-            transitive_dependents,
-            impact_score,
-        }
-    }
-
-    fn calculate_impact_score(&self, files: &[String]) -> f64 {
-        if files.is_empty() {
-            return 0.0;
-        }
-        let base = files.len() as f64;
-        // Weight by depth: deeper dependents contribute less? For now simple linear.
-        // Cap at 100.
-        (base * 10.0).min(100.0)
-    }
-
     /// Perform topological sort on a subset of files
     ///
     /// Uses Kahn's algorithm to produce a valid processing order.
@@ -388,8 +408,8 @@ impl FileDependencyGraph {
 
     /// Collect all transitive dependents of a file (BFS traversal)
     ///
-    /// Returns all files that directly or indirectly depend on the given file.
-    /// This is used for dependency propagation during hot updates.
+    /// Returns every dependent file, including the direct ones. Callers that need
+    /// disjoint first-hop and deeper sets should use [`Self::impact_of`].
     ///
     /// # Arguments
     /// * `file` - The starting file
@@ -428,6 +448,18 @@ impl FileDependencyGraph {
         }
 
         dependents.into_iter().collect()
+    }
+
+    /// Impact of a change to `file`, split into disjoint first-hop and deeper
+    /// dependent sets.
+    pub fn impact_of(&self, file: &str, max_depth: usize) -> ImpactAnalysis<String> {
+        let direct: HashSet<String> = self.get_dependents(file).into_iter().collect();
+        let indirect: Vec<String> = self
+            .collect_transitive_dependents(file, max_depth)
+            .into_iter()
+            .filter(|dependent| !direct.contains(dependent))
+            .collect();
+        ImpactAnalysis::new(file.to_string(), direct.into_iter().collect(), indirect)
     }
 
     /// Collect all transitive dependencies of a file (BFS traversal)

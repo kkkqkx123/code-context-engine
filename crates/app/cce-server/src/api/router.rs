@@ -152,6 +152,22 @@ pub fn create_router(state: AppState) -> Router {
             "/api/project/{project_id}/graph/impact",
             get(handlers::graph::handle_graph_impact),
         )
+        .route(
+            "/api/project/{project_id}/graph/entity-impact",
+            get(handlers::graph::handle_graph_entity_impact),
+        )
+        .route(
+            "/api/project/{project_id}/graph/cycles",
+            get(handlers::graph::handle_graph_cycles),
+        )
+        .route(
+            "/api/project/{project_id}/graph/structural",
+            get(handlers::graph::handle_graph_structural),
+        )
+        .route(
+            "/api/project/{project_id}/graph/module",
+            get(handlers::graph::handle_graph_module),
+        )
         // Metrics
         .route("/api/metrics", get(handlers::metrics::handle_get_metrics))
         .route(

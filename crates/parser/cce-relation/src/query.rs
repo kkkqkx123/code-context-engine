@@ -78,6 +78,11 @@ pub struct TraversalConfig {
     pub debug: bool,
     /// Maximum number of nodes to visit (safety limit)
     pub max_nodes: usize,
+    /// Keep only edges whose coarse domain is in this set. Empty means every
+    /// domain.
+    pub relation_domains: Vec<String>,
+    /// Whether edges pointing outside the indexed project may be crossed.
+    pub include_external: bool,
 }
 
 impl Default for TraversalConfig {
@@ -89,6 +94,8 @@ impl Default for TraversalConfig {
             direction: TraversalDirection::Forward,
             debug: false,
             max_nodes: 10000, // Safety limit to prevent infinite loops
+            relation_domains: Vec::new(),
+            include_external: true,
         }
     }
 }
@@ -135,6 +142,18 @@ impl TraversalConfig {
         self
     }
 
+    /// Restrict traversal to the given coarse relation domains.
+    pub fn with_relation_domains(mut self, domains: Vec<String>) -> Self {
+        self.relation_domains = domains;
+        self
+    }
+
+    /// Set whether edges pointing outside the indexed project may be crossed.
+    pub fn with_include_external(mut self, include_external: bool) -> Self {
+        self.include_external = include_external;
+        self
+    }
+
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), RelationQueryError> {
         if self.max_depth == 0 {
@@ -145,6 +164,36 @@ impl TraversalConfig {
         }
         Ok(())
     }
+}
+
+/// Coarse domain name of a relation type, matching the graph edge taxonomy
+/// (`call`, `dependency`, `structural`, `reference`, `template`, `other`).
+fn relation_domain(relation_type: &RelationType) -> &'static str {
+    if relation_type.is_call() {
+        "call"
+    } else if relation_type.is_dependency() {
+        "dependency"
+    } else if relation_type.is_structural() {
+        "structural"
+    } else if relation_type.is_reference() {
+        "reference"
+    } else if relation_type.is_template_relation() {
+        "template"
+    } else {
+        "other"
+    }
+}
+
+/// Whether a stored relation survives the traversal filter.
+fn relation_passes_filter(relation: &ResolvedRelation, config: &TraversalConfig) -> bool {
+    if !config.include_external && relation.is_external {
+        return false;
+    }
+    config.relation_domains.is_empty()
+        || config
+            .relation_domains
+            .iter()
+            .any(|domain| domain == relation_domain(&relation.relation_type))
 }
 
 /// Generic graph traversal for call chains.
@@ -265,6 +314,9 @@ impl<'a, I: SnapshotQueryIndex> CallChainTraverser<'a, I> {
                             self.index.get_resolved_relations_by_caller(current_id)
                         {
                             for relation in relations.iter() {
+                                if !relation_passes_filter(relation, &self.config) {
+                                    continue;
+                                }
                                 if let Some(callee_id) = relation.callee_id {
                                     let call_line =
                                         relation.span.line_range_opt().map(|(s, _)| s).unwrap_or(0);
@@ -282,6 +334,9 @@ impl<'a, I: SnapshotQueryIndex> CallChainTraverser<'a, I> {
                     }
                     TraversalDirection::Backward => {
                         for relation in self.index.get_relations_to_entity(current_id) {
+                            if !relation_passes_filter(&relation, &self.config) {
+                                continue;
+                            }
                             let call_line =
                                 relation.span.line_range_opt().map(|(s, _)| s).unwrap_or(0);
                             queue.push_back((
@@ -384,6 +439,9 @@ impl<'a, I: SnapshotQueryIndex> CallChainTraverser<'a, I> {
             // Expand path with calls from current function
             if let Some(relations) = self.index.get_resolved_relations_by_caller(*last_id) {
                 for relation in relations.iter() {
+                    if !relation_passes_filter(relation, &self.config) {
+                        continue;
+                    }
                     if let Some(callee_id) = relation.callee_id {
                         // Skip if already visited in this search (prevents cycles)
                         if visited.contains(&callee_id) {
@@ -545,51 +603,48 @@ impl CallChainQuery {
         self.index.get_implementing_classes(interface_id)
     }
 
-    /// Get inheritance hierarchy (all ancestors)
-    pub fn get_inheritance_hierarchy(&self, class_id: EntityId, max_depth: usize) -> Vec<EntityId> {
-        let mut result = Vec::new();
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
-
-        queue.push_back((class_id, 0));
-
-        while let Some((current_id, depth)) = queue.pop_front() {
-            if depth >= max_depth {
-                continue;
-            }
-
-            let base_classes = self.index.get_base_classes(current_id);
-            for base_id in base_classes {
-                if !visited.contains(&base_id) {
-                    visited.insert(base_id);
-                    result.push(base_id);
-                    queue.push_back((base_id, depth + 1));
-                }
-            }
-        }
-
-        result
+    /// Get inheritance hierarchy (all ancestors), each tagged with its
+    /// distance in hops from `class_id`.
+    pub fn get_inheritance_hierarchy(
+        &self,
+        class_id: EntityId,
+        max_depth: usize,
+    ) -> Vec<(EntityId, usize)> {
+        self.hierarchy_closure(class_id, max_depth, |index, id| index.get_base_classes(id))
     }
 
-    /// Get all derived classes (transitive closure)
-    pub fn get_all_derived_classes(&self, class_id: EntityId, max_depth: usize) -> Vec<EntityId> {
-        let mut result = Vec::new();
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
+    /// Get all derived classes (transitive closure), each tagged with its
+    /// distance in hops from `class_id`.
+    pub fn get_all_derived_classes(
+        &self,
+        class_id: EntityId,
+        max_depth: usize,
+    ) -> Vec<(EntityId, usize)> {
+        self.hierarchy_closure(class_id, max_depth, |index, id| {
+            index.get_derived_classes(id)
+        })
+    }
 
-        queue.push_back((class_id, 0));
+    /// Breadth-first closure over a hierarchy direction, tagging each reached
+    /// entity with its hop distance. The starting entity is never reported.
+    fn hierarchy_closure(
+        &self,
+        class_id: EntityId,
+        max_depth: usize,
+        next: impl Fn(&LayeredSnapshotIndex, EntityId) -> Vec<EntityId>,
+    ) -> Vec<(EntityId, usize)> {
+        let mut result = Vec::new();
+        let mut visited: HashSet<EntityId> = HashSet::from([class_id]);
+        let mut queue: VecDeque<(EntityId, usize)> = VecDeque::from([(class_id, 0)]);
 
         while let Some((current_id, depth)) = queue.pop_front() {
             if depth >= max_depth {
                 continue;
             }
-
-            let derived = self.index.get_derived_classes(current_id);
-            for derived_id in derived {
-                if !visited.contains(&derived_id) {
-                    visited.insert(derived_id);
-                    result.push(derived_id);
-                    queue.push_back((derived_id, depth + 1));
+            for related in next(&self.index, current_id) {
+                if visited.insert(related) {
+                    result.push((related, depth + 1));
+                    queue.push_back((related, depth + 1));
                 }
             }
         }
@@ -664,24 +719,217 @@ impl CallChainQuery {
     }
 
     /// Get change impact analysis for a file.
-    pub fn get_change_impact(&self, file_path: &str) -> crate::dependency_graph::ImpactAnalysis {
+    ///
+    /// Derived from the file dependency graph. `direct_dependents` and
+    /// `indirect_dependents` are disjoint, so their sizes can be summed
+    /// without double counting.
+    pub fn get_change_impact(
+        &self,
+        file_path: &str,
+        max_depth: usize,
+    ) -> crate::dependency_graph::ImpactAnalysis<String> {
         use crate::index::view::RelationIndexView;
-        let mut direct_dependents = self.index.dependents_of(file_path);
-        let mut transitive_dependents = self.index.collect_transitive_dependents(file_path, 10);
-        direct_dependents.sort();
-        transitive_dependents.sort();
-        let combined = direct_dependents.len() as f64 * 2.0 + transitive_dependents.len() as f64;
-        let impact_score = if combined <= 0.0 {
-            0.0
-        } else {
-            100.0 * combined / (combined + 10.0)
-        };
-        crate::dependency_graph::ImpactAnalysis {
-            changed_file: file_path.to_string(),
-            direct_dependents,
-            transitive_dependents,
-            impact_score,
+        let direct: HashSet<String> = self.index.dependents_of(file_path).into_iter().collect();
+        let indirect: Vec<String> = self
+            .index
+            .collect_transitive_dependents(file_path, max_depth)
+            .into_iter()
+            .filter(|dependent| !direct.contains(dependent))
+            .collect();
+        crate::dependency_graph::ImpactAnalysis::new(
+            file_path.to_string(),
+            direct.into_iter().collect(),
+            indirect,
+        )
+    }
+
+    /// Get change impact analysis for an entity, derived from the resolved
+    /// relation edges rather than a separately maintained entity graph.
+    ///
+    /// Direct dependents are the callers of the entity; indirect dependents are
+    /// the callers of those callers, so the two sets are disjoint.
+    pub fn get_entity_impact(
+        &self,
+        entity_id: EntityId,
+        max_depth: usize,
+    ) -> crate::dependency_graph::ImpactAnalysis<EntityId> {
+        use super::index::snapshot_query::SnapshotRelationQueryOps;
+
+        let direct: HashSet<EntityId> = self
+            .index
+            .get_callers_by_callee_entity(entity_id)
+            .into_iter()
+            .collect();
+        let mut indirect: Vec<EntityId> = Vec::new();
+        let mut visited: HashSet<EntityId> = direct.clone();
+        let mut frontier: Vec<EntityId> = direct.iter().copied().collect();
+        let mut depth = 1usize;
+        while !frontier.is_empty() && (max_depth == 0 || depth < max_depth) {
+            let mut next: Vec<EntityId> = Vec::new();
+            for current in &frontier {
+                for caller in self.index.get_callers_by_callee_entity(*current) {
+                    if visited.insert(caller) {
+                        next.push(caller);
+                    }
+                }
+            }
+            indirect.extend(next.iter().copied());
+            frontier = next;
+            depth += 1;
         }
+        crate::dependency_graph::ImpactAnalysis::new(
+            entity_id,
+            direct.into_iter().collect(),
+            indirect,
+        )
+    }
+
+    /// Dependency cycles among entities, each listing its members in
+    /// traversal order.
+    ///
+    /// Derived from the forward relation edges by iterative DFS with an
+    /// explicit stack: a recursive formulation would overflow the stack on
+    /// deep call chains.
+    pub fn find_entity_cycles(&self, max_cycles: usize) -> Vec<Vec<EntityId>> {
+        use crate::index::view::RelationIndexView;
+
+        /// DFS frame: node being expanded, plus the position within its
+        /// successors.
+        struct Frame {
+            node: EntityId,
+            successors: Vec<EntityId>,
+            cursor: usize,
+        }
+
+        let mut cycles: Vec<Vec<EntityId>> = Vec::new();
+        // `done` marks nodes whose outgoing edges are fully expanded; `on_path`
+        // marks nodes on the current DFS path.
+        let mut done: HashSet<EntityId> = HashSet::new();
+        let mut roots: Vec<EntityId> = Vec::new();
+        self.index.for_each_function(|id, _| roots.push(id));
+        roots.sort();
+
+        for root in roots {
+            if done.contains(&root) || cycles.len() >= max_cycles {
+                continue;
+            }
+            let mut path: Vec<EntityId> = vec![root];
+            let mut on_path: HashSet<EntityId> = HashSet::from([root]);
+            let mut stack: Vec<Frame> = vec![Frame {
+                node: root,
+                successors: self
+                    .index
+                    .get_resolved_relations_by_caller(root)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|relation| relation.callee_id)
+                    .collect(),
+                cursor: 0,
+            }];
+
+            while let Some(frame) = stack.last_mut() {
+                if frame.cursor >= frame.successors.len() {
+                    let node = frame.node;
+                    stack.pop();
+                    on_path.remove(&node);
+                    done.insert(node);
+                    continue;
+                }
+                let next = frame.successors[frame.cursor];
+                frame.cursor += 1;
+                if done.contains(&next) {
+                    continue;
+                }
+                if on_path.contains(&next) {
+                    if let Some(start) = path.iter().position(|node| *node == next) {
+                        cycles.push(path[start..].to_vec());
+                        if cycles.len() >= max_cycles {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                on_path.insert(next);
+                path.push(next);
+                stack.push(Frame {
+                    node: next,
+                    successors: self
+                        .index
+                        .get_resolved_relations_by_caller(next)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|relation| relation.callee_id)
+                        .collect(),
+                    cursor: 0,
+                });
+            }
+        }
+        cycles
+    }
+
+    /// File-level dependency cycles from the file dependency graph.
+    pub fn find_file_cycles(&self, max_cycles: usize) -> Vec<Vec<String>> {
+        use crate::index::view::RelationIndexView;
+
+        /// DFS frame over file dependencies.
+        struct Frame {
+            file: String,
+            dependencies: Vec<String>,
+            cursor: usize,
+        }
+
+        let mut cycles: Vec<Vec<String>> = Vec::new();
+        let mut done: HashSet<String> = HashSet::new();
+        let mut files: Vec<String> = self.index.dependency_files();
+        files.sort();
+
+        for root in files {
+            if done.contains(&root) || cycles.len() >= max_cycles {
+                continue;
+            }
+            let mut path: Vec<String> = vec![root.clone()];
+            let mut on_path: HashSet<String> = HashSet::from([root.clone()]);
+            let mut stack: Vec<Frame> = vec![Frame {
+                file: root.clone(),
+                dependencies: self.index.dependencies_of(&root),
+                cursor: 0,
+            }];
+
+            while let Some(frame) = stack.last_mut() {
+                if frame.cursor >= frame.dependencies.len() {
+                    let file = frame.file.clone();
+                    stack.pop();
+                    on_path.remove(&file);
+                    done.insert(file);
+                    continue;
+                }
+                let next = frame.dependencies[frame.cursor].clone();
+                frame.cursor += 1;
+                if next == root && path.len() == 1 {
+                    continue;
+                }
+                if done.contains(&next) {
+                    continue;
+                }
+                if on_path.contains(&next) {
+                    if let Some(start) = path.iter().position(|file| *file == next) {
+                        cycles.push(path[start..].to_vec());
+                        if cycles.len() >= max_cycles {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                on_path.insert(next.clone());
+                path.push(next.clone());
+                stack.push(Frame {
+                    file: next.clone(),
+                    dependencies: self.index.dependencies_of(&next),
+                    cursor: 0,
+                });
+            }
+        }
+        cycles
     }
 
     /// Query forward call chain by EntityId
@@ -736,12 +984,38 @@ impl CallChainQuery {
         start_id: EntityId,
         end_id: EntityId,
         max_depth: usize,
+        max_nodes: usize,
     ) -> Result<Option<Vec<CallChainNode>>, RelationQueryError> {
         let config = TraversalConfig::new()
             .with_max_depth(max_depth)
+            .with_max_nodes(max_nodes)
             .with_include_start_node(true)
             .with_stop_on_cycles(true)
             .with_direction(TraversalDirection::Forward);
+
+        let traverser = CallChainTraverser::new(self.index.as_ref(), config);
+        traverser.find_path(start_id, end_id)
+    }
+
+    /// Find call chain path between two EntityIds, crossing only edges in the
+    /// given coarse relation domains.
+    pub fn find_call_chain_in_domains(
+        &self,
+        start_id: EntityId,
+        end_id: EntityId,
+        max_depth: usize,
+        max_nodes: usize,
+        relation_domains: Vec<String>,
+        include_external: bool,
+    ) -> Result<Option<Vec<CallChainNode>>, RelationQueryError> {
+        let config = TraversalConfig::new()
+            .with_max_depth(max_depth)
+            .with_max_nodes(max_nodes)
+            .with_include_start_node(true)
+            .with_stop_on_cycles(true)
+            .with_direction(TraversalDirection::Forward)
+            .with_relation_domains(relation_domains)
+            .with_include_external(include_external);
 
         let traverser = CallChainTraverser::new(self.index.as_ref(), config);
         traverser.find_path(start_id, end_id)
@@ -761,6 +1035,29 @@ mod tests {
     use cce_types::Span;
     use cce_types::{Entity, EntityId, EntityKind, RelationType, ResolvedRelation};
     use std::collections::HashMap;
+
+    /// Minimal entity record for graph-shape tests.
+    fn test_entity(id: u64, name: &str) -> Entity {
+        Entity {
+            id: EntityId(id),
+            kind: EntityKind::Function,
+            name: name.to_string(),
+            signature: String::new(),
+            parameters: Vec::new(),
+            return_type: None,
+            span: Span::default(),
+            depth: 0,
+            parent: None,
+            children: Vec::new(),
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: HashMap::new(),
+            metadata: HashMap::new(),
+            is_stdlib: false,
+            subtype: None,
+            stdlib_category: None,
+        }
+    }
 
     /// Helper function to create a test function entity
     fn create_test_function_entity(
@@ -834,6 +1131,160 @@ mod tests {
         index
     }
 
+    fn impact_chain_query() -> CallChainQuery {
+        let base = RelationIndex::new();
+        base.add_function_with_path(EntityId(1), test_entity(1, "target"), "src/lib.rs".into());
+        for id in 2u64..=4 {
+            base.add_function_with_path(
+                EntityId(id),
+                test_entity(id, &format!("fn{id}")),
+                "src/lib.rs".into(),
+            );
+        }
+        // 2 -> 1, 3 -> 2, 4 -> 3.
+        for (from, to) in [(2u64, 1u64), (3, 2), (4, 3)] {
+            base.add_resolved_relation(ResolvedRelation {
+                caller: EntityId(from),
+                callee_id: Some(EntityId(to)),
+                callee_name: format!("fn{to}"),
+                relation_type: RelationType::DirectCall,
+                span: Span::default(),
+                is_external: false,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: CallContext::Direct,
+                overload_signature: None,
+            });
+        }
+        CallChainQuery::from_index(base)
+    }
+
+    #[test]
+    fn entity_impact_direct_and_indirect_are_disjoint() {
+        let query = impact_chain_query();
+        let impact = query.get_entity_impact(EntityId(1), 10);
+        assert_eq!(impact.changed, EntityId(1));
+        assert_eq!(impact.direct_dependents, vec![EntityId(2)]);
+        // 3 and 4 are reachable only after leaving the first hop.
+        assert_eq!(impact.indirect_dependents, vec![EntityId(3), EntityId(4)]);
+        for indirect in &impact.indirect_dependents {
+            assert!(!impact.direct_dependents.contains(indirect));
+        }
+        assert!(impact.impact_score > 0.0);
+    }
+
+    #[test]
+    fn entity_impact_respects_max_depth() {
+        let query = impact_chain_query();
+        let impact = query.get_entity_impact(EntityId(1), 1);
+        assert_eq!(impact.direct_dependents, vec![EntityId(2)]);
+        assert!(impact.indirect_dependents.is_empty());
+    }
+
+    #[test]
+    fn entity_impact_of_leaf_has_no_dependents() {
+        let query = impact_chain_query();
+        let impact = query.get_entity_impact(EntityId(4), 10);
+        assert!(impact.direct_dependents.is_empty());
+        assert!(impact.indirect_dependents.is_empty());
+        assert_eq!(impact.impact_score, 0.0);
+    }
+
+    #[test]
+    fn finds_call_cycles() {
+        let base = RelationIndex::new();
+        for id in 1u64..=3 {
+            base.add_function_with_path(
+                EntityId(id),
+                test_entity(id, &format!("fn{id}")),
+                "src/lib.rs".into(),
+            );
+        }
+        // 1 -> 2 -> 3 -> 1, plus a disjoint acyclic tail 4 -> 1.
+        for (from, to) in [(1u64, 2u64), (2, 3), (3, 1), (4, 1)] {
+            base.add_resolved_relation(ResolvedRelation {
+                caller: EntityId(from),
+                callee_id: Some(EntityId(to)),
+                callee_name: format!("fn{to}"),
+                relation_type: RelationType::DirectCall,
+                span: Span::default(),
+                is_external: false,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: CallContext::Direct,
+                overload_signature: None,
+            });
+        }
+        let query = CallChainQuery::from_index(base);
+        let cycles = query.find_entity_cycles(10);
+        assert_eq!(cycles.len(), 1);
+        let cycle = &cycles[0];
+        assert_eq!(cycle.len(), 3);
+        // Every member is a distinct participant in the cycle.
+        assert_eq!(cycle.iter().copied().collect::<HashSet<_>>().len(), 3);
+        // 4 calls into the cycle but is not part of it.
+        assert!(!cycle.contains(&EntityId(4)));
+    }
+
+    #[test]
+    fn acyclic_graph_has_no_cycles() {
+        let query = impact_chain_query();
+        assert!(query.find_entity_cycles(10).is_empty());
+    }
+
+    #[test]
+    fn cycle_search_honors_its_cap() {
+        let base = RelationIndex::new();
+        for id in 1u64..=4 {
+            base.add_function_with_path(
+                EntityId(id),
+                test_entity(id, &format!("fn{id}")),
+                "src/lib.rs".into(),
+            );
+        }
+        // Two disjoint two-node cycles.
+        for (from, to) in [(1u64, 2u64), (2, 1), (3, 4), (4, 3)] {
+            base.add_resolved_relation(ResolvedRelation {
+                caller: EntityId(from),
+                callee_id: Some(EntityId(to)),
+                callee_name: format!("fn{to}"),
+                relation_type: RelationType::DirectCall,
+                span: Span::default(),
+                is_external: false,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: CallContext::Direct,
+                overload_signature: None,
+            });
+        }
+        let query = CallChainQuery::from_index(base);
+        assert_eq!(query.find_entity_cycles(1).len(), 1);
+        assert_eq!(query.find_entity_cycles(10).len(), 2);
+    }
+
+    #[test]
+    fn file_impact_direct_and_indirect_are_disjoint() {
+        let base = RelationIndex::new();
+        // b depends on a, c on b, d on c: changing a.rs reaches all three.
+        base.dependency_graph.add_dependency("b.rs", "a.rs");
+        base.dependency_graph.add_dependency("c.rs", "b.rs");
+        base.dependency_graph.add_dependency("d.rs", "c.rs");
+        let query = CallChainQuery::from_index(base);
+        let impact = query.get_change_impact("a.rs", 10);
+        assert_eq!(impact.changed, "a.rs");
+        assert_eq!(impact.direct_dependents, vec!["b.rs".to_string()]);
+        assert_eq!(
+            impact.indirect_dependents,
+            vec!["c.rs".to_string(), "d.rs".to_string()]
+        );
+    }
+
     #[test]
     fn test_query_forward() {
         let index = create_test_index();
@@ -873,7 +1324,7 @@ mod tests {
 
         // Find path from func_a (EntityId(0)) to func_c (EntityId(2))
         let path = query
-            .find_call_chain(EntityId(0), EntityId(2), 5)
+            .find_call_chain(EntityId(0), EntityId(2), 5, 10_000)
             .expect("Query failed");
         assert!(path.is_some());
         let path = path.expect("Path should not be None");

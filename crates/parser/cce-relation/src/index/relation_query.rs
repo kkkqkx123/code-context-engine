@@ -6,6 +6,7 @@
 use crate::error::IndexError;
 use cce_types::{EntityId, RelationType, ResolvedRelation};
 use dashmap::DashMap;
+use std::collections::HashSet;
 
 use super::core::{RelationEdgeSet, RelationIndex};
 
@@ -72,9 +73,6 @@ pub trait RelationQueryOps {
     /// Get total number of resolved relations
     fn resolved_relation_count(&self) -> usize;
 
-    /// Get total number of call relations
-    fn call_count(&self) -> usize;
-
     /// Get reference to resolved relation index
     fn resolved_relation_index(&self) -> &DashMap<EntityId, RelationEdgeSet>;
 }
@@ -105,40 +103,13 @@ impl RelationQueryOps for RelationIndex {
     }
 
     fn get_callers_by_callee_entity(&self, callee_id: EntityId) -> Vec<EntityId> {
-        if let Some(callers) = self.reverse_callee_index.get(&callee_id) {
-            let mut result = callers.clone();
-            result.sort();
-            result.dedup();
-            result.truncate(MAX_REVERSE_FANIN);
-            return result;
-        }
-        // Empty early exit: unknown entities never have callers.
-        if !self.function_index.contains_key(&callee_id) {
+        // The reverse map is authoritative: an entry lists every caller, and a
+        // miss means no callers. Never derive callers from the callee's own
+        // outgoing edges — that answers a different question.
+        let Some(callers) = self.reverse_callee_index.get(&callee_id) else {
             return Vec::new();
-        }
-        // Authoritative reverse index with no entry means no callers.
-        if !self.reverse_callee_index.is_empty() {
-            return Vec::new();
-        }
-        // Fallback: legacy embedded list for indexes built before reverse
-        // was introduced (e.g. deserialized snapshots).
-        if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            let callers = entry.callers();
-            if !callers.is_empty() {
-                let mut result = callers.to_vec();
-                result.sort();
-                result.dedup();
-                result.truncate(MAX_REVERSE_FANIN);
-                return result;
-            }
-        }
-        // For callee-only entities without reverse entry, scan.
-        let mut result: Vec<EntityId> = self
-            .resolved_relation_index
-            .iter()
-            .filter(|entry| entry.value().iter().any(|r| r.callee_id == Some(callee_id)))
-            .map(|entry| *entry.key())
-            .collect();
+        };
+        let mut result = callers.clone();
         result.sort();
         result.dedup();
         result.truncate(MAX_REVERSE_FANIN);
@@ -162,15 +133,10 @@ impl RelationQueryOps for RelationIndex {
     ) -> Vec<EntityId> {
         // Single merged edge walk: derive callers from full edges filtered by
         // type instead of reverse-list plus per-caller forward re-verification.
-        // Empty early exit avoids full scans for unknown callees.
-        if !self.function_index.contains_key(&callee_id)
-            && self.reverse_callee_index.get(&callee_id).is_none()
-        {
-            return Vec::new();
-        }
+        let mut seen: HashSet<EntityId> = HashSet::new();
         let mut callers = Vec::new();
         for relation in self.get_relations_to_entity_by_type(callee_id, relation_type) {
-            if !callers.contains(&relation.caller) {
+            if seen.insert(relation.caller) {
                 callers.push(relation.caller);
                 if callers.len() >= MAX_REVERSE_FANIN {
                     break;
@@ -181,67 +147,23 @@ impl RelationQueryOps for RelationIndex {
     }
 
     fn get_relations_to_entity(&self, callee_id: EntityId) -> Vec<ResolvedRelation> {
-        // Use reverse index to enumerate callers O(k) without full scan.
-        // Unknown callees return empty without scanning.
-        if !self.function_index.contains_key(&callee_id)
-            && self.reverse_callee_index.get(&callee_id).is_none()
-            && self.resolved_relation_index.get(&callee_id).is_none()
-        {
+        // Enumerate callers through the reverse map, then resolve each
+        // caller's edges. A reverse miss means nothing points at this callee,
+        // so no scan and no fallback lookup is warranted.
+        let Some(callers) = self.reverse_callee_index.get(&callee_id) else {
             return Vec::new();
-        }
-        let callers: Vec<EntityId> = if let Some(v) = self.reverse_callee_index.get(&callee_id) {
-            let mut limited = v.clone();
-            limited.sort();
-            limited.dedup();
-            limited.truncate(MAX_REVERSE_FANIN);
-            limited
-        } else if let Some(entry) = self.resolved_relation_index.get(&callee_id) {
-            let c = entry.callers();
-            if !c.is_empty() {
-                c.to_vec()
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
         };
-        if !callers.is_empty() {
-            // Authoritative reverse hit: resolve edges directly, no fallback scan.
-            if self.reverse_callee_index.get(&callee_id).is_some() {
-                let mut result = Vec::new();
-                for caller_id in callers {
-                    if let Some(relations) = self.resolved_relation_index.get(&caller_id) {
-                        for r in relations.iter() {
-                            if r.callee_id == Some(callee_id) {
-                                result.push(r.clone());
-                            }
-                        }
-                    }
-                }
-                return result;
-            }
-            let mut result = Vec::new();
-            for caller_id in callers {
-                if let Some(relations) = self.resolved_relation_index.get(&caller_id) {
-                    for r in relations.iter() {
-                        if r.callee_id == Some(callee_id) {
-                            result.push(r.clone());
-                        }
-                    }
-                }
-            }
-            if !result.is_empty() {
-                return result;
-            }
-        } else if !self.reverse_callee_index.is_empty() {
-            return Vec::new();
-        }
-        // Fallback full scan for legacy indexes without a populated reverse map.
+        let mut limited = callers.clone();
+        limited.sort();
+        limited.dedup();
+        limited.truncate(MAX_REVERSE_FANIN);
         let mut result = Vec::new();
-        for entry in self.resolved_relation_index.iter() {
-            for r in entry.value().iter() {
-                if r.callee_id == Some(callee_id) {
-                    result.push(r.clone());
+        for caller_id in limited {
+            if let Some(relations) = self.resolved_relation_index.get(&caller_id) {
+                for relation in relations.iter() {
+                    if relation.callee_id == Some(callee_id) {
+                        result.push(relation.clone());
+                    }
                 }
             }
         }
@@ -278,10 +200,6 @@ impl RelationQueryOps for RelationIndex {
     }
 
     fn resolved_relation_count(&self) -> usize {
-        self.resolved_relation_index.iter().map(|v| v.len()).sum()
-    }
-
-    fn call_count(&self) -> usize {
         self.resolved_relation_index.iter().map(|v| v.len()).sum()
     }
 
@@ -468,6 +386,75 @@ mod tests {
             subtype: None,
             stdlib_category: None,
         }
+    }
+
+    /// A callee that itself calls something must not be reported as a caller
+    /// of itself: reverse lookups read the reverse map only.
+    #[test]
+    fn reverse_lookup_ignores_the_callees_own_outgoing_edges() {
+        let index = RelationIndex::new();
+        index.add_function(EntityId(1), create_test_entity(1, "middle"));
+        index.add_function(EntityId(2), create_test_entity(2, "target"));
+        // 1 -> 2 only.
+        index.add_resolved_relation(ResolvedRelation {
+            caller: EntityId(1),
+            callee_id: Some(EntityId(2)),
+            callee_name: "target".to_string(),
+            relation_type: RelationType::DirectCall,
+            span: Span::default(),
+            is_external: false,
+            external_type: None,
+            callee_symbol: None,
+            stdlib_category: None,
+            owner_type: None,
+            call_context: cce_types::relation::CallContext::Direct,
+            overload_signature: None,
+        });
+
+        assert_eq!(
+            index.get_callers_by_callee_entity(EntityId(2)),
+            vec![EntityId(1)]
+        );
+        assert!(index.get_callers_by_callee_entity(EntityId(1)).is_empty());
+        assert_eq!(
+            index.get_relations_to_entity(EntityId(2)).len(),
+            1,
+            "the single 1->2 edge is the only relation targeting 2"
+        );
+        assert!(
+            index.get_relations_to_entity(EntityId(1)).is_empty(),
+            "nothing targets 1; its own outgoing edge must not resurface"
+        );
+    }
+
+    #[test]
+    fn hierarchy_queries_only_follow_the_requested_family() {
+        let index = RelationIndex::new();
+        index.add_function(EntityId(1), create_test_entity(1, "base"));
+        index.add_function(EntityId(2), create_test_entity(2, "derived"));
+        index.add_function(EntityId(3), create_test_entity(3, "unrelated"));
+
+        index.add_resolved_relation(ResolvedRelation {
+            caller: EntityId(2),
+            callee_id: Some(EntityId(1)),
+            callee_name: "base".to_string(),
+            relation_type: RelationType::Inheritance,
+            span: Span::default(),
+            is_external: false,
+            external_type: None,
+            callee_symbol: None,
+            stdlib_category: None,
+            owner_type: None,
+            call_context: cce_types::relation::CallContext::Direct,
+            overload_signature: None,
+        });
+
+        assert_eq!(index.get_derived_classes(EntityId(1)), vec![EntityId(2)]);
+        assert_eq!(index.get_base_classes(EntityId(2)), vec![EntityId(1)]);
+        // 2 inherits from 1 but implements nothing, so it is not an implementor.
+        assert!(index.get_implementing_classes(EntityId(1)).is_empty());
+        assert!(index.get_types_with_trait_bound(EntityId(1)).is_empty());
+        assert!(index.get_derived_classes(EntityId(3)).is_empty());
     }
 
     #[test]
