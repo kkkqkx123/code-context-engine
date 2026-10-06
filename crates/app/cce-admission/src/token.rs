@@ -44,6 +44,8 @@ pub struct StoredToken {
     pub fingerprint: String,
     /// Explicitly authorized project ids. Empty authorizes no project scope.
     pub projects: Vec<i64>,
+    /// Stored byte quota for pushed content. None means unlimited.
+    pub quota_bytes: Option<u64>,
 }
 
 /// Pre-hashed token set used on the request hot path.
@@ -64,6 +66,7 @@ impl TokenStore {
                     fingerprint: fingerprint(&hash),
                     hash,
                     projects: entry.projects.clone(),
+                    quota_bytes: entry.quota_bytes,
                 }
             })
             .collect();
@@ -112,6 +115,7 @@ mod tests {
             tokens: vec![crate::config::TokenEntry {
                 token: "alpha-token-value-1".to_string(),
                 projects: vec![1],
+                quota_bytes: None,
             }],
             ..crate::config::AdmissionConfig::default()
         };

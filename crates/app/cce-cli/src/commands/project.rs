@@ -51,6 +51,7 @@ async fn create_project(
         exclude_dirs: exclude_list,
         respect_gitignore: true,
         ignore_patterns: vec![],
+        supply_mode: None,
     };
 
     if verbose {

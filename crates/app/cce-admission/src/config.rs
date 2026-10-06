@@ -18,6 +18,9 @@ pub struct TokenEntry {
     /// Explicitly authorized project ids. Empty authorizes no project scope.
     #[serde(default)]
     pub projects: Vec<i64>,
+    /// Stored byte quota for pushed content. None means unlimited.
+    #[serde(default)]
+    pub quota_bytes: Option<u64>,
 }
 
 /// Admission settings for the remote hosting shape.
@@ -39,6 +42,15 @@ pub struct AdmissionConfig {
     /// Largest request body the admission layer buffers for scope checks.
     #[serde(default = "default_max_body_bytes")]
     pub max_body_bytes: usize,
+    /// Request timeout in seconds for gateway long connections. Zero
+    /// disables the timeout layer.
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+    /// Explicitly allowed browser origins for cross-origin access. Empty
+    /// denies every browser origin; non-browser clients without an Origin
+    /// header are unaffected.
+    #[serde(default)]
+    pub cors_allowed_origins: Vec<String>,
 }
 
 fn default_public_paths() -> Vec<String> {
@@ -53,6 +65,10 @@ fn default_max_body_bytes() -> usize {
     8 * 1024 * 1024
 }
 
+fn default_request_timeout_secs() -> u64 {
+    300
+}
+
 impl Default for AdmissionConfig {
     fn default() -> Self {
         Self {
@@ -61,6 +77,8 @@ impl Default for AdmissionConfig {
             public_path_prefixes: default_public_paths(),
             rate_limit_per_min: default_rate_limit(),
             max_body_bytes: default_max_body_bytes(),
+            request_timeout_secs: default_request_timeout_secs(),
+            cors_allowed_origins: Vec::new(),
         }
     }
 }
@@ -69,7 +87,9 @@ impl AdmissionConfig {
     /// Load admission settings from the process environment.
     ///
     /// `CCE_ADMISSION_TOKENS` holds semicolon separated entries shaped as
-    /// `token@1,2` or a bare `token` with no project scope. The optional
+    /// `token@1,2:quota_bytes`, `token@1,2`, or a bare `token` with no
+    /// project scope. The optional quota suffix bounds stored bytes per
+    /// token; absent means unlimited. The optional
     /// `CCE_ADMISSION_PUBLIC_PATHS` overrides the default bypass list with
     /// comma separated prefixes, `CCE_ADMISSION_RATE_LIMIT_PER_MIN` tunes the
     /// per-token budget, and `CCE_ADMISSION_MAX_BODY_BYTES` bounds buffered
@@ -111,6 +131,21 @@ impl AdmissionConfig {
             if config.max_body_bytes == 0 {
                 config.max_body_bytes = default_max_body_bytes();
             }
+        }
+        if let Ok(raw_timeout) = std::env::var("CCE_ADMISSION_REQUEST_TIMEOUT_SECS") {
+            config.request_timeout_secs = raw_timeout.trim().parse().map_err(|_| {
+                crate::middleware::AdmissionError::config(
+                    "CCE_ADMISSION_REQUEST_TIMEOUT_SECS must be a non-negative integer",
+                )
+            })?;
+        }
+        if let Ok(raw_origins) = std::env::var("CCE_ADMISSION_CORS_ORIGINS") {
+            config.cors_allowed_origins = raw_origins
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
         }
         config.validate()?;
         Ok(config)
@@ -177,6 +212,22 @@ fn parse_token_env(raw: &str) -> Result<Vec<TokenEntry>, crate::middleware::Admi
             ));
         }
         let mut projects = Vec::new();
+        let mut quota_bytes: Option<u64> = None;
+        let scope = match scope {
+            Some(scope) if let Some((projects_part, quota_part)) = scope.split_once(':') => {
+                let quota: u64 = quota_part.trim().parse().map_err(|_| {
+                    AdmissionError::config("admission token quota must be a positive byte count")
+                })?;
+                if quota == 0 {
+                    return Err(AdmissionError::config(
+                        "admission token quota must be positive",
+                    ));
+                }
+                quota_bytes = Some(quota);
+                Some(projects_part)
+            }
+            other => other,
+        };
         if let Some(scope) = scope {
             for part in scope.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                 let id: i64 = part.parse().map_err(|_| {
@@ -190,6 +241,7 @@ fn parse_token_env(raw: &str) -> Result<Vec<TokenEntry>, crate::middleware::Admi
         entries.push(TokenEntry {
             token: token.to_string(),
             projects,
+            quota_bytes,
         });
     }
     if entries.is_empty() {
@@ -211,6 +263,14 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].projects, vec![1, 2]);
         assert!(entries[1].projects.is_empty());
+        assert!(entries[0].quota_bytes.is_none());
+    }
+
+    #[test]
+    fn token_env_parses_quota_suffix() {
+        let entries = parse_token_env("alpha-token-value-1@1,2:1048576").expect("parse");
+        assert_eq!(entries[0].projects, vec![1, 2]);
+        assert_eq!(entries[0].quota_bytes, Some(1_048_576));
     }
 
     #[test]
@@ -233,6 +293,7 @@ mod tests {
             tokens: vec![TokenEntry {
                 token: "short".to_string(),
                 projects: vec![1],
+                quota_bytes: None,
             }],
             ..AdmissionConfig::default()
         };

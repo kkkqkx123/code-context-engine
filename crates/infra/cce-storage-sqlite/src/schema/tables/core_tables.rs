@@ -137,5 +137,25 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
     )
     .map_err(|e| StorageError::Table(format!("Failed to create generation overrides: {}", e)))?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS admission_audit (
+            token_fingerprint TEXT PRIMARY KEY,
+            projects TEXT NOT NULL DEFAULT '',
+            quota_bytes INTEGER,
+            bytes_used INTEGER NOT NULL DEFAULT 0,
+            admitted INTEGER NOT NULL DEFAULT 0,
+            auth_rejections INTEGER NOT NULL DEFAULT 0,
+            scope_rejections INTEGER NOT NULL DEFAULT 0,
+            rate_rejections INTEGER NOT NULL DEFAULT 0,
+            body_rejections INTEGER NOT NULL DEFAULT 0,
+            quota_rejections INTEGER NOT NULL DEFAULT 0,
+            last_used INTEGER,
+            last_reject_reason TEXT,
+            updated_at INTEGER NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| StorageError::Table(format!("Failed to create admission audit: {}", e)))?;
+
     Ok(())
 }

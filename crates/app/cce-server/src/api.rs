@@ -172,10 +172,16 @@ fn admission_app(app_state: state::AppState, host: &str) -> anyhow::Result<axum:
         Arc::clone(&gate),
         cce_admission::admission_middleware,
     );
+    let timeout_layer =
+        axum::middleware::from_fn_with_state(Arc::clone(&gate), cce_admission::timeout_middleware);
+    let cors_layer =
+        axum::middleware::from_fn_with_state(Arc::clone(&gate), cce_admission::cors_middleware);
     Ok(router::api_routes()
         .merge(handlers::ingest::ingest_routes(admission_metrics))
         .with_state(app_state)
         .layer(admission_layer)
+        .layer(timeout_layer)
+        .layer(cors_layer)
         .layer(axum::middleware::from_fn(middleware::metrics_middleware(
             http_metrics,
         ))))

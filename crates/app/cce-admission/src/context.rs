@@ -11,14 +11,17 @@ pub struct AdmissionContext {
     pub fingerprint: String,
     /// Explicitly authorized project ids. Empty authorizes no project scope.
     pub projects: Vec<i64>,
+    /// Stored byte quota for pushed content. None means unlimited.
+    pub quota_bytes: Option<u64>,
 }
 
 impl AdmissionContext {
     /// Create a context from a verified stored token.
-    pub fn new(fingerprint: String, projects: Vec<i64>) -> Self {
+    pub fn new(fingerprint: String, projects: Vec<i64>, quota_bytes: Option<u64>) -> Self {
         Self {
             fingerprint,
             projects,
+            quota_bytes,
         }
     }
 

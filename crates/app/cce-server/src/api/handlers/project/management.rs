@@ -148,6 +148,27 @@ pub async fn handle_create_project(
             "Failed to initialize project metadata (non-critical)"
         );
     }
+    if let Some(supply_mode) = request.supply_mode.as_deref() {
+        let normalized = supply_mode.trim().to_lowercase();
+        if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
+            || normalized == cce_api::models::SUPPLY_MODE_LOCAL
+        {
+            if let Err(e) = client.with_transaction(|tx| {
+                ProjectRepository::meta_set_string(
+                    tx,
+                    project_id,
+                    cce_api::models::SUPPLY_MODE_KEY,
+                    &normalized,
+                )
+            }) {
+                tracing::warn!(
+                    project_id = project_id,
+                    error = %e,
+                    "Failed to record supply mode (non-critical)"
+                );
+            }
+        }
+    }
 
     // Build response
     ApiResult::Success(ProjectDetailResponse {
@@ -253,6 +274,27 @@ pub async fn handle_update_project(
             error_codes::STORAGE_ERROR,
             format!("Failed to update project: {}", e),
         ));
+    }
+    if let Some(supply_mode) = request.supply_mode.as_deref() {
+        let normalized = supply_mode.trim().to_lowercase();
+        if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
+            || normalized == cce_api::models::SUPPLY_MODE_LOCAL
+        {
+            if let Err(e) = client.with_transaction(|tx| {
+                ProjectRepository::meta_set_string(
+                    tx,
+                    id,
+                    cce_api::models::SUPPLY_MODE_KEY,
+                    &normalized,
+                )
+            }) {
+                tracing::warn!(
+                    project_id = id,
+                    error = %e,
+                    "Failed to record supply mode (non-critical)"
+                );
+            }
+        }
     }
 
     // Get updated project

@@ -1031,6 +1031,10 @@ pub enum GatewayCommands {
         /// Stage files without running the index commit
         #[arg(long, default_value = "false")]
         no_commit: bool,
+
+        /// Compress chunks before upload, negotiated off by default
+        #[arg(long, default_value = "false")]
+        compress: bool,
     },
 
     /// Sync once, then poll and push incremental changes
@@ -1058,6 +1062,10 @@ pub enum GatewayCommands {
         /// Poll interval in seconds
         #[arg(long, default_value = "5")]
         interval_secs: u64,
+
+        /// Compress chunks before upload, negotiated off by default
+        #[arg(long, default_value = "false")]
+        compress: bool,
     },
 }
 

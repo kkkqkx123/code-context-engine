@@ -4,11 +4,17 @@
 #   1. Build with the admission feature: cargo build --features cce-server/admission
 #   2. Copy this file and set an explicit site address below.
 #   3. Export long-lived tokens before starting (never commit them):
-#        export CCE_ADMISSION_TOKENS='gateway-token-value-0001@1,2;readonly-token-value-02@1'
-#      Each entry is `token@project1,project2`; a bare token authorizes no
-#      project scope. Rotate by adding the replacement token, redeploying the
-#      gateway and clients, then removing the old entry. Revoke by removing
-#      the entry and restarting the server.
+#        export CCE_ADMISSION_TOKENS='gateway-token-value-0001@1,2:1073741824;readonly-token-value-02@1'
+#      Each entry is `token@project1,project2:quota_bytes`; the quota suffix
+#      is optional and bounds stored bytes per token, absent means unlimited.
+#      A bare token authorizes no project scope. Rotate by adding the
+#      replacement token, redeploying the gateway and clients, then removing
+#      the old entry. Revoke by removing the entry and restarting the server.
+#      Optional hardening, same feature switch, local builds unaffected:
+#        export CCE_ADMISSION_REQUEST_TIMEOUT_SECS=300
+#        export CCE_ADMISSION_CORS_ORIGINS='https://ops.example.com'
+#      Direct supply migration, mirror by default:
+#        export CCE_INGEST_SUPPLY_MODE='mirror'
 #   4. Start the server: CCE_ENV=prod CCE_CONFIG=config.remote.toml <server binary>
 #
 # The server refuses a non-loopback bind without configured tokens, so an
@@ -23,6 +29,11 @@ port = 9000
 # Gateway behavior (client side, documented for operators):
 #   cce-cli gateway sync --project-id 1 --path /home/user/work/repo
 #   cce-cli gateway watch --project-id 1 --path /home/user/work/repo
+#   cce-gateway --project-id 1 --path /home/user/work/repo --health-file /var/lib/cce-gateway/health.json
 # The gateway reads CCE_API_TOKEN and pushes only; the remote host never
 # connects back. The remote project root is the staged mirror: create the
-# project with the server-side mirror path, then let the gateway fill it.
+# project with the server-side mirror path and supply_mode gateway, then let
+# the gateway fill it. Chunking uses 256 KiB pieces with per-chunk hashes;
+# compression stays off unless CCE_GATEWAY_COMPRESS=1 or --compress is set.
+# The resident daemon shares the CLI core; systemd unit and heartbeat wiring
+# live under contrib/cce-gateway.service.

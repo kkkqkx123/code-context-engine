@@ -1,0 +1,30 @@
+[package]
+name = "cce-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Lightweight file supply gateway for remote hosting: enumerate, fingerprint, push, observe"
+
+[[bin]]
+name = "cce-gateway"
+path = "src/main.rs"
+
+[lib]
+name = "cce_gateway"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+clap = { version = "4.6", features = ["derive", "env"] }
+base64 = "0.22"
+cce-api = { path = "../cce-api" }
+cce-scanner = { path = "../../infra/cce-scanner" }
+cce-types = { path = "../../core/cce-types" }
+sha2 = { workspace = true }
+hex = { workspace = true }
+zstd = { workspace = true }
+chrono = { workspace = true }

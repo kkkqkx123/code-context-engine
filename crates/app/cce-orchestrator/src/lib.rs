@@ -17,6 +17,7 @@ pub mod index;
 pub mod index_state;
 pub mod index_state_tracker;
 pub mod query;
+pub mod supply;
 pub mod tools;
 
 mod error;

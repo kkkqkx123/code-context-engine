@@ -15,6 +15,7 @@ pub struct AdmissionMetrics {
     scope_rejections: AtomicU64,
     rate_rejections: AtomicU64,
     body_rejections: AtomicU64,
+    quota_rejections: AtomicU64,
 }
 
 impl AdmissionMetrics {
@@ -43,6 +44,11 @@ impl AdmissionMetrics {
         self.body_rejections.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record one quota rejection.
+    pub fn record_quota_rejection(&self) {
+        self.quota_rejections.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Render the current counters.
     pub fn snapshot(&self) -> AdmissionStats {
         AdmissionStats {
@@ -51,12 +57,13 @@ impl AdmissionMetrics {
             scope_rejections: self.scope_rejections.load(Ordering::Relaxed),
             rate_rejections: self.rate_rejections.load(Ordering::Relaxed),
             body_rejections: self.body_rejections.load(Ordering::Relaxed),
+            quota_rejections: self.quota_rejections.load(Ordering::Relaxed),
         }
     }
 }
 
 /// Point-in-time admission counters.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct AdmissionStats {
     /// Requests admitted past the admission layer.
     pub admitted: u64,
@@ -68,6 +75,9 @@ pub struct AdmissionStats {
     pub rate_rejections: u64,
     /// Requests rejected for oversized bodies.
     pub body_rejections: u64,
+    /// Requests rejected for exceeding stored byte quotas.
+    #[serde(default)]
+    pub quota_rejections: u64,
 }
 
 #[cfg(test)]

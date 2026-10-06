@@ -55,6 +55,8 @@ pub struct AdmissionGate {
     public_prefixes: Vec<String>,
     rate_limit_per_min: u32,
     max_body_bytes: usize,
+    request_timeout_secs: u64,
+    cors_allowed_origins: Vec<String>,
     buckets: Mutex<HashMap<[u8; 32], RateBucket>>,
     metrics: Arc<AdmissionMetrics>,
 }
@@ -67,6 +69,8 @@ impl AdmissionGate {
             public_prefixes: config.public_path_prefixes.clone(),
             rate_limit_per_min: config.rate_limit_per_min,
             max_body_bytes: config.max_body_bytes,
+            request_timeout_secs: config.request_timeout_secs,
+            cors_allowed_origins: config.cors_allowed_origins.clone(),
             buckets: Mutex::new(HashMap::new()),
             metrics,
         }
@@ -194,7 +198,11 @@ pub async fn admission_middleware(
         return reject(StatusCode::UNAUTHORIZED, "AUTH_REQUIRED", "unknown token");
     };
     let token_hash = entry.hash;
-    let context = AdmissionContext::new(entry.fingerprint.clone(), entry.projects.clone());
+    let context = AdmissionContext::new(
+        entry.fingerprint.clone(),
+        entry.projects.clone(),
+        entry.quota_bytes,
+    );
 
     if !gate.check_rate(&token_hash).await {
         gate.metrics.record_rate_rejection();
@@ -273,6 +281,93 @@ pub async fn admission_middleware(
     next.run(request).await
 }
 
+/// Request timeout middleware for gateway long connections.
+///
+/// Only installed in admission-enabled builds; local builds never see this
+/// symbol. Zero disables the bound.
+pub async fn timeout_middleware(
+    State(gate): State<Arc<AdmissionGate>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if gate.request_timeout_secs == 0 {
+        return next.run(request).await;
+    }
+    let timeout = Duration::from_secs(gate.request_timeout_secs);
+    match tokio::time::timeout(timeout, next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => {
+            tracing::warn!("admission request timed out");
+            reject(
+                StatusCode::REQUEST_TIMEOUT,
+                "REQUEST_TIMEOUT",
+                "request exceeded the admission timeout",
+            )
+        }
+    }
+}
+
+/// Cross-origin tightening middleware.
+///
+/// Browser origins are denied unless explicitly listed; non-browser
+/// clients without an Origin header pass through untouched. Preflight
+/// requests for allowed origins short-circuit without authentication so
+/// operators can probe from configured consoles. Only installed in
+/// admission-enabled builds.
+pub async fn cors_middleware(
+    State(gate): State<Arc<AdmissionGate>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let origin = request
+        .headers()
+        .get(axum::http::header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let Some(origin) = origin else {
+        return next.run(request).await;
+    };
+    if !gate.cors_allowed_origins.iter().any(|o| o == &origin) {
+        tracing::warn!(origin = %origin, "admission rejected disallowed browser origin");
+        return reject(
+            StatusCode::FORBIDDEN,
+            "CORS_ORIGIN_FORBIDDEN",
+            "browser origin is not allowed by the remote host",
+        );
+    }
+    if request.method() == axum::http::Method::OPTIONS {
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::NO_CONTENT;
+        let headers = response.headers_mut();
+        if let Ok(value) = axum::http::HeaderValue::from_str(&origin) {
+            headers.insert(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+        }
+        headers.insert(
+            axum::http::header::ACCESS_CONTROL_ALLOW_METHODS,
+            axum::http::HeaderValue::from_static("GET, POST, PUT, DELETE, OPTIONS"),
+        );
+        headers.insert(
+            axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
+            axum::http::HeaderValue::from_static("authorization, content-type, x-api-token"),
+        );
+        headers.insert(
+            axum::http::header::VARY,
+            axum::http::HeaderValue::from_static("Origin"),
+        );
+        return response;
+    }
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    if let Ok(value) = axum::http::HeaderValue::from_str(&origin) {
+        headers.insert(axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+    }
+    headers.insert(
+        axum::http::header::VARY,
+        axum::http::HeaderValue::from_static("Origin"),
+    );
+    response
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,6 +378,7 @@ mod tests {
             tokens: vec![crate::config::TokenEntry {
                 token: "alpha-token-value-1".to_string(),
                 projects: vec![1, 2],
+                quota_bytes: None,
             }],
             ..crate::config::AdmissionConfig::default()
         };

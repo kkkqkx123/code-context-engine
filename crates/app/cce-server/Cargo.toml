@@ -21,6 +21,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "si
 axum = { workspace = true, features = ["macros"] }
 cce-admission = { path = "../cce-admission", optional = true }
 base64 = { version = "0.22", optional = true }
+zstd = { version = "0.13", optional = true }
 cce-types = { path = "../../core/cce-types" }
 cce-config = { path = "../../core/cce-config" }
 cce-utils = { path = "../../core/cce-utils" }
@@ -54,4 +55,4 @@ tempfile = { workspace = true }
 default = []
 # Remote hosting shape: admission middleware, gateway ingest entries, and
 # their transport helpers. The default build excludes all of them.
-admission = ["dep:cce-admission", "dep:base64"]
+admission = ["dep:cce-admission", "dep:base64", "dep:zstd"]

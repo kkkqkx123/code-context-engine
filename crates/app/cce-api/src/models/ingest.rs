@@ -17,6 +17,22 @@ pub const MAX_INGEST_FILE_BYTES: u64 = 1_048_576;
 /// Largest number of files accepted in one ingest batch.
 pub const MAX_INGEST_BATCH_FILES: usize = 200;
 
+/// Raw bytes per transfer chunk. Files larger than this are split into
+/// fixed-size pieces with per-chunk hashes so interrupted pushes resume
+/// without retransmitting received pieces.
+pub const INGEST_CHUNK_BYTES: usize = 256 * 1024;
+
+/// Largest number of chunks accepted in one ingest batch. The bound keeps a
+/// single request body inside the admission body limit after base64 growth.
+pub const MAX_INGEST_CHUNKS_PER_BATCH: usize = 16;
+
+/// Number of chunks needed to transfer `size` raw bytes. Empty files still
+/// use one chunk so hash verification has a stable shape.
+pub fn total_chunks_for_size(size: u64) -> u32 {
+    let chunks = size.div_ceil(INGEST_CHUNK_BYTES as u64);
+    chunks.max(1).min(u32::MAX as u64) as u32
+}
+
 /// One manifest entry describing a gateway-side file fingerprint.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IngestFileMeta {
@@ -36,6 +52,22 @@ pub struct IngestFileMeta {
 pub struct IngestManifestRequest {
     /// Files currently visible to the gateway.
     pub files: Vec<IngestFileMeta>,
+    /// Gateway-chosen manifest version identifying this sync pass. The
+    /// server keys received-chunk bookkeeping on it so an interrupted push
+    /// can resume without retransmitting stored pieces.
+    #[serde(default)]
+    pub manifest_version: u64,
+}
+
+/// One missing chunk the gateway must upload.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MissingChunk {
+    /// Canonical project-relative path with forward slashes.
+    pub relative_path: String,
+    /// Zero-based chunk index within the file.
+    pub chunk_index: u32,
+    /// Total chunks for the file at manifest time.
+    pub total_chunks: u32,
 }
 
 /// Manifest push response listing the paths the gateway must upload.
@@ -43,13 +75,19 @@ pub struct IngestManifestRequest {
 pub struct IngestManifestResponse {
     pub success: bool,
     pub project_id: i64,
+    /// Echo of the request manifest version.
+    #[serde(default)]
+    pub manifest_version: u64,
     /// Relative paths whose content the server still needs.
     pub upload: Vec<String>,
+    /// Chunk-granular misses for partially received files.
+    #[serde(default)]
+    pub missing_chunks: Vec<MissingChunk>,
     /// Files already up to date on the server.
     pub unchanged: usize,
 }
 
-/// One file payload inside an ingest batch.
+/// One file chunk payload inside an ingest batch.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IngestedFile {
     /// Canonical project-relative path with forward slashes.
@@ -57,15 +95,38 @@ pub struct IngestedFile {
     /// Expected full-content hash of the raw bytes.
     #[serde(default)]
     pub content_hash: Option<String>,
-    /// Raw file bytes encoded with standard base64.
+    /// Raw file bytes encoded with standard base64. When `compressed` is
+    /// true the bytes hold the compressed form and the server decompresses
+    /// before hash verification.
     pub content_base64: String,
+    /// Zero-based chunk index within the file.
+    #[serde(default)]
+    pub chunk_index: u32,
+    /// Total chunks for the file.
+    #[serde(default = "default_total_chunks")]
+    pub total_chunks: u32,
+    /// Full-content chunk hash of the uncompressed bytes.
+    #[serde(default)]
+    pub chunk_hash: Option<String>,
+    /// Whether `content_base64` carries compressed bytes. Negotiation stays
+    /// off by default; the gateway enables it explicitly per batch.
+    #[serde(default)]
+    pub compressed: bool,
+}
+
+fn default_total_chunks() -> u32 {
+    1
 }
 
 /// Batch upload request carrying file contents.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IngestBatchRequest {
-    /// Files to stage on the server.
+    /// File chunks to stage on the server.
     pub files: Vec<IngestedFile>,
+    /// Manifest version this batch belongs to. Zero means the legacy
+    /// whole-file pass without resume bookkeeping.
+    #[serde(default)]
+    pub manifest_version: u64,
 }
 
 /// Batch upload response.
@@ -73,8 +134,14 @@ pub struct IngestBatchRequest {
 pub struct IngestBatchResponse {
     pub success: bool,
     pub project_id: i64,
-    /// Files staged under the project root.
+    /// Echo of the request manifest version.
+    #[serde(default)]
+    pub manifest_version: u64,
+    /// Files fully staged under the project root.
     pub staged: usize,
+    /// Chunks accepted in this batch, including partial files.
+    #[serde(default)]
+    pub staged_chunks: usize,
     /// Files skipped with per-file reasons.
     #[serde(default)]
     pub errors: Vec<String>,

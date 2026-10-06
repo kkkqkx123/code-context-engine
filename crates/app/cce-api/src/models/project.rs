@@ -31,6 +31,16 @@ pub struct ProjectConfig {
     pub last_indexed: Option<String>,
 }
 
+/// Project metadata key marking gateway-supplied projects.
+pub const SUPPLY_MODE_KEY: &str = "supply_mode";
+
+/// Gateway supply marker value. Projects carrying it receive all changes
+/// through the gateway event entry; local filesystem watching is refused.
+pub const SUPPLY_MODE_GATEWAY: &str = "gateway";
+
+/// Local supply marker value, the default for single-host projects.
+pub const SUPPLY_MODE_LOCAL: &str = "local";
+
 /// Create project request
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateProjectRequest {
@@ -51,6 +61,10 @@ pub struct CreateProjectRequest {
     /// Additional ignore patterns
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
+    /// File supply mode: local or gateway. Remote templates set gateway
+    /// so the host refuses local watching and expects gateway events.
+    #[serde(default)]
+    pub supply_mode: Option<String>,
 }
 
 /// Update project request
@@ -71,6 +85,9 @@ pub struct UpdateProjectRequest {
     /// Additional ignore patterns
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ignore_patterns: Option<Vec<String>>,
+    /// File supply mode: local or gateway.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supply_mode: Option<String>,
 }
 
 /// Project list response

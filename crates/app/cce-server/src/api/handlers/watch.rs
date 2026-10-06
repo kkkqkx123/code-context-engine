@@ -45,6 +45,24 @@ pub async fn handle_start_watch(
             "Invalid project_id",
         ));
     }
+    if let Some(store) = state.engine.metadata_store()
+        && let Ok(mode) = store.as_ref().with_transaction(|tx| {
+            cce_storage_sqlite::ProjectRepository::meta_get_string_optional(
+                tx,
+                project_id,
+                cce_api::models::SUPPLY_MODE_KEY,
+            )
+        })
+        && mode.as_deref() == Some(cce_api::models::SUPPLY_MODE_GATEWAY)
+    {
+        return ApiResult::Error(ErrorResponse::with_details(
+            error_codes::INVALID_REQUEST,
+            "Project is gateway-supplied; local watching is disabled",
+            format!(
+                "Project {project_id} receives changes through POST /api/project/{project_id}/ingest/event; use the gateway watch loop instead of local watching"
+            ),
+        ));
+    }
 
     // Verify the watched path is within the project root directory
     let project_entry = match state

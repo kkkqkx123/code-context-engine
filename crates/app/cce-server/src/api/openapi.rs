@@ -12,6 +12,119 @@ use utoipa::OpenApi;
 
 use super::handlers;
 
+#[cfg(feature = "admission")]
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "CCE API",
+        description = "Code context engine: indexing, search, relations and tool endpoints",
+        version = "1.0.0"
+    ),
+    paths(
+        handlers::index::execute::handle_index,
+        handlers::index::incremental::handle_incremental,
+        handlers::index::parse::handle_parse,
+        handlers::summary::handle_summary,
+        handlers::storage::handle_clear_index,
+        handlers::storage::handle_delete_file,
+        handlers::storage::handle_delete_entity,
+        handlers::storage::handle_batch_delete,
+        handlers::storage::handle_index_stats,
+        handlers::storage::handle_storage_status,
+        handlers::project::management::handle_create_project,
+        handlers::project::query::handle_list_projects,
+        handlers::project::query::handle_get_project,
+        handlers::project::management::handle_update_project,
+        handlers::project::management::handle_delete_project,
+        handlers::project::indexing::handle_project_index,
+        handlers::project::indexing::handle_dead_letter_retry,
+        handlers::project::indexing::handle_dead_letter_list,
+        handlers::project::indexing::handle_dead_letter_files_retry,
+        handlers::project::indexing::handle_dead_letter_acknowledge,
+        handlers::project::config::handle_reload_project_config,
+        handlers::project::config::handle_get_project_config,
+        handlers::project::config::handle_update_project_config,
+        handlers::entity::detail::handle_function_detail,
+        handlers::entity::calls::handle_function_calls,
+        handlers::entity::calls::handle_function_callers,
+        handlers::entity::relation::handle_call_chain,
+        handlers::entity::relation::handle_call_path,
+        handlers::entity::relation::handle_class_inheritance,
+        handlers::entity::relation::handle_class_implementations,
+        handlers::entity::classification::get_classification_stats,
+        handlers::entity::classification::get_relations_by_classification,
+        handlers::graph::handle_graph_ego,
+        handlers::graph::handle_graph_path,
+        handlers::graph::handle_graph_subgraph,
+        handlers::graph::handle_graph_components,
+        handlers::graph::handle_graph_export,
+        handlers::graph::handle_graph_impact,
+        handlers::graph::handle_graph_entity_impact,
+        handlers::graph::handle_graph_cycles,
+        handlers::graph::handle_graph_structural,
+        handlers::graph::handle_graph_module,
+        handlers::metrics::handle_get_metrics,
+        handlers::metrics::handle_get_metrics_json,
+        handlers::metrics::handle_get_metrics_history,
+        handlers::metrics::handle_cleanup_metrics,
+        handlers::watch::handle_start_watch,
+        handlers::watch::handle_stop_watch,
+        handlers::watch::handle_watch_status,
+        handlers::config::handle_config_reload,
+        handlers::config::handle_config_info,
+        handlers::config::handle_config_validate,
+        handlers::qdrant_admin::handle_qdrant_process_status,
+        handlers::qdrant_admin::handle_qdrant_process_start,
+        handlers::qdrant_admin::handle_qdrant_process_stop,
+        handlers::qdrant_admin::handle_qdrant_process_restart,
+        handlers::search::handle_search,
+        handlers::search::handle_aggregated_search,
+        handlers::entity_search::handle_entity_search,
+        handlers::tools::compression::handle_compress,
+        handlers::tools::compression::handle_compress_batch,
+        handlers::tools::diagnosis::handle_diagnose,
+        handlers::tools::fold::handle_fold,
+        handlers::tools::fold::handle_fold_batch,
+        handlers::tools::keyword::handle_keyword_search,
+        handlers::tools::symbol::handle_get_symbols,
+        handlers::tools::symbol::handle_find_references,
+        handlers::tools::symbol::handle_goto_definition,
+        handlers::health::handle_health,
+        handlers::health::handle_qdrant_health,
+        handlers::health::handle_embedding_health,
+        handlers::health::handle_bm25_health,
+        handlers::health::handle_retry_queue_status,
+        handlers::health::handle_retry_queue_process,
+        handlers::health::handle_retry_queue_clear,
+        handlers::health::handle_retry_queue_dead_list,
+        handlers::health::handle_retry_queue_dead_clear,
+        handlers::ingest::handle_ingest_manifest,
+        handlers::ingest::handle_ingest_batch,
+        handlers::ingest::handle_ingest_commit,
+        handlers::ingest::handle_ingest_event,
+        handlers::ingest::handle_admission_stats,
+    ),
+    tags(
+        (name = "Index", description = "Indexing and parsing operations"),
+        (name = "Summary", description = "Ephemeral summary generation"),
+        (name = "Storage", description = "Index storage lifecycle management"),
+        (name = "Project", description = "Project registry and project-scoped indexing"),
+        (name = "Entity", description = "Entity detail and relation queries"),
+        (name = "Graph", description = "Graph traversal over the relation snapshot"),
+        (name = "Metrics", description = "Metrics export and retention"),
+        (name = "Watch", description = "Hot-reload file watching"),
+        (name = "Config", description = "Server configuration management"),
+        (name = "Qdrant", description = "Embedded Qdrant process lifecycle"),
+        (name = "Search", description = "Vector, BM25 and aggregated search"),
+        (name = "Tools", description = "Programming-task tools with in-band errors"),
+        (name = "Health", description = "Health checks and retry-queue management"),
+        (name = "Ingest", description = "Gateway file supply and remote indexing"),
+        (name = "Admission", description = "Token admission and quota auditing"),
+    )
+)]
+struct ApiDoc;
+
+#[cfg(not(feature = "admission"))]
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -135,10 +248,16 @@ mod tests {
 
     // ---- contract configuration (repo-specific) ----
 
-    const SNAPSHOT: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../tools/openapi-codegen/openapi.json"
-    );
+    fn snapshot_path() -> String {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tools/openapi-codegen");
+        if cfg!(feature = "admission") {
+            base.join("openapi-admission.json")
+                .to_string_lossy()
+                .to_string()
+        } else {
+            base.join("openapi.json").to_string_lossy().to_string()
+        }
+    }
     const REFRESH_ENV: &str = "CCE_REFRESH_OPENAPI";
 
     fn source_root() -> PathBuf {
@@ -148,9 +267,26 @@ mod tests {
     /// Mount prefix for `.route()` registrations in the file at `rel`
     /// (relative to the crate `src` root); `None` skips the file for route
     /// collection. The CCE router registers every endpoint with its final
-    /// absolute `/api/...` path.
+    /// absolute `/api/...` path. The admission-gated ingest table joins the
+    /// contract only in admission builds, keeping local builds unchanged.
     fn route_prefix(rel: &str) -> Option<String> {
-        (rel == "api/router.rs").then(String::new)
+        if rel == "api/router.rs" {
+            return Some(String::new());
+        }
+        if rel == "api/handlers/ingest.rs" && cfg!(feature = "admission") {
+            return Some(String::new());
+        }
+        None
+    }
+
+    /// Whether annotations in the file at `rel` join the contract. Ingest
+    /// annotations stabilize with the admission build; local builds skip
+    /// them so the local contract stays free of remote symbols.
+    fn annotations_included(rel: &str) -> bool {
+        if rel == "api/handlers/ingest.rs" && !cfg!(feature = "admission") {
+            return false;
+        }
+        true
     }
 
     /// Dev-only documentation endpoint, not part of the contract.
@@ -165,11 +301,12 @@ mod tests {
     #[test]
     fn openapi_snapshot_matches() {
         let doc = openapi_json();
+        let snapshot = snapshot_path();
         if std::env::var_os(REFRESH_ENV).is_some() {
-            std::fs::write(SNAPSHOT, format!("{doc}\n")).expect("snapshot must be writable");
+            std::fs::write(&snapshot, format!("{doc}\n")).expect("snapshot must be writable");
             return;
         }
-        let expected = std::fs::read_to_string(SNAPSHOT).expect("openapi snapshot must exist");
+        let expected = std::fs::read_to_string(&snapshot).expect("openapi snapshot must exist");
         assert_eq!(
             doc.trim_end(),
             expected.trim_end(),
@@ -262,7 +399,10 @@ mod tests {
 
     fn collect_annotated() -> BTreeSet<(String, String)> {
         let mut out = BTreeSet::new();
-        for (_rel, text) in source_files() {
+        for (rel, text) in source_files() {
+            if !annotations_included(&rel) {
+                continue;
+            }
             for (method, path) in parse_utoipa_annotations(&text) {
                 out.insert((method, path));
             }

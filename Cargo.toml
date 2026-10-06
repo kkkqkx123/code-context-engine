@@ -32,6 +32,7 @@ members = [
     "crates/app/cce-mcp",
     "crates/app/cce-e2e-tests",
     "crates/app/cce-cli",
+    "crates/app/cce-gateway",
     "crates/app/cce-plugin-sdk",
     # vendored
     "crates/tree-sitter-svelte",

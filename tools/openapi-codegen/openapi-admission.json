@@ -9,6 +9,27 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/admission/stats": {
+      "get": {
+        "tags": [
+          "Admission"
+        ],
+        "summary": "Render admission counters with per-token durable audit for rejection\nanalysis. Usage and last-use time survive restarts through the metadata\nstore; in-memory counters cover the current process.",
+        "operationId": "handle_admission_stats",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionStatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/config": {
       "get": {
         "tags": [
@@ -1949,6 +1970,291 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProjectIndexResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{id}/ingest/batch": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Store pushed file contents under the project mirror without indexing.",
+        "description": "Indexing happens explicitly through the commit entry or incrementally\nthrough the event entry, so large initial syncs can stage in batches.\nBatches exceeding the token byte quota are rejected as a whole with\nusage details; no partial staging occurs in that case.",
+        "operationId": "handle_ingest_batch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{id}/ingest/commit": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Run the existing full index pipeline over the staged project mirror.",
+        "operationId": "handle_ingest_commit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestCommitResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{id}/ingest/event": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Apply gateway-observed changes through the hot-update pipeline.",
+        "description": "Created and modified events carry content and are staged before the\ncoordinator runs; deletions remove the mirrored file and its index rows.\nThe remote host never starts its own filesystem watch in this shape:\nevery change arrives through this entry.",
+        "operationId": "handle_ingest_event",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestEventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{id}/ingest/manifest": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Compare a gateway manifest against the stored file hashes.",
+        "description": "Fresh files are skipped. For stale files the comparison descends to\nchunk granularity when the request carries a manifest version: chunks\nalready stored under the staging root are not requested again, so an\ninterrupted push resumes without retransmission.",
+        "operationId": "handle_ingest_manifest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestManifestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestManifestResponse"
                 }
               }
             }
@@ -5294,6 +5600,76 @@
   },
   "components": {
     "schemas": {
+      "AdmissionStats": {
+        "type": "object",
+        "description": "Point-in-time admission counters.",
+        "required": [
+          "admitted",
+          "auth_rejections",
+          "scope_rejections",
+          "rate_rejections",
+          "body_rejections"
+        ],
+        "properties": {
+          "admitted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests admitted past the admission layer.",
+            "minimum": 0
+          },
+          "auth_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests rejected for missing or unknown tokens.",
+            "minimum": 0
+          },
+          "body_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests rejected for oversized bodies.",
+            "minimum": 0
+          },
+          "quota_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests rejected for exceeding stored byte quotas.",
+            "minimum": 0
+          },
+          "rate_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests rejected by per-token rate limiting.",
+            "minimum": 0
+          },
+          "scope_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests rejected for project scope mismatch.",
+            "minimum": 0
+          }
+        }
+      },
+      "AdmissionStatsResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AdmissionStats",
+            "description": "Global in-memory counters."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "tokens": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TokenAuditEntry"
+                },
+                "description": "Per-token durable audit rows."
+              }
+            }
+          }
+        ],
+        "description": "Admission counters with per-token persistent audit."
+      },
       "AggregatedMetric": {
         "type": "object",
         "description": "Aggregated historical metric record (mirrors cce-metrics storage rows)",
@@ -8527,6 +8903,350 @@
           }
         }
       },
+      "IngestBatchRequest": {
+        "type": "object",
+        "description": "Batch upload request carrying file contents.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestedFile"
+            },
+            "description": "File chunks to stage on the server."
+          },
+          "manifest_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Manifest version this batch belongs to. Zero means the legacy\nwhole-file pass without resume bookkeeping.",
+            "minimum": 0
+          }
+        }
+      },
+      "IngestBatchResponse": {
+        "type": "object",
+        "description": "Batch upload response.",
+        "required": [
+          "success",
+          "project_id",
+          "staged"
+        ],
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files skipped with per-file reasons."
+          },
+          "manifest_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Echo of the request manifest version.",
+            "minimum": 0
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "staged": {
+            "type": "integer",
+            "description": "Files fully staged under the project root.",
+            "minimum": 0
+          },
+          "staged_chunks": {
+            "type": "integer",
+            "description": "Chunks accepted in this batch, including partial files.",
+            "minimum": 0
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "IngestCommitResponse": {
+        "type": "object",
+        "description": "Commit response after running the full index over staged files.",
+        "required": [
+          "success",
+          "project_id",
+          "project_name",
+          "indexed_files",
+          "total_entities",
+          "total_vectors",
+          "elapsed_ms"
+        ],
+        "properties": {
+          "elapsed_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "indexed_files": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "total_entities": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_vectors": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "IngestEvent": {
+        "type": "object",
+        "description": "One gateway-observed file change.",
+        "required": [
+          "relative_path",
+          "kind"
+        ],
+        "properties": {
+          "content_base64": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Raw file bytes encoded with standard base64, absent for deletions."
+          },
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Expected full-content hash, required for created and modified."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IngestEventKind",
+            "description": "Change kind."
+          },
+          "relative_path": {
+            "type": "string",
+            "description": "Canonical project-relative path with forward slashes."
+          }
+        }
+      },
+      "IngestEventKind": {
+        "type": "string",
+        "description": "Incremental change kind inside an ingest event.",
+        "enum": [
+          "created",
+          "modified",
+          "deleted"
+        ]
+      },
+      "IngestEventRequest": {
+        "type": "object",
+        "description": "Incremental push request driven by gateway change observation.",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestEvent"
+            },
+            "description": "Changes since the last push."
+          }
+        }
+      },
+      "IngestEventResponse": {
+        "type": "object",
+        "description": "Incremental push response.",
+        "required": [
+          "success",
+          "project_id",
+          "applied",
+          "removed"
+        ],
+        "properties": {
+          "applied": {
+            "type": "integer",
+            "description": "Files applied through the hot-update path.",
+            "minimum": 0
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "removed": {
+            "type": "integer",
+            "description": "Files removed from the index.",
+            "minimum": 0
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "IngestFileMeta": {
+        "type": "object",
+        "description": "One manifest entry describing a gateway-side file fingerprint.",
+        "required": [
+          "relative_path",
+          "size",
+          "modified_secs"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Full-content hash of the raw bytes, when known."
+          },
+          "modified_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Modification time as seconds since the unix epoch."
+          },
+          "relative_path": {
+            "type": "string",
+            "description": "Canonical project-relative path with forward slashes."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "File size in bytes.",
+            "minimum": 0
+          }
+        }
+      },
+      "IngestManifestRequest": {
+        "type": "object",
+        "description": "Manifest push request for initial sync comparison.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestFileMeta"
+            },
+            "description": "Files currently visible to the gateway."
+          },
+          "manifest_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Gateway-chosen manifest version identifying this sync pass. The\nserver keys received-chunk bookkeeping on it so an interrupted push\ncan resume without retransmitting stored pieces.",
+            "minimum": 0
+          }
+        }
+      },
+      "IngestManifestResponse": {
+        "type": "object",
+        "description": "Manifest push response listing the paths the gateway must upload.",
+        "required": [
+          "success",
+          "project_id",
+          "upload",
+          "unchanged"
+        ],
+        "properties": {
+          "manifest_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Echo of the request manifest version.",
+            "minimum": 0
+          },
+          "missing_chunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MissingChunk"
+            },
+            "description": "Chunk-granular misses for partially received files."
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "unchanged": {
+            "type": "integer",
+            "description": "Files already up to date on the server.",
+            "minimum": 0
+          },
+          "upload": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relative paths whose content the server still needs."
+          }
+        }
+      },
+      "IngestedFile": {
+        "type": "object",
+        "description": "One file chunk payload inside an ingest batch.",
+        "required": [
+          "relative_path",
+          "content_base64"
+        ],
+        "properties": {
+          "chunk_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Full-content chunk hash of the uncompressed bytes."
+          },
+          "chunk_index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based chunk index within the file.",
+            "minimum": 0
+          },
+          "compressed": {
+            "type": "boolean",
+            "description": "Whether `content_base64` carries compressed bytes. Negotiation stays\noff by default; the gateway enables it explicitly per batch."
+          },
+          "content_base64": {
+            "type": "string",
+            "description": "Raw file bytes encoded with standard base64. When `compressed` is\ntrue the bytes hold the compressed form and the server decompresses\nbefore hash verification."
+          },
+          "content_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Expected full-content hash of the raw bytes."
+          },
+          "relative_path": {
+            "type": "string",
+            "description": "Canonical project-relative path with forward slashes."
+          },
+          "total_chunks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Total chunks for the file.",
+            "minimum": 0
+          }
+        }
+      },
       "InterfaceRelation": {
         "type": "object",
         "description": "Interface relation",
@@ -8714,6 +9434,33 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "MissingChunk": {
+        "type": "object",
+        "description": "One missing chunk the gateway must upload.",
+        "required": [
+          "relative_path",
+          "chunk_index",
+          "total_chunks"
+        ],
+        "properties": {
+          "chunk_index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based chunk index within the file.",
+            "minimum": 0
+          },
+          "relative_path": {
+            "type": "string",
+            "description": "Canonical project-relative path with forward slashes."
+          },
+          "total_chunks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Total chunks for the file at manifest time.",
+            "minimum": 0
           }
         }
       },
@@ -10156,6 +10903,89 @@
           }
         }
       },
+      "TokenAuditEntry": {
+        "type": "object",
+        "description": "Per-token audit entry for persistent admission observability.",
+        "required": [
+          "fingerprint",
+          "projects",
+          "bytes_used",
+          "admitted",
+          "auth_rejections",
+          "scope_rejections",
+          "rate_rejections",
+          "body_rejections",
+          "quota_rejections"
+        ],
+        "properties": {
+          "admitted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Admitted batches."
+          },
+          "auth_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rejections by cause."
+          },
+          "body_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rejections by cause."
+          },
+          "bytes_used": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Stored bytes accepted."
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "Log-safe token fingerprint."
+          },
+          "last_reject_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Last rejection reason, if any."
+          },
+          "last_used": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Last use as seconds since the unix epoch, if any."
+          },
+          "projects": {
+            "type": "string",
+            "description": "Bound projects as comma separated ids."
+          },
+          "quota_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Configured byte quota, if any."
+          },
+          "quota_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rejections for exceeding the byte quota."
+          },
+          "rate_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rejections by cause."
+          },
+          "scope_rejections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rejections by cause."
+          }
+        }
+      },
       "UpdateProjectRequest": {
         "type": "object",
         "description": "Update project request",
@@ -10333,6 +11163,14 @@
     {
       "name": "Health",
       "description": "Health checks and retry-queue management"
+    },
+    {
+      "name": "Ingest",
+      "description": "Gateway file supply and remote indexing"
+    },
+    {
+      "name": "Admission",
+      "description": "Token admission and quota auditing"
     }
   ]
 }

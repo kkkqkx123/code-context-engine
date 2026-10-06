@@ -22,11 +22,12 @@ pub use client::SqliteClient;
 pub use config::SqliteConfig;
 pub use metrics::SqliteMetrics;
 pub use repo::{
-    CheckpointRepository, ChunkRepository, EntityDetailMappingRepository, EntityRepository,
-    FileRepository, FileSummaryRepository, GenerationOverride, GenerationOverrideRepository,
-    OverrideDisposition, ProjectIndexManifest, ProjectIndexManifestRepository,
-    ProjectIndexManifestState, ProjectRepository, RelationSnapshotManifest,
-    RelationSnapshotRepository, RelationSnapshotState, generate_project_name,
+    AdmissionAuditRecord, AdmissionAuditRepository, CheckpointRepository, ChunkRepository,
+    EntityDetailMappingRepository, EntityRepository, FileRepository, FileSummaryRepository,
+    GenerationOverride, GenerationOverrideRepository, OverrideDisposition, ProjectIndexManifest,
+    ProjectIndexManifestRepository, ProjectIndexManifestState, ProjectRepository,
+    RelationSnapshotManifest, RelationSnapshotRepository, RelationSnapshotState,
+    generate_project_name,
 };
 pub use snapshot_store::SqliteSnapshotStore;
 pub use types::{

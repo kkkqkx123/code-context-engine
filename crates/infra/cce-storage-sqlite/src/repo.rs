@@ -2,6 +2,7 @@
 //!
 //! This module contains all repository implementations for different data types.
 
+pub mod admission_repo;
 pub mod checkpoint_repo;
 pub mod chunk_repo;
 pub mod entity_detail_mapping_repo;
@@ -13,6 +14,7 @@ pub mod project_index_manifest_repo;
 pub mod project_repo;
 pub mod relation_snapshot_repo;
 
+pub use admission_repo::{AdmissionAuditRecord, AdmissionAuditRepository};
 pub use checkpoint_repo::CheckpointRepository;
 pub use chunk_repo::ChunkRepository;
 pub use entity_detail_mapping_repo::EntityDetailMappingRepository;
