@@ -262,6 +262,8 @@ mod tests {
             owner_type: None,
             call_context: CallContext::default(),
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         }
     }
 

@@ -34,12 +34,7 @@ export type NodeKind =
  *  value arrives on each edge as `domain`, and the string-based inference in
  *  `relationDomain` is only a fallback for mock/legacy data. */
 export type RelationDomain =
-	| 'call'
-	| 'dependency'
-	| 'structural'
-	| 'reference'
-	| 'template'
-	| 'other';
+	'call' | 'dependency' | 'structural' | 'reference' | 'template' | 'other';
 
 export interface RelationDomainMeta {
 	domain: RelationDomain;
@@ -173,10 +168,7 @@ const STRUCTURAL_RELATIONS = new Set([
 ]);
 
 /** Reference-domain relation values shared by reference and template relations. */
-const REFERENCE_RELATIONS = new Set([
-	'type_reference',
-	'field_access',
-]);
+const REFERENCE_RELATIONS = new Set(['type_reference', 'field_access']);
 
 /** Template/markup relation values (backend template domain). */
 const TEMPLATE_RELATIONS = new Set([
@@ -360,6 +352,19 @@ export interface GraphElementEdge {
 		domain: RelationDomain;
 		confidence: EdgeConfidence;
 		lineStyle: string;
+		/**
+		 * Traversal weight from the backend: the relation type's base
+		 * confidence multiplied by how many call sites the caller uses to
+		 * reach the target. Drives edge width, so a heavily repeated edge
+		 * reads as structurally more load-bearing than a one-off call.
+		 */
+		weight: number;
+		/** 1 when the caller carries a `cfg` predicate, so the edge only
+		 *  exists under that condition; 0 otherwise. Drawn faded so a
+		 *  platform-specific edge is never mistaken for an unconditional one. */
+		conditional: 0 | 1;
+		/** The raw predicate, kept for detail panels. */
+		cfgCondition: string | null;
 	};
 }
 
@@ -377,6 +382,12 @@ export function toElementNode(node: GraphNode): GraphElementNode {
 	};
 }
 
+/** Weight assumed when the backend omits it. The field carries a server-side
+ *  default, so a payload without it is a single-call-site edge of neutral
+ *  confidence; `mapData` clamps out-of-range values, and a missing one would
+ *  render as no width at all. */
+const DEFAULT_EDGE_WEIGHT = 1;
+
 export function toElementEdge(edge: GraphEdge): GraphElementEdge {
 	const domain = edgeDomain(edge);
 	const confidence = edgeConfidence(edge.confidence);
@@ -390,6 +401,9 @@ export function toElementEdge(edge: GraphEdge): GraphElementEdge {
 			domain,
 			confidence,
 			lineStyle: relationLineStyle(domain),
+			weight: edge.weight ?? DEFAULT_EDGE_WEIGHT,
+			conditional: edge.cfg_condition ? 1 : 0,
+			cfgCondition: edge.cfg_condition ?? null,
 		},
 	};
 }
@@ -411,6 +425,19 @@ export function isNodeElement(
  * the configured palette automatically. Rules are ordered from specific to
  * general so later selectors only act as fallbacks.
  */
+/** Opacity applied to edges whose caller is behind a `cfg` predicate.
+ *  Faded rather than dashed, because line style already encodes the relation
+ *  domain and a second dashed variant would be ambiguous. */
+const CONDITIONAL_EDGE_OPACITY = 0.45;
+
+/** Weight range the edge-width mapping spans. The backend emits the relation
+ *  type's base confidence (0.3 for a type reference up to 1.0 for a direct
+ *  call) multiplied by the hotness factor `1 + log2(call_site_count)`, which is
+ *  1.0 for a single call site. Anything at or beyond the upper bound is a
+ *  hub edge many call sites converge on. */
+const WEIGHT_RANGE = { min: 0.3, max: 4 };
+const WEIGHT_WIDTH = { min: 1, max: 4.5 };
+
 export const graphStylesheet: StylesheetStyle[] = [
 	{
 		selector: 'node',
@@ -442,7 +469,11 @@ export const graphStylesheet: StylesheetStyle[] = [
 	{
 		selector: 'edge',
 		style: {
-			width: 1.4,
+			// Width encodes how load-bearing the edge is, not which relation
+			// family it belongs to: colour and line style already carry the
+			// domain, so a per-domain width would be a third encoding of the
+			// same fact.
+			width: `mapData(weight, ${WEIGHT_RANGE.min}, ${WEIGHT_RANGE.max}, ${WEIGHT_WIDTH.min}, ${WEIGHT_WIDTH.max})`,
 			'line-color': RELATION_DOMAINS.other.color,
 			'target-arrow-color': RELATION_DOMAINS.other.color,
 			'target-arrow-shape': 'triangle',
@@ -464,7 +495,6 @@ export const graphStylesheet: StylesheetStyle[] = [
 		style: {
 			'line-color': RELATION_DOMAINS.call.color,
 			'target-arrow-color': RELATION_DOMAINS.call.color,
-			width: 1.8,
 		},
 	},
 	{
@@ -480,7 +510,6 @@ export const graphStylesheet: StylesheetStyle[] = [
 		style: {
 			'line-color': RELATION_DOMAINS.structural.color,
 			'target-arrow-color': RELATION_DOMAINS.structural.color,
-			width: 2.2,
 		},
 	},
 	{
@@ -497,6 +526,10 @@ export const graphStylesheet: StylesheetStyle[] = [
 			'line-color': RELATION_DOMAINS.template.color,
 			'target-arrow-color': RELATION_DOMAINS.template.color,
 		},
+	},
+	{
+		selector: 'edge[conditional = 1]',
+		style: { opacity: CONDITIONAL_EDGE_OPACITY },
 	},
 	{
 		selector: 'edge[confidence = "inferred"]',

@@ -510,4 +510,116 @@ mod tests {
             "conflict diagnostics must not influence the fingerprint"
         );
     }
+
+    /// Edge payload that the dedup identity excludes must survive the full
+    /// persistence round trip, otherwise a reloaded snapshot silently reports
+    /// single-call, unconditional edges.
+    #[test]
+    fn relation_edge_payload_round_trips_through_persistence() {
+        use cce_types::relation::CallContext;
+        use cce_types::{
+            CanonicalEntity, CanonicalFile, CanonicalRelation, CanonicalRelationSnapshot,
+            CanonicalRelationTarget, EntityKind, RelationType, StableSymbolKey,
+        };
+
+        let client = SqliteClient::in_memory().expect("in-memory database should open");
+        insert_project(&client);
+
+        let caller_key = StableSymbolKey::new(
+            "src/lib.rs",
+            "service::run",
+            EntityKind::Function,
+            "fn run()",
+        );
+        let callee_key = StableSymbolKey::new(
+            "src/lib.rs",
+            "service::handle",
+            EntityKind::Function,
+            "fn handle()",
+        );
+        let entity = |key: StableSymbolKey, name: &str| CanonicalEntity {
+            key,
+            entity_id: None,
+            name: name.to_string(),
+            signature: format!("fn {name}()"),
+            parameters: Vec::new(),
+            return_type: None,
+            span: Default::default(),
+            depth: 0,
+            parent: None,
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: Default::default(),
+            metadata: Default::default(),
+            is_stdlib: false,
+            stdlib_category: None,
+            subtype: None,
+        };
+
+        let mut snapshot = CanonicalRelationSnapshot::new("config".to_string());
+        snapshot.files.push(CanonicalFile {
+            path: "src/lib.rs".to_string(),
+            language: "rust".to_string(),
+            input_hash: "source-hash".to_string(),
+            file_size: 42,
+            imports: Vec::new(),
+            exports: Vec::new(),
+        });
+        snapshot.entities.push(entity(caller_key.clone(), "run"));
+        snapshot.entities.push(entity(callee_key.clone(), "handle"));
+        snapshot.relations.push(CanonicalRelation {
+            caller: caller_key,
+            target: CanonicalRelationTarget::Internal { key: callee_key },
+            raw_target: "handle".to_string(),
+            relation_type: RelationType::InstanceMethodCall,
+            span: Default::default(),
+            stdlib_category: None,
+            overload_signature: None,
+            callee_symbol: None,
+            owner_type: Some("dyn Shape".to_string()),
+            call_context: CallContext::VirtualDispatch {
+                receiver_type: "&dyn Shape".to_string(),
+            },
+            call_frequency: 7,
+            cfg_condition: Some("cfg(unix)".to_string()),
+        });
+
+        let epoch = client
+            .with_transaction(|tx| {
+                RelationSnapshotRepository::allocate_building(tx, 1, "operation", "config")
+            })
+            .expect("epoch should allocate");
+        client
+            .with_transaction(|tx| {
+                RelationSnapshotRepository::write_snapshot_and_mark_ready(
+                    tx,
+                    1,
+                    epoch,
+                    &snapshot,
+                    &snapshot.input_fingerprint(),
+                    &snapshot.fingerprint(),
+                )
+            })
+            .expect("snapshot should persist");
+
+        let conn = client
+            .read_connection()
+            .expect("test connection should open");
+        let manifest = RelationSnapshotRepository::get_manifest(&conn, 1, epoch)
+            .expect("manifest should load")
+            .expect("manifest should exist");
+        let reloaded = RelationSnapshotRepository::read_snapshot(&conn, &manifest)
+            .expect("snapshot should reload");
+
+        let edge = &reloaded.relations[0];
+        assert_eq!(edge.call_frequency, 7);
+        assert_eq!(edge.cfg_condition.as_deref(), Some("cfg(unix)"));
+        assert_eq!(edge.owner_type.as_deref(), Some("dyn Shape"));
+        assert_eq!(
+            edge.call_context,
+            CallContext::VirtualDispatch {
+                receiver_type: "&dyn Shape".to_string()
+            }
+        );
+    }
 }

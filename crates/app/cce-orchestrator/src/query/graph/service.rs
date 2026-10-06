@@ -529,9 +529,11 @@ impl<'a> SubGraphBuilder<'a> {
                 relation: relation.relation_type.to_string(),
                 domain: relation_domain(&relation.relation_type).to_string(),
                 confidence: confidence_of(relation),
-                call_context: Some(format!("{:?}", relation.call_context).to_lowercase()),
+                call_context: Some(relation.call_context.tag().to_string()),
                 is_external: false,
-                weight: edge_weight(&relation.relation_type),
+                weight: edge_weight(&relation.relation_type)
+                    * call_frequency_weight(relation.call_frequency),
+                cfg_condition: relation.cfg_condition.clone(),
             });
         }
     }
@@ -556,9 +558,10 @@ impl<'a> SubGraphBuilder<'a> {
             relation: target.relation_type.to_string(),
             domain: relation_domain(&target.relation_type).to_string(),
             confidence,
-            call_context: Some(format!("{:?}", target.call_context).to_lowercase()),
+            call_context: Some(target.call_context.tag().to_string()),
             is_external: false,
             weight: edge_weight(&target.relation_type),
+            cfg_condition: None,
         });
     }
 
@@ -574,6 +577,7 @@ impl<'a> SubGraphBuilder<'a> {
             call_context: None,
             is_external: true,
             weight: 1.0,
+            cfg_condition: None,
         });
     }
 
@@ -631,6 +635,21 @@ pub fn edge_weight(relation_type: &cce_types::RelationType) -> f32 {
         TypeReference => 0.3,
         _ => 0.6,
     }
+}
+
+/// Hotness multiplier derived from how many call sites a caller uses to reach
+/// the target.
+///
+/// Logarithmic in the frequency so a heavily repeated edge outranks a
+/// single-site one without letting one hub swamp every weighted traversal:
+/// each doubling of the call-site count adds one to the factor. A frequency of
+/// one leaves the type weight untouched, so edges with no repetition carry
+/// exactly the weight their relation type assigns.
+pub fn call_frequency_weight(call_frequency: u64) -> f32 {
+    if call_frequency <= 1 {
+        return 1.0;
+    }
+    1.0 + call_frequency.max(2).ilog2() as f32
 }
 
 #[cfg(test)]
@@ -691,6 +710,8 @@ mod tests {
                     owner_type: None,
                     call_context: cce_types::relation::CallContext::Direct,
                     overload_signature: None,
+                    call_frequency: 1,
+                    cfg_condition: None,
                 });
             }
             base
@@ -880,6 +901,8 @@ mod tests {
                 owner_type: None,
                 call_context: cce_types::relation::CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             });
             GraphService::new(Arc::new(RelationSearcher::new(Arc::new(
                 CallChainQuery::from_index(base),
@@ -904,6 +927,26 @@ mod tests {
                 .expect("components")
                 .total_components,
             2
+        );
+    }
+
+    #[test]
+    fn test_repeated_call_sites_raise_edge_weight() {
+        assert_eq!(call_frequency_weight(0), 1.0);
+        assert_eq!(call_frequency_weight(1), 1.0);
+        assert_eq!(call_frequency_weight(2), 2.0);
+        assert_eq!(call_frequency_weight(4), 3.0);
+        assert_eq!(call_frequency_weight(8), 4.0);
+    }
+
+    #[test]
+    fn test_edge_weight_scales_with_call_frequency() {
+        let once = edge_weight(&RelationType::DirectCall) * call_frequency_weight(1);
+        let thrice = edge_weight(&RelationType::DirectCall) * call_frequency_weight(3);
+        assert_eq!(once, 1.0);
+        assert!(
+            thrice > once,
+            "a repeated call site must outweigh a single one"
         );
     }
 
@@ -958,6 +1001,7 @@ mod tests {
             call_context: Some("direct".to_string()),
             is_external: false,
             weight: 1.0,
+            cfg_condition: None,
         }
     }
 }

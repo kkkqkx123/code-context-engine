@@ -74,6 +74,8 @@ fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)
             confidence: edge.confidence.to_string(),
             call_context: edge.call_context.clone(),
             is_external: edge.is_external,
+            weight: edge.weight,
+            cfg_condition: edge.cfg_condition.clone(),
         })
         .collect::<Vec<_>>();
 
@@ -91,15 +93,18 @@ fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)
     Ok((nodes, edges))
 }
 
-fn parse_graph_filter(domains: &str, include_external: bool) -> GraphFilter {
-    let relation_domains: Vec<String> = domains
-        .split(',')
+fn parse_comma_list(raw: &str) -> Vec<String> {
+    raw.split(',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .map(|part| part.to_lowercase())
-        .collect();
+        .collect()
+}
+
+fn parse_graph_filter(domains: &str, relation_types: &str, include_external: bool) -> GraphFilter {
     GraphFilter {
-        relation_domains,
+        relation_domains: parse_comma_list(domains),
+        relation_types: parse_comma_list(relation_types),
         include_external,
     }
 }
@@ -222,7 +227,11 @@ pub async fn handle_graph_ego(
         Err(e) => return ApiResult::Error(e),
     };
     let service = GraphService::new(searcher);
-    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let filter = parse_graph_filter(
+        &params.domains,
+        &params.relation_types,
+        params.include_external,
+    );
     let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
     let graph = match service.ego_graph_with_options(
         entity_id,
@@ -243,6 +252,7 @@ pub async fn handle_graph_ego(
         Ok(v) => v,
         Err(e) => return ApiResult::Error(e),
     };
+    let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
     ApiResult::Success(GraphSubgraphResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
@@ -250,6 +260,7 @@ pub async fn handle_graph_ego(
         edges,
         total_nodes: graph.total_nodes,
         total_edges: graph.total_edges,
+        truncated,
         relation_info: stale_relation_info(&runtime).await,
     })
 }
@@ -288,7 +299,11 @@ pub async fn handle_graph_path(
         Err(e) => return ApiResult::Error(e),
     };
     let service = GraphService::new(searcher);
-    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let filter = parse_graph_filter(
+        &params.domains,
+        &params.relation_types,
+        params.include_external,
+    );
     let path = match service.shortest_path_with_options(
         start,
         end,
@@ -363,7 +378,11 @@ pub async fn handle_graph_subgraph(
         }
     }
     let service = GraphService::new(searcher);
-    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let filter = parse_graph_filter(
+        &params.domains,
+        &params.relation_types,
+        params.include_external,
+    );
     let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
     let graph = match service.subgraph_with_options(&entity_ids, &filter, pagination) {
         Ok(graph) => graph,
@@ -378,6 +397,7 @@ pub async fn handle_graph_subgraph(
         Ok(v) => v,
         Err(e) => return ApiResult::Error(e),
     };
+    let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
     ApiResult::Success(GraphSubgraphResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
@@ -385,6 +405,7 @@ pub async fn handle_graph_subgraph(
         edges,
         total_nodes: graph.total_nodes,
         total_edges: graph.total_edges,
+        truncated,
         relation_info: stale_relation_info(&runtime).await,
     })
 }
@@ -418,7 +439,11 @@ pub async fn handle_graph_components(
         ));
     }
     let service = GraphService::new(searcher);
-    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let filter = parse_graph_filter(
+        &params.domains,
+        &params.relation_types,
+        params.include_external,
+    );
     let pagination = parse_graph_pagination(params.offset, params.limit);
     let paged = match service.connected_components_with_options(&filter, pagination) {
         Ok(paged) => paged,
@@ -483,7 +508,11 @@ pub async fn handle_graph_export(
         ));
     }
     let service = GraphService::new(searcher);
-    let filter = parse_graph_filter(&params.domains, params.include_external);
+    let filter = parse_graph_filter(
+        &params.domains,
+        &params.relation_types,
+        params.include_external,
+    );
     let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
     let graph = match service.export_full_with_options(params.limit, &filter, pagination) {
         Ok(graph) => graph,
@@ -498,6 +527,7 @@ pub async fn handle_graph_export(
         Ok(v) => v,
         Err(e) => return ApiResult::Error(e),
     };
+    let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
     ApiResult::Success(GraphSubgraphResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
@@ -505,6 +535,7 @@ pub async fn handle_graph_export(
         edges,
         total_nodes: graph.total_nodes,
         total_edges: graph.total_edges,
+        truncated,
         relation_info: stale_relation_info(&runtime).await,
     })
 }
@@ -583,7 +614,7 @@ pub async fn handle_graph_entity_impact(
         Ok(id) => id,
         Err(e) => return ApiResult::Error(e),
     };
-    let impact = searcher.get_entity_impact(entity_id, params.max_depth);
+    let impact = searcher.get_entity_impact(entity_id, params.max_depth, "entity");
     let name_of = |id: cce_types::EntityId| {
         snapshot
             .index
@@ -594,18 +625,16 @@ pub async fn handle_graph_entity_impact(
     ApiResult::Success(GraphEntityImpactResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
-        changed_entity: name_of(impact.changed),
+        changed_entity: name_of(entity_id),
         direct_dependents: impact
             .direct_dependents
             .iter()
-            .copied()
-            .map(name_of)
+            .map(|s| s.as_str().to_string())
             .collect(),
         indirect_dependents: impact
             .indirect_dependents
             .iter()
-            .copied()
-            .map(name_of)
+            .map(|s| s.as_str().to_string())
             .collect(),
         impact_score: impact.impact_score,
         relation_info: stale_relation_info(&runtime).await,

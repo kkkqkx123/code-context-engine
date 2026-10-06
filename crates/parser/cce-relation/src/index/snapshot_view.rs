@@ -77,6 +77,8 @@ mod tests {
             owner_type: None,
             call_context: cce_types::relation::CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         }
     }
 
@@ -127,6 +129,8 @@ mod tests {
                 owner_type: None,
                 call_context: cce_types::relation::CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             },
         );
         index.add_import_table(

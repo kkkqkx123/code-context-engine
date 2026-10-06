@@ -110,6 +110,8 @@ fn build_index(file_count: usize, changed: Option<usize>) -> RelationIndex {
                     owner_type: None,
                     call_context: CallContext::Direct,
                     overload_signature: None,
+                    call_frequency: 1,
+                    cfg_condition: None,
                 });
             }
         }
@@ -160,6 +162,8 @@ fn build_fanout(leaf_count: usize) -> RelationIndex {
             owner_type: None,
             call_context: CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         });
     }
     builder.process_file(

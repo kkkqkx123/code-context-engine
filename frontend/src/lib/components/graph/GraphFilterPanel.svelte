@@ -139,6 +139,19 @@
 			clutter.
 		</p>
 	</div>
+
+	<div class="panel-section">
+		<h4 class="panel-title">Reading the graph</h4>
+		<p class="hint">
+			Edge width is the traversal weight: how strongly the relation type is
+			trusted, scaled by how many call sites reach the target. A thick edge is
+			one the code leans on from many places.
+		</p>
+		<p class="hint">
+			Faded edges sit behind a conditional-compilation guard, so they only exist
+			under that predicate and are absent when the code is built without it.
+		</p>
+	</div>
 </aside>
 
 <style>

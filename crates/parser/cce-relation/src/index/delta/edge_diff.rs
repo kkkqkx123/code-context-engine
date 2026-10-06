@@ -1,9 +1,23 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use cce_types::{EntityId, FileRelationDiff, ResolvedRelation};
 
 use crate::index::core::{RelationEdgeIdentity, RelationIndex, relation_identity};
 use crate::index::view::RelationIndexView;
+
+/// The edge content the dedup identity deliberately excludes.
+///
+/// Identity answers *whether* an edge exists; these fields answer *what* it
+/// says. Two edges sharing an identity can still differ here, so the
+/// incremental diff must compare content as well as presence — otherwise an
+/// edit that only changes a conditional guard or the call-site count of an
+/// otherwise identical edge is silently dropped from the delta and the stale
+/// values survive into the next snapshot.
+type EdgeContent = (u64, Option<String>);
+
+fn edge_content(relation: &ResolvedRelation) -> EdgeContent {
+    (relation.call_frequency, relation.cfg_condition.clone())
+}
 
 fn entity_in_scope<V: RelationIndexView>(
     index: &V,
@@ -38,19 +52,28 @@ pub(super) fn compute_relation_diff<V: RelationIndexView>(
     affected_files: Option<&HashSet<String>>,
     removed_entity_set: &HashSet<EntityId>,
 ) -> (Vec<ResolvedRelation>, Vec<ResolvedRelation>, u64) {
-    let mut new_relation_edges: HashSet<RelationEdgeIdentity> = HashSet::new();
+    let mut new_relation_edges: HashMap<RelationEdgeIdentity, EdgeContent> = HashMap::new();
     for entry in new_index.resolved_relation_index.iter() {
         if !entity_in_scope_new(new_index, *entry.key(), &affected_files) {
             continue;
         }
-        new_relation_edges.extend(entry.value().iter().map(relation_identity));
+        new_relation_edges.extend(
+            entry
+                .value()
+                .iter()
+                .map(|relation| (relation_identity(relation), edge_content(relation))),
+        );
     }
-    let mut old_relation_edges: HashSet<RelationEdgeIdentity> = HashSet::new();
+    let mut old_relation_edges: HashMap<RelationEdgeIdentity, EdgeContent> = HashMap::new();
     old.for_each_resolved_relation(|caller, relations| {
         if !entity_in_scope(old, caller, &affected_files) {
             return;
         }
-        old_relation_edges.extend(relations.iter().map(relation_identity));
+        old_relation_edges.extend(
+            relations
+                .iter()
+                .map(|relation| (relation_identity(relation), edge_content(relation))),
+        );
     });
 
     let mut removed_relations = Vec::new();
@@ -64,7 +87,7 @@ pub(super) fn compute_relation_diff<V: RelationIndexView>(
             return;
         }
         for relation in relations.iter() {
-            if !new_relation_edges.contains(&relation_identity(relation)) {
+            if !edge_survives(&new_relation_edges, relation) {
                 removed_relations.push(relation.clone());
             }
         }
@@ -93,7 +116,7 @@ pub(super) fn compute_relation_diff<V: RelationIndexView>(
             continue;
         }
         for relation in entry.value().iter() {
-            if !old_relation_edges.contains(&relation_identity(relation)) {
+            if !edge_survives(&old_relation_edges, relation) {
                 added_relations.push(relation.clone());
             }
         }
@@ -104,6 +127,17 @@ pub(super) fn compute_relation_diff<V: RelationIndexView>(
         added_relations,
         relation_edges_dropped_unbounded,
     )
+}
+
+/// Whether `edges` already carries this exact relation: same identity and
+/// same excluded content.
+fn edge_survives(
+    edges: &HashMap<RelationEdgeIdentity, EdgeContent>,
+    relation: &ResolvedRelation,
+) -> bool {
+    edges
+        .get(&relation_identity(relation))
+        .is_some_and(|content| *content == edge_content(relation))
 }
 
 pub(super) fn compute_file_relation_diff<V: RelationIndexView>(
@@ -125,27 +159,30 @@ pub(super) fn compute_file_relation_diff<V: RelationIndexView>(
         .collect();
 
     for path in &all_file_relation_paths {
-        let old_edges: HashSet<RelationEdgeIdentity> = old
-            .file_relations_of(path)
+        let old_relations: Vec<ResolvedRelation> = old.file_relations_of(path);
+        let old_edges: HashMap<RelationEdgeIdentity, EdgeContent> = old_relations
             .iter()
-            .map(relation_identity)
+            .map(|relation| (relation_identity(relation), edge_content(relation)))
             .collect();
         let new_relations: Vec<ResolvedRelation> = new_index
             .file_relation_index
             .get(path)
             .map(|entry| entry.edges.clone())
             .unwrap_or_default();
-        let new_edges: HashSet<RelationEdgeIdentity> =
-            new_relations.iter().map(relation_identity).collect();
+        let new_edges: HashMap<RelationEdgeIdentity, EdgeContent> = new_relations
+            .iter()
+            .map(|relation| (relation_identity(relation), edge_content(relation)))
+            .collect();
 
-        let removed: Vec<_> = old
-            .file_relations_of(path)
-            .into_iter()
-            .filter(|r| !new_edges.contains(&relation_identity(r)))
+        let removed: Vec<_> = old_relations
+            .iter()
+            .filter(|relation| !edge_survives(&new_edges, relation))
+            .cloned()
             .collect();
         let added: Vec<_> = new_relations
-            .into_iter()
-            .filter(|r| !old_edges.contains(&relation_identity(r)))
+            .iter()
+            .filter(|relation| !edge_survives(&old_edges, relation))
+            .cloned()
             .collect();
 
         if !removed.is_empty() || !added.is_empty() {

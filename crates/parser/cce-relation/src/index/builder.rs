@@ -791,6 +791,8 @@ impl IndexBuilder {
                 owner_type: None,
                 call_context: CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             });
             inserted += 1;
         }
@@ -874,6 +876,8 @@ mod tests {
             owner_type: None,
             call_context: CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         });
         let index = builder.build();
         assert_eq!(index.resolved_relation_count(), 1);
@@ -1151,6 +1155,8 @@ mod tests {
                 owner_type: None,
                 call_context: CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             })
             .add_file(FileInfo {
                 id: "file_1".to_string(),

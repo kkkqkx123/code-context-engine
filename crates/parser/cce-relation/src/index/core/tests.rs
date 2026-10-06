@@ -100,6 +100,8 @@ fn test_add_resolved_relation() {
         owner_type: None,
         call_context: cce_types::relation::CallContext::Direct,
         overload_signature: None,
+        call_frequency: 1,
+        cfg_condition: None,
     };
     index.add_resolved_relation(relation);
 
@@ -228,6 +230,8 @@ fn test_clear() {
         owner_type: None,
         call_context: cce_types::relation::CallContext::Direct,
         overload_signature: None,
+        call_frequency: 1,
+        cfg_condition: None,
     };
     index.add_resolved_relation(relation);
 

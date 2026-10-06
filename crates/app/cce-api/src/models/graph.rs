@@ -61,6 +61,14 @@ pub struct GraphEdge {
     /// True when the edge points outside the indexed project.
     #[serde(default)]
     pub is_external: bool,
+    /// Traversal weight: the relation type's base confidence multiplied by
+    /// how many call sites the caller uses to reach the target.
+    #[serde(default = "default_edge_weight")]
+    pub weight: f32,
+    /// Conditional-compilation guard the calling entity carries, when it has
+    /// one. The edge exists only under that predicate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cfg_condition: Option<String>,
 }
 
 impl GraphNode {
@@ -153,6 +161,9 @@ pub struct EgoQuery {
     pub limit: usize,
     #[serde(default)]
     pub domains: String,
+    /// Exact relation types to keep (comma-separated). Empty keeps all.
+    #[serde(default)]
+    pub relation_types: String,
     #[serde(default = "default_true")]
     pub include_external: bool,
 }
@@ -167,6 +178,9 @@ pub struct GraphPathQuery {
     pub max_depth: usize,
     #[serde(default)]
     pub domains: String,
+    /// Exact relation types to keep (comma-separated). Empty keeps all.
+    #[serde(default)]
+    pub relation_types: String,
     #[serde(default = "default_true")]
     pub include_external: bool,
 }
@@ -182,6 +196,9 @@ pub struct SubgraphQuery {
     pub limit: usize,
     #[serde(default)]
     pub domains: String,
+    /// Exact relation types to keep (comma-separated). Empty keeps all.
+    #[serde(default)]
+    pub relation_types: String,
     #[serde(default = "default_true")]
     pub include_external: bool,
 }
@@ -196,6 +213,9 @@ pub struct ExportQuery {
     pub offset: usize,
     #[serde(default)]
     pub domains: String,
+    /// Exact relation types to keep (comma-separated). Empty keeps all.
+    #[serde(default)]
+    pub relation_types: String,
     #[serde(default = "default_true")]
     pub include_external: bool,
 }
@@ -210,6 +230,9 @@ pub struct ComponentsQuery {
     pub limit: usize,
     #[serde(default)]
     pub domains: String,
+    /// Exact relation types to keep (comma-separated). Empty keeps all.
+    #[serde(default)]
+    pub relation_types: String,
     #[serde(default = "default_true")]
     pub include_external: bool,
 }
@@ -401,6 +424,10 @@ pub struct GraphStructuralResponse {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relation_info: Option<serde_json::Value>,
+}
+
+fn default_edge_weight() -> f32 {
+    1.0
 }
 
 fn default_ego_depth() -> usize {

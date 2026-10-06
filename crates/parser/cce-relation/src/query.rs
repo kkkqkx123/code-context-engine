@@ -1312,6 +1312,8 @@ mod tests {
             owner_type: None,
             call_context: CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         });
         index.add_resolved_relation(ResolvedRelation {
             caller: EntityId(1),
@@ -1326,6 +1328,8 @@ mod tests {
             owner_type: None,
             call_context: CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         });
 
         index
@@ -1356,6 +1360,8 @@ mod tests {
                 owner_type: None,
                 call_context: CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             });
         }
         CallChainQuery::from_index(base)
@@ -1420,6 +1426,8 @@ mod tests {
                 owner_type: None,
                 call_context: CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             });
         }
         let query = CallChainQuery::from_index(base);
@@ -1464,6 +1472,8 @@ mod tests {
                 owner_type: None,
                 call_context: CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             });
         }
         let query = CallChainQuery::from_index(base);

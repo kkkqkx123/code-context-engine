@@ -37,6 +37,29 @@ pub struct EntityMetrics {
     pub pagerank: f64,
 }
 
+/// Caller-keyed out-edges, kept separate from the undirected adjacency
+/// because PageRank flows along the direction of the call, not across it.
+fn build_out_edges(
+    index: &LayeredSnapshotIndex,
+    nodes: &[EntityId],
+) -> HashMap<EntityId, Vec<EntityId>> {
+    let mut out: HashMap<EntityId, Vec<EntityId>> = HashMap::new();
+    for node in nodes {
+        out.insert(*node, Vec::new());
+    }
+    index.for_each_resolved_relation(|caller, relations| {
+        let callees: Vec<EntityId> = relations
+            .iter()
+            .filter_map(|relation| relation.callee_id)
+            .filter(|callee| *callee != caller && out.contains_key(callee))
+            .collect();
+        if let Some(out_edges) = out.get_mut(&caller) {
+            out_edges.extend(callees);
+        }
+    });
+    out
+}
+
 /// Compute graph metrics for all entities in the index.
 ///
 /// Betweenness centrality is only computed when the graph has at most
@@ -55,6 +78,7 @@ pub fn compute_metrics(index: &LayeredSnapshotIndex) -> HashMap<EntityId, Entity
     }
 
     let adjacency = build_adjacency(index, &nodes);
+    let out_edges = build_out_edges(index, &nodes);
     let degree = compute_degree_centrality(&nodes, &adjacency);
     let betweenness = if n <= MAX_BETWEENNESS_NODES {
         Some(compute_betweenness_centrality(&nodes, &adjacency))
@@ -62,7 +86,7 @@ pub fn compute_metrics(index: &LayeredSnapshotIndex) -> HashMap<EntityId, Entity
         None
     };
     let clustering = compute_clustering_coefficient(&nodes, &adjacency);
-    let pagerank = compute_pagerank(&nodes, &adjacency);
+    let pagerank = compute_pagerank(&nodes, &out_edges);
 
     let mut result = HashMap::new();
     for node in &nodes {
@@ -79,6 +103,13 @@ pub fn compute_metrics(index: &LayeredSnapshotIndex) -> HashMap<EntityId, Entity
     result
 }
 
+/// Undirected adjacency over the resolved call edges.
+///
+/// Every edge contributes to both endpoints. Degree centrality, betweenness
+/// and the local clustering coefficient are defined on the undirected
+/// projection of the call graph: a call from `a` to `b` raises the degree of
+/// `a` and of `b` alike. PageRank consumes the same list and is the one metric
+/// that must stay directed, so it re-reads the caller-keyed edges itself.
 fn build_adjacency(
     index: &LayeredSnapshotIndex,
     nodes: &[EntityId],
@@ -88,15 +119,19 @@ fn build_adjacency(
         adj.insert(*node, Vec::new());
     }
     index.for_each_resolved_relation(|caller, relations| {
-        let callee_ids: Vec<EntityId> = relations
-            .iter()
-            .filter_map(|r| r.callee_id)
-            .filter(|id| adj.contains_key(id))
-            .collect();
-        if !callee_ids.is_empty() {
-            if let Some(neighbors) = adj.get_mut(&caller) {
-                neighbors.extend(callee_ids);
+        if !adj.contains_key(&caller) {
+            return;
+        }
+        for callee in relations.iter().filter_map(|relation| relation.callee_id) {
+            if callee == caller || !adj.contains_key(&callee) {
+                continue;
             }
+            adj.get_mut(&caller)
+                .expect("caller is in scope")
+                .push(callee);
+            adj.get_mut(&callee)
+                .expect("callee is in scope")
+                .push(caller);
         }
     });
     adj
@@ -327,6 +362,8 @@ mod tests {
             owner_type: None,
             call_context: cce_types::relation::CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         }
     }
 

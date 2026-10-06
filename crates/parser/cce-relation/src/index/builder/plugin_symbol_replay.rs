@@ -231,6 +231,8 @@ impl IndexBuilder {
                 owner_type: None,
                 call_context: CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             };
             self.index.add_resolved_relation(resolved);
             injected += 1;

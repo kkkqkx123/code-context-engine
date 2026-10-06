@@ -2668,6 +2668,15 @@
             }
           },
           {
+            "name": "relation_types",
+            "in": "query",
+            "description": "Exact relation types to keep (comma-separated). Empty keeps all.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "include_external",
             "in": "query",
             "required": false,
@@ -2892,6 +2901,15 @@
             }
           },
           {
+            "name": "relation_types",
+            "in": "query",
+            "description": "Exact relation types to keep (comma-separated). Empty keeps all.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "include_external",
             "in": "query",
             "required": false,
@@ -2991,6 +3009,15 @@
             }
           },
           {
+            "name": "scope",
+            "in": "query",
+            "description": "`entity` (default) uses entity-level edges; `file` uses file-level\ndependency graph after locating the entity's file.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "project_id",
             "in": "path",
             "description": "Project id",
@@ -3084,6 +3111,15 @@
           {
             "name": "domains",
             "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "relation_types",
+            "in": "query",
+            "description": "Exact relation types to keep (comma-separated). Empty keeps all.",
             "required": false,
             "schema": {
               "type": "string"
@@ -3367,6 +3403,15 @@
             }
           },
           {
+            "name": "relation_types",
+            "in": "query",
+            "description": "Exact relation types to keep (comma-separated). Empty keeps all.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "include_external",
             "in": "query",
             "required": false,
@@ -3585,6 +3630,15 @@
           {
             "name": "domains",
             "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "relation_types",
+            "in": "query",
+            "description": "Exact relation types to keep (comma-separated). Empty keeps all.",
             "required": false,
             "schema": {
               "type": "string"
@@ -7380,6 +7434,13 @@
             ],
             "description": "How the call site invokes the target (`direct`, `instance_method`, ...),\nwhen the edge carries call context."
           },
+          "cfg_condition": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Conditional-compilation guard the calling entity carries, when it has\none. The edge exists only under that predicate."
+          },
           "confidence": {
             "type": "string"
           },
@@ -7399,6 +7460,11 @@
           },
           "target": {
             "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "format": "float",
+            "description": "Traversal weight: the relation type's base confidence multiplied by\nhow many call sites the caller uses to reach the target."
           }
         }
       },
@@ -7691,6 +7757,10 @@
           "total_nodes": {
             "type": "integer",
             "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether the result was truncated due to safety limits."
           }
         }
       },

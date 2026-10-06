@@ -260,6 +260,8 @@ impl RelationUpdateProcessor {
                         owner_type: None,
                         call_context: CallContext::Direct,
                         overload_signature: None,
+                        call_frequency: 1,
+                        cfg_condition: None,
                     };
                     index.add_file_relation(path, rel);
                 }

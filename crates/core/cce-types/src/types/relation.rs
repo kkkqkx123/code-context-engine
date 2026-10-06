@@ -83,10 +83,44 @@ pub enum CallContext {
         /// The type being constructed
         owner_type: String,
     },
+    /// Virtual/dynamic dispatch call through a vtable, trait object, or interface
+    ///
+    /// The callee is resolved to a trait/interface method; the concrete
+    /// implementation is determined at runtime. The `receiver_type` is the
+    /// static type of the receiver expression (which may be a trait object
+    /// like `dyn Trait` or `impl Trait`).
+    VirtualDispatch {
+        /// The static type of the receiver (may be a trait object type)
+        receiver_type: String,
+    },
+}
+
+impl CallContext {
+    /// Stable snake_case tag for this call context.
+    ///
+    /// The tag names the dispatch mechanism only. Receiver and owner types
+    /// are payload, not part of the mechanism's identity, so two calls sharing
+    /// a mechanism compare equal on their tag regardless of receiver type.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            CallContext::Direct => "direct",
+            CallContext::InstanceMethod { .. } => "instance_method",
+            CallContext::StaticMethod { .. } => "static_method",
+            CallContext::Constructor { .. } => "constructor",
+            CallContext::VirtualDispatch { .. } => "virtual_dispatch",
+        }
+    }
+}
+
+impl fmt::Display for CallContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.tag())
+    }
 }
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
+use std::fmt;
 
 use super::Span;
 use super::entity::EntityId;

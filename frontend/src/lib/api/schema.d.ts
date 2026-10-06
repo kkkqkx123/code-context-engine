@@ -2069,6 +2069,11 @@ export interface components {
              *     when the edge carries call context.
              */
             call_context?: string | null;
+            /**
+             * @description Conditional-compilation guard the calling entity carries, when it has
+             *     one. The edge exists only under that predicate.
+             */
+            cfg_condition?: string | null;
             confidence: string;
             /**
              * @description Coarse relation domain derived by the backend (`call`, `dependency`,
@@ -2081,6 +2086,12 @@ export interface components {
             relation: string;
             source: string;
             target: string;
+            /**
+             * Format: float
+             * @description Traversal weight: the relation type's base confidence multiplied by
+             *     how many call sites the caller uses to reach the target.
+             */
+            weight?: number;
         };
         /** @description Entity impact response. */
         GraphEntityImpactResponse: {
@@ -2179,6 +2190,8 @@ export interface components {
             success: boolean;
             total_edges?: number;
             total_nodes?: number;
+            /** @description Whether the result was truncated due to safety limits. */
+            truncated?: boolean;
         };
         /** @description References grouped by file */
         GroupedReferences: {
@@ -4781,6 +4794,8 @@ export interface operations {
                 offset?: number;
                 limit?: number;
                 domains?: string;
+                /** @description Exact relation types to keep (comma-separated). Empty keeps all. */
+                relation_types?: string;
                 include_external?: boolean;
             };
             header?: never;
@@ -4911,6 +4926,8 @@ export interface operations {
                 offset?: number;
                 limit?: number;
                 domains?: string;
+                /** @description Exact relation types to keep (comma-separated). Empty keeps all. */
+                relation_types?: string;
                 include_external?: boolean;
             };
             header?: never;
@@ -4974,6 +4991,11 @@ export interface operations {
             query: {
                 entity_id: string;
                 max_depth?: number;
+                /**
+                 * @description `entity` (default) uses entity-level edges; `file` uses file-level
+                 *     dependency graph after locating the entity's file.
+                 */
+                scope?: string;
             };
             header?: never;
             path: {
@@ -5037,6 +5059,8 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 domains?: string;
+                /** @description Exact relation types to keep (comma-separated). Empty keeps all. */
+                relation_types?: string;
                 include_external?: boolean;
             };
             header?: never;
@@ -5224,6 +5248,8 @@ export interface operations {
                 end: string;
                 max_depth?: number;
                 domains?: string;
+                /** @description Exact relation types to keep (comma-separated). Empty keeps all. */
+                relation_types?: string;
                 include_external?: boolean;
             };
             header?: never;
@@ -5359,6 +5385,8 @@ export interface operations {
                 offset?: number;
                 limit?: number;
                 domains?: string;
+                /** @description Exact relation types to keep (comma-separated). Empty keeps all. */
+                relation_types?: string;
                 include_external?: boolean;
             };
             header?: never;

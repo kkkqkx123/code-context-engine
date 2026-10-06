@@ -300,6 +300,8 @@ mod tests {
                     owner_type: None,
                     call_context: cce_types::relation::CallContext::Direct,
                     overload_signature: None,
+                    call_frequency: 1,
+                    cfg_condition: None,
                 },
                 unresolved_edge(EntityId(1), "renamed_fn", RelationType::DirectCall),
             ],
@@ -494,5 +496,96 @@ mod tests {
         replayed.apply_delta(&scoped);
         assert_eq!(edge_identities(&replayed), edge_identities(&new));
         assert!(replayed.validate_snapshot().is_ok());
+    }
+
+    #[test]
+    fn delta_reports_edge_whose_conditional_guard_changed() {
+        let mut guarded =
+            internal_edge(EntityId(1), EntityId(2), "callee", RelationType::DirectCall);
+        guarded.cfg_condition = Some("cfg(unix)".to_string());
+        let old = seed_index(
+            &[(EntityId(1), "caller"), (EntityId(2), "callee")],
+            &[guarded.clone()],
+        );
+
+        guarded.cfg_condition = Some("cfg(windows)".to_string());
+        let new = seed_index(
+            &[(EntityId(1), "caller"), (EntityId(2), "callee")],
+            &[guarded.clone()],
+        );
+
+        let delta = new.compute_delta(&old, 2, 1, "config".to_string(), None);
+
+        assert_eq!(
+            edge_identities(&old),
+            edge_identities(&new),
+            "identity is unchanged"
+        );
+        assert_eq!(delta.removed_relations.len(), 1);
+        assert_eq!(
+            delta.removed_relations[0].cfg_condition.as_deref(),
+            Some("cfg(unix)")
+        );
+        assert_eq!(delta.added_relations.len(), 1);
+        assert_eq!(
+            delta.added_relations[0].cfg_condition.as_deref(),
+            Some("cfg(windows)")
+        );
+
+        let replayed = old.detached_clone();
+        replayed.apply_delta(&delta);
+        let replayed_guard = replayed
+            .relations_of(EntityId(1))
+            .expect("caller edges")
+            .iter()
+            .find_map(|edge| edge.cfg_condition.clone());
+        assert_eq!(replayed_guard.as_deref(), Some("cfg(windows)"));
+    }
+
+    #[test]
+    fn delta_reports_surviving_edge_whose_call_frequency_changed() {
+        let edge = internal_edge(EntityId(1), EntityId(2), "callee", RelationType::DirectCall);
+        let mut frequent = edge.clone();
+        frequent.call_frequency = 4;
+        let old = seed_index(
+            &[(EntityId(1), "caller"), (EntityId(2), "callee")],
+            std::slice::from_ref(&edge),
+        );
+        let new = seed_index(
+            &[(EntityId(1), "caller"), (EntityId(2), "callee")],
+            &[frequent],
+        );
+
+        let delta = new.compute_delta(&old, 2, 1, "config".to_string(), None);
+
+        assert_eq!(delta.removed_relations.len(), 1);
+        assert_eq!(delta.removed_relations[0].call_frequency, 1);
+        assert_eq!(delta.added_relations.len(), 1);
+        assert_eq!(delta.added_relations[0].call_frequency, 4);
+
+        let replayed = old.detached_clone();
+        replayed.apply_delta(&delta);
+        let replayed_frequency = replayed
+            .relations_of(EntityId(1))
+            .expect("caller edges")
+            .iter()
+            .map(|edge| edge.call_frequency)
+            .next();
+        assert_eq!(replayed_frequency, Some(4));
+    }
+
+    #[test]
+    fn delta_stays_empty_when_presence_and_content_both_match() {
+        let edge = internal_edge(EntityId(1), EntityId(2), "callee", RelationType::DirectCall);
+        let old = seed_index(
+            &[(EntityId(1), "caller"), (EntityId(2), "callee")],
+            std::slice::from_ref(&edge),
+        );
+        let new = seed_index(&[(EntityId(1), "caller"), (EntityId(2), "callee")], &[edge]);
+
+        let delta = new.compute_delta(&old, 2, 1, "config".to_string(), None);
+
+        assert!(delta.removed_relations.is_empty());
+        assert!(delta.added_relations.is_empty());
     }
 }

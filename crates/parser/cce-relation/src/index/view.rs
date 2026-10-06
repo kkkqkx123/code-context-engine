@@ -298,6 +298,8 @@ pub(super) fn fingerprint_in_files_from_maps(
                 callee_symbol: relation.callee_symbol.clone(),
                 owner_type: canonical_owner_type(&relation.owner_type),
                 call_context: canonical_call_context(&relation.call_context),
+                call_frequency: relation.call_frequency,
+                cfg_condition: relation.cfg_condition.clone(),
             });
         }
     }
@@ -340,6 +342,8 @@ pub(super) fn fingerprint_in_files_from_maps(
                 callee_symbol: relation.callee_symbol.clone(),
                 owner_type: canonical_owner_type(&relation.owner_type),
                 call_context: canonical_call_context(&relation.call_context),
+                call_frequency: relation.call_frequency,
+                cfg_condition: relation.cfg_condition.clone(),
             });
         }
     }

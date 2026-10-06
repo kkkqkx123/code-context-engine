@@ -491,7 +491,7 @@ export const graphActions = {
 					...state.meta,
 					impactFile: response.changed_file,
 					impactDirect: response.direct_dependents,
-					impactTransitive: response.transitive_dependents,
+					impactTransitive: response.indirect_dependents,
 				},
 			}));
 			return { ok: true, value: response };

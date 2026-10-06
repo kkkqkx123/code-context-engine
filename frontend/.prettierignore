@@ -5,3 +5,8 @@ coverage
 .svelte-kit
 stats.html
 package-lock.json
+
+# Regenerated from the committed OpenAPI snapshot by `npm run gen` in
+# tools/openapi-codegen; its emitted formatting is not prettier's, so formatting
+# it would bury the real schema diff under whole-file churn.
+src/lib/api/schema.d.ts

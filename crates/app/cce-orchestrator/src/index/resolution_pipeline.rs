@@ -236,6 +236,8 @@ mod tests {
             callee_symbol: None,
             owner_type: None,
             call_context: Default::default(),
+            call_frequency: 1,
+            cfg_condition: None,
         });
         assert!(validate_snapshot(&snapshot).is_err());
     }

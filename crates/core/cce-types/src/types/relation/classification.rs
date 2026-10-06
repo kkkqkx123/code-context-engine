@@ -207,7 +207,12 @@ pub enum RelationType {
     /// Pointer call (ptr())
     #[serde(rename = "call.pointer")]
     PointerCall,
-    /// Callback call (callback())
+    /// Invocation of a function-valued expression: a closure literal, a
+    /// closure variable, an inline closure, a method reference, or a delegate.
+    ///
+    /// The edge points *at* the invoked function value, so the callee is the
+    /// function being run. Distinct from `HigherOrderCall`, where the callee is
+    /// the function being *handed* the callback.
     #[serde(rename = "call.callback")]
     CallbackCall,
     /// Template/generic call (foo<T>())
@@ -225,7 +230,12 @@ pub enum RelationType {
     /// Async call (await foo())
     #[serde(rename = "call.async")]
     AsyncCall,
-    /// Higher-order function call (caller passes a callback to callee)
+    /// Call that passes a callback to a higher-order callee (`arr.map(cb)`).
+    ///
+    /// The edge points *from* the caller to the function accepting the
+    /// callback; the callback itself is a separate edge from the callee,
+    /// synthesized once the callee's parameter types resolve it. Distinct from
+    /// `CallbackCall`, where the callee is the function being run.
     #[serde(rename = "call.higher_order")]
     HigherOrderCall,
 

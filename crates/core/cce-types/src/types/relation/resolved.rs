@@ -120,6 +120,21 @@ pub struct ResolvedRelation {
     /// and unresolved behavior unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overload_signature: Option<String>,
+
+    /// Call frequency: how many times this call site is executed.
+    ///
+    /// Populated from symbol-level call frequency during index construction.
+    /// Used for weighted impact analysis and path ranking.
+    #[serde(default)]
+    pub call_frequency: u64,
+
+    /// Conditional compilation guard for this relation.
+    ///
+    /// When the relation is inside a conditional compilation branch
+    /// (e.g., `#[cfg(test)]`, `#ifdef DEBUG`), this field carries the
+    /// condition string. `None` means the relation is unconditional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cfg_condition: Option<String>,
 }
 
 impl ResolvedRelation {

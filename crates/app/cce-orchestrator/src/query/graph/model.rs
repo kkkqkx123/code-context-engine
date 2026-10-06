@@ -113,6 +113,11 @@ pub struct GraphEdge {
     /// Edge weight for weighted traversal (1.0 for unweighted).
     #[serde(default = "default_edge_weight")]
     pub weight: f32,
+    /// Conditional-compilation guard the caller entity carries. The edge
+    /// exists only under that predicate, so consumers that expand or prune a
+    /// graph by platform can exclude it without re-reading the source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cfg_condition: Option<String>,
 }
 
 fn default_edge_weight() -> f32 {
@@ -270,6 +275,8 @@ mod tests {
             owner_type: None,
             call_context: CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         }
     }
 

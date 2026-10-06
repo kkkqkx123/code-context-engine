@@ -427,6 +427,18 @@ pub struct CanonicalRelation {
     /// Defaults to direct for snapshots written before this field.
     #[serde(default)]
     pub call_context: super::CallContext,
+    /// Call frequency at this call site, carried through snapshot round-trips
+    /// so reloaded edges retain their weight for impact analysis.
+    ///
+    /// Defaults to 1 for snapshots written before this field.
+    #[serde(default)]
+    pub call_frequency: u64,
+    /// Conditional compilation guard for this relation, carried through
+    /// snapshot round-trips so reloaded edges retain their cfg context.
+    ///
+    /// Optional so snapshots written before this field keep loading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cfg_condition: Option<String>,
 }
 
 /// Upper bound on persisted owner/receiver type strings.
@@ -465,6 +477,11 @@ pub fn canonical_call_context(context: &super::CallContext) -> super::CallContex
         super::CallContext::Constructor { owner_type } => super::CallContext::Constructor {
             owner_type: truncate(owner_type),
         },
+        super::CallContext::VirtualDispatch { receiver_type } => {
+            super::CallContext::VirtualDispatch {
+                receiver_type: truncate(receiver_type),
+            }
+        }
     }
 }
 
@@ -705,6 +722,40 @@ fn stable_json<T: Serialize>(value: &T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Edge records are stored one per call site for every edge in the project
+    /// and stay resident for the whole snapshot lifetime, so their inline
+    /// footprint is multiplied by the project edge count. Pinning the budget
+    /// makes an unnoticed payload growth — a new inline string, a wider
+    /// integer — fail loudly instead of quietly inflating the relation index.
+    const RESOLVED_RELATION_BUDGET: usize = 512;
+    const CANONICAL_RELATION_BUDGET: usize = 640;
+
+    #[test]
+    fn edge_records_fit_inline_budget() {
+        let resolved = std::mem::size_of::<super::super::ResolvedRelation>();
+        assert!(
+            resolved <= RESOLVED_RELATION_BUDGET,
+            "ResolvedRelation grew to {resolved} bytes, past the \
+             {RESOLVED_RELATION_BUDGET}-byte budget"
+        );
+        let canonical = std::mem::size_of::<CanonicalRelation>();
+        assert!(
+            canonical <= CANONICAL_RELATION_BUDGET,
+            "CanonicalRelation grew to {canonical} bytes, past the \
+             {CANONICAL_RELATION_BUDGET}-byte budget"
+        );
+    }
+
+    #[test]
+    fn call_context_stays_pointer_sized() {
+        assert_eq!(
+            std::mem::size_of::<super::super::CallContext>(),
+            std::mem::size_of::<usize>() * 4,
+            "CallContext is embedded inline in both edge records and travels as \
+             serialized JSON, so an oversized variant is paid per edge"
+        );
+    }
 
     #[test]
     fn path_normalization_is_platform_independent() {
@@ -987,6 +1038,8 @@ mod tests {
             callee_symbol: None,
             owner_type: None,
             call_context: Default::default(),
+            call_frequency: 1,
+            cfg_condition: None,
         };
         let json = serde_json::to_string(&relation).expect("serialize");
         assert!(json.contains("parse(String) -> Integer"));
@@ -1012,6 +1065,8 @@ mod tests {
             callee_symbol: None,
             owner_type: None,
             call_context: Default::default(),
+            call_frequency: 1,
+            cfg_condition: None,
         };
         let json = serde_json::to_string(&relation).expect("serialize");
         assert!(!json.contains("overload_signature"));
@@ -1064,6 +1119,8 @@ mod tests {
             callee_symbol: None,
             owner_type: None,
             call_context: Default::default(),
+            call_frequency: 1,
+            cfg_condition: None,
         });
         snapshot.dependencies.push(CanonicalDependency {
             source_file: "./src/lib.rs".to_string(),

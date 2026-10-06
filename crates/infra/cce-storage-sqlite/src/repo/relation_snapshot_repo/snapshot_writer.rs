@@ -205,8 +205,9 @@ impl RelationSnapshotRepository {
             project_id, relation_epoch, caller_symbol_id, target_symbol_id,
             target_state, raw_target, relation_type_json, span_json,
             external_type_json, unresolved_reason, stdlib_category_json,
-            call_context_json, owner_type, overload_signature, callee_symbol_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)";
+            call_context_json, owner_type, overload_signature, callee_symbol_json,
+            call_frequency, cfg_condition
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)";
         {
             let relation_type_json: Vec<String> = snapshot
                 .relations
@@ -243,6 +244,16 @@ impl RelationSnapshotRepository {
                 .iter()
                 .map(|relation| optional_json(&relation.callee_symbol))
                 .collect::<Result<_, _>>()?;
+            let call_frequencies: Vec<i64> = snapshot
+                .relations
+                .iter()
+                .map(|relation| relation.call_frequency as i64)
+                .collect();
+            let cfg_conditions: Vec<Option<String>> = snapshot
+                .relations
+                .iter()
+                .map(|relation| relation.cfg_condition.clone())
+                .collect();
             let target_ids: Vec<Option<i64>> = snapshot
                 .relations
                 .iter()
@@ -301,6 +312,8 @@ impl RelationSnapshotRepository {
                     &owner_types[i],
                     &overload_signatures[i],
                     &callee_symbols[i],
+                    &call_frequencies[i],
+                    &cfg_conditions[i],
                 ]);
             }
             execute_insert_batch(tx, relation_sql, &rows, "relation_snapshot_relations")?;

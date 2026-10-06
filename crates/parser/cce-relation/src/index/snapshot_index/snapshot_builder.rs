@@ -150,6 +150,8 @@ impl RelationSnapshotIndex {
                     callee_symbol: relation.callee_symbol.clone(),
                     owner_type: canonical_owner_type(&relation.owner_type),
                     call_context: canonical_call_context(&relation.call_context),
+                    call_frequency: relation.call_frequency,
+                    cfg_condition: relation.cfg_condition.clone(),
                 });
             }
         }
@@ -183,6 +185,8 @@ impl RelationSnapshotIndex {
                     callee_symbol: relation.callee_symbol.clone(),
                     owner_type: canonical_owner_type(&relation.owner_type),
                     call_context: canonical_call_context(&relation.call_context),
+                    call_frequency: relation.call_frequency,
+                    cfg_condition: relation.cfg_condition.clone(),
                 });
             }
         }
@@ -502,6 +506,8 @@ impl LayeredSnapshotIndex {
                     callee_symbol: relation.callee_symbol.clone(),
                     owner_type: canonical_owner_type(&relation.owner_type),
                     call_context: canonical_call_context(&relation.call_context),
+                    call_frequency: relation.call_frequency,
+                    cfg_condition: relation.cfg_condition.clone(),
                 });
             }
         }
@@ -573,6 +579,8 @@ impl LayeredSnapshotIndex {
                     callee_symbol: relation.callee_symbol.clone(),
                     owner_type: canonical_owner_type(&relation.owner_type),
                     call_context: canonical_call_context(&relation.call_context),
+                    call_frequency: relation.call_frequency,
+                    cfg_condition: relation.cfg_condition.clone(),
                 });
             }
         }

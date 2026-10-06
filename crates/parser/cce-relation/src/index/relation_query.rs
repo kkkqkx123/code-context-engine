@@ -409,6 +409,8 @@ mod tests {
             owner_type: None,
             call_context: cce_types::relation::CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         });
 
         assert_eq!(
@@ -447,6 +449,8 @@ mod tests {
             owner_type: None,
             call_context: cce_types::relation::CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         });
 
         assert_eq!(index.get_derived_classes(EntityId(1)), vec![EntityId(2)]);
@@ -478,6 +482,8 @@ mod tests {
             owner_type: None,
             call_context: cce_types::relation::CallContext::Direct,
             overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
         });
 
         // Test derived classes

@@ -98,6 +98,8 @@ fn create_resolved_relation(
         owner_type: None,
         call_context: CallContext::Direct,
         overload_signature: None,
+        call_frequency: 1,
+        cfg_condition: None,
     }
 }
 
@@ -375,6 +377,8 @@ fn test_relation_query_by_type() {
         owner_type: None,
         call_context: CallContext::Direct,
         overload_signature: None,
+        call_frequency: 1,
+        cfg_condition: None,
     });
 
     // Query by type
@@ -1036,6 +1040,8 @@ fn test_frontend_component_queries() {
         owner_type: None,
         call_context: CallContext::Direct,
         overload_signature: None,
+        call_frequency: 1,
+        cfg_condition: None,
     });
 
     // EventCallback: Parent binds to handleClick
@@ -1052,6 +1058,8 @@ fn test_frontend_component_queries() {
         owner_type: None,
         call_context: CallContext::Direct,
         overload_signature: None,
+        call_frequency: 1,
+        cfg_condition: None,
     });
 
     // ParameterBinding: Parent passes props to Child
@@ -1068,6 +1076,8 @@ fn test_frontend_component_queries() {
         owner_type: None,
         call_context: CallContext::Direct,
         overload_signature: None,
+        call_frequency: 1,
+        cfg_condition: None,
     });
 
     // Query child elements

@@ -129,7 +129,8 @@ fn read_relations(
             "SELECT caller_symbol_id, target_symbol_id, target_state, raw_target,
                     relation_type_json, span_json, external_type_json,
                     unresolved_reason, stdlib_category_json,
-                    call_context_json, owner_type, overload_signature, callee_symbol_json
+                    call_context_json, owner_type, overload_signature, callee_symbol_json,
+                    call_frequency, cfg_condition
              FROM relation_snapshot_relations
              WHERE project_id = ?1 AND relation_epoch = ?2 ORDER BY id",
         )
@@ -188,6 +189,8 @@ fn read_relations(
             callee_symbol: optional_from_json(row.get(12).map_err(query_error)?)?,
             owner_type: row.get(10).map_err(query_error)?,
             call_context,
+            call_frequency: row.get::<_, i64>(13).map_err(query_error)? as u64,
+            cfg_condition: row.get(14).map_err(query_error)?,
         });
     }
     Ok(())

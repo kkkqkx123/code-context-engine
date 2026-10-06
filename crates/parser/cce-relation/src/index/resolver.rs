@@ -4,7 +4,7 @@
 //! a global symbol table and classifying external calls (standard library,
 //! external packages, or unknown).
 
-use super::core::RelationIndex;
+use super::core::{RelationEdgeIdentity, RelationIndex, relation_identity};
 use super::dependency_index::DependencyIndex;
 use crate::config_parser::UntypedDependency;
 use crate::index::EntityIndexOps;
@@ -14,6 +14,7 @@ use crate::symbol_table::ResolutionContext;
 use crate::symbol_table::project::OverloadContext;
 use crate::type_inference::types::{BranchPolarity, TypeShape, parse_type_shape};
 use cce_metrics::domain::pipeline::RelationMetrics;
+use cce_types::entity::meta_keys::CFG_PREDICATE;
 use cce_types::entity::{Entity, EntityId};
 use cce_types::relation::{CallContext, ExternalCallType};
 use cce_types::{
@@ -576,9 +577,7 @@ impl RelationResolver {
             let call_context = match raw_data.relation_type {
                 cce_types::relation::RelationType::InstanceMethodCall => {
                     if let Some(ref owner) = owner_type {
-                        CallContext::InstanceMethod {
-                            receiver_type: owner.clone(),
-                        }
+                        instance_call_context(owner)
                     } else {
                         // Fallback 1: try to extract receiver type from dst_name
                         // For patterns like "obj.method" or "Type::method"
@@ -605,7 +604,7 @@ impl RelationResolver {
                                     )
                                 });
                             let receiver_type = inferred.unwrap_or(receiver);
-                            CallContext::InstanceMethod { receiver_type }
+                            instance_call_context(&receiver_type)
                         } else {
                             CallContext::Direct
                         }
@@ -697,6 +696,12 @@ impl RelationResolver {
             owner_type,
             call_context,
             overload_signature,
+            call_frequency: 1,
+            cfg_condition: entity_map
+                .get(&raw_data.src)
+                .and_then(|caller| caller.get_metadata(CFG_PREDICATE))
+                .filter(|predicate| !predicate.is_empty())
+                .cloned(),
         })
     }
 
@@ -984,6 +989,7 @@ impl RelationResolver {
                 ));
             }
         }
+        assign_call_frequency(&mut out);
         out
     }
 
@@ -1115,6 +1121,8 @@ impl RelationResolver {
                 owner_type: None,
                 call_context: CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             });
         }
         out
@@ -1363,6 +1371,41 @@ impl RelationResolver {
     }
 }
 
+/// Stamp every relation with how many call sites its caller uses to reach the
+/// same target.
+///
+/// The index keeps one edge per call site (`RelationEdgeIdentity::callsite`),
+/// so a caller that invokes the same callee from five places holds five edges
+/// and the repetition is otherwise invisible to any consumer that collapses
+/// them. Grouping by the callsite-free identity turns that multiplicity into an
+/// explicit weight, so a single representative edge still reports the full
+/// frequency. Only call-class edges carry a frequency: a non-call edge has no
+/// call sites to count, so it stays at one occurrence.
+fn assign_call_frequency(relations: &mut [ResolvedRelation]) {
+    let mut frequencies: HashMap<RelationEdgeIdentity, u64> = HashMap::new();
+    for relation in relations.iter() {
+        if relation.relation_type.is_call() {
+            *frequencies
+                .entry(callsite_free_identity(relation))
+                .or_default() += 1;
+        }
+    }
+    for relation in relations.iter_mut() {
+        if relation.relation_type.is_call() {
+            relation.call_frequency = frequencies[&callsite_free_identity(relation)];
+        }
+    }
+}
+
+/// The dedup identity of an edge with the call-site discriminator dropped, so
+/// every call site of one logical relation shares a key.
+fn callsite_free_identity(relation: &ResolvedRelation) -> RelationEdgeIdentity {
+    RelationEdgeIdentity {
+        callsite: None,
+        ..relation_identity(relation)
+    }
+}
+
 fn is_identifier(s: &str) -> bool {
     let mut chars = s.chars();
     match chars.next() {
@@ -1370,6 +1413,92 @@ fn is_identifier(s: &str) -> bool {
         _ => return false,
     }
     chars.all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Build the call context for a receiver-typed call, separating dynamic
+/// dispatch from direct instance dispatch.
+///
+/// A call is dispatched dynamically when the receiver's *static* type does
+/// not pin one implementation: a trait object (`dyn Trait`, including the
+/// common `&dyn`/`Box<dyn>`/`Arc<dyn>` wrappers), an opaque `impl Trait`,
+/// `Self` inside a trait or its implementors, or a bare type parameter
+/// (`T`, `K`, `V`, ...). Such receivers are erased to an interface, so the
+/// concrete callee is only known at runtime and the resolved edge must be
+/// marked as virtual.
+fn instance_call_context(receiver_type: &str) -> CallContext {
+    if is_dynamic_receiver(receiver_type) {
+        CallContext::VirtualDispatch {
+            receiver_type: receiver_type.to_string(),
+        }
+    } else {
+        CallContext::InstanceMethod {
+            receiver_type: receiver_type.to_string(),
+        }
+    }
+}
+
+/// Leading reference and raw-pointer markers, longest first so `&mut ` is
+/// never cut to a bare `&`.
+const POINTER_PREFIXES: &[&str] = &["&mut ", "&", "*mut ", "*const ", "*", "const "];
+
+/// Pointer and smart-pointer wrappers whose single type argument is the
+/// erased type actually being received.
+const DYNAMIC_RECEIVER_WRAPPERS: &[&str] = &[
+    "Box", "Rc", "Arc", "Cow", "Ref", "RefCell", "Cell", "Mutex", "RwLock", "Pin",
+];
+
+/// Whether a receiver type is statically erased, so method lookup goes
+/// through an interface rather than a single concrete type.
+///
+/// Recursive through pointer wrappers (`Arc<dyn Tr>` -> `dyn Tr`), and stops
+/// at the first wrapper whose argument is a concrete type: `Arc<Concrete>`
+/// pins its implementation and is not dynamic.
+fn is_dynamic_receiver(receiver_type: &str) -> bool {
+    let mut current = receiver_type.trim();
+    loop {
+        if current == "Self" || current == "this" {
+            return true;
+        }
+        // A trait object or an opaque `impl Trait` bound names an interface,
+        // never a single concrete implementation.
+        if strip_prefix_any(current, &["dyn ", "impl "]).is_some() {
+            return true;
+        }
+        if let Some(rest) = strip_prefix_any(current, POINTER_PREFIXES) {
+            current = rest;
+            continue;
+        }
+        if let Some(argument) = strip_wrapper_argument(current) {
+            current = argument;
+            continue;
+        }
+        return is_type_parameter(current);
+    }
+}
+
+/// Strip the first matching prefix, if any.
+fn strip_prefix_any<'a>(text: &'a str, prefixes: &[&str]) -> Option<&'a str> {
+    prefixes.iter().find_map(|prefix| text.strip_prefix(prefix))
+}
+
+/// Yield the single type argument of a known wrapper generic, if the generic
+/// has exactly one argument.
+fn strip_wrapper_argument(type_name: &str) -> Option<&str> {
+    let (base, rest) = type_name.split_once('<')?;
+    let argument = rest.strip_suffix('>')?;
+    if !argument.contains(',') && DYNAMIC_RECEIVER_WRAPPERS.contains(&base.trim()) {
+        Some(argument)
+    } else {
+        None
+    }
+}
+
+/// Whether a type name is a bare generic type parameter such as `T` or `K`.
+fn is_type_parameter(type_name: &str) -> bool {
+    is_identifier(type_name)
+        && type_name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
 fn infer_literal_type_shape(text: &str, language: Language) -> Option<TypeShape> {

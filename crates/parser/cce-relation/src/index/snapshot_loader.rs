@@ -340,6 +340,8 @@ impl RelationSnapshotLoader {
                         owner_type: canonical.owner_type.clone(),
                         call_context: canonical.call_context.clone(),
                         overload_signature: canonical.overload_signature.clone(),
+                        call_frequency: canonical.call_frequency,
+                        cfg_condition: canonical.cfg_condition.clone(),
                     },
                 );
                 continue;
@@ -358,6 +360,8 @@ impl RelationSnapshotLoader {
                 owner_type: canonical.owner_type.clone(),
                 call_context: canonical.call_context.clone(),
                 overload_signature: canonical.overload_signature.clone(),
+                call_frequency: canonical.call_frequency,
+                cfg_condition: canonical.cfg_condition.clone(),
             });
         }
 
@@ -716,6 +720,8 @@ mod tests {
                 owner_type: None,
                 call_context: cce_types::relation::CallContext::Direct,
                 overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
             }],
             import_diffs: Vec::new(),
             export_diffs: Vec::new(),
@@ -824,9 +830,10 @@ mod tests {
             overload_signature: None,
             callee_symbol: None,
             owner_type: None,
-            call_context: Default::default(),
+            call_context: cce_types::relation::CallContext::Direct,
+            call_frequency: 1,
+            cfg_condition: None,
         });
-        snapshot.normalize();
         snapshot
     }
 }
