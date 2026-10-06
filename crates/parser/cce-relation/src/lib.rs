@@ -11,6 +11,7 @@ pub mod config_parser;
 pub mod dependency_graph;
 pub mod error;
 pub mod external;
+pub mod graph_metrics;
 pub mod helpers;
 pub mod index;
 pub mod policy;

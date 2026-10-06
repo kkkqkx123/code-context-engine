@@ -602,16 +602,33 @@ impl RelationSearcher {
         options: &PathQueryOptions,
         filter: &GraphFilter,
     ) -> Result<Option<Vec<CallChainNode>>> {
-        self.query
-            .find_call_chain_in_domains(
-                start_id,
-                end_id,
-                options.max_depth,
-                options.max_nodes,
-                filter.relation_domains.clone(),
-                filter.include_external,
-            )
-            .map_err(Into::into)
+        if filter.relation_types.is_empty() {
+            self.query
+                .find_call_chain_in_domains(
+                    start_id,
+                    end_id,
+                    options.max_depth,
+                    options.max_nodes,
+                    filter.relation_domains.clone(),
+                    filter.include_external,
+                )
+                .map_err(Into::into)
+        } else {
+            self.query
+                .find_call_chain_with_types(
+                    start_id,
+                    end_id,
+                    options.max_depth,
+                    options.max_nodes,
+                    filter
+                        .relation_types
+                        .iter()
+                        .filter_map(|t| serde_json::from_str(&format!("\"{t}\"")).ok())
+                        .collect(),
+                    filter.include_external,
+                )
+                .map_err(Into::into)
+        }
     }
 
     // ========== Inheritance Queries ==========
@@ -751,12 +768,16 @@ impl RelationSearcher {
     }
 
     /// Get change impact analysis for an entity.
+    ///
+    /// `scope` selects the analysis scope: `"entity"` (default) uses entity-level
+    /// edges; `"file"` uses the file-level dependency graph.
     pub fn get_entity_impact(
         &self,
         entity_id: EntityId,
         max_depth: usize,
-    ) -> cce_relation::ImpactAnalysis<EntityId> {
-        self.query.get_entity_impact(entity_id, max_depth)
+        scope: &str,
+    ) -> cce_relation::ImpactAnalysis<String> {
+        self.query.get_entity_impact(entity_id, max_depth, scope)
     }
 
     /// Dependency cycles among entities.
@@ -808,6 +829,9 @@ pub enum StructuralKind {
     TemplateReferences,
     /// Components issuing a template reference to this entity.
     TemplateRefOwners,
+    /// Types with this entity as a trait bound (alias for TraitBound,
+    /// exposed under a separate label for API completeness).
+    TraitBounds,
 }
 
 impl StructuralKind {
@@ -822,6 +846,7 @@ impl StructuralKind {
             Self::ParameterBindings => "parameter_bindings",
             Self::TemplateReferences => "template_references",
             Self::TemplateRefOwners => "template_ref_owners",
+            Self::TraitBounds => "trait_bounds",
         }
     }
 
@@ -836,6 +861,7 @@ impl StructuralKind {
             "parameter_bindings" => Some(Self::ParameterBindings),
             "template_references" => Some(Self::TemplateReferences),
             "template_ref_owners" => Some(Self::TemplateRefOwners),
+            "trait_bounds" => Some(Self::TraitBounds),
             _ => None,
         }
     }
@@ -844,6 +870,7 @@ impl StructuralKind {
     pub fn labels() -> &'static [&'static str] {
         &[
             "trait_bound",
+            "trait_bounds",
             "child_elements",
             "parent_element",
             "event_handlers",
@@ -948,6 +975,10 @@ impl RelationSearcher {
             (StructuralKind::TemplateRefOwners, StructuralDirection::Incoming) => {
                 outgoing(index.get_template_references(entity_id))
             }
+            (StructuralKind::TraitBounds, _) => incoming(
+                index.get_types_with_trait_bound(entity_id),
+                RelationType::TraitBound,
+            ),
         }
     }
 }

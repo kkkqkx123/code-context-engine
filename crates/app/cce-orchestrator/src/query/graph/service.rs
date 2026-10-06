@@ -323,6 +323,14 @@ impl GraphService {
         self.subgraph_with_options(&ids, filter, pagination)
     }
 
+    /// Compute graph centrality and clustering metrics for all entities.
+    pub fn compute_metrics(
+        &self,
+    ) -> std::collections::HashMap<cce_types::EntityId, cce_relation::graph_metrics::EntityMetrics>
+    {
+        cce_relation::graph_metrics::compute_metrics(self.searcher.query().index())
+    }
+
     /// Whether a stored relation survives the graph filter.
     fn relation_passes_filter(
         relation: &cce_types::ResolvedRelation,
@@ -523,6 +531,7 @@ impl<'a> SubGraphBuilder<'a> {
                 confidence: confidence_of(relation),
                 call_context: Some(format!("{:?}", relation.call_context).to_lowercase()),
                 is_external: false,
+                weight: edge_weight(&relation.relation_type),
             });
         }
     }
@@ -531,7 +540,6 @@ impl<'a> SubGraphBuilder<'a> {
         let (caller, relation) = edge;
         self.insert_relation(caller, &relation);
     }
-
     fn insert_path_edge(&mut self, source: EntityId, target: &cce_relation::CallChainNode) {
         let confidence = if target.relation_type.is_call()
             && matches!(
@@ -550,6 +558,7 @@ impl<'a> SubGraphBuilder<'a> {
             confidence,
             call_context: Some(format!("{:?}", target.call_context).to_lowercase()),
             is_external: false,
+            weight: edge_weight(&target.relation_type),
         });
     }
 
@@ -564,6 +573,7 @@ impl<'a> SubGraphBuilder<'a> {
             confidence: Confidence::Inferred,
             call_context: None,
             is_external: true,
+            weight: 1.0,
         });
     }
 
@@ -603,6 +613,23 @@ fn location_of(span: &Span) -> String {
         String::new()
     } else {
         format!("L{}", span.start_position.row + 1)
+    }
+}
+
+/// Compute edge weight based on relation type.
+///
+/// Direct calls have the strongest weight (1.0), method calls slightly less
+/// (0.9), field access moderate (0.5), and type references weakest (0.3).
+pub fn edge_weight(relation_type: &cce_types::RelationType) -> f32 {
+    use cce_types::RelationType::*;
+    match relation_type {
+        DirectCall => 1.0,
+        InstanceMethodCall | StaticMethodCall | ChainedMethodCall => 0.9,
+        ConstructorCall | PointerCall | CallbackCall | GenericCall | MacroCall => 0.8,
+        GoroutineCall | DeferredCall | AsyncCall | HigherOrderCall => 0.7,
+        FieldAccess => 0.5,
+        TypeReference => 0.3,
+        _ => 0.6,
     }
 }
 
@@ -778,6 +805,7 @@ mod tests {
         // leaves no traversable edge and no path.
         let structural_only = GraphFilter {
             relation_domains: vec!["structural".to_string()],
+            relation_types: Vec::new(),
             include_external: true,
         };
         assert!(
@@ -867,6 +895,7 @@ mod tests {
         );
         let calls_only = GraphFilter {
             relation_domains: vec!["call".to_string()],
+            relation_types: Vec::new(),
             include_external: true,
         };
         assert_eq!(
@@ -928,6 +957,7 @@ mod tests {
             confidence: Confidence::Extracted,
             call_context: Some("direct".to_string()),
             is_external: false,
+            weight: 1.0,
         }
     }
 }

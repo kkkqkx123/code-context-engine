@@ -3,6 +3,7 @@
 mod config;
 mod entity;
 mod graph;
+mod graph_export;
 mod health;
 mod index;
 mod metrics;

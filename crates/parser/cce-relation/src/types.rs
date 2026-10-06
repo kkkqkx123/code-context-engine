@@ -61,7 +61,9 @@ pub enum ExportType {
 }
 
 /// Call chain node representing a function in the call chain
-#[derive(Debug, Clone, SerdeSerialize, SerdeDeserialize, Archive, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, SerdeSerialize, SerdeDeserialize, Archive, Serialize, Deserialize,
+)]
 pub struct CallChainNode {
     /// Function ID
     pub function_id: EntityId,

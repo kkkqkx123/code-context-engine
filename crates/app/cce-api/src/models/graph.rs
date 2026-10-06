@@ -129,6 +129,15 @@ impl GraphEdge {
     }
 }
 
+/// A materialized subgraph: nodes plus induced edges.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct SubGraph {
+    /// Nodes in encounter order, deduplicated by id.
+    pub nodes: Vec<GraphNode>,
+    /// Edges whose endpoints are both present.
+    pub edges: Vec<GraphEdge>,
+}
+
 /// Ego neighborhood query parameters.
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -219,6 +228,14 @@ pub struct EntityImpactQuery {
     pub entity_id: String,
     #[serde(default = "default_impact_depth")]
     pub max_depth: usize,
+    /// `entity` (default) uses entity-level edges; `file` uses file-level
+    /// dependency graph after locating the entity's file.
+    #[serde(default = "default_impact_scope")]
+    pub scope: String,
+}
+
+fn default_impact_scope() -> String {
+    "entity".to_string()
 }
 
 /// Dependency cycle query parameters.
@@ -262,6 +279,9 @@ pub struct GraphSubgraphResponse {
     pub total_nodes: usize,
     #[serde(default)]
     pub total_edges: usize,
+    /// Whether the result was truncated due to safety limits.
+    #[serde(default)]
+    pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relation_info: Option<serde_json::Value>,
 }

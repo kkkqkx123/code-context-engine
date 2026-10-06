@@ -110,6 +110,13 @@ pub struct GraphEdge {
     /// True when the edge points outside the indexed project.
     #[serde(default)]
     pub is_external: bool,
+    /// Edge weight for weighted traversal (1.0 for unweighted).
+    #[serde(default = "default_edge_weight")]
+    pub weight: f32,
+}
+
+fn default_edge_weight() -> f32 {
+    1.0
 }
 
 /// A materialized subgraph: nodes plus induced edges.
@@ -126,6 +133,9 @@ pub struct SubGraph {
 pub struct GraphFilter {
     /// Keep only relations in these coarse domains. Empty means no filtering.
     pub relation_domains: Vec<String>,
+    /// Keep only relations whose exact type is in this set. Empty means no
+    /// fine-grained filtering. Applied after `relation_domains`.
+    pub relation_types: Vec<String>,
     /// Whether to keep edges pointing outside the indexed project.
     pub include_external: bool,
 }
@@ -135,13 +145,14 @@ impl GraphFilter {
     pub fn allow_all() -> Self {
         Self {
             relation_domains: Vec::new(),
+            relation_types: Vec::new(),
             include_external: true,
         }
     }
 
     /// Whether the filter drops nothing.
     pub fn is_empty(&self) -> bool {
-        self.relation_domains.is_empty() && self.include_external
+        self.relation_domains.is_empty() && self.relation_types.is_empty() && self.include_external
     }
 
     /// Whether a materialized edge passes the filter.
@@ -149,12 +160,20 @@ impl GraphFilter {
         if !self.include_external && edge.is_external {
             return false;
         }
-        if self.relation_domains.is_empty() {
-            return true;
+        if !self.relation_domains.is_empty()
+            && !self
+                .relation_domains
+                .iter()
+                .any(|domain| domain == &edge.domain)
+        {
+            return false;
         }
-        self.relation_domains
-            .iter()
-            .any(|domain| domain == &edge.domain)
+        if !self.relation_types.is_empty()
+            && !self.relation_types.iter().any(|t| t == &edge.relation)
+        {
+            return false;
+        }
+        true
     }
 }
 
