@@ -10,7 +10,7 @@ name = "cce-cli"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 reqwest = { workspace = true, features = ["json", "rustls-tls", "multipart"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -24,6 +24,9 @@ chrono = { workspace = true, features = ["serde"] }
 cce-api = { path = "../cce-api" }
 cce-config = { path = "../../core/cce-config" }
 cce-mcp = { path = "../cce-mcp" }
+cce-scanner = { path = "../../infra/cce-scanner" }
+cce-types = { path = "../../core/cce-types" }
+base64 = "0.22"
 tokio-util = "0.7"
 
 clap = { version = "4.6", features = ["derive", "env", "color", "suggestions"] }

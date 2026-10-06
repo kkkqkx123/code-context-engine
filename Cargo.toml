@@ -24,6 +24,7 @@ members = [
     "crates/infra/cce-scanner",
     # app
     "crates/app/cce-api",
+    "crates/app/cce-admission",
     "crates/app/cce-plugin-runtime",
     "crates/app/cce-orchestrator",
     "crates/app/cce-server",

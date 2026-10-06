@@ -1,0 +1,16 @@
+[package]
+name = "cce-admission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Optional admission layer for remote hosting: token auth, tenant scope, and request guardrails"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }

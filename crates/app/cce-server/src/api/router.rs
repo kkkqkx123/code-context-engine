@@ -18,11 +18,11 @@ async fn serve_openapi() -> ([(&'static str, &'static str); 1], String) {
     ([("Content-Type", "application/json")], openapi_json())
 }
 
-/// Create API router with all routes
-pub fn create_router(state: AppState) -> Router {
-    // Create HTTP metrics wrapper for middleware
-    let http_metrics = HttpMetrics::new(state.engine.metrics_registry());
-
+/// Shared route table backing the local router and the admission router.
+///
+/// Neither state nor layers are applied here so both shapes serve the same
+/// endpoints and differ only in middleware.
+pub(crate) fn api_routes() -> Router<AppState> {
     let mut router = Router::new()
         // Index operations
         .route("/api/index", post(handlers::index::handle_index))
@@ -315,11 +315,7 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/retry-queue",
             delete(handlers::health::handle_retry_queue_clear),
-        )
-        // Inject state
-        .with_state(state)
-        // Apply metrics middleware to all routes
-        .layer(middleware::from_fn(metrics_middleware(http_metrics)));
+        );
 
     // Debug-only self-hosted OpenAPI document; excluded from the contract tests.
     #[cfg(debug_assertions)]
@@ -328,4 +324,18 @@ pub fn create_router(state: AppState) -> Router {
     }
 
     router
+}
+
+/// Create API router with all routes
+pub fn create_router(state: AppState) -> Router {
+    // Create HTTP metrics wrapper for middleware. The metrics layer stays
+    // outermost so it also observes admission rejections on the remote
+    // router assembled beside this one.
+    let http_metrics = HttpMetrics::new(state.engine.metrics_registry());
+
+    api_routes()
+        // Inject state
+        .with_state(state)
+        // Apply metrics middleware to all routes
+        .layer(middleware::from_fn(metrics_middleware(http_metrics)))
 }

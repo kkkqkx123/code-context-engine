@@ -122,6 +122,9 @@ pub async fn serve(
         .expect("engine Arc must have exactly one reference after coordinator drops");
 
     let app_state = state::AppState::from_engine(&engine, qdrant_handle).await;
+    #[cfg(feature = "admission")]
+    let app = admission_app(app_state, host)?;
+    #[cfg(not(feature = "admission"))]
     let app = router::create_router(app_state);
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", host, port)).await?;
@@ -138,3 +141,42 @@ pub async fn serve(
 
 // Re-export for convenience
 pub use state::AppState;
+
+#[cfg(feature = "admission")]
+/// Assemble the router for admission-enabled builds.
+///
+/// A loopback bind without configured tokens keeps the local router so
+/// single-host use is unaffected; any other bind requires configured tokens
+/// and serves the admission router with the gateway ingest entries.
+fn admission_app(app_state: state::AppState, host: &str) -> anyhow::Result<axum::Router> {
+    use cce_metrics::HttpMetrics;
+
+    let config = cce_admission::AdmissionConfig::from_env()
+        .map_err(|e| anyhow::anyhow!("Failed to load admission config: {e}"))?;
+    if cce_admission::requires_admission(host) && !config.is_configured() {
+        return Err(anyhow::anyhow!(
+            "Refusing to serve non-loopback host '{host}' without admission tokens; set CCE_ADMISSION_TOKENS"
+        ));
+    }
+    if !config.is_configured() {
+        return Ok(router::create_router(app_state));
+    }
+    tracing::info!("Admission layer enabled for remote hosting");
+    let admission_metrics = Arc::new(cce_admission::AdmissionMetrics::default());
+    let gate = Arc::new(cce_admission::AdmissionGate::new(
+        &config,
+        Arc::clone(&admission_metrics),
+    ));
+    let http_metrics = HttpMetrics::new(app_state.engine.metrics_registry());
+    let admission_layer = axum::middleware::from_fn_with_state(
+        Arc::clone(&gate),
+        cce_admission::admission_middleware,
+    );
+    Ok(router::api_routes()
+        .merge(handlers::ingest::ingest_routes(admission_metrics))
+        .with_state(app_state)
+        .layer(admission_layer)
+        .layer(axum::middleware::from_fn(middleware::metrics_middleware(
+            http_metrics,
+        ))))
+}

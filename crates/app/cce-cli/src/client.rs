@@ -8,6 +8,8 @@ use serde::{de::DeserializeOwned, Serialize};
 pub struct ApiClient {
     client: Client,
     base_url: String,
+    /// Bearer token for admission-enabled remotes, if any.
+    token: Option<String>,
 }
 
 impl ApiClient {
@@ -18,18 +20,34 @@ impl ApiClient {
             .build()
             .context("Failed to create HTTP client")?;
 
+        // Remote hosts sit behind the admission layer; the token travels in
+        // the authorization header only when it is configured, so local use
+        // sends exactly the same requests as before.
+        let token = std::env::var("CCE_API_TOKEN")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
+            token,
         })
+    }
+
+    /// Attach the authorization header when a token is configured.
+    fn authed(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.token {
+            Some(token) => builder.bearer_auth(token),
+            None => builder,
+        }
     }
 
     /// Make a GET request
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let response = self
-            .client
-            .get(&url)
+            .authed(self.client.get(&url))
             .send()
             .await
             .context(format!("Failed to GET {}", url))?;
@@ -50,9 +68,7 @@ impl ApiClient {
     pub async fn post<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
         let url = format!("{}{}", self.base_url, path);
         let response = self
-            .client
-            .post(&url)
-            .json(body)
+            .authed(self.client.post(&url).json(body))
             .send()
             .await
             .context(format!("Failed to POST {}", url))?;
@@ -73,8 +89,7 @@ impl ApiClient {
     pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let response = self
-            .client
-            .delete(&url)
+            .authed(self.client.delete(&url))
             .send()
             .await
             .context(format!("Failed to DELETE {}", url))?;
@@ -95,9 +110,7 @@ impl ApiClient {
     pub async fn put<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
         let url = format!("{}{}", self.base_url, path);
         let response = self
-            .client
-            .put(&url)
-            .json(body)
+            .authed(self.client.put(&url).json(body))
             .send()
             .await
             .context(format!("Failed to PUT {}", url))?;
@@ -122,9 +135,7 @@ impl ApiClient {
     ) -> Result<R> {
         let url = format!("{}{}", self.base_url, path);
         let response = self
-            .client
-            .delete(&url)
-            .json(body)
+            .authed(self.client.delete(&url).json(body))
             .send()
             .await
             .context(format!("Failed to DELETE {}", url))?;

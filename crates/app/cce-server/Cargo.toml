@@ -19,6 +19,8 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "signal"] }
 axum = { workspace = true, features = ["macros"] }
+cce-admission = { path = "../cce-admission", optional = true }
+base64 = { version = "0.22", optional = true }
 cce-types = { path = "../../core/cce-types" }
 cce-config = { path = "../../core/cce-config" }
 cce-utils = { path = "../../core/cce-utils" }
@@ -47,3 +49,9 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[features]
+default = []
+# Remote hosting shape: admission middleware, gateway ingest entries, and
+# their transport helpers. The default build excludes all of them.
+admission = ["dep:cce-admission", "dep:base64"]

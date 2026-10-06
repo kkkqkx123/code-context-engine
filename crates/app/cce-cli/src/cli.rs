@@ -105,6 +105,10 @@ pub enum Commands {
     /// Server status and health check
     Status,
 
+    /// Local file gateway for remote hosting (push only)
+    #[command(subcommand)]
+    Gateway(GatewayCommands),
+
     /// Run the MCP (Model Context Protocol) server locally
     #[command(subcommand)]
     Mcp(McpCommands),
@@ -999,6 +1003,64 @@ pub enum MetricsCommands {
     },
 }
 
+/// Gateway commands for remote hosting
+#[derive(Subcommand)]
+pub enum GatewayCommands {
+    /// Push a full sync pass: manifest, missing contents, then index commit
+    Sync {
+        /// Project ID on the remote host
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Local directory to supply
+        #[arg(short, long)]
+        path: String,
+
+        /// File extensions to include (comma-separated, empty means all text)
+        #[arg(short, long, default_value = "")]
+        extensions: String,
+
+        /// Directories to exclude (comma-separated)
+        #[arg(short, long, default_value = "node_modules,target,.git,vendor")]
+        exclude: String,
+
+        /// Respect .gitignore
+        #[arg(long, default_value = "true")]
+        gitignore: bool,
+
+        /// Stage files without running the index commit
+        #[arg(long, default_value = "false")]
+        no_commit: bool,
+    },
+
+    /// Sync once, then poll and push incremental changes
+    Watch {
+        /// Project ID on the remote host
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Local directory to supply
+        #[arg(short, long)]
+        path: String,
+
+        /// File extensions to include (comma-separated, empty means all text)
+        #[arg(short, long, default_value = "")]
+        extensions: String,
+
+        /// Directories to exclude (comma-separated)
+        #[arg(short, long, default_value = "node_modules,target,.git,vendor")]
+        exclude: String,
+
+        /// Respect .gitignore
+        #[arg(long, default_value = "true")]
+        gitignore: bool,
+
+        /// Poll interval in seconds
+        #[arg(long, default_value = "5")]
+        interval_secs: u64,
+    },
+}
+
 /// Health monitoring and retry queue commands
 #[derive(Subcommand)]
 pub enum HealthCommands {
@@ -1059,6 +1121,9 @@ impl Cli {
             Commands::Health(cmd) => self.execute_health(cmd).await,
             Commands::Status => {
                 commands::status::execute(&self.server, self.verbose, self.format).await
+            }
+            Commands::Gateway(cmd) => {
+                commands::gateway::execute(cmd, &self.server, self.verbose).await
             }
             Commands::Mcp(cmd) => commands::mcp::execute(cmd).await,
         }

@@ -1,0 +1,28 @@
+# Code Context Engine - Remote Hosting Configuration Template
+#
+# Usage:
+#   1. Build with the admission feature: cargo build --features cce-server/admission
+#   2. Copy this file and set an explicit site address below.
+#   3. Export long-lived tokens before starting (never commit them):
+#        export CCE_ADMISSION_TOKENS='gateway-token-value-0001@1,2;readonly-token-value-02@1'
+#      Each entry is `token@project1,project2`; a bare token authorizes no
+#      project scope. Rotate by adding the replacement token, redeploying the
+#      gateway and clients, then removing the old entry. Revoke by removing
+#      the entry and restarting the server.
+#   4. Start the server: CCE_ENV=prod CCE_CONFIG=config.remote.toml <server binary>
+#
+# The server refuses a non-loopback bind without configured tokens, so an
+# incomplete setup fails closed. Local single-host use keeps config.prod.toml
+# and never sets these variables.
+
+[server]
+# Explicit site address of the remote host (never a wildcard by accident).
+host = "10.0.0.10"
+port = 9000
+
+# Gateway behavior (client side, documented for operators):
+#   cce-cli gateway sync --project-id 1 --path /home/user/work/repo
+#   cce-cli gateway watch --project-id 1 --path /home/user/work/repo
+# The gateway reads CCE_API_TOKEN and pushes only; the remote host never
+# connects back. The remote project root is the staged mirror: create the
+# project with the server-side mirror path, then let the gateway fill it.
