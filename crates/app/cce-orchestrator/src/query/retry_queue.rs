@@ -58,6 +58,10 @@ pub struct RetryQueue {
 #[derive(Debug, Default)]
 struct RetryQueueInner {
     queue: Vec<QueuedQuery>,
+    /// Queries that exceeded `max_retries` and were dropped from the retry
+    /// flow. Kept for observability (status snapshot) and manual inspection;
+    /// they are never re-executed automatically.
+    dead: Vec<QueuedQuery>,
 }
 
 impl RetryQueue {
@@ -126,13 +130,18 @@ impl RetryQueue {
         let mut ready = Vec::new();
         let mut remaining = Vec::new();
 
-        for mut entry in inner.queue.drain(..) {
+        for mut entry in inner.queue.drain(..).collect::<Vec<_>>() {
             if entry.retry_count >= self.max_retries {
                 warn!(
                     retry_count = entry.retry_count,
                     max_retries = self.max_retries,
-                    "Query exceeded max retries, discarding"
+                    query = %entry.options.query,
+                    "Query exceeded max retries, moved to dead letter list"
                 );
+                inner.dead.push(entry);
+                if inner.dead.len() > self.max_queue_len {
+                    inner.dead.remove(0);
+                }
                 continue;
             }
 
@@ -169,6 +178,30 @@ impl RetryQueue {
     pub async fn clear(&self) {
         self.inner.lock().await.queue.clear();
         info!("Retry queue cleared");
+    }
+
+    /// Number of queries that exceeded max retries (observability only)
+    pub async fn dead_len(&self) -> usize {
+        self.inner.lock().await.dead.len()
+    }
+
+    /// Snapshot of dead-lettered queries: (query text, retry count).
+    /// Oldest first, bounded by the queue capacity.
+    pub async fn dead_snapshot(&self) -> Vec<(String, u32)> {
+        let inner = self.inner.lock().await;
+        inner
+            .dead
+            .iter()
+            .map(|q| (q.options.query.clone(), q.retry_count))
+            .collect()
+    }
+
+    /// Discard the dead-letter list
+    pub async fn clear_dead(&self) {
+        let mut inner = self.inner.lock().await;
+        let cleared = inner.dead.len();
+        inner.dead.clear();
+        info!(cleared, "Retry queue dead letter list cleared");
     }
 }
 

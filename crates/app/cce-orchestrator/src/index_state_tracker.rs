@@ -555,6 +555,9 @@ impl UpdateStateTracker {
     }
 
     /// Get all files in dead letter queue
+    ///
+    /// Files whose dead-letter modules are all acknowledged are excluded:
+    /// they were consciously written off by an operator.
     pub async fn get_dead_letters(&self) -> Vec<FileUpdateState> {
         let states = self.states.read().await;
 
@@ -563,10 +566,67 @@ impl UpdateStateTracker {
             .filter(|s| {
                 s.module_states
                     .values()
-                    .any(|r| matches!(r.state, ModuleUpdateState::DeadLetter))
+                    .any(|r| matches!(r.state, ModuleUpdateState::DeadLetter) && !r.acknowledged)
             })
             .cloned()
             .collect()
+    }
+
+    /// Acknowledge the dead letter(s) of a file so they stop participating in
+    /// retry passes. `module = None` acknowledges every dead-lettered module.
+    /// Returns the number of module records that were updated.
+    pub async fn acknowledge_dead_letter(
+        &self,
+        file_path: &Path,
+        module: Option<ModuleType>,
+    ) -> Result<usize, StateTrackerError> {
+        let path_str = file_path.to_string_lossy().to_string();
+        let mut states = self.states.write().await;
+
+        let Some(state) = states.get_mut(&path_str) else {
+            return Err(StateTrackerError::StateNotFound(path_str));
+        };
+
+        let mut updated = 0;
+        for (m, record) in state.module_states.iter_mut() {
+            if matches!(record.state, ModuleUpdateState::DeadLetter)
+                && !record.acknowledged
+                && module.is_none_or(|target| *m == target)
+            {
+                record.acknowledged = true;
+                updated += 1;
+            }
+        }
+        state.updated_at = Utc::now();
+        Ok(updated)
+    }
+
+    /// Reset a dead-letter module back to `Failed` so the regular retry path
+    /// picks it up again (e.g. after an external cause was fixed). Returns an
+    /// error when the file or the module is not currently dead-lettered.
+    pub async fn reset_dead_letter(
+        &self,
+        file_path: &Path,
+        module: ModuleType,
+    ) -> Result<(), StateTrackerError> {
+        let path_str = file_path.to_string_lossy().to_string();
+        let mut states = self.states.write().await;
+
+        let Some(state) = states.get_mut(&path_str) else {
+            return Err(StateTrackerError::StateNotFound(path_str));
+        };
+
+        let Some(record) = state.module_states.get_mut(&module) else {
+            return Err(StateTrackerError::StateNotFound(path_str));
+        };
+        if !matches!(record.state, ModuleUpdateState::DeadLetter) {
+            return Err(StateTrackerError::StateNotFound(path_str));
+        }
+
+        record.state = ModuleUpdateState::Failed;
+        record.acknowledged = false;
+        state.updated_at = Utc::now();
+        Ok(())
     }
 
     /// Get files whose Embedding module is eligible for a lossy truncate-retry
@@ -580,7 +640,7 @@ impl UpdateStateTracker {
                 state
                     .module_states
                     .get(&ModuleType::Embedding)
-                    .is_some_and(|r| r.is_truncate_candidate())
+                    .is_some_and(|r| r.is_truncate_candidate() && !r.acknowledged)
             })
             .cloned()
             .collect()

@@ -11,7 +11,8 @@ use crate::api::response::ApiResult;
 use crate::api::state::AppState;
 use cce_api::models::{
     Bm25HealthResponse, EmbeddingHealthResponse, ErrorResponse, HealthStatus, QdrantDiagnostic,
-    QdrantHealthResponse, RetryQueueClearResponse, RetryQueueProcessResponse,
+    QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
+    RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse,
     RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
 
@@ -167,9 +168,11 @@ pub async fn handle_retry_queue_status(
     State(state): State<AppState>,
 ) -> ApiResult<RetryQueueStatusResponse> {
     let pending_count = state.engine.retry_queue_total_len().await;
+    let dead_count = state.engine.retry_queue_total_dead_len().await;
     ApiResult::Success(RetryQueueStatusResponse {
         pending_count,
         is_empty: pending_count == 0,
+        dead_count,
     })
 }
 
@@ -225,6 +228,46 @@ pub async fn handle_retry_queue_clear(
     ApiResult::Success(RetryQueueClearResponse {
         cleared: pending,
         message: format!("Retry queue cleared, {} queries discarded", pending),
+    })
+}
+
+/// GET /api/retry-queue/dead — Snapshot of dead-lettered queries
+#[utoipa::path(
+    get, path = "/api/retry-queue/dead", tag = "Health",
+    responses(
+        (status = 200, body = RetryQueueDeadResponse, description = "Success"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_retry_queue_dead_list(
+    State(state): State<AppState>,
+) -> ApiResult<RetryQueueDeadResponse> {
+    let entries = state.engine.retry_queue_dead_snapshot().await;
+    let dead_count = entries.len();
+    ApiResult::Success(RetryQueueDeadResponse {
+        dead_count,
+        entries: entries
+            .into_iter()
+            .map(|(query, retry_count)| RetryQueueDeadEntry { query, retry_count })
+            .collect(),
+    })
+}
+
+/// DELETE /api/retry-queue/dead — Discard the dead-letter lists
+#[utoipa::path(
+    delete, path = "/api/retry-queue/dead", tag = "Health",
+    responses(
+        (status = 200, body = RetryQueueDeadClearResponse, description = "Success"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_retry_queue_dead_clear(
+    State(state): State<AppState>,
+) -> ApiResult<RetryQueueDeadClearResponse> {
+    let cleared = state.engine.clear_all_retry_queue_dead().await;
+    ApiResult::Success(RetryQueueDeadClearResponse {
+        cleared,
+        message: format!("Retry queue dead list cleared, {} entries discarded", cleared),
     })
 }
 

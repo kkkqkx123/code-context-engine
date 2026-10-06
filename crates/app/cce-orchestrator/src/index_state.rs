@@ -385,6 +385,11 @@ pub struct ModuleUpdateRecord {
     /// A dead-letter module that was truncated once is never truncated again,
     /// so a persistent deterministic failure cannot be shaved down repeatedly.
     pub truncated: bool,
+    /// Whether an operator acknowledged this dead letter. An acknowledged
+    /// dead letter no longer participates in retry passes and drops out of
+    /// the pending dead-letter list once every module of the file is set.
+    #[serde(default)]
+    pub acknowledged: bool,
 }
 
 impl Default for ModuleUpdateRecord {
@@ -396,6 +401,7 @@ impl Default for ModuleUpdateRecord {
             error_message: None,
             error_code: None,
             truncated: false,
+            acknowledged: false,
         }
     }
 }

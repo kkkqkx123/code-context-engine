@@ -504,6 +504,62 @@ impl super::CodeContextEngine {
         total
     }
 
+    /// Get the total number of dead-lettered queries across all projects
+    pub async fn retry_queue_total_dead_len(&self) -> usize {
+        let queues: Vec<Arc<RetryQueue>> = {
+            let mut result = Vec::new();
+            self.retry_queue
+                .for_each(|_, rq| {
+                    result.push(rq.clone());
+                })
+                .await;
+            result
+        };
+        let mut total = 0;
+        for q in queues {
+            total += q.dead_len().await;
+        }
+        total
+    }
+
+    /// Snapshot of dead-lettered queries across all projects:
+    /// (query text, retry count), oldest first.
+    pub async fn retry_queue_dead_snapshot(&self) -> Vec<(String, u32)> {
+        let queues: Vec<Arc<RetryQueue>> = {
+            let mut result = Vec::new();
+            self.retry_queue
+                .for_each(|_, rq| {
+                    result.push(rq.clone());
+                })
+                .await;
+            result
+        };
+        let mut entries = Vec::new();
+        for q in queues {
+            entries.extend(q.dead_snapshot().await);
+        }
+        entries
+    }
+
+    /// Discard the dead-letter lists of all retry queues
+    pub async fn clear_all_retry_queue_dead(&self) -> usize {
+        let queues: Vec<Arc<RetryQueue>> = {
+            let mut result = Vec::new();
+            self.retry_queue
+                .for_each(|_, rq| {
+                    result.push(rq.clone());
+                })
+                .await;
+            result
+        };
+        let mut cleared = 0;
+        for q in queues {
+            cleared += q.dead_len().await;
+            q.clear_dead().await;
+        }
+        cleared
+    }
+
     /// Clear all retry queues across all projects
     pub async fn clear_all_retry_queues(&self) {
         let queues: Vec<Arc<RetryQueue>> = {

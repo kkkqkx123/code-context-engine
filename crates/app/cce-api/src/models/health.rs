@@ -71,6 +71,30 @@ pub struct Bm25HealthResponse {
 pub struct RetryQueueStatusResponse {
     pub pending_count: usize,
     pub is_empty: bool,
+    /// Queries that exceeded max retries and were moved to the dead list.
+    pub dead_count: usize,
+}
+
+/// Dead entries of the retry queues (observability snapshot)
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RetryQueueDeadResponse {
+    pub dead_count: usize,
+    /// (query text, retry count) pairs, oldest first.
+    pub entries: Vec<RetryQueueDeadEntry>,
+}
+
+/// One dead-lettered query entry
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RetryQueueDeadEntry {
+    pub query: String,
+    pub retry_count: u32,
+}
+
+/// Retry queue dead list clear response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RetryQueueDeadClearResponse {
+    pub cleared: usize,
+    pub message: String,
 }
 
 /// Retry queue process response

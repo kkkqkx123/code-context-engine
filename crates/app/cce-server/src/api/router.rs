@@ -82,6 +82,18 @@ pub fn create_router(state: AppState) -> Router {
             post(handlers::project::handle_dead_letter_retry),
         )
         .route(
+            "/api/project/{id}/dead-letters",
+            get(handlers::project::handle_dead_letter_list),
+        )
+        .route(
+            "/api/project/{id}/dead-letters/retry",
+            post(handlers::project::handle_dead_letter_files_retry),
+        )
+        .route(
+            "/api/project/{id}/dead-letters/acknowledge",
+            post(handlers::project::handle_dead_letter_acknowledge),
+        )
+        .route(
             "/api/project/{id}/reload",
             post(handlers::project::handle_reload_project_config),
         )
@@ -286,6 +298,14 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/retry-queue",
             get(handlers::health::handle_retry_queue_status),
+        )
+        .route(
+            "/api/retry-queue/dead",
+            get(handlers::health::handle_retry_queue_dead_list),
+        )
+        .route(
+            "/api/retry-queue/dead",
+            delete(handlers::health::handle_retry_queue_dead_clear),
         )
         .route(
             "/api/retry-queue/process",

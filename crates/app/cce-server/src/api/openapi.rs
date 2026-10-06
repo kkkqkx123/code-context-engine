@@ -37,6 +37,9 @@ use super::handlers;
         handlers::project::management::handle_delete_project,
         handlers::project::indexing::handle_project_index,
         handlers::project::indexing::handle_dead_letter_retry,
+        handlers::project::indexing::handle_dead_letter_list,
+        handlers::project::indexing::handle_dead_letter_files_retry,
+        handlers::project::indexing::handle_dead_letter_acknowledge,
         handlers::project::config::handle_reload_project_config,
         handlers::project::config::handle_update_project_config,
         handlers::entity::detail::handle_function_detail,
@@ -91,6 +94,8 @@ use super::handlers;
         handlers::health::handle_retry_queue_status,
         handlers::health::handle_retry_queue_process,
         handlers::health::handle_retry_queue_clear,
+        handlers::health::handle_retry_queue_dead_list,
+        handlers::health::handle_retry_queue_dead_clear,
     ),
     tags(
         (name = "Index", description = "Indexing and parsing operations"),

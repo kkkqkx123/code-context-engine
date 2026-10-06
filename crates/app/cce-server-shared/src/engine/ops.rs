@@ -64,6 +64,60 @@ impl super::CodeContextEngine {
             .map_err(EngineError::Index)
     }
 
+    /// List the dead-letter files of a project for observability and manual ops.
+    ///
+    /// Returns the raw tracker states; the API layer projects them into
+    /// response models. Acknowledged dead letters stay visible here until the
+    /// tracker filters them (see `get_dead_letters`).
+    pub async fn dead_letters(
+        &self,
+        project_id: i64,
+    ) -> Result<Vec<cce_orchestrator::FileUpdateState>, EngineError> {
+        let orchestrator = self.get_orchestrator(project_id).await?;
+        let orchestrator = orchestrator.lock().await;
+        Ok(orchestrator.state_tracker().get_dead_letters().await)
+    }
+
+    /// Run a dead-letter truncate-retry pass restricted to specific files.
+    ///
+    /// Empty `files` means all candidates. The manual path ignores the
+    /// per-project enable switch (the periodic sweep honours it) but still
+    /// respects the one-truncate-attempt rule enforced by the state tracker.
+    pub async fn retry_dead_letters_for_files(
+        &self,
+        project_id: i64,
+        files: &[String],
+    ) -> Result<cce_orchestrator::DeadLetterRetryReport, EngineError> {
+        let orchestrator = self.get_orchestrator(project_id).await?;
+        let mut orchestrator = orchestrator.lock().await;
+        let filter = (!files.is_empty()).then_some(files);
+        orchestrator
+            .retry_dead_letters_for_files(filter)
+            .await
+            .map_err(EngineError::Index)
+    }
+
+    /// Acknowledge the dead letter(s) of one file so they stop participating
+    /// in retry passes. `module = None` acknowledges every dead-lettered
+    /// module of the file. Returns the number of module records updated.
+    pub async fn acknowledge_dead_letter(
+        &self,
+        project_id: i64,
+        file_path: &str,
+        module: Option<cce_orchestrator::ModuleType>,
+    ) -> Result<usize, EngineError> {
+        let orchestrator = self.get_orchestrator(project_id).await?;
+        let orchestrator = orchestrator.lock().await;
+        orchestrator
+            .state_tracker()
+            .acknowledge_dead_letter(Path::new(file_path), module)
+            .await
+            .map_err(|e| EngineError::Index(cce_orchestrator::OrchestratorError::index(
+                "dead_letter_acknowledge",
+                e.to_string(),
+            )))
+    }
+
     /// Perform startup recovery for a project
     ///
     /// This triggers the complete recovery sequence:

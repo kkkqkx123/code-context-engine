@@ -60,7 +60,23 @@ impl IndexOrchestrator {
     pub async fn retry_dead_letter_with_truncation(
         &mut self,
     ) -> Result<DeadLetterRetryReport, OrchestratorError> {
-        let candidates = self.state_tracker.get_truncate_retry_candidates().await;
+        self.retry_dead_letters_for_files(None).await
+    }
+
+    /// Run the truncate-retry pass restricted to specific files.
+    ///
+    /// `files = None` processes every candidate (same as
+    /// [`Self::retry_dead_letter_with_truncation`]); an explicit list keeps
+    /// only the candidates whose recorded file path matches, enabling
+    /// single-file manual retries.
+    pub async fn retry_dead_letters_for_files(
+        &mut self,
+        files: Option<&[String]>,
+    ) -> Result<DeadLetterRetryReport, OrchestratorError> {
+        let mut candidates: Vec<_> = self.state_tracker.get_truncate_retry_candidates().await;
+        if let Some(files) = files {
+            candidates.retain(|state| files.iter().any(|f| f == &state.file_path));
+        }
         if candidates.is_empty() {
             return Ok(DeadLetterRetryReport::default());
         }

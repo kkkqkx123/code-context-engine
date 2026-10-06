@@ -22,6 +22,8 @@
 		| '/summary'
 		| '/storage'
 		| '/health'
+		| '/ops/dead-letters'
+		| '/ops/retry-queue'
 		| '/metrics'
 		| '/tools'
 		| '/config';
@@ -59,6 +61,8 @@
 			items: [
 				{ href: '/storage', label: 'Storage' },
 				{ href: '/health', label: 'Health' },
+				{ href: '/ops/dead-letters', label: 'Dead Letters' },
+				{ href: '/ops/retry-queue', label: 'Retry Queue' },
 				{ href: '/metrics', label: 'Metrics' },
 				{ href: '/tools', label: 'Tools' },
 				{ href: '/config', label: 'Config' },

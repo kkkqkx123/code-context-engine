@@ -477,6 +477,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/project/{id}/dead-letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the dead-letter files of a project */
+        get: operations["handle_dead_letter_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{id}/dead-letters/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge the dead letter(s) of one file so they leave the retry flow */
+        post: operations["handle_dead_letter_acknowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{id}/dead-letters/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a dead-letter truncate-retry pass restricted to the requested files */
+        post: operations["handle_dead_letter_files_retry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/project/{id}/index": {
         parameters: {
             query?: never;
@@ -1018,6 +1069,24 @@ export interface paths {
         post?: never;
         /** DELETE /api/retry-queue — Clear all retry queues across all projects */
         delete: operations["handle_retry_queue_clear"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/retry-queue/dead": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/retry-queue/dead — Snapshot of dead-lettered queries */
+        get: operations["handle_retry_queue_dead_list"];
+        put?: never;
+        post?: never;
+        /** DELETE /api/retry-queue/dead — Discard the dead-letter lists */
+        delete: operations["handle_retry_queue_dead_clear"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1666,6 +1735,66 @@ export interface components {
             /** @description Root directory path */
             root_path: string;
         };
+        /** @description Request body of `POST /api/project/{id}/dead-letters/acknowledge`. */
+        DeadLetterAcknowledgeRequest: {
+            /** @description File path to acknowledge. */
+            file_path: string;
+            /** @description Restrict acknowledgement to one module; omitted means all modules. */
+            module?: string | null;
+        };
+        /** @description Response of the dead-letter retry / acknowledge actions. */
+        DeadLetterActionResponse: {
+            /** @description Files affected by the action (retained entries after acknowledge). */
+            affected: number;
+            message: string;
+            success: boolean;
+        };
+        /** @description One dead-lettered file in the project dead-letter list. */
+        DeadLetterFileEntry: {
+            /** @description Recorded file path. */
+            file_path: string;
+            /** @description Modules currently in dead-letter state. */
+            modules: components["schemas"]["DeadLetterModuleEntry"][];
+            /** @description Last update timestamp (RFC3339). */
+            updated_at: string;
+            /**
+             * Format: int64
+             * @description Index version the dead letter belongs to.
+             */
+            version: number;
+        };
+        /** @description Response of `GET /api/project/{id}/dead-letters`. */
+        DeadLetterListResponse: {
+            files: components["schemas"]["DeadLetterFileEntry"][];
+            /** Format: int64 */
+            project_id: number;
+        };
+        /** @description Per-module failure summary of a dead-lettered file. */
+        DeadLetterModuleEntry: {
+            /**
+             * @description Whether an operator acknowledged this dead letter (it no longer
+             *     participates in retry passes).
+             */
+            acknowledged: boolean;
+            /** @description Stable error code of the last failure, when known. */
+            error_code?: string | null;
+            /** @description Human-readable failure message. */
+            error_message?: string | null;
+            /** @description Module name (relation / summary / embedding / bm25 / export). */
+            module: string;
+            /**
+             * Format: int32
+             * @description Retry attempts already made.
+             */
+            retry_count: number;
+            /** @description Whether the module already went through a lossy truncate-retry. */
+            truncated: boolean;
+        };
+        /** @description Request body of `POST /api/project/{id}/dead-letters/retry`. */
+        DeadLetterRetryRequest: {
+            /** @description Restrict the retry pass to these file paths; empty means all candidates. */
+            files?: string[];
+        };
         /** @description Dead-letter truncate-retry response */
         DeadLetterRetryResponse: {
             message: string;
@@ -2088,8 +2217,9 @@ export interface components {
             target: string;
             /**
              * Format: float
-             * @description Traversal weight: the relation type's base confidence multiplied by
-             *     how many call sites the caller uses to reach the target.
+             * @description Structural bearing: the relation type's intrinsic link strength scaled
+             *     by how many call sites the caller uses to reach the target. Not a
+             *     confidence level — confidence is carried on its own field.
              */
             weight?: number;
         };
@@ -2570,6 +2700,23 @@ export interface components {
             cleared: number;
             message: string;
         };
+        /** @description Retry queue dead list clear response */
+        RetryQueueDeadClearResponse: {
+            cleared: number;
+            message: string;
+        };
+        /** @description One dead-lettered query entry */
+        RetryQueueDeadEntry: {
+            query: string;
+            /** Format: int32 */
+            retry_count: number;
+        };
+        /** @description Dead entries of the retry queues (observability snapshot) */
+        RetryQueueDeadResponse: {
+            dead_count: number;
+            /** @description (query text, retry count) pairs, oldest first. */
+            entries: components["schemas"]["RetryQueueDeadEntry"][];
+        };
         /** @description Retry queue process response */
         RetryQueueProcessResponse: {
             message: string;
@@ -2577,6 +2724,8 @@ export interface components {
         };
         /** @description Retry queue status response */
         RetryQueueStatusResponse: {
+            /** @description Queries that exceeded max retries and were moved to the dead list. */
+            dead_count: number;
             is_empty: boolean;
             pending_count: number;
         };
@@ -4185,6 +4334,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_dead_letter_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterListResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_dead_letter_acknowledge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeadLetterAcknowledgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterActionResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_dead_letter_files_retry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeadLetterRetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterActionResponse"];
                 };
             };
             /** @description Resource not found */
@@ -5989,6 +6269,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_retry_queue_dead_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryQueueDeadResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_retry_queue_dead_clear: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryQueueDeadClearResponse"];
                 };
             };
             /** @description Internal error */

@@ -280,6 +280,73 @@ fn default_true() -> bool {
     true
 }
 
+/// Per-module failure summary of a dead-lettered file.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DeadLetterModuleEntry {
+    /// Module name (relation / summary / embedding / bm25 / export).
+    pub module: String,
+    /// Retry attempts already made.
+    pub retry_count: u32,
+    /// Stable error code of the last failure, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    /// Human-readable failure message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    /// Whether the module already went through a lossy truncate-retry.
+    pub truncated: bool,
+    /// Whether an operator acknowledged this dead letter (it no longer
+    /// participates in retry passes).
+    pub acknowledged: bool,
+}
+
+/// One dead-lettered file in the project dead-letter list.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DeadLetterFileEntry {
+    /// Recorded file path.
+    pub file_path: String,
+    /// Index version the dead letter belongs to.
+    pub version: u64,
+    /// Modules currently in dead-letter state.
+    pub modules: Vec<DeadLetterModuleEntry>,
+    /// Last update timestamp (RFC3339).
+    pub updated_at: String,
+}
+
+/// Response of `GET /api/project/{id}/dead-letters`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DeadLetterListResponse {
+    pub project_id: i64,
+    pub files: Vec<DeadLetterFileEntry>,
+}
+
+/// Response of the dead-letter retry / acknowledge actions.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DeadLetterActionResponse {
+    pub success: bool,
+    /// Files affected by the action (retained entries after acknowledge).
+    pub affected: usize,
+    pub message: String,
+}
+
+/// Request body of `POST /api/project/{id}/dead-letters/retry`.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct DeadLetterRetryRequest {
+    /// Restrict the retry pass to these file paths; empty means all candidates.
+    #[serde(default)]
+    pub files: Vec<String>,
+}
+
+/// Request body of `POST /api/project/{id}/dead-letters/acknowledge`.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DeadLetterAcknowledgeRequest {
+    /// File path to acknowledge.
+    pub file_path: String,
+    /// Restrict acknowledgement to one module; omitted means all modules.
+    #[serde(default)]
+    pub module: Option<String>,
+}
+
 fn default_max_files() -> usize {
     100
 }

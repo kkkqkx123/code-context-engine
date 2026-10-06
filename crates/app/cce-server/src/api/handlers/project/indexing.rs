@@ -7,7 +7,11 @@ use axum::extract::{Path, State};
 use super::management::record_to_config;
 use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
-use cce_api::models::{DeadLetterRetryResponse, ErrorResponse, ProjectIndexResponse};
+use cce_api::models::{
+    DeadLetterActionResponse, DeadLetterAcknowledgeRequest, DeadLetterFileEntry,
+    DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest,
+    DeadLetterRetryResponse, ErrorResponse, ProjectIndexResponse,
+};
 use cce_storage_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 /// Handle project indexing request
@@ -128,6 +132,135 @@ pub async fn handle_dead_letter_retry(
         Err(e) => ApiResult::Error(ErrorResponse::new(
             error_codes::INTERNAL_ERROR,
             format!("Dead-letter retry failed: {}", e),
+        )),
+    }
+}
+
+/// Run a dead-letter truncate-retry pass restricted to the requested files
+#[utoipa::path(
+    post, path = "/api/project/{id}/dead-letters/retry", tag = "Project",
+    params(("id" = i64, Path, description = "Project id")),
+    request_body = DeadLetterRetryRequest,
+    responses(
+        (status = 200, body = DeadLetterActionResponse, description = "Success"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_dead_letter_files_retry(
+    State(state): State<crate::api::state::AppState>,
+    Path(id): Path<i64>,
+    axum::Json(body): axum::Json<DeadLetterRetryRequest>,
+) -> ApiResult<DeadLetterActionResponse> {
+    match state.engine.retry_dead_letters_for_files(id, &body.files).await {
+        Ok(report) => ApiResult::Success(DeadLetterActionResponse {
+            success: true,
+            affected: report.retried,
+            message: format!(
+                "dead-letter retry: {} retried, {} succeeded, {} still failed, {} chunks truncated",
+                report.retried, report.succeeded, report.still_failed, report.truncated_chunks
+            ),
+        }),
+        Err(e) => ApiResult::Error(ErrorResponse::new(
+            error_codes::INTERNAL_ERROR,
+            format!("Dead-letter retry failed: {}", e),
+        )),
+    }
+}
+
+/// Acknowledge the dead letter(s) of one file so they leave the retry flow
+#[utoipa::path(
+    post, path = "/api/project/{id}/dead-letters/acknowledge", tag = "Project",
+    params(("id" = i64, Path, description = "Project id")),
+    request_body = DeadLetterAcknowledgeRequest,
+    responses(
+        (status = 200, body = DeadLetterActionResponse, description = "Success"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_dead_letter_acknowledge(
+    State(state): State<crate::api::state::AppState>,
+    Path(id): Path<i64>,
+    axum::Json(body): axum::Json<DeadLetterAcknowledgeRequest>,
+) -> ApiResult<DeadLetterActionResponse> {
+    let module = match body.module.as_deref() {
+        None => None,
+        Some(name) => match cce_orchestrator::ModuleType::all()
+            .into_iter()
+            .find(|m| m.as_str() == name)
+        {
+            Some(m) => Some(m),
+            None => {
+                return ApiResult::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    format!("Unknown module: {}", name),
+                ));
+            }
+        },
+    };
+
+    match state
+        .engine
+        .acknowledge_dead_letter(id, &body.file_path, module)
+        .await
+    {
+        Ok(updated) => ApiResult::Success(DeadLetterActionResponse {
+            success: true,
+            affected: updated,
+            message: format!("acknowledged {} dead-letter module(s)", updated),
+        }),
+        Err(e) => ApiResult::Error(ErrorResponse::new(
+            error_codes::INTERNAL_ERROR,
+            format!("Dead-letter acknowledge failed: {}", e),
+        )),
+    }
+}
+
+/// List the dead-letter files of a project
+#[utoipa::path(
+    get, path = "/api/project/{id}/dead-letters", tag = "Project",
+    params(("id" = i64, Path, description = "Project id")),
+    responses(
+        (status = 200, body = DeadLetterListResponse, description = "Success"),
+        (status = 404, body = ErrorResponse, description = "Resource not found"),
+        (status = 500, body = ErrorResponse, description = "Internal error")
+    )
+)]
+pub async fn handle_dead_letter_list(
+    State(state): State<crate::api::state::AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<DeadLetterListResponse> {
+    match state.engine.dead_letters(id).await {
+        Ok(states) => {
+            let files: Vec<DeadLetterFileEntry> = states
+                .iter()
+                .map(|s| DeadLetterFileEntry {
+                    file_path: s.file_path.clone(),
+                    version: s.version,
+                    modules: s
+                        .module_states
+                        .iter()
+                        .filter(|(_, r)| {
+                            matches!(r.state, cce_orchestrator::ModuleUpdateState::DeadLetter)
+                        })
+                        .map(|(m, r)| DeadLetterModuleEntry {
+                            module: m.as_str().to_string(),
+                            retry_count: r.retry_count,
+                            error_code: r.error_code.clone(),
+                            error_message: r.error_message.clone(),
+                            truncated: r.truncated,
+                            acknowledged: r.acknowledged,
+                        })
+                        .collect(),
+                    updated_at: s.updated_at.to_rfc3339(),
+                })
+                .collect();
+            ApiResult::Success(DeadLetterListResponse { project_id: id, files })
+        }
+        Err(e) => ApiResult::Error(ErrorResponse::new(
+            error_codes::INTERNAL_ERROR,
+            format!("Dead-letter list failed: {}", e),
         )),
     }
 }
