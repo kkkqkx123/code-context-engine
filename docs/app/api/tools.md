@@ -48,7 +48,7 @@
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/compress" \
+curl -X POST "http://localhost:9000/api/tools/compress" \
   -H "Content-Type: application/json" \
   -d '{
     "file_path": "src/main.rs",
@@ -103,7 +103,7 @@ curl -X POST "http://localhost:3000/api/tools/compress" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/compress/batch" \
+curl -X POST "http://localhost:9000/api/tools/compress/batch" \
   -H "Content-Type: application/json" \
   -d '{
     "file_paths": ["src/main.rs", "src/lib.rs"]
@@ -185,7 +185,7 @@ Rust, Python, JavaScript, TypeScript, C, C++, C#, Go, Java, Kotlin, Ruby, PHP, J
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/diagnose" \
+curl -X POST "http://localhost:9000/api/tools/diagnose" \
   -H "Content-Type: application/json" \
   -d '{
     "code": "fn main() { let x = 1; }",
@@ -249,7 +249,7 @@ curl -X POST "http://localhost:3000/api/tools/diagnose" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/fold" \
+curl -X POST "http://localhost:9000/api/tools/fold" \
   -H "Content-Type: application/json" \
   -d '{
     "text": "fn main() {}",
@@ -332,7 +332,7 @@ curl -X POST "http://localhost:3000/api/tools/fold" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/fold/batch" \
+curl -X POST "http://localhost:9000/api/tools/fold/batch" \
   -H "Content-Type: application/json" \
   -d '{
     "items": [
@@ -401,7 +401,7 @@ BM25 关键词搜索。从 BM25 索引中检索匹配的代码块，从 SQLite �
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/keyword-search" \
+curl -X POST "http://localhost:9000/api/tools/keyword-search" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "async fn handle",
@@ -461,7 +461,7 @@ curl -X POST "http://localhost:3000/api/tools/keyword-search" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/symbols" \
+curl -X POST "http://localhost:9000/api/tools/symbols" \
   -H "Content-Type: application/json" \
   -d '{
     "paths": ["src/main.rs"]
@@ -537,7 +537,7 @@ curl -X POST "http://localhost:3000/api/tools/symbols" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/references" \
+curl -X POST "http://localhost:9000/api/tools/references" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "src/main.rs",
@@ -604,7 +604,7 @@ curl -X POST "http://localhost:3000/api/tools/references" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/tools/definition" \
+curl -X POST "http://localhost:9000/api/tools/definition" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "src/indexer.rs",

@@ -33,7 +33,7 @@ cce-cli [OPTIONS] <COMMAND>
 
 | 选项 | 说明 | 默认值 |
 |------|------|--------|
-| `-s, --server` | 服务端 URL | `http://localhost:3000` |
+| `-s, --server` | 服务端 URL | `http://127.0.0.1:9000` |
 | `-f, --format` | 输出格式 (table/json/plain) | `table` |
 | `-v, --verbose` | 详细输出 | `false` |
 
@@ -235,7 +235,7 @@ cce-cli -f plain search query --query "handler"
 配置文件位于 `~/.config/cce-cli/config.toml`：
 
 ```toml
-server_url = "http://localhost:3000"
+server_url = "http://127.0.0.1:9000"
 output_format = "table"
 timeout = 300
 ```
@@ -245,6 +245,7 @@ timeout = 300
 | 变量 | 说明 |
 |------|------|
 | `CCE_SERVER_URL` | 服务端 URL |
+| `CCE_API_TOKEN` | 远端准入令牌（网关推送与远端查询共用） |
 
 ## 示例工作流
 

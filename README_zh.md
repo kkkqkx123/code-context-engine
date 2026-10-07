@@ -107,8 +107,8 @@ CCE_CONFIG=config.prod.toml ./target/release/cce
 
 ### 命令行客户端
 
-CLI 通过 HTTP 与服务端通信，默认服务端地址为 `http://localhost:3000`，可用 `-s` 参数或
-`CCE_SERVER_URL` 环境变量覆盖。
+CLI 通过 HTTP 与服务端通信，默认服务端地址为 `http://127.0.0.1:9000`，可用 `-s` 参数或
+`CCE_SERVER_URL` 环境变量覆盖。远端准入主机的令牌通过 `CCE_API_TOKEN` 环境变量提供。
 
 ```bash
 # 指定服务端地址并检查状态

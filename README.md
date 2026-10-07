@@ -110,8 +110,9 @@ CCE_CONFIG=config.prod.toml ./target/release/cce
 
 ### Command-line client
 
-The CLI talks to the server over HTTP. Its default server URL is `http://localhost:3000`;
+The CLI talks to the server over HTTP. Its default server URL is `http://127.0.0.1:9000`;
 override it with `-s` or the `CCE_SERVER_URL` environment variable.
+Tokens for admission-enabled remotes come from `CCE_API_TOKEN`.
 
 ```bash
 # Point the CLI at the server

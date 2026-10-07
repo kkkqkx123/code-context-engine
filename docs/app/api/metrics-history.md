@@ -59,13 +59,13 @@
 
 ```bash
 # 查询过去1小时的查询延迟指标
-curl "http://localhost:3000/api/metrics/history?from=2024-01-15T09:00:00Z&to=2024-01-15T10:00:00Z&metric=query_execution_latency_ms"
+curl "http://localhost:9000/api/metrics/history?from=2024-01-15T09:00:00Z&to=2024-01-15T10:00:00Z&metric=query_execution_latency_ms"
 
 # 查询特定项目的索引操作（使用 project_id）
-curl "http://localhost:3000/api/metrics/history?from=2024-01-15T00:00:00Z&to=2024-01-15T23:59:59Z&project_id=1&operation_type=index"
+curl "http://localhost:9000/api/metrics/history?from=2024-01-15T00:00:00Z&to=2024-01-15T23:59:59Z&project_id=1&operation_type=index"
 
 # 查询特定项目的索引操作（使用 project_path）
-curl "http://localhost:3000/api/metrics/history?from=2024-01-15T00:00:00Z&to=2024-01-15T23:59:59Z&project_path=/path/to/my/project&operation_type=index"
+curl "http://localhost:9000/api/metrics/history?from=2024-01-15T00:00:00Z&to=2024-01-15T23:59:59Z&project_path=/path/to/my/project&operation_type=index"
 ```
 
 **注意**: `project_id` 和 `project_path` 可以同时不提供，也可以提供其中一个。如果同时提供，系统会优先使用 `project_id`。
@@ -116,10 +116,10 @@ curl "http://localhost:3000/api/metrics/history?from=2024-01-15T00:00:00Z&to=202
 
 ```bash
 # 清理7天前的数据
-curl -X DELETE "http://localhost:3000/api/metrics/cleanup?before=2024-01-08T00:00:00Z"
+curl -X DELETE "http://localhost:9000/api/metrics/cleanup?before=2024-01-08T00:00:00Z"
 
 # 清理所有历史数据
-curl -X DELETE "http://localhost:3000/api/metrics/cleanup?all=true"
+curl -X DELETE "http://localhost:9000/api/metrics/cleanup?all=true"
 ```
 
 ### 使用场景

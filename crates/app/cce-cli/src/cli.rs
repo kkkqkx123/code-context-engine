@@ -10,12 +10,12 @@ use crate::commands;
 #[command(about = "CLI client for Code Context Engine", long_about = None)]
 #[command(version)]
 pub struct Cli {
-    /// Server URL (e.g., http://localhost:3000)
+    /// Server URL (e.g., http://127.0.0.1:9000)
     #[arg(
         short,
         long,
         env = "CCE_SERVER_URL",
-        default_value = "http://localhost:3000"
+        default_value = "http://127.0.0.1:9000"
     )]
     pub server: String,
 

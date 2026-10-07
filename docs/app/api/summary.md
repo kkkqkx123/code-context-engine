@@ -114,14 +114,14 @@
 
 ```bash
 # 为单个文件生成摘要
-curl -X POST "http://localhost:3000/api/summary" \
+curl -X POST "http://localhost:9000/api/summary" \
   -H "Content-Type: application/json" \
   -d '{
     "file_paths": ["src/main.rs"]
   }'
 
 # 为目录生成摘要
-curl -X POST "http://localhost:3000/api/summary" \
+curl -X POST "http://localhost:9000/api/summary" \
   -H "Content-Type: application/json" \
   -d '{
     "directory_paths": ["src/"],
@@ -131,7 +131,7 @@ curl -X POST "http://localhost:3000/api/summary" \
   }'
 
 # 为多个文件生成摘要
-curl -X POST "http://localhost:3000/api/summary" \
+curl -X POST "http://localhost:9000/api/summary" \
   -H "Content-Type: application/json" \
   -d '{
     "file_paths": ["src/main.rs", "src/parser.rs", "src/indexer.rs"]

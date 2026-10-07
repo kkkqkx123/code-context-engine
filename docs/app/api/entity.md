@@ -63,7 +63,7 @@
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/1/function/123"
+curl "http://localhost:9000/api/project/1/function/123"
 ```
 
 ---
@@ -117,7 +117,7 @@ curl "http://localhost:3000/api/project/1/function/123"
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/1/function/123/calls"
+curl "http://localhost:9000/api/project/1/function/123/calls"
 ```
 
 ---
@@ -171,7 +171,7 @@ curl "http://localhost:3000/api/project/1/function/123/calls"
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/1/function/123/callers"
+curl "http://localhost:9000/api/project/1/function/123/callers"
 ```
 
 ---
@@ -231,10 +231,10 @@ curl "http://localhost:3000/api/project/1/function/123/callers"
 
 ```bash
 # 向下追踪调用链
-curl "http://localhost:3000/api/project/1/call-chain/123?direction=down&max_depth=5"
+curl "http://localhost:9000/api/project/1/call-chain/123?direction=down&max_depth=5"
 
 # 向上追踪调用链
-curl "http://localhost:3000/api/project/1/call-chain/123?direction=up&max_depth=5"
+curl "http://localhost:9000/api/project/1/call-chain/123?direction=up&max_depth=5"
 ```
 
 ---
@@ -313,7 +313,7 @@ curl "http://localhost:3000/api/project/1/call-chain/123?direction=up&max_depth=
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/1/call-path?start_id=123&end_id=456&max_depth=10"
+curl "http://localhost:9000/api/project/1/call-path?start_id=123&end_id=456&max_depth=10"
 ```
 
 ---
@@ -381,7 +381,7 @@ curl "http://localhost:3000/api/project/1/call-path?start_id=123&end_id=456&max_
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/1/class/123/inheritance"
+curl "http://localhost:9000/api/project/1/class/123/inheritance"
 ```
 
 ---
@@ -447,5 +447,5 @@ curl "http://localhost:3000/api/project/1/class/123/inheritance"
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/1/class/123/implementations"
+curl "http://localhost:9000/api/project/1/class/123/implementations"
 ```

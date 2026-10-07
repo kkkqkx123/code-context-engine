@@ -49,7 +49,7 @@
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/project/1/reload"
+curl -X POST "http://localhost:9000/api/project/1/reload"
 ```
 
 ### 使用场景
@@ -132,7 +132,7 @@ curl -X POST "http://localhost:3000/api/project/1/reload"
 ### 示例
 
 ```bash
-curl -X PUT "http://localhost:3000/api/project/1/config" \
+curl -X PUT "http://localhost:9000/api/project/1/config" \
   -H "Content-Type: application/json" \
   -d '{
     "config": {

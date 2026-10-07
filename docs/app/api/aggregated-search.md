@@ -146,7 +146,7 @@ Code Context Engine 提供两个搜索 API 端点：
 
 ```bash
 # 使用 project_path（推荐，更直观）
-curl -X POST "http://localhost:3000/api/search/aggregated" \
+curl -X POST "http://localhost:9000/api/search/aggregated" \
   -H "Content-Type: application/json" \
   -d '{
     "project_path": "/path/to/my/project",
@@ -166,7 +166,7 @@ curl -X POST "http://localhost:3000/api/search/aggregated" \
   }'
 
 # 或使用 project_id
-curl -X POST "http://localhost:3000/api/search/aggregated" \
+curl -X POST "http://localhost:9000/api/search/aggregated" \
   -H "Content-Type: application/json" \
   -d '{
     "project_id": 1,

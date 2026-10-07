@@ -47,7 +47,7 @@
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/project/1/watch/start" \
+curl -X POST "http://localhost:9000/api/project/1/watch/start" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/path/to/project",
@@ -84,7 +84,7 @@ curl -X POST "http://localhost:3000/api/project/1/watch/start" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/project/1/watch/stop"
+curl -X POST "http://localhost:9000/api/project/1/watch/stop"
 ```
 
 ---
@@ -136,7 +136,7 @@ curl -X POST "http://localhost:3000/api/project/1/watch/stop"
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/1/watch/status"
+curl "http://localhost:9000/api/project/1/watch/status"
 ```
 
 ## 工作原理

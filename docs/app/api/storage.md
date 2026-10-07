@@ -60,10 +60,10 @@
 
 ```bash
 # 清空所有索引
-curl -X DELETE "http://localhost:3000/api/index"
+curl -X DELETE "http://localhost:9000/api/index"
 
 # 仅清空向量存储
-curl -X DELETE "http://localhost:3000/api/index" \
+curl -X DELETE "http://localhost:9000/api/index" \
   -H "Content-Type: application/json" \
   -d '{
     "clear_vectors": true,
@@ -118,7 +118,7 @@ curl -X DELETE "http://localhost:3000/api/index" \
 ### 示例
 
 ```bash
-curl -X DELETE "http://localhost:3000/api/index/file/src%2Fold_file.rs"
+curl -X DELETE "http://localhost:9000/api/index/file/src%2Fold_file.rs"
 ```
 
 ---
@@ -166,7 +166,7 @@ curl -X DELETE "http://localhost:3000/api/index/file/src%2Fold_file.rs"
 ### 示例
 
 ```bash
-curl -X DELETE "http://localhost:3000/api/index/entity/123"
+curl -X DELETE "http://localhost:9000/api/index/entity/123"
 ```
 
 ---
@@ -222,7 +222,7 @@ curl -X DELETE "http://localhost:3000/api/index/entity/123"
 ### 示例
 
 ```bash
-curl -X DELETE "http://localhost:3000/api/index/batch" \
+curl -X DELETE "http://localhost:9000/api/index/batch" \
   -H "Content-Type: application/json" \
   -d '{
     "file_paths": ["src/old_file.rs"],
@@ -275,7 +275,7 @@ curl -X DELETE "http://localhost:3000/api/index/batch" \
 | `total_files`          | number | 文件总数      |
 
 ```bash
-curl "http://localhost:3000/api/index/stats"
+curl "http://localhost:9000/api/index/stats"
 ```
 
 ---
@@ -371,5 +371,5 @@ curl "http://localhost:3000/api/index/stats"
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/storage/status"
+curl "http://localhost:9000/api/storage/status"
 ```

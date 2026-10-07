@@ -7,11 +7,13 @@
 
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
+import { readStoredToken } from '../stores/auth';
 
 /**
  * Base URL for the backend API.
  * Defaults to same-origin relative paths: the dev server proxies `/api` to the
- * backend, and in production the static build is served behind the gateway.
+ * backend, and in production the static build is served behind the reverse
+ * proxy at the same origin.
  * Set VITE_API_BASE_URL only for cross-origin deployments (backend CORS
  * whitelist must then include the frontend origin).
  */
@@ -115,4 +117,18 @@ export async function call<T>(
 export const client = createClient<paths>({
 	baseUrl: BASE_URL,
 	headers: { 'Content-Type': 'application/json' },
+});
+
+// Attach the admission token when one is stored. Local loopback use stays
+// token-free, so requests without a token keep their previous shape.
+client.use({
+	async onRequest({ request }) {
+		const token = readStoredToken();
+		if (!token) return undefined;
+		const headers = new Headers(request.headers);
+		if (!headers.has('authorization')) {
+			headers.set('authorization', `Bearer ${token}`);
+		}
+		return new Request(request, { headers });
+	},
 });

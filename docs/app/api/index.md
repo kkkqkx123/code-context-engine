@@ -80,10 +80,10 @@
 
 ```bash
 # 通过 project_id 启动全量索引
-curl -X POST "http://localhost:3000/api/project/1/index"
+curl -X POST "http://localhost:9000/api/project/1/index"
 
 # 指定路径进行索引（POST /api/index）
-curl -X POST "http://localhost:3000/api/index" \
+curl -X POST "http://localhost:9000/api/index" \
   -H "Content-Type: application/json" \
   -d '{
     "project_id": 1,
@@ -157,7 +157,7 @@ curl -X POST "http://localhost:3000/api/index" \
 
 ```bash
 # 使用 project_path
-curl -X POST "http://localhost:3000/api/index/incremental" \
+curl -X POST "http://localhost:9000/api/index/incremental" \
   -H "Content-Type: application/json" \
   -d '{
     "project_path": "/path/to/my/project",
@@ -166,7 +166,7 @@ curl -X POST "http://localhost:3000/api/index/incremental" \
   }'
 
 # 或使用 project_id
-curl -X POST "http://localhost:3000/api/index/incremental" \
+curl -X POST "http://localhost:9000/api/index/incremental" \
   -H "Content-Type: application/json" \
   -d '{
     "project_id": 1,
@@ -270,7 +270,7 @@ curl -X POST "http://localhost:3000/api/index/incremental" \
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/parse" \
+curl -X POST "http://localhost:9000/api/parse" \
   -H "Content-Type: application/json" \
   -d '{
     "file_path": "src/main.rs"

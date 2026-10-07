@@ -20,7 +20,7 @@ use cce_gateway::{GatewayClient, SyncParams, sync_once, watch_loop};
 )]
 struct Args {
     /// Remote server base URL, for example http://10.0.0.10:9000.
-    #[arg(long, env = "CCE_SERVER_URL", default_value = "http://127.0.0.1:3000")]
+    #[arg(long, env = "CCE_SERVER_URL", default_value = "http://127.0.0.1:9000")]
     server: String,
 
     /// Remote project id.
@@ -76,6 +76,10 @@ struct Args {
     #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
     health_file: Option<std::path::PathBuf>,
 
+    /// Admission token; explicit value outranks CCE_API_TOKEN.
+    #[arg(long, env = "CCE_API_TOKEN")]
+    token: Option<String>,
+
     /// Verbose logging.
     #[arg(short, long, default_value = "false")]
     verbose: bool,
@@ -112,7 +116,7 @@ fn params_from(args: &Args) -> SyncParams {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let client = GatewayClient::new(&args.server)?;
+    let client = GatewayClient::new_with_token(&args.server, args.token.clone())?;
     let params = params_from(&args);
     if args.once {
         sync_once(&client, &params, args.verbose).await.map(|_| ())
@@ -128,7 +132,7 @@ mod tests {
     /// Build daemon arguments whose every optional business knob is unset.
     fn bare_args() -> Args {
         Args {
-            server: "http://127.0.0.1:3000".to_string(),
+            server: "http://127.0.0.1:9000".to_string(),
             project_id: 4,
             path: "/srv/repo".to_string(),
             extensions: None,
@@ -139,6 +143,7 @@ mod tests {
             compress: None,
             interval_secs: None,
             health_file: None,
+            token: None,
             verbose: false,
         }
     }

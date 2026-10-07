@@ -89,7 +89,12 @@ frontend/
 By default, the frontend talks to the backend over **same-origin relative
 paths**: the dev server proxies `/api` to `http://localhost:9000` (override
 the proxy target with `CCE_DEV_API_TARGET`), and in production the static
-build is served behind the gateway at the same origin.
+build is served behind the reverse proxy at the same origin.
+
+Admission-enabled remote hosts require the access token stored on the
+Config page (`Remote Access Token` card); the token lives only in browser
+local storage and is sent as a bearer credential. Local loopback use leaves
+it empty.
 
 Only for cross-origin deployments (frontend and backend on different
 origins):

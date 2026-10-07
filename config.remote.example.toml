@@ -30,11 +30,18 @@ port = 9000
 #   cce-cli gateway sync --project-id 1 --path /home/user/work/repo
 #   cce-cli gateway watch --project-id 1 --path /home/user/work/repo
 #   cce-gateway --project-id 1 --path /home/user/work/repo --health-file /var/lib/cce-gateway/health.json
-# The gateway reads CCE_API_TOKEN and pushes only; the remote host never
-# connects back. The remote project root is the staged mirror: create the
-# project with the server-side mirror path and supply_mode gateway, then let
-# the gateway fill it. Chunking uses 256 KiB pieces with per-chunk hashes;
-# compression stays off unless CCE_GATEWAY_COMPRESS=1 or --compress is set.
-# The resident daemon shares the CLI core; run it manually or under an external
-# supervisor (systemd user unit, launchd, pm2, task scheduler) with --health-file
-# for liveness probes. No system unit is shipped.
+# The gateway reads CCE_API_TOKEN (or --token) and pushes only; the remote
+# host never connects back. CLI queries against this host also read
+# CCE_API_TOKEN. Browser console users paste the same token on the Config
+# page instead of exporting it. The remote project root is the staged mirror:
+# create the project with the server-side mirror path and supply_mode gateway,
+# then let the gateway fill it. Chunking uses 256 KiB pieces with per-chunk
+# hashes; compression stays off unless CCE_GATEWAY_COMPRESS=1 or --compress
+# is set. The resident daemon shares the CLI core; run it manually or under
+# an external supervisor (systemd user unit, launchd, pm2, task scheduler)
+# with --health-file for liveness probes. No system unit is shipped.
+#
+# Database, embedder, and model sections are intentionally omitted here: copy
+# them from config.toml and adjust endpoints, keys, and storage paths for the
+# remote host. Omitted sections fall back to code defaults, which are meant
+# for loopback development rather than production hosting.

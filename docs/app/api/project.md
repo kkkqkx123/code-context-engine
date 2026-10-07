@@ -77,7 +77,7 @@
 ### 示例
 
 ```bash
-curl -X POST "http://localhost:3000/api/project" \
+curl -X POST "http://localhost:9000/api/project" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Project",
@@ -121,7 +121,7 @@ curl -X POST "http://localhost:3000/api/project" \
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project"
+curl "http://localhost:9000/api/project"
 ```
 
 ---
@@ -162,7 +162,7 @@ curl "http://localhost:3000/api/project"
 ### 示例
 
 ```bash
-curl "http://localhost:3000/api/project/proj_123"
+curl "http://localhost:9000/api/project/proj_123"
 ```
 
 ---
@@ -227,7 +227,7 @@ curl "http://localhost:3000/api/project/proj_123"
 ### 示例
 
 ```bash
-curl -X PUT "http://localhost:3000/api/project/proj_123" \
+curl -X PUT "http://localhost:9000/api/project/proj_123" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Updated Project Name",
@@ -263,7 +263,7 @@ curl -X PUT "http://localhost:3000/api/project/proj_123" \
 ### 示例
 
 ```bash
-curl -X DELETE "http://localhost:3000/api/project/proj_123"
+curl -X DELETE "http://localhost:9000/api/project/proj_123"
 ```
 
 ---
@@ -311,8 +311,8 @@ curl -X DELETE "http://localhost:3000/api/project/proj_123"
 
 ```bash
 # 索引项目
-curl -X POST "http://localhost:3000/api/project/proj_123/index"
+curl -X POST "http://localhost:9000/api/project/proj_123/index"
 
 # 强制重新索引
-curl -X POST "http://localhost:3000/api/project/proj_123/index?force_reindex=true"
+curl -X POST "http://localhost:9000/api/project/proj_123/index?force_reindex=true"
 ```

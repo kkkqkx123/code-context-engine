@@ -73,7 +73,7 @@
 **使用 curl**:
 
 ```bash
-curl -X POST "http://localhost:3000/api/config/reload" \
+curl -X POST "http://localhost:9000/api/config/reload" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```

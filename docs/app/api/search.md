@@ -106,17 +106,17 @@
 
 ```bash
 # 基本搜索（使用 project_id）
-curl -X POST "http://localhost:3000/api/search" \
+curl -X POST "http://localhost:9000/api/search" \
   -H "Content-Type: application/json" \
   -d '{"project_id": 1, "query": "parse file"}'
 
 # 基本搜索（使用 project_path，更方便）
-curl -X POST "http://localhost:3000/api/search" \
+curl -X POST "http://localhost:9000/api/search" \
   -H "Content-Type: application/json" \
   -d '{"project_path": "/path/to/my/project", "query": "parse file"}'
 
 # 向量搜索
-curl -X POST "http://localhost:3000/api/search" \
+curl -X POST "http://localhost:9000/api/search" \
   -H "Content-Type: application/json" \
   -d '{
     "project_id": 1,
@@ -126,7 +126,7 @@ curl -X POST "http://localhost:3000/api/search" \
   }'
 
 # 带过滤的搜索
-curl -X POST "http://localhost:3000/api/search" \
+curl -X POST "http://localhost:9000/api/search" \
   -H "Content-Type: application/json" \
   -d '{
     "project_path": "/home/user/projects/myapp",

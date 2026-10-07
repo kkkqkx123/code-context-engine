@@ -97,7 +97,7 @@
 
 ```bash
 # 搜索以 "auth" 开头的实体（使用 project_path）
-curl -X POST "http://localhost:3000/api/entities/search" \
+curl -X POST "http://localhost:9000/api/entities/search" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "auth*",
@@ -106,7 +106,7 @@ curl -X POST "http://localhost:3000/api/entities/search" \
   }'
 
 # 搜索包含 "test" 的函数（使用 project_id）
-curl -X POST "http://localhost:3000/api/entities/search" \
+curl -X POST "http://localhost:9000/api/entities/search" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "test",

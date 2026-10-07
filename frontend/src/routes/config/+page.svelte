@@ -13,6 +13,11 @@
 	} from '$lib/api/config';
 	import { projectApi, type ProjectConfigUpdateResponse } from '$lib/api';
 	import { currentProjectId, onProjectChange } from '$lib/stores/project';
+	import {
+		apiToken,
+		setApiToken,
+		clearApiToken,
+	} from '$lib/stores/auth';
 	import { get } from 'svelte/store';
 	import { errorMessage } from '$lib/utils/errors';
 
@@ -49,6 +54,11 @@
 	let runtimeVersion = $state<number | null>(null);
 	let reloadMessage = $state<string | null>(null);
 	let reloading = $state(false);
+
+	// ─── Remote access token (browser-local admission credential) ──
+	let tokenDraft = $state('');
+	let tokenMessage = $state<string | null>(null);
+	let tokenSaving = $state(false);
 
 	function parseList(value: string): string[] {
 		return value
@@ -208,7 +218,32 @@
 		}
 	}
 
+	async function saveAccessToken() {
+		tokenMessage = null;
+		tokenSaving = true;
+		try {
+			setApiToken(tokenDraft);
+			tokenDraft = get(apiToken);
+			await loadInfo();
+			tokenMessage = get(apiToken)
+				? 'Access token saved; requests now carry it.'
+				: 'Access token cleared; requests go token-free.';
+		} catch (e) {
+			tokenMessage = `Token saved locally, but the server rejected the check: ${errorMessage(e)}`;
+		} finally {
+			tokenSaving = false;
+		}
+	}
+
+	function clearAccessToken() {
+		tokenDraft = '';
+		tokenMessage = null;
+		clearApiToken();
+		void loadInfo();
+	}
+
 	onMount(async () => {
+		tokenDraft = get(apiToken);
 		await loadInfo();
 		await loadValidate();
 	});
@@ -262,6 +297,47 @@
 		</div>
 
 		{#if activeScope === 'global'}
+			<Card
+				title="Remote Access Token"
+				subtitle="Browser-local admission credential for remote hosts"
+			>
+				<p class="reload-description">
+					Stored only in this browser. Leave empty for local loopback use;
+					paste a project-scoped token when the backend requires admission.
+				</p>
+				<div class="form-grid">
+					<label class="form-field">
+						<span class="form-label">Admission token</span>
+						<Input
+							type="password"
+							bind:value={tokenDraft}
+							placeholder="Paste token for this remote host"
+							autocomplete="off"
+						/>
+					</label>
+				</div>
+				<div class="reload-actions">
+					<Button onclick={saveAccessToken} disabled={tokenSaving}>
+						{#if tokenSaving}Saving...{:else}Save Token{/if}
+					</Button>
+					<Button
+						variant="secondary"
+						onclick={clearAccessToken}
+						disabled={tokenSaving || (!tokenDraft && !$apiToken)}
+					>
+						Clear
+					</Button>
+					{#if $apiToken}
+						<Badge label="Token set" variant="active" />
+					{:else}
+						<Badge label="Local mode" variant="inactive" />
+					{/if}
+				</div>
+				{#if tokenMessage}
+					<p class="reload-description">{tokenMessage}</p>
+				{/if}
+			</Card>
+
 			<Card title="Global Configuration" subtitle="Active server snapshot (read-only)">
 				{#if loading && !configInfo}
 					<p class="placeholder-text">Loading configuration...</p>
