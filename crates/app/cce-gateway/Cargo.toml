@@ -27,3 +27,6 @@ cce-types = { path = "../../core/cce-types" }
 cce-utils = { path = "../../core/cce-utils" }
 zstd = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

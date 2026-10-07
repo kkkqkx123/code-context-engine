@@ -2150,7 +2150,7 @@
           "Ingest"
         ],
         "summary": "Apply gateway-observed changes through the hot-update pipeline.",
-        "description": "Created and modified events carry content and are staged before the\ncoordinator runs; deletions remove the mirrored file and its index rows.\nThe remote host never starts its own filesystem watch in this shape:\nevery change arrives through this entry.",
+        "description": "Created and modified events carry content and are staged before the\ncoordinator runs; deletions remove the mirrored file and its index rows.\nThe remote host never starts its own filesystem watch in this shape:\nevery change arrives through this entry. Events travel whole and raw,\nso a change that would exceed the entry-count or single-file ingest\nbounds is not split here: the gateway falls back to a full sync batch\ninstead.",
         "operationId": "handle_ingest_event",
         "parameters": [
           {
@@ -8920,7 +8920,7 @@
           "manifest_version": {
             "type": "integer",
             "format": "int64",
-            "description": "Manifest version this batch belongs to. Zero means the legacy\nwhole-file pass without resume bookkeeping.",
+            "description": "Manifest version this batch belongs to. Zero keeps no resume\nbookkeeping: nothing is staged for resume and every file must\narrive whole inside one batch. Decoding, per-chunk verification,\nreassembly, and the whole-file check are identical for both forms.",
             "minimum": 0
           }
         }
@@ -9010,7 +9010,7 @@
       },
       "IngestEvent": {
         "type": "object",
-        "description": "One gateway-observed file change.",
+        "description": "One gateway-observed file change.\n\nEvents travel whole and raw: the contract carries no compression flag\nand no chunk fields, so a caller that would exceed the entry-count or\nsingle-file ingest bounds falls back to a full sync instead of\nsplitting an event.",
         "required": [
           "relative_path",
           "kind"

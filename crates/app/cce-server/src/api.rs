@@ -77,6 +77,11 @@ pub async fn serve(
     // Start background generation GC worker (scans hourly, retains 2 active generations)
     engine_arc.start_generation_gc_worker(3600, 2, 3600);
 
+    // Reclaim expired ingest chunk staging left by interrupted pushes
+    // before any request can resume from it.
+    #[cfg(feature = "admission")]
+    handlers::ingest::sweep_expired_staging(handlers::ingest::INGEST_STAGING_RETENTION);
+
     // Run startup recovery for all projects before accepting requests
     let project_ids: Vec<i64> = {
         if let Some(store) = engine_arc.metadata_store() {

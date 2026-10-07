@@ -1004,6 +1004,10 @@ pub enum MetricsCommands {
 }
 
 /// Gateway commands for remote hosting
+///
+/// Business defaults (extensions, exclude, gitignore, commit, compression,
+/// poll interval) live in `SyncParams::with_defaults`; the variants only
+/// carry what the caller stated explicitly.
 #[derive(Subcommand)]
 pub enum GatewayCommands {
     /// Push a full sync pass: manifest, missing contents, then index commit
@@ -1017,24 +1021,37 @@ pub enum GatewayCommands {
         path: String,
 
         /// File extensions to include (comma-separated, empty means all text)
-        #[arg(short, long, default_value = "")]
-        extensions: String,
+        #[arg(short, long)]
+        extensions: Option<String>,
 
         /// Directories to exclude (comma-separated)
-        #[arg(short, long, default_value = "node_modules,target,.git,vendor")]
-        exclude: String,
+        #[arg(short, long)]
+        exclude: Option<String>,
 
-        /// Respect .gitignore
-        #[arg(long, default_value = "true")]
-        gitignore: bool,
+        /// Respect .gitignore; --gitignore=false forces them off
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        gitignore: Option<bool>,
 
         /// Stage files without running the index commit
         #[arg(long, default_value = "false")]
         no_commit: bool,
 
-        /// Compress chunks before upload, negotiated off by default
-        #[arg(long, default_value = "false")]
-        compress: bool,
+        /// Compress chunks before upload; --compress=false forces it off
+        /// and overrides the CCE_GATEWAY_COMPRESS environment value
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        compress: Option<bool>,
     },
 
     /// Sync once, then poll and push incremental changes
@@ -1048,24 +1065,37 @@ pub enum GatewayCommands {
         path: String,
 
         /// File extensions to include (comma-separated, empty means all text)
-        #[arg(short, long, default_value = "")]
-        extensions: String,
+        #[arg(short, long)]
+        extensions: Option<String>,
 
         /// Directories to exclude (comma-separated)
-        #[arg(short, long, default_value = "node_modules,target,.git,vendor")]
-        exclude: String,
+        #[arg(short, long)]
+        exclude: Option<String>,
 
-        /// Respect .gitignore
-        #[arg(long, default_value = "true")]
-        gitignore: bool,
+        /// Respect .gitignore; --gitignore=false forces them off
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        gitignore: Option<bool>,
 
         /// Poll interval in seconds
-        #[arg(long, default_value = "5")]
-        interval_secs: u64,
+        #[arg(long)]
+        interval_secs: Option<u64>,
 
-        /// Compress chunks before upload, negotiated off by default
-        #[arg(long, default_value = "false")]
-        compress: bool,
+        /// Compress chunks before upload; --compress=false forces it off
+        /// and overrides the CCE_GATEWAY_COMPRESS environment value
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        compress: Option<bool>,
     },
 }
 

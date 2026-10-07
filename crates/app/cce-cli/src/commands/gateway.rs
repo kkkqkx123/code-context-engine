@@ -8,14 +8,37 @@
 
 use anyhow::Result;
 
-use cce_gateway::{compression_enabled, sync_once, watch_loop, GatewayClient, SyncParams};
+use cce_gateway::{sync_once, watch_loop, GatewayClient, SyncParams};
 
 use crate::cli::GatewayCommands;
 
-/// Execute the gateway subcommand.
-pub async fn execute(cmd: &GatewayCommands, server: &str, verbose: bool) -> Result<()> {
-    let client = GatewayClient::new(server)?;
-    let compress_env = compression_enabled();
+/// Apply the overrides both gateway variants share.
+fn apply_shared(
+    params: &mut SyncParams,
+    extensions: &Option<String>,
+    exclude: &Option<String>,
+    gitignore: &Option<bool>,
+    compress: &Option<bool>,
+) {
+    if let Some(extensions) = extensions {
+        params.extensions = extensions.clone();
+    }
+    if let Some(exclude) = exclude {
+        params.exclude = exclude.clone();
+    }
+    if let Some(gitignore) = gitignore {
+        params.gitignore = *gitignore;
+    }
+    if let Some(compress) = compress {
+        params.compress = *compress;
+    }
+}
+
+/// Translate one gateway subcommand over the shared defaults.
+///
+/// Explicit arguments outrank the environment values baked into the
+/// defaults; anything the caller left out keeps the shared value.
+fn params_for(cmd: &GatewayCommands) -> SyncParams {
     match cmd {
         GatewayCommands::Sync {
             project_id,
@@ -26,16 +49,12 @@ pub async fn execute(cmd: &GatewayCommands, server: &str, verbose: bool) -> Resu
             no_commit,
             compress,
         } => {
-            let params = SyncParams {
-                project_id: *project_id,
-                path: path.clone(),
-                extensions: extensions.clone(),
-                exclude: exclude.clone(),
-                gitignore: *gitignore,
-                commit: !no_commit,
-                compress: compress_env || *compress,
-            };
-            sync_once(&client, &params, verbose).await
+            let mut params = SyncParams::with_defaults(*project_id, path.clone());
+            apply_shared(&mut params, extensions, exclude, gitignore, compress);
+            if *no_commit {
+                params.commit = false;
+            }
+            params
         }
         GatewayCommands::Watch {
             project_id,
@@ -46,16 +65,98 @@ pub async fn execute(cmd: &GatewayCommands, server: &str, verbose: bool) -> Resu
             interval_secs,
             compress,
         } => {
-            let params = SyncParams {
-                project_id: *project_id,
-                path: path.clone(),
-                extensions: extensions.clone(),
-                exclude: exclude.clone(),
-                gitignore: *gitignore,
-                commit: true,
-                compress: compress_env || *compress,
-            };
-            watch_loop(&client, &params, *interval_secs, verbose, None).await
+            let mut params = SyncParams::with_defaults(*project_id, path.clone());
+            apply_shared(&mut params, extensions, exclude, gitignore, compress);
+            if let Some(interval_secs) = interval_secs {
+                params.interval_secs = *interval_secs;
+            }
+            params
         }
+    }
+}
+
+/// Execute the gateway subcommand.
+pub async fn execute(cmd: &GatewayCommands, server: &str, verbose: bool) -> Result<()> {
+    let client = GatewayClient::new(server)?;
+    let params = params_for(cmd);
+    match cmd {
+        GatewayCommands::Sync { .. } => sync_once(&client, &params, verbose).await.map(|_| ()),
+        GatewayCommands::Watch { .. } => watch_loop(&client, &params, verbose).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build the sync variant with every optional business knob unset.
+    fn bare_sync() -> GatewayCommands {
+        GatewayCommands::Sync {
+            project_id: 5,
+            path: "/srv/repo".to_string(),
+            extensions: None,
+            exclude: None,
+            gitignore: None,
+            no_commit: false,
+            compress: None,
+        }
+    }
+
+    /// Build the watch variant with every optional business knob unset.
+    fn bare_watch() -> GatewayCommands {
+        GatewayCommands::Watch {
+            project_id: 5,
+            path: "/srv/repo".to_string(),
+            extensions: None,
+            exclude: None,
+            gitignore: None,
+            interval_secs: None,
+            compress: None,
+        }
+    }
+
+    #[test]
+    fn bare_sync_and_watch_equal_the_shared_defaults() {
+        let expected = format!("{:?}", SyncParams::with_defaults(5, "/srv/repo"));
+        assert_eq!(format!("{:?}", params_for(&bare_sync())), expected);
+        assert_eq!(format!("{:?}", params_for(&bare_watch())), expected);
+    }
+
+    #[test]
+    fn explicit_arguments_outrank_the_defaults() {
+        let sync = GatewayCommands::Sync {
+            project_id: 5,
+            path: "/srv/repo".to_string(),
+            extensions: Some("rs".to_string()),
+            exclude: Some("vendor".to_string()),
+            gitignore: Some(false),
+            no_commit: true,
+            compress: Some(false),
+        };
+        let params = params_for(&sync);
+        assert_eq!(params.extensions, "rs");
+        assert_eq!(params.exclude, "vendor");
+        assert!(!params.gitignore);
+        assert!(!params.commit);
+        assert!(!params.compress);
+        assert_eq!(params.interval_secs, 5);
+        assert!(params.health_file.is_none());
+
+        let watch = GatewayCommands::Watch {
+            project_id: 5,
+            path: "/srv/repo".to_string(),
+            extensions: Some("rs".to_string()),
+            exclude: None,
+            gitignore: Some(false),
+            interval_secs: Some(2),
+            compress: Some(true),
+        };
+        let params = params_for(&watch);
+        assert_eq!(params.extensions, "rs");
+        assert_eq!(params.exclude, "node_modules,target,.git,vendor");
+        assert!(!params.gitignore);
+        assert_eq!(params.interval_secs, 2);
+        assert!(params.compress);
+        assert!(params.commit);
     }
 }

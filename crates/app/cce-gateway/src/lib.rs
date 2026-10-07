@@ -6,11 +6,18 @@
 //! no vector store, embedder, parser, or orchestrator is involved, and the
 //! remote side never pulls from this machine.
 //!
+//! Polling reuses the previous round's hashes for unchanged files as a pure
+//! read optimization, with a periodic forced full scan bounding the mtime
+//! staleness window; change detection always compares fingerprints.
+//! `SyncParams` carries every business default, so the CLI branch and the
+//! daemon only translate their explicit arguments over it.
+//!
 //! The same core backs the one-shot CLI branch and the standalone resident
 //! daemon; both share this crate so behavior cannot drift.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -21,7 +28,7 @@ use cce_api::models::{
     IngestManifestRequest, IngestManifestResponse, IngestedFile, MAX_INGEST_BATCH_FILES,
     MAX_INGEST_CHUNKS_PER_BATCH, MAX_INGEST_FILE_BYTES, MissingChunk, total_chunks_for_size,
 };
-use cce_scanner::{FSScanner, ScanOptions};
+use cce_scanner::{FSScanner, FileEntry, ScanOptions};
 
 /// Wire byte budget per upload batch, kept below the server body bound.
 ///
@@ -29,8 +36,11 @@ use cce_scanner::{FSScanner, ScanOptions};
 /// body limit after transport growth.
 const BATCH_WIRE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Changes above this count fall back to a full sync pass.
-const WATCH_FULL_SYNC_THRESHOLD: usize = 100;
+/// Forced full scans happen at least this often in poll rounds.
+const FULL_SCAN_EVERY_POLLS: usize = 60;
+
+/// Forced full scans happen at least this often in wall-clock time.
+const FULL_SCAN_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Minimal HTTP client carrying the admission token from the environment.
 #[derive(Debug, Clone)]
@@ -83,6 +93,12 @@ impl GatewayClient {
 }
 
 /// Shared sync parameters for one-shot and watch passes.
+///
+/// This structure is the single source of business defaults: the CLI branch
+/// and the standalone daemon only translate their explicit arguments over
+/// `with_defaults`, so the three entry points cannot drift apart. Explicit
+/// command-line values outrank the environment, which outranks these
+/// defaults.
 #[derive(Debug, Clone)]
 pub struct SyncParams {
     /// Remote project id.
@@ -101,7 +117,38 @@ pub struct SyncParams {
     ///
     /// Compression only applies to the batch path; incremental events always
     /// carry raw bytes so the event entry stays a single whole-file shape.
+    /// The default picks up `CCE_GATEWAY_COMPRESS`.
     pub compress: bool,
+    /// Poll interval in seconds for watch mode.
+    pub interval_secs: u64,
+    /// Lower bound applied to the poll interval.
+    pub min_interval_secs: u64,
+    /// Change count above which a watch pass falls back to a full sync.
+    pub full_sync_threshold: usize,
+    /// Heartbeat file for supervisors and health probes, if any.
+    pub health_file: Option<PathBuf>,
+}
+
+impl SyncParams {
+    /// Parameters for one project with the shared business defaults.
+    ///
+    /// Every entry point starts here and overrides only what its caller
+    /// stated explicitly.
+    pub fn with_defaults(project_id: i64, path: impl Into<String>) -> Self {
+        Self {
+            project_id,
+            path: path.into(),
+            extensions: String::new(),
+            exclude: "node_modules,target,.git,vendor".to_string(),
+            gitignore: true,
+            commit: true,
+            compress: compression_enabled(),
+            interval_secs: 5,
+            min_interval_secs: 1,
+            full_sync_threshold: 100,
+            health_file: None,
+        }
+    }
 }
 
 /// Whether chunk compression is enabled. Optional negotiation, off by
@@ -222,7 +269,33 @@ pub fn maybe_compress(bytes: &[u8], compress: bool) -> (Vec<u8>, bool) {
     }
 }
 
+/// One scan pass: usable files plus the entries the next pass reuses.
+#[derive(Debug)]
+pub struct ScanOutcome {
+    /// Usable files keyed by normalized identity.
+    pub snapshot: ScanSnapshot,
+    /// Scanned entries keyed by relative path. Passing this back into
+    /// `scan_local` lets the scanner reuse hashes for unchanged files.
+    pub entries: HashMap<PathBuf, FileEntry>,
+}
+
+/// Whether a poll must ignore hash reuse and rescan everything.
+///
+/// The forced scan bounds the mtime-granularity staleness window of hash
+/// reuse: whichever leg trips first, fixed rounds or wall-clock time,
+/// forces one full rescan so neither fast nor slow polling leaves a file
+/// unverified indefinitely.
+fn should_force_full(polls_since_full: usize, last_full_scan: Instant, now: Instant) -> bool {
+    polls_since_full >= FULL_SCAN_EVERY_POLLS
+        || now.saturating_duration_since(last_full_scan) >= FULL_SCAN_INTERVAL
+}
+
 /// Scan the local directory and return usable entries keyed by identity.
+///
+/// With `previous` set, the scanner reuses each unchanged file's hash
+/// instead of re-reading it; reuse is a pure read optimization and never
+/// takes part in change detection, which stays fingerprint-based. New and
+/// deleted files are unaffected by reuse.
 ///
 /// The scan uses the same traversal and ignore semantics as local indexing.
 /// The ingest bound is applied as the scanner size limit so oversized files
@@ -230,7 +303,10 @@ pub fn maybe_compress(bytes: &[u8], compress: bool) -> (Vec<u8>, bool) {
 /// supply pre-filter; the remote project configuration stays authoritative
 /// for parsing. Plugin file filters are intentionally not applied here;
 /// oversupplied files are filtered again by the remote pipeline.
-pub async fn scan_local(params: &SyncParams) -> Result<ScanSnapshot> {
+pub async fn scan_local(
+    params: &SyncParams,
+    previous: Option<&HashMap<PathBuf, FileEntry>>,
+) -> Result<ScanOutcome> {
     let exclude_patterns: Vec<String> = params
         .exclude
         .split(',')
@@ -257,9 +333,11 @@ pub async fn scan_local(params: &SyncParams) -> Result<ScanSnapshot> {
         max_file_size: Some(MAX_INGEST_FILE_BYTES),
     };
     let mut scanner = FSScanner::new();
-    let report = scanner
-        .scan_report(&options)
-        .context("gateway failed to scan the local directory")?;
+    let report = match previous {
+        Some(previous) => scanner.scan_incremental_report(&options, previous),
+        None => scanner.scan_report(&options),
+    }
+    .context("gateway failed to scan the local directory")?;
     if !report.failures.is_empty() {
         eprintln!(
             "warning: {} paths could not be scanned and are skipped",
@@ -267,49 +345,59 @@ pub async fn scan_local(params: &SyncParams) -> Result<ScanSnapshot> {
         );
     }
     let mut files: HashMap<String, ScannedFile> = HashMap::new();
+    let mut entries: HashMap<PathBuf, FileEntry> = HashMap::with_capacity(report.entries.len());
     let mut skipped_oversize = 0usize;
     let mut skipped_binary = 0usize;
     for entry in report.entries {
         if entry.size > MAX_INGEST_FILE_BYTES {
             skipped_oversize += 1;
-            continue;
-        }
-        if !entry.is_text() {
+        } else if !entry.is_text() {
             skipped_binary += 1;
-            continue;
-        }
-        if !wanted.is_empty() {
-            let matches = entry
-                .relative_path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| wanted.contains(&ext.to_lowercase()))
-                .unwrap_or(false);
-            if !matches {
-                continue;
+        } else {
+            let matches = wanted.is_empty()
+                || entry
+                    .relative_path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| wanted.contains(&ext.to_lowercase()))
+                    .unwrap_or(false);
+            if matches {
+                let identity = cce_types::path::normalize_project_path(&entry.identity_key());
+                files.insert(
+                    identity,
+                    ScannedFile {
+                        absolute: entry.path.clone(),
+                        size: entry.size,
+                        modified_secs: entry.modified.timestamp(),
+                        content_hash: entry.content_hash.clone(),
+                    },
+                );
             }
         }
-        let identity = cce_types::path::normalize_project_path(&entry.identity_key());
-        files.insert(
-            identity,
-            ScannedFile {
-                absolute: entry.path.clone(),
-                size: entry.size,
-                modified_secs: entry.modified.timestamp(),
-                content_hash: entry.content_hash.clone(),
-            },
-        );
+        entries.insert(entry.relative_path.clone(), entry);
     }
-    Ok(ScanSnapshot {
-        files,
-        skipped_oversize,
-        skipped_binary,
+    Ok(ScanOutcome {
+        snapshot: ScanSnapshot {
+            files,
+            skipped_oversize,
+            skipped_binary,
+        },
+        entries,
     })
 }
 
 /// Push one full sync pass: manifest, missing contents, then commit.
-pub async fn sync_once(client: &GatewayClient, params: &SyncParams, verbose: bool) -> Result<()> {
-    let snapshot = scan_local(params).await?;
+///
+/// The pass always scans without hash reuse: the manifest covers the whole
+/// tree, so reuse would only hide a locally drifted file. The returned
+/// outcome seeds the watch loop's baseline and its next incremental pass.
+pub async fn sync_once(
+    client: &GatewayClient,
+    params: &SyncParams,
+    verbose: bool,
+) -> Result<ScanOutcome> {
+    let outcome = scan_local(params, None).await?;
+    let snapshot = &outcome.snapshot;
     if verbose {
         println!(
             "scanned {} files (skipped {} oversize, {} binary)",
@@ -318,7 +406,7 @@ pub async fn sync_once(client: &GatewayClient, params: &SyncParams, verbose: boo
             snapshot.skipped_binary
         );
     }
-    let manifest_version = manifest_version_for_snapshot(&snapshot);
+    let manifest_version = manifest_version_for_snapshot(snapshot);
     let manifest = IngestManifestRequest {
         files: snapshot
             .files
@@ -347,7 +435,7 @@ pub async fn sync_once(client: &GatewayClient, params: &SyncParams, verbose: boo
     let (staged, errors) = upload_paths(
         client,
         params,
-        &snapshot,
+        snapshot,
         &manifest_response.upload,
         &manifest_response.missing_chunks,
         manifest_response.manifest_version.max(manifest_version),
@@ -369,7 +457,7 @@ pub async fn sync_once(client: &GatewayClient, params: &SyncParams, verbose: boo
     } else {
         println!("gateway staged {staged} files without commit");
     }
-    Ok(())
+    Ok(outcome)
 }
 
 /// Upload the requested paths in bounded chunk batches.
@@ -514,9 +602,19 @@ async fn flush_batch(
     }
 }
 
+/// Schema version of the heartbeat record written by this build.
+const GATEWAY_HEALTH_VERSION: u32 = 1;
+
 /// Resident health state written as a heartbeat file.
-#[derive(Debug, Clone, serde::Serialize)]
+///
+/// The format only ever gains fields: supervisors parse leniently, treating
+/// an absent `version` as the earliest shape.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GatewayHealth {
+    /// Heartbeat schema version; absent in records written before
+    /// versioning was introduced.
+    #[serde(default)]
+    pub version: u32,
     /// Local path being supplied.
     pub path: String,
     /// Remote project id.
@@ -527,6 +625,27 @@ pub struct GatewayHealth {
     pub baseline_files: usize,
     /// Daemon start time in RFC3339.
     pub started_at: String,
+    /// Last forced full scan in RFC3339, if any.
+    #[serde(default)]
+    pub last_full_scan: Option<String>,
+}
+
+/// Build one heartbeat record for the current watch state.
+fn health_record(
+    params: &SyncParams,
+    baseline_files: usize,
+    started_at: &str,
+    last_full_scan: Option<String>,
+) -> GatewayHealth {
+    GatewayHealth {
+        version: GATEWAY_HEALTH_VERSION,
+        path: params.path.clone(),
+        project_id: params.project_id,
+        last_sync: Some(chrono::Utc::now().to_rfc3339()),
+        baseline_files,
+        started_at: started_at.to_string(),
+        last_full_scan,
+    }
 }
 
 /// Write the heartbeat file for process supervisors and health probes.
@@ -541,56 +660,90 @@ pub fn write_health_file(path: &std::path::Path, health: &GatewayHealth) -> Resu
     Ok(())
 }
 
+/// Persist the heartbeat when one is configured, warning otherwise.
+fn write_heartbeat(
+    params: &SyncParams,
+    baseline_files: usize,
+    started_at: &str,
+    last_full_scan: Option<String>,
+) {
+    let Some(path) = params.health_file.as_deref() else {
+        return;
+    };
+    let health = health_record(params, baseline_files, started_at, last_full_scan);
+    if let Err(e) = write_health_file(path, &health) {
+        eprintln!("warning: health write failed: {e:#}");
+    }
+}
+
+/// Build the fingerprint baseline from one scan's usable files.
+fn fingerprint_map(snapshot: &ScanSnapshot) -> BTreeMap<String, BaselineFingerprint> {
+    snapshot
+        .files
+        .iter()
+        .map(|(identity, file)| (identity.clone(), BaselineFingerprint::from(file)))
+        .collect()
+}
+
 /// Poll for local changes and push them as ingest events.
 ///
 /// The baseline lives in memory only; losing it rebuilds through one full
 /// sync pass, which is also the crash-recovery path for the resident daemon.
-pub async fn watch_loop(
-    client: &GatewayClient,
-    params: &SyncParams,
-    interval_secs: u64,
-    verbose: bool,
-    health_file: Option<std::path::PathBuf>,
-) -> Result<()> {
-    sync_once(client, params, verbose).await?;
-    let mut baseline: BTreeMap<String, BaselineFingerprint> = scan_local(params)
-        .await?
-        .files
-        .iter()
-        .map(|(identity, file)| (identity.clone(), BaselineFingerprint::from(file)))
-        .collect();
+/// Each poll rescans incrementally against the previous round's entries so
+/// unchanged files skip re-hashing, and a forced full scan runs every fixed
+/// number of rounds or within a fixed wall-clock window, whichever comes
+/// first, so reuse cannot hide a change indefinitely. Change detection
+/// itself always compares the size, modification time and content hash
+/// triple of the baseline; the reuse decision never takes part in it.
+pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bool) -> Result<()> {
+    let first = sync_once(client, params, verbose).await?;
+    let mut baseline = fingerprint_map(&first.snapshot);
+    let mut previous_entries = first.entries;
+    let mut polls_since_full: usize = 0;
+    let mut last_full_scan = Instant::now();
+    let mut last_full_scan_at = Some(chrono::Utc::now().to_rfc3339());
     let started_at = chrono::Utc::now().to_rfc3339();
+    let interval_secs = params.interval_secs.max(params.min_interval_secs);
     println!(
         "gateway watching {} (poll every {interval_secs}s)",
         params.path
     );
-    if let Some(path) = &health_file {
-        let health = GatewayHealth {
-            path: params.path.clone(),
-            project_id: params.project_id,
-            last_sync: Some(chrono::Utc::now().to_rfc3339()),
-            baseline_files: baseline.len(),
-            started_at: started_at.clone(),
-        };
-        if let Err(e) = write_health_file(path, &health) {
-            eprintln!("warning: health write failed: {e:#}");
-        }
-    }
-    let interval_secs = interval_secs.max(1);
+    write_heartbeat(
+        params,
+        baseline.len(),
+        &started_at,
+        last_full_scan_at.clone(),
+    );
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
-        let snapshot = match scan_local(params).await {
-            Ok(snapshot) => snapshot,
+        let now = Instant::now();
+        let force_full = should_force_full(polls_since_full, last_full_scan, now);
+        let outcome = match scan_local(
+            params,
+            if force_full {
+                None
+            } else {
+                Some(&previous_entries)
+            },
+        )
+        .await
+        {
+            Ok(outcome) => outcome,
             Err(e) => {
                 eprintln!("warning: rescan failed: {e:#}");
                 continue;
             }
         };
-        let current: BTreeMap<String, BaselineFingerprint> = snapshot
-            .files
-            .iter()
-            .map(|(identity, file)| (identity.clone(), BaselineFingerprint::from(file)))
-            .collect();
+        if force_full {
+            polls_since_full = 0;
+            last_full_scan = now;
+            last_full_scan_at = Some(chrono::Utc::now().to_rfc3339());
+        } else {
+            polls_since_full += 1;
+        }
+        previous_entries = outcome.entries;
+        let snapshot = outcome.snapshot;
+        let current = fingerprint_map(&snapshot);
         let mut events = Vec::new();
         for identity in current.keys() {
             let Some(file) = snapshot.files.get(identity) else {
@@ -627,41 +780,52 @@ pub async fn watch_loop(
         if verbose {
             println!("pushing {} change(s)", events.len());
         }
-        if events.len() > WATCH_FULL_SYNC_THRESHOLD {
-            if let Err(e) = sync_once(client, params, verbose).await {
-                eprintln!("warning: fallback sync failed: {e:#}");
-                continue;
-            }
-        } else {
-            let request = IngestEventRequest { events };
-            let url = format!("/api/project/{}/ingest/event", params.project_id);
-            match client.post::<_, IngestEventResponse>(&url, &request).await {
-                Ok(response) => {
-                    if !response.errors.is_empty() {
-                        for error in &response.errors {
-                            eprintln!("warning: {error}");
-                        }
-                    }
+        if events.len() > params.full_sync_threshold {
+            // Too many changes for the event path: fall back to one full
+            // sync pass, which also counts as this round's forced full scan.
+            match sync_once(client, params, verbose).await {
+                Ok(outcome) => {
+                    previous_entries = outcome.entries;
+                    baseline = fingerprint_map(&outcome.snapshot);
+                    polls_since_full = 0;
+                    last_full_scan = Instant::now();
+                    last_full_scan_at = Some(chrono::Utc::now().to_rfc3339());
+                    write_heartbeat(
+                        params,
+                        baseline.len(),
+                        &started_at,
+                        last_full_scan_at.clone(),
+                    );
                 }
                 Err(e) => {
-                    eprintln!("warning: event push failed: {e:#}");
+                    eprintln!("warning: fallback sync failed: {e:#}");
                     continue;
                 }
             }
+            continue;
         }
-        baseline = current;
-        if let Some(path) = &health_file {
-            let health = GatewayHealth {
-                path: params.path.clone(),
-                project_id: params.project_id,
-                last_sync: Some(chrono::Utc::now().to_rfc3339()),
-                baseline_files: baseline.len(),
-                started_at: started_at.clone(),
-            };
-            if let Err(e) = write_health_file(path, &health) {
-                eprintln!("warning: health write failed: {e:#}");
+        let request = IngestEventRequest { events };
+        let url = format!("/api/project/{}/ingest/event", params.project_id);
+        match client.post::<_, IngestEventResponse>(&url, &request).await {
+            Ok(response) => {
+                if !response.errors.is_empty() {
+                    for error in &response.errors {
+                        eprintln!("warning: {error}");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("warning: event push failed: {e:#}");
+                continue;
             }
         }
+        baseline = current;
+        write_heartbeat(
+            params,
+            baseline.len(),
+            &started_at,
+            last_full_scan_at.clone(),
+        );
     }
 }
 
@@ -787,5 +951,120 @@ mod tests {
         let (encoded, compressed) = maybe_compress(&repetitive, true);
         assert!(compressed);
         assert!(encoded.len() < repetitive.len());
+    }
+
+    #[test]
+    fn defaults_are_the_shared_contract_of_every_entry_point() {
+        let params = SyncParams::with_defaults(3, "/srv/repo");
+        assert_eq!(params.project_id, 3);
+        assert_eq!(params.path, "/srv/repo");
+        assert_eq!(params.extensions, "");
+        assert_eq!(params.exclude, "node_modules,target,.git,vendor");
+        assert!(params.gitignore);
+        assert!(params.commit);
+        assert_eq!(params.compress, compression_enabled());
+        assert_eq!(params.interval_secs, 5);
+        assert_eq!(params.min_interval_secs, 1);
+        assert_eq!(params.full_sync_threshold, 100);
+        assert!(params.health_file.is_none());
+    }
+
+    #[test]
+    fn forced_full_scan_trips_on_rounds_or_time_whichever_comes_first() {
+        let base = Instant::now();
+        assert!(!should_force_full(0, base, base));
+        assert!(!should_force_full(
+            FULL_SCAN_EVERY_POLLS - 1,
+            base,
+            base + Duration::from_secs(1)
+        ));
+        assert!(should_force_full(FULL_SCAN_EVERY_POLLS, base, base));
+        assert!(!should_force_full(0, base, base + Duration::from_secs(299)));
+        assert!(should_force_full(0, base, base + FULL_SCAN_INTERVAL));
+    }
+
+    #[test]
+    fn heartbeat_is_versioned_and_parses_legacy_records_leniently() {
+        let params = SyncParams::with_defaults(9, "/srv/repo");
+        let record = health_record(&params, 12, "2026-01-01T00:00:00Z", None);
+        assert_eq!(record.version, GATEWAY_HEALTH_VERSION);
+        assert_eq!(
+            record.version,
+            serde_json::to_value(&record)
+                .expect("health serializes")
+                .get("version")
+                .and_then(|v| v.as_u64())
+                .expect("version field is written") as u32
+        );
+        let legacy = serde_json::json!({
+            "path": "/srv/repo",
+            "project_id": 9,
+            "last_sync": null,
+            "baseline_files": 3,
+            "started_at": "2025-01-01T00:00:00Z"
+        });
+        let parsed: GatewayHealth =
+            serde_json::from_value(legacy).expect("legacy heartbeat parses leniently");
+        assert_eq!(parsed.version, 0);
+        assert!(parsed.last_full_scan.is_none());
+    }
+
+    #[tokio::test]
+    async fn incremental_rescan_keeps_hashes_and_detects_tail_rewrite() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}").expect("write a.rs");
+        let params = SyncParams::with_defaults(7, dir.path().to_string_lossy().to_string());
+        let first = scan_local(&params, None).await.expect("first scan");
+        let hash_before = first
+            .snapshot
+            .files
+            .get("a.rs")
+            .expect("a.rs is usable")
+            .content_hash
+            .clone()
+            .expect("a.rs carries a content hash");
+
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\nfn extra() {}").expect("rewrite a.rs");
+        std::fs::write(dir.path().join("b.rs"), "fn b() {}").expect("write b.rs");
+        let second = scan_local(&params, Some(&first.entries))
+            .await
+            .expect("incremental scan");
+        let rewritten = second
+            .snapshot
+            .files
+            .get("a.rs")
+            .expect("a.rs still usable")
+            .content_hash
+            .clone()
+            .expect("rewritten a.rs carries a hash");
+        assert_ne!(
+            rewritten, hash_before,
+            "a tail rewrite must surface as a new hash"
+        );
+        assert!(
+            second.snapshot.files.contains_key("b.rs"),
+            "new files are unaffected by reuse"
+        );
+
+        let third = scan_local(&params, Some(&second.entries))
+            .await
+            .expect("second incremental scan");
+        assert_eq!(
+            third
+                .snapshot
+                .files
+                .get("a.rs")
+                .and_then(|f| f.content_hash.as_deref()),
+            Some(rewritten.as_str()),
+            "an unchanged file keeps its hash across incremental passes"
+        );
+        std::fs::remove_file(dir.path().join("b.rs")).expect("remove b.rs");
+        let fourth = scan_local(&params, Some(&third.entries))
+            .await
+            .expect("third incremental scan");
+        assert!(
+            !fourth.snapshot.files.contains_key("b.rs"),
+            "deleted files disappear from the snapshot"
+        );
     }
 }

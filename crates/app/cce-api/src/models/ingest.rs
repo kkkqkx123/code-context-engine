@@ -123,8 +123,10 @@ fn default_total_chunks() -> u32 {
 pub struct IngestBatchRequest {
     /// File chunks to stage on the server.
     pub files: Vec<IngestedFile>,
-    /// Manifest version this batch belongs to. Zero means the legacy
-    /// whole-file pass without resume bookkeeping.
+    /// Manifest version this batch belongs to. Zero keeps no resume
+    /// bookkeeping: nothing is staged for resume and every file must
+    /// arrive whole inside one batch. Decoding, per-chunk verification,
+    /// reassembly, and the whole-file check are identical for both forms.
     #[serde(default)]
     pub manifest_version: u64,
 }
@@ -172,6 +174,11 @@ pub enum IngestEventKind {
 }
 
 /// One gateway-observed file change.
+///
+/// Events travel whole and raw: the contract carries no compression flag
+/// and no chunk fields, so a caller that would exceed the entry-count or
+/// single-file ingest bounds falls back to a full sync instead of
+/// splitting an event.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IngestEvent {
     /// Canonical project-relative path with forward slashes.
