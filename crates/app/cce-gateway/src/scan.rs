@@ -10,6 +10,47 @@ use cce_scanner::{FSScanner, FileEntry, ScanOptions};
 
 use super::params::SyncParams;
 
+/// Load previously cached scan entries for cross-restart hash reuse.
+///
+/// A missing or unreadable cache yields an empty map so the caller falls back
+/// to a full scan. Corruption never fails synchronization; it only costs one
+/// full pass.
+pub fn load_cached_entries(path: &std::path::Path) -> HashMap<PathBuf, FileEntry> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return HashMap::new(),
+        Err(e) => {
+            eprintln!("warning: scan cache unreadable, falling back to full scan: {e:#}");
+            return HashMap::new();
+        }
+    };
+    match serde_json::from_slice::<HashMap<PathBuf, FileEntry>>(&bytes) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("warning: scan cache corrupted, falling back to full scan: {e:#}");
+            HashMap::new()
+        }
+    }
+}
+
+/// Persist scan entries so the next start can reuse unchanged file hashes.
+///
+/// Failures are reported to the caller; sync and watch paths only warn so a
+/// cache write problem never blocks pushing file contents.
+pub fn save_cached_entries(
+    path: &std::path::Path,
+    entries: &HashMap<PathBuf, FileEntry>,
+) -> Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).context("scan cache parent must be creatable")?;
+    }
+    let content = serde_json::to_vec(entries).context("scan cache must serialize")?;
+    std::fs::write(path, content).context("scan cache must be writable")?;
+    Ok(())
+}
+
 /// Usable scan result for gateway pushes.
 #[derive(Debug)]
 pub struct ScanSnapshot {

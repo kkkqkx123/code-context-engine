@@ -37,6 +37,17 @@ pub struct SyncParams {
     pub full_sync_threshold: usize,
     /// Heartbeat file for supervisors and health probes, if any.
     pub health_file: Option<PathBuf>,
+    /// Scan cache file for cross-restart hash reuse, if any.
+    ///
+    /// Disabled by default; when set, successful scans persist their entries
+    /// so the next start can skip re-hashing unchanged files. The cache is a
+    /// pure read optimization and never decides change detection.
+    pub cache_file: Option<PathBuf>,
+    /// Whether the watch interval adapts to the baseline file count.
+    ///
+    /// Disabled by default; when enabled, medium and large trees wait longer
+    /// between polls. The default picks up `CCE_GATEWAY_ADAPTIVE_INTERVAL`.
+    pub adaptive_interval: bool,
     /// Emit single-line JSON progress records instead of human text.
     pub json_progress: bool,
 }
@@ -59,7 +70,37 @@ impl SyncParams {
             min_interval_secs: 1,
             full_sync_threshold: 100,
             health_file: None,
+            cache_file: None,
+            adaptive_interval: adaptive_enabled(),
             json_progress: false,
+        }
+    }
+
+    /// Effective poll interval for the given baseline size.
+    ///
+    /// Small trees keep the configured interval; medium and large trees wait
+    /// longer when adaptation is enabled. The configured lower bound always
+    /// applies first, so an explicit interval stays a floor rather than a
+    /// ceiling.
+    pub fn effective_interval(&self, file_count: usize) -> u64 {
+        Self::adaptive_interval_for(
+            file_count,
+            self.interval_secs.max(self.min_interval_secs),
+            self.adaptive_interval,
+        )
+    }
+
+    /// Resolve one poll interval from a file count and the adaptation flag.
+    pub fn adaptive_interval_for(file_count: usize, base_secs: u64, adaptive: bool) -> u64 {
+        if !adaptive {
+            return base_secs;
+        }
+        if file_count < 1000 {
+            base_secs
+        } else if file_count < 10_000 {
+            base_secs.max(10)
+        } else {
+            base_secs.max(30)
         }
     }
 }
@@ -68,6 +109,16 @@ impl SyncParams {
 /// default; the remote decompresses before hash verification.
 pub fn compression_enabled() -> bool {
     std::env::var("CCE_GATEWAY_COMPRESS")
+        .map(|v| {
+            let v = v.trim().to_lowercase();
+            v == "1" || v == "true" || v == "yes" || v == "on"
+        })
+        .unwrap_or(false)
+}
+
+/// Whether watch interval adaptation is enabled. Opt-in, off by default.
+pub fn adaptive_enabled() -> bool {
+    std::env::var("CCE_GATEWAY_ADAPTIVE_INTERVAL")
         .map(|v| {
             let v = v.trim().to_lowercase();
             v == "1" || v == "true" || v == "yes" || v == "on"
@@ -93,5 +144,17 @@ mod tests {
         assert_eq!(params.min_interval_secs, 1);
         assert_eq!(params.full_sync_threshold, 100);
         assert!(params.health_file.is_none());
+        assert!(params.cache_file.is_none());
+        assert_eq!(params.adaptive_interval, adaptive_enabled());
+    }
+
+    #[test]
+    fn adaptive_interval_keeps_small_trees_and_relaxes_large_ones() {
+        assert_eq!(SyncParams::adaptive_interval_for(10, 5, false), 5);
+        assert_eq!(SyncParams::adaptive_interval_for(50_000, 5, false), 5);
+        assert_eq!(SyncParams::adaptive_interval_for(10, 5, true), 5);
+        assert_eq!(SyncParams::adaptive_interval_for(5_000, 5, true), 10);
+        assert_eq!(SyncParams::adaptive_interval_for(50_000, 5, true), 30);
+        assert_eq!(SyncParams::adaptive_interval_for(50_000, 60, true), 60);
     }
 }

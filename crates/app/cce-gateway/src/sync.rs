@@ -14,7 +14,10 @@ use cce_api::models::{
 
 use super::client::GatewayClient;
 use super::params::SyncParams;
-use super::scan::{ScanOutcome, ScanSnapshot, manifest_version_for_snapshot, scan_local};
+use super::scan::{
+    ScanOutcome, ScanSnapshot, load_cached_entries, manifest_version_for_snapshot,
+    save_cached_entries, scan_local,
+};
 
 /// Wire byte budget per upload batch, kept below the server body bound.
 ///
@@ -24,15 +27,33 @@ const BATCH_WIRE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Push one full sync pass: manifest, missing contents, then commit.
 ///
-/// The pass always scans without hash reuse: the manifest covers the whole
-/// tree, so reuse would only hide a locally drifted file. The returned
-/// outcome seeds the watch loop's baseline and its next incremental pass.
+/// When a scan cache file is configured, the pass loads the previous entries
+/// and scans incrementally so unchanged files skip re-hashing; without a
+/// cache the pass scans everything. The manifest still covers the whole tree
+/// and change detection still compares fingerprints, so reuse only saves
+/// reads. The returned outcome seeds the watch loop's baseline and its next
+/// incremental pass.
 pub async fn sync_once(
     client: &GatewayClient,
     params: &SyncParams,
     verbose: bool,
 ) -> Result<ScanOutcome> {
-    let outcome = scan_local(params, None).await?;
+    let cached = params
+        .cache_file
+        .as_deref()
+        .map(load_cached_entries)
+        .unwrap_or_default();
+    let previous = if cached.is_empty() {
+        None
+    } else {
+        Some(cached)
+    };
+    let outcome = scan_local(params, previous.as_ref()).await?;
+    if let Some(cache_file) = params.cache_file.as_deref()
+        && let Err(e) = save_cached_entries(cache_file, &outcome.entries)
+    {
+        eprintln!("warning: scan cache write failed: {e:#}");
+    }
     let snapshot = &outcome.snapshot;
     if params.json_progress {
         println!(

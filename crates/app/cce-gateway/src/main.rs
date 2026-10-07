@@ -72,6 +72,20 @@ struct Args {
     #[arg(long)]
     interval_secs: Option<u64>,
 
+    /// Scan cache file for cross-restart hash reuse.
+    #[arg(long, env = "CCE_GATEWAY_CACHE_FILE")]
+    cache_file: Option<std::path::PathBuf>,
+
+    /// Adapt the poll interval to the baseline file count.
+    #[arg(
+        long,
+        action = clap::ArgAction::Set,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        require_equals = true
+    )]
+    adaptive_interval: Option<bool>,
+
     /// Heartbeat file for supervisors and health probes.
     #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
     health_file: Option<std::path::PathBuf>,
@@ -109,6 +123,12 @@ fn params_from(args: &Args) -> SyncParams {
     if let Some(interval_secs) = args.interval_secs {
         params.interval_secs = interval_secs;
     }
+    if let Some(cache_file) = args.cache_file.clone() {
+        params.cache_file = Some(cache_file);
+    }
+    if let Some(adaptive_interval) = args.adaptive_interval {
+        params.adaptive_interval = adaptive_interval;
+    }
     params.health_file = args.health_file.clone();
     params
 }
@@ -142,6 +162,8 @@ mod tests {
             no_commit: false,
             compress: None,
             interval_secs: None,
+            cache_file: None,
+            adaptive_interval: None,
             health_file: None,
             token: None,
             verbose: false,
@@ -166,6 +188,8 @@ mod tests {
         args.no_commit = true;
         args.compress = Some(false);
         args.interval_secs = Some(2);
+        args.cache_file = Some(std::path::PathBuf::from("/tmp/scan-cache.json"));
+        args.adaptive_interval = Some(true);
         args.health_file = Some(std::path::PathBuf::from("/run/gateway.json"));
         let params = params_from(&args);
         assert_eq!(params.extensions, "rs");
@@ -174,6 +198,11 @@ mod tests {
         assert!(!params.commit);
         assert!(!params.compress);
         assert_eq!(params.interval_secs, 2);
+        assert_eq!(
+            params.cache_file,
+            Some(std::path::PathBuf::from("/tmp/scan-cache.json"))
+        );
+        assert!(params.adaptive_interval);
         assert_eq!(
             params.health_file,
             Some(std::path::PathBuf::from("/run/gateway.json"))

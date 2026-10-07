@@ -19,6 +19,7 @@ fn apply_shared(
     exclude: &Option<String>,
     gitignore: &Option<bool>,
     compress: &Option<bool>,
+    cache_file: &Option<std::path::PathBuf>,
     health_file: &Option<std::path::PathBuf>,
 ) {
     if let Some(extensions) = extensions {
@@ -32,6 +33,9 @@ fn apply_shared(
     }
     if let Some(compress) = compress {
         params.compress = *compress;
+    }
+    if let Some(cache_file) = cache_file {
+        params.cache_file = Some(cache_file.clone());
     }
     params.health_file = health_file.clone();
 }
@@ -51,6 +55,7 @@ fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
             gitignore,
             no_commit,
             compress,
+            cache_file,
             health_file,
             token: _,
         } => {
@@ -61,6 +66,7 @@ fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
                 exclude,
                 gitignore,
                 compress,
+                cache_file,
                 health_file,
             );
             if *no_commit {
@@ -77,6 +83,8 @@ fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
             gitignore,
             interval_secs,
             compress,
+            cache_file,
+            adaptive_interval,
             health_file,
             token: _,
         } => {
@@ -87,10 +95,14 @@ fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
                 exclude,
                 gitignore,
                 compress,
+                cache_file,
                 health_file,
             );
             if let Some(interval_secs) = interval_secs {
                 params.interval_secs = *interval_secs;
+            }
+            if let Some(adaptive_interval) = adaptive_interval {
+                params.adaptive_interval = *adaptive_interval;
             }
             params.json_progress = json_progress;
             params
@@ -133,6 +145,7 @@ mod tests {
             gitignore: None,
             no_commit: false,
             compress: None,
+            cache_file: None,
             health_file: None,
             token: None,
         }
@@ -148,6 +161,8 @@ mod tests {
             gitignore: None,
             interval_secs: None,
             compress: None,
+            cache_file: None,
+            adaptive_interval: None,
             health_file: None,
             token: None,
         }
@@ -176,6 +191,7 @@ mod tests {
             gitignore: Some(false),
             no_commit: true,
             compress: Some(false),
+            cache_file: Some(std::path::PathBuf::from("/tmp/scan-cache.json")),
             health_file: Some(std::path::PathBuf::from("/run/gateway.json")),
             token: Some("explicit-token".to_string()),
         };
@@ -186,6 +202,10 @@ mod tests {
         assert!(!params.commit);
         assert!(!params.compress);
         assert_eq!(params.interval_secs, 5);
+        assert_eq!(
+            params.cache_file,
+            Some(std::path::PathBuf::from("/tmp/scan-cache.json"))
+        );
         assert_eq!(
             params.health_file,
             Some(std::path::PathBuf::from("/run/gateway.json"))
@@ -201,6 +221,8 @@ mod tests {
             gitignore: Some(false),
             interval_secs: Some(2),
             compress: Some(true),
+            cache_file: None,
+            adaptive_interval: Some(true),
             health_file: None,
             token: None,
         };
@@ -211,6 +233,7 @@ mod tests {
         assert_eq!(params.interval_secs, 2);
         assert!(params.compress);
         assert!(params.commit);
+        assert!(params.adaptive_interval);
         assert!(params.json_progress);
     }
 }

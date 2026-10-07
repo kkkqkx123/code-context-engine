@@ -14,7 +14,7 @@ use super::client::GatewayClient;
 use super::health::write_heartbeat;
 use super::params::SyncParams;
 use super::scan::{
-    BaselineFingerprint, ScanSnapshot, fingerprints_match, scan_local,
+    BaselineFingerprint, ScanSnapshot, fingerprints_match, save_cached_entries, scan_local,
 };
 use super::sync::sync_once;
 
@@ -46,14 +46,16 @@ fn fingerprint_map(snapshot: &ScanSnapshot) -> BTreeMap<String, BaselineFingerpr
 
 /// Poll for local changes and push them as ingest events.
 ///
-/// The baseline lives in memory only; losing it rebuilds through one full
-/// sync pass, which is also the crash-recovery path for the resident daemon.
+/// The baseline lives in memory with an optional on-disk scan cache for
+/// cross-restart hash reuse; losing both rebuilds through one full sync
+/// pass, which is also the crash-recovery path for the resident daemon.
 /// Each poll rescans incrementally against the previous round's entries so
 /// unchanged files skip re-hashing, and a forced full scan runs every fixed
 /// number of rounds or within a fixed wall-clock window, whichever comes
 /// first, so reuse cannot hide a change indefinitely. Change detection
 /// itself always compares the size, modification time and content hash
-/// triple of the baseline; the reuse decision never takes part in it.
+/// triple of the baseline; the reuse decision never takes part in it. The
+/// wait between polls adapts to the baseline size when enabled.
 pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bool) -> Result<()> {
     let first = sync_once(client, params, verbose).await?;
     let mut baseline = fingerprint_map(&first.snapshot);
@@ -62,7 +64,7 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
     let mut last_full_scan = Instant::now();
     let mut last_full_scan_at = Some(chrono::Utc::now().to_rfc3339());
     let started_at = chrono::Utc::now().to_rfc3339();
-    let interval_secs = params.interval_secs.max(params.min_interval_secs);
+    let mut interval_secs = params.effective_interval(baseline.len());
     if params.json_progress {
         println!(
             "{}",
@@ -113,6 +115,11 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
             polls_since_full += 1;
         }
         previous_entries = outcome.entries;
+        if let Some(cache_file) = params.cache_file.as_deref()
+            && let Err(e) = save_cached_entries(cache_file, &previous_entries)
+        {
+            eprintln!("warning: scan cache write failed: {e:#}");
+        }
         let snapshot = outcome.snapshot;
         let current = fingerprint_map(&snapshot);
         let mut events = Vec::new();
@@ -146,6 +153,8 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
             }
         }
         if events.is_empty() {
+            interval_secs = params.effective_interval(current.len());
+            baseline = current;
             continue;
         }
         if params.json_progress {
@@ -166,6 +175,7 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
                 Ok(outcome) => {
                     previous_entries = outcome.entries;
                     baseline = fingerprint_map(&outcome.snapshot);
+                    interval_secs = params.effective_interval(baseline.len());
                     polls_since_full = 0;
                     last_full_scan = Instant::now();
                     last_full_scan_at = Some(chrono::Utc::now().to_rfc3339());
@@ -199,6 +209,7 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
             }
         }
         baseline = current;
+        interval_secs = params.effective_interval(baseline.len());
         write_heartbeat(
             params,
             baseline.len(),

@@ -1,5 +1,6 @@
 //! Shared API models for CCE CLI and Server
 
+pub mod http;
 pub mod models;
 
 /// Read the admission token from the environment.

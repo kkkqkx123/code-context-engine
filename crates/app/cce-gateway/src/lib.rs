@@ -28,10 +28,10 @@ mod watch;
 
 pub use client::GatewayClient;
 pub use health::{GatewayHealth, write_health_file};
-pub use params::{SyncParams, compression_enabled};
+pub use params::{SyncParams, adaptive_enabled, compression_enabled};
 pub use scan::{
     BaselineFingerprint, ScanOutcome, ScanSnapshot, ScannedFile, fingerprints_match,
-    manifest_version_for_snapshot, scan_local,
+    load_cached_entries, manifest_version_for_snapshot, save_cached_entries, scan_local,
 };
 pub use sync::{chunk_hash, maybe_compress, sync_once, upload_paths};
 pub use watch::watch_loop;

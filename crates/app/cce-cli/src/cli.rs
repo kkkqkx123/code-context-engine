@@ -1053,6 +1053,10 @@ pub enum GatewayCommands {
         )]
         compress: Option<bool>,
 
+        /// Scan cache file for cross-restart hash reuse
+        #[arg(long, env = "CCE_GATEWAY_CACHE_FILE")]
+        cache_file: Option<std::path::PathBuf>,
+
         /// Heartbeat file for supervisors and health probes
         #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
         health_file: Option<std::path::PathBuf>,
@@ -1104,6 +1108,20 @@ pub enum GatewayCommands {
             require_equals = true
         )]
         compress: Option<bool>,
+
+        /// Scan cache file for cross-restart hash reuse
+        #[arg(long, env = "CCE_GATEWAY_CACHE_FILE")]
+        cache_file: Option<std::path::PathBuf>,
+
+        /// Adapt the poll interval to the baseline file count
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        adaptive_interval: Option<bool>,
 
         /// Heartbeat file for supervisors and health probes
         #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
