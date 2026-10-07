@@ -61,7 +61,12 @@ The frontend development server proxies API requests to the backend:
 - Frontend: `http://localhost:3001`
 - Backend API: `http://localhost:9000` (proxied via `/api` prefix)
 
-This is configured in `vite.config.ts`.
+This is configured in `vite.config.ts`. To test against a different backend,
+set `CCE_DEV_API_TARGET` before starting the dev server:
+
+```shell
+CCE_DEV_API_TARGET=http://10.0.0.5:9000 npm run dev
+```
 
 ## Migration Notes
 

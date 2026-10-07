@@ -86,10 +86,18 @@ frontend/
 
 ## API Configuration
 
-By default, the frontend connects to the backend at `http://localhost:9000`. To change this:
+By default, the frontend talks to the backend over **same-origin relative
+paths**: the dev server proxies `/api` to `http://localhost:9000` (override
+the proxy target with `CCE_DEV_API_TARGET`), and in production the static
+build is served behind the gateway at the same origin.
 
-1. Create a `.env.local` file
+Only for cross-origin deployments (frontend and backend on different
+origins):
+
+1. Create a `.env.local` file (see `.env.example`)
 2. Add `VITE_API_BASE_URL=http://your-backend-url`
+3. Register the frontend origin in the backend CORS whitelist
+   (`CCE_ADMISSION_CORS_ORIGINS`)
 
 ## Technology Stack
 

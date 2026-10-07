@@ -23,8 +23,11 @@ use cce_api::models::{
 };
 use cce_scanner::{FSScanner, ScanOptions};
 
-/// Raw byte budget per upload batch, kept below the server body bound.
-const BATCH_RAW_BYTES: u64 = 4 * 1024 * 1024;
+/// Wire byte budget per upload batch, kept below the server body bound.
+///
+/// Accounting uses base64 wire length so a batch never exceeds the admission
+/// body limit after transport growth.
+const BATCH_WIRE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Changes above this count fall back to a full sync pass.
 const WATCH_FULL_SYNC_THRESHOLD: usize = 100;
@@ -44,10 +47,7 @@ impl GatewayClient {
             .timeout(std::time::Duration::from_secs(300))
             .build()
             .context("Failed to create gateway HTTP client")?;
-        let token = std::env::var("CCE_API_TOKEN")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
+        let token = cce_api::gateway_token_from_env();
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -97,7 +97,10 @@ pub struct SyncParams {
     pub gitignore: bool,
     /// Whether to run the index commit after staging.
     pub commit: bool,
-    /// Whether to compress chunks before upload, off by default.
+    /// Whether to compress batch chunks before upload, off by default.
+    ///
+    /// Compression only applies to the batch path; incremental events always
+    /// carry raw bytes so the event entry stays a single whole-file shape.
     pub compress: bool,
 }
 
@@ -136,6 +139,41 @@ pub struct ScannedFile {
     pub content_hash: Option<String>,
 }
 
+/// Baseline fingerprint for incremental comparison.
+///
+/// The full-content hash stays authoritative. Size and modification time make
+/// hash-less entries comparable and keep the idempotence key explicit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaselineFingerprint {
+    /// File size in bytes at baseline time.
+    pub size: u64,
+    /// Modification time at baseline time.
+    pub modified_secs: i64,
+    /// Full-content hash when known.
+    pub content_hash: Option<String>,
+}
+
+impl From<&ScannedFile> for BaselineFingerprint {
+    fn from(file: &ScannedFile) -> Self {
+        Self {
+            size: file.size,
+            modified_secs: file.modified_secs,
+            content_hash: file.content_hash.clone(),
+        }
+    }
+}
+
+/// Whether the current file matches the baseline fingerprint.
+///
+/// Hashed entries compare by hash only. Hash-less entries fall back to the
+/// size plus modification time comparison.
+pub fn fingerprints_match(previous: &BaselineFingerprint, current: &ScannedFile) -> bool {
+    if previous.content_hash.is_some() || current.content_hash.is_some() {
+        return previous.content_hash == current.content_hash;
+    }
+    previous.size == current.size && previous.modified_secs == current.modified_secs
+}
+
 /// Stable manifest version for a snapshot. The same file set yields the
 /// same version so an interrupted push can resume without retransmitting
 /// received chunks; any content change yields a new version.
@@ -165,11 +203,11 @@ pub fn manifest_version_for_snapshot(snapshot: &ScanSnapshot) -> u64 {
 }
 
 /// Hash one chunk of raw bytes for per-chunk verification.
+///
+/// Delegates to the shared hash domain so gateway and server verify the same
+/// digest for the same bytes.
 pub fn chunk_hash(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
+    cce_utils::hash::calculate_hash(bytes)
 }
 
 /// Optionally compress chunk bytes. Compression stays off unless the
@@ -185,6 +223,13 @@ pub fn maybe_compress(bytes: &[u8], compress: bool) -> (Vec<u8>, bool) {
 }
 
 /// Scan the local directory and return usable entries keyed by identity.
+///
+/// The scan uses the same traversal and ignore semantics as local indexing.
+/// The ingest bound is applied as the scanner size limit so oversized files
+/// are marked before hashing. The extension filter is an explicit user-side
+/// supply pre-filter; the remote project configuration stays authoritative
+/// for parsing. Plugin file filters are intentionally not applied here;
+/// oversupplied files are filtered again by the remote pipeline.
 pub async fn scan_local(params: &SyncParams) -> Result<ScanSnapshot> {
     let exclude_patterns: Vec<String> = params
         .exclude
@@ -208,8 +253,8 @@ pub async fn scan_local(params: &SyncParams) -> Result<ScanSnapshot> {
         respect_gitignore: params.gitignore,
         gitignore_patterns: Vec::new(),
         gitignore_path: None,
-        max_content_size: None,
-        max_file_size: None,
+        max_content_size: Some(MAX_INGEST_FILE_BYTES),
+        max_file_size: Some(MAX_INGEST_FILE_BYTES),
     };
     let mut scanner = FSScanner::new();
     let report = scanner
@@ -376,6 +421,14 @@ pub async fn upload_paths(
             ));
             continue;
         }
+        if let Some(expected) = file.content_hash.as_deref()
+            && cce_utils::hash::calculate_hash(&bytes) != expected
+        {
+            errors.push(format!(
+                "{identity}: changed between manifest and upload; a fresh manifest is required"
+            ));
+            continue;
+        }
         let total = total_chunks_for_size(bytes.len().max(1) as u64);
         let mut indices: Vec<u32> = wanted_indices.into_iter().collect();
         indices.sort_unstable();
@@ -388,11 +441,12 @@ pub async fn upload_paths(
             let chunk_bytes = &bytes[start..end];
             let hash = chunk_hash(chunk_bytes);
             let (payload_bytes, compressed) = maybe_compress(chunk_bytes, params.compress);
-            batch_bytes += chunk_bytes.len() as u64;
+            let content_base64 = base64::engine::general_purpose::STANDARD.encode(&payload_bytes);
+            batch_bytes += content_base64.len() as u64;
             batch.push(IngestedFile {
                 relative_path: identity.clone(),
                 content_hash: file.content_hash.clone(),
-                content_base64: base64::engine::general_purpose::STANDARD.encode(&payload_bytes),
+                content_base64,
                 chunk_index,
                 total_chunks: total,
                 chunk_hash: Some(hash),
@@ -400,7 +454,7 @@ pub async fn upload_paths(
             });
             if batch.len() >= MAX_INGEST_CHUNKS_PER_BATCH
                 || batch.len() >= MAX_INGEST_BATCH_FILES
-                || batch_bytes >= BATCH_RAW_BYTES
+                || batch_bytes >= BATCH_WIRE_BYTES
             {
                 flush_batch(
                     client,
@@ -499,11 +553,11 @@ pub async fn watch_loop(
     health_file: Option<std::path::PathBuf>,
 ) -> Result<()> {
     sync_once(client, params, verbose).await?;
-    let mut baseline: BTreeMap<String, Option<String>> = scan_local(params)
+    let mut baseline: BTreeMap<String, BaselineFingerprint> = scan_local(params)
         .await?
         .files
-        .into_iter()
-        .map(|(identity, file)| (identity, file.content_hash))
+        .iter()
+        .map(|(identity, file)| (identity.clone(), BaselineFingerprint::from(file)))
         .collect();
     let started_at = chrono::Utc::now().to_rfc3339();
     println!(
@@ -532,20 +586,23 @@ pub async fn watch_loop(
                 continue;
             }
         };
-        let current: BTreeMap<String, Option<String>> = snapshot
+        let current: BTreeMap<String, BaselineFingerprint> = snapshot
             .files
             .iter()
-            .map(|(identity, file)| (identity.clone(), file.content_hash.clone()))
+            .map(|(identity, file)| (identity.clone(), BaselineFingerprint::from(file)))
             .collect();
         let mut events = Vec::new();
-        for (identity, hash) in &current {
+        for identity in current.keys() {
+            let Some(file) = snapshot.files.get(identity) else {
+                continue;
+            };
             match baseline.get(identity) {
                 None => {
                     if let Some(event) = read_event(&snapshot, identity, IngestEventKind::Created) {
                         events.push(event);
                     }
                 }
-                Some(previous) if previous != hash => {
+                Some(previous) if !fingerprints_match(previous, file) => {
                     if let Some(event) = read_event(&snapshot, identity, IngestEventKind::Modified)
                     {
                         events.push(event);
@@ -609,6 +666,10 @@ pub async fn watch_loop(
 }
 
 /// Read one changed file into an ingest event.
+///
+/// Events always carry raw bytes without compression. Bytes are verified
+/// against the scan hash before assembly; drifted reads are dropped so the
+/// next poll can reconverge instead of pushing stale content.
 fn read_event(
     snapshot: &ScanSnapshot,
     identity: &str,
@@ -618,6 +679,12 @@ fn read_event(
     let bytes = std::fs::read(&file.absolute).ok()?;
     if bytes.len() as u64 > MAX_INGEST_FILE_BYTES {
         eprintln!("warning: {identity} exceeds the ingest bound and is skipped");
+        return None;
+    }
+    if let Some(expected) = file.content_hash.as_deref()
+        && cce_utils::hash::calculate_hash(&bytes) != expected
+    {
+        eprintln!("warning: {identity} changed after scanning and is skipped");
         return None;
     }
     Some(IngestEvent {
@@ -657,6 +724,58 @@ mod tests {
     fn chunk_hash_is_stable() {
         assert_eq!(chunk_hash(b"hello"), chunk_hash(b"hello"));
         assert!(chunk_hash(b"hello") != chunk_hash(b"world"));
+    }
+
+    #[test]
+    fn chunk_hash_shares_common_hash_domain() {
+        assert_eq!(
+            chunk_hash(b"hello"),
+            cce_utils::hash::calculate_hash(b"hello")
+        );
+    }
+
+    #[test]
+    fn baseline_matches_by_hash_when_present() {
+        let file = ScannedFile {
+            absolute: PathBuf::from("/tmp/a.rs"),
+            size: 10,
+            modified_secs: 7,
+            content_hash: Some("hash-a".to_string()),
+        };
+        let same = BaselineFingerprint {
+            size: 99,
+            modified_secs: 99,
+            content_hash: Some("hash-a".to_string()),
+        };
+        assert!(fingerprints_match(&same, &file));
+        let changed = BaselineFingerprint {
+            size: 10,
+            modified_secs: 7,
+            content_hash: Some("hash-b".to_string()),
+        };
+        assert!(!fingerprints_match(&changed, &file));
+    }
+
+    #[test]
+    fn baseline_falls_back_to_size_and_mtime_without_hash() {
+        let file = ScannedFile {
+            absolute: PathBuf::from("/tmp/a.rs"),
+            size: 10,
+            modified_secs: 7,
+            content_hash: None,
+        };
+        let same = BaselineFingerprint {
+            size: 10,
+            modified_secs: 7,
+            content_hash: None,
+        };
+        assert!(fingerprints_match(&same, &file));
+        let changed = BaselineFingerprint {
+            size: 11,
+            modified_secs: 7,
+            content_hash: None,
+        };
+        assert!(!fingerprints_match(&changed, &file));
     }
 
     #[test]

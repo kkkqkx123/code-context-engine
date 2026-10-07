@@ -51,7 +51,9 @@ export default defineConfig(({ mode }) => {
 			port: 3001,
 			proxy: {
 				'/api': {
-					target: 'http://localhost:9000',
+					// Backend target for the dev proxy; override to test against a
+					// remote backend, e.g. CCE_DEV_API_TARGET=http://10.0.0.5:9000
+					target: process.env.CCE_DEV_API_TARGET ?? 'http://localhost:9000',
 					changeOrigin: true,
 				},
 			},

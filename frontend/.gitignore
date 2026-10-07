@@ -24,5 +24,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Build analysis output
+stats.html
+
 # Testing
 coverage/

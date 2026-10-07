@@ -23,10 +23,7 @@ impl ApiClient {
         // Remote hosts sit behind the admission layer; the token travels in
         // the authorization header only when it is configured, so local use
         // sends exactly the same requests as before.
-        let token = std::env::var("CCE_API_TOKEN")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
+        let token = cce_api::gateway_token_from_env();
 
         Ok(Self {
             client,

@@ -8,8 +8,14 @@
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
 
-export const BASE_URL =
-	import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
+/**
+ * Base URL for the backend API.
+ * Defaults to same-origin relative paths: the dev server proxies `/api` to the
+ * backend, and in production the static build is served behind the gateway.
+ * Set VITE_API_BASE_URL only for cross-origin deployments (backend CORS
+ * whitelist must then include the frontend origin).
+ */
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 export class ApiError extends Error {
 	status: number;
