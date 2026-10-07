@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 
+use cce_storage_common::VectorStorage;
 use cce_storage_sqlite::ProjectIndexManifestRepository;
 
 use crate::error::OrchestratorError;
@@ -40,9 +41,9 @@ impl StorageCoordinator {
             .map_err(OrchestratorError::Storage)?
         };
 
-        if let Some(qdrant) = &self.qdrant {
+        if let Some(vector) = &self.vector {
             self.ensure_project_group_id()?;
-            let epochs: HashSet<i64> = qdrant
+            let epochs: HashSet<i64> = vector
                 .scroll_all_points()
                 .await?
                 .into_iter()
@@ -53,7 +54,7 @@ impl StorageCoordinator {
                 .filter(|epoch| !plan.protected_data_epochs.contains(epoch))
                 .collect();
             for epoch in epochs {
-                qdrant
+                vector
                     .delete_by_group_epoch(&self.project_group_id, epoch)
                     .await?;
             }

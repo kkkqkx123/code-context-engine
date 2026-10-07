@@ -107,7 +107,14 @@ CCE_LOG_FILE=
 
 ### 数据库配置
 
-#### Qdrant
+#### 向量后端
+
+| 变量名 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `CCE_DB_VECTOR_BACKEND` | enum | `local` | 向量后端: local, qdrant（切换后端需重建索引） |
+| `CCE_DB_VECTOR_DATA_DIR` | string | - | 本地向量数据目录（为空时取 SQLite 目录下的 vectors 子目录） |
+
+#### Qdrant（仅 `CCE_DB_VECTOR_BACKEND=qdrant` 时生效）
 
 | 变量名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|

@@ -34,6 +34,7 @@ use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 
 use super::super::error::OrchestratorError;
+use super::vector_store::VectorStore;
 
 pub(crate) mod bm25;
 pub(crate) mod candidate;
@@ -49,7 +50,7 @@ pub use mapping::build_bm25_documents;
 
 /// Storage coordinator managing multiple storage backends
 pub struct StorageCoordinator {
-    qdrant: Option<Arc<QdrantClient>>,
+    vector: Option<VectorStore>,
     bm25: Option<Arc<tokio::sync::Mutex<Bm25Client>>>,
     embedder: Option<Arc<OpenAICompatibleProvider>>,
     metadata_store: Option<Arc<SqliteClient>>,
@@ -94,7 +95,7 @@ impl StorageCoordinator {
             ));
         }
         Ok(Self {
-            qdrant: None,
+            vector: None,
             bm25: None,
             embedder: None,
             metadata_store: None,
@@ -119,9 +120,21 @@ impl StorageCoordinator {
         self
     }
 
-    /// Set Qdrant client
+    /// Set vector backend directly (local or Qdrant enum dispatch).
+    pub fn with_vector(mut self, store: VectorStore) -> Self {
+        self.vector = Some(store);
+        self
+    }
+
+    /// Set Qdrant client (wraps into the vector backend enum).
     pub fn with_qdrant(mut self, client: Arc<QdrantClient>) -> Self {
-        self.qdrant = Some(client);
+        self.vector = Some(VectorStore::Qdrant(client));
+        self
+    }
+
+    /// Set embedded local vector store.
+    pub fn with_local(mut self, store: Arc<cce_storage_local::LocalVectorStore>) -> Self {
+        self.vector = Some(VectorStore::Local(store));
         self
     }
 
@@ -232,39 +245,61 @@ impl StorageCoordinator {
 
     /// Check if storage is configured
     pub fn is_configured(&self) -> bool {
-        self.qdrant.is_some() || self.bm25.is_some()
+        self.vector.is_some() || self.bm25.is_some()
     }
 
-    /// Check if Qdrant vector storage is configured
+    /// Check if any vector backend (local or Qdrant) is configured.
+    pub fn has_vector(&self) -> bool {
+        self.vector.is_some()
+    }
+
+    /// Check if Qdrant vector storage is configured (remote branch only).
     pub fn has_qdrant(&self) -> bool {
-        self.qdrant.is_some()
+        matches!(self.vector.as_ref(), Some(VectorStore::Qdrant(_)))
     }
 
-    /// Get the configured Qdrant client, if any.
+    /// Get the configured vector backend, if any.
+    pub fn vector(&self) -> Option<&VectorStore> {
+        self.vector.as_ref()
+    }
+
+    /// Get the configured Qdrant client, if the remote branch is active.
     pub fn qdrant(&self) -> Option<&Arc<QdrantClient>> {
-        self.qdrant.as_ref()
+        match self.vector.as_ref() {
+            Some(VectorStore::Qdrant(client)) => Some(client),
+            _ => None,
+        }
     }
 
     pub(crate) fn ensure_project_group_id(&self) -> Result<(), OrchestratorError> {
         if self.project_group_id.trim().is_empty() {
             return Err(OrchestratorError::index(
                 "project_context",
-                "project_group_id must be configured before Qdrant operations",
+                "project_group_id must be configured before vector operations",
             ));
         }
         Ok(())
     }
 
-    /// Ensure the Qdrant collection exists (create if not)
+    /// Ensure the vector collection exists (create if not)
     ///
     /// Must be called before any upsert operations to ensure the target
     /// collection has been created.
-    pub async fn initialize_qdrant(&self) -> Result<(), OrchestratorError> {
-        if let Some(ref qdrant) = self.qdrant {
-            qdrant.initialize().await?;
-            tracing::info!("Qdrant collection initialized");
+    pub async fn initialize_vector(&self) -> Result<(), OrchestratorError> {
+        if let Some(ref vector) = self.vector {
+            use cce_storage_common::VectorStorage;
+            vector.ensure_collection().await?;
+            tracing::info!(
+                backend = vector.backend_name(),
+                "Vector collection initialized"
+            );
         }
         Ok(())
+    }
+
+    /// Ensure the vector collection exists (legacy Qdrant-named entry).
+    pub async fn initialize_qdrant(&self) -> Result<(), OrchestratorError> {
+        self.initialize_vector().await
     }
 
     /// Check if BM25 full-text search is configured

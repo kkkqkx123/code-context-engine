@@ -1,17 +1,16 @@
 //! Summary vector retrieval implementation
 //!
-//! Provides low-level summary vector search operations against Qdrant.
-//! This layer handles direct Qdrant interaction and result mapping for
+//! Provides low-level summary vector search operations against the vector backend.
+//! This layer handles direct vector backend interaction and result mapping for
 //! file-level summary vectors, distinguished from chunk vectors by
 //! the `type = "summary"` payload field.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
+use crate::index::vector_store::VectorStore;
 use crate::query::error::{QueryError, Result};
 use crate::query::types::SearchResult;
-use cce_storage_common::{DenseSearchQuery, SearchFilter};
-use cce_storage_qdrant::QdrantRetrieval;
+use cce_storage_common::{DenseSearchQuery, SearchFilter, VectorStorage};
 
 /// Summary vector retrieval handler
 ///
@@ -19,16 +18,16 @@ use cce_storage_qdrant::QdrantRetrieval;
 /// This is a stateless implementation focused on file-level summary search.
 #[derive(Clone)]
 pub struct SummaryRetrieval {
-    qdrant_retrieval: Arc<QdrantRetrieval>,
+    vector: VectorStore,
 }
 
 impl SummaryRetrieval {
     /// Create a new summary retrieval instance
-    pub fn new(qdrant_retrieval: Arc<QdrantRetrieval>) -> Self {
-        Self { qdrant_retrieval }
+    pub fn new(vector: VectorStore) -> Self {
+        Self { vector }
     }
 
-    /// Search summary vectors in Qdrant with pre-computed embedding
+    /// Search summary vectors in the vector backend with pre-computed embedding
     ///
     /// Returns file-level results from the summary index.
     pub async fn search(
@@ -51,15 +50,11 @@ impl SummaryRetrieval {
 
         dense_query = dense_query.with_filter(filter);
 
-        let results = self
-            .qdrant_retrieval
-            .search_dense(dense_query)
-            .await
-            .map_err(|e| {
-                QueryError::Vector(cce_llm_client::LlmError::Http(
-                    cce_types::error::common::HttpError::new(e.to_string()),
-                ))
-            })?;
+        let results = self.vector.search_dense(dense_query).await.map_err(|e| {
+            QueryError::Vector(cce_llm_client::LlmError::Http(
+                cce_types::error::common::HttpError::new(e.to_string()),
+            ))
+        })?;
 
         let search_results: Vec<SearchResult> = results
             .into_iter()

@@ -4,6 +4,7 @@
 //! intact lives here.
 
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
+use cce_storage_common::VectorStorage;
 use cce_storage_sqlite::{ChunkRepository, EntityDetailMappingRepository, FileSummaryRepository};
 use cce_types::path::normalize_project_path;
 
@@ -17,17 +18,17 @@ impl StorageCoordinator {
         let file_id = normalize_project_path(&file_path.to_string_lossy());
         let mut backend_errors: Vec<String> = Vec::new();
 
-        // Remove from Qdrant (project-scoped)
-        if let Some(ref qdrant) = self.qdrant {
+        // Remove from vector store (project-scoped)
+        if let Some(ref vector) = self.vector {
             if let Err(error) = self.ensure_project_group_id() {
                 tracing::warn!(path = %file_id, error = %error, "Failed to resolve project group for vector removal");
-                backend_errors.push(format!("qdrant group: {error}"));
-            } else if let Err(error) = qdrant
+                backend_errors.push(format!("vector group: {error}"));
+            } else if let Err(error) = vector
                 .delete_by_file_path_scoped(&file_id, &self.project_group_id, None)
                 .await
             {
                 tracing::warn!(path = %file_id, error = %error, "Failed to remove file from vector store");
-                backend_errors.push(format!("qdrant: {error}"));
+                backend_errors.push(format!("vector: {error}"));
             }
         }
 
@@ -107,9 +108,9 @@ impl StorageCoordinator {
         }
 
         // Step 2: Remove old data after successful write
-        if let Some(ref qdrant) = self.qdrant {
+        if let Some(ref vector) = self.vector {
             self.ensure_project_group_id()?;
-            qdrant
+            vector
                 .delete_by_file_path_scoped(&file_path_str, &self.project_group_id, None)
                 .await?;
         }
@@ -164,9 +165,9 @@ impl StorageCoordinator {
         // generation is never addressed, so a failed store leaves previously
         // queryable data intact. This matches the prepare_hot_update_embedding
         // ordering and avoids the legacy unscoped delete-then-write hole.
-        if let Some(ref qdrant) = self.qdrant {
+        if let Some(ref vector) = self.vector {
             self.ensure_project_group_id()?;
-            qdrant
+            vector
                 .delete_by_file_path_scoped_epoch(
                     &file_path_str,
                     &self.project_group_id,
@@ -175,7 +176,7 @@ impl StorageCoordinator {
                 .await?;
         }
 
-        // Step 2: Clear old Qdrant references (scope to current epoch)
+        // Step 2: Clear old vector references (scope to current epoch)
         if let Some(client) = self.metadata_store.as_deref() {
             let file_id_opt = client
                 .with_transaction(|tx| {
@@ -234,7 +235,7 @@ impl StorageCoordinator {
         Ok(())
     }
 
-    /// Remove file from vector index only (Qdrant + entity mappings)
+    /// Remove file from vector index only (vector store + entity mappings)
     pub async fn remove_file_from_vectors(
         &self,
         file_path: &std::path::Path,
@@ -255,15 +256,15 @@ impl StorageCoordinator {
             return self.register_deleted_file(file_path).await;
         }
 
-        // Remove from Qdrant (project-scoped)
-        if let Some(ref qdrant) = self.qdrant {
+        // Remove from vector store (project-scoped)
+        if let Some(ref vector) = self.vector {
             self.ensure_project_group_id()?;
-            qdrant
+            vector
                 .delete_by_file_path_scoped(&file_id, &self.project_group_id, None)
                 .await?;
         }
 
-        // Clear Qdrant references in file summary mappings (all epochs)
+        // Clear vector references in file summary mappings (all epochs)
         if let Some(client) = self.metadata_store.as_deref() {
             let result = client.with_transaction(|tx| {
                     use rusqlite::params;

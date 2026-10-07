@@ -306,12 +306,12 @@ impl super::CodeContextEngine {
             })?;
         let publisher = self.get_relation_snapshot_publisher(project_id).await?;
         let group_id =
-            cce_storage_qdrant::generate_project_group_id(project_id, &project.metadata.root_path);
+            cce_storage_common::generate_project_group_id(project_id, &project.metadata.root_path);
         let storage = Arc::new(
             StorageCoordinator::new(project_id)
                 .map_err(|error| EngineError::Config(error.to_string()))?
                 .with_metadata_store(sqlite.clone())
-                .with_qdrant(self.qdrant.clone())
+                .with_vector(self.vector.clone())
                 .with_bm25(self.bm25.clone())
                 .with_embedder(self.embedder.clone())
                 .with_project_group_id(group_id),

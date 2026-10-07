@@ -120,10 +120,11 @@ cp config.minimal.toml config.toml
 host = "0.0.0.0"
 port = 9000
 
-[database.qdrant]
-url = "http://localhost:6333"
+[database]
+vector_backend = "local"
+
+[database.vector_local]
 vector_size = 1024
-enabled = true
 
 [database.sqlite]
 path = "metadata.db"

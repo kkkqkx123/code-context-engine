@@ -33,21 +33,52 @@ use crate::modules::{
     McpConfig, NestProcessorConfig, OrchestratorConfig, ProviderConfig, RelationConfig,
     RerankConfig, ScannerConfig, SearchModuleConfig, SummaryConfig, SymbolResolutionConfig,
 };
-use crate::modules::{Bm25Config, QdrantConfig};
+use crate::modules::{Bm25Config, LocalVectorConfig, QdrantConfig, VectorBackend};
 use crate::modules::{ChatModelConfig, EmbeddingModelConfig, RerankModelConfig};
 use crate::validation::{ConfigWarning, Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
 
-/// Database configuration (combines Qdrant, SQLite, and BM25)
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Database configuration (combines vector backends, SQLite, and BM25)
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
-    /// Qdrant vector database configuration
+    /// Vector backend selection (local default, qdrant optional).
+    pub vector_backend: VectorBackend,
+    /// Embedded local vector engine configuration.
+    pub vector_local: LocalVectorConfig,
+    /// Qdrant vector database configuration (remote branch only).
     pub qdrant: QdrantConfig,
     /// SQLite metadata database configuration
     pub sqlite: SqliteConfig,
     /// BM25 index configuration
     pub bm25: Bm25Config,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            vector_backend: VectorBackend::Local,
+            vector_local: LocalVectorConfig::default(),
+            qdrant: QdrantConfig::default(),
+            sqlite: SqliteConfig::default(),
+            bm25: Bm25Config::default(),
+        }
+    }
+}
+
+impl DatabaseConfig {
+    /// Whether the local vector backend is active.
+    pub fn is_local_vector(&self) -> bool {
+        matches!(self.vector_backend, VectorBackend::Local)
+    }
+
+    /// Effective vector dimension for the active backend.
+    pub fn vector_dimension(&self) -> usize {
+        match self.vector_backend {
+            VectorBackend::Local => self.vector_local.vector_size,
+            VectorBackend::Qdrant => self.qdrant.vector_size,
+        }
+    }
 }
 
 /// Global application configuration
@@ -242,8 +273,17 @@ impl Validate for AppConfig {
             errors.push(e);
         }
 
-        if let Err(e) = self.database.qdrant.validate_structured() {
-            errors.push(e);
+        match self.database.vector_backend {
+            crate::modules::VectorBackend::Local => {
+                if let Err(e) = self.database.vector_local.validate_structured() {
+                    errors.push(e);
+                }
+            }
+            crate::modules::VectorBackend::Qdrant => {
+                if let Err(e) = self.database.qdrant.validate_structured() {
+                    errors.push(e);
+                }
+            }
         }
 
         if let Err(e) = self.embedder.validate_structured() {
@@ -352,6 +392,7 @@ impl AppConfig {
             indexer_store_bm25: self.orchestrator.indexer.store_bm25,
             qdrant_enabled: self.database.qdrant.enabled,
             bm25_enabled: self.database.bm25.enabled,
+            vector_backend: self.database.vector_backend,
             relation_index_enabled: self.relation.index.enabled,
             llm_enabled: self.llm.enabled,
             has_llm_provider: !self.llm.providers.is_empty(),
@@ -376,7 +417,7 @@ impl AppConfig {
     pub fn resolve_dependencies(&mut self) -> Vec<ConfigWarning> {
         use crate::validation::{
             resolve_export_dependencies, resolve_relation_dependencies,
-            resolve_storage_dependencies,
+            resolve_storage_dependencies_with_backend,
         };
 
         let mut infos = Vec::new();
@@ -389,11 +430,12 @@ impl AppConfig {
             &mut self.relation.index.enabled,
         ));
 
-        infos.extend(resolve_storage_dependencies(
+        infos.extend(resolve_storage_dependencies_with_backend(
             self.orchestrator.indexer.store_vectors,
             self.orchestrator.indexer.store_bm25,
             &mut self.database.qdrant.enabled,
             &mut self.database.bm25.enabled,
+            self.database.vector_backend,
         ));
 
         infos.extend(resolve_relation_dependencies(

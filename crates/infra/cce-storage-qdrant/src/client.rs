@@ -20,7 +20,6 @@ use crate::{
 use cce_config::validation::Validate;
 use cce_types::PointKind;
 use cce_types::error::common::ErrorClassify;
-use cce_utils::hash::calculate_hash;
 
 /// Qdrant diagnostic information
 #[derive(Debug, Clone, serde::Serialize)]
@@ -39,8 +38,7 @@ pub struct QdrantDiagnostic {
 
 /// Generate a deterministic group ID from a workspace path.
 pub fn generate_group_id(workspace_path: &str) -> String {
-    let hash = calculate_hash(workspace_path.as_bytes());
-    format!("proj_{}", &hash[..12])
+    cce_storage_common::generate_group_id(workspace_path)
 }
 
 /// Generate a stable Qdrant namespace for one logical project.
@@ -48,7 +46,7 @@ pub fn generate_group_id(workspace_path: &str) -> String {
 /// Including the database project ID prevents two projects that share the same
 /// workspace path from writing into the same vector partition.
 pub fn generate_project_group_id(project_id: i64, workspace_path: &str) -> String {
-    format!("project-{project_id}-{}", generate_group_id(workspace_path))
+    cce_storage_common::generate_project_group_id(project_id, workspace_path)
 }
 
 /// Qdrant vector storage client

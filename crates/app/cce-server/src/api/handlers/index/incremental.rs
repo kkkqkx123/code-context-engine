@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use cce_api::models::{ErrorResponse, IncrementalIndexRequest, IncrementalIndexResponse};
 use cce_relation::index::entity_index::EntityIndexOps;
+use cce_storage_common::VectorStorage;
 
 /// Handle an explicit incremental index request.
 #[utoipa::path(
@@ -57,7 +58,7 @@ pub async fn handle_incremental(
     }
 
     // Report authoritative post-run totals: entity count from the relation
-    // index, vector count from the project-scoped Qdrant collection. The
+    // index, vector count from the project-scoped vector collection. The
     // operation result is the authoritative success/failure record; processors
     // may reparse dependent files as part of relation propagation, so
     // request-level counts would understate the actual index state.
@@ -72,7 +73,7 @@ pub async fn handle_incremental(
         if let Some(gid) = group_id {
             total_vectors = state
                 .engine
-                .qdrant()
+                .vector()
                 .count_points_by_group(&gid)
                 .await
                 .unwrap_or(0);

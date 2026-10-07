@@ -1,6 +1,6 @@
 //! Project index maintenance service
 //!
-//! Coordinates Qdrant, BM25, SQLite, relation runtime, and cache cleanup
+//! Coordinates vector store, BM25, SQLite, relation runtime, and cache cleanup
 //! for project-level clear and delete operations. All methods are idempotent
 //! and report per-backend results so partial failures are observable.
 
@@ -9,8 +9,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
+use cce_orchestrator::index::VectorStore;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
+use cce_storage_common::VectorStorage;
 use cce_storage_sqlite::SqliteClient;
 
 use crate::engine::CodeContextEngine;
@@ -58,7 +59,7 @@ impl MaintenanceResult {
 /// Each method is idempotent and returns detailed per-backend results.
 pub struct ProjectIndexMaintenanceService {
     engine: Arc<CodeContextEngine>,
-    qdrant: Option<Arc<QdrantClient>>,
+    vector: Option<VectorStore>,
     bm25: Option<Arc<Mutex<Bm25Client>>>,
     metadata_store: Option<Arc<SqliteClient>>,
 }
@@ -66,13 +67,13 @@ pub struct ProjectIndexMaintenanceService {
 impl ProjectIndexMaintenanceService {
     pub fn new(
         engine: Arc<CodeContextEngine>,
-        qdrant: Option<Arc<QdrantClient>>,
+        vector: Option<VectorStore>,
         bm25: Option<Arc<Mutex<Bm25Client>>>,
         metadata_store: Option<Arc<SqliteClient>>,
     ) -> Self {
         Self {
             engine,
-            qdrant,
+            vector,
             bm25,
             metadata_store,
         }
@@ -96,18 +97,22 @@ impl ProjectIndexMaintenanceService {
             }
         };
         let group_id =
-            cce_storage_qdrant::generate_project_group_id(project_id, &entry.metadata.root_path);
+            cce_storage_common::generate_project_group_id(project_id, &entry.metadata.root_path);
 
         info!(project_id, group = %group_id, "Clearing project index");
 
-        // 1. Qdrant: delete_by_group only
-        if let Some(client) = &self.qdrant {
+        // 1. Vector: delete_by_group only
+        if let Some(client) = &self.vector {
             match client.delete_by_group(&group_id).await {
-                Ok(()) => result.push("qdrant", true, "Group points deleted".to_string()),
-                Err(e) => result.push("qdrant", false, format!("Failed to delete group: {}", e)),
+                Ok(()) => result.push("vector", true, "Group points deleted".to_string()),
+                Err(e) => result.push("vector", false, format!("Failed to delete group: {}", e)),
             }
         } else {
-            result.push("qdrant", true, "Qdrant not configured, skipped".to_string());
+            result.push(
+                "vector",
+                true,
+                "Vector store not configured, skipped".to_string(),
+            );
         }
 
         // 2. BM25: delete_all_project_docs only
@@ -234,11 +239,11 @@ impl ProjectIndexMaintenanceService {
     }
 
     /// Delete a project's data from all backends AND remove the project record.
-    /// If Qdrant or BM25 cleanup fails, the project record is preserved to allow retry.
+    /// If vector or BM25 cleanup fails, the project record is preserved to allow retry.
     pub async fn delete_project(&self, project_id: i64) -> MaintenanceResult {
         let mut result = MaintenanceResult::new(project_id);
 
-        // Step A: Clear index data (Qdrant, BM25, SQLite, relations, cache)
+        // Step A: Clear index data (vector, BM25, SQLite, relations, cache)
         let clear_result = self.clear_project_index(project_id).await;
 
         // Merge clear results
@@ -249,21 +254,21 @@ impl ProjectIndexMaintenanceService {
             }
         }
 
-        // If Qdrant or BM25 failed, preserve project record for retry
-        let qdrant_ok = clear_result
+        // If vector or BM25 failed, preserve project record for retry
+        let vector_ok = clear_result
             .backends
             .iter()
-            .any(|b| b.backend == "qdrant" && !b.ok);
+            .any(|b| b.backend == "vector" && !b.ok);
         let bm25_ok = clear_result
             .backends
             .iter()
             .any(|b| b.backend == "bm25" && !b.ok);
 
-        if qdrant_ok || bm25_ok {
+        if vector_ok || bm25_ok {
             result.push(
                 "project_record",
                 false,
-                "Qdrant or BM25 cleanup failed, project record preserved for retry".to_string(),
+                "Vector or BM25 cleanup failed, project record preserved for retry".to_string(),
             );
             // Merge other backends results
             for br in clear_result.backends {

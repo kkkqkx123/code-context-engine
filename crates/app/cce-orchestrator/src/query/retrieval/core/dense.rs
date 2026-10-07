@@ -1,33 +1,32 @@
 //! Dense vector retrieval implementation
 //!
 //! Provides low-level dense vector search operations.
-//! This layer handles direct Qdrant interaction and result mapping,
+//! This layer handles direct vector backend interaction and result mapping,
 //! separated from high-level orchestration concerns.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
+use crate::index::vector_store::VectorStore;
 use crate::query::error::{QueryError, Result};
 use crate::query::types::SearchResult;
-use cce_storage_common::{DenseSearchQuery, SearchFilter};
-use cce_storage_qdrant::QdrantRetrieval;
+use cce_storage_common::{DenseSearchQuery, SearchFilter, VectorStorage};
 
 /// Dense vector retrieval handler
 ///
-/// Provides low-level dense search operations against Qdrant.
+/// Provides low-level dense search operations against the vector backend.
 /// This is a stateless implementation focused on direct vector search.
 #[derive(Clone)]
 pub struct DenseRetrieval {
-    qdrant_retrieval: Arc<QdrantRetrieval>,
+    vector: VectorStore,
 }
 
 impl DenseRetrieval {
     /// Create a new dense retrieval instance
-    pub fn new(qdrant_retrieval: Arc<QdrantRetrieval>) -> Self {
-        Self { qdrant_retrieval }
+    pub fn new(vector: VectorStore) -> Self {
+        Self { vector }
     }
 
-    /// Search vectors in Qdrant with pre-computed embedding
+    /// Search vectors in the vector backend with pre-computed embedding
     ///
     /// # Arguments
     ///
@@ -60,15 +59,11 @@ impl DenseRetrieval {
 
         dense_query = dense_query.with_filter(filter);
 
-        let results = self
-            .qdrant_retrieval
-            .search_dense(dense_query)
-            .await
-            .map_err(|e| {
-                QueryError::Vector(cce_llm_client::LlmError::Http(
-                    cce_types::error::common::HttpError::new(e.to_string()),
-                ))
-            })?;
+        let results = self.vector.search_dense(dense_query).await.map_err(|e| {
+            QueryError::Vector(cce_llm_client::LlmError::Http(
+                cce_types::error::common::HttpError::new(e.to_string()),
+            ))
+        })?;
 
         let search_results: Vec<SearchResult> = results
             .into_iter()

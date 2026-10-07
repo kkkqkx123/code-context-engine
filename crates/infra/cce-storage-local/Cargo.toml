@@ -1,25 +1,22 @@
 [package]
-name = "cce-storage-qdrant"
+name = "cce-storage-local"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Embedded local vector storage backed by simvec"
 
 [dependencies]
 cce-types = { path = "../../core/cce-types" }
 cce-config = { path = "../../core/cce-config" }
-cce-utils = { path = "../../core/cce-utils" }
 cce-storage-common = { path = "../cce-storage-common" }
-cce-circuit-breaker = { path = "../cce-circuit-breaker" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-api = { path = "../../app/cce-api" }
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+simvec = { path = "../../simvec" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-uuid = { workspace = true }
 async-trait = { workspace = true }
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

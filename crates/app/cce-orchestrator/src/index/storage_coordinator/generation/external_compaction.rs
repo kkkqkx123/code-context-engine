@@ -1,4 +1,4 @@
-//! External-store compaction: materializing inherited Qdrant and BM25
+//! External-store compaction: materializing inherited vector and BM25
 //! generations.
 //!
 //! Because tantivy `content`/`keywords` fields are index-only, the BM25 clone
@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use cce_parser::summary::FileSummary;
 use cce_storage_bm25::Bm25Document;
+use cce_storage_common::VectorStorage;
 use cce_types::PointKind;
 
 use crate::error::OrchestratorError;
@@ -32,7 +33,7 @@ struct Bm25CloneContent {
 }
 
 impl StorageCoordinator {
-    /// Materialize the external generations (Qdrant + BM25) inherited by
+    /// Materialize the external generations (vector store + BM25) inherited by
     /// `target_epoch` from `source_epoch`. Overridden files are skipped so
     /// the target's own newer points/documents are never shadowed. Only used
     /// by compaction.
@@ -51,9 +52,9 @@ impl StorageCoordinator {
                 None => false,
             }
         };
-        if let Some(qdrant) = &self.qdrant {
+        if let Some(vector) = &self.vector {
             self.ensure_project_group_id()?;
-            let points = qdrant.scroll_all_points().await?;
+            let points = vector.scroll_all_points().await?;
             let cloned: Vec<_> = points
                 .into_iter()
                 .filter(|point| {
@@ -78,7 +79,7 @@ impl StorageCoordinator {
                 })
                 .collect();
             if !cloned.is_empty() {
-                qdrant.upsert_points(&cloned).await?;
+                vector.upsert_points(&cloned).await?;
             }
         }
         if let Some(bm25) = &self.bm25 {

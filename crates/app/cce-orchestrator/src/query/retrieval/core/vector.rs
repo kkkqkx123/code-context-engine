@@ -1,8 +1,8 @@
 //! Vector retrieval types
 //!
 //! Provides filter options and result types for vector search operations.
-//! The actual retrieval logic is delegated to `QdrantRetrieval::search_dense`
-//! in the infrastructure layer.
+//! The actual retrieval logic is delegated to `VectorStorage::search_dense`
+//! in the infrastructure layer (via the `VectorStore` backend enum).
 
 /// Filter options for vector search
 #[derive(Debug, Clone, Default)]

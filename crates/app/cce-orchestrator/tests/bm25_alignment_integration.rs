@@ -141,10 +141,16 @@ impl AlignmentHarness {
         let empty_index = RelationIndex::new();
         let call_chain = Arc::new(CallChainQuery::from_index(empty_index));
 
-        let coordinator = QueryCoordinator::builder(qdrant, embedder, bm25, call_chain, scope)
-            .with_capabilities(cce_orchestrator::query::IndexCapabilities::new().with_bm25(true))
-            .with_sqlite(sqlite_db.clone())
-            .build();
+        let coordinator = QueryCoordinator::builder(
+            cce_orchestrator::index::VectorStore::Qdrant(qdrant),
+            embedder,
+            bm25,
+            call_chain,
+            scope,
+        )
+        .with_capabilities(cce_orchestrator::query::IndexCapabilities::new().with_bm25(true))
+        .with_sqlite(sqlite_db.clone())
+        .build();
 
         Self {
             _fixture_dir: fixture_dir,

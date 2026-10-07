@@ -246,7 +246,19 @@ impl IndexOrchestrator {
         self
     }
 
-    /// Set Qdrant client
+    /// Set vector backend directly (local or Qdrant enum dispatch)
+    pub fn with_vector(mut self, store: crate::index::vector_store::VectorStore) -> Self {
+        self.storage = self.storage.with_vector(store);
+        self
+    }
+
+    /// Set embedded local vector store
+    pub fn with_local(mut self, store: Arc<cce_storage_local::LocalVectorStore>) -> Self {
+        self.storage = self.storage.with_local(store);
+        self
+    }
+
+    /// Set Qdrant client (wraps into the vector backend enum)
     pub fn with_qdrant_client(mut self, client: Arc<cce_storage_qdrant::QdrantClient>) -> Self {
         self.storage = self.storage.with_qdrant(client);
         self
@@ -402,7 +414,7 @@ impl IndexOrchestrator {
         self
     }
 
-    /// Set Qdrant client
+    /// Set vector backend (Qdrant branch shim, prefer `with_vector`)
     pub fn with_qdrant(mut self, client: Arc<cce_storage_qdrant::QdrantClient>) -> Self {
         self.storage = self.storage.with_qdrant(client);
         self
@@ -485,9 +497,9 @@ impl IndexOrchestrator {
         let mut errors = Vec::new();
 
         // Ensure storage backends are ready before processing
-        if let Err(e) = self.storage.initialize_qdrant().await {
-            tracing::warn!(error = %e, "Failed to initialize Qdrant collections, vector storage may be unavailable");
-            errors.push(format!("Qdrant initialization failed: {}", e));
+        if let Err(e) = self.storage.initialize_vector().await {
+            tracing::warn!(error = %e, "Failed to initialize vector collections, vector storage may be unavailable");
+            errors.push(format!("Vector initialization failed: {}", e));
         }
         let target_epoch = self.storage.begin_full_index()?;
         tracing::info!(
@@ -839,7 +851,7 @@ impl IndexOrchestrator {
 
     /// Determine the output mode based on configured storage backends.
     ///
-    /// At least one storage backend (Qdrant or BM25) must be configured, or
+    /// At least one storage backend (vector or BM25) must be configured, or
     /// the NL exporter must be active (which implies Embedding text generation).
     /// Returns an error when no data path exists.
     fn determine_output_mode(
@@ -848,15 +860,15 @@ impl IndexOrchestrator {
     ) -> Result<OutputMode, OrchestratorError> {
         // Use requested mode (from options) rather than available mode (from storage clients).
         // If storage is requested but no client, warn and degrade gracefully.
-        let has_qdrant = self.storage.has_qdrant();
+        let has_vector = self.storage.has_vector();
         let has_bm25 = self.storage.has_bm25();
 
         let wants_vectors = options.store_vectors;
         let wants_bm25 = options.store_bm25;
 
-        if wants_vectors && !has_qdrant {
+        if wants_vectors && !has_vector {
             tracing::warn!(
-                "store_vectors is true but no Qdrant client configured. \
+                "store_vectors is true but no vector backend configured. \
                  Embeddings will be generated but not stored."
             );
         }
@@ -879,7 +891,7 @@ impl IndexOrchestrator {
 
         // Decide output mode based on what's requested and what's available.
         // Embedding mode is always available (just generate embeddings).
-        match (has_qdrant && wants_vectors, has_bm25 && wants_bm25) {
+        match (has_vector && wants_vectors, has_bm25 && wants_bm25) {
             (true, true) => Ok(OutputMode::Both),
             (true, false) => Ok(OutputMode::Embedding),
             (false, true) => Ok(OutputMode::Bm25),

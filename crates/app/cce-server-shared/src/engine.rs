@@ -20,11 +20,11 @@ use cce_metrics::{
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::index::IndexOrchestrator;
+use cce_orchestrator::index::VectorStore;
 use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_orchestrator::query::searcher::Searcher;
 use cce_plugin::PluginRegistry;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
 use cce_storage_qdrant::QdrantProcessHandle;
 use cce_storage_sqlite::SqliteClient;
 use cce_storage_sqlite::project_registry::ProjectRegistry;
@@ -48,7 +48,7 @@ pub enum EngineError {
     Llm(#[from] cce_llm_client::LlmError),
 
     #[error("Storage error: {0}")]
-    Storage(#[from] cce_storage_qdrant::QdrantError),
+    Storage(#[from] cce_types::StorageError),
 
     #[error("Recovery error: {0}")]
     Recovery(String),
@@ -61,7 +61,7 @@ pub enum EngineError {
 /// facade rather than assembling individual components manually.
 #[derive(Clone)]
 pub struct CodeContextEngine {
-    qdrant: Arc<QdrantClient>,
+    vector: VectorStore,
     bm25: Arc<Mutex<Bm25Client>>,
     embedder: Arc<OpenAICompatibleProvider>,
 
@@ -176,11 +176,8 @@ impl CodeContextEngine {
             (*sqlite_client).clone(),
         ));
 
-        let qdrant_config = config.database.qdrant.clone();
-        let qdrant = {
-            let client = QdrantClient::new(qdrant_config, ".").map_err(EngineError::Storage)?;
-            Arc::new(client)
-        };
+        let vector = VectorStore::from_database_config(&config.database)
+            .map_err(|e| EngineError::Config(e.to_string()))?;
 
         let bm25_config = config.database.bm25.clone();
         let bm25 = {
@@ -265,7 +262,7 @@ impl CodeContextEngine {
         // RelationRuntime is created per-project on demand
 
         Ok(Self {
-            qdrant,
+            vector,
             bm25,
             embedder,
             metadata_store,
@@ -366,6 +363,7 @@ impl EngineBuilder {
         // Apply URL overrides
         let mut effective_config = config;
         if let Some(qdrant_url) = self.qdrant_url {
+            effective_config.database.vector_backend = cce_config::modules::VectorBackend::Qdrant;
             effective_config.database.qdrant.url = qdrant_url;
         }
         if let Some(bm25_url) = self.bm25_url {

@@ -3,7 +3,7 @@
 //! This module defines data structures for vectors, payloads,
 //! search results, and collection information.
 
-pub use cce_storage_common::Payload;
+pub use cce_storage_common::{Payload, VectorPoint};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,41 +13,6 @@ pub const POINT_ID_NAMESPACE: Uuid = Uuid::from_u128(0x6ba7b810_9dad_11d1_80b4_0
 /// Convert a string-based point ID to a deterministic UUID v5.
 pub fn to_qdrant_point_id(id: &str) -> Uuid {
     Uuid::new_v5(&POINT_ID_NAMESPACE, id.as_bytes())
-}
-
-/// Vector point with payload
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorPoint {
-    /// Unique point ID
-    pub id: String,
-    /// Dense vector data
-    pub vector: Vec<f32>,
-    /// Payload metadata
-    pub payload: Payload,
-}
-
-impl VectorPoint {
-    /// Create a new vector point with dense vector only
-    pub fn new(id: impl Into<String>, vector: Vec<f32>, payload: Payload) -> Self {
-        Self {
-            id: id.into(),
-            vector,
-            payload,
-        }
-    }
-
-    /// Create a vector point with minimal payload
-    pub fn with_file_path(
-        id: impl Into<String>,
-        vector: Vec<f32>,
-        file_path: impl Into<String>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            vector,
-            payload: Payload::new(file_path),
-        }
-    }
 }
 
 /// Search query parameters

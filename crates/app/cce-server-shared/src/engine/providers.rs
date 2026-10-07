@@ -55,7 +55,7 @@ impl super::CodeContextEngine {
                 EngineError::Config("SQLite database not initialized for hot update".to_string())
             })?;
         let checkpoint_manager = operation_coordinator.checkpoint_manager();
-        let project_group_id = cce_storage_qdrant::generate_project_group_id(
+        let project_group_id = cce_storage_common::generate_project_group_id(
             project_id,
             &project_entry.metadata.root_path,
         );
@@ -96,7 +96,7 @@ impl super::CodeContextEngine {
             };
         let (processors, storage_coordinator) = ProcessorFactory::new()
             .create_all_processors(
-                Some(self.qdrant.clone()),
+                Some(self.vector.clone()),
                 Some(self.bm25.clone()),
                 Some(metadata_store.clone()),
                 Some(self.embedder.clone()),
@@ -185,7 +185,7 @@ impl super::CodeContextEngine {
             .map_err(|e| EngineError::Config(format!("Failed to load project config: {}", e)))?;
 
         let config = &project_entry.config;
-        let project_group_id = cce_storage_qdrant::generate_project_group_id(
+        let project_group_id = cce_storage_common::generate_project_group_id(
             project_id,
             &project_entry.metadata.root_path,
         );
@@ -206,7 +206,7 @@ impl super::CodeContextEngine {
         let mut orchestrator_builder =
             IndexOrchestrator::with_batch_config(project_id, config.orchestrator.batch.clone())
                 .map_err(|e| EngineError::Config(e.to_string()))?
-                .with_qdrant(self.qdrant.clone())
+                .with_vector(self.vector.clone())
                 .with_bm25(self.bm25.clone())
                 .with_embedder(self.embedder.clone())
                 .with_metadata_store(metadata_store)
@@ -446,7 +446,7 @@ impl super::CodeContextEngine {
             .map_err(|e| EngineError::Config(format!("Failed to load project config: {}", e)))?;
 
         let config = &project_entry.config;
-        let project_group_id = cce_storage_qdrant::generate_project_group_id(
+        let project_group_id = cce_storage_common::generate_project_group_id(
             project_id,
             &project_entry.metadata.root_path,
         );
@@ -458,7 +458,7 @@ impl super::CodeContextEngine {
             .map_err(|e| EngineError::Config(format!("Invalid project scope: {}", e)))?;
 
         let mut builder = Searcher::builder(
-            self.qdrant.clone(),
+            self.vector.clone(),
             self.embedder.clone(),
             self.bm25.clone(),
             scope,

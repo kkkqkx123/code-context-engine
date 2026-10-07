@@ -24,6 +24,7 @@ pub mod relation_store_trait;
 pub mod resolution_pipeline;
 mod result;
 mod storage_coordinator;
+pub mod vector_store;
 
 pub use file_indexer::FileIndexer;
 pub use file_processor::FileProcessor;
@@ -35,3 +36,4 @@ pub use relation_publisher::{RelationPublication, RelationSnapshotPublisher};
 pub use resolution_pipeline::ResolutionPipelineService;
 pub use result::IndexResult;
 pub use storage_coordinator::{StorageCoordinator, build_bm25_documents};
+pub use vector_store::VectorStore;

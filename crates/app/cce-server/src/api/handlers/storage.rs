@@ -23,6 +23,7 @@ use cce_api::models::{
 use cce_relation::index::entity_index::EntityIndexOps;
 use cce_relation::index::file_index::FileLevelOps;
 use cce_relation::index::relation_query::RelationQueryOps;
+use cce_storage_common::VectorStorage;
 
 // ============================================================================
 // Clear Index
@@ -58,7 +59,7 @@ pub async fn handle_clear_index(
 
     let maintenance = ProjectIndexMaintenanceService::new(
         state.engine.clone(),
-        Some(state.engine.qdrant_clone()),
+        Some(state.engine.vector_clone()),
         Some(state.engine.bm25_clone()),
         state.engine.metadata_store_clone(),
     );
@@ -124,20 +125,20 @@ pub async fn handle_delete_file(
 
     let group_id = resolve_group_id(&state, project_id).await;
 
-    // Step 1: Remove from Qdrant
+    // Step 1: Remove from vector store
     let vectors_deleted = 0;
     {
-        let qdrant = state.engine.qdrant();
+        let vector = state.engine.vector();
         if let Some(ref gid) = group_id {
-            let result = qdrant
+            let result = vector
                 .delete_by_file_path_scoped(&file_path, gid, None)
                 .await;
             match result {
                 Ok(()) => {
-                    tracing::info!(file = %file_path, %project_id, "Deleted vectors from Qdrant");
+                    tracing::info!(file = %file_path, %project_id, "Deleted vectors from vector store");
                 }
                 Err(e) => {
-                    tracing::error!(file = %file_path, error = %e, "Failed to delete vectors from Qdrant");
+                    tracing::error!(file = %file_path, error = %e, "Failed to delete vectors from vector store");
                     return ApiResult::Error(ErrorResponse::with_details(
                         error_codes::STORAGE_ERROR,
                         format!("Failed to delete vectors: {}", e),
@@ -296,13 +297,13 @@ pub async fn handle_delete_entity(
         }
     };
 
-    // Step 2: Remove from Qdrant
+    // Step 2: Remove from vector store
     let mut vectors_deleted = 0;
     {
-        let qdrant = state.engine.qdrant();
+        let vector = state.engine.vector();
         if let Some(ref file_path) = entity_file_path {
             if let Some(ref gid) = group_id {
-                let result = qdrant
+                let result = vector
                     .delete_by_file_path_scoped(file_path, gid, None)
                     .await;
                 if result.is_ok() {
@@ -421,16 +422,16 @@ pub async fn handle_batch_delete(
 
     // Delete files
     for file_path in &request.file_paths {
-        // Delete from Qdrant
+        // Delete from vector store
         {
-            let qdrant = state.engine.qdrant();
+            let vector = state.engine.vector();
             if let Some(ref gid) = group_id {
-                let result = qdrant
+                let result = vector
                     .delete_by_file_path_scoped(file_path, gid, None)
                     .await;
                 if let Err(e) = result {
                     errors.push(format!(
-                        "Failed to delete file {} from Qdrant: {}",
+                        "Failed to delete file {} from vector store: {}",
                         file_path, e
                     ));
                     continue;
@@ -483,12 +484,12 @@ pub async fn handle_batch_delete(
 
         if let Some(ref fp) = file_path {
             {
-                let qdrant = state.engine.qdrant();
+                let vector = state.engine.vector();
                 if let Some(ref gid) = group_id {
-                    let result = qdrant.delete_by_file_path_scoped(fp, gid, None).await;
+                    let result = vector.delete_by_file_path_scoped(fp, gid, None).await;
                     if let Err(e) = result {
                         errors.push(format!(
-                            "Failed to delete entity {} from Qdrant: {}",
+                            "Failed to delete entity {} from vector store: {}",
                             entity_id, e
                         ));
                         continue;
@@ -591,14 +592,14 @@ pub async fn handle_index_stats(
         }
     };
 
-    // Resolve Qdrant group ID
+    // Resolve vector group ID
     let group_id = resolve_group_id(&state, project_id).await;
 
-    // Get Qdrant stats (project-scoped via group filter)
+    // Get vector stats (project-scoped via group filter)
     let vector_count = if let Some(gid) = &group_id {
         state
             .engine
-            .qdrant()
+            .vector()
             .count_points_by_group(gid)
             .await
             .unwrap_or(0)
@@ -646,7 +647,7 @@ pub async fn handle_index_stats(
 /// Handle storage status request
 ///
 /// Checks all storage components and returns their status.
-/// Uses Qdrant's diagnose() method for comprehensive health assessment.
+/// Uses vector diagnostics for comprehensive health assessment.
 #[utoipa::path(
     get, path = "/api/storage/status", tag = "Storage",
     responses(
@@ -659,24 +660,57 @@ pub async fn handle_index_stats(
 pub async fn handle_storage_status(
     State(state): State<crate::api::state::AppState>,
 ) -> ApiResult<StorageStatusResponse> {
-    // Check Qdrant with comprehensive diagnostics
+    // Check vector store with comprehensive diagnostics
     let vector_storage = {
-        let qdrant = state.engine.qdrant();
-        match qdrant.diagnose().await {
-            Ok(diag) => StorageComponentStatus {
-                connected: diag.reachable,
-                item_count: diag.points_count as usize,
-                disk_usage_mb: 0.0, // Qdrant does not expose disk usage via REST API
-                version: diag.version,
-                last_error: diag.error,
-            },
-            Err(e) => StorageComponentStatus {
-                connected: false,
-                item_count: 0,
-                disk_usage_mb: 0.0,
-                version: None,
-                last_error: Some(format!("Diagnostic failed: {}", e)),
-            },
+        let vector = state.engine.vector();
+        if let Some(qdrant) = vector.as_qdrant() {
+            match qdrant.diagnose().await {
+                Ok(diag) => StorageComponentStatus {
+                    connected: diag.reachable,
+                    item_count: diag.points_count as usize,
+                    disk_usage_mb: 0.0, // Qdrant does not expose disk usage via REST API
+                    version: diag.version,
+                    last_error: diag.error,
+                },
+                Err(e) => StorageComponentStatus {
+                    connected: false,
+                    item_count: 0,
+                    disk_usage_mb: 0.0,
+                    version: None,
+                    last_error: Some(format!("Diagnostic failed: {}", e)),
+                },
+            }
+        } else {
+            match vector.health().await {
+                Ok(healthy) => {
+                    let (collection_exists, item_count) = match (
+                        vector.collection_exists().await,
+                        vector.count_all_points().await,
+                    ) {
+                        (Ok(exists), Ok(count)) => (exists, count),
+                        _ => (false, 0),
+                    };
+                    let _ = collection_exists;
+                    StorageComponentStatus {
+                        connected: healthy,
+                        item_count,
+                        disk_usage_mb: 0.0,
+                        version: None,
+                        last_error: if healthy {
+                            None
+                        } else {
+                            Some("Local vector store reported unhealthy".to_string())
+                        },
+                    }
+                }
+                Err(e) => StorageComponentStatus {
+                    connected: false,
+                    item_count: 0,
+                    disk_usage_mb: 0.0,
+                    version: None,
+                    last_error: Some(format!("Diagnostic failed: {}", e)),
+                },
+            }
         }
     };
 
@@ -704,7 +738,7 @@ pub async fn handle_storage_status(
         last_error: None,
     };
 
-    // Get Qdrant process info if subprocess management is available
+    // Get vector process info if subprocess management is available
     let process_status = if let Some(handle) = state.qdrant_control.as_ref() {
         let status = handle.current_status().await;
         Some(QdrantProcessInfo {
@@ -712,8 +746,7 @@ pub async fn handle_storage_status(
             running: matches!(status, QdrantProcessStatus::Running),
             status,
         })
-    } else {
-        let qdrant = state.engine.qdrant();
+    } else if let Some(qdrant) = state.engine.vector().as_qdrant() {
         Some({
             let config = qdrant.config();
             QdrantProcessInfo {
@@ -725,6 +758,16 @@ pub async fn handle_storage_status(
                 },
                 running: vector_storage.connected,
             }
+        })
+    } else {
+        Some(QdrantProcessInfo {
+            managed: false,
+            status: if vector_storage.connected {
+                QdrantProcessStatus::Running
+            } else {
+                QdrantProcessStatus::Stopped
+            },
+            running: vector_storage.connected,
         })
     };
 
@@ -748,7 +791,7 @@ pub async fn handle_storage_status(
     ApiResult::Success(response)
 }
 
-/// Resolve the Qdrant group_id from a project_id using the project registry.
+/// Resolve the vector group_id from a project_id using the project registry.
 ///
 /// Returns `None` if the project is not found or has no root_path configured.
 pub(crate) async fn resolve_group_id(
@@ -758,7 +801,7 @@ pub(crate) async fn resolve_group_id(
     let registry = state.engine.project_registry();
     match registry.get_or_load(project_id).await {
         Ok(entry) => {
-            let gid = cce_storage_qdrant::generate_project_group_id(
+            let gid = cce_storage_common::generate_project_group_id(
                 project_id,
                 &entry.metadata.root_path,
             );

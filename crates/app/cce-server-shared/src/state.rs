@@ -106,8 +106,18 @@ impl AppState {
     // --- Component access helpers ---
     // These provide convenient access to components stored in the engine.
 
-    /// Get a clone of the Qdrant client
-    pub fn qdrant_clone(&self) -> Arc<cce_storage_qdrant::QdrantClient> {
+    /// Get a reference to the vector store (backend-neutral)
+    pub fn vector(&self) -> &cce_orchestrator::index::VectorStore {
+        self.engine.vector()
+    }
+
+    /// Get a clone of the vector store
+    pub fn vector_clone(&self) -> cce_orchestrator::index::VectorStore {
+        self.engine.vector_clone()
+    }
+
+    /// Get a clone of the Qdrant client (Qdrant backend only, for diagnostics/process admin)
+    pub fn qdrant_clone(&self) -> Option<Arc<cce_storage_qdrant::QdrantClient>> {
         self.engine.qdrant_clone()
     }
 

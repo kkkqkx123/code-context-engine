@@ -129,7 +129,7 @@ impl GenerationGcWorker {
         stale_before: i64,
     ) -> Result<(), StorageError> {
         let database = self.sqlite.for_project(project_id)?;
-        let group_id = cce_storage_qdrant::generate_project_group_id(project_id, root_path);
+        let group_id = cce_storage_common::generate_project_group_id(project_id, root_path);
 
         let coordinator = StorageCoordinator::new(project_id)
             .map_err(|e| StorageError::Query(e.to_string()))?
@@ -212,7 +212,7 @@ mod tests {
     async fn test_cleanup_removes_stale_generations_sqlite_only() {
         let client = setup_test_db();
         let database = Arc::new(client.clone());
-        let group_id = cce_storage_qdrant::generate_project_group_id(1, "/tmp/test");
+        let group_id = cce_storage_common::generate_project_group_id(1, "/tmp/test");
 
         let coordinator = StorageCoordinator::new(1)
             .expect("valid project ID")
@@ -254,7 +254,7 @@ mod tests {
     async fn test_cleanup_respects_retention_window_with_stale_threshold() {
         let client = setup_test_db();
         let database = Arc::new(client.clone());
-        let group_id = cce_storage_qdrant::generate_project_group_id(1, "/tmp/test");
+        let group_id = cce_storage_common::generate_project_group_id(1, "/tmp/test");
 
         let coordinator = StorageCoordinator::new(1)
             .expect("valid project ID")

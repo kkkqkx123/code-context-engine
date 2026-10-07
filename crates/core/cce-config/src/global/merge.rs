@@ -74,6 +74,21 @@ impl AppConfig {
 /// Storage merge helper — kept separate because Qdrant uses patch/apply patterns.
 fn merge_storage(merged: &mut AppConfig, project: &ProjectAppConfig) {
     if let Some(ref project_storage) = project.storage {
+        // Local vector tuning
+        if let Some(ref project_local) = project_storage.vector_local {
+            if let Some(m) = project_local.hnsw_m {
+                merged.database.vector_local.hnsw_m = Some(m);
+            }
+            if let Some(ef) = project_local.hnsw_ef_construct {
+                merged.database.vector_local.hnsw_ef_construct = Some(ef);
+            }
+            if let Some(ef) = project_local.hnsw_ef_search {
+                merged.database.vector_local.hnsw_ef_search = Some(ef);
+            }
+            if let Some(threshold) = project_local.full_scan_threshold {
+                merged.database.vector_local.full_scan_threshold = Some(threshold);
+            }
+        }
         // Qdrant
         if let Some(ref project_qdrant) = project_storage.qdrant {
             if let Some(preset) = project_qdrant.preset {

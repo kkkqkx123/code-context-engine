@@ -113,9 +113,22 @@ fn test_validate_rejects_provider_with_empty_base_url() {
 fn test_validate_dependencies_no_warnings() {
     let mut config = AppConfig::default();
     config.database.bm25.enabled = true;
+    // Local backend is default; an enabled Qdrant flag would be reported
+    // as ignored, so turn it off for a fully consistent config.
+    config.database.qdrant.enabled = false;
 
     let warnings = config.validate_dependencies();
     assert!(warnings.is_empty());
+}
+
+#[test]
+fn test_validate_dependencies_local_backend_qdrant_notice() {
+    let config = AppConfig::default();
+    assert!(config.database.is_local_vector());
+
+    let warnings = config.validate_dependencies();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].field, "database.vector_backend");
 }
 
 #[test]
@@ -126,8 +139,9 @@ fn test_validate_dependencies_summary_warning() {
     config.orchestrator.indexer.store_summaries = false;
 
     let warnings = config.validate_dependencies();
-    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings.len(), 2);
     assert_eq!(warnings[0].field, "export.include_summary");
+    assert_eq!(warnings[1].field, "database.vector_backend");
 }
 
 #[test]
@@ -139,7 +153,7 @@ fn test_validate_dependencies_relation_warnings() {
     config.orchestrator.indexer.build_relations = false;
 
     let warnings = config.validate_dependencies();
-    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings.len(), 3);
 }
 
 #[test]
@@ -172,7 +186,7 @@ fn test_validate_and_resolve_dependencies() {
 
     let messages = config.validate_and_resolve_dependencies();
 
-    assert_eq!(messages.len(), 6);
+    assert_eq!(messages.len(), 7);
     assert!(config.orchestrator.indexer.store_summaries);
     assert!(config.orchestrator.indexer.build_relations);
     assert!(config.relation.index.enabled);
@@ -425,6 +439,7 @@ fn test_merge_with_project_storage_full_config() {
                 algorithm: Some(Bm25AlgorithmConfig { k1: 2.0, b: 0.3 }),
                 ..Default::default()
             }),
+            vector_local: None,
             index_manager: None,
         }),
         ..Default::default()

@@ -11,6 +11,7 @@
 
 use std::sync::atomic::Ordering;
 
+use cce_storage_common::VectorStorage;
 use cce_storage_sqlite::{
     GenerationOverrideRepository, OverrideDisposition, ProjectIndexManifestRepository,
 };
@@ -133,12 +134,12 @@ impl StorageCoordinator {
             }
 
             // External deletions are idempotent: deleting a non-existent epoch
-            // is a no-op in both Qdrant and BM25, so a resume that re-executes
+            // is a no-op in both vector and BM25, so a resume that re-executes
             // `begin_hot_update_candidate` after an interrupted delete remains
             // safe (candidate_ready guards adoption).
-            if let Some(qdrant) = &self.qdrant {
+            if let Some(vector) = &self.vector {
                 self.ensure_project_group_id()?;
-                qdrant
+                vector
                     .delete_by_group_epoch(&self.project_group_id, candidate_epoch)
                     .await?;
                 tracing::info!(
@@ -146,7 +147,7 @@ impl StorageCoordinator {
                     project_id = self.project_id,
                     candidate_epoch = candidate_epoch,
                     group_id = %self.project_group_id,
-                    "Qdrant candidate epoch deleted (idempotent)"
+                    "Vector candidate epoch deleted (idempotent)"
                 );
             }
             if let Some(bm25) = &self.bm25 {
@@ -493,7 +494,7 @@ impl StorageCoordinator {
         Ok(())
     }
 
-    /// Delete one file's Qdrant points and BM25 documents **scoped to the
+    /// Delete one file's vector points and BM25 documents **scoped to the
     /// candidate epoch only**. The published/parent generations are never
     /// addressed, so an abort leaves them intact (invariant 3).
     async fn delete_candidate_epoch_external_data(
@@ -501,9 +502,9 @@ impl StorageCoordinator {
         path: &str,
     ) -> Result<(), OrchestratorError> {
         let epoch = self.epoch();
-        if let Some(qdrant) = &self.qdrant {
+        if let Some(vector) = &self.vector {
             self.ensure_project_group_id()?;
-            qdrant
+            vector
                 .delete_by_file_path_scoped_epoch(path, &self.project_group_id, epoch)
                 .await?;
         }
@@ -569,9 +570,9 @@ impl StorageCoordinator {
     ) -> Result<(), OrchestratorError> {
         let path = normalize_project_path(&file_path.to_string_lossy());
         let epoch = self.epoch();
-        if let Some(qdrant) = &self.qdrant {
+        if let Some(vector) = &self.vector {
             self.ensure_project_group_id()?;
-            qdrant
+            vector
                 .delete_by_file_path_scoped_epoch(&path, &self.project_group_id, epoch)
                 .await?;
         }

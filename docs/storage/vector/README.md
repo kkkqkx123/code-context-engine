@@ -4,6 +4,8 @@
 
 本目录包含向量存储模块的完整文档，涵盖 Qdrant 使用分析和后端扩展设计。
 
+向量存储本地优先：默认使用内嵌本地引擎（`cce-storage-local`，simvec 实现，mmap 加 WAL 加 HNSW），单机与离线环境零外部依赖；大规模场景可经 `database.vector_backend = "qdrant"` 切换到 Qdrant 远程服务。两后端实现同一 `VectorStorage` 契约（写入、向量检索、按标识删除、计数与集合管理），组装层以 `VectorStore` 枚举按配置一次性分发，运行中不切换；切换后端需重建索引。双后端过滤语义一致性由 `cce-storage-common` 的契约测试（`tests/vector_backend_contract.rs`，Qdrant 分支需 `CCE_TEST_QDRANT_URL` 指向可用服务）锁定。
+
 ## 文档列表
 
 ### 1. Qdrant 使用分析
@@ -99,7 +101,7 @@
 
 | 后端 | 职责 | 数据类型 | 访问模式 |
 |------|------|---------|---------|
-| **Qdrant** | 向量存储与语义搜索 | 高维向量 + Payload | 相似性搜索 |
+| **向量存储**（本地 simvec / 远程 Qdrant，二选一） | 向量存储与语义搜索 | 高维向量 + Payload | 相似性搜索 |
 | **BM25** | 全文搜索 | 文档（标题、内容、关键词） | 关键词搜索 |
 | **SQLite** | 元数据存储 | 实体、关系、缓存、映射 | 精确查询、事务 |
 
@@ -124,7 +126,7 @@ pub async fn search(&self, query: SearchQuery) -> Result<Vec<SearchResult>, Qdra
 
 ```rust
 pub struct StorageCoordinator {
-    qdrant: Option<Arc<QdrantClient>>,              // Qdrant 客户端
+    vector: Option<VectorStore>,                     // 向量后端枚举（Local / Qdrant）
     bm25: Option<Arc<tokio::sync::Mutex<Bm25Client>>>, // BM25 客户端
     embedder: Option<Arc<Embedder>>,                // 嵌入器
     metadata_store: Option<Arc<SqliteDatabase>>,    // SQLite 元数据存储
@@ -170,14 +172,25 @@ HotUpdateOrchestrator::handle_file_change
 ## 配置示例
 
 ```toml
-# config.toml
-[database.qdrant]
-url = "http://localhost:6333"
+# config.toml（默认本地，零外部依赖）
+[database]
+vector_backend = "local"
+
+[database.vector_local]
 vector_size = 768
 distance_metric = "Cosine"
-timeout_ms = 30000
-enabled = true
-preset = "Medium"
+
+# 大规模场景切换远程（需重建索引）
+# [database]
+# vector_backend = "qdrant"
+#
+# [database.qdrant]
+# url = "http://localhost:6333"
+# vector_size = 768
+# distance_metric = "Cosine"
+# timeout_ms = 30000
+# enabled = true
+# preset = "Medium"
 ```
 
 ## 扩展设计
@@ -238,25 +251,23 @@ pub struct StorageCoordinator {
 ### 运行测试
 
 ```bash
-# 单元测试
-cargo test --lib storage::qdrant
+# 单元测试（共享类型、过滤谓词、本地引擎、Qdrant 客户端）
+cargo test -p cce-storage-common -p cce-storage-local -p cce-storage-qdrant
 
-# 集成测试（需要实际 Qdrant 服务）
-cargo test --test qdrant_integration -- --ignored
+# 双后端契约测试（本地分支常跑；Qdrant 分支需指向可用服务，否则跳过）
+CCE_TEST_QDRANT_URL=http://localhost:6333 cargo test -p cce-storage-common --test vector_backend_contract
 
-# 性能基准测试
-cargo bench --bench vector_storage_benchmark
+# 本地引擎 simvec 的测试与基准（workspace 成员）
+cargo test -p simvec
+cargo bench -p simvec
 ```
 
 ### 测试覆盖
 
-- ✅ 配置验证
-- ✅ 客户端创建
-- ✅ 集合管理
-- ✅ 点操作
-- ✅ 搜索功能
-- ✅ 错误处理
-- ✅ 性能指标
+- ✅ 配置验证（双后端依赖提示、维度校验）
+- ✅ 契约测试：相似度 roundtrip、分组隔离、世代排除、类型/目录前缀/测试排除/分类过滤、范围删除与计数、维度拒绝
+- ✅ 本地引擎：mmap/WAL 持久化、HNSW 与精确扫描、过滤位图、崩溃恢复
+- ✅ Qdrant 分支：过滤 JSON 翻译、客户端与错误映射
 
 ## 监控
 

@@ -7,13 +7,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::index::vector_store::VectorStore;
 use crate::query::boost::{BoostAggregationConfig, BoostContribution};
 use crate::query::error::{QueryError, Result};
 use crate::query::types::{SearchConfig, SearchResult};
 use cce_llm_client::LlmError;
 use cce_llm_client::OpenAICompatibleProvider;
-use cce_storage_common::{DenseSearchQuery, SearchFilter};
-use cce_storage_qdrant::QdrantRetrieval;
+use cce_storage_common::{DenseSearchQuery, SearchFilter, VectorStorage};
 use cce_types::PointKind;
 use cce_types::error::common::HttpError;
 
@@ -23,19 +23,19 @@ use cce_types::error::common::HttpError;
 /// additive boost contributions for candidates in matching files.
 #[derive(Clone)]
 pub struct SummaryBoost {
-    qdrant: Arc<QdrantRetrieval>,
+    vector: VectorStore,
     embedder: Arc<OpenAICompatibleProvider>,
     project_group_id: String,
 }
 
 impl SummaryBoost {
     pub fn new(
-        qdrant: Arc<QdrantRetrieval>,
+        vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
         project_group_id: String,
     ) -> Self {
         Self {
-            qdrant,
+            vector,
             embedder,
             project_group_id,
         }
@@ -79,7 +79,7 @@ impl SummaryBoost {
             });
 
         let summary_results = self
-            .qdrant
+            .vector
             .search_dense(dense_query)
             .await
             .map_err(|e| QueryError::Vector(LlmError::Http(HttpError::new(e.to_string()))))?;

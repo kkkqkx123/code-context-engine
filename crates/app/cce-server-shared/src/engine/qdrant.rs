@@ -18,13 +18,20 @@ impl super::CodeContextEngine {
     ///
     /// This method stores the handle and returns immediately.
     pub fn start_qdrant_process_manager(&mut self) -> Option<QdrantProcessHandle> {
-        if !self.qdrant.config().is_process_managed() {
+        let Some(qdrant) = self.vector.as_qdrant() else {
+            tracing::info!(
+                backend = self.vector.backend_name(),
+                "Vector backend is local, skipping Qdrant process manager"
+            );
+            return None;
+        };
+        if !qdrant.config().is_process_managed() {
             tracing::info!("Qdrant subprocess management is disabled");
             return None;
         }
 
-        let process_config = QdrantProcessConfig::from_config(self.qdrant.config());
-        let auto_start = self.qdrant.config().auto_start;
+        let process_config = QdrantProcessConfig::from_config(qdrant.config());
+        let auto_start = qdrant.config().auto_start;
         let auto_restart = process_config.auto_restart;
 
         tracing::info!(
@@ -214,12 +221,16 @@ impl super::CodeContextEngine {
     ///
     /// This spawns a background task and returns immediately.
     pub fn start_qdrant_connection_monitor(&self, interval_secs: u64) {
-        let qdrant = self.qdrant.clone();
+        use cce_storage_common::VectorStorage;
+
+        let vector = self.vector.clone();
+        let backend = vector.backend_name();
         let check_interval = Duration::from_secs(interval_secs.max(1));
 
         tracing::info!(
             interval_secs = check_interval.as_secs(),
-            "Starting Qdrant connection health monitor"
+            backend,
+            "Starting vector connection health monitor"
         );
 
         tokio::spawn(async move {
@@ -229,12 +240,12 @@ impl super::CodeContextEngine {
             loop {
                 interval.tick().await;
 
-                match qdrant.health().await {
+                match vector.health().await {
                     Ok(true) => {
                         if consecutive_failures > 0 {
                             tracing::info!(
                                 consecutive_failures,
-                                "Qdrant connection restored after {} failures",
+                                "Vector connection restored after {} failures",
                                 consecutive_failures
                             );
                             consecutive_failures = 0;
@@ -244,7 +255,7 @@ impl super::CodeContextEngine {
                         consecutive_failures += 1;
                         tracing::warn!(
                             consecutive_failures,
-                            "Qdrant health check returned non-success status"
+                            "Vector health check returned non-success status"
                         );
                     }
                     Err(e) => {
@@ -252,7 +263,7 @@ impl super::CodeContextEngine {
                         tracing::error!(
                             error = %e,
                             consecutive_failures,
-                            "Qdrant health check failed"
+                            "Vector health check failed"
                         );
                     }
                 }

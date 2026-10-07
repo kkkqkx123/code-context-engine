@@ -10,7 +10,7 @@
 
 ```toml
 [server]              # 服务器配置
-[database]            # 数据库配置（Qdrant, SQLite, BM25）
+[database]            # 数据库配置（向量后端二选一，默认本地；另含 SQLite, BM25）
 [embedder]            # 嵌入模型配置
 [llm]                 # LLM 配置
 [logger]              # 日志配置
@@ -38,7 +38,33 @@ port = 9000          # 服务器端口 (1-65535)
 
 ## 数据库配置
 
-### Qdrant 向量数据库
+### 向量后端选择
+
+```toml
+[database]
+vector_backend = "local"                # 向量后端: local（默认，内嵌引擎，零外部依赖）, qdrant（远程服务，大规模场景）
+```
+
+切换后端视为重建索引：旧后端数据不迁移，需走全量重建流程重新生成。本地模式下 `database.qdrant.*` 配置被忽略，校验会给出明确提示。
+
+### 本地向量引擎（默认）
+
+```toml
+[database.vector_local]
+data_dir = ""                           # 数据目录（mmap 文件与 WAL）；为空时取 SQLite 文件所在目录下的 vectors 子目录
+vector_size = 1024                      # 向量维度（必须与嵌入模型匹配）
+distance_metric = "cosine"              # 距离度量: cosine, euclid, dot
+hnsw_m = 16                             # HNSW 图连接度（可选，缺省用引擎默认值）
+hnsw_ef_construct = 200                 # HNSW 构建候选数（可选）
+hnsw_ef_search = 100                    # HNSW 查询候选数（可选）
+full_scan_threshold = 10000             # 精确扫描转 HNSW 的活跃点数阈值（可选）
+```
+
+HNSW 参数全部可选，不填即用引擎默认值；`vector_size` 与所选嵌入模型的输出维度不一致时启动即报错。
+
+### Qdrant 向量数据库（远程可选）
+
+仅当 `vector_backend = "qdrant"` 时生效，大规模与高负载场景使用，保留子进程管理、熔断与重试能力。
 
 ```toml
 [database.qdrant]

@@ -85,7 +85,7 @@ pub async fn handle_config_reload(
                 .first()
                 .cloned()
                 .unwrap_or_else(|| PathBuf::from("."));
-            let project_group_id = cce_storage_qdrant::generate_project_group_id(
+            let project_group_id = cce_storage_common::generate_project_group_id(
                 project_id,
                 &project_root.to_string_lossy(),
             );
@@ -141,7 +141,7 @@ pub async fn handle_config_reload(
                     generator
                 });
             let processors_result = factory.create_all_processors(
-                Some(state.engine.qdrant_clone()),
+                Some(state.engine.vector_clone()),
                 Some(state.engine.bm25_clone()),
                 state
                     .engine
@@ -292,6 +292,7 @@ pub async fn handle_config_validate() -> ApiResult<ConfigValidateResponse> {
                 indexer_store_bm25: config.orchestrator.indexer.store_bm25,
                 qdrant_enabled: config.database.qdrant.enabled,
                 bm25_enabled: config.database.bm25.enabled,
+                vector_backend: config.database.vector_backend,
                 relation_index_enabled: config.relation.index.enabled,
                 llm_enabled: config.llm.enabled,
                 has_llm_provider: !config.llm.providers.is_empty(),

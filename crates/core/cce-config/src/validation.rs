@@ -175,22 +175,55 @@ pub fn resolve_export_dependencies(
 /// Validate storage dependencies
 ///
 /// Checks that storage flags are consistent with storage backend enabled status.
+/// The vector check is backend-aware: local mode needs no Qdrant flag, Qdrant
+/// mode still requires `database.qdrant.enabled`.
 pub fn validate_storage_dependencies(
     indexer_store_vectors: bool,
     indexer_store_bm25: bool,
     qdrant_enabled: bool,
     bm25_enabled: bool,
 ) -> Vec<ConfigWarning> {
+    validate_storage_dependencies_with_backend(
+        indexer_store_vectors,
+        indexer_store_bm25,
+        qdrant_enabled,
+        bm25_enabled,
+        crate::modules::VectorBackend::Qdrant,
+    )
+}
+
+/// Backend-aware storage dependency validation.
+pub fn validate_storage_dependencies_with_backend(
+    indexer_store_vectors: bool,
+    indexer_store_bm25: bool,
+    qdrant_enabled: bool,
+    bm25_enabled: bool,
+    vector_backend: crate::modules::VectorBackend,
+) -> Vec<ConfigWarning> {
     let mut warnings = Vec::new();
 
     // Check vector storage dependency
-    if indexer_store_vectors && !qdrant_enabled {
-        warnings.push(ConfigWarning::new(
-            WarningSeverity::Warning,
-            "orchestrator.indexer.store_vectors",
-            "database.qdrant.enabled",
-            "Set database.qdrant.enabled = true to enable Qdrant vector storage.",
-        ));
+    match vector_backend {
+        crate::modules::VectorBackend::Local => {
+            if qdrant_enabled {
+                warnings.push(ConfigWarning::new(
+                    WarningSeverity::Warning,
+                    "database.vector_backend",
+                    "database.qdrant.enabled",
+                    "Local vector backend is active; database.qdrant.* settings are ignored. Switch database.vector_backend to qdrant to use them.",
+                ));
+            }
+        }
+        crate::modules::VectorBackend::Qdrant => {
+            if indexer_store_vectors && !qdrant_enabled {
+                warnings.push(ConfigWarning::new(
+                    WarningSeverity::Warning,
+                    "orchestrator.indexer.store_vectors",
+                    "database.qdrant.enabled",
+                    "Set database.qdrant.enabled = true to enable Qdrant vector storage.",
+                ));
+            }
+        }
     }
 
     // Check BM25 storage dependency
@@ -340,6 +373,7 @@ pub struct DependencyParams {
     // Storage settings
     pub qdrant_enabled: bool,
     pub bm25_enabled: bool,
+    pub vector_backend: crate::modules::VectorBackend,
     // Relation settings
     pub relation_index_enabled: bool,
     // LLM settings
@@ -364,11 +398,12 @@ pub fn validate_all_dependencies(params: &DependencyParams) -> Vec<ConfigWarning
     ));
 
     // Storage dependencies
-    warnings.extend(validate_storage_dependencies(
+    warnings.extend(validate_storage_dependencies_with_backend(
         params.indexer_store_vectors,
         params.indexer_store_bm25,
         params.qdrant_enabled,
         params.bm25_enabled,
+        params.vector_backend,
     ));
 
     // Relation dependencies
@@ -389,17 +424,39 @@ pub fn validate_all_dependencies(params: &DependencyParams) -> Vec<ConfigWarning
 
 /// Resolve storage dependencies by auto-enabling required features
 ///
-/// Returns a list of info messages for auto-enabled features
+/// Returns a list of info messages for auto-enabled features.
+/// Local vector backend needs no Qdrant flag; only Qdrant mode auto-enables it.
 pub fn resolve_storage_dependencies(
     indexer_store_vectors: bool,
     indexer_store_bm25: bool,
     qdrant_enabled: &mut bool,
     bm25_enabled: &mut bool,
 ) -> Vec<ConfigWarning> {
+    resolve_storage_dependencies_with_backend(
+        indexer_store_vectors,
+        indexer_store_bm25,
+        qdrant_enabled,
+        bm25_enabled,
+        crate::modules::VectorBackend::Qdrant,
+    )
+}
+
+/// Backend-aware storage dependency resolution.
+pub fn resolve_storage_dependencies_with_backend(
+    indexer_store_vectors: bool,
+    indexer_store_bm25: bool,
+    qdrant_enabled: &mut bool,
+    bm25_enabled: &mut bool,
+    vector_backend: crate::modules::VectorBackend,
+) -> Vec<ConfigWarning> {
     let mut infos = Vec::new();
 
-    // Auto-enable Qdrant if vector storage is requested
-    if indexer_store_vectors && !*qdrant_enabled {
+    // Auto-enable Qdrant if vector storage is requested in Qdrant mode.
+    // Local mode stores vectors embedded without any Qdrant flag.
+    if indexer_store_vectors
+        && matches!(vector_backend, crate::modules::VectorBackend::Qdrant)
+        && !*qdrant_enabled
+    {
         *qdrant_enabled = true;
         infos.push(ConfigWarning::new(
             WarningSeverity::Info,

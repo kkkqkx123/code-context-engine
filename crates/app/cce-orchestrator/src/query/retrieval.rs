@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! core/              # Low-level, stateless implementations (direct storage access)
-//!     ├── dense.rs      # DenseRetrieval - core vector search (Qdrant)
+//!     ├── dense.rs      # DenseRetrieval - core vector search (vector backend)
 //!     └── vector.rs     # FilterOptions and vector types
 //!
 //! strategies/        # High-level strategy interface (orchestration layer)
@@ -23,7 +23,7 @@
 //! # Design Principles
 //!
 //! - **Symmetric Layering**: Storage read paths live in the storage layer
-//!   (`Bm25Retrieval`, `QdrantRetrieval`); the orchestrator only composes
+//!   (`Bm25Retrieval`, vector backend `VectorStore`); the orchestrator only composes
 //!   strategies, translates filters and post-processes results
 //! - **Pure Recall Paths**: Strategies return raw results without enrichment or fusion.
 //!   Post-retrieval processing (SQLite enrichment, BM25 fusion, reranking) happens

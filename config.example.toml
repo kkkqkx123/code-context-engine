@@ -8,7 +8,29 @@ host = "0.0.0.0"
 port = 9000
 
 [database]
-# Qdrant vector database configuration
+# Vector backend: local (default, embedded engine, no external service)
+# or qdrant (remote service for large-scale deployments).
+# Switching backends requires a full reindex; old data is not migrated.
+vector_backend = "local"
+
+# Local embedded vector engine configuration (effective when vector_backend = "local")
+[database.vector_local]
+# Data directory for mmap files plus WAL (empty resolves to <sqlite_parent>/vectors)
+data_dir = ""
+# Vector dimension (must match the embedder model output)
+vector_size = 1024
+# Distance metric: cosine, euclid, dot
+distance_metric = "cosine"
+# HNSW graph degree (optional, engine default when unset)
+# hnsw_m = 16
+# HNSW build candidate list size (optional)
+# hnsw_ef_construct = 200
+# HNSW query-time candidate list size (optional)
+# hnsw_ef_search = 100
+# Live-point threshold promoting exact scan to HNSW (optional)
+# full_scan_threshold = 10000
+
+# Qdrant vector database configuration (effective when vector_backend = "qdrant")
 [database.qdrant]
 # Qdrant server URL
 url = "http://localhost:6333"

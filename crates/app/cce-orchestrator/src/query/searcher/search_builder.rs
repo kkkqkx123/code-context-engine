@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use cce_config::project_registry::ProjectScope;
 
+use crate::index::vector_store::VectorStore;
 use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
@@ -19,16 +20,13 @@ use cce_llm_client::OpenAICompatibleProvider;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::SearchMetrics;
 
-use cce_storage_qdrant::QdrantRetrieval;
-
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 
 use super::searcher_core::Searcher;
 
 pub struct SearcherBuilder {
-    qdrant: Arc<QdrantClient>,
+    vector: VectorStore,
     embedder: Arc<OpenAICompatibleProvider>,
     bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
     sqlite: Option<Arc<SqliteClient>>,
@@ -43,13 +41,13 @@ pub struct SearcherBuilder {
 impl SearcherBuilder {
     /// Create a new builder with required components and project scope
     pub(crate) fn new(
-        qdrant: Arc<QdrantClient>,
+        vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         scope: ProjectScope,
     ) -> Self {
         Self {
-            qdrant,
+            vector,
             embedder,
             bm25,
             sqlite: None,
@@ -111,12 +109,9 @@ impl SearcherBuilder {
 
     /// Build the Searcher instance
     pub fn build(self) -> Searcher {
-        // Create QdrantRetrieval for application-level fusion
-        let qdrant_retrieval = Arc::new(QdrantRetrieval::new(
-            self.qdrant.http_client().clone(),
-            self.qdrant.base_url().to_string(),
-            self.qdrant.collection_name().to_string(),
-        ));
+        // Vector backend (local or Qdrant) is shared by dense retrieval and
+        // summary boost; VectorStore is cheap to clone (holds Arc inside).
+        let vector = self.vector.clone();
 
         // Memoize query embeddings: dense retrieval and summary boost embed
         // the same query text within one search flow; the shared wrapper
@@ -128,7 +123,7 @@ impl SearcherBuilder {
         // Create summary boost if enabled
         let summary_boost = if self.enable_summary_boost {
             Some(Arc::new(SummaryBoost::new(
-                qdrant_retrieval.clone(),
+                vector.clone(),
                 self.embedder.clone(),
                 self.scope.project_group_id().to_string(),
             )))
@@ -137,7 +132,7 @@ impl SearcherBuilder {
         };
 
         Searcher {
-            qdrant_retrieval,
+            vector,
             embedder: self.embedder.clone(),
             bm25: self.bm25,
             sqlite: self.sqlite,

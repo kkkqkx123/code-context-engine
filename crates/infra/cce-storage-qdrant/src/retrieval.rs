@@ -64,6 +64,14 @@ impl QdrantRetrieval {
                 }));
             }
 
+            if let Some(ref file_path) = f.file_path {
+                let normalized = cce_types::normalize_project_path(file_path);
+                must_conditions.push(serde_json::json!({
+                    "key": "file_path",
+                    "match": { "value": normalized }
+                }));
+            }
+
             if let Some(ref prefix) = f.directory_prefix {
                 let normalized = cce_types::normalize_project_path(prefix);
                 let trimmed = normalized.trim_end_matches('/');

@@ -8,8 +8,7 @@ use std::sync::Arc;
 use crate::CheckpointManager;
 use cce_llm::LlmError;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_common::Payload;
-use cce_storage_qdrant::VectorPoint;
+use cce_storage_common::{Payload, VectorPoint, VectorStorage};
 use cce_storage_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
 use cce_storage_sqlite::{
     ChunkRecord, ChunkRepository, EntityDetailMapping, EntityDetailMappingRepository,
@@ -133,8 +132,8 @@ impl StorageCoordinator {
             }
         };
 
-        let qdrant = match &self.qdrant {
-            Some(q) => q,
+        let vector = match &self.vector {
+            Some(v) => v,
             None => {
                 return Err(OrchestratorError::index(
                     "vector_store",
@@ -234,7 +233,7 @@ impl StorageCoordinator {
             };
 
             total_stored += self
-                .persist_embedding_batch(batch, &embeddings, &wu_state, qdrant)
+                .persist_embedding_batch(batch, &embeddings, &wu_state, vector)
                 .await?;
 
             // Sleep between batches to avoid rate limits (skip last batch)
@@ -260,7 +259,7 @@ impl StorageCoordinator {
                 match embedder.embed(&texts).await {
                     Ok(embeddings) => {
                         total_stored += self
-                            .persist_embedding_batch(batch, &embeddings, &wu_state, qdrant)
+                            .persist_embedding_batch(batch, &embeddings, &wu_state, vector)
                             .await?;
                     }
                     Err(err) if is_retryable_llm_error(&err) => {
@@ -317,7 +316,7 @@ impl StorageCoordinator {
         batch: &[&ChunkedResult],
         embeddings: &cce_llm::EmbeddingResult,
         wu_state: &Option<(Arc<CheckpointManager>, String, String)>,
-        qdrant: &Arc<cce_storage_qdrant::QdrantClient>,
+        vector: &crate::index::vector_store::VectorStore,
     ) -> Result<usize, OrchestratorError> {
         // Build vector points and chunk records for this batch
         let (points, chunk_records, entity_mappings) = self
@@ -326,9 +325,9 @@ impl StorageCoordinator {
 
         let mut stored = 0;
 
-        // Store to Qdrant
+        // Store to vector backend (local or Qdrant via enum dispatch)
         if !points.is_empty() {
-            qdrant.upsert_points(&points).await?;
+            vector.upsert_points(&points).await?;
             stored = points.len();
         }
 
@@ -643,8 +642,8 @@ impl StorageCoordinator {
                 ));
             }
         };
-        let qdrant = match &self.qdrant {
-            Some(q) => q,
+        let vector = match &self.vector {
+            Some(v) => v,
             None => {
                 return Err(OrchestratorError::index(
                     "reembed_vectors",
@@ -685,7 +684,7 @@ impl StorageCoordinator {
             let points =
                 build_reembed_points(batch.iter().zip(vectors.iter()), &self.project_group_id);
             stored += points.len();
-            qdrant.upsert_points(&points).await?;
+            vector.upsert_points(&points).await?;
         }
         for batch in deferred {
             let texts: Vec<&str> = batch.iter().map(|(r, _)| r.content.as_str()).collect();
@@ -704,7 +703,7 @@ impl StorageCoordinator {
             let points =
                 build_reembed_points(batch.iter().zip(vectors.iter()), &self.project_group_id);
             stored += points.len();
-            qdrant.upsert_points(&points).await?;
+            vector.upsert_points(&points).await?;
         }
         Ok(stored)
     }

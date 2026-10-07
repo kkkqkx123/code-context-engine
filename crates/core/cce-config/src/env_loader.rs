@@ -149,6 +149,21 @@ pub fn apply_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
 fn apply_database_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     use crate::global::SqliteSyncMode;
 
+    if let Ok(val) = std::env::var("CCE_DB_VECTOR_BACKEND") {
+        config.database.vector_backend = match val.to_lowercase().as_str() {
+            "local" => crate::modules::VectorBackend::Local,
+            "qdrant" => crate::modules::VectorBackend::Qdrant,
+            _ => {
+                return Err(ConfigError::invalid_env_var(
+                    "CCE_DB_VECTOR_BACKEND",
+                    format!("invalid backend: {val} (expected local|qdrant)"),
+                ));
+            }
+        };
+    }
+    if let Ok(val) = std::env::var("CCE_DB_VECTOR_DATA_DIR") {
+        config.database.vector_local.data_dir = Some(val);
+    }
     if let Ok(val) = std::env::var("CCE_DB_QDRANT_URL") {
         config.database.qdrant.url = val;
     }

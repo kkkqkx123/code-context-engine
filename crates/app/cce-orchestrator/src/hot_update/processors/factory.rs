@@ -13,12 +13,12 @@ use crate::export::ExportConfig;
 use crate::export::NlDocumentExporter;
 use crate::index::RelationSnapshotPublisher;
 use crate::index::StorageCoordinator;
+use crate::index::VectorStore;
 use cce_config::{NestProcessorConfig, RelationConfig};
 use cce_metrics::RelationMetrics;
 use cce_parser::summary::{RuleBasedGenerator, SummaryGenerator};
 use cce_plugin::PluginRegistry;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 use cce_types::error::ConfigError;
 
@@ -40,10 +40,10 @@ pub struct ProcessorConfig {
     pub enable_relation: bool,
     /// Enable summary update processor
     pub enable_summary: bool,
-    /// Whether summary vectors are embedded into Qdrant during updates.
+    /// Whether summary vectors are embedded into the vector backend during updates.
     ///
     /// When false, summaries are still regenerated and persisted for NL
-    /// document export, but their vectors are not written to Qdrant.
+    /// document export, but their vectors are not written to the vector store.
     pub embed_summaries: bool,
     /// Enable NL document export processor
     pub enable_export: bool,
@@ -210,7 +210,7 @@ impl ProcessorFactory {
     #[allow(clippy::too_many_arguments)]
     pub fn create_all_processors(
         &self,
-        qdrant: Option<Arc<QdrantClient>>,
+        vector: Option<VectorStore>,
         bm25: Option<Arc<Mutex<Bm25Client>>>,
         metadata_store: Option<Arc<SqliteClient>>,
         embedder: Option<Arc<cce_llm_client::OpenAICompatibleProvider>>,
@@ -233,10 +233,10 @@ impl ProcessorFactory {
 
         // Processors are independent: missing vector or BM25 infrastructure
         // must not disable SQLite-backed relation publication.
-        let enable_embedding = config.enable_embedding && qdrant.is_some() && embedder.is_some();
+        let enable_embedding = config.enable_embedding && vector.is_some() && embedder.is_some();
         if config.enable_embedding && !enable_embedding {
             tracing::warn!(
-                "Embedding processor disabled because Qdrant or embedder is unavailable"
+                "Embedding processor disabled because vector backend or embedder is unavailable"
             );
         }
         let enable_bm25 = config.enable_bm25 && bm25.is_some();
@@ -290,8 +290,8 @@ impl ProcessorFactory {
             storage_coordinator = storage_coordinator.with_project_group_id(group_id);
         }
 
-        if let Some(qdrant) = qdrant {
-            storage_coordinator = storage_coordinator.with_qdrant(qdrant);
+        if let Some(vector) = vector {
+            storage_coordinator = storage_coordinator.with_vector(vector);
         }
 
         if let Some(bm25) = bm25 {

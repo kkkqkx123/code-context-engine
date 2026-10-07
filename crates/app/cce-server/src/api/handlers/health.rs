@@ -15,6 +15,7 @@ use cce_api::models::{
     RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse,
     RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
+use cce_storage_common::VectorStorage;
 
 // --- Handlers ---
 
@@ -59,25 +60,61 @@ pub async fn handle_health(State(state): State<AppState>) -> ApiResult<HealthSta
 pub async fn handle_qdrant_health(
     State(state): State<AppState>,
 ) -> ApiResult<QdrantHealthResponse> {
-    let circuit_breaker = state.engine.qdrant().circuit_breaker_state().to_string();
+    let vector = state.engine.vector();
+    let circuit_breaker = match vector.as_qdrant() {
+        Some(qdrant) => qdrant.circuit_breaker_state().to_string(),
+        None => "n/a (local backend)".to_string(),
+    };
 
     let diagnostic = {
-        let qdrant = state.engine.qdrant();
-        match qdrant.diagnose().await {
-            Ok(diag) => QdrantDiagnostic {
-                reachable: diag.reachable,
-                version: diag.version,
-                collection_exists: diag.collection_exists,
-                points_count: diag.points_count,
-                error: diag.error,
-            },
-            Err(e) => QdrantDiagnostic {
-                reachable: false,
-                version: None,
-                collection_exists: false,
-                points_count: 0,
-                error: Some(format!("Diagnostic failed: {}", e)),
-            },
+        if let Some(qdrant) = vector.as_qdrant() {
+            match qdrant.diagnose().await {
+                Ok(diag) => QdrantDiagnostic {
+                    reachable: diag.reachable,
+                    version: diag.version,
+                    collection_exists: diag.collection_exists,
+                    points_count: diag.points_count,
+                    error: diag.error,
+                },
+                Err(e) => QdrantDiagnostic {
+                    reachable: false,
+                    version: None,
+                    collection_exists: false,
+                    points_count: 0,
+                    error: Some(format!("Diagnostic failed: {}", e)),
+                },
+            }
+        } else {
+            match vector.health().await {
+                Ok(healthy) => {
+                    let (collection_exists, points_count) = match (
+                        vector.collection_exists().await,
+                        vector.count_all_points().await,
+                    ) {
+                        (Ok(exists), Ok(count)) => (exists, count as u64),
+                        (Ok(exists), Err(_)) => (exists, 0),
+                        _ => (false, 0),
+                    };
+                    QdrantDiagnostic {
+                        reachable: healthy,
+                        version: None,
+                        collection_exists,
+                        points_count,
+                        error: if healthy {
+                            None
+                        } else {
+                            Some("Local vector store reported unhealthy".to_string())
+                        },
+                    }
+                }
+                Err(e) => QdrantDiagnostic {
+                    reachable: false,
+                    version: None,
+                    collection_exists: false,
+                    points_count: 0,
+                    error: Some(format!("Diagnostic failed: {}", e)),
+                },
+            }
         }
     };
 
@@ -277,18 +314,20 @@ pub async fn handle_retry_queue_dead_clear(
 // --- Internal helpers ---
 
 async fn check_qdrant(state: &AppState) -> ServiceStatus {
-    match state.engine.qdrant().health().await {
+    let vector = state.engine.vector();
+    let backend = vector.backend_name();
+    match vector.health().await {
         Ok(true) => ServiceStatus {
             reachable: true,
-            message: "Qdrant is reachable and healthy".to_string(),
+            message: format!("Vector store ({backend}) is reachable and healthy"),
         },
         Ok(false) => ServiceStatus {
             reachable: false,
-            message: "Qdrant returned non-success health status".to_string(),
+            message: format!("Vector store ({backend}) returned non-success health status"),
         },
         Err(e) => ServiceStatus {
             reachable: false,
-            message: format!("Qdrant health check failed: {}", e),
+            message: format!("Vector store ({backend}) health check failed: {}", e),
         },
     }
 }

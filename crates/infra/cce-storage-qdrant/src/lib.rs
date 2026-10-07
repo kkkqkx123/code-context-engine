@@ -14,6 +14,7 @@
 //! | Medium | 10,000-100,000 | 32   | 256               |
 //! | Large  | > 100,000    | 64     | 512               |
 
+pub mod backend;
 pub mod client;
 pub mod config;
 pub mod error;

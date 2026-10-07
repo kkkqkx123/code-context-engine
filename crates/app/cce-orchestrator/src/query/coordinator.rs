@@ -25,7 +25,6 @@ use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::{MetricsRegistry, QueryMetrics, SearchMetrics};
 use cce_relation::CallChainQuery;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 use cce_types::error::common::ErrorClassify;
 
@@ -37,6 +36,7 @@ use super::relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationS
 use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
 use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult};
+use crate::index::vector_store::VectorStore;
 
 /// Query coordinator
 ///
@@ -97,14 +97,14 @@ pub struct QueryCoordinatorBuilder {
 impl QueryCoordinatorBuilder {
     /// Create a new builder with required components
     fn new(
-        qdrant: Arc<QdrantClient>,
+        vector: VectorStore,
         embedder: Arc<cce_llm_client::OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         call_chain_query: Arc<CallChainQuery>,
         scope: ProjectScope,
     ) -> Self {
         let project_id = scope.project_id();
-        let searcher_builder = Searcher::builder(qdrant, embedder, bm25, scope);
+        let searcher_builder = Searcher::builder(vector, embedder, bm25, scope);
         let relation_searcher = Arc::new(RelationSearcher::new(call_chain_query));
 
         Self {
@@ -183,13 +183,13 @@ impl QueryCoordinatorBuilder {
 impl QueryCoordinator {
     /// Create a new builder for QueryCoordinator with required components
     pub fn builder(
-        qdrant: Arc<QdrantClient>,
+        vector: VectorStore,
         embedder: Arc<cce_llm_client::OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         call_chain_query: Arc<CallChainQuery>,
         scope: ProjectScope,
     ) -> QueryCoordinatorBuilder {
-        QueryCoordinatorBuilder::new(qdrant, embedder, bm25, call_chain_query, scope)
+        QueryCoordinatorBuilder::new(vector, embedder, bm25, call_chain_query, scope)
     }
 
     /// Create a new query coordinator bound to a specific project

@@ -26,7 +26,7 @@ The CCE native plugin ABI is defined in `crates/app/cce-plugin-sdk/include/cce_p
 
 ## Project Overview
 
-The project is a server + CLI application developed in `Rust` for codebase indexing. It splits code files into entities (using tree-sitter as AST parser), groups related entities, converts them into natural language, then hands the result to the embedder (LLM service) to produce vectors. Vectors are stored in the Qdrant vector database and ready for vector query.
+The project is a server + CLI application developed in `Rust` for codebase indexing. It splits code files into entities (using tree-sitter as AST parser), groups related entities, converts them into natural language, then hands the result to the embedder (LLM service) to produce vectors. Vectors are stored in a configurable vector backend: the default is an embedded local engine (`crates/simvec`, mmap + WAL + HNSW, zero external dependency); external Qdrant stays available for large-scale deployments (`database.vector_backend = "qdrant"`). Switching backends requires a full reindex; no cross-backend migration.
 
 Beside vector-based query, the project also provides BM25 full-text search based on tantivy, and relationship queries (symbol table, call chains, dependencies) based on an inverted index stored in SQLite.
 
@@ -43,7 +43,9 @@ Crates: cce-types, cce-config, cce-utils, cce-metrics, cce-text, cce-plugin, cce
 Crates: cce-parser, cce-parser-core, cce-relation
 
 ### infra — Infrastructure services and storage backends
-Crates: cce-circuit-breaker, cce-llm-client, cce-storage-common, cce-storage-bm25, cce-storage-qdrant, cce-storage-sqlite, cce-scanner
+Crates: cce-circuit-breaker, cce-llm-client, cce-storage-common, cce-storage-bm25, cce-storage-qdrant, cce-storage-local, cce-storage-sqlite, cce-scanner
+
+`cce-storage-common` holds the backend-agnostic vector abstraction (`VectorStorage` contract, `SearchFilter`, `Payload`, shared filter semantics); `cce-storage-local` and `cce-storage-qdrant` implement its local and remote branches. The assembly layer dispatches by the `VectorStore` enum in `cce-orchestrator`.
 
 ### app — Application layer, orchestration, server, CLI, and plugin runtime
 Crates: cce-api, cce-plugin-runtime, cce-orchestrator, cce-server, cce-cli, plugin-sdk
@@ -51,6 +53,7 @@ Crates: cce-api, cce-plugin-runtime, cce-orchestrator, cce-server, cce-cli, plug
 ### Git Submodules
 - `crates/tantivy` — Vendored tantivy fork (https://github.com/kkkqkx123/tantivy.git)
 - `crates/app/cce-e2e-tests` — E2E test suite (https://github.com/kkkqkx123/code-context-engine-e2e.git)
+- `crates/simvec` — Embedded local vector engine (https://github.com/kkkqkx123/simvec.git), a workspace member: run its tests/benches with `cargo test -p simvec` / `cargo bench -p simvec`
 
 ## Command Execution
 

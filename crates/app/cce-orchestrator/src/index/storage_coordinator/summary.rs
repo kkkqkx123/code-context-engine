@@ -1,4 +1,4 @@
-//! File summary write path (Qdrant vectors, BM25 documents, SQLite rows).
+//! File summary write path (vector store, BM25 documents, SQLite rows).
 //!
 //! This module provides a clean separation between summary storage operations
 //! and business logic. The `SummaryStorage` struct handles all persistence
@@ -6,8 +6,7 @@
 
 use cce_parser::summary::FileSummary;
 use cce_storage_bm25::Bm25Document;
-use cce_storage_common::Payload;
-use cce_storage_qdrant::VectorPoint;
+use cce_storage_common::{Payload, VectorPoint, VectorStorage};
 use cce_storage_sqlite::FileSummaryRepository;
 use cce_types::{FileCategory, PointKind};
 
@@ -18,7 +17,7 @@ use super::StorageCoordinator;
 /// Summary storage operations handler
 ///
 /// Handles persistence of summaries to multiple backends:
-/// - Qdrant for vector storage
+/// - Vector store for vector storage
 /// - BM25 for full-text search
 /// - SQLite for metadata storage
 pub struct SummaryStorage<'a> {
@@ -37,7 +36,7 @@ impl<'a> SummaryStorage<'a> {
             return Ok(0);
         }
 
-        // Store to Qdrant vectors (skipped when summary embedding is disabled,
+        // Store to vector store (skipped when summary embedding is disabled,
         // e.g. export-only mode).
         if self.coordinator.embed_summaries() {
             self.store_vectors(summaries).await?;
@@ -52,12 +51,12 @@ impl<'a> SummaryStorage<'a> {
         Ok(summaries.len())
     }
 
-    /// Store summary vectors to Qdrant
+    /// Store summary vectors to the vector store
     async fn store_vectors(&self, summaries: &[FileSummary]) -> Result<(), OrchestratorError> {
         if summaries.is_empty() {
             return Ok(());
         }
-        let (Some(qdrant), Some(embedder)) = (&self.coordinator.qdrant, &self.coordinator.embedder)
+        let (Some(vector), Some(embedder)) = (&self.coordinator.vector, &self.coordinator.embedder)
         else {
             return Err(OrchestratorError::index(
                 "summary_vector_store",
@@ -74,7 +73,7 @@ impl<'a> SummaryStorage<'a> {
         let batch_id = self.coordinator.batch_id();
         let mut points = Vec::new();
 
-        for (summary, vector) in summaries.iter().zip(embeddings.embeddings.iter()) {
+        for (summary, embedding) in summaries.iter().zip(embeddings.embeddings.iter()) {
             let category = summary.category.unwrap_or(FileCategory::Code);
             let payload = Payload::new(summary.file_path.clone())
                 .with_type(PointKind::Summary)
@@ -90,11 +89,11 @@ impl<'a> SummaryStorage<'a> {
                 "{}::{}::summary::{}",
                 self.coordinator.project_group_id, epoch, summary.file_path
             );
-            points.push(VectorPoint::new(point_id, vector.clone(), payload));
+            points.push(VectorPoint::new(point_id, embedding.clone(), payload));
         }
 
         if !points.is_empty() {
-            qdrant.upsert_points(&points).await?;
+            vector.upsert_points(&points).await?;
         }
 
         Ok(())
@@ -275,7 +274,7 @@ impl StorageCoordinator {
         &self,
         batch_size: usize,
     ) -> Result<usize, OrchestratorError> {
-        let (Some(qdrant), Some(embedder)) = (&self.qdrant, &self.embedder) else {
+        let (Some(vector), Some(embedder)) = (&self.vector, &self.embedder) else {
             return Err(OrchestratorError::index(
                 "summary_reembed",
                 "vector store or embedder is not configured for summary re-embed",
@@ -330,7 +329,7 @@ impl StorageCoordinator {
             let text_refs: Vec<&str> = texts.iter().map(String::as_str).collect();
             let embeddings = embedder.embed(&text_refs).await?;
             let mut points = Vec::with_capacity(batch.len());
-            for ((summary, epoch), vector) in batch.iter().zip(embeddings.embeddings.iter()) {
+            for ((summary, epoch), embedding) in batch.iter().zip(embeddings.embeddings.iter()) {
                 let category = summary.category.unwrap_or(FileCategory::Code);
                 let payload = Payload::new(summary.file_path.clone())
                     .with_type(PointKind::Summary)
@@ -345,10 +344,10 @@ impl StorageCoordinator {
                     "{}::{}::summary::{}",
                     self.project_group_id, epoch, summary.file_path
                 );
-                points.push(VectorPoint::new(point_id, vector.clone(), payload));
+                points.push(VectorPoint::new(point_id, embedding.clone(), payload));
             }
             stored += points.len();
-            qdrant.upsert_points(&points).await?;
+            vector.upsert_points(&points).await?;
         }
         Ok(stored)
     }
@@ -370,10 +369,10 @@ impl StorageCoordinator {
             return self.register_deleted_file(file_path).await;
         }
 
-        // Step 1: Remove summary vectors from Qdrant
-        if let Some(qdrant) = &self.qdrant {
+        // Step 1: Remove summary vectors from the vector store
+        if let Some(vector) = &self.vector {
             self.ensure_project_group_id()?;
-            qdrant
+            vector
                 .delete_by_file_path_scoped(
                     &file_id,
                     &self.project_group_id,

@@ -20,8 +20,11 @@ members = [
     "crates/infra/cce-storage-common",
     "crates/infra/cce-storage-bm25",
     "crates/infra/cce-storage-qdrant",
+    "crates/infra/cce-storage-local",
     "crates/infra/cce-storage-sqlite",
     "crates/infra/cce-scanner",
+    # local vector engine (git submodule: https://github.com/kkkqkx123/simvec)
+    "crates/simvec",
     # app
     "crates/app/cce-api",
     "crates/app/cce-admission",
@@ -180,7 +183,9 @@ cce-circuit-breaker = { path = "crates/infra/cce-circuit-breaker" }
 cce-storage-common = { path = "crates/infra/cce-storage-common" }
 cce-storage-bm25 = { path = "crates/infra/cce-storage-bm25" }
 cce-storage-qdrant = { path = "crates/infra/cce-storage-qdrant" }
+cce-storage-local = { path = "crates/infra/cce-storage-local" }
 cce-storage-sqlite = { path = "crates/infra/cce-storage-sqlite" }
+simvec = { path = "crates/simvec" }
 
 # MCP SDK (official modelcontextprotocol/rust-sdk).
 rmcp = "3.4"

@@ -6,7 +6,7 @@
 //! This strategy is suitable for:
 //! - SummaryOnly search mode (query only summary vectors, not chunks)
 //! - File-level relevance filtering before detailed chunk search
-//! - Environments with access to embedder and Qdrant
+//! - Environments with access to embedder and vector backend
 
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ pub struct SummaryStrategy {
 impl SummaryStrategy {
     pub fn new(searcher: &crate::query::Searcher) -> Self {
         Self {
-            summary_retrieval: SummaryRetrieval::new(searcher.qdrant_retrieval.clone()),
+            summary_retrieval: SummaryRetrieval::new(searcher.vector.clone()),
             searcher: Arc::new(searcher.clone()),
         }
     }
@@ -75,6 +75,7 @@ fn build_summary_search_filter(options: &QueryOptions, group_id: &str) -> Search
         excluded_files: None,
         group_id: Some(group_id.to_string()),
         point_type: Some(PointKind::Summary),
+        file_path: None,
         directory_prefix: options.directory_prefix.clone(),
         exclude_test: options
             .exclude_content_types

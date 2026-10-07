@@ -38,8 +38,8 @@ use super::modules::defaults::default_true;
 
 // Re-export storage config types from modules for use in project config
 pub use super::modules::storage::{
-    Bm25AlgorithmConfig, Bm25Config, HnswConfig, IndexManagerConfig, QuantizationConfig,
-    VectorStorageConfig, WalConfig,
+    Bm25AlgorithmConfig, Bm25Config, HnswConfig, IndexManagerConfig, LocalVectorConfig,
+    QuantizationConfig, VectorStorageConfig, WalConfig,
 };
 
 /// Project-level application configuration
@@ -232,6 +232,10 @@ pub struct ProjectStorageConfig {
     #[serde(default)]
     pub qdrant: Option<ProjectQdrantConfig>,
 
+    /// Local vector engine tuning override (HNSW only, data_dir stays global).
+    #[serde(default)]
+    pub vector_local: Option<ProjectLocalVectorConfig>,
+
     /// BM25 index configuration override
     #[serde(default)]
     pub bm25: Option<ProjectBm25Config>,
@@ -239,6 +243,19 @@ pub struct ProjectStorageConfig {
     /// Index manager configuration override
     #[serde(default)]
     pub index_manager: Option<IndexManagerConfigOverride>,
+}
+
+/// Project-level local vector tuning override.
+///
+/// Only HNSW knobs are overridable per project; data_dir and dimension stay
+/// global so one engine directory serves all projects via group isolation.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectLocalVectorConfig {
+    pub hnsw_m: Option<u32>,
+    pub hnsw_ef_construct: Option<u32>,
+    pub hnsw_ef_search: Option<usize>,
+    pub full_scan_threshold: Option<usize>,
 }
 
 /// Project-level Qdrant configuration override

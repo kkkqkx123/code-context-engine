@@ -30,6 +30,141 @@ impl DistanceMetric {
     }
 }
 
+/// Vector backend selection (local-first, remote optional).
+///
+/// Local is the default: single-process embedded engine with no external
+/// service. Qdrant keeps the existing remote behaviour for large-scale
+/// deployments. Switching backends requires a full reindex; old data is
+/// never migrated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum VectorBackend {
+    /// Embedded local engine (simvec, mmap plus WAL plus HNSW).
+    #[default]
+    Local,
+    /// External Qdrant service (keeps process management and breaker).
+    Qdrant,
+}
+
+impl VectorBackend {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Qdrant => "qdrant",
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local)
+    }
+}
+
+/// Local vector engine configuration (embedded simvec).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalVectorConfig {
+    /// Data directory for mmap files plus WAL. None resolves to
+    /// `<sqlite_parent>/vectors` at engine build time.
+    pub data_dir: Option<String>,
+    /// Vector dimension, must match the embedder model output.
+    pub vector_size: usize,
+    /// Distance metric, same semantics as the Qdrant branch.
+    pub distance_metric: DistanceMetric,
+    /// HNSW graph degree (m). None uses the engine default.
+    pub hnsw_m: Option<u32>,
+    /// HNSW build candidate list size. None uses the engine default.
+    pub hnsw_ef_construct: Option<u32>,
+    /// HNSW query-time candidate list size. None uses the engine default.
+    pub hnsw_ef_search: Option<usize>,
+    /// Live-point threshold above which exact scan promotes to HNSW.
+    /// None uses the engine default (10000, Qdrant parity).
+    pub full_scan_threshold: Option<usize>,
+}
+
+impl Default for LocalVectorConfig {
+    fn default() -> Self {
+        Self {
+            data_dir: None,
+            vector_size: 1024,
+            distance_metric: DistanceMetric::Cosine,
+            hnsw_m: None,
+            hnsw_ef_construct: None,
+            hnsw_ef_search: None,
+            full_scan_threshold: None,
+        }
+    }
+}
+
+impl Validate for LocalVectorConfig {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if self.vector_size == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "vector_size",
+                "must be greater than 0",
+            ));
+        }
+        if let Some(m) = self.hnsw_m
+            && !(2..=128).contains(&m)
+        {
+            errors.push(ConfigValidationError::out_of_range(
+                "hnsw_m",
+                m.to_string(),
+                "2",
+                "128",
+            ));
+        }
+        if let Some(ef) = self.hnsw_ef_construct
+            && !(10..=1000).contains(&ef)
+        {
+            errors.push(ConfigValidationError::out_of_range(
+                "hnsw_ef_construct",
+                ef.to_string(),
+                "10",
+                "1000",
+            ));
+        }
+        if let Some(ef) = self.hnsw_ef_search
+            && ef == 0
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "hnsw_ef_search",
+                "must be greater than 0",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl LocalVectorConfig {
+    pub fn with_data_dir(mut self, dir: impl Into<String>) -> Self {
+        self.data_dir = Some(dir.into());
+        self
+    }
+
+    pub fn with_vector_size(mut self, size: usize) -> Self {
+        self.vector_size = size;
+        self
+    }
+
+    /// Resolve the effective data directory against the SQLite path.
+    pub fn resolved_data_dir(&self, sqlite_path: &str) -> String {
+        if let Some(ref dir) = self.data_dir {
+            return dir.clone();
+        }
+        let parent = std::path::Path::new(sqlite_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| ".".to_string());
+        format!("{parent}/vectors")
+    }
+}
+
 /// Collection configuration preset
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]

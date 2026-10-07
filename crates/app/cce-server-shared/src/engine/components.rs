@@ -5,8 +5,8 @@ use super::EngineError;
 use super::project_cache::ProjectCache;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache};
+use cce_orchestrator::index::VectorStore;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 use cce_storage_sqlite::project_registry::ProjectRegistry;
 use cce_storage_sqlite::repo::{CheckpointRepository, ProjectRepository};
@@ -25,14 +25,24 @@ impl super::CodeContextEngine {
         self.project_registry.clone()
     }
 
-    /// Get a reference to the Qdrant client
-    pub fn qdrant(&self) -> &Arc<QdrantClient> {
-        &self.qdrant
+    /// Get a reference to the vector store (backend-neutral)
+    pub fn vector(&self) -> &VectorStore {
+        &self.vector
     }
 
-    /// Get a clone of the Qdrant client
-    pub fn qdrant_clone(&self) -> Arc<QdrantClient> {
-        self.qdrant.clone()
+    /// Get a clone of the vector store
+    pub fn vector_clone(&self) -> VectorStore {
+        self.vector.clone()
+    }
+
+    /// Get a reference to the Qdrant client (Qdrant backend only)
+    pub fn qdrant(&self) -> Option<&Arc<cce_storage_qdrant::QdrantClient>> {
+        self.vector.as_qdrant()
+    }
+
+    /// Get a clone of the Qdrant client (Qdrant backend only)
+    pub fn qdrant_clone(&self) -> Option<Arc<cce_storage_qdrant::QdrantClient>> {
+        self.vector.as_qdrant().cloned()
     }
 
     /// Get a reference to the BM25 client

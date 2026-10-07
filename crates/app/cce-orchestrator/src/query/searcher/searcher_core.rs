@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use cce_config::project_registry::ProjectScope;
 
+use crate::index::vector_store::VectorStore;
 use crate::query::boost::{SummaryBoost, apply_boosts};
 use crate::query::error::QueryError;
 use crate::query::error::Result;
@@ -33,10 +34,7 @@ use crate::query::types::{ExecutionStrategy, QueryOptions, QueryResult, SearchRe
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{SearchMetrics, SearchType};
 
-use cce_storage_qdrant::QdrantRetrieval;
-
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 
 use super::search_builder::SearcherBuilder;
@@ -48,8 +46,8 @@ use super::search_builder::SearcherBuilder;
 #[derive(Clone)]
 
 pub struct Searcher {
-    /// Qdrant retrieval implementation used by DenseRetrieval strategy
-    pub(crate) qdrant_retrieval: Arc<QdrantRetrieval>,
+    /// Vector backend used by DenseRetrieval strategy
+    pub(crate) vector: VectorStore,
     pub(crate) embedder: Arc<OpenAICompatibleProvider>,
     pub(crate) bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
     /// SQLite database for chunk content lookup (optional)
@@ -93,18 +91,18 @@ impl Searcher {
     /// # Example
     ///
     /// ```ignore
-    /// let searcher = Searcher::builder(qdrant, embedder, bm25, scope)
+    /// let searcher = Searcher::builder(vector, embedder, bm25, scope)
     ///     .with_sqlite(sqlite)
     ///     .with_rerank(rerank_handler)
     ///     .build();
     /// ```
     pub fn builder(
-        qdrant: Arc<QdrantClient>,
+        vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
         bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
         scope: ProjectScope,
     ) -> SearcherBuilder {
-        SearcherBuilder::new(qdrant, embedder, bm25, scope)
+        SearcherBuilder::new(vector, embedder, bm25, scope)
     }
 
     /// Extract the BM25 client from a searcher reference (used by strategy factory).
@@ -303,7 +301,7 @@ impl Searcher {
             if e.is_config_error() {
                 e
             } else {
-                QueryError::retryable("qdrant", format!("Vector recall path failed: {e}"))
+                QueryError::retryable("vector", format!("Vector recall path failed: {e}"))
             }
         })?;
         let bm25_results = bm25_attempt.map_err(|e| {

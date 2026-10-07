@@ -5,7 +5,7 @@
 //!
 //! This strategy is suitable for:
 //! - Semantic similarity search via vector embeddings
-//! - Environments with access to embedder and Qdrant
+//! - Environments with access to embedder and vector backend
 //! - Dense-only search mode
 
 use std::sync::Arc;
@@ -33,7 +33,7 @@ pub struct DenseStrategy {
 impl DenseStrategy {
     pub fn new(searcher: &crate::query::Searcher) -> Self {
         Self {
-            dense_retrieval: DenseRetrieval::new(searcher.qdrant_retrieval.clone()),
+            dense_retrieval: DenseRetrieval::new(searcher.vector.clone()),
             searcher: Arc::new(searcher.clone()),
         }
     }
@@ -81,6 +81,7 @@ fn build_search_filter(options: &QueryOptions, group_id: &str) -> SearchFilter {
         excluded_files: None,
         group_id: Some(group_id.to_string()),
         point_type: Some(PointKind::Chunk),
+        file_path: None,
         directory_prefix: options.directory_prefix.clone(),
         exclude_test: options
             .exclude_content_types

@@ -348,7 +348,7 @@ pub async fn handle_delete_project(
     // 2. Use unified maintenance service for all storage-layer cleanup
     let maintenance = crate::maintenance::ProjectIndexMaintenanceService::new(
         state.engine.clone(),
-        Some(state.engine.qdrant_clone()),
+        Some(state.engine.vector_clone()),
         Some(state.engine.bm25_clone()),
         state.engine.metadata_store_clone(),
     );
