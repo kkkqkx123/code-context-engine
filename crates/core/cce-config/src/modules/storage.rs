@@ -59,6 +59,89 @@ impl VectorBackend {
     }
 }
 
+/// Relation storage backend selection.
+///
+/// Phase 1 exposes only the local branch (embedded SQLite). The remote
+/// variant reserves the configuration position for a future relational
+/// database branch; selecting it is rejected by validation until phase 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RelationBackend {
+    /// Embedded SQLite repositories (current behavior).
+    #[default]
+    Local,
+    /// Future relational database branch (reserved, not enabled).
+    Remote,
+}
+
+impl RelationBackend {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local)
+    }
+}
+
+/// Fulltext storage backend selection.
+///
+/// Phase 1 exposes only the local branch (embedded Tantivy). The remote
+/// variant reserves the configuration position for a future search-service
+/// branch; selecting it is rejected by validation until phase 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FulltextBackend {
+    /// Embedded Tantivy index (current behavior).
+    #[default]
+    Local,
+    /// Future search-service branch (reserved, not enabled).
+    Remote,
+}
+
+impl FulltextBackend {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, Self::Local)
+    }
+}
+
+/// Reserved remote parameters for the relation branch.
+///
+/// No client reads these in phase 1; the fields exist so later phases do
+/// not need to rename configuration keys. Secrets stay overridable via
+/// environment variables.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct RelationRemoteConfig {
+    /// Remote database URL (reserved).
+    pub url: Option<String>,
+    /// API key or password (reserved, prefer environment override).
+    pub api_key: Option<String>,
+}
+
+/// Reserved remote parameters for the fulltext branch.
+///
+/// No client reads these in phase 1; the fields exist so later phases do
+/// not need to rename configuration keys.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct FulltextRemoteConfig {
+    /// Remote search-service URL (reserved).
+    pub url: Option<String>,
+    /// API key (reserved, prefer environment override).
+    pub api_key: Option<String>,
+}
+
 /// Local vector engine configuration (embedded simvec).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

@@ -374,6 +374,9 @@ pub struct DependencyParams {
     pub qdrant_enabled: bool,
     pub bm25_enabled: bool,
     pub vector_backend: crate::modules::VectorBackend,
+    pub relation_backend: crate::modules::RelationBackend,
+    pub fulltext_backend: crate::modules::FulltextBackend,
+    pub allow_nonstandard_backends: bool,
     // Relation settings
     pub relation_index_enabled: bool,
     // LLM settings
@@ -382,11 +385,76 @@ pub struct DependencyParams {
     pub has_chat_model: bool,
 }
 
+/// Validate backend preset combination (three-tier logic).
+///
+/// Official presets pass silently; non-preset combinations warn and point
+/// at the advanced switch; reserved remote branches always warn because
+/// structural validation rejects them.
+pub fn validate_backend_preset_dependencies(
+    vector_backend: crate::modules::VectorBackend,
+    relation_backend: crate::modules::RelationBackend,
+    fulltext_backend: crate::modules::FulltextBackend,
+    allow_nonstandard_backends: bool,
+) -> Vec<ConfigWarning> {
+    use crate::modules::VectorBackend as VB;
+    let mut warnings = Vec::new();
+    if !relation_backend.is_local() {
+        warnings.push(ConfigWarning::new(
+            WarningSeverity::Warning,
+            "database.relation_backend",
+            "database.relation_backend=local",
+            "Remote relation backend is reserved and not enabled in this phase.",
+        ));
+    }
+    if !fulltext_backend.is_local() {
+        warnings.push(ConfigWarning::new(
+            WarningSeverity::Warning,
+            "database.fulltext_backend",
+            "database.fulltext_backend=local",
+            "Remote fulltext backend is reserved and not enabled in this phase.",
+        ));
+    }
+    let official = matches!(
+        (&vector_backend, &relation_backend, &fulltext_backend),
+        (
+            VB::Local,
+            crate::modules::RelationBackend::Local,
+            crate::modules::FulltextBackend::Local,
+        ) | (
+            VB::Qdrant,
+            crate::modules::RelationBackend::Local,
+            crate::modules::FulltextBackend::Local,
+        )
+    );
+    if !official {
+        warnings.push(ConfigWarning::new(
+            if allow_nonstandard_backends {
+                WarningSeverity::Info
+            } else {
+                WarningSeverity::Warning
+            },
+            "database.vector_backend",
+            "database.allow_nonstandard_backends",
+            "Non-preset backend combination is active; set database.allow_nonstandard_backends = true to acknowledge the risk.",
+        ));
+    }
+    warnings
+}
+
 /// Validate all configuration dependencies
 ///
 /// This is the main validation function that checks all cross-module dependencies.
 pub fn validate_all_dependencies(params: &DependencyParams) -> Vec<ConfigWarning> {
     let mut warnings = Vec::new();
+
+    // Backend preset combination (three-tier: official pass, non-preset
+    // warn, advanced switch acknowledges).
+    warnings.extend(validate_backend_preset_dependencies(
+        params.vector_backend,
+        params.relation_backend,
+        params.fulltext_backend,
+        params.allow_nonstandard_backends,
+    ));
 
     // Export dependencies
     warnings.extend(validate_export_dependencies(

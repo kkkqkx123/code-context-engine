@@ -24,6 +24,7 @@ use std::sync::Arc;
 use cce_config::project_registry::ProjectScope;
 
 use crate::index::vector_store::VectorStore;
+use crate::index::vector_store::{FulltextStore, RelationStore};
 use crate::query::boost::{SummaryBoost, apply_boosts};
 use crate::query::error::QueryError;
 use crate::query::error::Result;
@@ -103,6 +104,31 @@ impl Searcher {
         scope: ProjectScope,
     ) -> SearcherBuilder {
         SearcherBuilder::new(vector, embedder, bm25, scope)
+    }
+
+    /// Create a searcher builder from backend enums (phase-2 entry point).
+    ///
+    /// Only local branches exist; the enums unwrap once at this boundary
+    /// so retrieval behavior stays unchanged.
+    pub fn builder_from_stores(
+        vector: VectorStore,
+        embedder: Arc<OpenAICompatibleProvider>,
+        fulltext: FulltextStore,
+        scope: ProjectScope,
+    ) -> SearcherBuilder {
+        SearcherBuilder::new(vector, embedder, fulltext.into_local(), scope)
+    }
+
+    /// Fulltext backend enum wrapping the configured client.
+    pub fn fulltext_store(&self) -> FulltextStore {
+        FulltextStore::local(self.bm25.clone())
+    }
+
+    /// Relation backend enum wrapping the configured database.
+    pub fn relation_store(&self) -> Option<RelationStore> {
+        self.sqlite
+            .as_ref()
+            .map(|store| RelationStore::local(store.clone()))
     }
 
     /// Extract the BM25 client from a searcher reference (used by strategy factory).

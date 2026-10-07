@@ -270,6 +270,18 @@ impl IndexOrchestrator {
         self
     }
 
+    /// Set fulltext backend via enum dispatch (phase-2 entry point).
+    pub fn with_fulltext_store(mut self, store: crate::index::vector_store::FulltextStore) -> Self {
+        self.storage = self.storage.with_fulltext_store(store);
+        self
+    }
+
+    /// Set relation backend via enum dispatch (phase-2 entry point).
+    pub fn with_relation_store(mut self, store: crate::index::vector_store::RelationStore) -> Self {
+        self.storage = self.storage.with_relation_store(store);
+        self
+    }
+
     /// Set pre-processor configuration
     pub fn with_pre_processor_config(mut self, config: NestProcessorConfig) -> Self {
         self.file_processor =

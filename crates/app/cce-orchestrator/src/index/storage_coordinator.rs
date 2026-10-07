@@ -34,7 +34,7 @@ use cce_storage_qdrant::QdrantClient;
 use cce_storage_sqlite::SqliteClient;
 
 use super::super::error::OrchestratorError;
-use super::vector_store::VectorStore;
+use super::vector_store::{FulltextStore, RelationStore, VectorStore};
 
 pub(crate) mod bm25;
 pub(crate) mod candidate;
@@ -144,6 +144,23 @@ impl StorageCoordinator {
         self
     }
 
+    /// Set fulltext backend via enum dispatch (phase-2 entry point).
+    ///
+    /// Only the local branch exists; the enum unwraps once at this
+    /// boundary so the write path keeps its current behavior.
+    pub fn with_fulltext_store(mut self, store: FulltextStore) -> Self {
+        self.bm25 = Some(store.into_local());
+        self
+    }
+
+    /// Fulltext backend name for logging.
+    pub fn fulltext_backend_name(&self) -> &'static str {
+        match &self.bm25 {
+            Some(_) => "local",
+            None => "none",
+        }
+    }
+
     /// Set embedder
     pub fn with_embedder(mut self, embedder: Arc<OpenAICompatibleProvider>) -> Self {
         self.embedder = Some(embedder);
@@ -159,6 +176,23 @@ impl StorageCoordinator {
     pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
         self.metadata_store = Some(store);
         self
+    }
+
+    /// Set relation backend via enum dispatch (phase-2 entry point).
+    ///
+    /// Only the local branch exists; the enum unwraps once at this
+    /// boundary so per-project scoping semantics stay unchanged.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.metadata_store = Some(store.into_local());
+        self
+    }
+
+    /// Relation backend name for logging.
+    pub fn relation_backend_name(&self) -> &'static str {
+        match &self.metadata_store {
+            Some(_) => "local",
+            None => "none",
+        }
     }
 
     /// Set project group ID used for payload isolation in Qdrant.
@@ -325,6 +359,20 @@ impl StorageCoordinator {
     /// Get the configured SQLite metadata store, if any.
     pub fn metadata_client(&self) -> Option<&Arc<SqliteClient>> {
         self.metadata_store.as_ref()
+    }
+
+    /// Get the relation backend enum wrapping the configured store.
+    pub fn relation_store(&self) -> Option<RelationStore> {
+        self.metadata_store
+            .as_ref()
+            .map(|store| RelationStore::local(store.clone()))
+    }
+
+    /// Get the fulltext backend enum wrapping the configured client.
+    pub fn fulltext_store(&self) -> Option<FulltextStore> {
+        self.bm25
+            .as_ref()
+            .map(|client| FulltextStore::local(client.clone()))
     }
 
     /// Get the project ID this coordinator writes for.

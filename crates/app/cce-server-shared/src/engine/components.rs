@@ -6,6 +6,7 @@ use super::project_cache::ProjectCache;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache};
 use cce_orchestrator::index::VectorStore;
+use cce_orchestrator::index::{FulltextStore, RelationStore};
 use cce_storage_bm25::Bm25Client;
 use cce_storage_sqlite::SqliteClient;
 use cce_storage_sqlite::project_registry::ProjectRegistry;
@@ -55,6 +56,11 @@ impl super::CodeContextEngine {
         self.bm25.clone()
     }
 
+    /// Get the fulltext backend enum (phase-2 branch accessor).
+    pub fn fulltext_store(&self) -> FulltextStore {
+        FulltextStore::local(self.bm25.clone())
+    }
+
     /// Get a reference to the embedder
     pub fn embedder(&self) -> &Arc<OpenAICompatibleProvider> {
         &self.embedder
@@ -73,6 +79,13 @@ impl super::CodeContextEngine {
     /// Get a clone of the SQLite metadata store
     pub fn metadata_store_clone(&self) -> Option<Arc<SqliteClient>> {
         self.metadata_store.clone()
+    }
+
+    /// Get the relation backend enum (phase-2 branch accessor).
+    pub fn relation_store(&self) -> Option<RelationStore> {
+        self.metadata_store
+            .as_ref()
+            .map(|store| RelationStore::local(store.clone()))
     }
 
     /// Reload project configuration and recreate components

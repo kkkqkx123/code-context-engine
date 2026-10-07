@@ -18,6 +18,14 @@
 //! ## Database
 //! - `CCE_DB_QDRANT_URL` - Qdrant server URL
 //! - `CCE_DB_QDRANT_API_KEY` - Qdrant API key (optional, can use placeholder in config.toml)
+//! - `CCE_DB_VECTOR_BACKEND` - Vector backend (local|qdrant)
+//! - `CCE_DB_VECTOR_DATA_DIR` - Local vector data directory
+//! - `CCE_DB_RELATION_BACKEND` - Relation backend key (phase 1: parsed, only local effective)
+//! - `CCE_DB_FULLTEXT_BACKEND` - Fulltext backend key (phase 1: parsed, only local effective)
+//! - `CCE_DB_RELATION_URL` - Reserved remote relation URL (phase 3)
+//! - `CCE_DB_RELATION_API_KEY` - Reserved remote relation key (phase 3)
+//! - `CCE_DB_FULLTEXT_URL` - Reserved remote fulltext URL (phase 3)
+//! - `CCE_DB_FULLTEXT_API_KEY` - Reserved remote fulltext key (phase 3)
 //! - `CCE_DB_SQLITE_PATH` - SQLite database path
 //! - `CCE_DB_SQLITE_SYNC` - SQLite sync mode (OFF/NORMAL/FULL/EXTRA)
 //! - `CCE_DB_SQLITE_CACHE_SIZE` - SQLite cache size in KB
@@ -169,6 +177,45 @@ fn apply_database_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     }
     if let Ok(val) = std::env::var("CCE_DB_QDRANT_API_KEY") {
         config.database.qdrant.api_key = Some(val);
+    }
+    // Relation/fulltext backend switches are parsed in phase 1 so later
+    // phases keep stable key names; only `local` takes effect for now
+    // (remote selections are rejected by structural validation).
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_BACKEND") {
+        config.database.relation_backend = match val.to_lowercase().as_str() {
+            "local" => crate::modules::RelationBackend::Local,
+            "remote" => crate::modules::RelationBackend::Remote,
+            _ => {
+                return Err(ConfigError::invalid_env_var(
+                    "CCE_DB_RELATION_BACKEND",
+                    format!("invalid backend: {val} (expected local|remote)"),
+                ));
+            }
+        };
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_BACKEND") {
+        config.database.fulltext_backend = match val.to_lowercase().as_str() {
+            "local" => crate::modules::FulltextBackend::Local,
+            "remote" => crate::modules::FulltextBackend::Remote,
+            _ => {
+                return Err(ConfigError::invalid_env_var(
+                    "CCE_DB_FULLTEXT_BACKEND",
+                    format!("invalid backend: {val} (expected local|remote)"),
+                ));
+            }
+        };
+    }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_URL") {
+        config.database.relation_remote.url = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_API_KEY") {
+        config.database.relation_remote.api_key = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_URL") {
+        config.database.fulltext_remote.url = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_API_KEY") {
+        config.database.fulltext_remote.api_key = Some(val);
     }
 
     // SQLite configuration

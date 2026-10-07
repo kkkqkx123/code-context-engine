@@ -13,7 +13,7 @@ use crate::export::ExportConfig;
 use crate::export::NlDocumentExporter;
 use crate::index::RelationSnapshotPublisher;
 use crate::index::StorageCoordinator;
-use crate::index::VectorStore;
+use crate::index::{FulltextStore, RelationStore, VectorStore};
 use cce_config::{NestProcessorConfig, RelationConfig};
 use cce_metrics::RelationMetrics;
 use cce_parser::summary::{RuleBasedGenerator, SummaryGenerator};
@@ -190,6 +190,54 @@ impl ProcessorFactory {
     /// Create a new processor factory
     pub fn new() -> Self {
         Self
+    }
+
+    /// Create all enabled processors from backend enums (phase-2 entry point).
+    ///
+    /// Only local branches exist; the enums unwrap once here so processor
+    /// behavior stays unchanged.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_all_processors_from_stores(
+        &self,
+        vector: Option<VectorStore>,
+        fulltext: Option<FulltextStore>,
+        relation: Option<RelationStore>,
+        embedder: Option<Arc<cce_llm_client::OpenAICompatibleProvider>>,
+        project_group_id: Option<String>,
+        project_id: i64,
+        relation_publisher: Option<Arc<dyn RelationSnapshotPublisher>>,
+        relation_config: &RelationConfig,
+        checkpoint_manager: Option<Arc<crate::operation::CheckpointManager>>,
+        summary_generator: Option<Arc<dyn SummaryGenerator>>,
+        ast_to_nl_config: Option<&cce_config::AstToNlConfig>,
+        grouper_config: &NestProcessorConfig,
+        license_config: &cce_config::LicenseHeaderConfig,
+        summary_config: Option<&cce_config::SummaryConfig>,
+        config: &ProcessorConfig,
+        plugin_registry: Option<Arc<PluginRegistry>>,
+        relation_metrics: Option<Arc<RelationMetrics>>,
+        storage_metrics: Option<Arc<cce_metrics::HotUpdateStorageMetrics>>,
+    ) -> Result<(Vec<BoxedUpdateProcessor>, Arc<StorageCoordinator>), ConfigError> {
+        self.create_all_processors(
+            vector,
+            fulltext.map(FulltextStore::into_local),
+            relation.map(RelationStore::into_local),
+            embedder,
+            project_group_id,
+            project_id,
+            relation_publisher,
+            relation_config,
+            checkpoint_manager,
+            summary_generator,
+            ast_to_nl_config,
+            grouper_config,
+            license_config,
+            summary_config,
+            config,
+            plugin_registry,
+            relation_metrics,
+            storage_metrics,
+        )
     }
 
     /// Create all enabled processors from individual components

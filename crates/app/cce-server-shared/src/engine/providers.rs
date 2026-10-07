@@ -10,6 +10,7 @@ use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::processors::factory::{ProcessorConfig, ProcessorFactory};
 use cce_orchestrator::index::IndexOrchestrator;
+use cce_orchestrator::index::RelationStore;
 use cce_orchestrator::query::searcher::Searcher;
 use cce_parser::summary::SummaryGenerator;
 use cce_plugin::PluginRegistry;
@@ -46,11 +47,11 @@ impl super::CodeContextEngine {
         let operation_coordinator = self.get_operation_coordinator(project_id).await?;
 
         let metadata_store = self
-            .metadata_store
-            .as_ref()
-            .map(|db| db.for_project(project_id))
+            .relation_store()
+            .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
+            .map(RelationStore::into_local)
             .ok_or_else(|| {
                 EngineError::Config("SQLite database not initialized for hot update".to_string())
             })?;
@@ -95,10 +96,10 @@ impl super::CodeContextEngine {
                 None
             };
         let (processors, storage_coordinator) = ProcessorFactory::new()
-            .create_all_processors(
+            .create_all_processors_from_stores(
                 Some(self.vector.clone()),
-                Some(self.bm25.clone()),
-                Some(metadata_store.clone()),
+                Some(self.fulltext_store()),
+                Some(RelationStore::local(metadata_store.clone())),
                 Some(self.embedder.clone()),
                 Some(project_group_id),
                 project_id,
@@ -190,11 +191,11 @@ impl super::CodeContextEngine {
             &project_entry.metadata.root_path,
         );
         let metadata_store = self
-            .metadata_store
-            .as_ref()
-            .map(|db| db.for_project(project_id))
+            .relation_store()
+            .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
+            .map(RelationStore::into_local)
             .ok_or_else(|| {
                 EngineError::Config("SQLite database not initialized for indexing".to_string())
             })?;
@@ -207,9 +208,9 @@ impl super::CodeContextEngine {
             IndexOrchestrator::with_batch_config(project_id, config.orchestrator.batch.clone())
                 .map_err(|e| EngineError::Config(e.to_string()))?
                 .with_vector(self.vector.clone())
-                .with_bm25(self.bm25.clone())
+                .with_fulltext_store(self.fulltext_store())
                 .with_embedder(self.embedder.clone())
-                .with_metadata_store(metadata_store)
+                .with_relation_store(RelationStore::local(metadata_store))
                 .with_checkpoint_manager(operation_coordinator.checkpoint_manager())
                 .with_progress_tracker(project_progress_tracker)
                 // Apply project-specific grouper (pre-processor) and ast_to_nl configs
@@ -373,11 +374,11 @@ impl super::CodeContextEngine {
         tracing::info!(project_id, "Creating project-specific OperationCoordinator");
 
         let db = self
-            .metadata_store
-            .as_ref()
-            .map(|db| db.for_project(project_id))
+            .relation_store()
+            .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
+            .map(RelationStore::into_local)
             .ok_or_else(|| {
                 EngineError::Config(
                     "SQLite database not initialized for OperationCoordinator".to_string(),
@@ -457,23 +458,23 @@ impl super::CodeContextEngine {
         let scope = ProjectScope::new(project_id, project_group_id)
             .map_err(|e| EngineError::Config(format!("Invalid project scope: {}", e)))?;
 
-        let mut builder = Searcher::builder(
+        let mut builder = Searcher::builder_from_stores(
             self.vector.clone(),
             self.embedder.clone(),
-            self.bm25.clone(),
+            self.fulltext_store(),
             scope,
         )
         .with_search_metrics(SearchMetrics::new(&self.metrics_registry, project_id));
 
         // Pass SQLite database for BM25 project isolation filtering and chunk enrichment
         if let Some(sqlite) = self
-            .metadata_store
-            .as_ref()
-            .map(|db| db.for_project(project_id))
+            .relation_store()
+            .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
+            .map(RelationStore::into_local)
         {
-            builder = builder.with_sqlite(sqlite);
+            builder = builder.with_relation_store(RelationStore::local(sqlite));
         }
 
         // Add rerank handler if available

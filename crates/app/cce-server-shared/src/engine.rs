@@ -20,7 +20,7 @@ use cce_metrics::{
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::index::IndexOrchestrator;
-use cce_orchestrator::index::VectorStore;
+use cce_orchestrator::index::{FulltextStore, RelationStore, VectorStore};
 use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_orchestrator::query::searcher::Searcher;
 use cce_plugin::PluginRegistry;
@@ -159,13 +159,11 @@ impl CodeContextEngine {
         }
         let metrics_system_metrics = cce_metrics::MetricsSystemMetrics::new(&metrics_registry);
 
-        // Create SQLite client
-        let sqlite_config = config.database.sqlite.clone();
-        let sqlite_client = {
-            let client =
-                SqliteClient::new(sqlite_config).map_err(|e| EngineError::Config(e.to_string()))?;
-            Arc::new(client)
-        };
+        // Create SQLite client through the relation backend enum so the
+        // backend selection is validated once at assembly time.
+        let relation_store = RelationStore::from_database_config(&config.database)
+            .map_err(|e| EngineError::Config(e.to_string()))?;
+        let sqlite_client = relation_store.into_local();
 
         // The SQLite client is shared as the metadata store
         let metadata_store = Some(sqlite_client.clone());
@@ -179,11 +177,9 @@ impl CodeContextEngine {
         let vector = VectorStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
 
-        let bm25_config = config.database.bm25.clone();
-        let bm25 = {
-            let client = Bm25Client::new(bm25_config);
-            Arc::new(Mutex::new(client))
-        };
+        let fulltext_store = FulltextStore::from_database_config(&config.database)
+            .map_err(|e| EngineError::Config(e.to_string()))?;
+        let bm25 = fulltext_store.into_local();
 
         // Initialize BM25 index (Tantivy) if enabled
         {

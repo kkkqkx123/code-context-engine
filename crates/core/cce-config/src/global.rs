@@ -35,6 +35,9 @@ use crate::modules::{
 };
 use crate::modules::{Bm25Config, LocalVectorConfig, QdrantConfig, VectorBackend};
 use crate::modules::{ChatModelConfig, EmbeddingModelConfig, RerankModelConfig};
+use crate::modules::{
+    FulltextBackend, FulltextRemoteConfig, RelationBackend, RelationRemoteConfig,
+};
 use crate::validation::{ConfigWarning, Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
 
@@ -52,6 +55,19 @@ pub struct DatabaseConfig {
     pub sqlite: SqliteConfig,
     /// BM25 index configuration
     pub bm25: Bm25Config,
+    /// Relation storage backend selection (phase 1: local only).
+    pub relation_backend: RelationBackend,
+    /// Reserved remote parameters for the relation branch (phase 3).
+    pub relation_remote: RelationRemoteConfig,
+    /// Fulltext storage backend selection (phase 1: local only).
+    pub fulltext_backend: FulltextBackend,
+    /// Reserved remote parameters for the fulltext branch (phase 3).
+    pub fulltext_remote: FulltextRemoteConfig,
+    /// Advanced switch allowing non-preset backend combinations.
+    ///
+    /// Official presets always pass; any other combination is rejected
+    /// unless this flag is set explicitly (risk acknowledged by operator).
+    pub allow_nonstandard_backends: bool,
 }
 
 impl Default for DatabaseConfig {
@@ -62,6 +78,11 @@ impl Default for DatabaseConfig {
             qdrant: QdrantConfig::default(),
             sqlite: SqliteConfig::default(),
             bm25: Bm25Config::default(),
+            relation_backend: RelationBackend::Local,
+            relation_remote: RelationRemoteConfig::default(),
+            fulltext_backend: FulltextBackend::Local,
+            fulltext_remote: FulltextRemoteConfig::default(),
+            allow_nonstandard_backends: false,
         }
     }
 }
@@ -72,11 +93,59 @@ impl DatabaseConfig {
         matches!(self.vector_backend, VectorBackend::Local)
     }
 
+    /// Whether the local relation backend is active.
+    pub fn is_local_relation(&self) -> bool {
+        self.relation_backend.is_local()
+    }
+
+    /// Whether the local fulltext backend is active.
+    pub fn is_local_fulltext(&self) -> bool {
+        self.fulltext_backend.is_local()
+    }
+
     /// Effective vector dimension for the active backend.
     pub fn vector_dimension(&self) -> usize {
         match self.vector_backend {
             VectorBackend::Local => self.vector_local.vector_size,
             VectorBackend::Qdrant => self.qdrant.vector_size,
+        }
+    }
+
+    /// Official preset combinations supported in phase 1.
+    ///
+    /// Local-first (`local/local/local`) and remote-vector
+    /// (`qdrant/local/local`) pass. Remote relation/fulltext branches are
+    /// reserved and rejected until phase 3 regardless of this switch.
+    pub fn validate_backend_combination(&self) -> ValidationResult {
+        use crate::modules::VectorBackend as VB;
+        if !self.relation_backend.is_local() {
+            return Err(ConfigValidationError::invalid_field(
+                "database.relation_backend",
+                "remote relation backend is reserved and not enabled in this phase",
+            ));
+        }
+        if !self.fulltext_backend.is_local() {
+            return Err(ConfigValidationError::invalid_field(
+                "database.fulltext_backend",
+                "remote fulltext backend is reserved and not enabled in this phase",
+            ));
+        }
+        let official = matches!(
+            (
+                &self.vector_backend,
+                &self.relation_backend,
+                &self.fulltext_backend
+            ),
+            (VB::Local, RelationBackend::Local, FulltextBackend::Local)
+                | (VB::Qdrant, RelationBackend::Local, FulltextBackend::Local)
+        );
+        if official || self.allow_nonstandard_backends {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::invalid_field(
+                "database.vector_backend",
+                "non-preset backend combination requires database.allow_nonstandard_backends = true",
+            ))
         }
     }
 }
@@ -285,6 +354,9 @@ impl Validate for AppConfig {
                 }
             }
         }
+        if let Err(e) = self.database.validate_backend_combination() {
+            errors.push(e);
+        }
 
         if let Err(e) = self.embedder.validate_structured() {
             errors.push(e);
@@ -393,6 +465,9 @@ impl AppConfig {
             qdrant_enabled: self.database.qdrant.enabled,
             bm25_enabled: self.database.bm25.enabled,
             vector_backend: self.database.vector_backend,
+            relation_backend: self.database.relation_backend,
+            fulltext_backend: self.database.fulltext_backend,
+            allow_nonstandard_backends: self.database.allow_nonstandard_backends,
             relation_index_enabled: self.relation.index.enabled,
             llm_enabled: self.llm.enabled,
             has_llm_provider: !self.llm.providers.is_empty(),

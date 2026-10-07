@@ -7,6 +7,7 @@
 pub mod cache;
 pub mod client;
 pub mod config;
+pub mod contract;
 pub mod helpers;
 pub mod metrics;
 pub mod migration;
@@ -20,6 +21,7 @@ pub mod utils;
 
 pub use client::SqliteClient;
 pub use config::SqliteConfig;
+pub use contract::{FileHashCachePort, RelationStorage, assert_relation_storage};
 pub use metrics::SqliteMetrics;
 pub use repo::{
     AdmissionAuditRecord, AdmissionAuditRepository, CheckpointRepository, ChunkRepository,

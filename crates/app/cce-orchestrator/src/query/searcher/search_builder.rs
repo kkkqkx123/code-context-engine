@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use cce_config::project_registry::ProjectScope;
 
-use crate::index::vector_store::VectorStore;
+use crate::index::vector_store::{RelationStore, VectorStore};
 use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
@@ -63,6 +63,15 @@ impl SearcherBuilder {
     /// Enable SQLite support for chunk content lookup
     pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
         self.sqlite = Some(sqlite);
+        self
+    }
+
+    /// Enable relation backend via enum dispatch (phase-2 entry point).
+    ///
+    /// Only the local branch exists; the enum unwraps once at this
+    /// boundary so enrichment semantics stay unchanged.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.sqlite = Some(store.into_local());
         self
     }
 
