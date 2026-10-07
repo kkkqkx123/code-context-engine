@@ -1,9 +1,10 @@
 //! Tool command handlers
 
+use clap::Subcommand;
+
 use anyhow::Result;
 use colored::Colorize;
 
-use crate::cli::ToolCommands;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{
@@ -465,4 +466,145 @@ pub async fn execute_keyword_search(
     }
 
     Ok(())
+}
+
+/// Tool commands
+#[derive(Subcommand)]
+pub enum ToolCommands {
+    /// Compress code from file
+    Compress {
+        /// File path to compress
+        #[arg(short, long)]
+        file_path: String,
+
+        /// Include entities in compression
+        #[arg(long, default_value_t = false)]
+        include_entities: bool,
+
+        /// Include groups in compression
+        #[arg(long, default_value_t = false)]
+        include_groups: bool,
+
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Batch compress multiple files
+    BatchCompress {
+        /// File paths to compress (multiple --file-path flags)
+        #[arg(short, long = "file-path")]
+        file_paths: Vec<String>,
+
+        /// Include entities in compression
+        #[arg(long, default_value_t = false)]
+        include_entities: bool,
+
+        /// Include groups in compression
+        #[arg(long, default_value_t = false)]
+        include_groups: bool,
+
+        /// Maximum concurrency
+        #[arg(long)]
+        max_concurrency: Option<usize>,
+    },
+
+    /// Diagnose code
+    Diagnose {
+        /// Code to diagnose
+        #[arg(short, long)]
+        code: String,
+
+        /// Language
+        #[arg(short, long)]
+        language: Option<String>,
+
+        /// File name hint
+        #[arg(long)]
+        file_name: Option<String>,
+
+        /// Include AST in output
+        #[arg(long, default_value_t = false)]
+        include_ast: bool,
+    },
+
+    /// Get symbols from files
+    Symbols {
+        /// File paths
+        #[arg(short, long)]
+        paths: Vec<String>,
+
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Find references at a location
+    References {
+        /// File path
+        #[arg(short, long)]
+        path: String,
+
+        /// Line number (0-based)
+        #[arg(short, long)]
+        line: usize,
+
+        /// Column number (optional)
+        #[arg(long)]
+        column: Option<usize>,
+
+        /// Symbol name (optional, used if file/line/column not provided)
+        #[arg(long)]
+        symbol: Option<String>,
+
+        /// Number of context lines to show
+        #[arg(long)]
+        context_lines: Option<usize>,
+
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Go to definition
+    Definition {
+        /// File path
+        #[arg(short, long)]
+        path: String,
+
+        /// Line number (0-based)
+        #[arg(short, long)]
+        line: usize,
+
+        /// Column number (optional)
+        #[arg(long)]
+        column: Option<usize>,
+
+        /// Symbol name (optional, used if file/line/column not provided)
+        #[arg(long)]
+        symbol: Option<String>,
+
+        /// Include function body in output
+        #[arg(long, default_value_t = false)]
+        include_body: bool,
+
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Keyword search (BM25-based with raw source snippets)
+    KeyWordSearch {
+        /// Search query
+        #[arg(short, long)]
+        query: String,
+
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Maximum number of results
+        #[arg(short, long, default_value = "10")]
+        top_n: usize,
+    },
 }

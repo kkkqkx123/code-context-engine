@@ -28,6 +28,11 @@ impl ApiClient {
         self.inner.get(path).await
     }
 
+    /// Make a GET request returning raw text.
+    pub async fn get_text(&self, path: &str) -> Result<String> {
+        self.inner.get_text(path).await
+    }
+
     /// Make a POST request
     pub async fn post<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
         self.inner.post(path, body).await

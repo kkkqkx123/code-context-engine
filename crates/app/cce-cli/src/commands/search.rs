@@ -1,8 +1,9 @@
 //! Search command handlers
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
-use crate::cli::SearchCommands;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_output, print_success, truncate};
 use cce_api::models::{SearchRequest, SearchResponse, SearchResultItem};
@@ -169,4 +170,59 @@ fn print_result_item(index: usize, item: &SearchResultItem) {
     }
 
     println!();
+}
+
+/// Search commands
+#[derive(Subcommand)]
+pub enum SearchCommands {
+    /// Search code
+    Query {
+        /// Project ID (required)
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Project root path (optional if --project-id is provided)
+        #[arg(long)]
+        project_path: Option<String>,
+
+        /// Search query
+        #[arg(short, long)]
+        query: String,
+
+        /// Query type: vector, bm25, hybrid, summary
+        #[arg(short = 't', long, default_value = "hybrid")]
+        query_type: String,
+
+        /// Maximum results
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+
+        /// Minimum score threshold
+        #[arg(long)]
+        min_score: Option<f32>,
+
+        /// Filter by directory prefix
+        #[arg(long)]
+        directory: Option<String>,
+
+        /// Content types to exclude (comma-separated): test, generated, vendor
+        #[arg(long)]
+        exclude_content_types: Option<String>,
+
+        /// Exclude patterns (comma-separated)
+        #[arg(long)]
+        exclude: Option<String>,
+
+        /// Include patterns (comma-separated)
+        #[arg(long)]
+        include: Option<String>,
+
+        /// Force reranking on/off for this query (defaults to config)
+        #[arg(long)]
+        enable_rerank: Option<bool>,
+
+        /// Override the maximum number of rerank candidates
+        #[arg(long)]
+        rerank_max_candidates: Option<usize>,
+    },
 }

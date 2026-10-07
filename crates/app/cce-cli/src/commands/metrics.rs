@@ -1,5 +1,7 @@
 //! Metrics command handler
 
+use clap::Subcommand;
+
 use anyhow::Result;
 use chrono::{Duration, Utc};
 
@@ -22,14 +24,14 @@ pub async fn execute(format: MetricsFormat, server: &str, verbose: bool) -> Resu
         println!("Fetching metrics from: {}", path);
     }
 
-    let response = reqwest::get(format!("{}{}", server, path)).await?;
-
-    if !response.status().is_success() {
-        print_error(&format!("Failed to fetch metrics: {}", response.status()));
-        return Ok(());
-    }
-
-    let content = response.text().await?;
+    let client = ApiClient::new(server)?;
+    let content = match client.get_text(path).await {
+        Ok(content) => content,
+        Err(error) => {
+            print_error(&format!("Failed to fetch metrics: {error}"));
+            return Ok(());
+        }
+    };
     println!("{}", content);
 
     Ok(())
@@ -172,4 +174,52 @@ pub async fn execute_cleanup(
     }
 
     Ok(())
+}
+
+/// Metrics commands
+#[derive(Subcommand)]
+pub enum MetricsCommands {
+    /// Export metrics in Prometheus format
+    Prometheus,
+
+    /// Export metrics in JSON format
+    Json,
+
+    /// Get metrics history
+    History {
+        /// Start time in RFC3339 format
+        #[arg(long)]
+        from: Option<String>,
+
+        /// End time in RFC3339 format
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Metric name filter
+        #[arg(long)]
+        metric: Option<String>,
+
+        /// Project ID filter
+        #[arg(long)]
+        project_id: Option<i64>,
+
+        /// Operation type filter
+        #[arg(long)]
+        operation_type: Option<String>,
+    },
+
+    /// Clean up old metrics data
+    Cleanup {
+        /// Delete all historical metrics
+        #[arg(long)]
+        all: bool,
+
+        /// Delete records before this RFC3339 timestamp
+        #[arg(long)]
+        before: Option<String>,
+
+        /// Keep data for the last N days
+        #[arg(short, long, default_value = "30")]
+        keep_days: u64,
+    },
 }

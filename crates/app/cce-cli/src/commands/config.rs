@@ -3,6 +3,8 @@
 //! Commands for managing and inspecting server configuration.
 //! Supports reload, info, and validate operations.
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
 use crate::client::ApiClient;
@@ -127,4 +129,21 @@ pub async fn execute_validate(server: &str, verbose: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Config commands
+#[derive(Subcommand)]
+pub enum ConfigCommands {
+    /// Reload configuration
+    Reload {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Show current configuration info
+    Info,
+
+    /// Validate configuration
+    Validate,
 }

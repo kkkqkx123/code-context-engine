@@ -1,8 +1,9 @@
 //! Qdrant process management command handler
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
-use crate::cli::QdrantCommands;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{QdrantActionResponse, QdrantProcessStatus, QdrantProcessStatusResponse};
@@ -13,10 +14,10 @@ pub async fn execute(cmd: &QdrantCommands, server: &str, verbose: bool) -> Resul
     match cmd {
         QdrantCommands::Process { action } => {
             let action_str = match action {
-                crate::cli::QdrantProcessAction::Status => "status",
-                crate::cli::QdrantProcessAction::Start => "start",
-                crate::cli::QdrantProcessAction::Stop => "stop",
-                crate::cli::QdrantProcessAction::Restart => "restart",
+                QdrantProcessAction::Status => "status",
+                QdrantProcessAction::Start => "start",
+                QdrantProcessAction::Stop => "stop",
+                QdrantProcessAction::Restart => "restart",
             };
 
             if verbose {
@@ -56,4 +57,27 @@ fn format_status(status: &QdrantProcessStatus) -> &'static str {
         QdrantProcessStatus::Stopped => "Stopped",
         QdrantProcessStatus::Failed(_) => "Failed",
     }
+}
+
+/// Qdrant process management
+#[derive(Debug, Subcommand)]
+pub enum QdrantCommands {
+    /// Process management actions
+    Process {
+        #[command(subcommand)]
+        action: QdrantProcessAction,
+    },
+}
+
+/// Qdrant process actions
+#[derive(Debug, Subcommand)]
+pub enum QdrantProcessAction {
+    /// Check Qdrant process status
+    Status,
+    /// Start Qdrant process
+    Start,
+    /// Stop Qdrant process
+    Stop,
+    /// Restart Qdrant process
+    Restart,
 }

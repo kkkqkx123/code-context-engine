@@ -1,8 +1,9 @@
 //! Storage command handlers
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
-use crate::cli::StorageCommands;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
@@ -287,4 +288,76 @@ async fn batch_delete(
     }
 
     Ok(())
+}
+
+/// Storage commands
+#[derive(Subcommand)]
+pub enum StorageCommands {
+    /// Get storage status
+    Status,
+
+    /// Get index statistics
+    Stats {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Clear index
+    Clear {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Clear vectors
+        #[arg(long, default_value = "true")]
+        vectors: bool,
+
+        /// Clear BM25 index
+        #[arg(long, default_value = "true")]
+        bm25: bool,
+
+        /// Clear relations
+        #[arg(long, default_value = "true")]
+        relations: bool,
+
+        /// Clear cache
+        #[arg(long, default_value = "true")]
+        cache: bool,
+    },
+
+    /// Delete a file from index
+    DeleteFile {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// File path
+        path: String,
+    },
+
+    /// Delete an entity from index
+    DeleteEntity {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Entity ID
+        id: String,
+    },
+
+    /// Batch delete
+    BatchDelete {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// File paths to delete (comma-separated)
+        #[arg(long)]
+        files: Option<String>,
+
+        /// Entity IDs to delete (comma-separated)
+        #[arg(long)]
+        entities: Option<String>,
+    },
 }

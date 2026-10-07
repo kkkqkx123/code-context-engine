@@ -91,6 +91,21 @@ impl SharedHttpClient {
             .context("Failed to parse response JSON")
     }
 
+    /// Make a GET request returning raw text.
+    pub async fn get_text(&self, path: &str) -> Result<String> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self
+            .authed(self.client.get(&url))
+            .send()
+            .await
+            .context(format!("Failed to GET {url}"))?;
+        Self::checked(response, "GET", &url)
+            .await?
+            .text()
+            .await
+            .context("Failed to read response body")
+    }
+
     /// Make a POST request.
     pub async fn post<T: serde::Serialize, R: serde::de::DeserializeOwned>(
         &self,

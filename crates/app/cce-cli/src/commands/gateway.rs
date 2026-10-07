@@ -6,11 +6,13 @@
 //! both reach the same remote index state for the same repository. This file
 //! holds no traversal, hashing, or batching logic of its own.
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
 use cce_gateway::{sync_once, watch_loop, GatewayClient, SyncParams};
 
-use crate::cli::{GatewayCommands, OutputFormat};
+use crate::cli::OutputFormat;
 
 /// Apply the overrides both gateway variants share.
 fn apply_shared(
@@ -236,4 +238,134 @@ mod tests {
         assert!(params.adaptive_interval);
         assert!(params.json_progress);
     }
+}
+
+/// Gateway commands for remote hosting
+///
+/// Business defaults (extensions, exclude, gitignore, commit, compression,
+/// poll interval) live in `SyncParams::with_defaults`; the variants only
+/// carry what the caller stated explicitly.
+#[derive(Subcommand)]
+pub enum GatewayCommands {
+    /// Push a full sync pass: manifest, missing contents, then index commit
+    Sync {
+        /// Project ID on the remote host
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Local directory to supply
+        #[arg(short, long)]
+        path: String,
+
+        /// File extensions to include (comma-separated, empty means all text)
+        #[arg(short, long)]
+        extensions: Option<String>,
+
+        /// Directories to exclude (comma-separated)
+        #[arg(short, long)]
+        exclude: Option<String>,
+
+        /// Respect .gitignore; --gitignore=false forces them off
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        gitignore: Option<bool>,
+
+        /// Stage files without running the index commit
+        #[arg(long, default_value = "false")]
+        no_commit: bool,
+
+        /// Compress chunks before upload; --compress=false forces it off
+        /// and overrides the CCE_GATEWAY_COMPRESS environment value
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        compress: Option<bool>,
+
+        /// Scan cache file for cross-restart hash reuse
+        #[arg(long, env = "CCE_GATEWAY_CACHE_FILE")]
+        cache_file: Option<std::path::PathBuf>,
+
+        /// Heartbeat file for supervisors and health probes
+        #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
+        health_file: Option<std::path::PathBuf>,
+
+        /// Admission token; explicit value outranks CCE_API_TOKEN
+        #[arg(long, env = "CCE_API_TOKEN")]
+        token: Option<String>,
+    },
+
+    /// Sync once, then poll and push incremental changes
+    Watch {
+        /// Project ID on the remote host
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Local directory to supply
+        #[arg(short, long)]
+        path: String,
+
+        /// File extensions to include (comma-separated, empty means all text)
+        #[arg(short, long)]
+        extensions: Option<String>,
+
+        /// Directories to exclude (comma-separated)
+        #[arg(short, long)]
+        exclude: Option<String>,
+
+        /// Respect .gitignore; --gitignore=false forces them off
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        gitignore: Option<bool>,
+
+        /// Poll interval in seconds
+        #[arg(long)]
+        interval_secs: Option<u64>,
+
+        /// Compress chunks before upload; --compress=false forces it off
+        /// and overrides the CCE_GATEWAY_COMPRESS environment value
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        compress: Option<bool>,
+
+        /// Scan cache file for cross-restart hash reuse
+        #[arg(long, env = "CCE_GATEWAY_CACHE_FILE")]
+        cache_file: Option<std::path::PathBuf>,
+
+        /// Adapt the poll interval to the baseline file count
+        #[arg(
+            long,
+            action = clap::ArgAction::Set,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        adaptive_interval: Option<bool>,
+
+        /// Heartbeat file for supervisors and health probes
+        #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
+        health_file: Option<std::path::PathBuf>,
+
+        /// Admission token; explicit value outranks CCE_API_TOKEN
+        #[arg(long, env = "CCE_API_TOKEN")]
+        token: Option<String>,
+    },
 }

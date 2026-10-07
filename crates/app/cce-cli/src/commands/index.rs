@@ -1,8 +1,9 @@
 //! Index command handlers
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
-use crate::cli::IndexCommands;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
@@ -243,4 +244,68 @@ async fn parse_file(client: &ApiClient, file: &str, verbose: bool) -> Result<()>
     }
 
     Ok(())
+}
+
+/// Index commands
+#[derive(Subcommand)]
+pub enum IndexCommands {
+    /// Execute full index on a directory
+    Run {
+        /// Project ID (required)
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Root directory to index
+        #[arg(short, long)]
+        path: String,
+
+        /// File extensions to include (comma-separated)
+        #[arg(short, long, default_value = "rs,py,js,ts,c,cpp,java")]
+        extensions: String,
+
+        /// Directories to exclude (comma-separated)
+        #[arg(short, long, default_value = "node_modules,target,.git,vendor")]
+        exclude: String,
+
+        /// Respect .gitignore
+        #[arg(long, default_value = "true")]
+        gitignore: bool,
+
+        /// Custom gitignore file path
+        #[arg(long)]
+        custom_gitignore: Option<String>,
+    },
+
+    /// Execute incremental index
+    Incremental {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Files to index (comma-separated paths)
+        #[arg(short, long)]
+        add: Option<String>,
+
+        /// Files to remove (comma-separated paths)
+        #[arg(short, long)]
+        remove: Option<String>,
+
+        /// Force re-index
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Parse a single file
+    Parse {
+        /// File path to parse
+        #[arg(short, long)]
+        file: String,
+    },
+
+    /// Run a truncate-retry pass over the Embedding dead letter queue
+    RetryDeadLetter {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
 }

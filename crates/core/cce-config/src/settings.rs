@@ -52,6 +52,38 @@ impl Settings {
         Self::init(config)
     }
 
+    /// Resolve the configuration file path shared by all entry points.
+    ///
+    /// An explicit path wins, then the `CCE_CONFIG` environment variable,
+    /// then the default `config.toml` beside the working directory.
+    pub fn resolve_config_path(explicit: Option<&str>) -> String {
+        explicit
+            .map(str::to_string)
+            .or_else(|| std::env::var("CCE_CONFIG").ok())
+            .unwrap_or_else(|| "config.toml".to_string())
+    }
+
+    /// Initialize global configuration from the resolved path with fallback.
+    ///
+    /// Loads the file at the resolved path and falls back to defaults when
+    /// the file cannot be read. When global configuration is already present
+    /// the existing value is returned so repeated entry calls stay harmless.
+    pub fn init_with_fallback(explicit: Option<&str>) -> AppConfig {
+        if let Ok(config) = Self::global() {
+            return config;
+        }
+        let path = Self::resolve_config_path(explicit);
+        match Self::init_from_file(Some(std::path::Path::new(&path))) {
+            Ok(()) => Self::global().unwrap_or_default(),
+            Err(_) => {
+                eprintln!("Failed to load config from {path}; using defaults");
+                let default_config = AppConfig::default();
+                let _ = Self::init(default_config.clone());
+                Self::global().unwrap_or(default_config)
+            }
+        }
+    }
+
     /// Initialize configuration for a specific project
     ///
     /// This loads global configuration and merges it with project-specific

@@ -1,8 +1,9 @@
 //! Entity command handlers
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
-use crate::cli::EntityCommands;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_output, print_success, truncate};
 use cce_api::models::{
@@ -450,4 +451,109 @@ async fn search_entities(
     }
 
     Ok(())
+}
+
+/// Entity commands
+#[derive(Subcommand)]
+pub enum EntityCommands {
+    /// Get function details
+    Function {
+        /// Function ID
+        id: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Get function calls (callees)
+    Calls {
+        /// Function ID
+        id: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Get function callers
+    Callers {
+        /// Function ID
+        id: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Get call chain
+    CallChain {
+        /// Function ID
+        id: String,
+
+        /// Direction: up (callers) or down (callees)
+        #[arg(short, long, default_value = "down")]
+        direction: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Find call path between two functions
+    CallPath {
+        /// Start function ID
+        #[arg(long)]
+        from: String,
+
+        /// End function ID
+        #[arg(long)]
+        to: String,
+
+        /// Maximum search depth
+        #[arg(long, default_value = "10")]
+        depth: usize,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Get class inheritance
+    Inheritance {
+        /// Class ID
+        id: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Get class implementations
+    Implementations {
+        /// Class ID
+        id: String,
+
+        /// Project ID
+        #[arg(long)]
+        project_id: i64,
+    },
+
+    /// Search entities (FTS5 full-text search)
+    Search {
+        /// Search query
+        query: String,
+
+        /// Project ID (optional)
+        #[arg(long)]
+        project_id: Option<i64>,
+
+        /// Maximum number of results
+        #[arg(short, long, default_value = "20")]
+        limit: i64,
+
+        /// Filter by entity kind (optional)
+        #[arg(long)]
+        kind: Option<String>,
+    },
 }

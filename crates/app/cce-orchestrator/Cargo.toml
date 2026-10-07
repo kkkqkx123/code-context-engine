@@ -49,7 +49,6 @@ chrono = { workspace = true }
 globset = { workspace = true }
 moka = { workspace = true }
 tantivy = { workspace = true }
-reqwest = { workspace = true }
 tree-sitter = { workspace = true }
 rusqlite = { workspace = true }
 

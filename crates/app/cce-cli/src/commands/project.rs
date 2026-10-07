@@ -1,8 +1,9 @@
 //! Project command handlers
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
-use crate::cli::ProjectCommands;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success, print_table, truncate};
 use cce_api::models::{
@@ -247,4 +248,70 @@ async fn update_project_config(client: &ApiClient, id: &str, verbose: bool) -> R
     }
 
     Ok(())
+}
+
+/// Project commands
+#[derive(Subcommand)]
+pub enum ProjectCommands {
+    /// Create a new project
+    Create {
+        /// Root directory path
+        #[arg(short, long)]
+        path: String,
+
+        /// Project name (optional, auto-generated if not provided)
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// File extensions to include
+        #[arg(long, default_value = "rs,py,js,ts")]
+        extensions: String,
+
+        /// Directories to exclude
+        #[arg(long, default_value = "node_modules,target,.git")]
+        exclude: String,
+    },
+
+    /// List all projects
+    List,
+
+    /// Get project details
+    Get {
+        /// Project ID
+        id: String,
+    },
+
+    /// Update project
+    Update {
+        /// Project ID
+        id: String,
+
+        /// New project name
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Delete project
+    Delete {
+        /// Project ID
+        id: String,
+    },
+
+    /// Index a project
+    Index {
+        /// Project ID
+        id: String,
+    },
+
+    /// Reload project configuration (hot reload)
+    Reload {
+        /// Project ID
+        id: String,
+    },
+
+    /// Update project configuration
+    Config {
+        /// Project ID
+        id: String,
+    },
 }

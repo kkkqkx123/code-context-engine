@@ -4,24 +4,16 @@
 //! the shared engine state, and serves the MCP surface over stdio or the
 //! streamable HTTP transport, as selected by the `[mcp]` configuration section.
 
-use std::path::Path;
 use std::sync::Arc;
 
+use cce_config::Settings;
 use cce_config::modules::McpTransport;
-use cce_config::{AppConfig, Settings};
 use cce_server_shared::engine::CodeContextEngine;
 use cce_server_shared::state::AppState;
 use tokio_util::sync::CancellationToken;
 
 fn main() -> anyhow::Result<()> {
-    let config_path = std::env::var("CCE_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
-    let config_path = Path::new(&config_path);
-
-    Settings::init_from_file(Some(config_path)).unwrap_or_else(|error| {
-        eprintln!("Failed to load config from {config_path:?}: {error}; using defaults");
-        let default_config = AppConfig::default();
-        Settings::init(default_config).expect("failed to initialize default config");
-    });
+    Settings::init_with_fallback(None);
 
     // MCP is a protocol server: logs must never touch stdout in stdio mode.
     tracing_subscriber::fmt()

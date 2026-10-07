@@ -3,24 +3,15 @@
 //! Minimal entry that initializes configuration and starts the HTTP server.
 //! All HTTP logic is in `api::handlers`, all business logic is in `engine`.
 
-use std::path::Path;
-
-use cce_config::{AppConfig, Settings};
+use cce_config::Settings;
 use cce_server::logger;
 
 use cce_server::api;
 use cce_server::engine::CodeContextEngine;
 
 fn main() -> anyhow::Result<()> {
-    // Initialize configuration from file
-    let config_path = std::env::var("CCE_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
-    let config_path = Path::new(&config_path);
-
-    Settings::init_from_file(Some(config_path)).unwrap_or_else(|e| {
-        eprintln!("Failed to load config from file: {}, using defaults", e);
-        let default_config = AppConfig::default();
-        Settings::init(default_config).expect("Failed to initialize default config");
-    });
+    // Initialize configuration from file, falling back to defaults.
+    Settings::init_with_fallback(None);
 
     // Initialize logger with configuration
     let logger_config =

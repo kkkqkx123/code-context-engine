@@ -94,9 +94,6 @@ pub mod relation_searcher;
 // Query coordinator (unified entry point)
 pub mod coordinator;
 
-// Fusion and Ranking module (deprecated, use boost + ranking instead)
-// pub mod fusion_ranking;
-
 // Boost module — additive score boosting from multiple sources
 pub mod boost;
 

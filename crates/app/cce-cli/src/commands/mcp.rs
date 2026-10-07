@@ -4,13 +4,12 @@
 //! HTTP API: MCP is a protocol endpoint, so the CLI simply builds the shared
 //! engine state and hands it to `cce-mcp`.
 
+use clap::Subcommand;
+
 use anyhow::Result;
-use std::path::Path;
 
 use cce_config::{AppConfig, Settings};
 use tokio_util::sync::CancellationToken;
-
-use crate::cli::McpCommands;
 
 pub async fn execute(cmd: &McpCommands) -> Result<()> {
     match cmd {
@@ -45,18 +44,31 @@ pub async fn execute(cmd: &McpCommands) -> Result<()> {
 /// Resolve the configuration, preferring an explicit path, then `$CCE_CONFIG`,
 /// then the default `config.toml`, falling back to defaults.
 fn load_config(explicit: Option<&str>) -> Result<AppConfig> {
-    let path = explicit
-        .map(str::to_string)
-        .or_else(|| std::env::var("CCE_CONFIG").ok())
-        .unwrap_or_else(|| "config.toml".to_string());
+    Ok(Settings::init_with_fallback(explicit))
+}
 
-    match Settings::init_from_file(Some(Path::new(&path))) {
-        Ok(()) => Ok(Settings::global()?.clone()),
-        Err(error) => {
-            eprintln!("Failed to load config from {path}: {error}; using defaults");
-            let default_config = AppConfig::default();
-            Settings::init(default_config.clone())?;
-            Ok(default_config)
-        }
-    }
+/// MCP server commands
+#[derive(Subcommand)]
+pub enum McpCommands {
+    /// Serve MCP over stdio (for local MCP clients)
+    Stdio {
+        /// Optional config file path (defaults to config.toml or $CCE_CONFIG)
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+
+    /// Serve MCP over the streamable HTTP transport
+    Http {
+        /// Optional config file path (defaults to config.toml or $CCE_CONFIG)
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Override the bind host (defaults to the [mcp.http] config)
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Override the bind port (defaults to the [mcp.http] config)
+        #[arg(long)]
+        port: Option<u16>,
+    },
 }

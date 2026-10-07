@@ -1,8 +1,9 @@
 //! Watch command handlers
 
+use clap::Subcommand;
+
 use anyhow::Result;
 
-use crate::cli::WatchCommands;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{StartWatchRequest, WatchStatusResponse};
@@ -103,4 +104,41 @@ async fn watch_status(client: &ApiClient, project_id: i64, verbose: bool) -> Res
     }
 
     Ok(())
+}
+
+/// Watch commands
+#[derive(Subcommand)]
+pub enum WatchCommands {
+    /// Start watching a directory
+    Start {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+
+        /// Directory to watch
+        #[arg(short, long)]
+        path: String,
+
+        /// File extensions to watch
+        #[arg(long)]
+        extensions: Option<String>,
+
+        /// Debounce interval in milliseconds
+        #[arg(long, default_value = "500")]
+        debounce: u64,
+    },
+
+    /// Stop watching
+    Stop {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Get watch status
+    Status {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
 }

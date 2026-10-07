@@ -1,5 +1,7 @@
 //! Health checking and retry queue management commands
 
+use clap::Subcommand;
+
 use anyhow::Result;
 use colored::Colorize;
 
@@ -290,4 +292,29 @@ fn print_health_bool(label: &str, value: bool) {
 /// Print a key-value pair
 fn print_value(label: &str, value: &str) {
     println!("{}: {}", label, value);
+}
+
+/// Health monitoring and retry queue commands
+#[derive(Subcommand)]
+pub enum HealthCommands {
+    /// Unified health check for all external services
+    Check,
+
+    /// Qdrant detailed diagnostics (circuit breaker, collection info)
+    Qdrant,
+
+    /// Embedding service health (per-provider status)
+    Embedding,
+
+    /// BM25 index health
+    Bm25,
+
+    /// Get retry queue status (pending query count)
+    QueueStatus,
+
+    /// Manually trigger retry queue processing
+    QueueProcess,
+
+    /// Clear retry queue (discard all pending queries)
+    QueueClear,
 }

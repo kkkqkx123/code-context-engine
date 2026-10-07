@@ -3,6 +3,8 @@
 //! Generates temporary file summaries without storage.
 //! Supports single files, multiple files, and directory scanning.
 
+use clap::Subcommand;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -208,4 +210,31 @@ pub async fn execute(options: SummaryOptions) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Summary commands
+#[derive(Subcommand)]
+pub enum SummaryCommands {
+    /// Generate summaries for files or directories
+    Generate {
+        /// File paths to summarize
+        #[arg(long)]
+        file_paths: Vec<String>,
+
+        /// Directory paths to scan and summarize
+        #[arg(long)]
+        directory_paths: Vec<String>,
+
+        /// File extensions to include
+        #[arg(long)]
+        extensions: Vec<String>,
+
+        /// Directories to exclude
+        #[arg(long)]
+        exclude_dirs: Vec<String>,
+
+        /// Respect .gitignore
+        #[arg(long, default_value_t = false)]
+        respect_gitignore: bool,
+    },
 }
