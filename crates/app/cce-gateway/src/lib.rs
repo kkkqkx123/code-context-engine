@@ -53,11 +53,16 @@ pub struct GatewayClient {
 impl GatewayClient {
     /// Build a client for the given server base URL.
     pub fn new(base_url: &str) -> Result<Self> {
+        Self::new_with_token(base_url, None)
+    }
+
+    /// Build a client with an explicit token outranking the environment.
+    pub fn new_with_token(base_url: &str, explicit_token: Option<String>) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
             .context("Failed to create gateway HTTP client")?;
-        let token = cce_api::gateway_token_from_env();
+        let token = cce_api::resolve_gateway_token(explicit_token);
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -127,6 +132,8 @@ pub struct SyncParams {
     pub full_sync_threshold: usize,
     /// Heartbeat file for supervisors and health probes, if any.
     pub health_file: Option<PathBuf>,
+    /// Emit single-line JSON progress records instead of human text.
+    pub json_progress: bool,
 }
 
 impl SyncParams {
@@ -147,6 +154,7 @@ impl SyncParams {
             min_interval_secs: 1,
             full_sync_threshold: 100,
             health_file: None,
+            json_progress: false,
         }
     }
 }
@@ -398,7 +406,17 @@ pub async fn sync_once(
 ) -> Result<ScanOutcome> {
     let outcome = scan_local(params, None).await?;
     let snapshot = &outcome.snapshot;
-    if verbose {
+    if params.json_progress {
+        println!(
+            "{}",
+            serde_json::json!({
+                "kind": "scan",
+                "files": snapshot.files.len(),
+                "skipped_oversize": snapshot.skipped_oversize,
+                "skipped_binary": snapshot.skipped_binary,
+            })
+        );
+    } else if verbose {
         println!(
             "scanned {} files (skipped {} oversize, {} binary)",
             snapshot.files.len(),
@@ -422,7 +440,19 @@ pub async fn sync_once(
     };
     let manifest_url = format!("/api/project/{}/ingest/manifest", params.project_id);
     let manifest_response: IngestManifestResponse = client.post(&manifest_url, &manifest).await?;
-    if verbose {
+    if params.json_progress {
+        println!(
+            "{}",
+            serde_json::json!({
+                "kind": "manifest",
+                "manifest_version": manifest_response.manifest_version,
+                "unchanged": manifest_response.unchanged,
+                "upload_files": manifest_response.upload.len(),
+                "missing_chunks": manifest_response.missing_chunks.len(),
+                "compressed": params.compress,
+            })
+        );
+    } else if verbose {
         println!(
             "manifest v{}: {} unchanged, {} files and {} chunks to upload{}",
             manifest_response.manifest_version,
@@ -450,9 +480,29 @@ pub async fn sync_once(
     if params.commit {
         let commit_url = format!("/api/project/{}/ingest/commit", params.project_id);
         let commit: IngestCommitResponse = client.post(&commit_url, &serde_json::json!({})).await?;
+        if params.json_progress {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "kind": "sync_complete",
+                    "indexed_files": commit.indexed_files,
+                    "total_entities": commit.total_entities,
+                })
+            );
+        } else {
+            println!(
+                "gateway sync complete: {} files indexed, {} entities",
+                commit.indexed_files, commit.total_entities
+            );
+        }
+    } else if params.json_progress {
         println!(
-            "gateway sync complete: {} files indexed, {} entities",
-            commit.indexed_files, commit.total_entities
+            "{}",
+            serde_json::json!({
+                "kind": "staged",
+                "staged": staged,
+                "commit": false,
+            })
         );
     } else {
         println!("gateway staged {staged} files without commit");
@@ -704,10 +754,22 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
     let mut last_full_scan_at = Some(chrono::Utc::now().to_rfc3339());
     let started_at = chrono::Utc::now().to_rfc3339();
     let interval_secs = params.interval_secs.max(params.min_interval_secs);
-    println!(
-        "gateway watching {} (poll every {interval_secs}s)",
-        params.path
-    );
+    if params.json_progress {
+        println!(
+            "{}",
+            serde_json::json!({
+                "kind": "watching",
+                "path": params.path,
+                "interval_secs": interval_secs,
+                "baseline_files": baseline.len(),
+            })
+        );
+    } else {
+        println!(
+            "gateway watching {} (poll every {interval_secs}s)",
+            params.path
+        );
+    }
     write_heartbeat(
         params,
         baseline.len(),
@@ -777,7 +839,15 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
         if events.is_empty() {
             continue;
         }
-        if verbose {
+        if params.json_progress {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "kind": "pushing",
+                    "changes": events.len(),
+                })
+            );
+        } else if verbose {
             println!("pushing {} change(s)", events.len());
         }
         if events.len() > params.full_sync_threshold {

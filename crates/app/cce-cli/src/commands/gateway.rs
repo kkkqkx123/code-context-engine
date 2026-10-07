@@ -10,7 +10,7 @@ use anyhow::Result;
 
 use cce_gateway::{sync_once, watch_loop, GatewayClient, SyncParams};
 
-use crate::cli::GatewayCommands;
+use crate::cli::{GatewayCommands, OutputFormat};
 
 /// Apply the overrides both gateway variants share.
 fn apply_shared(
@@ -19,6 +19,7 @@ fn apply_shared(
     exclude: &Option<String>,
     gitignore: &Option<bool>,
     compress: &Option<bool>,
+    health_file: &Option<std::path::PathBuf>,
 ) {
     if let Some(extensions) = extensions {
         params.extensions = extensions.clone();
@@ -32,13 +33,15 @@ fn apply_shared(
     if let Some(compress) = compress {
         params.compress = *compress;
     }
+    params.health_file = health_file.clone();
 }
 
 /// Translate one gateway subcommand over the shared defaults.
 ///
 /// Explicit arguments outrank the environment values baked into the
 /// defaults; anything the caller left out keeps the shared value.
-fn params_for(cmd: &GatewayCommands) -> SyncParams {
+fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
+    let json_progress = matches!(format, OutputFormat::Json);
     match cmd {
         GatewayCommands::Sync {
             project_id,
@@ -48,12 +51,22 @@ fn params_for(cmd: &GatewayCommands) -> SyncParams {
             gitignore,
             no_commit,
             compress,
+            health_file,
+            token: _,
         } => {
             let mut params = SyncParams::with_defaults(*project_id, path.clone());
-            apply_shared(&mut params, extensions, exclude, gitignore, compress);
+            apply_shared(
+                &mut params,
+                extensions,
+                exclude,
+                gitignore,
+                compress,
+                health_file,
+            );
             if *no_commit {
                 params.commit = false;
             }
+            params.json_progress = json_progress;
             params
         }
         GatewayCommands::Watch {
@@ -64,21 +77,42 @@ fn params_for(cmd: &GatewayCommands) -> SyncParams {
             gitignore,
             interval_secs,
             compress,
+            health_file,
+            token: _,
         } => {
             let mut params = SyncParams::with_defaults(*project_id, path.clone());
-            apply_shared(&mut params, extensions, exclude, gitignore, compress);
+            apply_shared(
+                &mut params,
+                extensions,
+                exclude,
+                gitignore,
+                compress,
+                health_file,
+            );
             if let Some(interval_secs) = interval_secs {
                 params.interval_secs = *interval_secs;
             }
+            params.json_progress = json_progress;
             params
         }
     }
 }
 
+fn explicit_token(cmd: &GatewayCommands) -> Option<String> {
+    match cmd {
+        GatewayCommands::Sync { token, .. } | GatewayCommands::Watch { token, .. } => token.clone(),
+    }
+}
+
 /// Execute the gateway subcommand.
-pub async fn execute(cmd: &GatewayCommands, server: &str, verbose: bool) -> Result<()> {
-    let client = GatewayClient::new(server)?;
-    let params = params_for(cmd);
+pub async fn execute(
+    cmd: &GatewayCommands,
+    server: &str,
+    verbose: bool,
+    format: OutputFormat,
+) -> Result<()> {
+    let client = GatewayClient::new_with_token(server, explicit_token(cmd))?;
+    let params = params_for(cmd, format);
     match cmd {
         GatewayCommands::Sync { .. } => sync_once(&client, &params, verbose).await.map(|_| ()),
         GatewayCommands::Watch { .. } => watch_loop(&client, &params, verbose).await,
@@ -99,6 +133,8 @@ mod tests {
             gitignore: None,
             no_commit: false,
             compress: None,
+            health_file: None,
+            token: None,
         }
     }
 
@@ -112,14 +148,22 @@ mod tests {
             gitignore: None,
             interval_secs: None,
             compress: None,
+            health_file: None,
+            token: None,
         }
     }
 
     #[test]
     fn bare_sync_and_watch_equal_the_shared_defaults() {
         let expected = format!("{:?}", SyncParams::with_defaults(5, "/srv/repo"));
-        assert_eq!(format!("{:?}", params_for(&bare_sync())), expected);
-        assert_eq!(format!("{:?}", params_for(&bare_watch())), expected);
+        assert_eq!(
+            format!("{:?}", params_for(&bare_sync(), OutputFormat::Table)),
+            expected
+        );
+        assert_eq!(
+            format!("{:?}", params_for(&bare_watch(), OutputFormat::Table)),
+            expected
+        );
     }
 
     #[test]
@@ -132,15 +176,22 @@ mod tests {
             gitignore: Some(false),
             no_commit: true,
             compress: Some(false),
+            health_file: Some(std::path::PathBuf::from("/run/gateway.json")),
+            token: Some("explicit-token".to_string()),
         };
-        let params = params_for(&sync);
+        let params = params_for(&sync, OutputFormat::Table);
         assert_eq!(params.extensions, "rs");
         assert_eq!(params.exclude, "vendor");
         assert!(!params.gitignore);
         assert!(!params.commit);
         assert!(!params.compress);
         assert_eq!(params.interval_secs, 5);
-        assert!(params.health_file.is_none());
+        assert_eq!(
+            params.health_file,
+            Some(std::path::PathBuf::from("/run/gateway.json"))
+        );
+        assert!(!params.json_progress);
+        assert_eq!(explicit_token(&sync), Some("explicit-token".to_string()));
 
         let watch = GatewayCommands::Watch {
             project_id: 5,
@@ -150,13 +201,16 @@ mod tests {
             gitignore: Some(false),
             interval_secs: Some(2),
             compress: Some(true),
+            health_file: None,
+            token: None,
         };
-        let params = params_for(&watch);
+        let params = params_for(&watch, OutputFormat::Json);
         assert_eq!(params.extensions, "rs");
         assert_eq!(params.exclude, "node_modules,target,.git,vendor");
         assert!(!params.gitignore);
         assert_eq!(params.interval_secs, 2);
         assert!(params.compress);
         assert!(params.commit);
+        assert!(params.json_progress);
     }
 }

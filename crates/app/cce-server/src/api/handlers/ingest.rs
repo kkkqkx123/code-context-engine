@@ -5,8 +5,8 @@
 //! and incremental pipelines. Encoding detection still runs inside those
 //! pipelines, and project isolation filtering is untouched. These routes only
 //! exist in admission-enabled builds and always sit behind the admission
-//! layer. They carry no OpenAPI annotations yet because the push protocol
-//! shape is still stabilizing.
+//! layer. They are annotated for the admission-gated contract and join the
+//! OpenAPI document only in admission builds; local builds exclude them.
 //!
 //! Chunk staging lives under the system temp directory, keyed by project
 //! and manifest version. Every batch, whatever its manifest version, runs

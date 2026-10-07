@@ -13,3 +13,34 @@ pub fn gateway_token_from_env() -> Option<String> {
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
 }
+
+/// Resolve the admission token with explicit arguments outranking the environment.
+///
+/// An explicit non-empty value wins; otherwise the environment is consulted.
+/// Empty or whitespace-only explicit values fall back to the environment.
+pub fn resolve_gateway_token(explicit: Option<String>) -> Option<String> {
+    match explicit {
+        Some(value) => {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                gateway_token_from_env()
+            } else {
+                Some(trimmed)
+            }
+        }
+        None => gateway_token_from_env(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_token_is_trimmed_and_outranks_environment() {
+        assert_eq!(
+            resolve_gateway_token(Some("  explicit-token  ".to_string())),
+            Some("explicit-token".to_string())
+        );
+    }
+}

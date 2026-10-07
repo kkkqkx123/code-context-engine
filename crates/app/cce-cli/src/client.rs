@@ -15,6 +15,11 @@ pub struct ApiClient {
 impl ApiClient {
     /// Create a new API client
     pub fn new(base_url: &str) -> Result<Self> {
+        Self::new_with_token(base_url, None)
+    }
+
+    /// Create a client with an explicit token outranking the environment.
+    pub fn new_with_token(base_url: &str, explicit_token: Option<String>) -> Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
@@ -23,7 +28,7 @@ impl ApiClient {
         // Remote hosts sit behind the admission layer; the token travels in
         // the authorization header only when it is configured, so local use
         // sends exactly the same requests as before.
-        let token = cce_api::gateway_token_from_env();
+        let token = cce_api::resolve_gateway_token(explicit_token);
 
         Ok(Self {
             client,

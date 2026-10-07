@@ -1052,6 +1052,14 @@ pub enum GatewayCommands {
             require_equals = true
         )]
         compress: Option<bool>,
+
+        /// Heartbeat file for supervisors and health probes
+        #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
+        health_file: Option<std::path::PathBuf>,
+
+        /// Admission token; explicit value outranks CCE_API_TOKEN
+        #[arg(long, env = "CCE_API_TOKEN")]
+        token: Option<String>,
     },
 
     /// Sync once, then poll and push incremental changes
@@ -1096,6 +1104,14 @@ pub enum GatewayCommands {
             require_equals = true
         )]
         compress: Option<bool>,
+
+        /// Heartbeat file for supervisors and health probes
+        #[arg(long, env = "CCE_GATEWAY_HEALTH_FILE")]
+        health_file: Option<std::path::PathBuf>,
+
+        /// Admission token; explicit value outranks CCE_API_TOKEN
+        #[arg(long, env = "CCE_API_TOKEN")]
+        token: Option<String>,
     },
 }
 
@@ -1161,7 +1177,7 @@ impl Cli {
                 commands::status::execute(&self.server, self.verbose, self.format).await
             }
             Commands::Gateway(cmd) => {
-                commands::gateway::execute(cmd, &self.server, self.verbose).await
+                commands::gateway::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::Mcp(cmd) => commands::mcp::execute(cmd).await,
         }

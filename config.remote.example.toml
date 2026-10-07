@@ -35,5 +35,6 @@ port = 9000
 # project with the server-side mirror path and supply_mode gateway, then let
 # the gateway fill it. Chunking uses 256 KiB pieces with per-chunk hashes;
 # compression stays off unless CCE_GATEWAY_COMPRESS=1 or --compress is set.
-# The resident daemon shares the CLI core; systemd unit and heartbeat wiring
-# live under contrib/cce-gateway.service.
+# The resident daemon shares the CLI core; run it manually or under an external
+# supervisor (systemd user unit, launchd, pm2, task scheduler) with --health-file
+# for liveness probes. No system unit is shipped.
