@@ -180,6 +180,19 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].document_id, format!("{generation}-own"));
 
+    // Empty epochs disable epoch filtering but project filtering stays active.
+    let hits = store
+        .search("zephyrwind", &options(7, Vec::new()))
+        .await
+        .expect("empty-epoch search");
+    assert!(hits.iter().all(|h| h.fields.get("file_path").is_some()));
+    assert!(!hits.is_empty());
+    let hits = store
+        .search("zephyrwind", &options(9, Vec::new()))
+        .await
+        .expect("empty-epoch missing project search");
+    assert!(hits.is_empty());
+
     // Test-code exclusion plus category filtering.
     let flags = format!("{tag}-flags");
     store

@@ -7,7 +7,7 @@
 use std::hash::{Hash, Hasher};
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_bm25::Bm25Document;
+use cce_storage_common::FulltextDocument;
 use cce_storage_metadb_sqlite::ChunkRecord;
 use cce_types::chunk_refs::ChunkEntityRefs;
 use cce_types::{TestInfo, TestStatus};
@@ -22,7 +22,7 @@ pub fn build_bm25_documents(
     chunks: &[&ChunkedResult],
     project_id: i64,
     epoch: i64,
-) -> Vec<Bm25Document> {
+) -> Vec<FulltextDocument> {
     let project_id_str = project_id.to_string();
     let epoch_str = epoch.to_string();
 
@@ -36,7 +36,7 @@ pub fn build_bm25_documents(
             let entity_ids = ChunkEntityRefs::new(chunk.metadata.content_entity_ids().to_vec(), "")
                 .to_bm25_csv();
 
-            Bm25Document::new(format!("{project_id}::{epoch}::{}", chunk.chunk_id))
+            FulltextDocument::new(format!("{project_id}::{epoch}::{}", chunk.chunk_id))
                 .with_field("chunk_id", &chunk.chunk_id)
                 .with_field("content", &chunk.text)
                 .with_field("title", title)

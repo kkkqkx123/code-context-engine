@@ -20,11 +20,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use cce_codegraph::CallChainQuery;
 use cce_config::project_registry::ProjectScope;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::{MetricsRegistry, QueryMetrics, SearchMetrics};
-use cce_codegraph::CallChainQuery;
-use cce_storage_metadb_sqlite::SqliteClient;
 use cce_types::error::common::ErrorClassify;
 
 use super::SearcherBuilder;
@@ -36,6 +35,7 @@ use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
 use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult};
 use crate::index::vector_store::FulltextStore;
+use crate::index::vector_store::RelationStore;
 use crate::index::vector_store::VectorStore;
 
 /// Query coordinator
@@ -71,8 +71,8 @@ pub struct QueryCoordinator {
     cache: QueryCache,
     /// Index capabilities
     capabilities: IndexCapabilities,
-    /// SQLite database for FTS5 entity search (optional)
-    sqlite: Option<Arc<SqliteClient>>,
+    /// Relation backend for FTS5 entity search (optional, local branch only)
+    relation: Option<RelationStore>,
     /// Monitoring metrics (optional)
     metrics: Option<Arc<QueryMetrics>>,
     /// Retry queue for preserving query progress during service outages
@@ -89,7 +89,7 @@ pub struct QueryCoordinatorBuilder {
     relation_searcher: Option<Arc<RelationSearcher>>,
     cache_config: Option<CacheConfig>,
     capabilities: Option<IndexCapabilities>,
-    sqlite: Option<Arc<SqliteClient>>,
+    relation: Option<RelationStore>,
     metrics_registry: Option<Arc<MetricsRegistry>>,
     project_id: i64,
 }
@@ -112,17 +112,21 @@ impl QueryCoordinatorBuilder {
             relation_searcher: Some(relation_searcher),
             cache_config: None,
             capabilities: None,
-            sqlite: None,
+            relation: None,
             metrics_registry: None,
             project_id,
         }
     }
 
-    /// Enable SQLite support
-    pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
-        self.sqlite = Some(sqlite.clone());
+    /// Attach the local relation database.
+    ///
+    /// Local-only port: FTS5 entity search runs inside the embedded branch.
+    /// The handle is also forwarded to the searcher through the backend enum.
+    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
+        let store = RelationStore::local(sqlite);
+        self.relation = Some(store.clone());
         if let Some(builder) = self.searcher_builder.take() {
-            self.searcher_builder = Some(builder.with_sqlite(sqlite));
+            self.searcher_builder = Some(builder.with_relation_store(store));
         }
         self
     }
@@ -172,7 +176,7 @@ impl QueryCoordinatorBuilder {
             relation_searcher,
             cache: QueryCache::new(self.cache_config.unwrap_or_default()),
             capabilities: self.capabilities.unwrap_or_default(),
-            sqlite: self.sqlite,
+            relation: self.relation,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
             project_id: self.project_id,
@@ -203,7 +207,7 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(CacheConfig::default()),
             capabilities: IndexCapabilities::default(),
-            sqlite: None,
+            relation: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
             project_id,
@@ -222,7 +226,7 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(cache_config),
             capabilities: IndexCapabilities::default(),
-            sqlite: None,
+            relation: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
             project_id,
@@ -241,7 +245,7 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(CacheConfig::default()),
             capabilities,
-            sqlite: None,
+            relation: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
             project_id,
@@ -261,7 +265,7 @@ impl QueryCoordinator {
             relation_searcher,
             cache: QueryCache::new(cache_config),
             capabilities,
-            sqlite: None,
+            relation: None,
             metrics: None,
             retry_queue: Arc::new(RetryQueue::new()),
             project_id,
@@ -279,9 +283,11 @@ impl QueryCoordinator {
         self.metrics.as_ref()
     }
 
-    /// Set SQLite database for FTS5 entity search
-    pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
-        self.sqlite = Some(sqlite);
+    /// Attach the local relation database for FTS5 entity search.
+    ///
+    /// Local-only port: FTS5 entity search runs inside the embedded branch.
+    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
+        self.relation = Some(RelationStore::local(sqlite));
         self
     }
 
@@ -337,21 +343,25 @@ impl QueryCoordinator {
     /// // Search for exact phrase in signature
     /// let entities = coordinator.search_entities("\"fn test()\"", 1, 10)?;
     /// ```
-    pub fn search_entities(
+    pub async fn search_entities(
         &self,
         query: &str,
         limit: i64,
     ) -> Result<Vec<cce_storage_metadb_sqlite::EntityRecord>> {
+        // FTS5 is an embedded-branch capability: the only fenced downcast
+        // on this path. Other branches report unavailability instead of
+        // silently returning no entities.
         let sqlite = self
-            .sqlite
+            .relation
             .as_ref()
-            .ok_or_else(|| QueryError::Config("SQLite database not configured".to_string()))?;
+            .and_then(RelationStore::as_local)
+            .ok_or_else(|| QueryError::Config("FTS5 entity search not configured".to_string()))?;
+
+        let view = self.searcher.load_query_filter(self.project_id).await?;
 
         let conn = sqlite.read_connection().map_err(|e| {
             QueryError::InvalidQuery(format!("Failed to get database connection: {}", e))
         })?;
-
-        let view = self.searcher.load_query_filter(self.project_id)?;
 
         let start = Instant::now();
         let result = Self::search_entities_at_view(&conn, query, self.project_id, limit, &view);
@@ -415,9 +425,9 @@ impl QueryCoordinator {
         Ok(entities)
     }
 
-    /// Check if FTS5 entity search is available
+    /// Check if FTS5 entity search is available (local branch attached)
     pub fn has_fts5_search(&self) -> bool {
-        self.sqlite.is_some()
+        self.relation.as_ref().is_some_and(RelationStore::is_local)
     }
 
     // ========== Unified Search ==========
@@ -435,7 +445,7 @@ impl QueryCoordinator {
     /// when the service recovers. The error is still propagated to the
     /// caller so the degradation is visible.
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
-        let view = self.searcher.load_query_filter(options.project_id)?;
+        let view = self.searcher.load_query_filter(options.project_id).await?;
         self.search_with_view(options, &view).await
     }
 
@@ -530,7 +540,7 @@ impl QueryCoordinator {
         tracing::trace!(count, "Processing retry queue");
 
         for options in pending {
-            let view = match self.searcher.load_query_filter(options.project_id) {
+            let view = match self.searcher.load_query_filter(options.project_id).await {
                 Ok(view) => view,
                 Err(error) => {
                     tracing::warn!(%error, "Failed to resolve retry query epoch");
@@ -587,7 +597,10 @@ impl QueryCoordinator {
         agg_options: &AggregatedQueryOptions,
     ) -> Result<QueryResult> {
         let start = std::time::Instant::now();
-        let view = self.searcher.load_query_filter(agg_options.project_id)?;
+        let view = self
+            .searcher
+            .load_query_filter(agg_options.project_id)
+            .await?;
         let sub_queries_count = agg_options.sub_queries.len();
 
         // Build every sub-query's options up front so the shared filters and
@@ -1036,17 +1049,24 @@ impl QueryCoordinator {
     ///
     /// # Returns
     /// Returns the file summary JSON if found, or QueryError if not available
-    pub fn get_file_summary(&self, file_path: &str, project_id: i64) -> Result<serde_json::Value> {
+    pub async fn get_file_summary(
+        &self,
+        file_path: &str,
+        project_id: i64,
+    ) -> Result<serde_json::Value> {
+        // File-row lookup stays on the embedded branch; the epoch view
+        // itself resolves through the relation contract.
         let sqlite = self
-            .sqlite
+            .relation
             .as_ref()
+            .and_then(RelationStore::as_local)
             .ok_or_else(|| QueryError::index_not_available("sqlite"))?;
+
+        let view = self.searcher.load_query_filter(project_id).await?;
 
         let conn = sqlite
             .read_connection()
             .map_err(|e| QueryError::invalid(&format!("Failed to connect to SQLite: {}", e)))?;
-
-        let view = self.searcher.load_query_filter(project_id)?;
 
         // Two-stage resolution ("own first, miss → parent"): an inherited
         // file's rows live in the parent generation; overridden files never

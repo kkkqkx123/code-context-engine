@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_codegraph::index::RelationIndex;
+use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 
 use super::aggregator::FileAggregator;
 use super::config::{ExportConfig, RelationEnhancerConfig};

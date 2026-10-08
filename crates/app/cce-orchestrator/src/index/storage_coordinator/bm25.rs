@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::CheckpointManager;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_bm25::Bm25Document;
+use cce_storage_common::FulltextDocument;
 use cce_storage_metadb_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
 use cce_storage_metadb_sqlite::{ChunkRecord, EntityDetailMapping};
 
@@ -132,12 +132,12 @@ impl StorageCoordinator {
     fn build_bm25_entity_mappings(
         &self,
         chunks: &[&ChunkedResult],
-        documents: &[Bm25Document],
+        documents: &[FulltextDocument],
     ) -> Result<Vec<EntityDetailMapping>, OrchestratorError> {
         // Build a map from chunk_id to document_id to avoid zip-order alignment issues.
         // This is necessary because build_bm25_documents may filter out chunks with
         // empty text, causing document count to differ from chunk count.
-        let doc_by_chunk_id: std::collections::HashMap<&str, &Bm25Document> = documents
+        let doc_by_chunk_id: std::collections::HashMap<&str, &FulltextDocument> = documents
             .iter()
             .map(|d| (d.fields.get("chunk_id").map_or("", |s| s.as_str()), d))
             .collect();

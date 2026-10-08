@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 
+use super::vector_store::RelationStore;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::repo::RelationSnapshotRepository;
 use cce_storage_metadb_sqlite::repo::RelationSnapshotState;
@@ -13,12 +14,28 @@ use cce_types::{
 };
 
 pub struct ResolutionPipelineService {
-    db_client: SqliteClient,
+    store: RelationStore,
 }
 
 impl ResolutionPipelineService {
-    pub fn new(db_client: SqliteClient) -> Self {
-        Self { db_client }
+    pub fn new(store: RelationStore) -> Self {
+        Self { store }
+    }
+
+    /// Local-only constructor for tests and single-branch callers.
+    pub fn new_local(db_client: SqliteClient) -> Self {
+        Self::new(RelationStore::Local(std::sync::Arc::new(db_client)))
+    }
+
+    fn local_client(&self) -> Result<SqliteClient, StorageError> {
+        self.store
+            .as_local()
+            .map(|client| client.as_ref().clone())
+            .ok_or_else(|| {
+                StorageError::validation(
+                    "remote relation branch is not wired into the snapshot write path",
+                )
+            })
     }
 
     /// Allocate a building epoch and write snapshot data (without activating).
@@ -38,8 +55,9 @@ impl ResolutionPipelineService {
 
         let input_fingerprint = snapshot.input_fingerprint();
         let snapshot_fingerprint = snapshot.fingerprint();
+        let db_client = self.local_client()?;
 
-        if let Some(existing) = self.db_client.with_transaction(|tx| {
+        if let Some(existing) = db_client.with_transaction(|tx| {
             RelationSnapshotRepository::get_manifest_by_operation(tx, project_id, operation_id)
         })? {
             match existing.state {
@@ -54,7 +72,7 @@ impl ResolutionPipelineService {
                     return Ok(existing.relation_epoch);
                 }
                 RelationSnapshotState::Failed => {
-                    self.db_client.with_transaction(|tx| {
+                    db_client.with_transaction(|tx| {
                         RelationSnapshotRepository::retry_failed(
                             tx,
                             project_id,
@@ -66,7 +84,7 @@ impl ResolutionPipelineService {
             }
         }
 
-        let epoch = self.db_client.with_transaction(|tx| {
+        let epoch = db_client.with_transaction(|tx| {
             RelationSnapshotRepository::allocate_building(
                 tx,
                 project_id,
@@ -75,7 +93,7 @@ impl ResolutionPipelineService {
             )
         })?;
 
-        let write_result = self.db_client.with_transaction(|tx| {
+        let write_result = db_client.with_transaction(|tx| {
             RelationSnapshotRepository::write_snapshot_and_mark_ready(
                 tx,
                 project_id,
@@ -87,7 +105,7 @@ impl ResolutionPipelineService {
         });
         if let Err(error) = write_result {
             let reason = error.to_string();
-            if let Err(mark_error) = self.db_client.with_transaction(|tx| {
+            if let Err(mark_error) = db_client.with_transaction(|tx| {
                 RelationSnapshotRepository::mark_failed(tx, project_id, epoch, &reason)
             }) {
                 tracing::error!(
@@ -109,10 +127,11 @@ impl ResolutionPipelineService {
     /// `RelationSnapshotPublisher` so the runtime and SQLite epoch move
     /// together.
     pub fn activate(&self, project_id: i64, epoch: i64) -> Result<(), StorageError> {
-        self.db_client
+        let db_client = self.local_client()?;
+        db_client
             .with_transaction(|tx| RelationSnapshotRepository::activate(tx, project_id, epoch))?;
         let stale_before = chrono::Utc::now().timestamp() - 24 * 60 * 60;
-        if let Err(error) = self.db_client.with_transaction(|tx| {
+        if let Err(error) = db_client.with_transaction(|tx| {
             RelationSnapshotRepository::collect_garbage(tx, project_id, stale_before).map(|_| ())
         }) {
             tracing::warn!(project_id, error = %error, "Relation epoch garbage collection failed");
@@ -127,7 +146,7 @@ impl ResolutionPipelineService {
         epoch: i64,
         reason: &str,
     ) -> Result<(), StorageError> {
-        self.db_client.with_transaction(|tx| {
+        self.local_client()?.with_transaction(|tx| {
             RelationSnapshotRepository::mark_failed(tx, project_id, epoch, reason)
         })
     }
@@ -247,7 +266,7 @@ mod tests {
         let client = SqliteClient::in_memory().expect("in-memory database should open");
         insert_project(&client);
         let snapshot = CanonicalRelationSnapshot::new("config".to_string());
-        let writer = ResolutionPipelineService::new(client.clone());
+        let writer = ResolutionPipelineService::new_local(client.clone());
 
         let first_epoch = writer
             .allocate_and_write(1, "operation-1", &snapshot)

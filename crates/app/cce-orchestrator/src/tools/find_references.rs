@@ -9,11 +9,11 @@ use std::sync::Arc;
 use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
 use cce_codegraph::query::QueryCache;
-use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::repo::EntityRepository;
 use cce_types::{Entity, EntityId};
 use parking_lot::RwLock;
 
+use crate::index::vector_store::RelationStore;
 use crate::tools::symbol_lookup_types::{
     CallerEntityInfo, FindReferencesRequest, FindReferencesResponse, GroupedReferences,
     ReferenceLocation, SymbolKind, SymbolLookupError,
@@ -43,9 +43,9 @@ pub struct FindReferencesTool {
     index: Arc<LayeredSnapshotIndex>,
     /// Configuration
     config: FindReferencesConfig,
-    /// Optional SQLite database for chunk content lookup
-    sqlite: Option<Arc<SqliteClient>>,
-    /// Project ID for SQLite queries
+    /// Relation backend for snippet lookup (local branch only)
+    relation: Option<RelationStore>,
+    /// Project ID for relation queries
     project_id: i64,
     /// Query result cache (LRU) for repeated lookups
     cache: Arc<RwLock<QueryCache>>,
@@ -57,7 +57,7 @@ impl FindReferencesTool {
         Self {
             index,
             config: FindReferencesConfig::default(),
-            sqlite: None,
+            relation: None,
             project_id,
             cache: Arc::new(RwLock::new(QueryCache::new(128))),
         }
@@ -69,9 +69,12 @@ impl FindReferencesTool {
         self
     }
 
-    /// Attach SQLite database for chunk content lookup
-    pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
-        self.sqlite = Some(sqlite);
+    /// Attach the local relation database for snippet lookup.
+    ///
+    /// Local-only port: snippet and FTS5 fallback reads stay on the embedded
+    /// branch until the contract carries the operations they need.
+    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
+        self.relation = Some(RelationStore::local(sqlite));
         self
     }
 
@@ -330,7 +333,7 @@ impl FindReferencesTool {
     /// Read file content from disk (chunk rows no longer persist raw code)
     fn get_file_content_from_chunks(&self, path: &str) -> Option<String> {
         let project_id = self.project_id;
-        let conn = crate::tools::common::get_read_connection(&self.sqlite).ok()?;
+        let conn = crate::tools::common::get_read_connection(&self.relation).ok()?;
         let project_root =
             cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
         let content = cce_storage_metadb_sqlite::source_reader::read_source_lines(

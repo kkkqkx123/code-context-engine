@@ -181,6 +181,20 @@ async fn run_contract_suite(store: &impl RelationStorage, tag: &str, project: i6
     assert_eq!(readback.len(), 1);
     assert_eq!(readback[0].content, "fn c1() {}");
 
+    // Empty epochs disable epoch filtering but project filtering stays active.
+    let unfiltered = store
+        .chunks_by_ids(project, &["c1".to_string()], &[])
+        .await
+        .expect("empty-epoch readback");
+    assert_eq!(unfiltered.len(), 1);
+    assert!(
+        store
+            .chunks_by_ids(other, &["c1".to_string()], &[])
+            .await
+            .expect("empty-epoch cross-project readback")
+            .is_empty()
+    );
+
     // Project isolation: the other project sees none of this, and a project
     // that was never indexed reads empty everywhere.
     assert_eq!(store.chunks_count(other, 3).await.expect("count"), 0);

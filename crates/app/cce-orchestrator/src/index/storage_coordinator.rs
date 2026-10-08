@@ -173,7 +173,10 @@ impl StorageCoordinator {
         self.embedding_stage_timeout_secs = secs;
     }
 
-    /// Set metadata store
+    /// Set metadata store (local-only port).
+    ///
+    /// Direct handle for write paths that require embedded-branch
+    /// capabilities such as explicit transactions and repositories.
     pub fn with_metadata_store(mut self, store: Arc<SqliteClient>) -> Self {
         self.metadata_store = Some(store);
         self

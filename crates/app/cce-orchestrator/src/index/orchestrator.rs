@@ -38,6 +38,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::export::NlDocumentExporter;
+use cce_codegraph::IndexBuilder;
 use cce_config::modules::summary::SummaryGenerationStrategy as SummaryStrategy;
 use cce_config::{
     AstToNlConfig, BatchConfig, NestProcessorConfig, RelationConfig, SummaryConfig,
@@ -55,7 +56,6 @@ use cce_parser::summary::{
     FileSummary, ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator,
 };
 use cce_plugin::PluginRegistry;
-use cce_codegraph::IndexBuilder;
 use cce_scanner::ScanOptions;
 use cce_types::OutputMode;
 

@@ -861,5 +861,15 @@ mod tests {
             !std::path::Path::new(&project_path).exists(),
             "project database file must be removed"
         );
+
+        // The evicted handle must not serve stale rows: reopening the
+        // project yields a fresh database that reads back empty.
+        let reopened = client.for_project(p1).expect("reopen project db");
+        let count: i64 = reopened
+            .read_connection()
+            .expect("reopened connection")
+            .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
+            .unwrap_or(0);
+        assert_eq!(count, 0);
     }
 }

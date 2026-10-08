@@ -3,7 +3,9 @@
 use cce_types::normalize_project_path;
 use serde_json::{Value, json};
 
-use crate::{Bm25Error, Bm25SearchOptions, Bm25SearchResult, TermOperator};
+use cce_storage_common::{FulltextHit, FulltextSearchOptions, TermOperator};
+
+use crate::Bm25Error;
 
 use super::ElasticsearchClient;
 
@@ -30,7 +32,7 @@ impl ElasticsearchClient {
     /// Term combination mirrors the local branch: the operator governs how
     /// query terms combine *within* each field (`and`/`or`), while the
     /// fields themselves stay disjunctive (any field may satisfy the query).
-    pub fn search_body(&self, query: &str, options: &Bm25SearchOptions) -> Value {
+    pub fn search_body(&self, query: &str, options: &FulltextSearchOptions) -> Value {
         let weights =
             |name: &str, default: f32| options.field_weights.get(name).copied().unwrap_or(default);
         let title_weight = weights("title", 2.0);
@@ -115,8 +117,8 @@ impl ElasticsearchClient {
     pub async fn search(
         &self,
         query: &str,
-        options: &Bm25SearchOptions,
-    ) -> Result<Vec<Bm25SearchResult>, Bm25Error> {
+        options: &FulltextSearchOptions,
+    ) -> Result<Vec<FulltextHit>, Bm25Error> {
         self.check_breaker().await?;
         let body = self.search_body(query, options);
         let result = self.search_once(&body).await;
@@ -127,7 +129,7 @@ impl ElasticsearchClient {
         result
     }
 
-    async fn search_once(&self, body: &Value) -> Result<Vec<Bm25SearchResult>, Bm25Error> {
+    async fn search_once(&self, body: &Value) -> Result<Vec<FulltextHit>, Bm25Error> {
         let response = self
             .apply_auth(
                 self.http
@@ -150,7 +152,7 @@ impl ElasticsearchClient {
         Ok(Self::parse_hits(&payload))
     }
 
-    fn parse_hits(payload: &Value) -> Vec<Bm25SearchResult> {
+    fn parse_hits(payload: &Value) -> Vec<FulltextHit> {
         let mut hits = Vec::new();
         let empty = Vec::new();
         let entries = payload
@@ -203,7 +205,7 @@ impl ElasticsearchClient {
                     fields.insert("entity_id".to_string(), joined);
                 }
             }
-            hits.push(Bm25SearchResult {
+            hits.push(FulltextHit {
                 document_id,
                 score,
                 fields,

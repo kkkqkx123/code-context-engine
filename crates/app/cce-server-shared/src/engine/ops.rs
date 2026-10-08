@@ -2,11 +2,11 @@ use std::path::Path;
 
 use super::EngineError;
 use crate::runtime::{ProjectMeta, RecoveryResult, SnapshotIntegrity, StartupRecoveryCoordinator};
-use cce_orchestrator::query::types::{QueryOptions, QueryResult};
-use cce_orchestrator::{IndexOptions, IndexResult};
 use cce_codegraph::index::entity_index::EntityIndexOps;
 use cce_codegraph::index::relation_query::RelationQueryOps;
 use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
+use cce_orchestrator::query::types::{QueryOptions, QueryResult};
+use cce_orchestrator::{IndexOptions, IndexResult};
 use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 
 impl super::CodeContextEngine {

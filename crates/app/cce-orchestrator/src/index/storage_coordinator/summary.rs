@@ -5,7 +5,7 @@
 //! concerns, while `SummaryManager` coordinates the generation and storage workflow.
 
 use cce_parser::summary::FileSummary;
-use cce_storage_bm25::Bm25Document;
+use cce_storage_common::FulltextDocument;
 use cce_storage_common::FulltextStorage;
 use cce_storage_common::{Payload, VectorPoint, VectorStorage};
 use cce_storage_metadb_sqlite::FileSummaryRepository;
@@ -171,7 +171,7 @@ impl<'a> SummaryStorage<'a> {
         let epoch_str = self.coordinator.epoch().to_string();
         let batch_id_str = self.coordinator.batch_id().to_string();
 
-        let bm25_documents: Vec<Bm25Document> = summaries
+        let bm25_documents: Vec<FulltextDocument> = summaries
             .iter()
             .map(|s| {
                 let document_id = format!(
@@ -185,7 +185,7 @@ impl<'a> SummaryStorage<'a> {
                 } else {
                     s.tags.join(" ")
                 };
-                Bm25Document::new(&document_id)
+                FulltextDocument::new(&document_id)
                     .with_field("content", s.to_bm25_text())
                     .with_field("title", format!("{} summary", s.file_path))
                     .with_field("keywords", &keywords)
@@ -210,7 +210,7 @@ impl<'a> SummaryStorage<'a> {
     async fn update_bm25_doc_ids(
         &self,
         summaries: &[FileSummary],
-        bm25_documents: &[Bm25Document],
+        bm25_documents: &[FulltextDocument],
     ) -> Result<(), OrchestratorError> {
         if summaries.is_empty() || bm25_documents.is_empty() {
             return Ok(());

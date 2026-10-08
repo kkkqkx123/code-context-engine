@@ -482,9 +482,7 @@ fn parse_entity_kind(s: &str) -> EntityKind {
     }
 }
 
-fn entity_records_to_entities(
-    records: &[cce_storage_metadb_sqlite::EntityRecord],
-) -> Vec<Entity> {
+fn entity_records_to_entities(records: &[cce_storage_metadb_sqlite::EntityRecord]) -> Vec<Entity> {
     records
         .iter()
         .enumerate()

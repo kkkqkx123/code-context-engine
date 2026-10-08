@@ -14,7 +14,9 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 use crate::metrics::Bm25Metrics;
-use crate::{Bm25Config, Bm25Document, Bm25Error};
+use cce_storage_common::{FulltextDocument, FulltextHit, FulltextSearchOptions};
+
+use crate::{Bm25Config, Bm25Error};
 use crate::{
     IndexManager, IndexSchema, batch_add_documents, delete_document,
     delete_documents_by_file_path_and_project, delete_documents_by_file_path_project_epoch,
@@ -152,7 +154,7 @@ impl Bm25Client {
     pub async fn batch_index(
         &self,
         index_name: &str,
-        documents: &[Bm25Document],
+        documents: &[FulltextDocument],
     ) -> Result<usize, Bm25Error> {
         self.validate_index_name(index_name)?;
         if documents.is_empty() {
@@ -183,7 +185,7 @@ impl Bm25Client {
     async fn batch_index_inner(
         &self,
         _index_name: &str,
-        documents: &[Bm25Document],
+        documents: &[FulltextDocument],
     ) -> Result<usize, Bm25Error> {
         if documents.is_empty() {
             return Ok(0);
@@ -346,8 +348,8 @@ impl Bm25Client {
     pub async fn search(
         &self,
         query: &str,
-        options: &crate::Bm25SearchOptions,
-    ) -> Result<Vec<crate::Bm25SearchResult>, Bm25Error> {
+        options: &FulltextSearchOptions,
+    ) -> Result<Vec<FulltextHit>, Bm25Error> {
         use crate::Bm25Retrieval;
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
@@ -361,7 +363,7 @@ impl Bm25Client {
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Vec<Bm25Document>, Bm25Error> {
+    ) -> Result<Vec<FulltextDocument>, Bm25Error> {
         let start_time = Instant::now();
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
@@ -394,7 +396,7 @@ impl Bm25Client {
             else {
                 continue;
             };
-            let mut result = Bm25Document::new(document_id.to_string());
+            let mut result = FulltextDocument::new(document_id.to_string());
             for (field, target) in [
                 (self.schema.title, "title"),
                 (self.schema.chunk_id, "chunk_id"),

@@ -13,7 +13,6 @@ use std::sync::Arc;
 use cce_config::project_registry::ProjectScope;
 
 use crate::index::vector_store::{FulltextStore, RelationStore, VectorStore};
-use crate::query::QueryError;
 use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
@@ -21,15 +20,13 @@ use cce_llm_client::OpenAICompatibleProvider;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::SearchMetrics;
 
-use cce_storage_metadb_sqlite::SqliteClient;
-
 use super::searcher_core::Searcher;
 
 pub struct SearcherBuilder {
     vector: VectorStore,
     embedder: Arc<OpenAICompatibleProvider>,
     fulltext: FulltextStore,
-    sqlite: Option<Arc<SqliteClient>>,
+    relation: Option<RelationStore>,
     rerank_handler: Option<Arc<ProductionRerankHandler>>,
     plugin_rerank_plugins: Vec<std::sync::Arc<dyn cce_plugin::CodePlugin>>,
     plugin_registry: Option<Arc<cce_plugin::PluginRegistry>>,
@@ -50,7 +47,7 @@ impl SearcherBuilder {
             vector,
             embedder,
             fulltext,
-            sqlite: None,
+            relation: None,
             rerank_handler: None,
             plugin_rerank_plugins: Vec::new(),
             plugin_registry: None,
@@ -60,26 +57,23 @@ impl SearcherBuilder {
         }
     }
 
-    /// Enable SQLite support for chunk content lookup
-    pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
-        self.sqlite = Some(sqlite);
+    /// Attach the local relation database for chunk content lookup.
+    ///
+    /// Local-only port: the embedded branch owns per-project database files,
+    /// so only a local handle can be attached here. Callers holding the
+    /// backend enum use [`Self::with_relation_store`] instead.
+    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
+        self.relation = Some(RelationStore::local(sqlite));
         self
     }
 
-    /// Enable relation backend via enum dispatch.
+    /// Enable the relation backend via enum dispatch.
     ///
-    /// Only the local branch feeds chunk enrichment. A remote branch fails
-    /// fast instead of silently disabling enrichment.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Result<Self, QueryError> {
-        match store {
-            RelationStore::Local(sqlite) => {
-                self.sqlite = Some(sqlite);
-                Ok(self)
-            }
-            RelationStore::Remote(_) => Err(QueryError::Config(
-                "remote relation branch is not wired into the Searcher read path yet".to_string(),
-            )),
-        }
+    /// Reads go through the relation contract, so both branches share one
+    /// read path and branch selection stays inside the enum.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.relation = Some(store);
+        self
     }
 
     /// Enable reranking support
@@ -151,7 +145,7 @@ impl SearcherBuilder {
             vector,
             embedder: self.embedder.clone(),
             fulltext: self.fulltext,
-            sqlite: self.sqlite,
+            relation: self.relation,
             reranker: Arc::new(LlmReranker::new(self.rerank_handler)),
             plugin_reranker: Arc::new(PluginReranker::new(self.plugin_rerank_plugins)),
             plugin_registry: self.plugin_registry,

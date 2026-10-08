@@ -15,7 +15,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use cce_storage_bm25::{Bm25Retrieval, Bm25SearchOptions, IndexManager, batch_add_documents};
+use cce_storage_bm25::{Bm25Retrieval, IndexManager, batch_add_documents};
+use cce_storage_common::FulltextSearchOptions;
 
 fn make_docs(n: usize) -> Vec<(String, HashMap<String, String>)> {
     (0..n)
@@ -47,8 +48,8 @@ fn make_docs(n: usize) -> Vec<(String, HashMap<String, String>)> {
         .collect()
 }
 
-fn opts(limit: usize, offset: usize) -> Bm25SearchOptions {
-    Bm25SearchOptions {
+fn opts(limit: usize, offset: usize) -> FulltextSearchOptions {
+    FulltextSearchOptions {
         limit,
         offset,
         field_weights: HashMap::from([("title".to_string(), 2.0), ("content".to_string(), 1.0)]),
@@ -101,7 +102,7 @@ fn main() {
     let long = "calculate_total discounted amount user session retry tax manager";
     let phrase = "\"calculate_total amount\" session";
 
-    let cases: Vec<(&str, String, Bm25SearchOptions)> = vec![
+    let cases: Vec<(&str, String, FulltextSearchOptions)> = vec![
         ("short/l10/o0", short.to_string(), opts(10, 0)),
         ("long/l10/o0", long.to_string(), opts(10, 0)),
         ("phrase/l10/o0", phrase.to_string(), opts(10, 0)),

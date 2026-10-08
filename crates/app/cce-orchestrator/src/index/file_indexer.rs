@@ -20,9 +20,7 @@ use tracing::{debug, info};
 use crate::CheckpointManager;
 use cce_metrics::ScannerMetrics;
 use cce_scanner::{FSScanner, FileEntry, ScanFailure, ScanOptions};
-use cce_storage_metadb_sqlite::types::{
-    BatchCheckpointRecord, CheckpointRecord, CheckpointStatus,
-};
+use cce_storage_metadb_sqlite::types::{BatchCheckpointRecord, CheckpointRecord, CheckpointStatus};
 use cce_types::{OperationKind, StorageError};
 
 /// Error returned when recovery from an existing checkpoint is not possible

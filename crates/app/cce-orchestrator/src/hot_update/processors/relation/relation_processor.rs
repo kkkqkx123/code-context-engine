@@ -21,14 +21,14 @@ use crate::hot_update::error::{HotUpdateError, Result};
 use crate::hot_update::processors::trait_def::UpdateProcessor;
 use crate::hot_update::{BatchChangeResult, FileChangeType};
 
-use cce_config::RelationBuilderParams;
-use cce_metrics::RelationMetrics;
-use cce_plugin::PluginRegistry;
 use cce_codegraph::BuildConfigParser;
 use cce_codegraph::IndexBuilder;
 use cce_codegraph::index::{
     RelationDeltaOps, RelationIndex, RelationIndexView, SnapshotFileQueryOps,
 };
+use cce_config::RelationBuilderParams;
+use cce_metrics::RelationMetrics;
+use cce_plugin::PluginRegistry;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::repo::RelationSnapshotRepository;
 use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;

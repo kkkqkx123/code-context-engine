@@ -9,7 +9,7 @@ use tantivy::tokenizer::{TextAnalyzer, Token, TokenStream};
 
 use crate::manager::IndexManager;
 use crate::schema::IndexSchema;
-use crate::types::{Bm25SearchOptions, Bm25SearchResult, TermOperator};
+use cce_storage_common::{FulltextHit, FulltextSearchOptions, TermOperator};
 
 /// BM25 retrieval handler — stateless read path over a Tantivy index.
 #[derive(Debug, Clone, Default)]
@@ -48,8 +48,8 @@ impl Bm25Retrieval {
         manager: &IndexManager,
         schema: &IndexSchema,
         query_text: &str,
-        options: &Bm25SearchOptions,
-    ) -> Result<Vec<Bm25SearchResult>, Bm25Error> {
+        options: &FulltextSearchOptions,
+    ) -> Result<Vec<FulltextHit>, Bm25Error> {
         let reader = manager.reader()?;
         let searcher = reader.searcher();
 
@@ -248,7 +248,7 @@ impl Bm25Retrieval {
                 fields.insert("segment_id".to_string(), segment_id);
             }
 
-            search_results.push(Bm25SearchResult {
+            search_results.push(FulltextHit {
                 document_id,
                 score,
                 fields,

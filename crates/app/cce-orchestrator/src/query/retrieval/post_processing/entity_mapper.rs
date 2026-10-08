@@ -4,15 +4,18 @@
 //! eliminating SQLite query code duplication.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use rusqlite::Connection;
 
+use crate::index::vector_store::RelationStore;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
 use crate::query::types::SearchResult;
 use crate::query::types::content_reference::{
     ContentState, DowngradeReason, file_level_reference, reference_content,
 };
+use cce_storage_common::RelationStorage;
 use cce_storage_metadb_sqlite::repo::ChunkRepository;
 use cce_storage_metadb_sqlite::source_reader::{SourceFileCache, read_source_lines_cached};
 use cce_storage_metadb_sqlite::types::ChunkRecord;
@@ -96,6 +99,99 @@ fn resolve_chunk_records(
         records.entry(chunk.chunk_id.clone()).or_insert(chunk);
     }
     Ok(records)
+}
+
+/// Fetch chunk records by chunk IDs through the backend-neutral
+/// [`RelationStorage`] contract, resolving the full epoch view.
+///
+/// Same two-stage resolution as [`get_chunk_records`] ("own first,
+/// miss → parent", dropping parent hits of overridden files); the epoch
+/// filtering runs inside the branch implementation while the
+/// excluded-file decision stays with the caller view.
+pub async fn get_chunk_records_from_store(
+    store: &RelationStore,
+    chunk_ids: &[String],
+    project_id: i64,
+    query_filter: &QueryFilter,
+) -> Result<Option<HashMap<String, ChunkRecord>>> {
+    if chunk_ids.is_empty() {
+        return Ok(Some(HashMap::new()));
+    }
+
+    match resolve_chunk_records_from_store(store, chunk_ids, project_id, query_filter).await {
+        Ok(records) => Ok(Some(records)),
+        Err(e) => {
+            tracing::warn!("Failed to fetch chunks from relation store: {}", e);
+            Ok(None)
+        }
+    }
+}
+
+async fn resolve_chunk_records_from_store(
+    store: &RelationStore,
+    chunk_ids: &[String],
+    project_id: i64,
+    query_filter: &QueryFilter,
+) -> std::result::Result<HashMap<String, ChunkRecord>, cce_types::StorageError> {
+    let own_records = store
+        .chunks_by_ids(project_id, chunk_ids, &[query_filter.epoch_value()])
+        .await?;
+    let mut records: HashMap<String, ChunkRecord> = own_records
+        .into_iter()
+        .map(|chunk| (chunk.chunk_id.clone(), chunk))
+        .collect();
+
+    let Some(parent_epoch) = query_filter.parent_epoch() else {
+        return Ok(records);
+    };
+    let missing: Vec<String> = chunk_ids
+        .iter()
+        .filter(|id| !records.contains_key(*id))
+        .cloned()
+        .collect();
+    if missing.is_empty() {
+        return Ok(records);
+    }
+
+    let excluded: Option<HashSet<&str>> = if query_filter.excluded_files().is_empty() {
+        None
+    } else {
+        Some(
+            query_filter
+                .excluded_files()
+                .iter()
+                .map(String::as_str)
+                .collect(),
+        )
+    };
+    let parent_records = store
+        .chunks_by_ids(project_id, &missing, &[parent_epoch])
+        .await?;
+    for chunk in parent_records {
+        if let Some(ref excluded) = excluded
+            && excluded.contains(chunk.file_path.as_str())
+        {
+            continue;
+        }
+        records.entry(chunk.chunk_id.clone()).or_insert(chunk);
+    }
+    Ok(records)
+}
+
+/// Resolve a project root directory through the relation store.
+///
+/// Query contexts only know `project_id`; chunk file paths are stored relative
+/// to the project root, so the root is recovered from the project registry.
+/// Returns `None` when the project row or its root path is unavailable.
+pub async fn resolve_project_root_from_store(
+    store: &RelationStore,
+    project_id: i64,
+) -> Option<PathBuf> {
+    store
+        .project_record(project_id)
+        .await
+        .ok()?
+        .map(|record| PathBuf::from(record.root_path))
 }
 
 /// Batch-enrich results sharing one file-content cache.

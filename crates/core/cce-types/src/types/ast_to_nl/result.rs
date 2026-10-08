@@ -8,7 +8,7 @@
 //! `ConversionResult` is a core data exchange format that flows through multiple layers:
 //! - **Core layer**: Produced by `ast_to_nl` converter
 //! - **Orchestrator layer**: Passed through processing pipeline
-//! - **Storage layer**: Converted to `Bm25Document` for indexing
+//! - **Storage layer**: Converted to `FulltextDocument` for indexing
 //!
 //! # Relationship with Entity
 //!

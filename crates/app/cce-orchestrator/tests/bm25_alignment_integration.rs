@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use cce_codegraph::{CallChainQuery, RelationIndex};
 use cce_config::AppConfig;
 use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
 use cce_config::project_registry::ProjectScope;
@@ -18,7 +19,6 @@ use cce_orchestrator::query::types::{QueryOptions, SearchConfig, SearchSources};
 use cce_orchestrator::{
     CheckpointManager, IndexOptions, IndexOrchestrator, QueryCoordinator, SearchResult,
 };
-use cce_codegraph::{CallChainQuery, RelationIndex};
 use cce_storage_bm25::{Bm25Client, Bm25Config};
 use cce_storage_metadb_sqlite::ChunkRepository;
 use cce_storage_metadb_sqlite::SqliteClient;

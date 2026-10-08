@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::Bm25Document;
+use cce_storage_common::FulltextDocument;
 
 use super::ElasticsearchClient;
 
@@ -16,7 +16,7 @@ impl ElasticsearchClient {
     ///
     /// Raw body and keyword text never enter `_source`; only the
     /// pre-tokenized sidecars are indexed for those fields.
-    pub fn index_source(&self, document: &Bm25Document) -> Value {
+    pub fn index_source(&self, document: &FulltextDocument) -> Value {
         let field = |name: &str| document.get_field(name).cloned().unwrap_or_default();
         let title = field("title");
         let content = field("content");
@@ -54,7 +54,7 @@ impl ElasticsearchClient {
     }
 
     /// Bulk request body for one batch (newline-delimited action pairs).
-    pub fn bulk_body(&self, documents: &[Bm25Document]) -> String {
+    pub fn bulk_body(&self, documents: &[FulltextDocument]) -> String {
         let mut body = String::new();
         for document in documents {
             body.push_str(&json!({ "index": { "_id": document.document_id } }).to_string());

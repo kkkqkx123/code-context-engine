@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 
 use crate::hot_update::error::{HotUpdateError, Result};
 
-use cce_config::{RelationBuilderParams, RelationConfig};
 use cce_codegraph::BuildConfigParser;
 use cce_codegraph::index::RelationIndexView;
+use cce_config::{RelationBuilderParams, RelationConfig};
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 

@@ -36,12 +36,12 @@ use tokio::sync::Mutex;
 use crate::hot_update::{
     BatchChangeResult, HotUpdateError, ParseResultWithChanges, Result, UpdateProcessor,
 };
+use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_config::{AstToNlConfig, NestProcessorConfig, Settings};
 use cce_parser::ast_to_nl::AstToNlConverter;
 use cce_parser::ast_to_nl::chunker::GroupChunker;
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::grouper::types::ProcessingResult;
-use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 

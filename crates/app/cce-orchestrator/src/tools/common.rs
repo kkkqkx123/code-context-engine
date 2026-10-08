@@ -5,32 +5,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rusqlite::Connection;
-
 use cce_codegraph::index::{LayeredSnapshotIndex, SnapshotFileQueryOps};
 use cce_storage_metadb_sqlite::source_reader;
 use cce_storage_metadb_sqlite::types::ChunkRecord;
 use cce_types::Entity;
 
-use crate::query::error::Result as QueryResult;
-use crate::query::filter::{QueryFilter, load_active_query_filter};
+use crate::index::vector_store::RelationStore;
 use crate::tools::symbol_lookup_types::SymbolLookupError;
-
-/// Resolve the epoch view for a project, with optional explicit epoch override.
-///
-/// When `epoch` is provided, creates a full-generation view for that epoch.
-/// Otherwise, loads the active manifest view from SQLite.
-pub(crate) fn resolve_epoch_view(
-    conn: &Connection,
-    project_id: i64,
-    epoch: Option<i64>,
-) -> QueryResult<QueryFilter> {
-    match epoch {
-        Some(epoch) => QueryFilter::new(epoch)
-            .map_err(|e| crate::query::error::QueryError::config(&format!("Invalid epoch: {e}"))),
-        None => load_active_query_filter(conn, project_id),
-    }
-}
 
 /// Read source snippets for multiple chunks, grouped by file for efficiency.
 ///
@@ -70,11 +51,19 @@ pub(crate) fn read_snippets_batch(
     snippets
 }
 
-/// Get a read connection from SqliteClient with consistent error handling.
+/// Get a read connection from the local relation branch with consistent error
+/// handling.
+///
+/// The single fenced downcast for the synchronous symbol tools: snippet and
+/// mapping reads stay on the embedded branch until the contract carries the
+/// operations they need.
 pub(crate) fn get_read_connection(
-    sqlite: &Option<Arc<cce_storage_metadb_sqlite::SqliteClient>>,
+    relation: &Option<RelationStore>,
 ) -> Result<parking_lot::MutexGuard<'_, rusqlite::Connection>, String> {
-    let client = sqlite.as_ref().ok_or("SQLite not configured")?;
+    let client = relation
+        .as_ref()
+        .and_then(RelationStore::as_local)
+        .ok_or("local relation database not configured")?;
     client
         .read_connection()
         .map_err(|e| format!("Failed to get read connection: {e}"))

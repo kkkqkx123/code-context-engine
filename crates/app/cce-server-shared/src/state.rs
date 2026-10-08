@@ -9,10 +9,10 @@ use tokio::sync::RwLock;
 
 use crate::engine::CodeContextEngine;
 use crate::engine::ProjectCache;
+use cce_codegraph::CallChainQuery;
 use cce_metrics::ProgressTracker;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
 use cce_orchestrator::query::RelationSearcher;
-use cce_codegraph::CallChainQuery;
 
 type RelationSearcherEntry = (i64, Arc<RelationSearcher>);
 type RelationSearcherCache = Arc<RwLock<HashMap<i64, RelationSearcherEntry>>>;

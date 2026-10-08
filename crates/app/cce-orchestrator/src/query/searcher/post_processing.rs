@@ -207,19 +207,14 @@ impl Searcher {
     /// Derive the epoch view of the active publication.
     ///
     /// Reads the active manifest (own epoch + inheritance link) and its
-    /// generation overrides; recomputed per request by design.
-    pub(crate) fn load_query_filter(&self, project_id: i64) -> Result<QueryFilter> {
-        let sqlite = self
-            .sqlite
+    /// generation overrides through the relation contract; recomputed per
+    /// request by design.
+    pub(crate) async fn load_query_filter(&self, project_id: i64) -> Result<QueryFilter> {
+        let store = self
+            .relation
             .as_ref()
-            .ok_or_else(|| QueryError::config("SQLite database not available"))?;
-
-        // read-only connection — the active manifest is queried on
-        // every search request and must not contend with the write lock.
-        let conn = sqlite
-            .read_connection()
-            .map_err(|e| QueryError::storage(&format!("Failed to get SQLite connection: {e}")))?;
-        crate::query::filter::load_active_query_filter(&conn, project_id)
+            .ok_or_else(|| QueryError::config("relation store not available for query filter"))?;
+        crate::query::filter::load_active_query_filter_from_store(store, project_id).await
     }
 }
 

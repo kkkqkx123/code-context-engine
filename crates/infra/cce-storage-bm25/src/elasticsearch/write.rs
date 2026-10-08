@@ -5,7 +5,9 @@ use std::time::Instant;
 use serde_json::Value;
 use tracing::debug;
 
-use crate::{Bm25Document, Bm25Error};
+use cce_storage_common::FulltextDocument;
+
+use crate::Bm25Error;
 
 use super::ElasticsearchClient;
 
@@ -14,7 +16,7 @@ impl ElasticsearchClient {
     pub async fn batch_index(
         &self,
         index_name: &str,
-        documents: &[Bm25Document],
+        documents: &[FulltextDocument],
     ) -> Result<usize, Bm25Error> {
         self.validate_index_name(index_name)?;
         if documents.is_empty() {
@@ -39,7 +41,7 @@ impl ElasticsearchClient {
         Ok(total)
     }
 
-    async fn bulk_once(&self, documents: &[Bm25Document]) -> Result<usize, Bm25Error> {
+    async fn bulk_once(&self, documents: &[FulltextDocument]) -> Result<usize, Bm25Error> {
         let body = self.bulk_body(documents);
         let response = self
             .apply_auth(

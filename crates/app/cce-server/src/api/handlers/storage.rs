@@ -685,15 +685,25 @@ pub async fn handle_storage_status(
         }
     };
 
-    // Get relation storage stats (cached from all loaded runtimes)
-    let relation_item_count = 0;
-
-    let relation_storage = StorageComponentStatus {
-        connected: true,
-        item_count: relation_item_count,
-        disk_usage_mb: 0.0,
-        version: None,
-        last_error: None,
+    // Check relation through the backend-neutral diagnostics snapshot.
+    let relation_storage = match state.engine.relation_store() {
+        Some(store) => {
+            let diag = store.diagnose_summary().await;
+            StorageComponentStatus {
+                connected: diag.reachable,
+                item_count: 0,
+                disk_usage_mb: diag.size_bytes as f64 / 1024.0 / 1024.0,
+                version: diag.version,
+                last_error: diag.error,
+            }
+        }
+        None => StorageComponentStatus {
+            connected: false,
+            item_count: 0,
+            disk_usage_mb: 0.0,
+            version: None,
+            last_error: Some("Relation backend is not configured".to_string()),
+        },
     };
 
     // Get vector process info if subprocess management is available

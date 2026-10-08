@@ -32,9 +32,10 @@
 
 use rusqlite::Connection;
 
-use cce_storage_common::SearchFilter;
+use cce_storage_common::{RelationStorage, SearchFilter};
 use cce_storage_metadb_sqlite::{GenerationOverrideRepository, ProjectIndexManifestRepository};
 
+use crate::index::vector_store::RelationStore;
 use crate::query::error::{QueryError, Result};
 
 /// Error type for query filter operations
@@ -207,6 +208,56 @@ pub(crate) fn load_active_query_filter(conn: &Connection, project_id: i64) -> Re
         .map_err(|error| QueryError::config(&format!("Invalid epoch view: {error}")));
     }
     let epoch = read_legacy_active_epoch(conn, project_id)?;
+    QueryFilter::new(epoch).map_err(|error| QueryError::config(&format!("Invalid epoch: {error}")))
+}
+
+/// Derive the [`QueryFilter`] of the active publication through the
+/// backend-neutral [`RelationStorage`] contract.
+///
+/// Reads the active manifest together with its inheritance link and the
+/// generation overrides of its own epoch. Projects never published through a
+/// manifest fall back to the legacy `project_meta.active_epoch` key with a
+/// full-generation view; that fallback is local-file history, so it stays on
+/// a fenced local read and the remote branch reports a missing publication
+/// instead of silently downgrading to epoch 0.
+///
+/// The view is recomputed on every call by design: readers must trust the
+/// manifest, and keeping no process-local cache guarantees an adoption or
+/// rollback becomes visible to the very next query.
+pub(crate) async fn load_active_query_filter_from_store(
+    store: &RelationStore,
+    project_id: i64,
+) -> Result<QueryFilter> {
+    if let Some(manifest) = store.manifest_active(project_id).await.map_err(|error| {
+        QueryError::storage(&format!("Failed to read active index manifest: {error}"))
+    })? {
+        let excluded_files = store
+            .overrides_for_generation(project_id, manifest.data_epoch)
+            .await
+            .map_err(|error| {
+                QueryError::storage(&format!("Failed to read generation overrides: {error}"))
+            })?
+            .into_iter()
+            .map(|override_entry| override_entry.file_path)
+            .collect();
+        return QueryFilter::inherited(
+            manifest.data_epoch,
+            manifest.parent_data_epoch,
+            excluded_files,
+        )
+        .map_err(|error| QueryError::config(&format!("Invalid epoch view: {error}")));
+    }
+    let Some(client) = store.as_local() else {
+        return Err(QueryError::config(&format!(
+            "project {project_id} has no active publication on the remote relation branch"
+        )));
+    };
+    // read-only connection — the legacy fallback is queried on every search
+    // request and must not contend with the write lock.
+    let conn = client.read_connection().map_err(|error| {
+        QueryError::storage(&format!("Failed to get SQLite connection: {error}"))
+    })?;
+    let epoch = read_legacy_active_epoch(&conn, project_id)?;
     QueryFilter::new(epoch).map_err(|error| QueryError::config(&format!("Invalid epoch: {error}")))
 }
 

@@ -129,20 +129,18 @@ pub async fn handle_embedding_health(
     )
 )]
 pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25HealthResponse> {
-    // Index path and connection state are local-branch details; the remote
-    // branch is rejected at startup, so it reports as unavailable here.
-    let (enabled, connected, index_path) = match state.engine.fulltext() {
-        cce_orchestrator::index::FulltextStore::Local(client) => (
-            client.is_enabled(),
-            client.is_connected(),
-            client.config().index_path.clone(),
-        ),
-        cce_orchestrator::index::FulltextStore::Remote(_) => (false, false, None),
-    };
+    // Status stays branch-free: reachability comes from the diagnostics
+    // snapshot, enablement from the contract, and the configured index name
+    // from the active branch configuration.
+    use cce_storage_common::FulltextStorage;
+    let store = state.engine.fulltext().clone();
+    let diag = store.diagnose_summary().await;
+    let enabled = FulltextStorage::is_enabled(&store);
+    let index_path = Some(store.configured_index_name());
 
     ApiResult::Success(Bm25HealthResponse {
         enabled,
-        connected,
+        connected: diag.reachable,
         index_path,
     })
 }
@@ -272,50 +270,37 @@ pub async fn handle_retry_queue_dead_clear(
 async fn check_qdrant(state: &AppState) -> ServiceStatus {
     let vector = state.engine.vector();
     let backend = vector.backend_name();
-    match vector.health().await {
-        Ok(true) => ServiceStatus {
+    let diag = vector.diagnose_summary().await;
+    if diag.reachable {
+        ServiceStatus {
             reachable: true,
             message: format!("Vector store ({backend}) is reachable and healthy"),
-        },
-        Ok(false) => ServiceStatus {
+        }
+    } else {
+        let detail = diag
+            .error
+            .unwrap_or_else(|| "health check failed".to_string());
+        ServiceStatus {
             reachable: false,
-            message: format!("Vector store ({backend}) returned non-success health status"),
-        },
-        Err(e) => ServiceStatus {
-            reachable: false,
-            message: format!("Vector store ({backend}) health check failed: {}", e),
-        },
+            message: format!("Vector store ({backend}) health check failed: {detail}"),
+        }
     }
 }
 
 async fn check_bm25(state: &AppState) -> ServiceStatus {
-    // Connection detail is local-branch specific; the remote branch is
-    // rejected at startup, so it reports as unavailable here.
-    let Some(client) = state.engine.fulltext().as_local() else {
-        return ServiceStatus {
-            reachable: false,
-            message: "BM25 remote branch is not supported".to_string(),
-        };
-    };
-    if client.is_enabled() && client.is_connected() {
+    let diag = state.engine.fulltext().diagnose_summary().await;
+    if diag.reachable {
         ServiceStatus {
             reachable: true,
             message: "BM25 is enabled and connected".to_string(),
         }
-    } else if client.is_connected() {
-        ServiceStatus {
-            reachable: true,
-            message: "BM25 is connected but disabled in config".to_string(),
-        }
-    } else if client.config().enabled {
-        ServiceStatus {
-            reachable: false,
-            message: "BM25 is enabled but not connected".to_string(),
-        }
     } else {
+        let detail = diag
+            .error
+            .unwrap_or_else(|| "BM25 remote branch is not supported".to_string());
         ServiceStatus {
             reachable: false,
-            message: "BM25 is disabled".to_string(),
+            message: detail,
         }
     }
 }

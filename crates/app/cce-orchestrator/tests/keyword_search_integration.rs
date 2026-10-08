@@ -9,7 +9,8 @@ use std::sync::Arc;
 use cce_orchestrator::tools::keyword_search::{
     KeywordSearchError, KeywordSearchRequest, KeywordSearchTool,
 };
-use cce_storage_bm25::{Bm25Client, Bm25Config, Bm25Document};
+use cce_storage_bm25::{Bm25Client, Bm25Config};
+use cce_storage_common::FulltextDocument;
 use cce_storage_metadb_sqlite::{
     ChunkRecord, ChunkRepository, NewProjectRecord, ProjectRepository, SqliteClient,
 };
@@ -76,8 +77,8 @@ fn chunk(env: &TestEnv, chunk_id: &str, path: &str, content: &str, raw_code: &st
     .with_project_id(env.project_id)
 }
 
-fn doc(document_id: &str, fields: &[(&str, &str)]) -> Bm25Document {
-    let mut doc = Bm25Document::new(document_id);
+fn doc(document_id: &str, fields: &[(&str, &str)]) -> FulltextDocument {
+    let mut doc = FulltextDocument::new(document_id);
     for (name, value) in fields {
         doc = doc.with_field(*name, *value);
     }

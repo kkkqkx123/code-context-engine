@@ -104,6 +104,55 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
     );
     assert_eq!(store.count_points_by_group(&group).await.expect("count"), 3);
 
+    // Missing group: a never-written group reads empty and counts zero.
+    let missing = format!("{tag}-never-written");
+    let hits = store
+        .search_dense(
+            DenseSearchQuery::new(vec![1.0, 0.0, 0.0, 0.0], 10).with_filter(SearchFilter {
+                group_id: Some(missing.clone()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("missing-group search");
+    assert!(hits.is_empty());
+    assert_eq!(
+        store.count_points_by_group(&missing).await.expect("count"),
+        0
+    );
+
+    // Empty epochs disable epoch filtering but group filtering stays active.
+    let orthogonal = format!("{tag}-orthogonal");
+    store
+        .upsert_points(&[
+            code_point("e1", vec![1.0, 0.0, 0.0, 0.0], "src/e.rs", &orthogonal, 7),
+            code_point("e2", vec![1.0, 0.0, 0.0, 0.0], "src/e.rs", &orthogonal, 8),
+        ])
+        .await
+        .expect("upsert orthogonal");
+    let hits = store
+        .search_dense(
+            DenseSearchQuery::new(vec![1.0, 0.0, 0.0, 0.0], 10).with_filter(SearchFilter {
+                group_id: Some(orthogonal.clone()),
+                epochs: Vec::new(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("empty-epoch search");
+    assert_eq!(hits.len(), 2);
+    let hits = store
+        .search_dense(
+            DenseSearchQuery::new(vec![1.0, 0.0, 0.0, 0.0], 10).with_filter(SearchFilter {
+                group_id: Some(missing.clone()),
+                epochs: Vec::new(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("empty-epoch missing-group search");
+    assert!(hits.is_empty());
+
     // Generation exclusion: the parent row of an overridden file is hidden.
     let generation = format!("{tag}-generation");
     store
@@ -224,7 +273,7 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
         .await
         .expect("delete file");
     assert_eq!(store.count_points_by_group(&group).await.expect("count"), 2);
-    for cleanup in [&group, &other, &generation, &types, &docs] {
+    for cleanup in [&group, &other, &generation, &types, &docs, &orthogonal] {
         store.delete_by_group(cleanup).await.expect("delete group");
         assert_eq!(
             store.count_points_by_group(cleanup).await.expect("count"),

@@ -2,7 +2,9 @@
 
 use serde_json::{Value, json};
 
-use crate::{Bm25Document, Bm25Error};
+use cce_storage_common::FulltextDocument;
+
+use crate::Bm25Error;
 
 use super::ElasticsearchClient;
 
@@ -16,7 +18,7 @@ impl ElasticsearchClient {
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Vec<Bm25Document>, Bm25Error> {
+    ) -> Result<Vec<FulltextDocument>, Bm25Error> {
         self.check_breaker().await?;
         let mut documents = Vec::new();
         let mut search_after: Option<Value> = None;
@@ -93,7 +95,7 @@ impl ElasticsearchClient {
                     }
                 }
                 search_after = entry.get("sort").and_then(|s| s.get(0)).cloned();
-                documents.push(Bm25Document {
+                documents.push(FulltextDocument {
                     document_id,
                     fields,
                 });

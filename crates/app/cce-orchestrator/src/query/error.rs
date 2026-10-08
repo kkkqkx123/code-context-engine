@@ -18,9 +18,9 @@
 //! }
 //! ```
 
+use cce_codegraph::RelationQueryError;
 use cce_llm_client::LlmError;
 use cce_parser::tree_sitter_query::TreeSitterQueryError;
-use cce_codegraph::RelationQueryError;
 use cce_types::error::common::ErrorClassify;
 use thiserror::Error;
 

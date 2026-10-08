@@ -216,7 +216,7 @@ mod tests {
     use cce_config::modules::{Bm25Config, FulltextRemoteConfig};
     use serde_json::{Value, json};
 
-    use crate::{Bm25Document, Bm25SearchOptions, TermOperator};
+    use cce_storage_common::{FulltextDocument, FulltextSearchOptions, TermOperator};
 
     fn test_config() -> ElasticsearchConfig {
         ElasticsearchConfig {
@@ -237,8 +237,8 @@ mod tests {
         ElasticsearchClient::new(test_config()).expect("test client builds without I/O")
     }
 
-    fn sample_document() -> Bm25Document {
-        Bm25Document::new("1::2::group_1_bm25_0")
+    fn sample_document() -> FulltextDocument {
+        FulltextDocument::new("1::2::group_1_bm25_0")
             .with_field("chunk_id", "group_1_bm25_0")
             .with_field("title", "calculator.calculate_total")
             .with_field("content", "fn calculate_total() {}")
@@ -347,7 +347,7 @@ mod tests {
         let client = test_client();
         let mut weights = HashMap::new();
         weights.insert("title".to_string(), 2.0);
-        let options = Bm25SearchOptions {
+        let options = FulltextSearchOptions {
             limit: 10,
             offset: 0,
             field_weights: weights,
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn search_body_empty_query_matches_scoped_set() {
         let client = test_client();
-        let options = Bm25SearchOptions {
+        let options = FulltextSearchOptions {
             limit: 5,
             offset: 0,
             field_weights: HashMap::new(),
@@ -402,7 +402,7 @@ mod tests {
     #[test]
     fn search_body_term_operator_reaches_fields() {
         let client = test_client();
-        let options_for = |operator| Bm25SearchOptions {
+        let options_for = |operator| FulltextSearchOptions {
             limit: 5,
             offset: 0,
             field_weights: HashMap::new(),

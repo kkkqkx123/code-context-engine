@@ -468,17 +468,16 @@ impl super::CodeContextEngine {
         .map_err(|e| EngineError::Config(e.to_string()))?
         .with_search_metrics(SearchMetrics::new(&self.metrics_registry, project_id));
 
-        // Pass SQLite database for BM25 project isolation filtering and chunk enrichment
-        if let Some(sqlite) = self
+        // Pass the relation store for the epoch view and chunk enrichment.
+        // Reads go through the relation contract, so no branch downcast is
+        // needed here.
+        if let Some(store) = self
             .relation_store()
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .and_then(RelationStore::into_local)
         {
-            builder = builder
-                .with_relation_store(RelationStore::local(sqlite))
-                .map_err(|e| EngineError::Config(e.to_string()))?;
+            builder = builder.with_relation_store(store);
         }
 
         // Add rerank handler if available

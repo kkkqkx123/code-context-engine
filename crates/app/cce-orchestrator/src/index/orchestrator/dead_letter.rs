@@ -117,11 +117,11 @@ impl IndexOrchestrator {
                 .map_err(OrchestratorError::Storage)?;
             cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, self.project_id)
                 .ok_or_else(|| {
-                    OrchestratorError::index(
-                        "dead_letter_retry",
-                        format!("project {} has no registered root path", self.project_id),
-                    )
-                })?
+                OrchestratorError::index(
+                    "dead_letter_retry",
+                    format!("project {} has no registered root path", self.project_id),
+                )
+            })?
         };
 
         let mut report = DeadLetterRetryReport::default();

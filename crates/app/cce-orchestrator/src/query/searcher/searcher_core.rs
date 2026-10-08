@@ -35,8 +35,6 @@ use crate::query::types::{ExecutionStrategy, QueryOptions, QueryResult, SearchRe
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{SearchMetrics, SearchType};
 
-use cce_storage_metadb_sqlite::SqliteClient;
-
 use super::search_builder::SearcherBuilder;
 
 /// Unified searcher
@@ -50,8 +48,8 @@ pub struct Searcher {
     pub(crate) vector: VectorStore,
     pub(crate) embedder: Arc<OpenAICompatibleProvider>,
     pub(crate) fulltext: FulltextStore,
-    /// SQLite database for chunk content lookup (optional)
-    pub(crate) sqlite: Option<Arc<SqliteClient>>,
+    /// Relation backend for the epoch view and chunk content lookup (optional)
+    pub(crate) relation: Option<RelationStore>,
     /// Optional summary relevance boost contributor
     pub(crate) summary_boost: Option<Arc<SummaryBoost>>,
     /// Immutable project scope binding project_id and project_group_id.
@@ -123,11 +121,9 @@ impl Searcher {
         self.fulltext.clone()
     }
 
-    /// Relation backend enum wrapping the configured database.
+    /// Relation backend enum backing this searcher.
     pub fn relation_store(&self) -> Option<RelationStore> {
-        self.sqlite
-            .as_ref()
-            .map(|store| RelationStore::local(store.clone()))
+        self.relation.clone()
     }
 
     /// Extract the fulltext backend from a searcher reference (used by strategy factory).
@@ -138,18 +134,13 @@ impl Searcher {
         searcher.fulltext.clone()
     }
 
-    /// Get the SQLite database reference for project isolation filtering (used by BM25 strategy)
-    pub fn get_sqlite(&self) -> Option<Arc<SqliteClient>> {
-        self.sqlite.clone()
-    }
-
     /// Execute search with given options
     ///
     /// Loads the active epoch view itself. Callers that already resolved a
     /// [`QueryFilter`] (query cache, retry replay) should use
     /// [`Searcher::search_with_view`] to avoid a second manifest read.
     pub async fn search(&self, options: &QueryOptions) -> Result<QueryResult> {
-        let query_filter = self.load_query_filter(options.project_id)?;
+        let query_filter = self.load_query_filter(options.project_id).await?;
         self.search_with_view(options, &query_filter).await
     }
 
@@ -531,12 +522,9 @@ impl Searcher {
         }
     }
 
-    /// Batch-enrich results from SQLite chunk records (content/snippet, line
-    /// ranges, kind, entity fallback). Lookup failures degrade to unenriched
-    /// results; enrichment is data-only and never fails the request.
-    ///
-    /// SQLite operations run on a blocking thread pool to avoid stalling the
-    /// async runtime.
+    /// Batch-enrich results from relation-store chunk records (content/snippet,
+    /// line ranges, kind, entity fallback). Lookup failures degrade to
+    /// unenriched results; enrichment is data-only and never fails the request.
     async fn enrich_results(
         &self,
         results: &mut Vec<SearchResult>,
@@ -545,53 +533,32 @@ impl Searcher {
         max_content_tokens: usize,
     ) {
         use crate::query::retrieval::post_processing::{
-            enrich_results as enrich_results_batch, get_chunk_records,
+            enrich_results as enrich_results_batch, get_chunk_records_from_store,
+            resolve_project_root_from_store,
         };
 
-        let Some(sqlite_db) = &self.sqlite else {
+        let Some(store) = &self.relation else {
             return;
         };
         if results.is_empty() {
             return;
         }
         let point_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-        let sqlite = sqlite_db.clone();
-        let point_ids_clone = point_ids.clone();
-        let query_filter_clone = query_filter.clone();
-
-        let enrichment_result = tokio::task::spawn_blocking(move || {
-            let conn = match sqlite.read_connection() {
-                Ok(conn) => conn,
-                Err(e) => return Err(format!("Failed to get SQLite connection: {e}")),
+        let records =
+            match get_chunk_records_from_store(store, &point_ids, project_id, query_filter).await {
+                Ok(Some(records)) => records,
+                Ok(None) => return,
+                Err(e) => {
+                    tracing::warn!("Chunk enrichment failed: {e}");
+                    return;
+                }
             };
-            let records =
-                match get_chunk_records(&conn, &point_ids_clone, project_id, &query_filter_clone) {
-                    Ok(Some(records)) => records,
-                    Ok(None) => return Ok(None),
-                    Err(e) => return Err(format!("Chunk enrichment failed: {e}")),
-                };
-            let project_root =
-                cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, project_id);
-            Ok(Some((records, project_root)))
-        })
-        .await;
-
-        match enrichment_result {
-            Ok(Ok(Some((records, project_root)))) => {
-                enrich_results_batch(
-                    results,
-                    &records,
-                    project_root.as_deref(),
-                    max_content_tokens,
-                );
-            }
-            Ok(Ok(None)) => {}
-            Ok(Err(e)) => {
-                tracing::warn!("{}", e);
-            }
-            Err(e) => {
-                tracing::warn!("Enriching results panicked: {}", e);
-            }
-        }
+        let project_root = resolve_project_root_from_store(store, project_id).await;
+        enrich_results_batch(
+            results,
+            &records,
+            project_root.as_deref(),
+            max_content_tokens,
+        );
     }
 }

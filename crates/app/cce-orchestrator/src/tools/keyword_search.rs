@@ -7,12 +7,12 @@
 //! # Architecture
 //!
 //! ```text
-//! Query → BM25 search → get chunk_ids → SQLite lookup → read source snippet → scored results
+//! Query → BM25 search → get chunk_ids → relation-store lookup → read source snippet → scored results
 //! ```
 //!
-//! Content is sourced from SQLite (not Tantivy stored fields), returning the
-//! raw source lines so the caller can grep or read them directly. No markup is
-//! embedded in the snippet.
+//! Content is sourced from relation-store chunk metadata (not Tantivy stored
+//! fields), returning the raw source lines so the caller can grep or read
+//! them directly. No markup is embedded in the snippet.
 //!
 //! # Usage
 //!
@@ -30,11 +30,13 @@ mod types;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::index::vector_store::FulltextStore;
+use crate::index::vector_store::{FulltextStore, RelationStore};
 use cce_storage_common::{FulltextSearchOptions, FulltextStorage};
-use cce_storage_metadb_sqlite::SqliteClient;
 
-use crate::tools::common::{read_snippets_batch, resolve_epoch_view};
+use crate::query::retrieval::post_processing::{
+    get_chunk_records_from_store, resolve_project_root_from_store,
+};
+use crate::tools::common::read_snippets_batch;
 
 pub use self::types::{
     KeywordSearchError, KeywordSearchItem, KeywordSearchRequest, KeywordSearchResponse,
@@ -43,13 +45,14 @@ pub use self::types::{
 /// Keyword search tool
 ///
 /// Provides standalone BM25-based keyword search with raw source snippets
-/// sourced from SQLite content. Results are sorted by BM25 relevance score.
+/// sourced from relation-store chunk content. Results are sorted by BM25
+/// relevance score.
 #[derive(Clone)]
 pub struct KeywordSearchTool {
     /// Fulltext backend for keyword recall (called through the contract)
     fulltext: FulltextStore,
-    /// Optional SQLite database for chunk content lookup
-    sqlite: Option<Arc<SqliteClient>>,
+    /// Relation backend for the epoch view and chunk content lookup
+    relation: Option<RelationStore>,
 }
 
 impl KeywordSearchTool {
@@ -61,17 +64,25 @@ impl KeywordSearchTool {
     pub fn new(fulltext: FulltextStore) -> Self {
         Self {
             fulltext,
-            sqlite: None,
+            relation: None,
         }
     }
 
-    /// Attach SQLite database for chunk content lookup
+    /// Attach the local relation database for chunk content lookup.
     ///
-    /// # Arguments
+    /// Local-only port: callers holding the backend enum attach it directly
+    /// through [`Self::with_relation_store`].
+    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
+        self.relation = Some(RelationStore::local(sqlite));
+        self
+    }
+
+    /// Attach the relation backend via enum dispatch.
     ///
-    /// * `sqlite` - SQLite database for chunk content retrieval
-    pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
-        self.sqlite = Some(sqlite);
+    /// Reads go through the relation contract, so both branches share one
+    /// read path and branch selection stays inside the enum.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+        self.relation = Some(store);
         self
     }
 
@@ -79,7 +90,7 @@ impl KeywordSearchTool {
     ///
     /// 1. Validate input (project_id must be positive, query must be non-empty, top_n > 0)
     /// 2. Search BM25 index for matching documents
-    /// 3. Enrich with chunk metadata from SQLite
+    /// 3. Enrich with chunk metadata from the relation store
     /// 4. Read raw source snippets for the matched chunks
     /// 5. Sort by BM25 score descending
     ///
@@ -111,25 +122,25 @@ impl KeywordSearchTool {
                 "top_n must be greater than 0".to_string(),
             ));
         }
-        if self.sqlite.is_none() {
+        if self.relation.is_none() {
             return Err(KeywordSearchError::SqliteNotConfigured);
         }
 
         // Step 1: Resolve the epoch view for version-aware filtering. An
         // explicit `request.epoch` pins a single full generation; otherwise
         // the active manifest view (own + parent + overridden files) applies.
-        // Only owned filter data leaves this scope: the SQLite guard is not
-        // `Send`, so it must not be held across the search await below.
-        let sqlite_ref = self
-            .sqlite
+        let store = self
+            .relation
             .as_ref()
             .ok_or(KeywordSearchError::SqliteNotConfigured)?;
-        let query_filter = {
-            let conn = sqlite_ref
-                .read_connection()
-                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
-            resolve_epoch_view(&conn, request.project_id, request.epoch)
-                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?
+        let query_filter = match request.epoch {
+            Some(epoch) => crate::query::filter::QueryFilter::new(epoch)
+                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?,
+            None => {
+                crate::query::filter::load_active_query_filter_from_store(store, request.project_id)
+                    .await
+                    .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?
+            }
         };
 
         let options = FulltextSearchOptions {
@@ -162,44 +173,37 @@ impl KeywordSearchTool {
             results.len()
         );
 
-        // Step 3: Extract chunk_ids for SQLite lookup
+        // Step 3: Extract chunk_ids for relation-store lookup
         let chunk_ids: Vec<String> = results
             .iter()
             .filter_map(|r| r.fields.get("chunk_id").cloned())
             .filter(|id| !id.is_empty())
             .collect();
 
-        // Step 4: Look up chunk metadata from SQLite via the same two-stage
-        // epoch-view resolution as the search pipeline; snippets are
-        // lazy-loaded from the source file via the project root. The
-        // connection is acquired fresh here so no guard crosses an await.
-        let (chunk_records, project_root) = {
-            let conn = sqlite_ref
-                .read_connection()
-                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
-            let project_root = cce_storage_metadb_sqlite::source_reader::resolve_project_root(
-                &conn,
-                request.project_id,
-            );
-            match crate::query::retrieval::post_processing::get_chunk_records(
-                &conn,
-                &chunk_ids,
-                request.project_id,
-                &query_filter,
-            ) {
-                Ok(records) => {
-                    let records = records.unwrap_or_default();
-                    if records.is_empty() {
-                        tracing::warn!("No chunk records found for keyword search results");
-                        (None, project_root)
-                    } else {
-                        (Some(records), project_root)
-                    }
+        // Step 4: Look up chunk metadata through the relation contract via
+        // the same two-stage epoch-view resolution as the search pipeline;
+        // snippets are lazy-loaded from the source file via the project root.
+        let project_root = resolve_project_root_from_store(store, request.project_id).await;
+        let chunk_records = match get_chunk_records_from_store(
+            store,
+            &chunk_ids,
+            request.project_id,
+            &query_filter,
+        )
+        .await
+        {
+            Ok(records) => {
+                let records = records.unwrap_or_default();
+                if records.is_empty() {
+                    tracing::warn!("No chunk records found for keyword search results");
+                    None
+                } else {
+                    Some(records)
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to query chunk records: {}", e);
-                    return Err(KeywordSearchError::Sqlite(e.to_string()));
-                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to query chunk records: {}", e);
+                return Err(KeywordSearchError::Sqlite(e.to_string()));
             }
         };
 

@@ -3,17 +3,15 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cce_orchestrator::index::{
-    RelationPublication, RelationSnapshotPublisher, ResolutionPipelineService,
-};
 use cce_codegraph::index::RelationIndexView;
 use cce_codegraph::index::core::RelationIndex;
 use cce_codegraph::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
 use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
-use cce_storage_metadb_sqlite::SqliteClient;
-use cce_storage_metadb_sqlite::repo::{
-    ProjectIndexManifestRepository, RelationSnapshotRepository,
+use cce_orchestrator::index::{
+    RelationPublication, RelationSnapshotPublisher, ResolutionPipelineService,
 };
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::repo::{ProjectIndexManifestRepository, RelationSnapshotRepository};
 use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
 use rusqlite::OptionalExtension;
@@ -51,7 +49,7 @@ pub struct ServerRelationSnapshotPublisher {
 impl ServerRelationSnapshotPublisher {
     pub fn new(sqlite: SqliteClient, runtime: Arc<RelationRuntime>) -> Self {
         Self {
-            writer: ResolutionPipelineService::new(sqlite.clone()),
+            writer: ResolutionPipelineService::new_local(sqlite.clone()),
             sqlite,
             publish_lock: runtime.publication_lock(),
             runtime,

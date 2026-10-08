@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
-use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::{ChunkRepository, EntityDetailMappingRepository};
 use cce_types::{Entity, EntityId};
 
+use crate::index::vector_store::RelationStore;
 use crate::tools::symbol_lookup_types::{
     DefinitionCode, DefinitionLocation, GotoDefinitionRequest, GotoDefinitionResponse,
     SymbolLookupError,
@@ -20,9 +20,9 @@ use crate::tools::symbol_lookup_types::{
 pub struct GotoDefinitionTool {
     /// Published snapshot index (shared, read-only)
     index: Arc<LayeredSnapshotIndex>,
-    /// Optional SQLite database for chunk content lookup
-    sqlite: Option<Arc<SqliteClient>>,
-    /// Project ID for SQLite queries
+    /// Relation backend for chunk content lookup (local branch only)
+    relation: Option<RelationStore>,
+    /// Project ID for relation queries
     project_id: i64,
 }
 
@@ -31,14 +31,17 @@ impl GotoDefinitionTool {
     pub fn new(index: Arc<LayeredSnapshotIndex>, project_id: i64) -> Self {
         Self {
             index,
-            sqlite: None,
+            relation: None,
             project_id,
         }
     }
 
-    /// Attach SQLite database for chunk content lookup
-    pub fn with_sqlite(mut self, sqlite: Arc<SqliteClient>) -> Self {
-        self.sqlite = Some(sqlite);
+    /// Attach the local relation database for chunk content lookup.
+    ///
+    /// Local-only port: body and mapping reads stay on the embedded branch
+    /// until the contract carries the operations they need.
+    pub fn with_sqlite(mut self, sqlite: Arc<cce_storage_metadb_sqlite::SqliteClient>) -> Self {
+        self.relation = Some(RelationStore::local(sqlite));
         self
     }
 
@@ -170,7 +173,7 @@ impl GotoDefinitionTool {
     /// ("own first, miss → parent") so inherited generations stay readable.
     fn get_body_from_chunks(&self, entity_id: EntityId) -> Option<String> {
         let project_id = self.project_id;
-        let conn = crate::tools::common::get_read_connection(&self.sqlite).ok()?;
+        let conn = crate::tools::common::get_read_connection(&self.relation).ok()?;
 
         let view = crate::query::filter::load_active_query_filter(&conn, project_id).ok()?;
 
@@ -220,14 +223,12 @@ impl GotoDefinitionTool {
         // persist raw code.
         let project_root =
             cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
-        Some(
-            cce_storage_metadb_sqlite::source_reader::read_source_lines(
-                Some(project_root.as_path()),
-                &first.file_path,
-                first.start_line.max(0) as u32,
-                last.end_line.max(0) as u32,
-            ),
-        )
+        Some(cce_storage_metadb_sqlite::source_reader::read_source_lines(
+            Some(project_root.as_path()),
+            &first.file_path,
+            first.start_line.max(0) as u32,
+            last.end_line.max(0) as u32,
+        ))
     }
 }
 

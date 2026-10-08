@@ -25,17 +25,13 @@ pub mod metrics;
 pub mod retrieval;
 #[cfg(feature = "local")]
 pub mod schema;
-pub mod types;
 
 #[cfg(feature = "local")]
 pub use batch::batch_add_documents;
+pub use cce_config::modules::search::TermOperator;
 #[cfg(feature = "local")]
 pub use client::Bm25Client;
 pub use config::{Bm25AlgorithmConfig, Bm25Config, IndexManagerConfig};
-pub use contract::{
-    FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
-    assert_fulltext_storage,
-};
 #[cfg(feature = "local")]
 pub use delete::{
     delete_document, delete_documents_by_file_path, delete_documents_by_file_path_and_project,
@@ -52,4 +48,3 @@ pub use metrics::Bm25Metrics;
 pub use retrieval::{Bm25Retrieval, expand_query_tokens};
 #[cfg(feature = "local")]
 pub use schema::IndexSchema;
-pub use types::{Bm25Document, Bm25SearchOptions, Bm25SearchResult, TermOperator};

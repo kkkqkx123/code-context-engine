@@ -9,7 +9,7 @@ use cce_storage_common::FulltextStorage;
 use std::collections::HashMap;
 
 use cce_parser::summary::FileSummary;
-use cce_storage_bm25::Bm25Document;
+use cce_storage_common::FulltextDocument;
 use cce_storage_common::VectorStorage;
 use cce_types::PointKind;
 
@@ -146,7 +146,7 @@ impl StorageCoordinator {
                     let mut fields = document.fields;
                     fields.insert("project_id".to_string(), self.project_id.to_string());
                     fields.insert("epoch".to_string(), target_epoch.to_string());
-                    Bm25Document {
+                    FulltextDocument {
                         document_id,
                         fields,
                     }

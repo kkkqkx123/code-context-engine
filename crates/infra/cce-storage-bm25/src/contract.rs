@@ -2,15 +2,12 @@
 //!
 //! The contract itself lives in `cce_storage_common::fulltext`; this module
 //! implements it for the embedded Tantivy branch and the remote
-//! search-service branch, and re-exports the contract surface so branch code
-//! keeps a single import path.
+//! search-service branch.
 
-pub use cce_storage_common::fulltext::{
+use cce_storage_common::fulltext::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
     assert_fulltext_storage,
 };
-
-use crate::{Bm25Document, Bm25Error, Bm25SearchOptions, Bm25SearchResult};
 
 #[cfg(feature = "local")]
 use crate::Bm25Client;
@@ -20,16 +17,16 @@ impl FulltextStorage for Bm25Client {
     async fn batch_index(
         &self,
         index_name: &str,
-        documents: &[Bm25Document],
-    ) -> Result<usize, Bm25Error> {
+        documents: &[FulltextDocument],
+    ) -> Result<usize, FulltextError> {
         Bm25Client::batch_index(self, index_name, documents).await
     }
 
     async fn search(
         &self,
         query: &str,
-        options: &Bm25SearchOptions,
-    ) -> Result<Vec<Bm25SearchResult>, Bm25Error> {
+        options: &FulltextSearchOptions,
+    ) -> Result<Vec<FulltextHit>, FulltextError> {
         Bm25Client::search(self, query, options).await
     }
 
@@ -38,7 +35,7 @@ impl FulltextStorage for Bm25Client {
         index_name: &str,
         file_path: &str,
         project_id: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         Bm25Client::delete_by_file_path_scoped(self, index_name, file_path, project_id).await
     }
 
@@ -48,7 +45,7 @@ impl FulltextStorage for Bm25Client {
         file_path: &str,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         Bm25Client::delete_by_file_path_scoped_epoch(self, index_name, file_path, project_id, epoch)
             .await
     }
@@ -58,7 +55,7 @@ impl FulltextStorage for Bm25Client {
         index_name: &str,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         Bm25Client::delete_by_project_epoch(self, index_name, project_id, epoch).await
     }
 
@@ -66,7 +63,7 @@ impl FulltextStorage for Bm25Client {
         &self,
         index_name: &str,
         project_id: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         Bm25Client::delete_all_project_docs(self, index_name, project_id).await
     }
 
@@ -74,27 +71,27 @@ impl FulltextStorage for Bm25Client {
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Vec<Bm25Document>, Bm25Error> {
+    ) -> Result<Vec<FulltextDocument>, FulltextError> {
         Bm25Client::snapshot_documents(self, project_id, epoch).await
     }
 
-    async fn document_count(&self) -> Result<usize, Bm25Error> {
+    async fn document_count(&self) -> Result<usize, FulltextError> {
         Bm25Client::document_count(self).await
     }
 
-    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, Bm25Error> {
+    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, FulltextError> {
         Bm25Client::document_count_by_project(self, project_id).await
     }
 
-    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, Bm25Error> {
+    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, FulltextError> {
         Bm25Client::epochs_by_project(self, project_id).await
     }
 
-    async fn clear_index(&self, index_name: &str) -> Result<usize, Bm25Error> {
+    async fn clear_index(&self, index_name: &str) -> Result<usize, FulltextError> {
         Bm25Client::clear_index(self, index_name).await
     }
 
-    async fn flush(&self) -> Result<(), Bm25Error> {
+    async fn flush(&self) -> Result<(), FulltextError> {
         Ok(())
     }
 
@@ -113,16 +110,16 @@ impl FulltextStorage for crate::ElasticsearchClient {
     async fn batch_index(
         &self,
         index_name: &str,
-        documents: &[Bm25Document],
-    ) -> Result<usize, Bm25Error> {
+        documents: &[FulltextDocument],
+    ) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::batch_index(self, index_name, documents).await
     }
 
     async fn search(
         &self,
         query: &str,
-        options: &Bm25SearchOptions,
-    ) -> Result<Vec<Bm25SearchResult>, Bm25Error> {
+        options: &FulltextSearchOptions,
+    ) -> Result<Vec<FulltextHit>, FulltextError> {
         crate::ElasticsearchClient::search(self, query, options).await
     }
 
@@ -131,7 +128,7 @@ impl FulltextStorage for crate::ElasticsearchClient {
         index_name: &str,
         file_path: &str,
         project_id: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::delete_by_file_path_scoped(
             self, index_name, file_path, project_id,
         )
@@ -144,7 +141,7 @@ impl FulltextStorage for crate::ElasticsearchClient {
         file_path: &str,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::delete_by_file_path_scoped_epoch(
             self, index_name, file_path, project_id, epoch,
         )
@@ -156,7 +153,7 @@ impl FulltextStorage for crate::ElasticsearchClient {
         index_name: &str,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::delete_by_project_epoch(self, index_name, project_id, epoch)
             .await
     }
@@ -165,7 +162,7 @@ impl FulltextStorage for crate::ElasticsearchClient {
         &self,
         index_name: &str,
         project_id: i64,
-    ) -> Result<usize, Bm25Error> {
+    ) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::delete_all_project_docs(self, index_name, project_id).await
     }
 
@@ -173,23 +170,23 @@ impl FulltextStorage for crate::ElasticsearchClient {
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Vec<Bm25Document>, Bm25Error> {
+    ) -> Result<Vec<FulltextDocument>, FulltextError> {
         crate::ElasticsearchClient::snapshot_documents(self, project_id, epoch).await
     }
 
-    async fn document_count(&self) -> Result<usize, Bm25Error> {
+    async fn document_count(&self) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::document_count(self).await
     }
 
-    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, Bm25Error> {
+    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::document_count_by_project(self, project_id).await
     }
 
-    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, Bm25Error> {
+    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, FulltextError> {
         crate::ElasticsearchClient::epochs_by_project(self, project_id).await
     }
 
-    async fn clear_index(&self, index_name: &str) -> Result<usize, Bm25Error> {
+    async fn clear_index(&self, index_name: &str) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::clear_index(self, index_name).await
     }
 
@@ -201,7 +198,7 @@ impl FulltextStorage for crate::ElasticsearchClient {
         crate::ElasticsearchClient::backend_name(self)
     }
 
-    async fn flush(&self) -> Result<(), Bm25Error> {
+    async fn flush(&self) -> Result<(), FulltextError> {
         crate::ElasticsearchClient::flush(self).await
     }
 }
