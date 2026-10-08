@@ -55,6 +55,10 @@ impl VectorStore {
     }
 
     /// Borrow the Qdrant client when this is the remote branch.
+    ///
+    /// Reserved for the Qdrant lifecycle task, the only caller that needs
+    /// the concrete client (process management). Status and health paths
+    /// must use the backend-neutral diagnostics below instead.
     pub fn as_qdrant(&self) -> Option<&Arc<QdrantClient>> {
         match self {
             Self::Qdrant(client) => Some(client),
@@ -63,10 +67,104 @@ impl VectorStore {
     }
 
     /// Borrow the local store when this is the embedded branch.
+    ///
+    /// Reserved for the Qdrant lifecycle task, the only caller that needs
+    /// the concrete client (process management). Status and health paths
+    /// must use the backend-neutral diagnostics below instead.
     pub fn as_local(&self) -> Option<&Arc<LocalVectorStore>> {
         match self {
             Self::Local(store) => Some(store),
             _ => None,
+        }
+    }
+}
+
+/// Backend-neutral vector diagnostics snapshot.
+///
+/// Lets HTTP handlers report health without downcasting to a concrete
+/// client: the local branch synthesizes the snapshot from its own
+/// health/count probes, the Qdrant branch delegates to its diagnostic call.
+#[derive(Debug, Clone)]
+pub struct VectorDiagnostics {
+    /// Whether the backend is reachable and healthy.
+    pub reachable: bool,
+    /// Backend version, when the backend exposes one.
+    pub version: Option<String>,
+    /// Whether the shared collection exists.
+    pub collection_exists: bool,
+    /// Number of points in the collection.
+    pub points_count: u64,
+    /// Human-readable failure detail, when unhealthy.
+    pub error: Option<String>,
+}
+
+impl VectorStore {
+    /// Circuit-breaker summary without touching the concrete client.
+    ///
+    /// The embedded branch has no breaker (in-process calls, no transient
+    /// network failures), so it reports a fixed marker string.
+    pub fn circuit_breaker_summary(&self) -> String {
+        match self {
+            Self::Local(_) => "n/a (local backend)".to_string(),
+            Self::Qdrant(client) => client.circuit_breaker_state(),
+        }
+    }
+
+    /// Whether the backend manages its own server process.
+    ///
+    /// Returns the Qdrant `auto_start` flag on the remote branch and `None`
+    /// on the embedded branch, which has no subprocess to manage.
+    pub fn managed_process(&self) -> Option<bool> {
+        match self {
+            Self::Local(_) => None,
+            Self::Qdrant(client) => Some(client.config().auto_start),
+        }
+    }
+
+    /// Backend-neutral diagnostics snapshot for status endpoints.
+    ///
+    /// Never fails: probe errors are folded into the snapshot so handlers
+    /// stay branch-free.
+    pub async fn diagnose_summary(&self) -> VectorDiagnostics {
+        match self {
+            Self::Qdrant(client) => match client.diagnose().await {
+                Ok(diag) => VectorDiagnostics {
+                    reachable: diag.reachable,
+                    version: diag.version,
+                    collection_exists: diag.collection_exists,
+                    points_count: diag.points_count,
+                    error: diag.error,
+                },
+                Err(e) => VectorDiagnostics {
+                    reachable: false,
+                    version: None,
+                    collection_exists: false,
+                    points_count: 0,
+                    error: Some(format!("Diagnostic failed: {e}")),
+                },
+            },
+            Self::Local(store) => {
+                let healthy = VectorStorage::health(store.as_ref()).await.unwrap_or(false);
+                let (collection_exists, points_count) = match (
+                    VectorStorage::collection_exists(store.as_ref()).await,
+                    VectorStorage::count_all_points(store.as_ref()).await,
+                ) {
+                    (Ok(exists), Ok(count)) => (exists, count as u64),
+                    (Ok(exists), Err(_)) => (exists, 0),
+                    _ => (false, 0),
+                };
+                VectorDiagnostics {
+                    reachable: healthy,
+                    version: None,
+                    collection_exists,
+                    points_count,
+                    error: if healthy {
+                        None
+                    } else {
+                        Some("Local vector store reported unhealthy".to_string())
+                    },
+                }
+            }
         }
     }
 

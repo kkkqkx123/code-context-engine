@@ -464,6 +464,7 @@ impl super::CodeContextEngine {
             self.fulltext_store(),
             scope,
         )
+        .map_err(|e| EngineError::Config(e.to_string()))?
         .with_search_metrics(SearchMetrics::new(&self.metrics_registry, project_id));
 
         // Pass SQLite database for BM25 project isolation filtering and chunk enrichment

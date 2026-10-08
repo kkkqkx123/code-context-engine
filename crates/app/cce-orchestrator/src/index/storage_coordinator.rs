@@ -146,11 +146,21 @@ impl StorageCoordinator {
 
     /// Set fulltext backend via enum dispatch.
     ///
-    /// The local branch unwraps once at this boundary so the write path
-    /// keeps its current behavior; the remote branch is not wired into
-    /// the write path yet and resolves to no local client.
+    /// Only the local branch is wired into the write path. A remote branch
+    /// is rejected loudly (error log, client left unset) instead of being
+    /// silently dropped, so a misconfiguration surfaces instead of
+    /// degrading to index-without-fulltext.
     pub fn with_fulltext_store(mut self, store: FulltextStore) -> Self {
-        self.bm25 = store.into_local();
+        match store {
+            FulltextStore::Local(client) => {
+                self.bm25 = Some(client);
+            }
+            FulltextStore::Remote(_) => {
+                tracing::error!(
+                    "remote fulltext branch is not wired into the write path; pass the local branch"
+                );
+            }
+        }
         self
     }
 
@@ -181,11 +191,21 @@ impl StorageCoordinator {
 
     /// Set relation backend via enum dispatch.
     ///
-    /// The local branch unwraps once at this boundary so per-project
-    /// scoping semantics stay unchanged; the remote branch is not wired
-    /// into the write path yet and resolves to no local store.
+    /// Only the local branch is wired into the write path. A remote branch
+    /// is rejected loudly (error log, store left unset) instead of being
+    /// silently dropped, so a misconfiguration surfaces instead of
+    /// degrading to index-without-metadata.
     pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.metadata_store = store.into_local();
+        match store {
+            RelationStore::Local(client) => {
+                self.metadata_store = Some(client);
+            }
+            RelationStore::Remote(_) => {
+                tracing::error!(
+                    "remote relation branch is not wired into the write path; pass the local branch"
+                );
+            }
+        }
         self
     }
 

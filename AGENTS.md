@@ -40,15 +40,15 @@ All source crates live under `crates/`. Vendored third-party crates (tantivy, tr
 Crates: cce-types, cce-config, cce-utils, cce-metrics, cce-text, cce-plugin, cce-llm
 
 ### parser — AST parsing, grouping, NL conversion, and relation indexing
-Crates: cce-parser, cce-parser-core, cce-relation
+Crates: cce-document, cce-parser, cce-parser-core, cce-relation, cce-stdlib
 
 ### infra — Infrastructure services and storage backends
-Crates: cce-circuit-breaker, cce-llm-client, cce-storage-common, cce-storage-bm25, cce-storage-qdrant, cce-storage-local, cce-storage-sqlite, cce-scanner
+Crates: cce-circuit-breaker, cce-llm-client, cce-scanner, cce-storage-common, cce-storage-bm25, cce-storage-vector-local, cce-storage-vector-qdrant, cce-storage-relation-sqlite, cce-storage-relation-pg
 
-`cce-storage-common` holds the backend-agnostic vector abstraction (`VectorStorage` contract, `SearchFilter`, `Payload`, shared filter semantics); `cce-storage-local` and `cce-storage-qdrant` implement its local and remote branches. The assembly layer dispatches by the `VectorStore` enum in `cce-orchestrator`.
+`cce-storage-common` holds the backend-agnostic contracts (`VectorStorage`, `SearchFilter`, `Payload`, shared filter semantics; `RelationStorage` plus relation record types). The vector branches are `cce-storage-vector-local` (embedded simvec) and `cce-storage-vector-qdrant` (remote service); the fulltext branches (`Bm25Client` local Tantivy, `ElasticsearchClient` remote) both live in `cce-storage-bm25` behind the `FulltextStorage` contract; the relation branches are `cce-storage-relation-sqlite` (embedded, per-project files) and `cce-storage-relation-pg` (remote PostgreSQL). The assembly layer dispatches by the `VectorStore` / `FulltextStore` / `RelationStore` enums in `cce-orchestrator`, never by trait objects.
 
 ### app — Application layer, orchestration, server, CLI, and plugin runtime
-Crates: cce-api, cce-plugin-runtime, cce-orchestrator, cce-server, cce-cli, plugin-sdk
+Crates: cce-admission, cce-api, cce-cli, cce-gateway, cce-mcp, cce-orchestrator, cce-plugin-runtime, cce-plugin-sdk, cce-server, cce-server-shared
 
 ### Git Submodules
 - `crates/tantivy` — Vendored tantivy fork (https://github.com/kkkqkx123/tantivy.git)

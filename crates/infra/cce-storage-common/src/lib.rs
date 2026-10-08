@@ -4,8 +4,9 @@
 //! `DenseSearchQuery`, `SearchFilter`, `VectorPoint`) with backend-neutral
 //! semantics plus the operation contract every vector backend implements.
 //! Backends translate the filter into their native form (local predicate or
-//! Qdrant filter JSON, including the `raw_filter` passthrough which only the
-//! Qdrant branch honors).
+//! Qdrant filter JSON). The `raw_filter` passthrough is a Qdrant-only escape
+//! hatch: the Qdrant branch honors it, the local branch rejects queries that
+//! set it instead of silently ignoring it.
 //!
 //! It also holds the relation storage contract (`RelationStorage`) shared by
 //! the embedded SQLite branch and the remote PostgreSQL branch.
@@ -64,7 +65,8 @@ pub struct SearchFilter {
     /// Exclude specific categories
     pub exclude_categories: Option<Vec<FileCategory>>,
     /// Pre-built raw filter JSON (Qdrant branch only; takes precedence over
-    /// other fields when set. The local branch ignores it).
+    /// other fields when set. The local branch rejects queries that set it
+    /// with a validation error rather than silently ignoring it).
     pub raw_filter: Option<serde_json::Value>,
 }
 
@@ -319,7 +321,8 @@ impl Payload {
 ///
 /// Shared by the local backend predicate and the dual-backend contract tests
 /// so generation, group, type, directory, test and category semantics stay
-/// identical. `raw_filter` is Qdrant-only and ignored here.
+/// identical. `raw_filter` is Qdrant-only and never reaches this predicate:
+/// the local backend rejects it before searching.
 pub fn payload_matches_filter(payload: &Payload, filter: &SearchFilter) -> bool {
     if let Some(ref group_id) = filter.group_id
         && payload.group_id.as_deref() != Some(group_id.as_str())

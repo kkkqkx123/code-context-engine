@@ -16,6 +16,11 @@ use simvec::{
 };
 
 /// Embedded local vector store (single collection, group-isolated).
+///
+/// Resilience note: unlike the Qdrant branch this store performs in-process
+/// calls with no network hop, so it carries no circuit breaker, retry loop,
+/// or remote metrics. Validation failures (dimension, non-finite elements)
+/// fail fast; I/O errors surface directly through `StorageError`.
 pub struct LocalVectorStore {
     engine: Arc<LocalVectorEngine>,
     collection: String,
@@ -112,10 +117,11 @@ impl LocalVectorStore {
     }
 
     fn simvec_filter(filter: &SearchFilter) -> Option<SimFilter> {
+        // `raw_filter` is a Qdrant-only escape hatch with no local meaning.
+        // Queries that set it are rejected in `search_dense` before reaching
+        // here; the debug log below is a second line of defense for any
+        // future caller that bypasses that check.
         if filter.raw_filter.is_some() {
-            // Qdrant-only passthrough has no local meaning; the full
-            // predicate still applies as a post-filter in search and as
-            // explicit field checks in deletes.
             tracing::debug!("local vector backend ignores raw_filter");
         }
         let mut sim = SimFilter::new();
@@ -369,6 +375,15 @@ impl VectorStorage for LocalVectorStore {
                 query.vector.len()
             )));
         }
+        if query
+            .filter
+            .as_ref()
+            .is_some_and(|filter| filter.raw_filter.is_some())
+        {
+            return Err(StorageError::validation(
+                "raw_filter is Qdrant-only and not supported by the local vector backend",
+            ));
+        }
         let limit = query.limit.max(1);
         let excluded_len = query
             .filter
@@ -533,12 +548,49 @@ impl VectorStorage for LocalVectorStore {
     }
 
     async fn count_points_by_group(&self, group_id: &str) -> Result<usize, StorageError> {
-        Ok(self
-            .scroll_all_points()
-            .await?
-            .into_iter()
-            .filter(|p| p.payload.group_id.as_deref() == Some(group_id))
-            .count())
+        // Stream pages and count from payloads only. Vectors are never
+        // fetched, so peak memory stays at one page instead of O(N*d).
+        const PAGE: usize = 5000;
+        let mut count = 0;
+        let mut offset: Option<String> = None;
+        loop {
+            let engine = Arc::clone(&self.engine);
+            let collection = self.collection.clone();
+            let current = offset.clone();
+            let (points, next) = tokio::task::spawn_blocking(move || {
+                engine
+                    .scroll(
+                        &collection,
+                        PAGE,
+                        current.as_deref(),
+                        Some(true),
+                        Some(false),
+                    )
+                    .map_err(map_simvec_error)
+            })
+            .await
+            .map_err(|e| StorageError::query(format!("local count join failed: {e}")))??;
+            for sim in points {
+                let Some(map) = sim.payload else {
+                    continue;
+                };
+                match map_to_payload(&map) {
+                    Ok(payload) => {
+                        if payload.group_id.as_deref() == Some(group_id) {
+                            count += 1;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "skipping local point with invalid payload");
+                    }
+                }
+            }
+            match next {
+                Some(next_offset) => offset = Some(next_offset),
+                None => break,
+            }
+        }
+        Ok(count)
     }
 
     async fn count_all_points(&self) -> Result<usize, StorageError> {

@@ -61,61 +61,15 @@ pub async fn handle_qdrant_health(
     State(state): State<AppState>,
 ) -> ApiResult<QdrantHealthResponse> {
     let vector = state.engine.vector();
-    let circuit_breaker = match vector.as_qdrant() {
-        Some(qdrant) => qdrant.circuit_breaker_state().to_string(),
-        None => "n/a (local backend)".to_string(),
-    };
+    let circuit_breaker = vector.circuit_breaker_summary();
 
-    let diagnostic = {
-        if let Some(qdrant) = vector.as_qdrant() {
-            match qdrant.diagnose().await {
-                Ok(diag) => QdrantDiagnostic {
-                    reachable: diag.reachable,
-                    version: diag.version,
-                    collection_exists: diag.collection_exists,
-                    points_count: diag.points_count,
-                    error: diag.error,
-                },
-                Err(e) => QdrantDiagnostic {
-                    reachable: false,
-                    version: None,
-                    collection_exists: false,
-                    points_count: 0,
-                    error: Some(format!("Diagnostic failed: {}", e)),
-                },
-            }
-        } else {
-            match vector.health().await {
-                Ok(healthy) => {
-                    let (collection_exists, points_count) = match (
-                        vector.collection_exists().await,
-                        vector.count_all_points().await,
-                    ) {
-                        (Ok(exists), Ok(count)) => (exists, count as u64),
-                        (Ok(exists), Err(_)) => (exists, 0),
-                        _ => (false, 0),
-                    };
-                    QdrantDiagnostic {
-                        reachable: healthy,
-                        version: None,
-                        collection_exists,
-                        points_count,
-                        error: if healthy {
-                            None
-                        } else {
-                            Some("Local vector store reported unhealthy".to_string())
-                        },
-                    }
-                }
-                Err(e) => QdrantDiagnostic {
-                    reachable: false,
-                    version: None,
-                    collection_exists: false,
-                    points_count: 0,
-                    error: Some(format!("Diagnostic failed: {}", e)),
-                },
-            }
-        }
+    let diag = vector.diagnose_summary().await;
+    let diagnostic = QdrantDiagnostic {
+        reachable: diag.reachable,
+        version: diag.version,
+        collection_exists: diag.collection_exists,
+        points_count: diag.points_count,
+        error: diag.error,
     };
 
     let healthy = diagnostic.reachable;

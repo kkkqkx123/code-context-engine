@@ -478,27 +478,28 @@ pub fn validate_required_env_vars(config: &AppConfig) -> Result<(), ConfigError>
     }
 
     // Check remote relation/fulltext secrets for unresolved placeholders
-    let mut remote_placeholders: Vec<(&str, &Option<String>)> = Vec::new();
-    remote_placeholders.push((
-        "database.relation_remote.url",
-        &config.database.relation_remote.url,
-    ));
-    remote_placeholders.push((
-        "database.relation_remote.password",
-        &config.database.relation_remote.password,
-    ));
-    remote_placeholders.push((
-        "database.fulltext_remote.url",
-        &config.database.fulltext_remote.url,
-    ));
-    remote_placeholders.push((
-        "database.fulltext_remote.api_key",
-        &config.database.fulltext_remote.api_key,
-    ));
-    remote_placeholders.push((
-        "database.fulltext_remote.password",
-        &config.database.fulltext_remote.password,
-    ));
+    let remote_placeholders: Vec<(&str, &Option<String>)> = vec![
+        (
+            "database.relation_remote.url",
+            &config.database.relation_remote.url,
+        ),
+        (
+            "database.relation_remote.password",
+            &config.database.relation_remote.password,
+        ),
+        (
+            "database.fulltext_remote.url",
+            &config.database.fulltext_remote.url,
+        ),
+        (
+            "database.fulltext_remote.api_key",
+            &config.database.fulltext_remote.api_key,
+        ),
+        (
+            "database.fulltext_remote.password",
+            &config.database.fulltext_remote.password,
+        ),
+    ];
     for (field, value) in remote_placeholders {
         if let Some(key_ref) = value
             && key_ref.starts_with("${")

@@ -663,54 +663,13 @@ pub async fn handle_storage_status(
     // Check vector store with comprehensive diagnostics
     let vector_storage = {
         let vector = state.engine.vector();
-        if let Some(qdrant) = vector.as_qdrant() {
-            match qdrant.diagnose().await {
-                Ok(diag) => StorageComponentStatus {
-                    connected: diag.reachable,
-                    item_count: diag.points_count as usize,
-                    disk_usage_mb: 0.0, // Qdrant does not expose disk usage via REST API
-                    version: diag.version,
-                    last_error: diag.error,
-                },
-                Err(e) => StorageComponentStatus {
-                    connected: false,
-                    item_count: 0,
-                    disk_usage_mb: 0.0,
-                    version: None,
-                    last_error: Some(format!("Diagnostic failed: {}", e)),
-                },
-            }
-        } else {
-            match vector.health().await {
-                Ok(healthy) => {
-                    let (collection_exists, item_count) = match (
-                        vector.collection_exists().await,
-                        vector.count_all_points().await,
-                    ) {
-                        (Ok(exists), Ok(count)) => (exists, count),
-                        _ => (false, 0),
-                    };
-                    let _ = collection_exists;
-                    StorageComponentStatus {
-                        connected: healthy,
-                        item_count,
-                        disk_usage_mb: 0.0,
-                        version: None,
-                        last_error: if healthy {
-                            None
-                        } else {
-                            Some("Local vector store reported unhealthy".to_string())
-                        },
-                    }
-                }
-                Err(e) => StorageComponentStatus {
-                    connected: false,
-                    item_count: 0,
-                    disk_usage_mb: 0.0,
-                    version: None,
-                    last_error: Some(format!("Diagnostic failed: {}", e)),
-                },
-            }
+        let diag = vector.diagnose_summary().await;
+        StorageComponentStatus {
+            connected: diag.reachable,
+            item_count: diag.points_count as usize,
+            disk_usage_mb: 0.0, // Neither backend exposes disk usage here
+            version: diag.version,
+            last_error: diag.error,
         }
     };
 
@@ -746,22 +705,10 @@ pub async fn handle_storage_status(
             running: matches!(status, QdrantProcessStatus::Running),
             status,
         })
-    } else if let Some(qdrant) = state.engine.vector().as_qdrant() {
-        Some({
-            let config = qdrant.config();
-            QdrantProcessInfo {
-                managed: config.auto_start,
-                status: if vector_storage.connected {
-                    QdrantProcessStatus::Running
-                } else {
-                    QdrantProcessStatus::Stopped
-                },
-                running: vector_storage.connected,
-            }
-        })
     } else {
+        let managed = state.engine.vector().managed_process().unwrap_or(false);
         Some(QdrantProcessInfo {
-            managed: false,
+            managed,
             status: if vector_storage.connected {
                 QdrantProcessStatus::Running
             } else {

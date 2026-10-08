@@ -68,11 +68,20 @@ impl SearcherBuilder {
 
     /// Enable relation backend via enum dispatch.
     ///
-    /// The local branch unwraps once at this boundary so enrichment
-    /// semantics stay unchanged; the remote branch resolves to no local
-    /// enrichment store.
+    /// Only the local branch feeds chunk enrichment. A remote branch is
+    /// rejected loudly (error log, enrichment left disabled) instead of
+    /// being silently dropped.
     pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.sqlite = store.into_local();
+        match store {
+            RelationStore::Local(sqlite) => {
+                self.sqlite = Some(sqlite);
+            }
+            RelationStore::Remote(_) => {
+                tracing::error!(
+                    "remote relation branch is not wired into the Searcher read path; enrichment disabled"
+                );
+            }
+        }
         self
     }
 

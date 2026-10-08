@@ -108,19 +108,25 @@ impl Searcher {
 
     /// Create a searcher builder from backend enums.
     ///
-    /// The local branch unwraps once at this boundary so retrieval
-    /// behavior stays unchanged; the remote branch is not wired into
-    /// the Tantivy read path yet.
+    /// Only the local fulltext branch is wired into the read path. A remote
+    /// branch returns a configuration error instead of panicking, so callers
+    /// handle the unsupported combination explicitly.
     pub fn builder_from_stores(
         vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
         fulltext: FulltextStore,
         scope: ProjectScope,
-    ) -> SearcherBuilder {
-        let bm25 = fulltext
-            .into_local()
-            .expect("remote fulltext branch is not wired into the Searcher read path yet");
-        SearcherBuilder::new(vector, embedder, bm25, scope)
+    ) -> Result<SearcherBuilder> {
+        let bm25 = match fulltext {
+            FulltextStore::Local(client) => client,
+            FulltextStore::Remote(_) => {
+                return Err(QueryError::Config(
+                    "remote fulltext branch is not wired into the Searcher read path yet"
+                        .to_string(),
+                ));
+            }
+        };
+        Ok(SearcherBuilder::new(vector, embedder, bm25, scope))
     }
 
     /// Fulltext backend enum wrapping the configured client.

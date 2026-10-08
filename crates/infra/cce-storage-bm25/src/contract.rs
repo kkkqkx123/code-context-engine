@@ -212,8 +212,8 @@ impl FulltextStorage for Bm25Client {
         Bm25Client::clear_index(self, index_name)
     }
 
-    fn flush(&self) -> impl Future<Output = Result<(), Bm25Error>> + Send {
-        async { Ok(()) }
+    async fn flush(&self) -> Result<(), Bm25Error> {
+        Ok(())
     }
 
     fn is_enabled(&self) -> bool {
