@@ -157,7 +157,6 @@ dynamic dispatch remains for LLM chat.
 **Status:** Resolved — dynamic dispatch removed; filtered out of this list.
 
 ### FusionAlgorithmImpl — Hybrid Fusion Algorithm Dispatch
-
 **File:** `crates/app/cce-orchestrator/src/query/retrieval/post_processing/fusion/merger.rs`
 
 ```rust
@@ -183,4 +182,17 @@ pub fn create_fusion_algorithm(config: &HybridFusionConfig) -> Box<dyn FusionAlg
 The hybrid fusion pipeline supports multiple aggregation algorithms (weighted min-max, RRF, Borda count) selected at runtime by configuration. Each algorithm is implemented as a struct with its own score combination logic. An enum wrapper would require a match on every call site and would not support plugin-provided algorithms.
 
 **Status:** Necessary — runtime algorithm selection from configuration.
+
+### Bm25Metrics — Fulltext Metrics Collector
+
+**File:** `crates/infra/cce-storage-bm25/src/elasticsearch.rs:81`
+
+```rust
+metrics: Option<Arc<dyn Bm25Metrics>>,
+```
+
+The remote fulltext client accepts an optional metrics collector shared with the local branch contract. Collectors are provided by the server layer at runtime, so the client cannot name a concrete type. The local branch holds the same collector type through its own client handle.
+
+**Status:** Necessary — metrics injection boundary shared by both fulltext branches.
+
 

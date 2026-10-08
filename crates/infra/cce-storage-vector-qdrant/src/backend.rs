@@ -10,7 +10,6 @@ use cce_types::{PointKind, StorageError};
 use crate::client::QdrantClient;
 use crate::retrieval::QdrantRetrieval;
 
-#[async_trait::async_trait]
 impl VectorStorage for QdrantClient {
     fn backend_name(&self) -> &'static str {
         "qdrant"

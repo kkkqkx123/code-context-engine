@@ -13,6 +13,7 @@ use std::sync::Arc;
 use cce_config::project_registry::ProjectScope;
 
 use crate::index::vector_store::{RelationStore, VectorStore};
+use crate::query::QueryError;
 use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
 use crate::query::retrieval::post_processing::GlobFilter;
@@ -68,21 +69,18 @@ impl SearcherBuilder {
 
     /// Enable relation backend via enum dispatch.
     ///
-    /// Only the local branch feeds chunk enrichment. A remote branch is
-    /// rejected loudly (error log, enrichment left disabled) instead of
-    /// being silently dropped.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+    /// Only the local branch feeds chunk enrichment. A remote branch fails
+    /// fast instead of silently disabling enrichment.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Result<Self, QueryError> {
         match store {
             RelationStore::Local(sqlite) => {
                 self.sqlite = Some(sqlite);
+                Ok(self)
             }
-            RelationStore::Remote(_) => {
-                tracing::error!(
-                    "remote relation branch is not wired into the Searcher read path; enrichment disabled"
-                );
-            }
+            RelationStore::Remote(_) => Err(QueryError::Config(
+                "remote relation branch is not wired into the Searcher read path yet".to_string(),
+            )),
         }
-        self
     }
 
     /// Enable reranking support

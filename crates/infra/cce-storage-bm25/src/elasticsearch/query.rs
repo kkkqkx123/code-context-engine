@@ -1,5 +1,6 @@
 //! Retrieval query DSL construction and hit parsing.
 
+use cce_types::normalize_project_path;
 use serde_json::{Value, json};
 
 use crate::{Bm25Error, Bm25SearchOptions, Bm25SearchResult, TermOperator};
@@ -81,11 +82,15 @@ impl ElasticsearchClient {
         if options.epochs.len() > 1
             && let Some(excluded) = options.excluded_files.as_ref().filter(|f| !f.is_empty())
         {
+            let normalized: Vec<String> = excluded
+                .iter()
+                .map(|path| normalize_project_path(path))
+                .collect();
             must_not.push(json!({
                 "bool": {
                     "filter": [
                         { "term": { "epoch": options.epochs[0] } },
-                        { "terms": { "file_path": excluded } },
+                        { "terms": { "file_path": normalized } },
                     ]
                 }
             }));

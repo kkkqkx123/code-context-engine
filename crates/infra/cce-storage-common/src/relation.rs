@@ -439,6 +439,8 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
     /// Remove a project: local deletes the per-project database files
     /// (evict handle, then main plus WAL/SHM sidecars); remote deletes the
     /// project rows across business tables in one transaction.
+    /// Returns the number of removed business records; snapshot-only
+    /// deletion stays on `snapshot_delete_project`.
     async fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError>;
 
     /// Backend name for logging (`local` for the embedded branch).

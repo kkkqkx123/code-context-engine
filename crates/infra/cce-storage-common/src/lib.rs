@@ -79,6 +79,15 @@ impl SearchFilter {
             ..Default::default()
         }
     }
+
+    /// Whether this filter is safe for business query paths.
+    ///
+    /// Business retrieval must never set `raw_filter`; that field is a
+    /// Qdrant-only debug escape hatch reserved for tooling. The local
+    /// backend rejects filtered queries carrying it.
+    pub fn is_business_query(&self) -> bool {
+        self.raw_filter.is_none()
+    }
 }
 
 /// Dense vector search query
@@ -408,8 +417,17 @@ pub fn vector_collection_name() -> String {
 /// Covers writes, vector search, id/file deletes, counting and collection
 /// management. Filter semantics stay backend-agnostic; each backend
 /// translates `SearchFilter` into its native predicate.
-#[async_trait::async_trait]
-pub trait VectorStorage: Send + Sync {
+///
+/// Frozen semantics: every named operation is atomic on its own scope and
+/// idempotent per point id, so replaying a batch after a transient failure
+/// is safe. `clear_collection` removes all points while keeping the
+/// collection definition and dimension. `count_*` report logically visible
+/// points. `health` reports liveness only, never data completeness.
+/// `scroll_all_points` is the snapshot source for generation GC and
+/// compaction. Path comparisons always use normalized project paths.
+/// `payload_matches_filter` is the semantic oracle: backend pushdown is an
+/// optimization and must agree with it.
+pub trait VectorStorage: Clone + Send + Sync + 'static {
     /// Backend name for logging and diagnostics (`local` or `qdrant`).
     fn backend_name(&self) -> &'static str;
 
@@ -462,6 +480,9 @@ pub trait VectorStorage: Send + Sync {
     async fn delete_by_group(&self, group_id: &str) -> Result<(), cce_types::StorageError>;
 
     /// Delete several files' points inside a group.
+    ///
+    /// Backends may serve this as one native batch or as sequential single
+    /// deletes; the visible result must match sequential deletes.
     async fn delete_by_file_paths_scoped(
         &self,
         file_paths: &[&str],
@@ -585,5 +606,45 @@ mod tests {
         let pgid = generate_project_group_id(7, "/tmp/ws");
         assert!(pgid.starts_with("project-7-proj_"));
         assert!(vector_collection_name().starts_with("cce_vectors-i"));
+    }
+
+    #[test]
+    fn test_filter_root_prefix_matches_everything() {
+        let payload = Payload::new("src/a.rs");
+        let root = SearchFilter {
+            directory_prefix: Some("/".to_string()),
+            ..Default::default()
+        };
+        assert!(payload_matches_filter(&payload, &root));
+    }
+
+    #[test]
+    fn test_filter_single_epoch_ignores_excluded_files() {
+        let payload = Payload::new("src/a.rs").with_epoch(4);
+        let filter = SearchFilter {
+            epochs: vec![4],
+            excluded_files: Some(vec!["src/a.rs".to_string()]),
+            ..Default::default()
+        };
+        assert!(payload_matches_filter(&payload, &filter));
+    }
+
+    #[test]
+    fn test_business_query_rejects_raw_filter() {
+        let clean = SearchFilter::default();
+        assert!(clean.is_business_query());
+        let debug = SearchFilter {
+            raw_filter: Some(serde_json::json!({"term": {"group_id": "g"}})),
+            ..Default::default()
+        };
+        assert!(!debug.is_business_query());
+    }
+
+    #[test]
+    fn test_file_scoped_normalizes_path() {
+        let filter = SearchFilter::file_scoped("src\\lib/a.rs", "g");
+        assert_eq!(filter.file_path.as_deref(), Some("src/lib/a.rs"));
+        let payload = Payload::new("src/lib/a.rs").with_group_id("g");
+        assert!(payload_matches_filter(&payload, &filter));
     }
 }

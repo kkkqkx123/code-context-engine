@@ -219,6 +219,16 @@ impl ProcessorFactory {
         relation_metrics: Option<Arc<RelationMetrics>>,
         storage_metrics: Option<Arc<cce_metrics::HotUpdateStorageMetrics>>,
     ) -> Result<(Vec<BoxedUpdateProcessor>, Arc<StorageCoordinator>), ConfigError> {
+        if matches!(fulltext, Some(FulltextStore::Remote(_))) {
+            return Err(ConfigError::Other(
+                "remote fulltext branch is not wired into hot-update processors".to_string(),
+            ));
+        }
+        if matches!(relation, Some(RelationStore::Remote(_))) {
+            return Err(ConfigError::Other(
+                "remote relation branch is not wired into hot-update processors".to_string(),
+            ));
+        }
         self.create_all_processors(
             vector,
             fulltext.and_then(FulltextStore::into_local),

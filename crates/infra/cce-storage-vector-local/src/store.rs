@@ -21,6 +21,7 @@ use simvec::{
 /// calls with no network hop, so it carries no circuit breaker, retry loop,
 /// or remote metrics. Validation failures (dimension, non-finite elements)
 /// fail fast; I/O errors surface directly through `StorageError`.
+#[derive(Clone)]
 pub struct LocalVectorStore {
     engine: Arc<LocalVectorEngine>,
     collection: String,
@@ -288,7 +289,6 @@ pub fn map_simvec_error(err: VectorSearchError) -> StorageError {
     }
 }
 
-#[async_trait::async_trait]
 impl VectorStorage for LocalVectorStore {
     fn backend_name(&self) -> &'static str {
         "local"

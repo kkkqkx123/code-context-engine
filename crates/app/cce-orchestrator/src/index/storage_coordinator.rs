@@ -32,6 +32,7 @@ use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
 use cce_storage_relation_sqlite::SqliteClient;
 use cce_storage_vector_qdrant::QdrantClient;
+use cce_types::StorageError;
 
 use super::super::error::OrchestratorError;
 use super::vector_store::{FulltextStore, RelationStore, VectorStore};
@@ -147,21 +148,18 @@ impl StorageCoordinator {
     /// Set fulltext backend via enum dispatch.
     ///
     /// Only the local branch is wired into the write path. A remote branch
-    /// is rejected loudly (error log, client left unset) instead of being
-    /// silently dropped, so a misconfiguration surfaces instead of
-    /// degrading to index-without-fulltext.
-    pub fn with_fulltext_store(mut self, store: FulltextStore) -> Self {
+    /// fails fast so a misconfiguration surfaces instead of degrading to
+    /// index-without-fulltext.
+    pub fn with_fulltext_store(mut self, store: FulltextStore) -> Result<Self, StorageError> {
         match store {
             FulltextStore::Local(client) => {
                 self.bm25 = Some(client);
+                Ok(self)
             }
-            FulltextStore::Remote(_) => {
-                tracing::error!(
-                    "remote fulltext branch is not wired into the write path; pass the local branch"
-                );
-            }
+            FulltextStore::Remote(_) => Err(StorageError::validation(
+                "remote fulltext branch is not wired into the write path; pass the local branch",
+            )),
         }
-        self
     }
 
     /// Fulltext backend name for logging.
@@ -192,21 +190,18 @@ impl StorageCoordinator {
     /// Set relation backend via enum dispatch.
     ///
     /// Only the local branch is wired into the write path. A remote branch
-    /// is rejected loudly (error log, store left unset) instead of being
-    /// silently dropped, so a misconfiguration surfaces instead of
-    /// degrading to index-without-metadata.
-    pub fn with_relation_store(mut self, store: RelationStore) -> Self {
+    /// fails fast so a misconfiguration surfaces instead of degrading to
+    /// index-without-metadata.
+    pub fn with_relation_store(mut self, store: RelationStore) -> Result<Self, StorageError> {
         match store {
             RelationStore::Local(client) => {
                 self.metadata_store = Some(client);
+                Ok(self)
             }
-            RelationStore::Remote(_) => {
-                tracing::error!(
-                    "remote relation branch is not wired into the write path; pass the local branch"
-                );
-            }
+            RelationStore::Remote(_) => Err(StorageError::validation(
+                "remote relation branch is not wired into the write path; pass the local branch",
+            )),
         }
-        self
     }
 
     /// Relation backend name for logging.

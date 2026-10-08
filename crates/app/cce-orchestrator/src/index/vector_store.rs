@@ -203,7 +203,6 @@ impl std::fmt::Debug for VectorStore {
     }
 }
 
-#[async_trait::async_trait]
 impl VectorStorage for VectorStore {
     fn backend_name(&self) -> &'static str {
         match self {
@@ -366,8 +365,10 @@ impl VectorStorage for VectorStore {
 
 /// Fulltext backend holding one concrete implementation.
 ///
-/// Local is the embedded Tantivy branch; Remote is the Elasticsearch
-/// branch. The enum mirrors [`VectorStore`] so assembly selects branches
+/// Local is the embedded Tantivy branch and the only branch wired into
+/// indexing, search, and hot-update paths; Remote constructs successfully
+/// but every consumer fails fast until the remote read and write paths are
+/// implemented. The enum mirrors [`VectorStore`] so assembly selects branches
 /// from configuration instead of threading concrete client types through
 /// every caller.
 #[derive(Clone)]
@@ -469,10 +470,11 @@ impl std::fmt::Debug for FulltextStore {
 
 /// Relation backend holding one concrete implementation.
 ///
-/// Local is the embedded SQLite branch (per-project database files);
-/// Remote is the PostgreSQL branch (per-row project filtering). Path
-/// rules, cache eviction, capacity stats, and the project-delete
-/// two-step semantics stay inside the local client.
+/// Local is the embedded SQLite branch (per-project database files) and the
+/// only branch wired into indexing, search, and hot-update paths; Remote
+/// constructs successfully but every consumer fails fast until the remote
+/// paths are implemented. Path rules, cache eviction, capacity stats, and
+/// the project-delete two-step semantics stay inside the local client.
 #[derive(Clone)]
 pub enum RelationStore {
     /// Embedded SQLite repositories.

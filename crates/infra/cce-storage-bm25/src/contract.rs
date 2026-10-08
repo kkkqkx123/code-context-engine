@@ -32,92 +32,90 @@ pub type FulltextError = Bm25Error;
 ///
 /// Callers hold the backend enum and call through this contract; no caller
 /// touches a concrete client or index manager.
+///
+/// Frozen semantics: batch writes are idempotent per document id; deletes
+/// report the number of removed documents; `clear_index` removes all
+/// documents and reports how many were removed; counts and snapshots only
+/// observe flushed writes, so callers must invoke `flush` after the last
+/// batch before marking a generation ready. File paths are compared after
+/// normalization on every branch.
 pub trait FulltextStorage: Clone + Send + Sync + 'static {
     /// Index a batch of documents into the configured index.
-    fn batch_index(
+    async fn batch_index(
         &mut self,
         index_name: &str,
         documents: &[Bm25Document],
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    ) -> Result<usize, Bm25Error>;
 
     /// Run a keyword retrieval with project and generation filters.
     ///
     /// The output carries only the stored readback fields (document and
     /// chunk ids, title, file path, alignment ids); the indexed-only body
     /// and keyword fields never participate in readback on any branch.
-    fn search(
+    async fn search(
         &self,
         query: &str,
         options: &Bm25SearchOptions,
-    ) -> impl Future<Output = Result<Vec<Bm25SearchResult>, Bm25Error>> + Send;
+    ) -> Result<Vec<Bm25SearchResult>, Bm25Error>;
 
     /// Delete documents for one file within one project.
-    fn delete_by_file_path_scoped(
+    async fn delete_by_file_path_scoped(
         &mut self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    ) -> Result<usize, Bm25Error>;
 
     /// Delete documents for one file in one data epoch.
-    fn delete_by_file_path_scoped_epoch(
+    async fn delete_by_file_path_scoped_epoch(
         &mut self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    ) -> Result<usize, Bm25Error>;
 
     /// Delete all documents for one project and data epoch.
-    fn delete_by_project_epoch(
+    async fn delete_by_project_epoch(
         &mut self,
         index_name: &str,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    ) -> Result<usize, Bm25Error>;
 
     /// Delete all documents for a project.
-    fn delete_all_project_docs(
+    async fn delete_all_project_docs(
         &mut self,
         index_name: &str,
         project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    ) -> Result<usize, Bm25Error>;
 
     /// Read back the stored fields needed to copy an epoch into a
     /// candidate generation.
-    fn snapshot_documents(
+    async fn snapshot_documents(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<Vec<Bm25Document>, Bm25Error>> + Send;
+    ) -> Result<Vec<Bm25Document>, Bm25Error>;
 
     /// Count all documents in the index.
-    fn document_count(&self) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    async fn document_count(&self) -> Result<usize, Bm25Error>;
 
     /// Count documents belonging to one project.
-    fn document_count_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, Bm25Error>;
 
     /// List data epochs currently present for a project.
-    fn epochs_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Vec<i64>, Bm25Error>> + Send;
+    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, Bm25Error>;
 
     /// Recreate the index from scratch (generation rebuild/cleanup).
-    fn clear_index(
-        &mut self,
-        index_name: &str,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send;
+    async fn clear_index(&mut self, index_name: &str) -> Result<usize, Bm25Error>;
 
     /// Make recent writes visible to counts and snapshot readbacks.
     ///
     /// The local branch reloads its reader per batch, so this is a no-op
     /// there; the remote branch refreshes the index. Call it after the last
     /// batch before a generation is marked ready or activated.
-    fn flush(&self) -> impl Future<Output = Result<(), Bm25Error>> + Send;
+    async fn flush(&self) -> Result<(), Bm25Error>;
 
     /// Whether the branch is enabled and connected.
     fn is_enabled(&self) -> bool;
@@ -130,89 +128,81 @@ pub trait FulltextStorage: Clone + Send + Sync + 'static {
 
 #[cfg(feature = "local")]
 impl FulltextStorage for Bm25Client {
-    fn batch_index(
+    async fn batch_index(
         &mut self,
         index_name: &str,
         documents: &[Bm25Document],
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        Bm25Client::batch_index(self, index_name, documents)
+    ) -> Result<usize, Bm25Error> {
+        Bm25Client::batch_index(self, index_name, documents).await
     }
 
-    fn search(
+    async fn search(
         &self,
         query: &str,
         options: &Bm25SearchOptions,
-    ) -> impl Future<Output = Result<Vec<Bm25SearchResult>, Bm25Error>> + Send {
-        Bm25Client::search(self, query, options)
+    ) -> Result<Vec<Bm25SearchResult>, Bm25Error> {
+        Bm25Client::search(self, query, options).await
     }
 
-    fn delete_by_file_path_scoped(
+    async fn delete_by_file_path_scoped(
         &mut self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        Bm25Client::delete_by_file_path_scoped(self, index_name, file_path, project_id)
+    ) -> Result<usize, Bm25Error> {
+        Bm25Client::delete_by_file_path_scoped(self, index_name, file_path, project_id).await
     }
 
-    fn delete_by_file_path_scoped_epoch(
+    async fn delete_by_file_path_scoped_epoch(
         &mut self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
+    ) -> Result<usize, Bm25Error> {
         Bm25Client::delete_by_file_path_scoped_epoch(self, index_name, file_path, project_id, epoch)
+            .await
     }
 
-    fn delete_by_project_epoch(
+    async fn delete_by_project_epoch(
         &mut self,
         index_name: &str,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        Bm25Client::delete_by_project_epoch(self, index_name, project_id, epoch)
+    ) -> Result<usize, Bm25Error> {
+        Bm25Client::delete_by_project_epoch(self, index_name, project_id, epoch).await
     }
 
-    fn delete_all_project_docs(
+    async fn delete_all_project_docs(
         &mut self,
         index_name: &str,
         project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        Bm25Client::delete_all_project_docs(self, index_name, project_id)
+    ) -> Result<usize, Bm25Error> {
+        Bm25Client::delete_all_project_docs(self, index_name, project_id).await
     }
 
-    fn snapshot_documents(
+    async fn snapshot_documents(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<Vec<Bm25Document>, Bm25Error>> + Send {
-        Bm25Client::snapshot_documents(self, project_id, epoch)
+    ) -> Result<Vec<Bm25Document>, Bm25Error> {
+        Bm25Client::snapshot_documents(self, project_id, epoch).await
     }
 
-    fn document_count(&self) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        Bm25Client::document_count(self)
+    async fn document_count(&self) -> Result<usize, Bm25Error> {
+        Bm25Client::document_count(self).await
     }
 
-    fn document_count_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        Bm25Client::document_count_by_project(self, project_id)
+    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, Bm25Error> {
+        Bm25Client::document_count_by_project(self, project_id).await
     }
 
-    fn epochs_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Vec<i64>, Bm25Error>> + Send {
-        Bm25Client::epochs_by_project(self, project_id)
+    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, Bm25Error> {
+        Bm25Client::epochs_by_project(self, project_id).await
     }
 
-    fn clear_index(
-        &mut self,
-        index_name: &str,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        Bm25Client::clear_index(self, index_name)
+    async fn clear_index(&mut self, index_name: &str) -> Result<usize, Bm25Error> {
+        Bm25Client::clear_index(self, index_name).await
     }
 
     async fn flush(&self) -> Result<(), Bm25Error> {
@@ -234,93 +224,87 @@ pub fn assert_fulltext_storage<T: FulltextStorage>() {}
 /// live on [`crate::ElasticsearchClient`].
 #[cfg(feature = "remote")]
 impl FulltextStorage for crate::ElasticsearchClient {
-    fn batch_index(
+    async fn batch_index(
         &mut self,
         index_name: &str,
         documents: &[Bm25Document],
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        crate::ElasticsearchClient::batch_index(self, index_name, documents)
+    ) -> Result<usize, Bm25Error> {
+        crate::ElasticsearchClient::batch_index(self, index_name, documents).await
     }
 
-    fn search(
+    async fn search(
         &self,
         query: &str,
         options: &Bm25SearchOptions,
-    ) -> impl Future<Output = Result<Vec<Bm25SearchResult>, Bm25Error>> + Send {
-        crate::ElasticsearchClient::search(self, query, options)
+    ) -> Result<Vec<Bm25SearchResult>, Bm25Error> {
+        crate::ElasticsearchClient::search(self, query, options).await
     }
 
-    fn delete_by_file_path_scoped(
+    async fn delete_by_file_path_scoped(
         &mut self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
+    ) -> Result<usize, Bm25Error> {
         crate::ElasticsearchClient::delete_by_file_path_scoped(
             self, index_name, file_path, project_id,
         )
+        .await
     }
 
-    fn delete_by_file_path_scoped_epoch(
+    async fn delete_by_file_path_scoped_epoch(
         &mut self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
+    ) -> Result<usize, Bm25Error> {
         crate::ElasticsearchClient::delete_by_file_path_scoped_epoch(
             self, index_name, file_path, project_id, epoch,
         )
+        .await
     }
 
-    fn delete_by_project_epoch(
+    async fn delete_by_project_epoch(
         &mut self,
         index_name: &str,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
+    ) -> Result<usize, Bm25Error> {
         crate::ElasticsearchClient::delete_by_project_epoch(self, index_name, project_id, epoch)
+            .await
     }
 
-    fn delete_all_project_docs(
+    async fn delete_all_project_docs(
         &mut self,
         index_name: &str,
         project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        crate::ElasticsearchClient::delete_all_project_docs(self, index_name, project_id)
+    ) -> Result<usize, Bm25Error> {
+        crate::ElasticsearchClient::delete_all_project_docs(self, index_name, project_id).await
     }
 
-    fn snapshot_documents(
+    async fn snapshot_documents(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> impl Future<Output = Result<Vec<Bm25Document>, Bm25Error>> + Send {
-        crate::ElasticsearchClient::snapshot_documents(self, project_id, epoch)
+    ) -> Result<Vec<Bm25Document>, Bm25Error> {
+        crate::ElasticsearchClient::snapshot_documents(self, project_id, epoch).await
     }
 
-    fn document_count(&self) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        crate::ElasticsearchClient::document_count(self)
+    async fn document_count(&self) -> Result<usize, Bm25Error> {
+        crate::ElasticsearchClient::document_count(self).await
     }
 
-    fn document_count_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        crate::ElasticsearchClient::document_count_by_project(self, project_id)
+    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, Bm25Error> {
+        crate::ElasticsearchClient::document_count_by_project(self, project_id).await
     }
 
-    fn epochs_by_project(
-        &self,
-        project_id: i64,
-    ) -> impl Future<Output = Result<Vec<i64>, Bm25Error>> + Send {
-        crate::ElasticsearchClient::epochs_by_project(self, project_id)
+    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, Bm25Error> {
+        crate::ElasticsearchClient::epochs_by_project(self, project_id).await
     }
 
-    fn clear_index(
-        &mut self,
-        index_name: &str,
-    ) -> impl Future<Output = Result<usize, Bm25Error>> + Send {
-        crate::ElasticsearchClient::clear_index(self, index_name)
+    async fn clear_index(&mut self, index_name: &str) -> Result<usize, Bm25Error> {
+        crate::ElasticsearchClient::clear_index(self, index_name).await
     }
 
     fn is_enabled(&self) -> bool {
@@ -331,8 +315,8 @@ impl FulltextStorage for crate::ElasticsearchClient {
         crate::ElasticsearchClient::backend_name(self)
     }
 
-    fn flush(&self) -> impl Future<Output = Result<(), Bm25Error>> + Send {
-        crate::ElasticsearchClient::flush(self)
+    async fn flush(&self) -> Result<(), Bm25Error> {
+        crate::ElasticsearchClient::flush(self).await
     }
 }
 

@@ -209,8 +209,10 @@ impl super::CodeContextEngine {
                 .map_err(|e| EngineError::Config(e.to_string()))?
                 .with_vector(self.vector.clone())
                 .with_fulltext_store(self.fulltext_store())
+                .map_err(|e| EngineError::Config(e.to_string()))?
                 .with_embedder(self.embedder.clone())
                 .with_relation_store(RelationStore::local(metadata_store))
+                .map_err(|e| EngineError::Config(e.to_string()))?
                 .with_checkpoint_manager(operation_coordinator.checkpoint_manager())
                 .with_progress_tracker(project_progress_tracker)
                 // Apply project-specific grouper (pre-processor) and ast_to_nl configs
@@ -475,7 +477,9 @@ impl super::CodeContextEngine {
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
             .and_then(RelationStore::into_local)
         {
-            builder = builder.with_relation_store(RelationStore::local(sqlite));
+            builder = builder
+                .with_relation_store(RelationStore::local(sqlite))
+                .map_err(|e| EngineError::Config(e.to_string()))?;
         }
 
         // Add rerank handler if available

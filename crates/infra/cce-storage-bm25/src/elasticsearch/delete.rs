@@ -1,5 +1,6 @@
 //! Delete-by-query operations.
 
+use cce_types::normalize_project_path;
 use serde_json::{Value, json};
 
 use crate::Bm25Error;
@@ -54,9 +55,10 @@ impl ElasticsearchClient {
         project_id: i64,
     ) -> Result<usize, Bm25Error> {
         self.validate_index_name(index_name)?;
+        let normalized = normalize_project_path(file_path);
         self.delete_by_query(&json!({
             "bool": { "filter": [
-                { "term": { "file_path": file_path } },
+                { "term": { "file_path": normalized } },
                 { "term": { "project_id": project_id.to_string() } },
             ]}
         }))
@@ -72,9 +74,10 @@ impl ElasticsearchClient {
         epoch: i64,
     ) -> Result<usize, Bm25Error> {
         self.validate_index_name(index_name)?;
+        let normalized = normalize_project_path(file_path);
         self.delete_by_query(&json!({
             "bool": { "filter": [
-                { "term": { "file_path": file_path } },
+                { "term": { "file_path": normalized } },
                 { "term": { "project_id": project_id.to_string() } },
                 { "term": { "epoch": epoch } },
             ]}

@@ -515,6 +515,7 @@ impl Bm25Client {
     /// Clear an index by recreating it from scratch
     pub async fn clear_index(&mut self, index_name: &str) -> Result<usize, Bm25Error> {
         self.validate_index_name(index_name)?;
+        let removed = self.document_count().await.unwrap_or(0);
         let start_time = Instant::now();
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
 
@@ -538,11 +539,11 @@ impl Bm25Client {
 
         let elapsed = start_time.elapsed().as_secs_f64() * 1000.0;
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(elapsed, 0, true);
+            metrics.record_delete(elapsed, removed, true);
         }
 
         tracing::info!("Cleared BM25 index");
-        Ok(0)
+        Ok(removed)
     }
 
     /// Get the BM25 index directory path

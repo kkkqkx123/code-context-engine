@@ -277,15 +277,21 @@ impl IndexOrchestrator {
     }
 
     /// Set fulltext backend via enum dispatch (phase-2 entry point).
-    pub fn with_fulltext_store(mut self, store: crate::index::vector_store::FulltextStore) -> Self {
-        self.storage = self.storage.with_fulltext_store(store);
-        self
+    pub fn with_fulltext_store(
+        mut self,
+        store: crate::index::vector_store::FulltextStore,
+    ) -> Result<Self, cce_types::StorageError> {
+        self.storage = self.storage.with_fulltext_store(store)?;
+        Ok(self)
     }
 
     /// Set relation backend via enum dispatch (phase-2 entry point).
-    pub fn with_relation_store(mut self, store: crate::index::vector_store::RelationStore) -> Self {
-        self.storage = self.storage.with_relation_store(store);
-        self
+    pub fn with_relation_store(
+        mut self,
+        store: crate::index::vector_store::RelationStore,
+    ) -> Result<Self, cce_types::StorageError> {
+        self.storage = self.storage.with_relation_store(store)?;
+        Ok(self)
     }
 
     /// Set pre-processor configuration
