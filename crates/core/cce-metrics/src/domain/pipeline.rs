@@ -61,7 +61,7 @@ impl EmbeddingMetrics {
     /// # Example
     ///
     /// ```rust
-    /// use cce_core::metrics::{MetricsRegistry, EmbeddingMetrics};
+    /// use cce_metrics::{MetricsRegistry, EmbeddingMetrics};
     ///
     /// let registry = MetricsRegistry::new();
     /// let metrics = EmbeddingMetrics::new(&registry, "openai");

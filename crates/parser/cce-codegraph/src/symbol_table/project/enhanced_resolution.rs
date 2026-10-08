@@ -554,10 +554,8 @@ impl ProjectSymbolTable {
             let symbol_ref =
                 self.symbol_ref_for(&metadata, member.module_path.as_deref().unwrap_or(""));
             return Some(symbol_ref);
-        } else {
-            if let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone()) {
-                metrics.type_member_miss_total.increment();
-            }
+        } else if let Some(metrics) = self.metrics_sink.read().ok().and_then(|g| g.clone()) {
+            metrics.type_member_miss_total.increment();
         }
         None
     }

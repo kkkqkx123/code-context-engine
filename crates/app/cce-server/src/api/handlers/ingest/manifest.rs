@@ -3,7 +3,7 @@
 use axum::extract::{Path as AxumPath, State};
 use cce_api::models::{
     ErrorResponse, IngestManifestRequest, IngestManifestResponse, MissingChunk,
-    SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, error_codes, total_chunks_for_size,
+    error_codes, total_chunks_for_size,
 };
 use cce_storage_metadb_sqlite::{FileRepository, ProjectRepository};
 

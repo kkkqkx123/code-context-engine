@@ -952,21 +952,34 @@ mod tests {
         // Remote branches are forward scaffolding, not an official preset:
         // even with endpoints configured, the full-remote combination needs
         // the advanced switch.
-        let mut preset = DatabaseConfig::default();
-        preset.vector_backend = cce_config::modules::VectorBackend::Qdrant;
-        preset.relation_backend = cce_config::modules::RelationBackend::Remote;
-        preset.fulltext_backend = cce_config::modules::FulltextBackend::Remote;
-        preset.relation_remote.url = Some("postgres://localhost:5432/cce".to_string());
-        preset.fulltext_remote.url = Some("http://localhost:9200".to_string());
-        preset.fulltext_remote.index_name = Some("code_index".to_string());
+        let mut preset = DatabaseConfig {
+            vector_backend: cce_config::modules::VectorBackend::Qdrant,
+            relation_backend: cce_config::modules::RelationBackend::Remote,
+            fulltext_backend: cce_config::modules::FulltextBackend::Remote,
+            relation_remote: cce_config::modules::RelationRemoteConfig {
+                url: Some("postgres://localhost:5432/cce".to_string()),
+                ..Default::default()
+            },
+            fulltext_remote: cce_config::modules::FulltextRemoteConfig {
+                url: Some("http://localhost:9200".to_string()),
+                index_name: Some("code_index".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         assert!(preset.validate_backend_combination().is_err());
         preset.allow_nonstandard_backends = true;
         assert!(preset.validate_backend_combination().is_ok());
         // A partial remote mix stays non-preset and needs the advanced switch.
-        let mut partial = DatabaseConfig::default();
-        partial.fulltext_backend = cce_config::modules::FulltextBackend::Remote;
-        partial.fulltext_remote.url = Some("http://localhost:9200".to_string());
-        partial.fulltext_remote.index_name = Some("code_index".to_string());
+        let mut partial = DatabaseConfig {
+            fulltext_backend: cce_config::modules::FulltextBackend::Remote,
+            fulltext_remote: cce_config::modules::FulltextRemoteConfig {
+                url: Some("http://localhost:9200".to_string()),
+                index_name: Some("code_index".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         assert!(partial.validate_backend_combination().is_err());
         partial.allow_nonstandard_backends = true;
         assert!(partial.validate_backend_combination().is_ok());

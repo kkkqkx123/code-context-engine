@@ -15,7 +15,6 @@ use cce_api::models::{
     RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse,
     RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
-use cce_storage_common::VectorStorage;
 
 // --- Handlers ---
 

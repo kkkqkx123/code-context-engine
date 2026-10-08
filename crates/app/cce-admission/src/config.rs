@@ -214,19 +214,22 @@ fn parse_token_env(raw: &str) -> Result<Vec<TokenEntry>, crate::middleware::Admi
         let mut projects = Vec::new();
         let mut quota_bytes: Option<u64> = None;
         let scope = match scope {
-            Some(scope) if let Some((projects_part, quota_part)) = scope.split_once(':') => {
-                let quota: u64 = quota_part.trim().parse().map_err(|_| {
-                    AdmissionError::config("admission token quota must be a positive byte count")
-                })?;
-                if quota == 0 {
-                    return Err(AdmissionError::config(
-                        "admission token quota must be positive",
-                    ));
+            Some(scope) => match scope.split_once(':') {
+                Some((projects_part, quota_part)) => {
+                    let quota: u64 = quota_part.trim().parse().map_err(|_| {
+                        AdmissionError::config("admission token quota must be a positive byte count")
+                    })?;
+                    if quota == 0 {
+                        return Err(AdmissionError::config(
+                            "admission token quota must be positive",
+                        ));
+                    }
+                    quota_bytes = Some(quota);
+                    Some(projects_part)
                 }
-                quota_bytes = Some(quota);
-                Some(projects_part)
-            }
-            other => other,
+                None => Some(scope),
+            },
+            None => None,
         };
         if let Some(scope) = scope {
             for part in scope.split(',').map(str::trim).filter(|s| !s.is_empty()) {

@@ -36,15 +36,13 @@ pub async fn execute_reload(server: &str, project_id: i64, verbose: bool) -> Res
                 if !response.message.is_empty() {
                     println!("  {}", response.message);
                 }
+            } else if !response.message.is_empty() {
+                print_error(&format!(
+                    "Configuration reload failed: {}",
+                    response.message
+                ));
             } else {
-                if !response.message.is_empty() {
-                    print_error(&format!(
-                        "Configuration reload failed: {}",
-                        response.message
-                    ));
-                } else {
-                    print_error("Configuration reload failed");
-                }
+                print_error("Configuration reload failed");
             }
         }
         Err(e) => {

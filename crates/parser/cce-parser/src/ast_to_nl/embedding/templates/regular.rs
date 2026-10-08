@@ -281,8 +281,8 @@ impl RegularGroupTemplate {
             let signature_emitted =
                 !signature.is_empty() && (signature.contains('=') || signature.contains('.'));
             if !member_desc.contains(&relation)
-                && !(signature_emitted
-                    && Self::is_redundant_relation(&relation, &member_desc, signature))
+                && (!signature_emitted
+                    || !Self::is_redundant_relation(&relation, &member_desc, signature))
             {
                 member_desc.push('\n');
                 member_desc.push_str(&relation);

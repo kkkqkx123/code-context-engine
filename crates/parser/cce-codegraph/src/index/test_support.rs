@@ -3,8 +3,6 @@
 //! Test-only: seeded indexes, edge/entity builders, and identity comparison
 //! helpers reused across the index module's unit tests.
 
-#![cfg(test)]
-
 use std::collections::HashMap;
 
 use cce_types::relation::CallContext;

@@ -99,7 +99,7 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
         .await
         .expect("search");
     assert_eq!(hits.len(), 2);
-    assert!(hits.iter().all(|h| h.fields.get("file_path").is_some()));
+    assert!(hits.iter().all(|h| h.fields.contains_key("file_path")));
 
     // Project isolation: another project's documents stay invisible, and a
     // project that was never indexed reads empty.
@@ -185,7 +185,7 @@ async fn run_contract_suite(store: &impl FulltextStorage, tag: &str, index: &str
         .search("zephyrwind", &options(7, Vec::new()))
         .await
         .expect("empty-epoch search");
-    assert!(hits.iter().all(|h| h.fields.get("file_path").is_some()));
+    assert!(hits.iter().all(|h| h.fields.contains_key("file_path")));
     assert!(!hits.is_empty());
     let hits = store
         .search("zephyrwind", &options(9, Vec::new()))

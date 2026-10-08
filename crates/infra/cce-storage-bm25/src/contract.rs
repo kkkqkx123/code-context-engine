@@ -6,7 +6,6 @@
 
 use cce_storage_common::fulltext::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
-    assert_fulltext_storage,
 };
 
 #[cfg(feature = "local")]
@@ -206,6 +205,7 @@ impl FulltextStorage for crate::ElasticsearchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cce_storage_common::fulltext::assert_fulltext_storage;
 
     #[test]
     #[cfg(feature = "local")]

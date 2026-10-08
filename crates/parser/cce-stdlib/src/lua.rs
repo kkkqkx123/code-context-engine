@@ -215,11 +215,10 @@ impl LuaStdlibDetector {
                 // Check if module prefix exists in stdlib
                 if Self::STDLIB_MODULES
                     .iter()
-                    .position(|&m| {
+                    .any(|&m| {
                         m.starts_with(parts[0])
                             && (m == parts[0] || (m.chars().nth(parts[0].len()) == Some('.')))
                     })
-                    .is_some()
                 {
                     return true;
                 }

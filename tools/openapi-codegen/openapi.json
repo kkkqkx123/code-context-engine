@@ -4887,7 +4887,7 @@
           "Storage"
         ],
         "summary": "Handle storage status request",
-        "description": "Checks all storage components and returns their status.\nUses Qdrant's diagnose() method for comprehensive health assessment.",
+        "description": "Checks all storage components and returns their status.\nUses vector diagnostics for comprehensive health assessment.",
         "operationId": "handle_storage_status",
         "responses": {
           "200": {
