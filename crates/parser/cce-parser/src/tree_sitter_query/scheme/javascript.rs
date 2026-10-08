@@ -342,13 +342,25 @@ pub fn entity_js_only() -> &'static str {
 ; ============================================
 ; Patterns for `obj.method = function method(args) {}` and variants.
 ; Common in older JavaScript codebases and prototype-based inheritance.
+;
+; The entity is named after the assigned property, never after the whole
+; member expression: `res.status = ...` declares the method `status`, the
+; same way a class method declaration would. The receiver is an arbitrary
+; local binding, so keeping it in the name would make the declaration key
+; unmatchable against call sites (`this.status(...)`, `res.status(...)`)
+; and would diverge from every other language scheme, which names entities
+; after the identifier node. Only `property_identifier` is accepted: a
+; computed key (`res[key] = ...`) names no identifier and falls through to
+; the generic member-assignment pattern below.
 
 ; Function expression assigned to member expression (named or anonymous)
 ; e.g., res.send = function send(body) { ... }
 ; e.g., res.send = function(body) { ... }
 ; e.g., View.prototype.lookup = function lookup(name) { ... }
 (assignment_expression
-  left: (member_expression) @entity.method.name
+  left: (member_expression
+    property: (property_identifier) @entity.method.name
+  )
   right: (function_expression
     parameters: (formal_parameters) @entity.method.params
     body: (statement_block
@@ -360,7 +372,9 @@ pub fn entity_js_only() -> &'static str {
 ; Arrow function assigned to member expression
 ; e.g., res.send = (body) => { ... }
 (assignment_expression
-  left: (member_expression) @entity.method.name
+  left: (member_expression
+    property: (property_identifier) @entity.method.name
+  )
   right: (arrow_function
     parameters: (formal_parameters) @entity.method.params
   )
@@ -368,7 +382,9 @@ pub fn entity_js_only() -> &'static str {
 
 ; Chained assignment outermost span, e.g. res.set = res.header = function() {}
 (assignment_expression
-  left: (member_expression) @entity.method.chain.name
+  left: (member_expression
+    property: (property_identifier) @entity.method.chain.name
+  )
   right: (assignment_expression)
 ) @entity.method.chain
 

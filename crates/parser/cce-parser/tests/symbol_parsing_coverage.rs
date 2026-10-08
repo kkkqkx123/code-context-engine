@@ -145,13 +145,20 @@ res.json = function json(obj) {
 
 res.links = function(next) {
   return this;
-};
+}
+
+View.prototype.lookup = function lookup(name) {
+  return this[name];
+}
 "#,
     );
     find(&parsed.entities, EntityKind::Method, "status");
     find(&parsed.entities, EntityKind::Method, "send");
     find(&parsed.entities, EntityKind::Method, "json");
     find(&parsed.entities, EntityKind::Method, "links");
+    // The receiver may itself be a member expression; the entity is still
+    // named after the assigned property, not after the whole target.
+    find(&parsed.entities, EntityKind::Method, "lookup");
 }
 
 #[test]
