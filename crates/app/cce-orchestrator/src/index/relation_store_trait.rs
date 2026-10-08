@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::repo::RelationSnapshotRepository;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::repo::RelationSnapshotRepository;
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta};
 
 /// Persistent store for relation snapshots and deltas.

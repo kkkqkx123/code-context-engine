@@ -1,14 +1,9 @@
-//! Core record types for SQLite tables.
+//! Backend-neutral record types for relation storage.
 
-use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::helpers::FromRow;
-
-/// Database ID type.
 pub type DbId = i64;
 
-/// File record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRecord {
     pub id: i64,
@@ -21,7 +16,6 @@ pub struct FileRecord {
     pub content_hash: Option<String>,
 }
 
-/// Entity record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityRecord {
     pub id: i64,
@@ -49,7 +43,6 @@ pub struct EntityRecord {
     pub rank: f32,
 }
 
-/// Project record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectRecord {
     pub id: i64,
@@ -66,7 +59,6 @@ pub struct ProjectRecord {
     pub updated_at: i64,
 }
 
-/// New project record (without ID and timestamps).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewProjectRecord {
     pub name: String,
@@ -116,7 +108,6 @@ impl NewProjectRecord {
     }
 }
 
-/// Project update record (partial update).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectUpdateRecord {
     pub name: Option<String>,
@@ -177,7 +168,6 @@ impl ProjectUpdateRecord {
     }
 }
 
-/// Entity detail mapping record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityDetailMapping {
     pub id: i64,
@@ -266,7 +256,6 @@ impl EntityDetailMapping {
     }
 }
 
-/// Chunk record for storing code chunk content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkRecord {
     pub chunk_id: String,
@@ -287,7 +276,6 @@ pub struct ChunkRecord {
     pub path: String,
     pub bm25_keywords: String,
     pub segment_id: String,
-    /// Token-budget truncation marker: 1 when `content` was truncated.
     pub truncated: u8,
 }
 
@@ -441,128 +429,270 @@ impl ChunkRecord {
     }
 }
 
-/// Statistics for summary generation operations.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SummaryGenerationStats {
-    pub total: usize,
-    pub completed: usize,
-    pub failed: usize,
-    pub total_duration_ms: i64,
-    pub entry_count: usize,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckpointRecord {
+    pub id: Option<i64>,
+    pub project_id: i64,
+    pub operation_id: String,
+    pub operation_type: String,
+    pub root_dir: String,
+    pub total_files: u32,
+    pub batch_size: u32,
+    pub current_batch_index: u32,
+    pub current_phase: String,
+    pub file_list_hash: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_error: Option<String>,
+    pub failure_count: u32,
+    pub status: CheckpointStatus,
+    pub active_flag: bool,
+    pub priority: i32,
+    pub last_heartbeat: Option<String>,
+    pub failed_at: Option<String>,
 }
 
-impl SummaryGenerationStats {
-    pub fn success_rate(&self) -> f64 {
-        if self.total == 0 {
-            0.0
-        } else {
-            (self.completed as f64 / self.total as f64) * 100.0
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCheckpointRecord {
+    pub id: Option<i64>,
+    pub operation_id: String,
+    pub batch_index: u32,
+    pub file_path: String,
+    pub file_id: Option<i64>,
+    pub language: Option<String>,
+    pub file_size: Option<i64>,
+    pub content_hash: Option<String>,
+    pub parsed_data: Option<Vec<u8>>,
+    pub parse_error: Option<String>,
+    pub summary_data: Option<Vec<u8>>,
+    pub embedding_count: u32,
+    pub bm25_doc_id: Option<String>,
+    pub export_path: Option<String>,
+    pub render_fingerprint: Option<String>,
+    pub module_progress: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkUnitCheckpointRecord {
+    pub id: Option<i64>,
+    pub project_id: i64,
+    pub operation_id: String,
+    pub stage: String,
+    pub target_epoch: i64,
+    pub work_unit_hash: String,
+    pub status: WorkUnitStatus,
+    pub item_count: u32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckpointStatus {
+    #[serde(rename = "in_progress")]
+    InProgress,
+    Completed,
+    Failed,
+}
+
+impl CheckpointStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CheckpointStatus::InProgress => "in_progress",
+            CheckpointStatus::Completed => "completed",
+            CheckpointStatus::Failed => "failed",
         }
     }
 }
 
-impl FromRow for FileRecord {
-    fn from_row(row: &Row) -> Result<Self, rusqlite::Error> {
-        Ok(FileRecord {
-            id: row.get(0)?,
-            path: row.get(1)?,
-            language: row.get(2)?,
-            category: row.get(3)?,
-            last_modified: row.get(4)?,
-            created_at: row.get(5)?,
-            project_id: row.get(6)?,
-            content_hash: row.get(7)?,
-        })
+impl std::str::FromStr for CheckpointStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "in_progress" => Ok(CheckpointStatus::InProgress),
+            "completed" => Ok(CheckpointStatus::Completed),
+            "failed" => Ok(CheckpointStatus::Failed),
+            _ => Err(()),
+        }
     }
 }
 
-impl FromRow for EntityRecord {
-    fn from_row(row: &Row) -> Result<Self, rusqlite::Error> {
-        Ok(EntityRecord {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            kind: row.get(2)?,
-            file_id: row.get(3)?,
-            signature: row.get(4)?,
-            span_start_row: row.get(5)?,
-            span_end_row: row.get(6)?,
-            span_start_column: row.get(7)?,
-            span_end_column: row.get(8)?,
-            span_start_byte: row.get(9)?,
-            span_end_byte: row.get(10)?,
-            scoped_name: row.get(11)?,
-            depth: row.get(12)?,
-            parent_id: row.get(13)?,
-            metadata: row.get(14)?,
-            parameters_json: row.get(15)?,
-            return_type: row.get(16)?,
-            doc_comment: row.get(17)?,
-            modifiers_json: row.get(18)?,
-            project_id: row.get(19)?,
-            epoch: row.get(20)?,
-            batch_id: row.get(21)?,
-            rank: row.get(22)?,
-        })
+impl std::fmt::Display for CheckpointStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
-impl FromRow for ChunkRecord {
-    fn from_row(row: &Row) -> Result<Self, rusqlite::Error> {
-        Ok(ChunkRecord {
-            chunk_id: row.get(0)?,
-            file_path: row.get(1)?,
-            content: row.get(2)?,
-            start_line: row.get(3)?,
-            end_line: row.get(4)?,
-            entity_ids: row.get(5)?,
-            entity_names: row.get(6)?,
-            chunk_type: row.get(7)?,
-            test_status: row.get::<_, u8>(8)?,
-            test_source: row.get::<_, u8>(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-            project_id: row.get(12)?,
-            epoch: row.get(13)?,
-            batch_id: row.get(14)?,
-            path: row.get(15)?,
-            bm25_keywords: row.get(16)?,
-            segment_id: row.get(17)?,
-            truncated: row.get::<_, u8>(18)?,
-        })
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkUnitStatus {
+    Pending,
+    Running,
+    Committed,
+    Failed,
+}
+
+impl WorkUnitStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WorkUnitStatus::Pending => "pending",
+            WorkUnitStatus::Running => "running",
+            WorkUnitStatus::Committed => "committed",
+            WorkUnitStatus::Failed => "failed",
+        }
     }
 }
 
-impl FromRow for EntityDetailMapping {
-    fn from_row(row: &Row) -> Result<Self, rusqlite::Error> {
-        Ok(EntityDetailMapping {
-            id: row.get(0)?,
-            entity_id: row.get(1)?,
-            project_id: row.get(2)?,
-            epoch: row.get(3)?,
-            qdrant_point_ids: row.get(4)?,
-            bm25_doc_ids: row.get(5)?,
-            chunk_count: row.get(6)?,
-            created_at: row.get(7)?,
-            updated_at: row.get(8)?,
-        })
+impl std::str::FromStr for WorkUnitStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(WorkUnitStatus::Pending),
+            "running" => Ok(WorkUnitStatus::Running),
+            "committed" => Ok(WorkUnitStatus::Committed),
+            "failed" => Ok(WorkUnitStatus::Failed),
+            _ => Err(()),
+        }
     }
 }
 
-impl FromRow for ProjectRecord {
-    fn from_row(row: &Row) -> Result<Self, rusqlite::Error> {
-        Ok(ProjectRecord {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            root_path: row.get(2)?,
-            config_file_path: row.get(3)?,
-            language: row.get(4)?,
-            extensions: row.get(5)?,
-            exclude_dirs: row.get(6)?,
-            respect_gitignore: row.get::<_, Option<i32>>(7)?.map(|v| v != 0),
-            ignore_patterns: row.get(8)?,
-            last_indexed: row.get(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-        })
+impl std::fmt::Display for WorkUnitStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverrideDisposition {
+    Replaced,
+    Deleted,
+}
+
+impl OverrideDisposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Replaced => "replaced",
+            Self::Deleted => "deleted",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, cce_types::StorageError> {
+        match value {
+            "replaced" => Ok(Self::Replaced),
+            "deleted" => Ok(Self::Deleted),
+            other => Err(cce_types::StorageError::Query(format!(
+                "invalid generation override disposition: {other}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenerationOverride {
+    pub file_path: String,
+    pub disposition: OverrideDisposition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectIndexManifestState {
+    Building,
+    Active,
+    Failed,
+}
+
+impl ProjectIndexManifestState {
+    pub fn parse(value: &str) -> Result<Self, cce_types::StorageError> {
+        match value {
+            "building" => Ok(Self::Building),
+            "active" => Ok(Self::Active),
+            "failed" => Ok(Self::Failed),
+            _ => Err(cce_types::StorageError::Query(format!(
+                "invalid project index manifest state: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectIndexManifest {
+    pub project_id: i64,
+    pub publication_epoch: i64,
+    pub data_epoch: i64,
+    pub relation_epoch: i64,
+    pub operation_id: String,
+    pub state: ProjectIndexManifestState,
+    pub input_fingerprint: Option<String>,
+    pub candidate_ready: bool,
+    pub parent_data_epoch: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GenerationGcPlan {
+    pub stale_publication_epochs: Vec<i64>,
+    pub stale_data_epochs: Vec<i64>,
+    pub stale_relation_epochs: Vec<i64>,
+    pub protected_data_epochs: Vec<i64>,
+    pub protected_relation_epochs: Vec<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdmissionAuditRecord {
+    pub token_fingerprint: String,
+    pub projects: String,
+    pub quota_bytes: Option<i64>,
+    pub bytes_used: i64,
+    pub admitted: i64,
+    pub auth_rejections: i64,
+    pub scope_rejections: i64,
+    pub rate_rejections: i64,
+    pub body_rejections: i64,
+    pub quota_rejections: i64,
+    pub last_used: Option<i64>,
+    pub last_reject_reason: Option<String>,
+}
+
+impl rusqlite::types::FromSql for CheckpointStatus {
+    fn column_result(
+        value: rusqlite::types::ValueRef,
+    ) -> Result<Self, rusqlite::types::FromSqlError> {
+        match value.as_str() {
+            Ok(s) => s
+                .parse()
+                .map_err(|_| rusqlite::types::FromSqlError::InvalidType),
+            Err(e) => Err(rusqlite::types::FromSqlError::Other(Box::new(e))),
+        }
+    }
+}
+
+impl rusqlite::types::ToSql for CheckpointStatus {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::Owned(
+            rusqlite::types::Value::Text(self.as_str().to_string()),
+        ))
+    }
+}
+
+impl rusqlite::types::FromSql for WorkUnitStatus {
+    fn column_result(
+        value: rusqlite::types::ValueRef,
+    ) -> Result<Self, rusqlite::types::FromSqlError> {
+        match value.as_str() {
+            Ok(s) => s
+                .parse()
+                .map_err(|_| rusqlite::types::FromSqlError::InvalidType),
+            Err(e) => Err(rusqlite::types::FromSqlError::Other(Box::new(e))),
+        }
+    }
+}
+
+impl rusqlite::types::ToSql for WorkUnitStatus {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::Owned(
+            rusqlite::types::Value::Text(self.as_str().to_string()),
+        ))
     }
 }

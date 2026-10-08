@@ -10,9 +10,11 @@ use cce_relation::index::RelationIndexView;
 use cce_relation::index::core::RelationIndex;
 use cce_relation::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
 use cce_relation::index::snapshot_loader::RelationSnapshotLoader;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::repo::{ProjectIndexManifestRepository, RelationSnapshotRepository};
-use cce_storage_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::repo::{
+    ProjectIndexManifestRepository, RelationSnapshotRepository,
+};
+use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
 use rusqlite::OptionalExtension;
 use tokio::sync::Mutex;
@@ -648,9 +650,9 @@ mod tests {
         SnapshotSymbolQueryOps,
     };
     use cce_relation::index::{LayeredSnapshotIndex, RelationSnapshotIndex};
-    use cce_storage_sqlite::ProjectRepository;
-    use cce_storage_sqlite::repo::ProjectIndexManifestRepository;
-    use cce_storage_sqlite::types::NewProjectRecord;
+    use cce_storage_relation_sqlite::ProjectRepository;
+    use cce_storage_relation_sqlite::repo::ProjectIndexManifestRepository;
+    use cce_storage_relation_sqlite::types::NewProjectRecord;
     use cce_types::relation::CallContext;
     use cce_types::{
         CanonicalEntity, CanonicalFile, CanonicalRelation, CanonicalRelationTarget, EntityKind,

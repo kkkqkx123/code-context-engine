@@ -94,7 +94,7 @@ pub async fn verify_direct_batch(
 pub async fn process_gateway_queue(
     processor: &mut crate::hot_update::FileProcessor,
     payloads: &[FileContentPayload],
-    metadata_store: &Option<std::sync::Arc<cce_storage_sqlite::SqliteClient>>,
+    metadata_store: &Option<std::sync::Arc<cce_storage_relation_sqlite::SqliteClient>>,
     project_id: i64,
 ) -> Result<usize, String> {
     use crate::hot_update::FileChangeType;

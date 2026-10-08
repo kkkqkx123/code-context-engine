@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use cce_storage_common::VectorStorage;
-use cce_storage_sqlite::ProjectIndexManifestRepository;
+use cce_storage_relation_sqlite::ProjectIndexManifestRepository;
 
 use crate::error::OrchestratorError;
 

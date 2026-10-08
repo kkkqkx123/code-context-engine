@@ -61,16 +61,16 @@ impl VectorBackend {
 
 /// Relation storage backend selection.
 ///
-/// Phase 1 exposes only the local branch (embedded SQLite). The remote
-/// variant reserves the configuration position for a future relational
-/// database branch; selecting it is rejected by validation until phase 3.
+/// `Local` is the default embedded SQLite branch; `Remote` selects the
+/// PostgreSQL branch. Switching backends requires a full reindex; old data
+/// is never migrated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RelationBackend {
     /// Embedded SQLite repositories (current behavior).
     #[default]
     Local,
-    /// Future relational database branch (reserved, not enabled).
+    /// PostgreSQL branch (remote preset only).
     Remote,
 }
 
@@ -89,16 +89,16 @@ impl RelationBackend {
 
 /// Fulltext storage backend selection.
 ///
-/// Phase 1 exposes only the local branch (embedded Tantivy). The remote
-/// variant reserves the configuration position for a future search-service
-/// branch; selecting it is rejected by validation until phase 3.
+/// `Local` is the default embedded Tantivy branch; `Remote` selects the
+/// Elasticsearch branch. Switching backends requires a full reindex; old
+/// data is never migrated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FulltextBackend {
     /// Embedded Tantivy index (current behavior).
     #[default]
     Local,
-    /// Future search-service branch (reserved, not enabled).
+    /// Elasticsearch branch (remote preset only).
     Remote,
 }
 
@@ -115,31 +115,164 @@ impl FulltextBackend {
     }
 }
 
-/// Reserved remote parameters for the relation branch.
+/// Remote parameters for the relation branch (PostgreSQL).
 ///
-/// No client reads these in phase 1; the fields exist so later phases do
-/// not need to rename configuration keys. Secrets stay overridable via
-/// environment variables.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Local parameters and remote parameters are isolated: SQLite tuning stays
+/// in [`SqliteConfig`], pool and timeout tuning lives here. Secrets stay
+/// overridable via environment variables.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RelationRemoteConfig {
-    /// Remote database URL (reserved).
+    /// PostgreSQL connection URL (e.g. `postgres://host:5432/cce`).
+    /// Individual credential fields below take precedence over the
+    /// credentials embedded in the URL.
     pub url: Option<String>,
-    /// API key or password (reserved, prefer environment override).
+    /// Database user name (reserved alias for `username`).
     pub api_key: Option<String>,
+    /// Database user name.
+    pub username: Option<String>,
+    /// Database password (prefer environment override).
+    pub password: Option<String>,
+    /// Connection pool size.
+    pub pool_size: u32,
+    /// Timeout for establishing a new connection, in milliseconds.
+    pub connect_timeout_ms: u64,
+    /// Timeout for acquiring a pooled connection, in milliseconds.
+    pub acquire_timeout_ms: u64,
+    /// Per-statement timeout, in milliseconds (0 disables).
+    pub statement_timeout_ms: u64,
 }
 
-/// Reserved remote parameters for the fulltext branch.
+impl Default for RelationRemoteConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            api_key: None,
+            username: None,
+            password: None,
+            pool_size: 8,
+            connect_timeout_ms: 5_000,
+            acquire_timeout_ms: 5_000,
+            statement_timeout_ms: 30_000,
+        }
+    }
+}
+
+impl Validate for RelationRemoteConfig {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if self.pool_size == 0 || self.pool_size > 128 {
+            errors.push(ConfigValidationError::out_of_range(
+                "pool_size",
+                self.pool_size.to_string(),
+                "1",
+                "128",
+            ));
+        }
+        if self.connect_timeout_ms == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "connect_timeout_ms",
+                "must be greater than 0",
+            ));
+        }
+        if self.acquire_timeout_ms == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "acquire_timeout_ms",
+                "must be greater than 0",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl RelationRemoteConfig {
+    /// Effective database user: explicit username wins, api_key stays as a
+    /// legacy alias, empty means no authentication.
+    pub fn effective_username(&self) -> Option<&str> {
+        self.username
+            .as_deref()
+            .or(self.api_key.as_deref())
+            .filter(|s| !s.is_empty())
+    }
+}
+
+/// Remote parameters for the fulltext branch (Elasticsearch).
 ///
-/// No client reads these in phase 1; the fields exist so later phases do
-/// not need to rename configuration keys.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Local parameters (writer budget, reader policy) stay in [`Bm25Config`];
+/// endpoint, authentication, refresh and batching tuning lives here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FulltextRemoteConfig {
-    /// Remote search-service URL (reserved).
+    /// Search-service base URL (e.g. `http://localhost:9200`).
     pub url: Option<String>,
     /// API key (reserved, prefer environment override).
     pub api_key: Option<String>,
+    /// Basic-auth user name.
+    pub username: Option<String>,
+    /// Basic-auth password (prefer environment override).
+    pub password: Option<String>,
+    /// Index name; defaults to the local `bm25.index_name` when unset.
+    pub index_name: Option<String>,
+    /// Bulk batch size for write requests.
+    pub bulk_size: usize,
+    /// Per-request timeout in milliseconds.
+    pub request_timeout_ms: u64,
+    /// Desired index refresh interval (e.g. `1s`, `-1` to disable).
+    pub refresh_interval: Option<String>,
+}
+
+impl Default for FulltextRemoteConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            api_key: None,
+            username: None,
+            password: None,
+            index_name: None,
+            bulk_size: 500,
+            request_timeout_ms: 30_000,
+            refresh_interval: None,
+        }
+    }
+}
+
+impl Validate for FulltextRemoteConfig {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if self.bulk_size == 0 || self.bulk_size > 10_000 {
+            errors.push(ConfigValidationError::out_of_range(
+                "bulk_size",
+                self.bulk_size.to_string(),
+                "1",
+                "10000",
+            ));
+        }
+        if self.request_timeout_ms == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "request_timeout_ms",
+                "must be greater than 0",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl FulltextRemoteConfig {
+    /// Effective index name, falling back to the local BM25 index name.
+    pub fn effective_index_name<'a>(&'a self, bm25_index_name: &'a str) -> &'a str {
+        self.index_name
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(bm25_index_name)
+    }
 }
 
 /// Local vector engine configuration (embedded simvec).

@@ -1,7 +1,7 @@
 //! SQLite file and entity persistence.
 
 use cce_scanner::FileEntry;
-use cce_storage_sqlite::{EntityRecord, EntityRepository};
+use cce_storage_relation_sqlite::{EntityRecord, EntityRepository};
 
 use crate::error::OrchestratorError;
 
@@ -18,7 +18,7 @@ impl StorageCoordinator {
             .with_transaction(|tx| {
                 for file in files {
                     if let Some(hash) = file.content_hash.as_deref() {
-                        cce_storage_sqlite::FileRepository::insert_hash_for_epoch(
+                        cce_storage_relation_sqlite::FileRepository::insert_hash_for_epoch(
                             tx,
                             &file.relative_path,
                             hash,
@@ -261,7 +261,9 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::super::StorageCoordinator;
-    use cce_storage_sqlite::{EntityRepository, NewProjectRecord, ProjectRepository, SqliteClient};
+    use cce_storage_relation_sqlite::{
+        EntityRepository, NewProjectRecord, ProjectRepository, SqliteClient,
+    };
     use cce_types::entity::{Entity, EntityId, EntityKind, ParsedFile};
     use cce_types::{Language, Span};
     use std::sync::Arc;

@@ -256,7 +256,7 @@ impl StorageCoordinator {
 mod tests {
     use std::sync::Arc;
 
-    use cce_storage_sqlite::{
+    use cce_storage_relation_sqlite::{
         ChunkRecord, ChunkRepository, FileRepository, FileSummaryRepository, NewProjectRecord,
         ProjectRepository, SqliteClient,
     };
@@ -281,7 +281,7 @@ mod tests {
             .with_transaction(|tx| {
                 FileRepository::insert(
                     tx,
-                    &cce_storage_sqlite::FileRecord {
+                    &cce_storage_relation_sqlite::FileRecord {
                         id: 0,
                         path: "src/lib.rs".to_string(),
                         language: "rust".to_string(),

@@ -3,8 +3,8 @@
 //! This module provides functionality for detecting and tracking changes
 //! to file lists, which is critical for incremental update optimizations.
 
-use cce_storage_sqlite::CheckpointRepository;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::CheckpointRepository;
+use cce_storage_relation_sqlite::SqliteClient;
 use cce_types::StorageError;
 use chrono::Utc;
 use std::sync::Arc;

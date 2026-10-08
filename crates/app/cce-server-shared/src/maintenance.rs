@@ -12,7 +12,7 @@ use tracing::info;
 use cce_orchestrator::index::VectorStore;
 use cce_storage_bm25::Bm25Client;
 use cce_storage_common::VectorStorage;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 
 use crate::engine::CodeContextEngine;
 
@@ -280,7 +280,7 @@ impl ProjectIndexMaintenanceService {
         // Step B: Delete SQLite project record and project database
         if let Some(sqlite) = self.sqlite_client() {
             let registry_result = sqlite.with_transaction(|tx| {
-                cce_storage_sqlite::ProjectRepository::delete_with_cascade(tx, project_id)
+                cce_storage_relation_sqlite::ProjectRepository::delete_with_cascade(tx, project_id)
             });
             match registry_result {
                 Ok(()) => {

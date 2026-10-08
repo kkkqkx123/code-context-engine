@@ -33,7 +33,7 @@
 use rusqlite::Connection;
 
 use cce_storage_common::SearchFilter;
-use cce_storage_sqlite::{GenerationOverrideRepository, ProjectIndexManifestRepository};
+use cce_storage_relation_sqlite::{GenerationOverrideRepository, ProjectIndexManifestRepository};
 
 use crate::query::error::{QueryError, Result};
 

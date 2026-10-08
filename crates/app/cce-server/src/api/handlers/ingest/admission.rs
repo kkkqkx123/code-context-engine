@@ -60,9 +60,9 @@ pub async fn handle_admission_stats(
     let global = metrics.snapshot();
     let mut tokens = Vec::new();
     if let Some(store) = state.engine.metadata_store()
-        && let Ok(records) = store
-            .as_ref()
-            .with_transaction(|tx| cce_storage_sqlite::AdmissionAuditRepository::list_all(tx))
+        && let Ok(records) = store.as_ref().with_transaction(|tx| {
+            cce_storage_relation_sqlite::AdmissionAuditRepository::list_all(tx)
+        })
     {
         for record in records {
             tokens.push(TokenAuditEntry {

@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_bm25::Bm25Document;
-use cce_storage_sqlite::ChunkRecord;
+use cce_storage_relation_sqlite::ChunkRecord;
 use cce_types::chunk_refs::ChunkEntityRefs;
 use cce_types::{TestInfo, TestStatus};
 

@@ -7,7 +7,7 @@ use cce_orchestrator::{IndexOptions, IndexResult};
 use cce_relation::index::entity_index::EntityIndexOps;
 use cce_relation::index::relation_query::RelationQueryOps;
 use cce_relation::index::snapshot_loader::RelationSnapshotLoader;
-use cce_storage_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
 
 impl super::CodeContextEngine {
     // --- Index operations ---
@@ -177,7 +177,9 @@ impl super::CodeContextEngine {
         })?;
         let relation_epoch = sqlite_client
             .with_transaction(|tx| {
-                cce_storage_sqlite::ProjectIndexManifestRepository::get_active(tx, project_id)
+                cce_storage_relation_sqlite::ProjectIndexManifestRepository::get_active(
+                    tx, project_id,
+                )
             })
             .map_err(|error| EngineError::Recovery(error.to_string()))?
             .map(|manifest| manifest.relation_epoch)
@@ -205,7 +207,7 @@ impl super::CodeContextEngine {
                                 "Failed to read relation manifest: {error}"
                             ))
                         })?;
-                        cce_storage_sqlite::repo::RelationSnapshotRepository::get_manifest(
+                        cce_storage_relation_sqlite::repo::RelationSnapshotRepository::get_manifest(
                             &conn,
                             project_id,
                             relation_epoch,

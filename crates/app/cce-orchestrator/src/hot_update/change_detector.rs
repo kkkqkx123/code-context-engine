@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use cce_scanner::{FSScanner, FileEntry, ScanOptions};
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::cache::FileHashCache;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::cache::FileHashCache;
 
 use super::error::HotUpdateError;
 use super::exclude_rules::ExcludeRules;
@@ -413,8 +413,8 @@ impl ChangeDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_sqlite::SqliteClient;
-    use cce_storage_sqlite::repo::file_repo::FileRepository;
+    use cce_storage_relation_sqlite::SqliteClient;
+    use cce_storage_relation_sqlite::repo::file_repo::FileRepository;
 
     #[test]
     fn test_change_detector_creation() {
@@ -825,9 +825,9 @@ mod tests {
     /// inherits from it and owns only `src/changed.rs`, with `src/gone.rs`
     /// registered as deleted.
     fn seed_inherited_view(db: &SqliteClient) {
-        use cce_storage_sqlite::GenerationOverrideRepository;
-        use cce_storage_sqlite::OverrideDisposition;
-        use cce_storage_sqlite::ProjectIndexManifestRepository;
+        use cce_storage_relation_sqlite::GenerationOverrideRepository;
+        use cce_storage_relation_sqlite::OverrideDisposition;
+        use cce_storage_relation_sqlite::ProjectIndexManifestRepository;
 
         let conn = db.write_connection().unwrap();
         let tx = conn.unchecked_transaction().unwrap();

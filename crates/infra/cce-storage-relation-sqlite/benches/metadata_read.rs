@@ -15,7 +15,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use cce_storage_sqlite::{
+use cce_storage_relation_sqlite::{
     ChunkRecord, ChunkRepository, FileRecord, FileRepository, NewProjectRecord, ProjectRepository,
     SqliteClient,
 };

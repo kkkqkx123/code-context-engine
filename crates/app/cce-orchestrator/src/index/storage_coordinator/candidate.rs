@@ -12,7 +12,7 @@
 use std::sync::atomic::Ordering;
 
 use cce_storage_common::VectorStorage;
-use cce_storage_sqlite::{
+use cce_storage_relation_sqlite::{
     GenerationOverrideRepository, OverrideDisposition, ProjectIndexManifestRepository,
 };
 use cce_types::path::normalize_project_path;
@@ -315,7 +315,7 @@ impl StorageCoordinator {
 
     /// Adoption judgment: ready + epoch continuity + parent-chain validity.
     fn candidate_matches_active(
-        manifest: &cce_storage_sqlite::ProjectIndexManifest,
+        manifest: &cce_storage_relation_sqlite::ProjectIndexManifest,
         active_epoch: i64,
     ) -> bool {
         let expected_parent = if active_epoch > 0 {
@@ -770,7 +770,7 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::super::StorageCoordinator;
-    use cce_storage_sqlite::{
+    use cce_storage_relation_sqlite::{
         NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
     };
     use std::sync::Arc;
@@ -1056,7 +1056,7 @@ mod tests {
 
     #[tokio::test]
     async fn changed_and_deleted_files_register_generation_overrides() {
-        use cce_storage_sqlite::{
+        use cce_storage_relation_sqlite::{
             GenerationOverride, GenerationOverrideRepository, OverrideDisposition,
         };
         use std::path::Path;
@@ -1163,12 +1163,12 @@ mod tests {
                 )
                 .map(|_| ())
                 .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))?;
-                cce_storage_sqlite::GenerationOverrideRepository::upsert(
+                cce_storage_relation_sqlite::GenerationOverrideRepository::upsert(
                     tx,
                     1,
                     2,
                     "src/replaced.rs",
-                    cce_storage_sqlite::OverrideDisposition::Replaced,
+                    cce_storage_relation_sqlite::OverrideDisposition::Replaced,
                 )?;
                 Ok(())
             })
@@ -1194,9 +1194,11 @@ mod tests {
         assert_eq!(active.data_epoch, 2);
         assert_eq!(active.parent_data_epoch, None);
         assert!(
-            cce_storage_sqlite::GenerationOverrideRepository::list_for_generation(&conn, 1, 2)
-                .expect("overrides should list")
-                .is_empty()
+            cce_storage_relation_sqlite::GenerationOverrideRepository::list_for_generation(
+                &conn, 1, 2
+            )
+            .expect("overrides should list")
+            .is_empty()
         );
         let gen2_paths: Vec<String> = {
             let mut stmt = conn

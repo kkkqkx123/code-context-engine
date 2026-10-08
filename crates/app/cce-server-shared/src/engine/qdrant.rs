@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cce_storage_qdrant::{
+use cce_storage_vector_qdrant::{
     QdrantControlAction, QdrantProcessConfig, QdrantProcessHandle, QdrantProcessManager,
     QdrantProcessStatus,
 };

@@ -134,7 +134,7 @@ impl StorageCoordinator {
 mod tests {
     use std::sync::Arc;
 
-    use cce_storage_sqlite::{NewProjectRecord, ProjectRepository, SqliteClient};
+    use cce_storage_relation_sqlite::{NewProjectRecord, ProjectRepository, SqliteClient};
 
     use super::super::StorageCoordinator;
 

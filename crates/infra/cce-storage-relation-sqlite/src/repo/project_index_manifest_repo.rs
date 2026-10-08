@@ -7,60 +7,9 @@ use cce_types::StorageError;
 use crate::repo::project_repo::ProjectRepository;
 use crate::repo::relation_snapshot_repo::RelationSnapshotRepository;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectIndexManifestState {
-    Building,
-    Active,
-    Failed,
-}
-
-impl ProjectIndexManifestState {
-    fn parse(value: &str) -> Result<Self, StorageError> {
-        match value {
-            "building" => Ok(Self::Building),
-            "active" => Ok(Self::Active),
-            "failed" => Ok(Self::Failed),
-            _ => Err(StorageError::Query(format!(
-                "invalid project index manifest state: {value}"
-            ))),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ProjectIndexManifest {
-    pub project_id: i64,
-    pub publication_epoch: i64,
-    pub data_epoch: i64,
-    pub relation_epoch: i64,
-    pub operation_id: String,
-    pub state: ProjectIndexManifestState,
-    pub input_fingerprint: Option<String>,
-    /// Set once the inheritance registration of a zero-copy candidate
-    /// generation is complete (parent link + residual cleanup committed).
-    /// Recovery may only reuse a building candidate when this flag is set; a
-    /// crash before registration leaves it false and forces a fresh
-    /// registration.
-    pub candidate_ready: bool,
-    /// Generation this one inherits from under zero-copy candidate building
-    /// (see the epoch-clone design). `None` for full generations that own all
-    /// of their data. Inheritance is single-parent by construction.
-    pub parent_data_epoch: Option<i64>,
-}
-
-/// Epochs that are safe to remove from the local and external generations.
-///
-/// The plan is calculated from the durable manifest state before external
-/// storage is touched. Callers should remove external epochs first and then
-/// apply the SQLite part of the plan.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GenerationGcPlan {
-    pub stale_publication_epochs: Vec<i64>,
-    pub stale_data_epochs: Vec<i64>,
-    pub stale_relation_epochs: Vec<i64>,
-    pub protected_data_epochs: Vec<i64>,
-    pub protected_relation_epochs: Vec<i64>,
-}
+pub use cce_storage_common::relation::types::{
+    GenerationGcPlan, ProjectIndexManifest, ProjectIndexManifestState,
+};
 
 /// Repository for the single project-visible index generation.
 pub struct ProjectIndexManifestRepository;

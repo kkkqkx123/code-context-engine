@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cce_storage_bm25::{Bm25Client, Bm25Retrieval, Bm25SearchOptions};
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 
 use crate::tools::common::{read_snippets_batch, resolve_epoch_view};
 
@@ -172,8 +172,10 @@ impl KeywordSearchTool {
         // epoch-view resolution as the search pipeline; snippets are
         // lazy-loaded from the source file via the project root.
         let (chunk_records, project_root) = {
-            let project_root =
-                cce_storage_sqlite::source_reader::resolve_project_root(&conn, request.project_id);
+            let project_root = cce_storage_relation_sqlite::source_reader::resolve_project_root(
+                &conn,
+                request.project_id,
+            );
             match crate::query::retrieval::post_processing::get_chunk_records(
                 &conn,
                 &chunk_ids,

@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use std::time::Duration;
 
 use cce_metrics::HotUpdateMetrics;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 use cce_types::OperationKind;
 
 use super::change::{BatchChangeResult, FileChange, FileChangeType};

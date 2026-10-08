@@ -15,7 +15,7 @@ use cce_api::models::{
     CreateProjectRequest, ErrorResponse, ProjectConfig, ProjectDeleteResponse,
     ProjectDetailResponse, UpdateProjectRequest,
 };
-use cce_storage_sqlite::{
+use cce_storage_relation_sqlite::{
     NewProjectRecord, ProjectRepository, ProjectUpdateRecord, generate_project_name,
 };
 
@@ -396,7 +396,7 @@ pub async fn handle_delete_project(
 /// The list columns are optional JSON arrays written by this module; a column
 /// that is absent or unreadable is treated as an empty list.
 pub(crate) fn record_to_config(
-    record: &cce_storage_sqlite::ProjectRecord,
+    record: &cce_storage_relation_sqlite::ProjectRecord,
 ) -> cce_api::models::ProjectConfig {
     use cce_api::models::ProjectConfig;
 

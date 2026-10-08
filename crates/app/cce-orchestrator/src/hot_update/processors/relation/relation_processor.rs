@@ -29,9 +29,9 @@ use cce_relation::IndexBuilder;
 use cce_relation::index::{
     RelationDeltaOps, RelationIndex, RelationIndexView, SnapshotFileQueryOps,
 };
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::repo::RelationSnapshotRepository;
-use cce_storage_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::repo::RelationSnapshotRepository;
+use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
 use cce_types::{LanguageInfo, StorageError};
 
 use crate::index::RelationBaseCache;

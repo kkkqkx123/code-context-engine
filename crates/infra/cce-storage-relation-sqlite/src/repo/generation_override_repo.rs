@@ -11,40 +11,7 @@ use rusqlite::{Connection, Transaction, params};
 
 use cce_types::StorageError;
 
-/// Why a file must not resolve against the parent generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OverrideDisposition {
-    /// The file has new rows in this generation; only they are visible.
-    Replaced,
-    /// The file was deleted in this generation; it is invisible everywhere.
-    Deleted,
-}
-
-impl OverrideDisposition {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Replaced => "replaced",
-            Self::Deleted => "deleted",
-        }
-    }
-
-    fn parse(value: &str) -> Result<Self, StorageError> {
-        match value {
-            "replaced" => Ok(Self::Replaced),
-            "deleted" => Ok(Self::Deleted),
-            other => Err(StorageError::Query(format!(
-                "invalid generation override disposition: {other}"
-            ))),
-        }
-    }
-}
-
-/// A single file-level exception to parent inheritance.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GenerationOverride {
-    pub file_path: String,
-    pub disposition: OverrideDisposition,
-}
+pub use cce_storage_common::relation::types::{GenerationOverride, OverrideDisposition};
 
 /// Repository for `generation_overrides`.
 pub struct GenerationOverrideRepository;

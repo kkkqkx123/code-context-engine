@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::engine::CodeContextEngine;
 use crate::runtime::StartupCoordinator;
-use cce_storage_sqlite::ProjectRepository;
+use cce_storage_relation_sqlite::ProjectRepository;
 
 /// Start the HTTP server
 ///

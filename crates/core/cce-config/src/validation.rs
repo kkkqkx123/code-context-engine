@@ -387,9 +387,10 @@ pub struct DependencyParams {
 
 /// Validate backend preset combination (three-tier logic).
 ///
-/// Official presets pass silently; non-preset combinations warn and point
-/// at the advanced switch; reserved remote branches always warn because
-/// structural validation rejects them.
+/// Official presets pass silently: local-first, remote-vector, and the
+/// remote preset (Qdrant plus remote fulltext plus remote relation).
+/// Non-preset combinations warn and point at the advanced switch; partial
+/// remote mixes additionally warn that they are outside the tested matrix.
 pub fn validate_backend_preset_dependencies(
     vector_backend: crate::modules::VectorBackend,
     relation_backend: crate::modules::RelationBackend,
@@ -398,20 +399,14 @@ pub fn validate_backend_preset_dependencies(
 ) -> Vec<ConfigWarning> {
     use crate::modules::VectorBackend as VB;
     let mut warnings = Vec::new();
-    if !relation_backend.is_local() {
+    let remote_relation = !relation_backend.is_local();
+    let remote_fulltext = !fulltext_backend.is_local();
+    if remote_relation || remote_fulltext {
         warnings.push(ConfigWarning::new(
-            WarningSeverity::Warning,
-            "database.relation_backend",
-            "database.relation_backend=local",
-            "Remote relation backend is reserved and not enabled in this phase.",
-        ));
-    }
-    if !fulltext_backend.is_local() {
-        warnings.push(ConfigWarning::new(
-            WarningSeverity::Warning,
-            "database.fulltext_backend",
-            "database.fulltext_backend=local",
-            "Remote fulltext backend is reserved and not enabled in this phase.",
+            WarningSeverity::Info,
+            "database.relation_backend/database.fulltext_backend",
+            "database.qdrant",
+            "Remote relation/fulltext branches require the remote preset (Qdrant plus remote fulltext plus remote relation) and a full reindex; old data is never migrated.",
         ));
     }
     let official = matches!(
@@ -424,6 +419,10 @@ pub fn validate_backend_preset_dependencies(
             VB::Qdrant,
             crate::modules::RelationBackend::Local,
             crate::modules::FulltextBackend::Local,
+        ) | (
+            VB::Qdrant,
+            crate::modules::RelationBackend::Remote,
+            crate::modules::FulltextBackend::Remote,
         )
     );
     if !official {

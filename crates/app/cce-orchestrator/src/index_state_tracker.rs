@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 
 use crate::hot_update::FileChangeType;
 use crate::index_state::{
@@ -880,7 +880,7 @@ mod tests {
     use crate::index_state::TOKEN_LIMIT_ERROR_CODE;
     use crate::operation::CheckpointManager;
     use crate::operation::checkpoint::CreateCheckpointParams;
-    use cce_storage_sqlite::SqliteClient;
+    use cce_storage_relation_sqlite::SqliteClient;
     use cce_types::OperationKind;
     use std::sync::Arc;
     use std::time::Duration;

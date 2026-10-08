@@ -222,7 +222,7 @@ pub async fn handle_delete_file(
 
         if let Some(file_id_num) = file_id_opt {
             match client.with_transaction(|tx| {
-                use cce_storage_sqlite::EntityDetailMappingRepository;
+                use cce_storage_relation_sqlite::EntityDetailMappingRepository;
                 EntityDetailMappingRepository::delete_by_file_id(tx, file_id_num)?;
                 Ok(())
             }) {
@@ -365,7 +365,7 @@ pub async fn handle_delete_entity(
         && let Ok(project) = client.for_project(project_id)
     {
         let _ = project.with_transaction(|tx| {
-            use cce_storage_sqlite::EntityDetailMappingRepository;
+            use cce_storage_relation_sqlite::EntityDetailMappingRepository;
             EntityDetailMappingRepository::delete_by_entity_id(tx, entity_id as i64, project_id)
         });
     }
@@ -620,7 +620,7 @@ pub async fn handle_index_stats(
     let file_count = if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
         && let Ok(project) = client.for_project(project_id)
     {
-        use cce_storage_sqlite::FileRepository;
+        use cce_storage_relation_sqlite::FileRepository;
         match project.with_transaction(|tx| FileRepository::count_by_project(tx, project_id)) {
             Ok(count) => count as usize,
             Err(_) => 0,

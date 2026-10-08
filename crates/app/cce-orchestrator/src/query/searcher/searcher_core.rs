@@ -36,7 +36,7 @@ use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{SearchMetrics, SearchType};
 
 use cce_storage_bm25::Bm25Client;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 
 use super::search_builder::SearcherBuilder;
 
@@ -106,17 +106,21 @@ impl Searcher {
         SearcherBuilder::new(vector, embedder, bm25, scope)
     }
 
-    /// Create a searcher builder from backend enums (phase-2 entry point).
+    /// Create a searcher builder from backend enums.
     ///
-    /// Only local branches exist; the enums unwrap once at this boundary
-    /// so retrieval behavior stays unchanged.
+    /// The local branch unwraps once at this boundary so retrieval
+    /// behavior stays unchanged; the remote branch is not wired into
+    /// the Tantivy read path yet.
     pub fn builder_from_stores(
         vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
         fulltext: FulltextStore,
         scope: ProjectScope,
     ) -> SearcherBuilder {
-        SearcherBuilder::new(vector, embedder, fulltext.into_local(), scope)
+        let bm25 = fulltext
+            .into_local()
+            .expect("remote fulltext branch is not wired into the Searcher read path yet");
+        SearcherBuilder::new(vector, embedder, bm25, scope)
     }
 
     /// Fulltext backend enum wrapping the configured client.
@@ -572,7 +576,7 @@ impl Searcher {
                     Err(e) => return Err(format!("Chunk enrichment failed: {e}")),
                 };
             let project_root =
-                cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id);
+                cce_storage_relation_sqlite::source_reader::resolve_project_root(&conn, project_id);
             Ok(Some((records, project_root)))
         })
         .await;

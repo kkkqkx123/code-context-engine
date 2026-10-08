@@ -10,7 +10,7 @@ use cce_orchestrator::tools::keyword_search::{
     KeywordSearchError, KeywordSearchRequest, KeywordSearchTool,
 };
 use cce_storage_bm25::{Bm25Client, Bm25Config, Bm25Document};
-use cce_storage_sqlite::{
+use cce_storage_relation_sqlite::{
     ChunkRecord, ChunkRepository, NewProjectRecord, ProjectRepository, SqliteClient,
 };
 

@@ -7,6 +7,7 @@ pub mod client;
 pub mod config;
 pub mod contract;
 pub mod delete;
+pub mod elasticsearch;
 pub mod error;
 pub mod manager;
 pub mod metrics;
@@ -17,12 +18,16 @@ pub mod types;
 pub use batch::batch_add_documents;
 pub use client::Bm25Client;
 pub use config::{Bm25AlgorithmConfig, Bm25Config, IndexManagerConfig};
-pub use contract::{FulltextStorage, assert_fulltext_storage};
+pub use contract::{
+    FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
+    assert_fulltext_storage,
+};
 pub use delete::{
     delete_document, delete_documents_by_file_path, delete_documents_by_file_path_and_project,
     delete_documents_by_file_path_project_epoch, delete_documents_by_project,
     delete_documents_by_project_epoch,
 };
+pub use elasticsearch::{ElasticsearchClient, ElasticsearchConfig};
 pub use error::Bm25Error;
 pub use manager::IndexManager;
 pub use metrics::Bm25Metrics;

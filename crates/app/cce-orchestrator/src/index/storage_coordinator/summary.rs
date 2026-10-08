@@ -7,7 +7,7 @@
 use cce_parser::summary::FileSummary;
 use cce_storage_bm25::Bm25Document;
 use cce_storage_common::{Payload, VectorPoint, VectorStorage};
-use cce_storage_sqlite::FileSummaryRepository;
+use cce_storage_relation_sqlite::FileSummaryRepository;
 use cce_types::{FileCategory, PointKind};
 
 use crate::error::OrchestratorError;
@@ -128,7 +128,7 @@ impl<'a> SummaryStorage<'a> {
         db.with_transaction(|tx| {
             for (file_path_str, project_id, summary_json) in &rows {
                 let file_record =
-                    cce_storage_sqlite::FileRepository::get_by_path_and_project_at_epoch(
+                    cce_storage_relation_sqlite::FileRepository::get_by_path_and_project_at_epoch(
                         tx,
                         file_path_str,
                         *project_id,
@@ -140,7 +140,7 @@ impl<'a> SummaryStorage<'a> {
                             "file record missing for summary {file_path_str}"
                         ))
                     })?;
-                cce_storage_sqlite::FileSummaryRepository::upsert_with_epoch(
+                cce_storage_relation_sqlite::FileSummaryRepository::upsert_with_epoch(
                     tx,
                     file_record.id,
                     epoch,
@@ -228,7 +228,7 @@ impl<'a> SummaryStorage<'a> {
         db.with_transaction(|tx| {
             for (summary, doc) in summaries.iter().zip(bm25_documents.iter()) {
                 let Some(file_record) =
-                    cce_storage_sqlite::FileRepository::get_by_path_and_project_at_epoch(
+                    cce_storage_relation_sqlite::FileRepository::get_by_path_and_project_at_epoch(
                         tx,
                         &summary.file_path,
                         project_id,
@@ -240,7 +240,7 @@ impl<'a> SummaryStorage<'a> {
                         summary.file_path
                     )));
                 };
-                cce_storage_sqlite::FileSummaryRepository::update_bm25_doc_id_at_epoch(
+                cce_storage_relation_sqlite::FileSummaryRepository::update_bm25_doc_id_at_epoch(
                     tx,
                     file_record.id,
                     epoch,

@@ -21,7 +21,7 @@ use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::SearchMetrics;
 
 use cce_storage_bm25::Bm25Client;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 
 use super::searcher_core::Searcher;
 
@@ -66,12 +66,13 @@ impl SearcherBuilder {
         self
     }
 
-    /// Enable relation backend via enum dispatch (phase-2 entry point).
+    /// Enable relation backend via enum dispatch.
     ///
-    /// Only the local branch exists; the enum unwraps once at this
-    /// boundary so enrichment semantics stay unchanged.
+    /// The local branch unwraps once at this boundary so enrichment
+    /// semantics stay unchanged; the remote branch resolves to no local
+    /// enrichment store.
     pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.sqlite = Some(store.into_local());
+        self.sqlite = store.into_local();
         self
     }
 

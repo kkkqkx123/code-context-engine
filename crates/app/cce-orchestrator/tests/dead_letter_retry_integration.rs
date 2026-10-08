@@ -16,7 +16,7 @@ use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index_state::{
     ModuleType, ModuleUpdateState, TOKEN_LIMIT_ERROR_CODE, TrackerFailure,
 };
-use cce_storage_sqlite::{
+use cce_storage_relation_sqlite::{
     NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
 };
 
@@ -50,7 +50,7 @@ async fn spawn_mock_qdrant_url() -> String {
     format!("http://{addr}")
 }
 
-fn mock_qdrant_client(url: &str) -> Arc<cce_storage_qdrant::QdrantClient> {
+fn mock_qdrant_client(url: &str) -> Arc<cce_storage_vector_qdrant::QdrantClient> {
     let qdrant_config = cce_config::modules::QdrantConfig {
         url: url.to_string(),
         vector_size: 2,
@@ -62,7 +62,7 @@ fn mock_qdrant_client(url: &str) -> Arc<cce_storage_qdrant::QdrantClient> {
         ..Default::default()
     };
     Arc::new(
-        cce_storage_qdrant::QdrantClient::new(qdrant_config, ".")
+        cce_storage_vector_qdrant::QdrantClient::new(qdrant_config, ".")
             .expect("qdrant client must build"),
     )
 }

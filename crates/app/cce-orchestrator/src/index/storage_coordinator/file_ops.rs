@@ -5,7 +5,9 @@
 
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_storage_common::VectorStorage;
-use cce_storage_sqlite::{ChunkRepository, EntityDetailMappingRepository, FileSummaryRepository};
+use cce_storage_relation_sqlite::{
+    ChunkRepository, EntityDetailMappingRepository, FileSummaryRepository,
+};
 use cce_types::path::normalize_project_path;
 
 use crate::error::OrchestratorError;

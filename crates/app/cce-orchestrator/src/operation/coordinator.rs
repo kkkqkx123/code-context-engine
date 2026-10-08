@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use tracing::{debug, info, trace, warn};
 
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 use cce_types::error::common::NotFoundError;
 use cce_types::{OperationKind, StorageError};
 
@@ -684,7 +684,7 @@ impl OperationCoordinator {
     /// window and must be skipped (and marked Failed) instead of replayed.
     fn is_stale_for_recovery(
         &self,
-        checkpoint: &cce_storage_sqlite::types::CheckpointRecord,
+        checkpoint: &cce_storage_relation_sqlite::types::CheckpointRecord,
     ) -> bool {
         let Some(freshness_secs) = self.recovery_freshness_secs else {
             return false;
@@ -720,7 +720,7 @@ impl OperationCoordinator {
 
         // Check checkpoint for terminal states
         if let Ok(Some(checkpoint)) = self.checkpoint_manager.get_checkpoint(operation_id).await {
-            use cce_storage_sqlite::types::CheckpointStatus;
+            use cce_storage_relation_sqlite::types::CheckpointStatus;
             match checkpoint.status {
                 CheckpointStatus::Completed => return Ok(OperationPhase::Completed),
                 CheckpointStatus::Failed => return Ok(OperationPhase::Failed),
@@ -736,8 +736,8 @@ impl OperationCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_sqlite::CheckpointRepository;
-    use cce_storage_sqlite::types::{CheckpointRecord, CheckpointStatus};
+    use cce_storage_relation_sqlite::CheckpointRepository;
+    use cce_storage_relation_sqlite::types::{CheckpointRecord, CheckpointStatus};
 
     fn make_checkpoint(
         operation_id: &str,

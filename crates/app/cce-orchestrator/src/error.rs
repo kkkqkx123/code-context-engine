@@ -189,8 +189,8 @@ impl ErrorClassify for OrchestratorError {
 }
 
 // Convert module-specific errors to domain errors
-impl From<cce_storage_qdrant::QdrantError> for OrchestratorError {
-    fn from(e: cce_storage_qdrant::QdrantError) -> Self {
+impl From<cce_storage_vector_qdrant::QdrantError> for OrchestratorError {
+    fn from(e: cce_storage_vector_qdrant::QdrantError) -> Self {
         OrchestratorError::Storage(cce_types::error::StorageError::from(e))
     }
 }

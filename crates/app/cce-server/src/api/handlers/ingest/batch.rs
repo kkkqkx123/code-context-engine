@@ -65,7 +65,7 @@ pub async fn handle_ingest_batch(
         }
         if let Some(store) = state.engine.metadata_store()
             && let Ok(used) = store.as_ref().with_transaction(|tx| {
-                cce_storage_sqlite::AdmissionAuditRepository::get(tx, &context.fingerprint)
+                cce_storage_relation_sqlite::AdmissionAuditRepository::get(tx, &context.fingerprint)
                     .map(|record| record.map_or(0, |r| r.bytes_used.max(0) as u64))
             })
             && used.saturating_add(batch_bytes) > quota
@@ -73,7 +73,7 @@ pub async fn handle_ingest_batch(
             metrics.record_quota_rejection();
             if let Some(store) = state.engine.metadata_store() {
                 let _ = store.as_ref().with_transaction(|tx| {
-                    cce_storage_sqlite::AdmissionAuditRepository::record_rejection(
+                    cce_storage_relation_sqlite::AdmissionAuditRepository::record_rejection(
                         tx,
                         &context.fingerprint,
                         &context.projects,
@@ -200,7 +200,7 @@ pub async fn handle_ingest_batch(
             .map(|f| f.content_base64.len() as u64 * 3 / 4)
             .sum();
         let _ = store.as_ref().with_transaction(|tx| {
-            cce_storage_sqlite::AdmissionAuditRepository::record_admitted(
+            cce_storage_relation_sqlite::AdmissionAuditRepository::record_admitted(
                 tx,
                 &context.fingerprint,
                 &context.projects,

@@ -14,8 +14,8 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{Level, debug, error, info, span};
 
-use cce_storage_sqlite::ProjectRepository;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::ProjectRepository;
+use cce_storage_relation_sqlite::SqliteClient;
 use cce_types::StorageError;
 
 use cce_orchestrator::index::StorageCoordinator;
@@ -155,7 +155,9 @@ use tracing::warn;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_sqlite::{NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository};
+    use cce_storage_relation_sqlite::{
+        NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository,
+    };
 
     fn setup_test_db() -> SqliteClient {
         let client = SqliteClient::in_memory().expect("Failed to create SQLite");

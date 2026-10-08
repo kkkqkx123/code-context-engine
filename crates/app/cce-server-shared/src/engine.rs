@@ -25,9 +25,9 @@ use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_orchestrator::query::searcher::Searcher;
 use cce_plugin::PluginRegistry;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantProcessHandle;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::project_registry::ProjectRegistry;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::project_registry::ProjectRegistry;
+use cce_storage_vector_qdrant::QdrantProcessHandle;
 
 /// Error type for engine operations
 #[derive(Debug, thiserror::Error)]
@@ -160,10 +160,16 @@ impl CodeContextEngine {
         let metrics_system_metrics = cce_metrics::MetricsSystemMetrics::new(&metrics_registry);
 
         // Create SQLite client through the relation backend enum so the
-        // backend selection is validated once at assembly time.
+        // backend selection is validated once at assembly time. The
+        // PostgreSQL branch constructs at the enum level, but the engine
+        // write path still requires the local branch.
         let relation_store = RelationStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
-        let sqlite_client = relation_store.into_local();
+        let sqlite_client = relation_store.into_local().ok_or_else(|| {
+            EngineError::Config(
+                "remote relation branch is not wired into the engine write path yet".to_string(),
+            )
+        })?;
 
         // The SQLite client is shared as the metadata store
         let metadata_store = Some(sqlite_client.clone());
@@ -179,7 +185,11 @@ impl CodeContextEngine {
 
         let fulltext_store = FulltextStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
-        let bm25 = fulltext_store.into_local();
+        let bm25 = fulltext_store.into_local().ok_or_else(|| {
+            EngineError::Config(
+                "remote fulltext branch is not wired into the engine write path yet".to_string(),
+            )
+        })?;
 
         // Initialize BM25 index (Tantivy) if enabled
         {

@@ -405,7 +405,7 @@ impl McpServerHandler {
         };
         match store
             .as_ref()
-            .with_transaction(|tx| cce_storage_sqlite::ProjectRepository::get_all(tx))
+            .with_transaction(|tx| cce_storage_relation_sqlite::ProjectRepository::get_all(tx))
         {
             Ok(records) => {
                 let items: Vec<Value> = records

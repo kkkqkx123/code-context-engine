@@ -8,7 +8,7 @@ use super::management::record_to_config;
 use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
 use cce_api::models::{ErrorResponse, ProjectDetailResponse, ProjectListResponse};
-use cce_storage_sqlite::ProjectRepository;
+use cce_storage_relation_sqlite::ProjectRepository;
 
 /// Handle list all projects request
 #[utoipa::path(

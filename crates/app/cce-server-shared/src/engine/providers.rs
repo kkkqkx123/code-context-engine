@@ -51,7 +51,7 @@ impl super::CodeContextEngine {
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .map(RelationStore::into_local)
+            .and_then(RelationStore::into_local)
             .ok_or_else(|| {
                 EngineError::Config("SQLite database not initialized for hot update".to_string())
             })?;
@@ -195,7 +195,7 @@ impl super::CodeContextEngine {
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .map(RelationStore::into_local)
+            .and_then(RelationStore::into_local)
             .ok_or_else(|| {
                 EngineError::Config("SQLite database not initialized for indexing".to_string())
             })?;
@@ -378,7 +378,7 @@ impl super::CodeContextEngine {
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .map(RelationStore::into_local)
+            .and_then(RelationStore::into_local)
             .ok_or_else(|| {
                 EngineError::Config(
                     "SQLite database not initialized for OperationCoordinator".to_string(),
@@ -472,7 +472,7 @@ impl super::CodeContextEngine {
             .map(|store| store.for_project(project_id))
             .transpose()
             .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
-            .map(RelationStore::into_local)
+            .and_then(RelationStore::into_local)
         {
             builder = builder.with_relation_store(RelationStore::local(sqlite));
         }
@@ -517,7 +517,7 @@ mod tests {
     use crate::engine::CodeContextEngine;
     use cce_config::AppConfig;
     use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
-    use cce_storage_sqlite::{NewProjectRecord, ProjectRepository};
+    use cce_storage_relation_sqlite::{NewProjectRecord, ProjectRepository};
     use std::collections::HashMap;
 
     fn create_test_config() -> AppConfig {

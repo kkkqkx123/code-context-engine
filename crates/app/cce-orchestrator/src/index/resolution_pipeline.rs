@@ -5,9 +5,9 @@
 
 use std::collections::HashSet;
 
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::repo::RelationSnapshotRepository;
-use cce_storage_sqlite::repo::RelationSnapshotState;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::repo::RelationSnapshotRepository;
+use cce_storage_relation_sqlite::repo::RelationSnapshotState;
 use cce_types::{
     CanonicalRelationSnapshot, CanonicalRelationTarget, StableSymbolKey, StorageError,
 };

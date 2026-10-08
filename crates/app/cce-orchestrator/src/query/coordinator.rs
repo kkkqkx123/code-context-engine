@@ -25,7 +25,7 @@ use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::{MetricsRegistry, QueryMetrics, SearchMetrics};
 use cce_relation::CallChainQuery;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 use cce_types::error::common::ErrorClassify;
 
 use super::SearcherBuilder;
@@ -341,7 +341,7 @@ impl QueryCoordinator {
         &self,
         query: &str,
         limit: i64,
-    ) -> Result<Vec<cce_storage_sqlite::EntityRecord>> {
+    ) -> Result<Vec<cce_storage_relation_sqlite::EntityRecord>> {
         let sqlite = self
             .sqlite
             .as_ref()
@@ -379,9 +379,9 @@ impl QueryCoordinator {
         project_id: i64,
         limit: i64,
         view: &crate::query::filter::QueryFilter,
-    ) -> Result<Vec<cce_storage_sqlite::EntityRecord>> {
-        use cce_storage_sqlite::EntityRepository;
-        use cce_storage_sqlite::repo::FileRepository;
+    ) -> Result<Vec<cce_storage_relation_sqlite::EntityRecord>> {
+        use cce_storage_relation_sqlite::EntityRepository;
+        use cce_storage_relation_sqlite::repo::FileRepository;
 
         let mut entities = EntityRepository::search_fts_at_epoch(
             conn,
@@ -1051,7 +1051,7 @@ impl QueryCoordinator {
         // Two-stage resolution ("own first, miss → parent"): an inherited
         // file's rows live in the parent generation; overridden files never
         // resolve against it.
-        use cce_storage_sqlite::repo::FileRepository;
+        use cce_storage_relation_sqlite::repo::FileRepository;
         let resolve_file = |epoch: i64| {
             FileRepository::get_by_path_and_project_at_epoch(&conn, file_path, project_id, epoch)
                 .map_err(|e| QueryError::invalid(&format!("Failed to get file: {}", e)))
@@ -1075,7 +1075,7 @@ impl QueryCoordinator {
         })?;
 
         // Get summary from file_summaries table (returns JSON string)
-        use cce_storage_sqlite::repo::FileSummaryRepository;
+        use cce_storage_relation_sqlite::repo::FileSummaryRepository;
         let summary_json_str =
             FileSummaryRepository::get_by_file_id_at_epoch(&conn, file_record.id, resolved_epoch)
                 .map_err(|e| QueryError::invalid(&format!("Failed to get summary: {}", e)))?

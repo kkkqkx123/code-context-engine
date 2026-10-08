@@ -1,4 +1,4 @@
-//! Backend-agnostic vector storage abstraction.
+//! Backend-agnostic storage abstraction.
 //!
 //! This module holds the retrieval types (`Payload`, `ScoredPoint`,
 //! `DenseSearchQuery`, `SearchFilter`, `VectorPoint`) with backend-neutral
@@ -6,6 +6,9 @@
 //! Backends translate the filter into their native form (local predicate or
 //! Qdrant filter JSON, including the `raw_filter` passthrough which only the
 //! Qdrant branch honors).
+//!
+//! It also holds the relation storage contract (`RelationStorage`) shared by
+//! the embedded SQLite branch and the remote PostgreSQL branch.
 //!
 //! # Architecture
 //!
@@ -15,6 +18,9 @@
 //!             └── VectorStorage (operation contract)
 //!                     ├── Local branch (embedded simvec)
 //!                     └── Qdrant branch (remote service)
+//!     └── RelationStorage (operation contract)
+//!             ├── SQLite branch (embedded)
+//!             └── PostgreSQL branch (remote)
 //! ```
 //!
 //! Dispatch uses a backend enum at the assembly layer, never trait objects.
@@ -22,6 +28,12 @@
 use serde::{Deserialize, Serialize};
 
 use cce_types::{FileCategory, PointKind, TestSource, normalize_project_path};
+
+pub mod relation;
+
+pub use relation::{
+    RelationChunk, RelationEntity, RelationFile, RelationStorage, assert_relation_storage,
+};
 
 /// Search filter options for vector retrieval.
 ///

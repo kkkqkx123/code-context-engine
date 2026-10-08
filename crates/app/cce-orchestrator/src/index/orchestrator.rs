@@ -253,19 +253,25 @@ impl IndexOrchestrator {
     }
 
     /// Set embedded local vector store
-    pub fn with_local(mut self, store: Arc<cce_storage_local::LocalVectorStore>) -> Self {
+    pub fn with_local(mut self, store: Arc<cce_storage_vector_local::LocalVectorStore>) -> Self {
         self.storage = self.storage.with_local(store);
         self
     }
 
     /// Set Qdrant client (wraps into the vector backend enum)
-    pub fn with_qdrant_client(mut self, client: Arc<cce_storage_qdrant::QdrantClient>) -> Self {
+    pub fn with_qdrant_client(
+        mut self,
+        client: Arc<cce_storage_vector_qdrant::QdrantClient>,
+    ) -> Self {
         self.storage = self.storage.with_qdrant(client);
         self
     }
 
     /// Set metadata store (SQLite)
-    pub fn with_metadata_store(mut self, store: Arc<cce_storage_sqlite::SqliteClient>) -> Self {
+    pub fn with_metadata_store(
+        mut self,
+        store: Arc<cce_storage_relation_sqlite::SqliteClient>,
+    ) -> Self {
         self.storage = self.storage.with_metadata_store(store);
         self
     }
@@ -427,7 +433,7 @@ impl IndexOrchestrator {
     }
 
     /// Set vector backend (Qdrant branch shim, prefer `with_vector`)
-    pub fn with_qdrant(mut self, client: Arc<cce_storage_qdrant::QdrantClient>) -> Self {
+    pub fn with_qdrant(mut self, client: Arc<cce_storage_vector_qdrant::QdrantClient>) -> Self {
         self.storage = self.storage.with_qdrant(client);
         self
     }

@@ -11,8 +11,8 @@ use cce_orchestrator::RelationSnapshotPublisher;
 use cce_orchestrator::hot_update::processors::RelationUpdateProcessor;
 use cce_orchestrator::index::StorageCoordinator;
 use cce_orchestrator::query::retry_queue::RetryQueue;
-use cce_storage_sqlite::repo::ProjectRepository;
-use cce_storage_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_relation_sqlite::repo::ProjectRepository;
+use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
 
 impl super::CodeContextEngine {
     /// Get or create project-specific RelationRuntime
@@ -99,7 +99,7 @@ impl super::CodeContextEngine {
         // runs on the query path and must not contend with the write lock.
         let active_epoch = match sqlite.read_connection() {
             Ok(conn) => {
-                match cce_storage_sqlite::ProjectIndexManifestRepository::get_active(
+                match cce_storage_relation_sqlite::ProjectIndexManifestRepository::get_active(
                     &conn, project_id,
                 ) {
                     Ok(Some(manifest)) => manifest.relation_epoch,

@@ -111,23 +111,39 @@ impl DatabaseConfig {
         }
     }
 
-    /// Official preset combinations supported in phase 1.
+    /// Official preset combinations.
     ///
-    /// Local-first (`local/local/local`) and remote-vector
-    /// (`qdrant/local/local`) pass. Remote relation/fulltext branches are
-    /// reserved and rejected until phase 3 regardless of this switch.
+    /// Supported presets: local-first (`local/local/local`), remote-vector
+    /// (`qdrant/local/local`), and the remote preset
+    /// (`qdrant/remote/remote`). Any other combination is a non-preset mix
+    /// and requires `allow_nonstandard_backends`. Remote branches validate
+    /// their own parameters when selected.
     pub fn validate_backend_combination(&self) -> ValidationResult {
         use crate::modules::VectorBackend as VB;
-        if !self.relation_backend.is_local() {
+        if !self.relation_backend.is_local()
+            && let Err(e) = self.relation_remote.validate_structured()
+        {
             return Err(ConfigValidationError::invalid_field(
-                "database.relation_backend",
-                "remote relation backend is reserved and not enabled in this phase",
+                "database.relation_remote",
+                format!("remote relation parameters are invalid: {e}"),
             ));
         }
-        if !self.fulltext_backend.is_local() {
+        if !self.fulltext_backend.is_local()
+            && let Err(e) = self.fulltext_remote.validate_structured()
+        {
             return Err(ConfigValidationError::invalid_field(
-                "database.fulltext_backend",
-                "remote fulltext backend is reserved and not enabled in this phase",
+                "database.fulltext_remote",
+                format!("remote fulltext parameters are invalid: {e}"),
+            ));
+        }
+        if !self.relation_backend.is_local() && self.relation_remote.url.is_none() {
+            return Err(ConfigValidationError::missing_field(
+                "database.relation_remote.url",
+            ));
+        }
+        if !self.fulltext_backend.is_local() && self.fulltext_remote.url.is_none() {
+            return Err(ConfigValidationError::missing_field(
+                "database.fulltext_remote.url",
             ));
         }
         let official = matches!(
@@ -138,6 +154,7 @@ impl DatabaseConfig {
             ),
             (VB::Local, RelationBackend::Local, FulltextBackend::Local)
                 | (VB::Qdrant, RelationBackend::Local, FulltextBackend::Local)
+                | (VB::Qdrant, RelationBackend::Remote, FulltextBackend::Remote)
         );
         if official || self.allow_nonstandard_backends {
             Ok(())

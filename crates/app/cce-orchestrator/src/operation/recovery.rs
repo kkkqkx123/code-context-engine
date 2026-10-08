@@ -160,9 +160,9 @@ impl RecoveryManager {
     /// resume-start batch and its predecessor.
     async fn load_recovery_boundaries(
         &self,
-        checkpoint: &cce_storage_sqlite::types::CheckpointRecord,
+        checkpoint: &cce_storage_relation_sqlite::types::CheckpointRecord,
         start_batch: u32,
-    ) -> Result<Vec<cce_storage_sqlite::types::BatchCheckpointRecord>, StorageError> {
+    ) -> Result<Vec<cce_storage_relation_sqlite::types::BatchCheckpointRecord>, StorageError> {
         let mut boundaries = Vec::new();
         for batch_index in [start_batch, start_batch.saturating_sub(1)] {
             if let Some(record) = self

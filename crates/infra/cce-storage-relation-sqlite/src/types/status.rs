@@ -4,61 +4,7 @@ use rusqlite::Result as SqlResult;
 use rusqlite::types::{FromSql, FromSqlError, ToSql, ToSqlOutput};
 use serde::{Deserialize, Serialize};
 
-/// Operation-level checkpoint status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CheckpointStatus {
-    #[serde(rename = "in_progress")]
-    InProgress,
-    Completed,
-    Failed,
-}
-
-impl CheckpointStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            CheckpointStatus::InProgress => "in_progress",
-            CheckpointStatus::Completed => "completed",
-            CheckpointStatus::Failed => "failed",
-        }
-    }
-}
-
-impl std::str::FromStr for CheckpointStatus {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "in_progress" => Ok(CheckpointStatus::InProgress),
-            "completed" => Ok(CheckpointStatus::Completed),
-            "failed" => Ok(CheckpointStatus::Failed),
-            _ => Err(()),
-        }
-    }
-}
-
-impl std::fmt::Display for CheckpointStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl FromSql for CheckpointStatus {
-    fn column_result(value: rusqlite::types::ValueRef) -> Result<Self, FromSqlError> {
-        match value.as_str() {
-            Ok(s) => s.parse().map_err(|_| FromSqlError::InvalidType),
-            Err(e) => Err(FromSqlError::Other(Box::new(e))),
-        }
-    }
-}
-
-impl ToSql for CheckpointStatus {
-    fn to_sql(&self) -> SqlResult<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::Owned(rusqlite::types::Value::Text(
-            self.as_str().to_string(),
-        )))
-    }
-}
+pub use cce_storage_common::relation::types::{CheckpointStatus, WorkUnitStatus};
 
 /// Module processing status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,64 +244,6 @@ impl FromSql for ScanStatus {
 }
 
 impl ToSql for ScanStatus {
-    fn to_sql(&self) -> SqlResult<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::Owned(rusqlite::types::Value::Text(
-            self.as_str().to_string(),
-        )))
-    }
-}
-
-/// Work unit processing status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum WorkUnitStatus {
-    Pending,
-    Running,
-    Committed,
-    Failed,
-}
-
-impl WorkUnitStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            WorkUnitStatus::Pending => "pending",
-            WorkUnitStatus::Running => "running",
-            WorkUnitStatus::Committed => "committed",
-            WorkUnitStatus::Failed => "failed",
-        }
-    }
-}
-
-impl std::str::FromStr for WorkUnitStatus {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "pending" => Ok(WorkUnitStatus::Pending),
-            "running" => Ok(WorkUnitStatus::Running),
-            "committed" => Ok(WorkUnitStatus::Committed),
-            "failed" => Ok(WorkUnitStatus::Failed),
-            _ => Err(()),
-        }
-    }
-}
-
-impl std::fmt::Display for WorkUnitStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl FromSql for WorkUnitStatus {
-    fn column_result(value: rusqlite::types::ValueRef) -> Result<Self, FromSqlError> {
-        match value.as_str() {
-            Ok(s) => s.parse().map_err(|_| FromSqlError::InvalidType),
-            Err(e) => Err(FromSqlError::Other(Box::new(e))),
-        }
-    }
-}
-
-impl ToSql for WorkUnitStatus {
     fn to_sql(&self) -> SqlResult<ToSqlOutput<'_>> {
         Ok(ToSqlOutput::Owned(rusqlite::types::Value::Text(
             self.as_str().to_string(),

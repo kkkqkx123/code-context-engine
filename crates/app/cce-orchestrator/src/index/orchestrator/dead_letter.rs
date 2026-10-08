@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_sqlite::FileRepository;
+use cce_storage_relation_sqlite::FileRepository;
 use cce_types::OutputMode;
 use cce_utils::token_estimation::{estimate_tokens, truncate_to_token_budget};
 
@@ -115,7 +115,7 @@ impl IndexOrchestrator {
             let conn = client
                 .read_connection()
                 .map_err(OrchestratorError::Storage)?;
-            cce_storage_sqlite::source_reader::resolve_project_root(&conn, self.project_id)
+            cce_storage_relation_sqlite::source_reader::resolve_project_root(&conn, self.project_id)
                 .ok_or_else(|| {
                     OrchestratorError::index(
                         "dead_letter_retry",

@@ -20,12 +20,24 @@
 //! - `CCE_DB_QDRANT_API_KEY` - Qdrant API key (optional, can use placeholder in config.toml)
 //! - `CCE_DB_VECTOR_BACKEND` - Vector backend (local|qdrant)
 //! - `CCE_DB_VECTOR_DATA_DIR` - Local vector data directory
-//! - `CCE_DB_RELATION_BACKEND` - Relation backend key (phase 1: parsed, only local effective)
-//! - `CCE_DB_FULLTEXT_BACKEND` - Fulltext backend key (phase 1: parsed, only local effective)
-//! - `CCE_DB_RELATION_URL` - Reserved remote relation URL (phase 3)
-//! - `CCE_DB_RELATION_API_KEY` - Reserved remote relation key (phase 3)
-//! - `CCE_DB_FULLTEXT_URL` - Reserved remote fulltext URL (phase 3)
-//! - `CCE_DB_FULLTEXT_API_KEY` - Reserved remote fulltext key (phase 3)
+//! - `CCE_DB_RELATION_BACKEND` - Relation backend key (local|remote)
+//! - `CCE_DB_FULLTEXT_BACKEND` - Fulltext backend key (local|remote)
+//! - `CCE_DB_RELATION_URL` - PostgreSQL connection URL
+//! - `CCE_DB_RELATION_API_KEY` - Legacy alias for the relation username
+//! - `CCE_DB_RELATION_USERNAME` - PostgreSQL user name
+//! - `CCE_DB_RELATION_PASSWORD` - PostgreSQL password
+//! - `CCE_DB_RELATION_POOL_SIZE` - PostgreSQL pool size
+//! - `CCE_DB_RELATION_CONNECT_TIMEOUT_MS` - PostgreSQL connect timeout
+//! - `CCE_DB_RELATION_ACQUIRE_TIMEOUT_MS` - PostgreSQL pool acquire timeout
+//! - `CCE_DB_RELATION_STATEMENT_TIMEOUT_MS` - PostgreSQL statement timeout
+//! - `CCE_DB_FULLTEXT_URL` - Elasticsearch base URL
+//! - `CCE_DB_FULLTEXT_API_KEY` - Elasticsearch API key
+//! - `CCE_DB_FULLTEXT_USERNAME` - Elasticsearch basic-auth user
+//! - `CCE_DB_FULLTEXT_PASSWORD` - Elasticsearch basic-auth password
+//! - `CCE_DB_FULLTEXT_INDEX` - Elasticsearch index name
+//! - `CCE_DB_FULLTEXT_BULK_SIZE` - Elasticsearch bulk batch size
+//! - `CCE_DB_FULLTEXT_REQUEST_TIMEOUT_MS` - Elasticsearch request timeout
+//! - `CCE_DB_FULLTEXT_REFRESH_INTERVAL` - Elasticsearch refresh interval
 //! - `CCE_DB_SQLITE_PATH` - SQLite database path
 //! - `CCE_DB_SQLITE_SYNC` - SQLite sync mode (OFF/NORMAL/FULL/EXTRA)
 //! - `CCE_DB_SQLITE_CACHE_SIZE` - SQLite cache size in KB
@@ -178,9 +190,8 @@ fn apply_database_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     if let Ok(val) = std::env::var("CCE_DB_QDRANT_API_KEY") {
         config.database.qdrant.api_key = Some(val);
     }
-    // Relation/fulltext backend switches are parsed in phase 1 so later
-    // phases keep stable key names; only `local` takes effect for now
-    // (remote selections are rejected by structural validation).
+    // Relation/fulltext backend switches keep stable key names across
+    // phases; remote selections are validated by the preset matrix.
     if let Ok(val) = std::env::var("CCE_DB_RELATION_BACKEND") {
         config.database.relation_backend = match val.to_lowercase().as_str() {
             "local" => crate::modules::RelationBackend::Local,
@@ -211,11 +222,59 @@ fn apply_database_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     if let Ok(val) = std::env::var("CCE_DB_RELATION_API_KEY") {
         config.database.relation_remote.api_key = Some(val);
     }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_USERNAME") {
+        config.database.relation_remote.username = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_PASSWORD") {
+        config.database.relation_remote.password = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_POOL_SIZE") {
+        config.database.relation_remote.pool_size = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_RELATION_POOL_SIZE", "invalid value")
+        })?;
+    }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_CONNECT_TIMEOUT_MS") {
+        config.database.relation_remote.connect_timeout_ms = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_RELATION_CONNECT_TIMEOUT_MS", "invalid value")
+        })?;
+    }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_ACQUIRE_TIMEOUT_MS") {
+        config.database.relation_remote.acquire_timeout_ms = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_RELATION_ACQUIRE_TIMEOUT_MS", "invalid value")
+        })?;
+    }
+    if let Ok(val) = std::env::var("CCE_DB_RELATION_STATEMENT_TIMEOUT_MS") {
+        config.database.relation_remote.statement_timeout_ms = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_RELATION_STATEMENT_TIMEOUT_MS", "invalid value")
+        })?;
+    }
     if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_URL") {
         config.database.fulltext_remote.url = Some(val);
     }
     if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_API_KEY") {
         config.database.fulltext_remote.api_key = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_USERNAME") {
+        config.database.fulltext_remote.username = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_PASSWORD") {
+        config.database.fulltext_remote.password = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_INDEX") {
+        config.database.fulltext_remote.index_name = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_BULK_SIZE") {
+        config.database.fulltext_remote.bulk_size = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_FULLTEXT_BULK_SIZE", "invalid value")
+        })?;
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_REQUEST_TIMEOUT_MS") {
+        config.database.fulltext_remote.request_timeout_ms = val.parse().map_err(|_| {
+            ConfigError::invalid_env_var("CCE_DB_FULLTEXT_REQUEST_TIMEOUT_MS", "invalid value")
+        })?;
+    }
+    if let Ok(val) = std::env::var("CCE_DB_FULLTEXT_REFRESH_INTERVAL") {
+        config.database.fulltext_remote.refresh_interval = Some(val);
     }
 
     // SQLite configuration
@@ -418,6 +477,40 @@ pub fn validate_required_env_vars(config: &AppConfig) -> Result<(), ConfigError>
         }
     }
 
+    // Check remote relation/fulltext secrets for unresolved placeholders
+    let mut remote_placeholders: Vec<(&str, &Option<String>)> = Vec::new();
+    remote_placeholders.push((
+        "database.relation_remote.url",
+        &config.database.relation_remote.url,
+    ));
+    remote_placeholders.push((
+        "database.relation_remote.password",
+        &config.database.relation_remote.password,
+    ));
+    remote_placeholders.push((
+        "database.fulltext_remote.url",
+        &config.database.fulltext_remote.url,
+    ));
+    remote_placeholders.push((
+        "database.fulltext_remote.api_key",
+        &config.database.fulltext_remote.api_key,
+    ));
+    remote_placeholders.push((
+        "database.fulltext_remote.password",
+        &config.database.fulltext_remote.password,
+    ));
+    for (field, value) in remote_placeholders {
+        if let Some(key_ref) = value
+            && key_ref.starts_with("${")
+            && key_ref.ends_with('}')
+        {
+            let var_name = &key_ref[2..key_ref.len() - 1];
+            if std::env::var(var_name).is_err() {
+                missing_vars.push(format!("{field}.{var_name}"));
+            }
+        }
+    }
+
     if !missing_vars.is_empty() {
         return Err(ConfigError::Other(format!(
             "Required environment variables not set: {}",
@@ -450,6 +543,28 @@ pub fn resolve_config_placeholders(config: &mut AppConfig) {
     config.database.qdrant.url = resolve_env_placeholders(&config.database.qdrant.url);
     if let Some(ref mut key) = config.database.qdrant.api_key {
         *key = resolve_env_placeholders(key);
+    }
+
+    // Resolve remote relation/fulltext secrets and URLs
+    let relation_remote = &mut config.database.relation_remote;
+    if let Some(ref mut url) = relation_remote.url {
+        *url = resolve_env_placeholders(url);
+    }
+    if let Some(ref mut key) = relation_remote.api_key {
+        *key = resolve_env_placeholders(key);
+    }
+    if let Some(ref mut password) = relation_remote.password {
+        *password = resolve_env_placeholders(password);
+    }
+    let fulltext_remote = &mut config.database.fulltext_remote;
+    if let Some(ref mut url) = fulltext_remote.url {
+        *url = resolve_env_placeholders(url);
+    }
+    if let Some(ref mut key) = fulltext_remote.api_key {
+        *key = resolve_env_placeholders(key);
+    }
+    if let Some(ref mut password) = fulltext_remote.password {
+        *password = resolve_env_placeholders(password);
     }
 
     // Resolve logger file path

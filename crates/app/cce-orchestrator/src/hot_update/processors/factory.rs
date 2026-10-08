@@ -19,7 +19,7 @@ use cce_metrics::RelationMetrics;
 use cce_parser::summary::{RuleBasedGenerator, SummaryGenerator};
 use cce_plugin::PluginRegistry;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 use cce_types::error::ConfigError;
 
 use super::{
@@ -192,10 +192,11 @@ impl ProcessorFactory {
         Self
     }
 
-    /// Create all enabled processors from backend enums (phase-2 entry point).
+    /// Create all enabled processors from backend enums.
     ///
-    /// Only local branches exist; the enums unwrap once here so processor
-    /// behavior stays unchanged.
+    /// The local branches unwrap once here so processor behavior stays
+    /// unchanged; remote branches resolve to no local client and disable
+    /// the corresponding processor.
     #[allow(clippy::too_many_arguments)]
     pub fn create_all_processors_from_stores(
         &self,
@@ -220,8 +221,8 @@ impl ProcessorFactory {
     ) -> Result<(Vec<BoxedUpdateProcessor>, Arc<StorageCoordinator>), ConfigError> {
         self.create_all_processors(
             vector,
-            fulltext.map(FulltextStore::into_local),
-            relation.map(RelationStore::into_local),
+            fulltext.and_then(FulltextStore::into_local),
+            relation.and_then(RelationStore::into_local),
             embedder,
             project_group_id,
             project_id,

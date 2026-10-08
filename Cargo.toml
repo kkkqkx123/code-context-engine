@@ -19,9 +19,10 @@ members = [
     "crates/infra/cce-llm-client",
     "crates/infra/cce-storage-common",
     "crates/infra/cce-storage-bm25",
-    "crates/infra/cce-storage-qdrant",
-    "crates/infra/cce-storage-local",
-    "crates/infra/cce-storage-sqlite",
+    "crates/infra/cce-storage-vector-qdrant",
+    "crates/infra/cce-storage-vector-local",
+    "crates/infra/cce-storage-relation-sqlite",
+    "crates/infra/cce-storage-relation-pg",
     "crates/infra/cce-scanner",
     # local vector engine (git submodule: https://github.com/kkkqkx123/simvec)
     "crates/simvec",
@@ -136,6 +137,10 @@ governor = "0.10"
 # SQLite
 rusqlite = { version = "0.39", features = ["bundled"] }
 
+# PostgreSQL remote branch (relation storage)
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+deadpool-postgres = { version = "0.14", features = ["serde"] }
+
 # Async trait support
 async-trait = "0.1"
 
@@ -182,9 +187,9 @@ tree-sitter-vue = { path = "crates/tree-sitter-vue" }
 cce-circuit-breaker = { path = "crates/infra/cce-circuit-breaker" }
 cce-storage-common = { path = "crates/infra/cce-storage-common" }
 cce-storage-bm25 = { path = "crates/infra/cce-storage-bm25" }
-cce-storage-qdrant = { path = "crates/infra/cce-storage-qdrant" }
-cce-storage-local = { path = "crates/infra/cce-storage-local" }
-cce-storage-sqlite = { path = "crates/infra/cce-storage-sqlite" }
+cce-storage-vector-qdrant = { path = "crates/infra/cce-storage-vector-qdrant" }
+cce-storage-vector-local = { path = "crates/infra/cce-storage-vector-local" }
+cce-storage-relation-sqlite = { path = "crates/infra/cce-storage-relation-sqlite" }
 simvec = { path = "crates/simvec" }
 
 # MCP SDK (official modelcontextprotocol/rust-sdk).

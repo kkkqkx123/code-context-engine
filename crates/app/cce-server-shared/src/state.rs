@@ -27,7 +27,7 @@ pub struct AppState {
     /// Per-project progress trackers for lock-free metrics access
     pub progress_tracker: ProjectCache<ProgressTracker>,
     /// Qdrant subprocess lifecycle control handle
-    pub qdrant_control: Option<cce_storage_qdrant::QdrantProcessHandle>,
+    pub qdrant_control: Option<cce_storage_vector_qdrant::QdrantProcessHandle>,
     /// Per-project relation searcher cache (LRU caching for hot queries)
     pub relation_searcher_cache: RelationSearcherCache,
 }
@@ -44,7 +44,7 @@ impl AppState {
     /// * `qdrant_handle` - Optional Qdrant process handle
     pub async fn from_engine(
         engine: &CodeContextEngine,
-        qdrant_handle: Option<cce_storage_qdrant::QdrantProcessHandle>,
+        qdrant_handle: Option<cce_storage_vector_qdrant::QdrantProcessHandle>,
     ) -> Self {
         Self {
             engine: Arc::new(engine.clone()),
@@ -117,7 +117,7 @@ impl AppState {
     }
 
     /// Get a clone of the Qdrant client (Qdrant backend only, for diagnostics/process admin)
-    pub fn qdrant_clone(&self) -> Option<Arc<cce_storage_qdrant::QdrantClient>> {
+    pub fn qdrant_clone(&self) -> Option<Arc<cce_storage_vector_qdrant::QdrantClient>> {
         self.engine.qdrant_clone()
     }
 
@@ -132,14 +132,14 @@ impl AppState {
     }
 
     /// Get a clone of the metadata store (SQLite client)
-    pub fn metadata_store_clone(&self) -> Option<Arc<cce_storage_sqlite::SqliteClient>> {
+    pub fn metadata_store_clone(&self) -> Option<Arc<cce_storage_relation_sqlite::SqliteClient>> {
         self.engine.metadata_store_clone()
     }
 
     /// Get a clone of the project registry
     pub fn project_registry_clone(
         &self,
-    ) -> Arc<cce_storage_sqlite::project_registry::ProjectRegistry> {
+    ) -> Arc<cce_storage_relation_sqlite::project_registry::ProjectRegistry> {
         self.engine.project_registry_clone()
     }
 }

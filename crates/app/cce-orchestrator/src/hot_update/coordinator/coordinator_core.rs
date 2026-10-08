@@ -14,8 +14,8 @@ use cce_config::HotUpdateConfig;
 use cce_metrics::{HotUpdateMetrics, WatchMetrics};
 use cce_parser::parser::ParseCoordinator;
 use cce_scanner::ScanOptions;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::project_registry::ProjectRegistry;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::project_registry::ProjectRegistry;
 
 use crate::hot_update::change::BatchChangeResult;
 use crate::hot_update::change_detector::ChangeDetector;

@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use cce_orchestrator::index::FileIndexer;
 use cce_scanner::{FSScanner, ScanOptions};
-use cce_storage_sqlite::BatchCheckpointRecord;
+use cce_storage_relation_sqlite::BatchCheckpointRecord;
 
 const FILE_COUNT: usize = 300;
 const BATCH_SIZE: usize = 50;

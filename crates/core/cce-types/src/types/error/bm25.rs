@@ -47,6 +47,11 @@ pub enum Bm25Error {
     /// Writer error
     #[error("Writer error: {0}")]
     Writer(String),
+
+    /// Remote search-service error (transport, authentication, or
+    /// server-side rejection on the Elasticsearch branch).
+    #[error("Remote fulltext error: {0}")]
+    Remote(String),
 }
 
 impl Bm25Error {
@@ -65,6 +70,11 @@ impl Bm25Error {
         Self::Config(ConfigError::Other(msg.into()))
     }
 
+    /// Create a remote search-service error from string
+    pub fn remote<S: Into<String>>(msg: S) -> Self {
+        Self::Remote(msg.into())
+    }
+
     /// Whether the failure is caused by exhausted storage space.
     pub fn is_storage_full(&self) -> bool {
         match self {
@@ -73,7 +83,8 @@ impl Bm25Error {
             | Self::Search(message)
             | Self::Schema(message)
             | Self::Document(message)
-            | Self::Writer(message) => {
+            | Self::Writer(message)
+            | Self::Remote(message) => {
                 let lowered = message.to_lowercase();
                 lowered.contains("no space")
                     || lowered.contains("storage full")
@@ -114,6 +125,7 @@ impl ErrorClassify for Bm25Error {
                 | Self::Document(_)
                 | Self::Writer(_)
                 | Self::Search(_)
+                | Self::Remote(_)
         )
     }
 

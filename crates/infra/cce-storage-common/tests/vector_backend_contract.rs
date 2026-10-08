@@ -272,8 +272,8 @@ async fn local_backend_contract() {
         hnsw_ef_search: None,
         full_scan_threshold: None,
     };
-    let store =
-        cce_storage_local::LocalVectorStore::open_at(dir.path(), &config).expect("open store");
+    let store = cce_storage_vector_local::LocalVectorStore::open_at(dir.path(), &config)
+        .expect("open store");
     run_contract_suite(&store, "local").await;
 }
 
@@ -287,7 +287,7 @@ async fn qdrant_backend_contract() {
         return;
     };
     use cce_config::modules::{DistanceMetric, QdrantConfig};
-    use cce_storage_qdrant::QdrantClient;
+    use cce_storage_vector_qdrant::QdrantClient;
     let config = QdrantConfig {
         url,
         vector_size: DIM,

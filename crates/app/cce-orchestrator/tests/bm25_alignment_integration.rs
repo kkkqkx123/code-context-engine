@@ -20,10 +20,10 @@ use cce_orchestrator::{
 };
 use cce_relation::{CallChainQuery, RelationIndex};
 use cce_storage_bm25::{Bm25Client, Bm25Config};
-use cce_storage_qdrant::generate_group_id;
-use cce_storage_qdrant::{QdrantClient, QdrantConfig};
-use cce_storage_sqlite::ChunkRepository;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::ChunkRepository;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_vector_qdrant::generate_group_id;
+use cce_storage_vector_qdrant::{QdrantClient, QdrantConfig};
 
 /// Fixture files: two Rust source files worth of functions/structs plus a
 /// markdown document chunk.

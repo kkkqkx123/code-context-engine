@@ -4,7 +4,7 @@
 //! local parse pipeline from on-disk content under the new configuration, so
 //! unchanged source files never wait for an LLM round-trip to catch up.
 
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 use cce_types::StorageError;
 
 /// Drift detection outcome for a persisted string fingerprint.

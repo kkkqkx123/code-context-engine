@@ -6,7 +6,7 @@
 //! the sweep separates per-transaction fixed cost from per-row cost and
 //! shows whether large batches develop a source-loading-style tail.
 //!
-//! Run with: `cargo run -p cce-storage-sqlite --bench storage_txn`
+//! Run with: `cargo run -p cce-storage-relation-sqlite --bench storage_txn`
 //!
 //! Results are printed to stdout and appended to
 //! `benches/results/storage_txn.tsv`.
@@ -16,7 +16,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use cce_storage_sqlite::{
+use cce_storage_relation_sqlite::{
     ChunkRecord, ChunkRepository, NewProjectRecord, ProjectRepository, SqliteClient,
 };
 

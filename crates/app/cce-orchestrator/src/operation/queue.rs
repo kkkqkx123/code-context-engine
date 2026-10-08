@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, trace, warn};
 
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::repo::CheckpointRepository;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::repo::CheckpointRepository;
 use cce_types::{OperationKind, StorageError};
 
 /// Maximum number of pending (queued, not active) operations.

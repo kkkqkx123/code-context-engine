@@ -18,8 +18,8 @@ use crate::hot_update::error::{HotUpdateError, Result};
 use cce_config::{RelationBuilderParams, RelationConfig};
 use cce_relation::BuildConfigParser;
 use cce_relation::index::RelationIndexView;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
 
 use super::external_packages::{BuildConfigParserExt, ExternalPackageData};
 use super::relation_processor::RelationUpdateProcessor;

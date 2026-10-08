@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::hot_update::FileChangeType;
 use cce_config::HotUpdateConfig;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
 
 use super::coordinator_core::HotUpdateCoordinator;
 use crate::hot_update::coordinator::change_merger::coalesce_pending_changes;

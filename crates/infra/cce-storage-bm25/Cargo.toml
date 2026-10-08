@@ -9,8 +9,10 @@ cce-types = { path = "../../core/cce-types" }
 cce-config = { path = "../../core/cce-config" }
 cce-text = { path = "../../core/cce-text" }
 cce-utils = { path = "../../core/cce-utils" }
+cce-circuit-breaker = { path = "../cce-circuit-breaker" }
 tantivy = { workspace = true }
 tokio = { workspace = true }
+reqwest = { workspace = true }
 rayon = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }

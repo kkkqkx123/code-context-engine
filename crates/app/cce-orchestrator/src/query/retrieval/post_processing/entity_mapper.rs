@@ -13,9 +13,9 @@ use crate::query::types::SearchResult;
 use crate::query::types::content_reference::{
     ContentState, DowngradeReason, file_level_reference, reference_content,
 };
-use cce_storage_sqlite::repo::ChunkRepository;
-use cce_storage_sqlite::source_reader::{SourceFileCache, read_source_lines_cached};
-use cce_storage_sqlite::types::ChunkRecord;
+use cce_storage_relation_sqlite::repo::ChunkRepository;
+use cce_storage_relation_sqlite::source_reader::{SourceFileCache, read_source_lines_cached};
+use cce_storage_relation_sqlite::types::ChunkRecord;
 use cce_utils::token_estimation::estimate_tokens;
 
 /// Fetch chunk records by chunk IDs, resolving the full epoch view.
@@ -273,7 +273,7 @@ fn choose_entity_name(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_storage_sqlite::{ChunkRepository, SqliteClient};
+    use cce_storage_relation_sqlite::{ChunkRepository, SqliteClient};
     use cce_types::EntityId;
 
     fn chunk_record(entity_ids: &[i64]) -> ChunkRecord {

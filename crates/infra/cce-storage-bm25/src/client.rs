@@ -342,6 +342,23 @@ impl Bm25Client {
         result
     }
 
+    /// Run a keyword retrieval against the local index.
+    ///
+    /// This is the contract read path: the retrieval handler owns the query
+    /// construction so remote branches can reproduce the same filter
+    /// semantics (project, generations, excluded files, test/category).
+    pub async fn search(
+        &self,
+        query: &str,
+        options: &crate::Bm25SearchOptions,
+    ) -> Result<Vec<crate::Bm25SearchResult>, Bm25Error> {
+        use crate::Bm25Retrieval;
+        let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
+        let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
+        Bm25Retrieval::new().search(&manager_guard, schema, query, options)
+    }
+
     /// Read the stored fields needed to copy a published epoch into a
     /// candidate generation.
     pub async fn snapshot_documents(

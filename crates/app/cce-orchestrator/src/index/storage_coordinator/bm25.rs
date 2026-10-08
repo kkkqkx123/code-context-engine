@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::CheckpointManager;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_bm25::Bm25Document;
-use cce_storage_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
-use cce_storage_sqlite::{ChunkRecord, EntityDetailMapping};
+use cce_storage_relation_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
+use cce_storage_relation_sqlite::{ChunkRecord, EntityDetailMapping};
 
 use crate::error::OrchestratorError;
 

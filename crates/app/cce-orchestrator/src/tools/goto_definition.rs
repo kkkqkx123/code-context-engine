@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use cce_relation::index::LayeredSnapshotIndex;
 use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::{ChunkRepository, EntityDetailMappingRepository};
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::{ChunkRepository, EntityDetailMappingRepository};
 use cce_types::{Entity, EntityId};
 
 use crate::tools::symbol_lookup_types::{
@@ -219,13 +219,15 @@ impl GotoDefinitionTool {
         // The body is lazy-loaded from the source file; chunk rows no longer
         // persist raw code.
         let project_root =
-            cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
-        Some(cce_storage_sqlite::source_reader::read_source_lines(
-            Some(project_root.as_path()),
-            &first.file_path,
-            first.start_line.max(0) as u32,
-            last.end_line.max(0) as u32,
-        ))
+            cce_storage_relation_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
+        Some(
+            cce_storage_relation_sqlite::source_reader::read_source_lines(
+                Some(project_root.as_path()),
+                &first.file_path,
+                first.start_line.max(0) as u32,
+                last.end_line.max(0) as u32,
+            ),
+        )
     }
 }
 

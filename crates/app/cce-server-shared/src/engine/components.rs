@@ -8,9 +8,9 @@ use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetr
 use cce_orchestrator::index::VectorStore;
 use cce_orchestrator::index::{FulltextStore, RelationStore};
 use cce_storage_bm25::Bm25Client;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::project_registry::ProjectRegistry;
-use cce_storage_sqlite::repo::{CheckpointRepository, ProjectRepository};
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::project_registry::ProjectRegistry;
+use cce_storage_relation_sqlite::repo::{CheckpointRepository, ProjectRepository};
 use tokio::sync::Mutex;
 
 impl super::CodeContextEngine {
@@ -37,12 +37,12 @@ impl super::CodeContextEngine {
     }
 
     /// Get a reference to the Qdrant client (Qdrant backend only)
-    pub fn qdrant(&self) -> Option<&Arc<cce_storage_qdrant::QdrantClient>> {
+    pub fn qdrant(&self) -> Option<&Arc<cce_storage_vector_qdrant::QdrantClient>> {
         self.vector.as_qdrant()
     }
 
     /// Get a clone of the Qdrant client (Qdrant backend only)
-    pub fn qdrant_clone(&self) -> Option<Arc<cce_storage_qdrant::QdrantClient>> {
+    pub fn qdrant_clone(&self) -> Option<Arc<cce_storage_vector_qdrant::QdrantClient>> {
         self.vector.as_qdrant().cloned()
     }
 
@@ -553,7 +553,7 @@ impl super::CodeContextEngine {
                                     }
                                     let operation_id = &name[".export-backup-".len()..];
                                     let is_expired = if let Some(ref conn) = read_conn {
-                                        match cce_storage_sqlite::CheckpointRepository::get_checkpoint(
+                                        match cce_storage_relation_sqlite::CheckpointRepository::get_checkpoint(
                                             conn, *project_id, operation_id,
                                         ) {
                                             Ok(Some(checkpoint)) => {

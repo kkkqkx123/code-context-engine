@@ -12,34 +12,7 @@ fn current_timestamp() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// One per-token audit row.
-#[derive(Debug, Clone)]
-pub struct AdmissionAuditRecord {
-    /// Log-safe token fingerprint, never the token itself.
-    pub token_fingerprint: String,
-    /// Comma separated project ids bound to the token at last use.
-    pub projects: String,
-    /// Configured byte quota, if any.
-    pub quota_bytes: Option<i64>,
-    /// Stored bytes accepted through ingest batches.
-    pub bytes_used: i64,
-    /// Admitted ingest batches.
-    pub admitted: i64,
-    /// Rejections by cause.
-    pub auth_rejections: i64,
-    /// Rejections by cause.
-    pub scope_rejections: i64,
-    /// Rejections by cause.
-    pub rate_rejections: i64,
-    /// Rejections by cause.
-    pub body_rejections: i64,
-    /// Rejections for exceeding the byte quota.
-    pub quota_rejections: i64,
-    /// Last use as seconds since the unix epoch, if any.
-    pub last_used: Option<i64>,
-    /// Last rejection reason, if any.
-    pub last_reject_reason: Option<String>,
-}
+pub use cce_storage_common::relation::types::AdmissionAuditRecord;
 
 /// Admission audit persistence.
 pub struct AdmissionAuditRepository;

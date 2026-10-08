@@ -9,8 +9,8 @@ use std::sync::Arc;
 use cce_relation::index::LayeredSnapshotIndex;
 use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps};
 use cce_relation::query::QueryCache;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::repo::EntityRepository;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::repo::EntityRepository;
 use cce_types::{Entity, EntityId};
 use parking_lot::RwLock;
 
@@ -332,8 +332,8 @@ impl FindReferencesTool {
         let project_id = self.project_id;
         let conn = crate::tools::common::get_read_connection(&self.sqlite).ok()?;
         let project_root =
-            cce_storage_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
-        let content = cce_storage_sqlite::source_reader::read_source_lines(
+            cce_storage_relation_sqlite::source_reader::resolve_project_root(&conn, project_id)?;
+        let content = cce_storage_relation_sqlite::source_reader::read_source_lines(
             Some(project_root.as_path()),
             path,
             0,

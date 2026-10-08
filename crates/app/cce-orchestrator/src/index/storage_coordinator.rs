@@ -30,8 +30,8 @@ use crate::CheckpointManager;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_qdrant::QdrantClient;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_vector_qdrant::QdrantClient;
 
 use super::super::error::OrchestratorError;
 use super::vector_store::{FulltextStore, RelationStore, VectorStore};
@@ -133,7 +133,7 @@ impl StorageCoordinator {
     }
 
     /// Set embedded local vector store.
-    pub fn with_local(mut self, store: Arc<cce_storage_local::LocalVectorStore>) -> Self {
+    pub fn with_local(mut self, store: Arc<cce_storage_vector_local::LocalVectorStore>) -> Self {
         self.vector = Some(VectorStore::Local(store));
         self
     }
@@ -144,12 +144,13 @@ impl StorageCoordinator {
         self
     }
 
-    /// Set fulltext backend via enum dispatch (phase-2 entry point).
+    /// Set fulltext backend via enum dispatch.
     ///
-    /// Only the local branch exists; the enum unwraps once at this
-    /// boundary so the write path keeps its current behavior.
+    /// The local branch unwraps once at this boundary so the write path
+    /// keeps its current behavior; the remote branch is not wired into
+    /// the write path yet and resolves to no local client.
     pub fn with_fulltext_store(mut self, store: FulltextStore) -> Self {
-        self.bm25 = Some(store.into_local());
+        self.bm25 = store.into_local();
         self
     }
 
@@ -178,12 +179,13 @@ impl StorageCoordinator {
         self
     }
 
-    /// Set relation backend via enum dispatch (phase-2 entry point).
+    /// Set relation backend via enum dispatch.
     ///
-    /// Only the local branch exists; the enum unwraps once at this
-    /// boundary so per-project scoping semantics stay unchanged.
+    /// The local branch unwraps once at this boundary so per-project
+    /// scoping semantics stay unchanged; the remote branch is not wired
+    /// into the write path yet and resolves to no local store.
     pub fn with_relation_store(mut self, store: RelationStore) -> Self {
-        self.metadata_store = Some(store.into_local());
+        self.metadata_store = store.into_local();
         self
     }
 
@@ -256,7 +258,7 @@ impl StorageCoordinator {
         let Some(client) = self.metadata_store.clone() else {
             return Ok(None);
         };
-        cce_storage_sqlite::cache::FileHashCache::new(client, self.project_id)
+        cce_storage_relation_sqlite::cache::FileHashCache::new(client, self.project_id)
             .active_epoch()
             .map_err(OrchestratorError::Storage)
     }

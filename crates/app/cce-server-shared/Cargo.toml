@@ -30,10 +30,10 @@ cce-plugin-runtime = { path = "../cce-plugin-runtime" }
 cce-parser = { path = "../../parser/cce-parser" }
 cce-relation = { path = "../../parser/cce-relation" }
 cce-storage-common = { path = "../../infra/cce-storage-common" }
-cce-storage-sqlite = { path = "../../infra/cce-storage-sqlite" }
+cce-storage-relation-sqlite = { path = "../../infra/cce-storage-relation-sqlite" }
 cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
-cce-storage-qdrant = { path = "../../infra/cce-storage-qdrant" }
-cce-storage-local = { path = "../../infra/cce-storage-local" }
+cce-storage-vector-qdrant = { path = "../../infra/cce-storage-vector-qdrant" }
+cce-storage-vector-local = { path = "../../infra/cce-storage-vector-local" }
 cce-llm-client = { path = "../../infra/cce-llm-client" }
 cce-scanner = { path = "../../infra/cce-scanner" }
 cce-orchestrator = { path = "../cce-orchestrator" }

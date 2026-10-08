@@ -27,7 +27,7 @@ cce-server-shared = { path = "../cce-server-shared" }
 cce-orchestrator = { path = "../cce-orchestrator" }
 cce-parser = { path = "../../parser/cce-parser" }
 cce-relation = { path = "../../parser/cce-relation" }
-cce-storage-sqlite = { path = "../../infra/cce-storage-sqlite" }
+cce-storage-relation-sqlite = { path = "../../infra/cce-storage-relation-sqlite" }
 
 rmcp = { workspace = true, features = [
     "server",

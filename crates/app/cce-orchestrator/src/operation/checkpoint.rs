@@ -7,9 +7,9 @@
 //! - Recovery support
 
 use crate::hot_update::FileChangeType;
-use cce_storage_sqlite::CheckpointRepository;
-use cce_storage_sqlite::SqliteClient;
-use cce_storage_sqlite::types::{
+use cce_storage_relation_sqlite::CheckpointRepository;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_relation_sqlite::types::{
     BatchCheckpointRecord, CheckpointRecord, CheckpointStatus, FileCheckpointRecord,
     WorkUnitCheckpointRecord, WorkUnitStatus,
 };

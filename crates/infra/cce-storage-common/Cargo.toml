@@ -12,10 +12,11 @@ chrono = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 cce-config = { path = "../../core/cce-config" }
-cce-storage-local = { path = "../cce-storage-local" }
-cce-storage-qdrant = { path = "../cce-storage-qdrant" }
+cce-storage-vector-local = { path = "../cce-storage-vector-local" }
+cce-storage-vector-qdrant = { path = "../cce-storage-vector-qdrant" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

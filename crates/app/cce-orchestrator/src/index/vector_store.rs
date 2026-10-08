@@ -5,11 +5,12 @@
 
 use std::sync::Arc;
 
-use cce_storage_bm25::Bm25Client;
+use cce_storage_bm25::{Bm25Client, ElasticsearchClient};
 use cce_storage_common::{DenseSearchQuery, ScoredPoint, VectorPoint, VectorStorage};
-use cce_storage_local::LocalVectorStore;
-use cce_storage_qdrant::QdrantClient;
-use cce_storage_sqlite::SqliteClient;
+use cce_storage_relation_pg::PostgresClient;
+use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_vector_local::LocalVectorStore;
+use cce_storage_vector_qdrant::QdrantClient;
 use cce_types::{PointKind, StorageError};
 
 /// Vector backend holding one concrete implementation.
@@ -267,13 +268,16 @@ impl VectorStorage for VectorStore {
 
 /// Fulltext backend holding one concrete implementation.
 ///
-/// Local is the only phase-2 branch (embedded Tantivy). The enum mirrors
-/// [`VectorStore`] so assembly selects branches from configuration instead
-/// of threading concrete client types through every caller.
+/// Local is the embedded Tantivy branch; Remote is the Elasticsearch
+/// branch. The enum mirrors [`VectorStore`] so assembly selects branches
+/// from configuration instead of threading concrete client types through
+/// every caller.
 #[derive(Clone)]
 pub enum FulltextStore {
     /// Embedded Tantivy index.
     Local(Arc<tokio::sync::Mutex<Bm25Client>>),
+    /// External Elasticsearch service.
+    Remote(Arc<ElasticsearchClient>),
 }
 
 impl FulltextStore {
@@ -282,36 +286,62 @@ impl FulltextStore {
         Self::Local(client)
     }
 
+    /// Wrap a remote Elasticsearch client.
+    pub fn remote(client: Arc<ElasticsearchClient>) -> Self {
+        Self::Remote(client)
+    }
+
     /// Whether this is the embedded backend.
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local(_))
     }
 
-    /// Backend name for logging (`local`).
+    /// Whether this is the remote backend.
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote(_))
+    }
+
+    /// Backend name for logging (`local` or `remote`).
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Local(_) => "local",
+            Self::Remote(_) => "remote",
         }
     }
 
-    /// Borrow the local client.
-    pub fn as_local(&self) -> &Arc<tokio::sync::Mutex<Bm25Client>> {
+    /// Borrow the local client when this is the embedded branch.
+    pub fn as_local(&self) -> Option<&Arc<tokio::sync::Mutex<Bm25Client>>> {
         match self {
-            Self::Local(client) => client,
+            Self::Local(client) => Some(client),
+            _ => None,
         }
     }
 
-    /// Unwrap into the concrete client handle.
-    pub fn into_local(self) -> Arc<tokio::sync::Mutex<Bm25Client>> {
+    /// Borrow the remote client when this is the remote branch.
+    pub fn as_remote(&self) -> Option<&Arc<ElasticsearchClient>> {
         match self {
-            Self::Local(client) => client,
+            Self::Remote(client) => Some(client),
+            _ => None,
+        }
+    }
+
+    /// Unwrap into the local handle when this is the embedded branch.
+    pub fn into_local(self) -> Option<Arc<tokio::sync::Mutex<Bm25Client>>> {
+        match self {
+            Self::Local(client) => Some(client),
+            _ => None,
+        }
+    }
+
+    /// Unwrap into the remote handle when this is the remote branch.
+    pub fn into_remote(self) -> Option<Arc<ElasticsearchClient>> {
+        match self {
+            Self::Remote(client) => Some(client),
+            _ => None,
         }
     }
 
     /// Build the store from the resolved database configuration.
-    ///
-    /// Phase 2 only supports the local branch; a remote selection is
-    /// rejected here (structural validation already rejects it earlier).
     pub fn from_database_config(
         database: &cce_config::global::DatabaseConfig,
     ) -> Result<Self, StorageError> {
@@ -320,9 +350,12 @@ impl FulltextStore {
                 let client = Bm25Client::new(database.bm25.clone());
                 Ok(Self::Local(Arc::new(tokio::sync::Mutex::new(client))))
             }
-            cce_config::modules::FulltextBackend::Remote => Err(StorageError::query(
-                "remote fulltext backend is reserved and not enabled in this phase",
-            )),
+            cce_config::modules::FulltextBackend::Remote => {
+                let client = ElasticsearchClient::from_database_config(database).map_err(|e| {
+                    StorageError::query(format!("failed to create remote fulltext client: {e}"))
+                })?;
+                Ok(Self::Remote(Arc::new(client)))
+            }
         }
     }
 }
@@ -331,20 +364,23 @@ impl std::fmt::Debug for FulltextStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Local(_) => write!(f, "FulltextStore::Local(..)"),
+            Self::Remote(_) => write!(f, "FulltextStore::Remote(..)"),
         }
     }
 }
 
 /// Relation backend holding one concrete implementation.
 ///
-/// Local is the only phase-2 branch (embedded SQLite with per-project
-/// database files). Path rules, cache eviction, capacity stats, and the
-/// project-delete two-step semantics stay inside the local client; this
-/// enum only fixes the dispatch shape for the future remote branch.
+/// Local is the embedded SQLite branch (per-project database files);
+/// Remote is the PostgreSQL branch (per-row project filtering). Path
+/// rules, cache eviction, capacity stats, and the project-delete
+/// two-step semantics stay inside the local client.
 #[derive(Clone)]
 pub enum RelationStore {
     /// Embedded SQLite repositories.
     Local(Arc<SqliteClient>),
+    /// External PostgreSQL service.
+    Remote(Arc<PostgresClient>),
 }
 
 impl RelationStore {
@@ -353,44 +389,73 @@ impl RelationStore {
         Self::Local(client)
     }
 
+    /// Wrap a remote PostgreSQL client.
+    pub fn remote(client: Arc<PostgresClient>) -> Self {
+        Self::Remote(client)
+    }
+
     /// Whether this is the embedded backend.
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local(_))
     }
 
-    /// Backend name for logging (`local`).
+    /// Whether this is the remote backend.
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote(_))
+    }
+
+    /// Backend name for logging (`local` or `remote`).
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Local(_) => "local",
+            Self::Remote(_) => "remote",
         }
     }
 
-    /// Borrow the local client.
-    pub fn as_local(&self) -> &Arc<SqliteClient> {
+    /// Borrow the local client when this is the embedded branch.
+    pub fn as_local(&self) -> Option<&Arc<SqliteClient>> {
         match self {
-            Self::Local(client) => client,
+            Self::Local(client) => Some(client),
+            _ => None,
         }
     }
 
-    /// Unwrap into the concrete client handle.
-    pub fn into_local(self) -> Arc<SqliteClient> {
+    /// Borrow the remote client when this is the remote branch.
+    pub fn as_remote(&self) -> Option<&Arc<PostgresClient>> {
         match self {
-            Self::Local(client) => client,
+            Self::Remote(client) => Some(client),
+            _ => None,
         }
     }
 
-    /// Open the per-project scoped handle, preserving the local branch
-    /// per-project-database semantics.
+    /// Unwrap into the local handle when this is the embedded branch.
+    pub fn into_local(self) -> Option<Arc<SqliteClient>> {
+        match self {
+            Self::Local(client) => Some(client),
+            _ => None,
+        }
+    }
+
+    /// Unwrap into the remote handle when this is the remote branch.
+    pub fn into_remote(self) -> Option<Arc<PostgresClient>> {
+        match self {
+            Self::Remote(client) => Some(client),
+            _ => None,
+        }
+    }
+
+    /// Open the per-project scoped handle.
+    ///
+    /// The local branch opens the per-project database file; the remote
+    /// branch carries project filtering per query, so scoping is a clone.
     pub fn for_project(&self, project_id: i64) -> Result<Self, StorageError> {
         match self {
             Self::Local(client) => Ok(Self::Local(client.for_project(project_id)?)),
+            Self::Remote(client) => Ok(Self::Remote(client.clone())),
         }
     }
 
     /// Build the store from the resolved database configuration.
-    ///
-    /// Phase 2 only supports the local branch; a remote selection is
-    /// rejected here (structural validation already rejects it earlier).
     pub fn from_database_config(
         database: &cce_config::global::DatabaseConfig,
     ) -> Result<Self, StorageError> {
@@ -401,9 +466,10 @@ impl RelationStore {
                 })?;
                 Ok(Self::Local(Arc::new(client)))
             }
-            cce_config::modules::RelationBackend::Remote => Err(StorageError::query(
-                "remote relation backend is reserved and not enabled in this phase",
-            )),
+            cce_config::modules::RelationBackend::Remote => {
+                let client = PostgresClient::from_database_config(database)?;
+                Ok(Self::Remote(Arc::new(client)))
+            }
         }
     }
 }
@@ -412,6 +478,7 @@ impl std::fmt::Debug for RelationStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Local(_) => write!(f, "RelationStore::Local(..)"),
+            Self::Remote(_) => write!(f, "RelationStore::Remote(..)"),
         }
     }
 }
@@ -430,12 +497,19 @@ mod tests {
     }
 
     #[test]
-    fn fulltext_store_rejects_remote_branch() {
-        let database = cce_config::global::DatabaseConfig {
+    fn fulltext_store_remote_branch_dispatch() {
+        let mut database = cce_config::global::DatabaseConfig {
             fulltext_backend: cce_config::modules::FulltextBackend::Remote,
             ..cce_config::global::DatabaseConfig::default()
         };
         assert!(FulltextStore::from_database_config(&database).is_err());
+        database.fulltext_remote.url = Some("http://localhost:9200".to_string());
+        let store =
+            FulltextStore::from_database_config(&database).expect("remote branch must build");
+        assert!(store.is_remote());
+        assert_eq!(store.backend_name(), "remote");
+        assert!(store.as_remote().is_some());
+        assert!(store.as_local().is_none());
     }
 
     #[test]
@@ -449,11 +523,20 @@ mod tests {
     }
 
     #[test]
-    fn relation_store_rejects_remote_branch() {
-        let database = cce_config::global::DatabaseConfig {
+    fn relation_store_remote_branch_dispatch() {
+        let mut database = cce_config::global::DatabaseConfig {
             relation_backend: cce_config::modules::RelationBackend::Remote,
             ..cce_config::global::DatabaseConfig::default()
         };
         assert!(RelationStore::from_database_config(&database).is_err());
+        database.relation_remote.url = Some("postgres://localhost:5432/cce".to_string());
+        let store =
+            RelationStore::from_database_config(&database).expect("remote branch must build");
+        assert!(store.is_remote());
+        assert_eq!(store.backend_name(), "remote");
+        assert!(store.as_remote().is_some());
+        assert!(store.as_local().is_none());
+        let scoped = store.for_project(1).expect("remote scoping clones");
+        assert!(scoped.is_remote());
     }
 }

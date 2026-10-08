@@ -108,7 +108,7 @@ pub async fn handle_function_detail(
                 && let Ok(project) = client.for_project(project_id)
                 && let Ok(numeric_id) = id.parse::<i64>()
             {
-                use cce_storage_sqlite::EntityRepository;
+                use cce_storage_relation_sqlite::EntityRepository;
                 match project.with_transaction(|tx| EntityRepository::get_by_id(tx, numeric_id)) {
                     Ok(Some(record)) => FunctionInfo {
                         id: id.clone(),
