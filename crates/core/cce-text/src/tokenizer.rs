@@ -1,69 +1,14 @@
-use jieba_rs::{Jieba, TokenizeMode};
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
-use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+//! Embedded-engine adapter over the shared segmentation core.
+//!
+//! The segmentation rules live in [`crate::segment`]; this module owns the
+//! tokenizer handle used across the codebase plus the optional engine
+//! stream adapter. Consumers that only need word strings or offsets use
+//! [`MixedTokenizer::tokenize`] and [`MixedTokenizer::tokenize_offsets`]
+//! without the engine dependency.
 
-use cce_utils::text::split_identifier;
+use jieba_rs::Jieba;
 
-/// Upper bound for tokenized input length, in characters.
-///
-/// Inputs beyond this limit are truncated to the prefix before
-/// segmentation. Leading terms dominate BM25 scoring, so the prefix keeps
-/// retrieval quality while pathological blobs stay bounded. Truncations are
-/// counted in [`truncated_input_count`].
-pub const MAX_TOKENIZE_CHARS: usize = 32_768;
-
-/// Maximum consecutive CJK characters sent to the dictionary segmenter in a
-/// single call. Longer runs are split into character-aligned windows so one
-/// huge run cannot spike indexing latency. The window is orders of magnitude
-/// larger than common words, keeping boundary effects negligible.
-const MAX_CJK_RUN_CHARS: usize = 4096;
-
-/// Number of inputs truncated by the length guard since process start.
-static TRUNCATED_INPUTS: AtomicU64 = AtomicU64::new(0);
-
-/// Number of inputs truncated by [`MAX_TOKENIZE_CHARS`] so far.
-pub fn truncated_input_count() -> u64 {
-    TRUNCATED_INPUTS.load(Ordering::Relaxed)
-}
-
-/// Truncate over-long inputs to the [`MAX_TOKENIZE_CHARS`] prefix,
-/// preserving a character boundary. Short inputs pass through untouched.
-fn cap_text(text: &str) -> &str {
-    match text.char_indices().nth(MAX_TOKENIZE_CHARS) {
-        Some((byte_idx, _)) => {
-            TRUNCATED_INPUTS.fetch_add(1, Ordering::Relaxed);
-            &text[..byte_idx]
-        }
-        None => text,
-    }
-}
-
-/// Shared Jieba instance.
-///
-/// `Jieba::new()` eagerly loads the full default dictionary (several MB) and
-/// builds a cedar trie, which is far too expensive to repeat per call. All
-/// `MixedTokenizer` instances share one lazily-initialized, read-only `Jieba`.
-static SHARED_JIEBA: OnceLock<Jieba> = OnceLock::new();
-
-/// A single token produced by [`MixedTokenizer::tokenize_offsets`].
-///
-/// Exposes the full token metadata (text, byte offsets, position) so that
-/// downstream consumers (highlighting, benchmarks) can reconstruct token
-/// spans without re-implementing the tokenization rules.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MixedToken {
-    /// Token text (lowercased).
-    pub text: String,
-    /// Byte offset of the token start within the input text.
-    pub offset_from: usize,
-    /// Byte offset of the token end (exclusive) within the input text.
-    pub offset_to: usize,
-    /// Token position. Tokens sharing the same source word share a position.
-    pub position: u32,
-    /// Span length: `1` for original tokens, `0` for split (auxiliary) tokens.
-    pub position_length: u32,
-}
+use crate::segment::{MixedToken, segment_text, shared_jieba};
 
 #[derive(Clone)]
 pub struct MixedTokenizer {
@@ -73,16 +18,16 @@ pub struct MixedTokenizer {
 impl MixedTokenizer {
     pub fn new() -> Self {
         Self {
-            jieba: SHARED_JIEBA.get_or_init(Jieba::new),
+            jieba: shared_jieba(),
         }
     }
 
     /// Tokenize text into words, returning only the word strings.
     /// Used externally for word counting during chunking.
     pub fn tokenize(&self, text: &str) -> Vec<String> {
-        MixedTokenStream::tokenize_text(cap_text(text), self.jieba)
+        segment_text(text, self.jieba)
             .into_iter()
-            .map(|td| td.text)
+            .map(|token| token.text)
             .collect()
     }
 
@@ -90,18 +35,9 @@ impl MixedTokenizer {
     ///
     /// This is the canonical public entry for consumers that need span
     /// information (highlighting, benchmarks) and must stay symmetric with the
-    /// tantivy `Tokenizer` implementation used during indexing.
+    /// engine `Tokenizer` implementation used during indexing.
     pub fn tokenize_offsets(&self, text: &str) -> Vec<MixedToken> {
-        MixedTokenStream::tokenize_text(cap_text(text), self.jieba)
-            .into_iter()
-            .map(|td| MixedToken {
-                text: td.text,
-                offset_from: td.offset_from,
-                offset_to: td.offset_to,
-                position: td.position,
-                position_length: td.position_length,
-            })
-            .collect()
+        segment_text(text, self.jieba)
     }
 }
 
@@ -111,289 +47,89 @@ impl Default for MixedTokenizer {
     }
 }
 
-impl Tokenizer for MixedTokenizer {
-    type TokenStream<'a> = MixedTokenStream<'a>;
+/// Embedded-engine stream adapter, available with the `tantivy` feature.
+#[cfg(feature = "tantivy")]
+mod engine {
+    use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
-    fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
-        MixedTokenStream::new(text, self.jieba)
+    use super::MixedTokenizer;
+    use crate::segment::MixedToken;
+
+    pub struct MixedTokenStream<'a> {
+        tokens: Vec<MixedToken>,
+        pos: usize,
+        token: Token,
+        _phantom: std::marker::PhantomData<&'a ()>,
     }
-}
 
-pub struct MixedTokenStream<'a> {
-    tokens: Vec<TokenData>,
-    pos: usize,
-    token: Token,
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
-
-struct TokenData {
-    text: String,
-    offset_from: usize,
-    offset_to: usize,
-    /// Token position in the stream. Tokens from the same word share the
-    /// same position (they are alternatives). Split tokens are marked with
-    /// `position_length=0` so they don't participate in phrase queries.
-    position: u32,
-    /// Span length. `1` for original tokens, `0` for split (auxiliary) tokens.
-    position_length: u32,
-}
-
-impl<'a> MixedTokenStream<'a> {
-    fn new(text: &'a str, jieba: &'static Jieba) -> Self {
-        let tokens = Self::tokenize_text(cap_text(text), jieba);
-        Self {
-            tokens,
-            pos: 0,
-            token: Token::default(),
-            _phantom: std::marker::PhantomData,
+    impl<'a> MixedTokenStream<'a> {
+        fn from_tokens(tokens: Vec<MixedToken>) -> Self {
+            Self {
+                tokens,
+                pos: 0,
+                token: Token::default(),
+                _phantom: std::marker::PhantomData,
+            }
         }
     }
 
-    fn tokenize_text(text: &str, jieba: &Jieba) -> Vec<TokenData> {
-        let mut result = Vec::new();
-        let mut current_position: u32 = 0;
-        let mut i = 0;
+    impl Tokenizer for MixedTokenizer {
+        type TokenStream<'a> = MixedTokenStream<'a>;
 
-        while i < text.len() {
-            // The byte index `i` is always advanced by `len_utf8()`, so it
-            // stays on a char boundary; still guard against an unexpected
-            // non-boundary by skipping the byte defensively.
-            let Some(c) = text[i..].chars().next() else {
-                i += 1;
-                continue;
-            };
-            let char_len = c.len_utf8();
+        fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
+            MixedTokenStream::from_tokens(self.tokenize_offsets(text))
+        }
+    }
 
-            if Self::is_cjk(c) {
-                let cjk_start = i;
-                let cjk_end;
-                i += char_len;
-                loop {
-                    if i >= text.len() {
-                        cjk_end = i;
-                        break;
-                    }
-                    let Some(nc) = text[i..].chars().next() else {
-                        i += 1;
-                        cjk_end = i;
-                        break;
-                    };
-                    if Self::is_cjk(nc) {
-                        i += nc.len_utf8();
-                    } else {
-                        cjk_end = i;
-                        break;
-                    }
-                }
-
-                let cjk_text = &text[cjk_start..cjk_end];
-                let char_offsets = Self::calc_char_offsets(cjk_text);
-                let total_chars = char_offsets.len().saturating_sub(1);
-                let mut window_char_start = 0usize;
-                while window_char_start < total_chars {
-                    let window_char_end = (window_char_start + MAX_CJK_RUN_CHARS).min(total_chars);
-                    let window =
-                        &cjk_text[char_offsets[window_char_start]..char_offsets[window_char_end]];
-                    let window_base = cjk_start + char_offsets[window_char_start];
-                    Self::push_cjk_window(
-                        &mut result,
-                        &mut current_position,
-                        jieba,
-                        window_base,
-                        window,
-                    );
-                    window_char_start = window_char_end;
-                }
-            } else if c.is_whitespace() {
-                i += char_len;
-            } else {
-                let word_start = i;
-                let word_end;
-                i += char_len;
-                loop {
-                    if i >= text.len() {
-                        word_end = i;
-                        break;
-                    }
-                    let Some(nc) = text[i..].chars().next() else {
-                        i += 1;
-                        word_end = i;
-                        break;
-                    };
-                    if Self::is_cjk(nc) || nc.is_whitespace() {
-                        word_end = i;
-                        break;
-                    }
-                    i += nc.len_utf8();
-                }
-
-                let word_text = &text[word_start..word_end];
-                let Some(trimmed_start_byte) = word_text
-                    .char_indices()
-                    .find(|(_, ch)| ch.is_alphanumeric())
-                    .map(|(pos, _)| pos)
-                else {
-                    continue;
+    impl TokenStream for MixedTokenStream<'_> {
+        fn advance(&mut self) -> bool {
+            if self.pos < self.tokens.len() {
+                let data = &self.tokens[self.pos];
+                self.token = Token {
+                    offset_from: data.offset_from,
+                    offset_to: data.offset_to,
+                    position: data.position as usize,
+                    position_length: data.position_length as usize,
+                    text: data.text.clone(),
                 };
-                let trimmed_end_byte = word_text
-                    .char_indices()
-                    .rfind(|(_, ch)| ch.is_alphanumeric())
-                    .map(|(pos, ch)| pos + ch.len_utf8())
-                    .unwrap_or(word_text.len());
-
-                let trimmed = &word_text[trimmed_start_byte..trimmed_end_byte];
-                let original_lower = trimmed.to_lowercase();
-
-                // Output the original token (lowercased) at the current position
-                result.push(TokenData {
-                    text: original_lower.clone(),
-                    offset_from: word_start + trimmed_start_byte,
-                    offset_to: word_start + trimmed_end_byte,
-                    position: current_position,
-                    position_length: 1,
-                });
-
-                // Output split tokens at the same position (auxiliary, position_length=0)
-                let split_words = split_identifier(trimmed);
-                for word in split_words {
-                    if word != original_lower {
-                        result.push(TokenData {
-                            text: word,
-                            offset_from: word_start + trimmed_start_byte,
-                            offset_to: word_start + trimmed_end_byte,
-                            position: current_position,
-                            position_length: 0,
-                        });
-                    }
-                }
-
-                current_position += 1;
+                self.pos += 1;
+                true
+            } else {
+                false
             }
         }
 
-        result
-    }
-
-    fn is_cjk(c: char) -> bool {
-        matches!(c,
-            '\u{4E00}'..='\u{9FFF}' |
-            '\u{3400}'..='\u{4DBF}' |
-            '\u{20000}'..='\u{2A6DF}' |
-            '\u{2A700}'..='\u{2B73F}' |
-            '\u{2B740}'..='\u{2B81F}' |
-            '\u{2B820}'..='\u{2CEAF}' |
-            '\u{F900}'..='\u{FAFF}' |
-            '\u{2F800}'..='\u{2FA1F}' |
-            // Japanese hiragana
-            '\u{3040}'..='\u{309F}' |
-            // Japanese katakana
-            '\u{30A0}'..='\u{30FF}' |
-            '\u{31F0}'..='\u{31FF}' |
-            '\u{FF66}'..='\u{FF9D}' |
-            // Korean Hangul syllables, Jamo, and compatibility Jamo
-            '\u{AC00}'..='\u{D7AF}' |
-            '\u{1100}'..='\u{11FF}' |
-            '\u{3130}'..='\u{318F}'
-        )
-    }
-
-    fn calc_char_offsets(text: &str) -> Vec<usize> {
-        let mut offsets = Vec::with_capacity(text.chars().count() + 1);
-        offsets.push(0);
-        for (byte_index, _) in text.char_indices().skip(1) {
-            offsets.push(byte_index);
+        fn token(&self) -> &Token {
+            &self.token
         }
-        offsets.push(text.len());
-        offsets
-    }
 
-    /// Segment one character-aligned CJK window through the dictionary and
-    /// append the resulting tokens with absolute byte offsets.
-    fn push_cjk_window(
-        result: &mut Vec<TokenData>,
-        current_position: &mut u32,
-        jieba: &Jieba,
-        window_base: usize,
-        window: &str,
-    ) {
-        let char_offsets = Self::calc_char_offsets(window);
-        let jieba_tokens = jieba.tokenize(window, TokenizeMode::Search, true);
-        for jt in jieba_tokens {
-            let byte_start = char_offsets.get(jt.start).copied().unwrap_or(0);
-            let byte_end = char_offsets.get(jt.end).copied().unwrap_or(window.len());
-            result.push(TokenData {
-                text: jt.word.to_string(),
-                offset_from: window_base + byte_start,
-                offset_to: window_base + byte_end,
-                position: *current_position,
-                position_length: 1,
-            });
-            *current_position += 1;
+        fn token_mut(&mut self) -> &mut Token {
+            &mut self.token
         }
     }
 }
 
-impl TokenStream for MixedTokenStream<'_> {
-    fn advance(&mut self) -> bool {
-        if self.pos < self.tokens.len() {
-            let data = &self.tokens[self.pos];
-            self.token = Token {
-                offset_from: data.offset_from,
-                offset_to: data.offset_to,
-                position: data.position as usize,
-                position_length: data.position_length as usize,
-                text: data.text.clone(),
-            };
-            self.pos += 1;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn token(&self) -> &Token {
-        &self.token
-    }
-
-    fn token_mut(&mut self) -> &mut Token {
-        &mut self.token
-    }
-}
+#[cfg(feature = "tantivy")]
+pub use engine::MixedTokenStream;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn collect_tokens(text: &str) -> Vec<String> {
-        let mut tokenizer = MixedTokenizer::default();
-        let mut stream = tokenizer.token_stream(text);
-        let mut tokens = Vec::new();
-        let mut collect = |token: &Token| tokens.push(token.text.clone());
-        stream.process(&mut collect);
-        tokens
-    }
-
-    fn collect_tokens_with_positions(text: &str) -> Vec<(String, usize, usize)> {
-        let mut tokenizer = MixedTokenizer::default();
-        let mut stream = tokenizer.token_stream(text);
-        let mut tokens = Vec::new();
-        let mut collect = |token: &Token| {
-            tokens.push((token.text.clone(), token.position, token.position_length))
-        };
-        stream.process(&mut collect);
-        tokens
+    fn collect_texts(text: &str) -> Vec<String> {
+        MixedTokenizer::default().tokenize(text)
     }
 
     #[test]
     fn test_chinese_tokenization() {
-        let tokens = collect_tokens("计算总价");
+        let tokens = collect_texts("计算总价");
         assert!(tokens.contains(&"计算".to_string()));
         assert!(tokens.contains(&"总价".to_string()));
     }
 
     #[test]
     fn test_english_tokenization() {
-        let tokens = collect_tokens("calculate total price");
+        let tokens = collect_texts("calculate total price");
         assert!(tokens.contains(&"calculate".to_string()));
         assert!(tokens.contains(&"total".to_string()));
         assert!(tokens.contains(&"price".to_string()));
@@ -401,7 +137,7 @@ mod tests {
 
     #[test]
     fn test_mixed_tokenization() {
-        let tokens = collect_tokens("计算total price");
+        let tokens = collect_texts("计算total price");
         assert!(tokens.contains(&"计算".to_string()));
         assert!(tokens.contains(&"total".to_string()));
         assert!(tokens.contains(&"price".to_string()));
@@ -409,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_snake_case_split() {
-        let tokens = collect_tokens("get_or_init");
+        let tokens = collect_texts("get_or_init");
         assert!(tokens.contains(&"get_or_init".to_string()));
         assert!(tokens.contains(&"get".to_string()));
         assert!(tokens.contains(&"or".to_string()));
@@ -418,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_camel_case_split() {
-        let tokens = collect_tokens("calculateTotal");
+        let tokens = collect_texts("calculateTotal");
         assert!(tokens.contains(&"calculatetotal".to_string()));
         assert!(tokens.contains(&"calculate".to_string()));
         assert!(tokens.contains(&"total".to_string()));
@@ -426,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_path_split() {
-        let tokens = collect_tokens("std::path::Path");
+        let tokens = collect_texts("std::path::Path");
         assert!(tokens.contains(&"std::path::path".to_string()));
         assert!(tokens.contains(&"std".to_string()));
         assert!(tokens.contains(&"path".to_string()));
@@ -434,75 +170,9 @@ mod tests {
 
     #[test]
     fn test_kebab_case_split() {
-        let tokens = collect_tokens("utf-8");
+        let tokens = collect_texts("utf-8");
         assert!(tokens.contains(&"utf-8".to_string()));
         assert!(tokens.contains(&"utf".to_string()));
-    }
-
-    #[test]
-    fn test_split_tokens_share_position() {
-        let tokens = collect_tokens_with_positions("get_or_init");
-        // All tokens from "get_or_init" should share the same position
-        let positions: Vec<usize> = tokens.iter().map(|(_, pos, _)| *pos).collect();
-        let unique_positions: Vec<usize> = positions
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-        assert_eq!(unique_positions.len(), 1);
-    }
-
-    #[test]
-    fn test_original_has_full_span() {
-        let tokens = collect_tokens_with_positions("get_or_init");
-        // The original token should have position_length=1
-        let original = tokens
-            .iter()
-            .find(|(text, _, pl)| text == "get_or_init" && *pl == 1);
-        assert!(original.is_some());
-        // Split tokens should have position_length=0
-        let splits: Vec<_> = tokens
-            .iter()
-            .filter(|(text, _, pl)| text != "get_or_init" && *pl == 0)
-            .collect();
-        assert_eq!(splits.len(), 3); // get, or, init
-    }
-
-    #[test]
-    fn test_byte_offsets() {
-        let mut tokenizer = MixedTokenizer::default();
-        let mut stream = tokenizer.token_stream("hello world");
-        let mut tokens = Vec::new();
-        let mut collect = |token: &Token| {
-            tokens.push((token.text.clone(), token.offset_from, token.offset_to));
-        };
-        stream.process(&mut collect);
-        // The first token is "hello" (original)
-        assert_eq!(tokens[0].0, "hello");
-        assert_eq!(tokens[0].1, 0);
-        assert_eq!(tokens[0].2, 5);
-        // Skip split tokens, find "world" (original)
-        let world = tokens
-            .iter()
-            .find(|(t, _, _)| t == "world")
-            .expect("world token");
-        assert_eq!(world.1, 6);
-        assert_eq!(world.2, 11);
-    }
-
-    #[test]
-    fn test_chinese_byte_offsets() {
-        let mut tokenizer = MixedTokenizer::default();
-        let mut stream = tokenizer.token_stream("计算总价");
-        let mut tokens = Vec::new();
-        let mut collect = |token: &Token| {
-            tokens.push((token.text.clone(), token.offset_from, token.offset_to));
-        };
-        stream.process(&mut collect);
-        assert_eq!(tokens[0].0, "计算");
-        assert_eq!(tokens[1].0, "总价");
-        assert!(tokens[0].1 < tokens[0].2);
-        assert!(tokens[1].1 < tokens[1].2);
     }
 
     #[test]
@@ -519,33 +189,20 @@ mod tests {
     }
 
     #[test]
-    fn test_long_input_truncated_to_prefix() {
-        let long = "数据库连接池".repeat(8000);
-        assert!(long.chars().count() > MAX_TOKENIZE_CHARS);
-        let tokenizer = MixedTokenizer::default();
-        let before = truncated_input_count();
-        let words = tokenizer.tokenize(&long);
-        assert!(truncated_input_count() > before);
-        let prefix: String = long.chars().take(MAX_TOKENIZE_CHARS).collect();
-        assert_eq!(words, tokenizer.tokenize(&prefix));
-    }
-
-    #[test]
     fn test_case_lowered() {
-        let tokens = collect_tokens("Hello World");
+        let tokens = collect_texts("Hello World");
         assert!(tokens.contains(&"hello".to_string()));
         assert!(tokens.contains(&"world".to_string()));
     }
 
     #[test]
     fn test_empty_input() {
-        let tokens = collect_tokens("");
-        assert!(tokens.is_empty());
+        assert!(collect_texts("").is_empty());
     }
 
     #[test]
     fn test_single_char_tokens_preserved() {
-        let tokens = collect_tokens("a b cd ef");
+        let tokens = collect_texts("a b cd ef");
         assert!(tokens.contains(&"a".to_string()));
         assert!(tokens.contains(&"b".to_string()));
         assert!(tokens.contains(&"cd".to_string()));
@@ -554,14 +211,63 @@ mod tests {
 
     #[test]
     fn test_qualified_path_dual_form() {
-        let tokens = collect_tokens("OnceCell::get_or_init");
-        // Original form (lowercased)
+        let tokens = collect_texts("OnceCell::get_or_init");
         assert!(tokens.contains(&"oncecell::get_or_init".to_string()));
-        // Split forms
         assert!(tokens.contains(&"once".to_string()));
         assert!(tokens.contains(&"cell".to_string()));
         assert!(tokens.contains(&"get".to_string()));
         assert!(tokens.contains(&"or".to_string()));
         assert!(tokens.contains(&"init".to_string()));
+    }
+
+    #[cfg(feature = "tantivy")]
+    mod engine_tests {
+        use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+
+        use super::MixedTokenizer;
+
+        fn collect_stream(text: &str) -> Vec<Token> {
+            let mut tokenizer = MixedTokenizer::default();
+            let mut stream = tokenizer.token_stream(text);
+            let mut tokens = Vec::new();
+            let mut collect = |token: &Token| tokens.push(token.clone());
+            stream.process(&mut collect);
+            tokens
+        }
+
+        #[test]
+        fn stream_matches_pure_segmentation() {
+            let tokenizer = MixedTokenizer::default();
+            let expected = tokenizer.tokenize_offsets("计算total price");
+            let streamed = collect_stream("计算total price");
+            let texts: Vec<String> = streamed.iter().map(|t| t.text.clone()).collect();
+            let plain: Vec<String> = expected.iter().map(|t| t.text.clone()).collect();
+            assert_eq!(texts, plain);
+        }
+
+        #[test]
+        fn split_tokens_share_position() {
+            let tokens = collect_stream("get_or_init");
+            let positions: std::collections::HashSet<usize> =
+                tokens.iter().map(|t| t.position).collect();
+            assert_eq!(positions.len(), 1);
+            let original = tokens
+                .iter()
+                .find(|t| t.text == "get_or_init")
+                .expect("original");
+            assert_eq!(original.position_length, 1);
+        }
+
+        #[test]
+        fn byte_offsets_match_source_spans() {
+            let tokens = collect_stream("hello world");
+            assert_eq!(tokens[0].text, "hello");
+            assert_eq!((tokens[0].offset_from, tokens[0].offset_to), (0, 5));
+            let world = tokens
+                .iter()
+                .find(|t| t.text == "world")
+                .expect("world token");
+            assert_eq!((world.offset_from, world.offset_to), (6, 11));
+        }
     }
 }

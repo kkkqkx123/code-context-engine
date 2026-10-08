@@ -25,6 +25,10 @@ impl ElasticsearchClient {
     /// title keeps a standard-analyzed clause. Quoted phrases degrade to
     /// token conjunctions. Generation exclusion removes parent-generation
     /// rows for overridden files.
+    ///
+    /// Term combination mirrors the local branch: the operator governs how
+    /// query terms combine *within* each field (`and`/`or`), while the
+    /// fields themselves stay disjunctive (any field may satisfy the query).
     pub fn search_body(&self, query: &str, options: &Bm25SearchOptions) -> Value {
         let weights =
             |name: &str, default: f32| options.field_weights.get(name).copied().unwrap_or(default);
@@ -32,21 +36,21 @@ impl ElasticsearchClient {
         let content_weight = weights("content", 1.0);
         let keywords_weight = weights("keywords", 2.0);
         let tokens = self.pretokenize(query);
-        let occur = match options.term_operator {
-            TermOperator::And => "must",
-            TermOperator::Or => "should",
+        let field_operator = match options.term_operator {
+            TermOperator::And => "and",
+            TermOperator::Or => "or",
         };
         let mut must: Vec<Value> = Vec::new();
         if !tokens.trim().is_empty() {
             must.push(json!({
                 "bool": {
-                    occur: [
-                        { "match": { "title": { "query": query, "boost": title_weight } } },
-                        { "match": { "title_tokens": { "query": tokens, "boost": title_weight, "operator": "or" } } },
-                        { "match": { "content_tokens": { "query": tokens, "boost": content_weight, "operator": "or" } } },
-                        { "match": { "keywords_tokens": { "query": tokens, "boost": keywords_weight, "operator": "or" } } },
+                    "should": [
+                        { "match": { "title": { "query": query, "boost": title_weight, "operator": field_operator } } },
+                        { "match": { "title_tokens": { "query": tokens, "boost": title_weight, "operator": field_operator } } },
+                        { "match": { "content_tokens": { "query": tokens, "boost": content_weight, "operator": field_operator } } },
+                        { "match": { "keywords_tokens": { "query": tokens, "boost": keywords_weight, "operator": field_operator } } },
                     ],
-                    "minimum_should_match": if matches!(options.term_operator, TermOperator::Or) { 1 } else { 0 },
+                    "minimum_should_match": 1,
                 }
             }));
         } else {

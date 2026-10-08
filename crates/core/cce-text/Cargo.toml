@@ -9,8 +9,12 @@ description = "Text processing utilities for the code context engine"
 cce-utils = { path = "../cce-utils" }
 regex = { workspace = true }
 jieba-rs = { workspace = true }
-tantivy = { workspace = true }
 serde = { workspace = true }
+tantivy = { workspace = true, optional = true }
+
+[features]
+default = ["tantivy"]
+tantivy = ["dep:tantivy"]
 
 [[bench]]
 name = "mixed_tokenizer"

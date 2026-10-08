@@ -16,13 +16,16 @@
 //!
 //! The local mixed tokenizer (identifier splitting plus whole and subword
 //! tokens at one position, CJK dictionary segmentation) has no server-side
-//! equivalent without analyzer plugins. Every analyzed field is therefore
-//! pre-tokenized on the client with the shared [`MixedTokenizer`]: the token
-//! stream is joined into a `*_tokens` sidecar field indexed with the
-//! `whitespace` analyzer, and the query is tokenized the same way before it
-//! is sent. Term-level parity holds; phrase queries degrade to token
-//! conjunctions (documented approximation, covered by the recall
-//! backoff-range acceptance).
+//! equivalent without analyzer plugins, which the offline deployment cannot
+//! rely on. Every analyzed field is therefore pre-tokenized on the client
+//! with the shared segmentation core: the token stream is joined into a
+//! `*_tokens` sidecar field indexed with the `whitespace` analyzer (chosen
+//! deliberately so the server never re-splits tokens like `get_or_init`),
+//! and the query is tokenized the same way before it is sent. Term-level
+//! parity holds; phrase queries degrade to token conjunctions (documented
+//! approximation, covered by the recall backoff-range acceptance). The
+//! term operator governs combination within each field, mirroring the local
+//! branch, while fields stay disjunctive.
 //!
 //! # Write visibility
 //!
@@ -394,6 +397,44 @@ mod tests {
             body.to_string().contains("match_all"),
             "empty query degrades to a scoped match_all"
         );
+    }
+
+    #[test]
+    fn search_body_term_operator_reaches_fields() {
+        let client = test_client();
+        let options_for = |operator| Bm25SearchOptions {
+            limit: 5,
+            offset: 0,
+            field_weights: HashMap::new(),
+            project_id: 7,
+            epochs: vec![],
+            excluded_files: None,
+            exclude_test: false,
+            include_categories: vec![],
+            exclude_categories: vec![],
+            term_operator: operator,
+        };
+        for (operator, expected) in [(TermOperator::Or, "or"), (TermOperator::And, "and")] {
+            let body = client.search_body("calculate total", &options_for(operator));
+            let clauses = body
+                .pointer("/query/bool/must/0/bool/should")
+                .and_then(Value::as_array)
+                .expect("fields stay disjunctive");
+            assert_eq!(clauses.len(), 4);
+            for clause in clauses {
+                let params = clause
+                    .as_object()
+                    .and_then(|obj| obj.get("match"))
+                    .and_then(Value::as_object)
+                    .and_then(|obj| obj.values().next())
+                    .expect("match clause carries params");
+                assert_eq!(
+                    params.get("operator").and_then(Value::as_str),
+                    Some(expected),
+                    "field operator follows {operator:?}"
+                );
+            }
+        }
     }
 
     #[test]

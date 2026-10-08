@@ -11,7 +11,9 @@
 //! Batch writes commit once per batch; a transient failure retries the whole
 //! batch, never a partial prefix.
 
-use crate::{Bm25Client, Bm25Document, Bm25Error, Bm25SearchOptions, Bm25SearchResult};
+#[cfg(feature = "local")]
+use crate::Bm25Client;
+use crate::{Bm25Document, Bm25Error, Bm25SearchOptions, Bm25SearchResult};
 
 /// Backend-neutral fulltext document (same shape as the local branch).
 pub type FulltextDocument = Bm25Document;
@@ -126,6 +128,7 @@ pub trait FulltextStorage: Clone + Send + Sync + 'static {
     }
 }
 
+#[cfg(feature = "local")]
 impl FulltextStorage for Bm25Client {
     fn batch_index(
         &mut self,
@@ -229,6 +232,7 @@ pub fn assert_fulltext_storage<T: FulltextStorage>() {}
 /// Method-for-method delegation keeps the two branches substitutable behind
 /// the backend enum; behavior notes (refresh timing, phrase approximation)
 /// live on [`crate::ElasticsearchClient`].
+#[cfg(feature = "remote")]
 impl FulltextStorage for crate::ElasticsearchClient {
     fn batch_index(
         &mut self,
@@ -337,6 +341,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "local")]
     fn local_client_satisfies_fulltext_contract() {
         assert_fulltext_storage::<Bm25Client>();
         let client = Bm25Client::default_client();
@@ -345,6 +350,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "remote")]
     fn remote_client_satisfies_fulltext_contract() {
         use crate::ElasticsearchConfig;
         assert_fulltext_storage::<crate::ElasticsearchClient>();
