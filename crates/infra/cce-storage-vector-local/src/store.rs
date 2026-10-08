@@ -117,6 +117,16 @@ impl LocalVectorStore {
         &self.collection
     }
 
+    /// Fetch window for a filtered search: the requested limit plus a
+    /// heuristic margin for post-filtered rows plus one slot per excluded
+    /// file, bounded by a ceiling that grows with the exclusion load so a
+    /// large override set cannot truncate the visible window.
+    fn overfetch_limit(limit: usize, excluded_len: usize) -> usize {
+        (limit * 5 + excluded_len + 20)
+            .min(10_000 + excluded_len)
+            .max(limit)
+    }
+
     fn simvec_filter(filter: &SearchFilter) -> Option<SimFilter> {
         // `raw_filter` is a Qdrant-only escape hatch with no local meaning.
         // Queries that set it are rejected in `search_dense` before reaching
@@ -391,8 +401,11 @@ impl VectorStorage for LocalVectorStore {
             .and_then(|f| f.excluded_files.as_ref().map(|v| v.len()))
             .unwrap_or(0);
         // Over-fetch so generation exclusion and directory post-filtering can
-        // still fill the requested limit.
-        let fetch_limit = (limit * 5 + excluded_len + 20).min(10_000).max(limit);
+        // still fill the requested limit. The ceiling grows with the
+        // exclusion load: excluded parent rows can occupy at most
+        // `excluded_len` fetch slots, so a fixed ceiling would truncate the
+        // visible window when the override set is large.
+        let fetch_limit = Self::overfetch_limit(limit, excluded_len);
         let mut sim_query = SimQuery::new(query.vector.clone(), fetch_limit);
         if let Some(threshold) = query.score_threshold {
             sim_query = sim_query.with_score_threshold(threshold);
@@ -704,5 +717,18 @@ mod tests {
             .await
             .expect_err("dimension mismatch must fail");
         assert!(err.to_string().contains("dimension"));
+    }
+
+    #[test]
+    fn overfetch_ceiling_scales_with_exclusions() {
+        // Small loads keep the historical window.
+        assert_eq!(LocalVectorStore::overfetch_limit(10, 0), 70);
+        // The fixed ceiling still applies without exclusions.
+        assert_eq!(LocalVectorStore::overfetch_limit(5000, 0), 10_000);
+        // A large override set lifts the ceiling one-for-one so excluded
+        // parent rows cannot truncate the visible window.
+        assert_eq!(LocalVectorStore::overfetch_limit(10, 50_000), 50_070);
+        // The requested limit is always a floor.
+        assert_eq!(LocalVectorStore::overfetch_limit(20_000, 0), 20_000);
     }
 }

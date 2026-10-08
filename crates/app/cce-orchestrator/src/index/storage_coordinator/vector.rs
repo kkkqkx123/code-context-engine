@@ -9,8 +9,8 @@ use crate::CheckpointManager;
 use cce_llm::LlmError;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_common::{Payload, VectorPoint, VectorStorage};
-use cce_storage_relation_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
-use cce_storage_relation_sqlite::{
+use cce_storage_metadb_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
+use cce_storage_metadb_sqlite::{
     ChunkRecord, ChunkRepository, EntityDetailMapping, EntityDetailMappingRepository,
 };
 use cce_types::PointKind;
@@ -754,7 +754,7 @@ mod tests {
     use cce_parser::ast_to_nl::chunker::{
         ChunkMetadata, ChunkPath, ChunkedResult, CodeSpecificMetadata,
     };
-    use cce_storage_relation_sqlite::ChunkRecord;
+    use cce_storage_metadb_sqlite::ChunkRecord;
     use cce_types::ast_to_nl::FileCategory;
     use cce_types::entity::{EntityId, EntityKind};
     use cce_types::{Language, Span};

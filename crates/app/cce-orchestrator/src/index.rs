@@ -20,7 +20,6 @@ mod orchestrator;
 mod relation_base_cache;
 mod relation_build_spool;
 pub mod relation_publisher;
-pub mod relation_store_trait;
 pub mod resolution_pipeline;
 mod result;
 mod storage_coordinator;

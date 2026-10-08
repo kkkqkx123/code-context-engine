@@ -13,9 +13,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use cce_relation::BuildConfigParser;
-use cce_relation::IndexBuilder;
-use cce_relation::index::{
+use cce_codegraph::BuildConfigParser;
+use cce_codegraph::IndexBuilder;
+use cce_codegraph::index::{
     LayeredSnapshotIndex, RelationIndex, RelationIndexView, SnapshotFileQueryOps,
 };
 

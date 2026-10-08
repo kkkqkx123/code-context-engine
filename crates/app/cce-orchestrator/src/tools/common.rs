@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use rusqlite::Connection;
 
-use cce_relation::index::{LayeredSnapshotIndex, SnapshotFileQueryOps};
-use cce_storage_relation_sqlite::source_reader;
-use cce_storage_relation_sqlite::types::ChunkRecord;
+use cce_codegraph::index::{LayeredSnapshotIndex, SnapshotFileQueryOps};
+use cce_storage_metadb_sqlite::source_reader;
+use cce_storage_metadb_sqlite::types::ChunkRecord;
 use cce_types::Entity;
 
 use crate::query::error::Result as QueryResult;
@@ -72,7 +72,7 @@ pub(crate) fn read_snippets_batch(
 
 /// Get a read connection from SqliteClient with consistent error handling.
 pub(crate) fn get_read_connection(
-    sqlite: &Option<Arc<cce_storage_relation_sqlite::SqliteClient>>,
+    sqlite: &Option<Arc<cce_storage_metadb_sqlite::SqliteClient>>,
 ) -> Result<parking_lot::MutexGuard<'_, rusqlite::Connection>, String> {
     let client = sqlite.as_ref().ok_or("SQLite not configured")?;
     client

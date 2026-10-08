@@ -129,13 +129,15 @@ pub async fn handle_embedding_health(
     )
 )]
 pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25HealthResponse> {
-    let (enabled, connected, index_path) = {
-        let bm25 = state.engine.bm25().lock().await;
-        (
-            bm25.is_enabled(),
-            bm25.is_connected(),
-            bm25.config().index_path.clone(),
-        )
+    // Index path and connection state are local-branch details; the remote
+    // branch is rejected at startup, so it reports as unavailable here.
+    let (enabled, connected, index_path) = match state.engine.fulltext() {
+        cce_orchestrator::index::FulltextStore::Local(client) => (
+            client.is_enabled(),
+            client.is_connected(),
+            client.config().index_path.clone(),
+        ),
+        cce_orchestrator::index::FulltextStore::Remote(_) => (false, false, None),
     };
 
     ApiResult::Success(Bm25HealthResponse {
@@ -287,18 +289,25 @@ async fn check_qdrant(state: &AppState) -> ServiceStatus {
 }
 
 async fn check_bm25(state: &AppState) -> ServiceStatus {
-    let bm25 = state.engine.bm25().lock().await;
-    if bm25.is_enabled() && bm25.is_connected() {
+    // Connection detail is local-branch specific; the remote branch is
+    // rejected at startup, so it reports as unavailable here.
+    let Some(client) = state.engine.fulltext().as_local() else {
+        return ServiceStatus {
+            reachable: false,
+            message: "BM25 remote branch is not supported".to_string(),
+        };
+    };
+    if client.is_enabled() && client.is_connected() {
         ServiceStatus {
             reachable: true,
             message: "BM25 is enabled and connected".to_string(),
         }
-    } else if bm25.is_connected() {
+    } else if client.is_connected() {
         ServiceStatus {
             reachable: true,
             message: "BM25 is connected but disabled in config".to_string(),
         }
-    } else if bm25.config().enabled {
+    } else if client.config().enabled {
         ServiceStatus {
             reachable: false,
             message: "BM25 is enabled but not connected".to_string(),

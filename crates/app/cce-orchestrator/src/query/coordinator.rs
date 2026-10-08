@@ -23,9 +23,8 @@ use std::time::Instant;
 use cce_config::project_registry::ProjectScope;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::{MetricsRegistry, QueryMetrics, SearchMetrics};
-use cce_relation::CallChainQuery;
-use cce_storage_bm25::Bm25Client;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_codegraph::CallChainQuery;
+use cce_storage_metadb_sqlite::SqliteClient;
 use cce_types::error::common::ErrorClassify;
 
 use super::SearcherBuilder;
@@ -36,6 +35,7 @@ use super::relation_searcher::{PathQueryOptions, RelationQueryOptions, RelationS
 use super::retry_queue::RetryQueue;
 use super::searcher::Searcher;
 use super::types::{AggregatedQueryOptions, QueryOptions, QueryResult};
+use crate::index::vector_store::FulltextStore;
 use crate::index::vector_store::VectorStore;
 
 /// Query coordinator
@@ -99,12 +99,12 @@ impl QueryCoordinatorBuilder {
     fn new(
         vector: VectorStore,
         embedder: Arc<cce_llm_client::OpenAICompatibleProvider>,
-        bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+        fulltext: FulltextStore,
         call_chain_query: Arc<CallChainQuery>,
         scope: ProjectScope,
     ) -> Self {
         let project_id = scope.project_id();
-        let searcher_builder = Searcher::builder(vector, embedder, bm25, scope);
+        let searcher_builder = Searcher::builder(vector, embedder, fulltext, scope);
         let relation_searcher = Arc::new(RelationSearcher::new(call_chain_query));
 
         Self {
@@ -185,11 +185,11 @@ impl QueryCoordinator {
     pub fn builder(
         vector: VectorStore,
         embedder: Arc<cce_llm_client::OpenAICompatibleProvider>,
-        bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+        fulltext: FulltextStore,
         call_chain_query: Arc<CallChainQuery>,
         scope: ProjectScope,
     ) -> QueryCoordinatorBuilder {
-        QueryCoordinatorBuilder::new(vector, embedder, bm25, call_chain_query, scope)
+        QueryCoordinatorBuilder::new(vector, embedder, fulltext, call_chain_query, scope)
     }
 
     /// Create a new query coordinator bound to a specific project
@@ -341,7 +341,7 @@ impl QueryCoordinator {
         &self,
         query: &str,
         limit: i64,
-    ) -> Result<Vec<cce_storage_relation_sqlite::EntityRecord>> {
+    ) -> Result<Vec<cce_storage_metadb_sqlite::EntityRecord>> {
         let sqlite = self
             .sqlite
             .as_ref()
@@ -379,9 +379,9 @@ impl QueryCoordinator {
         project_id: i64,
         limit: i64,
         view: &crate::query::filter::QueryFilter,
-    ) -> Result<Vec<cce_storage_relation_sqlite::EntityRecord>> {
-        use cce_storage_relation_sqlite::EntityRepository;
-        use cce_storage_relation_sqlite::repo::FileRepository;
+    ) -> Result<Vec<cce_storage_metadb_sqlite::EntityRecord>> {
+        use cce_storage_metadb_sqlite::EntityRepository;
+        use cce_storage_metadb_sqlite::repo::FileRepository;
 
         let mut entities = EntityRepository::search_fts_at_epoch(
             conn,
@@ -829,7 +829,7 @@ impl QueryCoordinator {
         &self,
         entity_id: cce_types::EntityId,
         options: &RelationQueryOptions,
-    ) -> Result<Vec<cce_relation::CallChainNode>> {
+    ) -> Result<Vec<cce_codegraph::CallChainNode>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }
@@ -841,7 +841,7 @@ impl QueryCoordinator {
         &self,
         entity_id: cce_types::EntityId,
         options: &RelationQueryOptions,
-    ) -> Result<Vec<cce_relation::CallChainNode>> {
+    ) -> Result<Vec<cce_codegraph::CallChainNode>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }
@@ -853,7 +853,7 @@ impl QueryCoordinator {
         &self,
         entity_id: cce_types::EntityId,
         options: &RelationQueryOptions,
-    ) -> Result<Vec<cce_relation::CallChainNode>> {
+    ) -> Result<Vec<cce_codegraph::CallChainNode>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }
@@ -866,7 +866,7 @@ impl QueryCoordinator {
         &self,
         entity_id: cce_types::EntityId,
         options: &RelationQueryOptions,
-    ) -> Result<Vec<cce_relation::CallChainNode>> {
+    ) -> Result<Vec<cce_codegraph::CallChainNode>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }
@@ -880,7 +880,7 @@ impl QueryCoordinator {
         start_id: cce_types::EntityId,
         end_id: cce_types::EntityId,
         options: &PathQueryOptions,
-    ) -> Result<Option<Vec<cce_relation::CallChainNode>>> {
+    ) -> Result<Option<Vec<cce_codegraph::CallChainNode>>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }
@@ -1051,7 +1051,7 @@ impl QueryCoordinator {
         // Two-stage resolution ("own first, miss → parent"): an inherited
         // file's rows live in the parent generation; overridden files never
         // resolve against it.
-        use cce_storage_relation_sqlite::repo::FileRepository;
+        use cce_storage_metadb_sqlite::repo::FileRepository;
         let resolve_file = |epoch: i64| {
             FileRepository::get_by_path_and_project_at_epoch(&conn, file_path, project_id, epoch)
                 .map_err(|e| QueryError::invalid(&format!("Failed to get file: {}", e)))
@@ -1075,7 +1075,7 @@ impl QueryCoordinator {
         })?;
 
         // Get summary from file_summaries table (returns JSON string)
-        use cce_storage_relation_sqlite::repo::FileSummaryRepository;
+        use cce_storage_metadb_sqlite::repo::FileSummaryRepository;
         let summary_json_str =
             FileSummaryRepository::get_by_file_id_at_epoch(&conn, file_record.id, resolved_epoch)
                 .map_err(|e| QueryError::invalid(&format!("Failed to get summary: {}", e)))?

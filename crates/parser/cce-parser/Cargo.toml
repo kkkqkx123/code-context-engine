@@ -77,7 +77,7 @@ cce-llm = { path = "../../core/cce-llm" }
 [dev-dependencies]
 tempfile = { workspace = true }
 cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
-cce-relation = { path = "../cce-relation" }
+cce-codegraph = { path = "../cce-codegraph" }
 
 [[bench]]
 name = "parse_nl_chunk"

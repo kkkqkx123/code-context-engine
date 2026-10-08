@@ -5,7 +5,7 @@
 //! maintenance methods (`clear_relations*`) plus the relation builder accessors
 //! support incremental graph repair.
 
-use cce_relation::index::{FileLevelOps, RelationQueryOps};
+use cce_codegraph::index::{FileLevelOps, RelationQueryOps};
 use cce_scanner::FileEntry;
 use cce_types::ParsedFile;
 
@@ -85,12 +85,12 @@ impl IndexOrchestrator {
 
 impl IndexOrchestrator {
     /// Get the relation builder (immutable reference)
-    pub fn get_relation_builder(&self) -> Option<&cce_relation::IndexBuilder> {
+    pub fn get_relation_builder(&self) -> Option<&cce_codegraph::IndexBuilder> {
         self.relation_builder.as_ref()
     }
 
     /// Get the relation builder (mutable reference)
-    pub fn get_relation_builder_mut(&mut self) -> Option<&mut cce_relation::IndexBuilder> {
+    pub fn get_relation_builder_mut(&mut self) -> Option<&mut cce_codegraph::IndexBuilder> {
         self.relation_builder.as_mut()
     }
 

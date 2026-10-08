@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cce_relation::index::snapshot_query::SnapshotRelationQueryOps;
+use cce_codegraph::index::snapshot_query::SnapshotRelationQueryOps;
 use cce_types::ExternalCallType;
 
 use cce_api::models::{

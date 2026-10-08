@@ -3,7 +3,7 @@
 use std::path::Path;
 use thiserror::Error;
 
-use cce_storage_relation_sqlite::project_registry::ProjectRegistry;
+use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
 
 #[derive(Error, Debug)]
 pub enum ValidationError {

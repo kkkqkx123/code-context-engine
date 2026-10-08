@@ -70,7 +70,8 @@ pub enum RelationBackend {
     /// Embedded SQLite repositories (current behavior).
     #[default]
     Local,
-    /// PostgreSQL branch (remote preset only).
+    /// PostgreSQL branch (forward scaffolding: configurable but not wired
+    /// into indexing, search, or hot-update paths yet).
     Remote,
 }
 
@@ -98,7 +99,8 @@ pub enum FulltextBackend {
     /// Embedded Tantivy index (current behavior).
     #[default]
     Local,
-    /// Elasticsearch branch (remote preset only).
+    /// Elasticsearch branch (forward scaffolding: configurable but not
+    /// wired into indexing, search, or hot-update paths yet).
     Remote,
 }
 
@@ -127,8 +129,6 @@ pub struct RelationRemoteConfig {
     /// Individual credential fields below take precedence over the
     /// credentials embedded in the URL.
     pub url: Option<String>,
-    /// Database user name (reserved alias for `username`).
-    pub api_key: Option<String>,
     /// Database user name.
     pub username: Option<String>,
     /// Database password (prefer environment override).
@@ -147,7 +147,6 @@ impl Default for RelationRemoteConfig {
     fn default() -> Self {
         Self {
             url: None,
-            api_key: None,
             username: None,
             password: None,
             pool_size: 8,
@@ -190,13 +189,10 @@ impl Validate for RelationRemoteConfig {
 }
 
 impl RelationRemoteConfig {
-    /// Effective database user: explicit username wins, api_key stays as a
-    /// legacy alias, empty means no authentication.
+    /// Effective database user: the explicit username, empty means no
+    /// authentication.
     pub fn effective_username(&self) -> Option<&str> {
-        self.username
-            .as_deref()
-            .or(self.api_key.as_deref())
-            .filter(|s| !s.is_empty())
+        self.username.as_deref().filter(|s| !s.is_empty())
     }
 }
 
@@ -215,7 +211,7 @@ pub struct FulltextRemoteConfig {
     pub username: Option<String>,
     /// Basic-auth password (prefer environment override).
     pub password: Option<String>,
-    /// Index name; defaults to the local `bm25.index_name` when unset.
+    /// Index name; required, no fallback to the local index name.
     pub index_name: Option<String>,
     /// Bulk batch size for write requests.
     pub bulk_size: usize,
@@ -266,12 +262,12 @@ impl Validate for FulltextRemoteConfig {
 }
 
 impl FulltextRemoteConfig {
-    /// Effective index name, falling back to the local BM25 index name.
-    pub fn effective_index_name<'a>(&'a self, bm25_index_name: &'a str) -> &'a str {
+    /// Explicit index name, if configured (blank counts as unset).
+    pub fn explicit_index_name(&self) -> Option<&str> {
         self.index_name
             .as_deref()
+            .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or(bm25_index_name)
     }
 }
 

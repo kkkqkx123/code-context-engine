@@ -55,7 +55,7 @@ use cce_parser::summary::{
     FileSummary, ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator,
 };
 use cce_plugin::PluginRegistry;
-use cce_relation::IndexBuilder;
+use cce_codegraph::IndexBuilder;
 use cce_scanner::ScanOptions;
 use cce_types::OutputMode;
 
@@ -113,7 +113,7 @@ pub struct IndexOrchestrator {
     relation_publisher: Option<Arc<dyn RelationSnapshotPublisher>>,
     /// Cached build-config parser from `init_relation_builder`; reused in
     /// `build_and_publish_relations` to avoid a second filesystem scan.
-    cached_build_config: Option<cce_relation::BuildConfigParser>,
+    cached_build_config: Option<cce_codegraph::BuildConfigParser>,
     /// Whether the periodic scan drives the dead-letter truncate-retry executor.
     /// Manual (CLI/API) invocation ignores this flag.
     dead_letter_truncate_retry: bool,
@@ -238,10 +238,7 @@ impl IndexOrchestrator {
     }
 
     /// Set BM25 client
-    pub fn with_bm25_client(
-        mut self,
-        client: Arc<tokio::sync::Mutex<cce_storage_bm25::Bm25Client>>,
-    ) -> Self {
+    pub fn with_bm25_client(mut self, client: Arc<cce_storage_bm25::Bm25Client>) -> Self {
         self.storage = self.storage.with_bm25(client);
         self
     }
@@ -270,19 +267,16 @@ impl IndexOrchestrator {
     /// Set metadata store (SQLite)
     pub fn with_metadata_store(
         mut self,
-        store: Arc<cce_storage_relation_sqlite::SqliteClient>,
+        store: Arc<cce_storage_metadb_sqlite::SqliteClient>,
     ) -> Self {
         self.storage = self.storage.with_metadata_store(store);
         self
     }
 
     /// Set fulltext backend via enum dispatch (phase-2 entry point).
-    pub fn with_fulltext_store(
-        mut self,
-        store: crate::index::vector_store::FulltextStore,
-    ) -> Result<Self, cce_types::StorageError> {
-        self.storage = self.storage.with_fulltext_store(store)?;
-        Ok(self)
+    pub fn with_fulltext_store(mut self, store: crate::index::vector_store::FulltextStore) -> Self {
+        self.storage = self.storage.with_fulltext_store(store);
+        self
     }
 
     /// Set relation backend via enum dispatch (phase-2 entry point).
@@ -445,10 +439,7 @@ impl IndexOrchestrator {
     }
 
     /// Set BM25 client
-    pub fn with_bm25(
-        mut self,
-        client: Arc<tokio::sync::Mutex<cce_storage_bm25::Bm25Client>>,
-    ) -> Self {
+    pub fn with_bm25(mut self, client: Arc<cce_storage_bm25::Bm25Client>) -> Self {
         self.storage = self.storage.with_bm25(client);
         self
     }
@@ -804,7 +795,7 @@ impl IndexOrchestrator {
         &mut self,
         options: &IndexOptions,
     ) -> Result<(), OrchestratorError> {
-        let mut parser = cce_relation::BuildConfigParser::new();
+        let mut parser = cce_codegraph::BuildConfigParser::new();
         let root = options.root_dir.clone();
         let depth = self.relation_config.manifest_scan_depth;
         if let Err(error) = parser.scan_project_async(root, depth).await {
@@ -827,7 +818,7 @@ impl IndexOrchestrator {
 
     fn finish_init_relation_builder(
         &mut self,
-        parser: cce_relation::BuildConfigParser,
+        parser: cce_codegraph::BuildConfigParser,
     ) -> Result<(), OrchestratorError> {
         let params = self.relation_config.to_builder_params();
         let mut builder = IndexBuilder::new();

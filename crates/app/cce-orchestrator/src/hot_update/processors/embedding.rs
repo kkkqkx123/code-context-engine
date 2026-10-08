@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 
-use cce_storage_relation_sqlite::ChunkRepository;
+use cce_storage_metadb_sqlite::ChunkRepository;
 
 use crate::hot_update::ParseResultWithChanges;
 use crate::hot_update::error::{HotUpdateError, Result};
@@ -235,7 +235,7 @@ impl EmbeddingUpdateProcessor {
         use crate::hot_update::processors::rechunk::{
             FingerprintDrift, detect_fingerprint_drift, persist_fingerprint, resolve_project_root,
         };
-        use cce_storage_relation_sqlite::FileRepository;
+        use cce_storage_metadb_sqlite::FileRepository;
 
         let storage = &self.context.storage;
         let Some(client) = storage.metadata_client() else {

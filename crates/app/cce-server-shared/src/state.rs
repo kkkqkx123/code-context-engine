@@ -12,7 +12,7 @@ use crate::engine::ProjectCache;
 use cce_metrics::ProgressTracker;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
 use cce_orchestrator::query::RelationSearcher;
-use cce_relation::CallChainQuery;
+use cce_codegraph::CallChainQuery;
 
 type RelationSearcherEntry = (i64, Arc<RelationSearcher>);
 type RelationSearcherCache = Arc<RwLock<HashMap<i64, RelationSearcherEntry>>>;
@@ -121,9 +121,9 @@ impl AppState {
         self.engine.qdrant_clone()
     }
 
-    /// Get a clone of the BM25 client
-    pub fn bm25_clone(&self) -> Arc<tokio::sync::Mutex<cce_storage_bm25::Bm25Client>> {
-        self.engine.bm25_clone()
+    /// Get a clone of the fulltext backend
+    pub fn fulltext_clone(&self) -> cce_orchestrator::index::FulltextStore {
+        self.engine.fulltext_clone()
     }
 
     /// Get a clone of the embedder
@@ -132,14 +132,14 @@ impl AppState {
     }
 
     /// Get a clone of the metadata store (SQLite client)
-    pub fn metadata_store_clone(&self) -> Option<Arc<cce_storage_relation_sqlite::SqliteClient>> {
+    pub fn metadata_store_clone(&self) -> Option<Arc<cce_storage_metadb_sqlite::SqliteClient>> {
         self.engine.metadata_store_clone()
     }
 
     /// Get a clone of the project registry
     pub fn project_registry_clone(
         &self,
-    ) -> Arc<cce_storage_relation_sqlite::project_registry::ProjectRegistry> {
+    ) -> Arc<cce_storage_metadb_sqlite::project_registry::ProjectRegistry> {
         self.engine.project_registry_clone()
     }
 }

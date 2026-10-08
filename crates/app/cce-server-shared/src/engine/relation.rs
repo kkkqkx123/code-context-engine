@@ -11,8 +11,8 @@ use cce_orchestrator::RelationSnapshotPublisher;
 use cce_orchestrator::hot_update::processors::RelationUpdateProcessor;
 use cce_orchestrator::index::StorageCoordinator;
 use cce_orchestrator::query::retry_queue::RetryQueue;
-use cce_storage_relation_sqlite::repo::ProjectRepository;
-use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_metadb_sqlite::repo::ProjectRepository;
+use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 
 impl super::CodeContextEngine {
     /// Get or create project-specific RelationRuntime
@@ -99,7 +99,7 @@ impl super::CodeContextEngine {
         // runs on the query path and must not contend with the write lock.
         let active_epoch = match sqlite.read_connection() {
             Ok(conn) => {
-                match cce_storage_relation_sqlite::ProjectIndexManifestRepository::get_active(
+                match cce_storage_metadb_sqlite::ProjectIndexManifestRepository::get_active(
                     &conn, project_id,
                 ) {
                     Ok(Some(manifest)) => manifest.relation_epoch,
@@ -165,7 +165,7 @@ impl super::CodeContextEngine {
         }
 
         runtime.set_updating().await;
-        match cce_relation::index::snapshot_loader::RelationSnapshotLoader::load(
+        match cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
             &SqliteSnapshotStore::new((*sqlite).clone()),
             project_id,
             active_epoch,
@@ -175,7 +175,7 @@ impl super::CodeContextEngine {
                 // afterwards, so share its maps zero-copy into the snapshot
                 // instead of deep-copying the whole graph
                 let snapshot_index =
-                    cce_relation::index::RelationSnapshotIndex::from_index_shared(&index);
+                    cce_codegraph::index::RelationSnapshotIndex::from_index_shared(&index);
                 runtime
                     .publish_snapshot(
                         Arc::new(snapshot_index),
@@ -208,7 +208,7 @@ impl super::CodeContextEngine {
     pub async fn init_relation_runtime(
         &self,
         project_id: i64,
-        index: cce_relation::index::core::RelationIndex,
+        index: cce_codegraph::index::core::RelationIndex,
         relation_epoch: i64,
         integrity: SnapshotIntegrity,
         manifest_id: Option<String>,
@@ -216,7 +216,7 @@ impl super::CodeContextEngine {
         let runtime = self.get_relation_runtime(project_id).await?;
         // The index is moved in by value from the cold-start loader and never
         // mutated afterwards, so share its maps zero-copy
-        let snapshot_index = cce_relation::index::RelationSnapshotIndex::from_index_shared(&index);
+        let snapshot_index = cce_codegraph::index::RelationSnapshotIndex::from_index_shared(&index);
         runtime
             .publish_snapshot(
                 Arc::new(snapshot_index),
@@ -312,7 +312,7 @@ impl super::CodeContextEngine {
                 .map_err(|error| EngineError::Config(error.to_string()))?
                 .with_metadata_store(sqlite.clone())
                 .with_vector(self.vector.clone())
-                .with_bm25(self.bm25.clone())
+                .with_fulltext_store(self.fulltext.clone())
                 .with_embedder(self.embedder.clone())
                 .with_project_group_id(group_id),
         );
@@ -369,7 +369,7 @@ impl super::CodeContextEngine {
                     chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
                 ),
                 snapshot,
-                &cce_relation::index::RelationIndex::new(),
+                &cce_codegraph::index::RelationIndex::new(),
             )
             .await
             .map_err(cce_orchestrator::OrchestratorError::from)?;

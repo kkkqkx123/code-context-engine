@@ -46,7 +46,7 @@
 
 use std::sync::Arc;
 
-use cce_relation::index::{LayeredSnapshotIndex, RelationIndex, RelationSnapshotIndex};
+use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndex, RelationSnapshotIndex};
 use cce_types::SnapshotDelta;
 use cce_types::StorageError;
 use cce_types::relation::RelationSnapshotStore;
@@ -97,7 +97,7 @@ impl RelationBaseCache {
                 cached.deltas.clone(),
             )));
         }
-        let loaded = cce_relation::index::snapshot_loader::RelationSnapshotLoader::load(
+        let loaded = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
             store, project_id, epoch,
         )?;
         // Zero-copy: the snapshot shares the loaded index's maps; the mutable
@@ -190,7 +190,7 @@ impl RelationBaseCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_relation::index::{RelationDeltaOps, RelationIndexView, SnapshotFileQueryOps};
+    use cce_codegraph::index::{RelationDeltaOps, RelationIndexView, SnapshotFileQueryOps};
     use cce_types::{
         AddedEntity, CanonicalEntity, CanonicalFile, CanonicalRelationSnapshot, Entity, EntityId,
         EntityKind, RelationSnapshotManifest, RelationSnapshotState, Span, StableSymbolKey,
@@ -465,7 +465,7 @@ mod tests {
 
         // Chain semantics match an independent materialization of base + deltas.
         let base_index =
-            cce_relation::index::snapshot_loader::RelationSnapshotLoader::load(&store, 1, 1)
+            cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(&store, 1, 1)
                 .expect("base should load");
         let materialized = base_index.detached_clone();
         materialized.apply_delta(&d2);
@@ -573,7 +573,7 @@ mod tests {
 
         // Simulate server-side compaction: materialize the base + chain.
         let base_index =
-            cce_relation::index::snapshot_loader::RelationSnapshotLoader::load(&store, 1, 1)
+            cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(&store, 1, 1)
                 .expect("base should load");
         let merged = base_index.detached_clone();
         for d in cache

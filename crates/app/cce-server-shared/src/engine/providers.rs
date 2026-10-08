@@ -209,7 +209,6 @@ impl super::CodeContextEngine {
                 .map_err(|e| EngineError::Config(e.to_string()))?
                 .with_vector(self.vector.clone())
                 .with_fulltext_store(self.fulltext_store())
-                .map_err(|e| EngineError::Config(e.to_string()))?
                 .with_embedder(self.embedder.clone())
                 .with_relation_store(RelationStore::local(metadata_store))
                 .map_err(|e| EngineError::Config(e.to_string()))?
@@ -522,7 +521,7 @@ mod tests {
     use crate::engine::CodeContextEngine;
     use cce_config::AppConfig;
     use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
-    use cce_storage_relation_sqlite::{NewProjectRecord, ProjectRepository};
+    use cce_storage_metadb_sqlite::{NewProjectRecord, ProjectRepository};
     use std::collections::HashMap;
 
     fn create_test_config() -> AppConfig {

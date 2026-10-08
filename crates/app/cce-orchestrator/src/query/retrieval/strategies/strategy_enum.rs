@@ -32,7 +32,7 @@ impl RecallAlgorithm {
             Self::Bm25 => {
                 // Create BM25 strategy with native project_id filtering in the index
                 let bm25_strategy =
-                    Bm25Strategy::new(crate::query::Searcher::extract_bm25_client(searcher));
+                    Bm25Strategy::new(crate::query::Searcher::extract_fulltext_store(searcher));
                 RetrievalStrategy::Bm25(bm25_strategy)
             }
             Self::Summary => RetrievalStrategy::Summary(SummaryStrategy::new(searcher)),

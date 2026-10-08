@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use cce_scanner::FileEntry;
-use cce_storage_relation_sqlite::repo::{ChunkRepository, ProjectIndexManifestRepository};
+use cce_storage_metadb_sqlite::repo::{ChunkRepository, ProjectIndexManifestRepository};
 use rusqlite::OptionalExtension;
 
 use crate::hot_update::change::{BatchChangeResult, FileChangeType};
@@ -203,7 +203,7 @@ impl HotUpdateOperationRuntime {
         };
         // Resolve the active epoch through the same cache entry every other
         // read path uses, instead of re-deriving the manifest fallback here.
-        let cache = cce_storage_relation_sqlite::cache::FileHashCache::new(
+        let cache = cce_storage_metadb_sqlite::cache::FileHashCache::new(
             std::sync::Arc::clone(store),
             self.project_id,
         );

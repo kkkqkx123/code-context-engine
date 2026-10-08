@@ -6,8 +6,8 @@
 use cce_orchestrator::query::{
     CacheConfig, CacheKey, QueryCache, QueryConfigBuilder, QueryOptions, QueryResult,
 };
-use cce_storage_relation_sqlite::SqliteClient;
-use cce_storage_relation_sqlite::{ChunkRecord, ChunkRepository};
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::{ChunkRecord, ChunkRepository};
 use cce_storage_vector_qdrant::generate_project_group_id;
 
 // ---------------------------------------------------------------------------

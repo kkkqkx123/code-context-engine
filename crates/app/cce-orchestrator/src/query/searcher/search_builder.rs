@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use cce_config::project_registry::ProjectScope;
 
-use crate::index::vector_store::{RelationStore, VectorStore};
+use crate::index::vector_store::{FulltextStore, RelationStore, VectorStore};
 use crate::query::QueryError;
 use crate::query::boost::SummaryBoost;
 use crate::query::ranking::{LlmReranker, PluginReranker, ScoreSorter, ThresholdFilter};
@@ -21,15 +21,14 @@ use cce_llm_client::OpenAICompatibleProvider;
 use cce_llm_client::ProductionRerankHandler;
 use cce_metrics::SearchMetrics;
 
-use cce_storage_bm25::Bm25Client;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::SqliteClient;
 
 use super::searcher_core::Searcher;
 
 pub struct SearcherBuilder {
     vector: VectorStore,
     embedder: Arc<OpenAICompatibleProvider>,
-    bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+    fulltext: FulltextStore,
     sqlite: Option<Arc<SqliteClient>>,
     rerank_handler: Option<Arc<ProductionRerankHandler>>,
     plugin_rerank_plugins: Vec<std::sync::Arc<dyn cce_plugin::CodePlugin>>,
@@ -44,13 +43,13 @@ impl SearcherBuilder {
     pub(crate) fn new(
         vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
-        bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+        fulltext: FulltextStore,
         scope: ProjectScope,
     ) -> Self {
         Self {
             vector,
             embedder,
-            bm25,
+            fulltext,
             sqlite: None,
             rerank_handler: None,
             plugin_rerank_plugins: Vec::new(),
@@ -151,7 +150,7 @@ impl SearcherBuilder {
         Searcher {
             vector,
             embedder: self.embedder.clone(),
-            bm25: self.bm25,
+            fulltext: self.fulltext,
             sqlite: self.sqlite,
             reranker: Arc::new(LlmReranker::new(self.rerank_handler)),
             plugin_reranker: Arc::new(PluginReranker::new(self.plugin_rerank_plugins)),

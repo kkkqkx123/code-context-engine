@@ -47,6 +47,12 @@ impl DenseRetrieval {
         hnsw_ef: Option<usize>,
         filter: SearchFilter,
     ) -> Result<Vec<SearchResult>> {
+        if !filter.is_business_query() {
+            return Err(QueryError::InvalidQuery(
+                "raw_filter is a backend-debug escape hatch and is rejected on business query paths"
+                    .to_string(),
+            ));
+        }
         let mut dense_query = DenseSearchQuery::new(query_embedding, top_k);
 
         if min_score > 0.0 {
@@ -111,4 +117,43 @@ impl DenseRetrieval {
 /// unenriched results (no metadata store) still carry a readable label.
 fn extract_name(id: &str) -> String {
     id.split(':').nth(1).unwrap_or(id).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn rejects_raw_filter_on_business_path() {
+        use cce_config::modules::{DistanceMetric, LocalVectorConfig};
+        // Declared before the store so it outlives the memory-mapped engine.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = cce_storage_vector_local::LocalVectorStore::open_at(
+            dir.path(),
+            &LocalVectorConfig {
+                data_dir: None,
+                vector_size: 4,
+                distance_metric: DistanceMetric::Cosine,
+                hnsw_m: None,
+                hnsw_ef_construct: None,
+                hnsw_ef_search: None,
+                full_scan_threshold: None,
+            },
+        )
+        .expect("open store");
+        let retrieval = DenseRetrieval::new(VectorStore::Local(Arc::new(store)));
+        let filter = SearchFilter {
+            raw_filter: Some(serde_json::json!({"term": {"group_id": "g"}})),
+            ..Default::default()
+        };
+        let err = retrieval
+            .search(vec![1.0, 0.0, 0.0, 0.0], 5, 0.0, None, filter)
+            .await
+            .expect_err("raw_filter must be rejected");
+        assert!(
+            matches!(err, QueryError::InvalidQuery(_)),
+            "unexpected error: {err}"
+        );
+    }
 }

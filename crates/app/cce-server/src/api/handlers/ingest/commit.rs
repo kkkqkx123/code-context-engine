@@ -2,7 +2,7 @@
 
 use axum::extract::{Path as AxumPath, State};
 use cce_api::models::{ErrorResponse, IngestCommitResponse, error_codes};
-use cce_storage_relation_sqlite::{ProjectRepository, ProjectUpdateRecord};
+use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 use super::staging::{INGEST_STAGING_RETENTION, clear_project_staging, sweep_project_staging};
 use crate::api::handlers::project::management::record_to_config;

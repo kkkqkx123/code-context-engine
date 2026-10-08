@@ -6,13 +6,11 @@
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
 use tracing::info;
 
-use cce_orchestrator::index::VectorStore;
-use cce_storage_bm25::Bm25Client;
-use cce_storage_common::VectorStorage;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_orchestrator::index::{FulltextStore, VectorStore};
+use cce_storage_common::{FulltextStorage, VectorStorage};
+use cce_storage_metadb_sqlite::SqliteClient;
 
 use crate::engine::CodeContextEngine;
 
@@ -60,7 +58,7 @@ impl MaintenanceResult {
 pub struct ProjectIndexMaintenanceService {
     engine: Arc<CodeContextEngine>,
     vector: Option<VectorStore>,
-    bm25: Option<Arc<Mutex<Bm25Client>>>,
+    fulltext: Option<FulltextStore>,
     metadata_store: Option<Arc<SqliteClient>>,
 }
 
@@ -68,13 +66,13 @@ impl ProjectIndexMaintenanceService {
     pub fn new(
         engine: Arc<CodeContextEngine>,
         vector: Option<VectorStore>,
-        bm25: Option<Arc<Mutex<Bm25Client>>>,
+        fulltext: Option<FulltextStore>,
         metadata_store: Option<Arc<SqliteClient>>,
     ) -> Self {
         Self {
             engine,
             vector,
-            bm25,
+            fulltext,
             metadata_store,
         }
     }
@@ -116,11 +114,10 @@ impl ProjectIndexMaintenanceService {
         }
 
         // 2. BM25: delete_all_project_docs only
-        if let Some(bm25) = &self.bm25 {
-            let mut client = bm25.lock().await;
-            if client.is_enabled() {
-                let index_name = client.config().index_name.clone();
-                match client
+        if let Some(fulltext) = &self.fulltext {
+            if FulltextStorage::is_enabled(fulltext) {
+                let index_name = fulltext.configured_index_name();
+                match fulltext
                     .delete_all_project_docs(&index_name, project_id)
                     .await
                 {
@@ -280,7 +277,7 @@ impl ProjectIndexMaintenanceService {
         // Step B: Delete SQLite project record and project database
         if let Some(sqlite) = self.sqlite_client() {
             let registry_result = sqlite.with_transaction(|tx| {
-                cce_storage_relation_sqlite::ProjectRepository::delete_with_cascade(tx, project_id)
+                cce_storage_metadb_sqlite::ProjectRepository::delete_with_cascade(tx, project_id)
             });
             match registry_result {
                 Ok(()) => {

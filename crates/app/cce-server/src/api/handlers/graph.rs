@@ -17,7 +17,7 @@ use cce_api::models::{
 use cce_orchestrator::query::{
     GraphDirection, GraphFilter, GraphPagination, GraphService, SubGraph,
 };
-use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
+use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
 
 use crate::api::handlers::entity::seed::resolve_symbol_seed;
 use crate::api::response::ApiResult;

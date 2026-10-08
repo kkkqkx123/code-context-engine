@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::export::NlDocumentExporter;
-use cce_relation::{
+use cce_codegraph::{
     ThreadSafeIndex,
     index::{RelationIndexView, RelationQueryOps},
 };
@@ -337,8 +337,8 @@ impl IndexOrchestrator {
     }
 
     fn inject_governance_edges(
-        builder: &cce_relation::IndexBuilder,
-        parser: &cce_relation::BuildConfigParser,
+        builder: &cce_codegraph::IndexBuilder,
+        parser: &cce_codegraph::BuildConfigParser,
     ) {
         use cce_types::relation::CallContext;
         use cce_types::{EntityId, LanguageInfo, RelationType, ResolvedRelation, Span};

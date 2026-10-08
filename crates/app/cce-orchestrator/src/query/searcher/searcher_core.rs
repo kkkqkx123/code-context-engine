@@ -35,8 +35,7 @@ use crate::query::types::{ExecutionStrategy, QueryOptions, QueryResult, SearchRe
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{SearchMetrics, SearchType};
 
-use cce_storage_bm25::Bm25Client;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::SqliteClient;
 
 use super::search_builder::SearcherBuilder;
 
@@ -50,7 +49,7 @@ pub struct Searcher {
     /// Vector backend used by DenseRetrieval strategy
     pub(crate) vector: VectorStore,
     pub(crate) embedder: Arc<OpenAICompatibleProvider>,
-    pub(crate) bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+    pub(crate) fulltext: FulltextStore,
     /// SQLite database for chunk content lookup (optional)
     pub(crate) sqlite: Option<Arc<SqliteClient>>,
     /// Optional summary relevance boost contributor
@@ -92,7 +91,7 @@ impl Searcher {
     /// # Example
     ///
     /// ```ignore
-    /// let searcher = Searcher::builder(vector, embedder, bm25, scope)
+    /// let searcher = Searcher::builder(vector, embedder, fulltext, scope)
     ///     .with_sqlite(sqlite)
     ///     .with_rerank(rerank_handler)
     ///     .build();
@@ -100,38 +99,28 @@ impl Searcher {
     pub fn builder(
         vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
-        bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+        fulltext: FulltextStore,
         scope: ProjectScope,
     ) -> SearcherBuilder {
-        SearcherBuilder::new(vector, embedder, bm25, scope)
+        SearcherBuilder::new(vector, embedder, fulltext, scope)
     }
 
     /// Create a searcher builder from backend enums.
     ///
-    /// Only the local fulltext branch is wired into the read path. A remote
-    /// branch returns a configuration error instead of panicking, so callers
-    /// handle the unsupported combination explicitly.
+    /// Calls go through the fulltext contract, so both branches share one
+    /// read path and branch selection stays inside the enum.
     pub fn builder_from_stores(
         vector: VectorStore,
         embedder: Arc<OpenAICompatibleProvider>,
         fulltext: FulltextStore,
         scope: ProjectScope,
     ) -> Result<SearcherBuilder> {
-        let bm25 = match fulltext {
-            FulltextStore::Local(client) => client,
-            FulltextStore::Remote(_) => {
-                return Err(QueryError::Config(
-                    "remote fulltext branch is not wired into the Searcher read path yet"
-                        .to_string(),
-                ));
-            }
-        };
-        Ok(SearcherBuilder::new(vector, embedder, bm25, scope))
+        Ok(SearcherBuilder::new(vector, embedder, fulltext, scope))
     }
 
-    /// Fulltext backend enum wrapping the configured client.
+    /// Fulltext backend enum backing this searcher.
     pub fn fulltext_store(&self) -> FulltextStore {
-        FulltextStore::local(self.bm25.clone())
+        self.fulltext.clone()
     }
 
     /// Relation backend enum wrapping the configured database.
@@ -141,12 +130,12 @@ impl Searcher {
             .map(|store| RelationStore::local(store.clone()))
     }
 
-    /// Extract the BM25 client from a searcher reference (used by strategy factory).
+    /// Extract the fulltext backend from a searcher reference (used by strategy factory).
     ///
-    /// This static method provides access to the BM25 client for the BM25 recall strategy,
+    /// This static method provides access to the fulltext backend for the BM25 recall strategy,
     /// avoiding circular dependency between Searcher and strategies.
-    pub fn extract_bm25_client(searcher: &Self) -> Arc<tokio::sync::Mutex<Bm25Client>> {
-        searcher.bm25.clone()
+    pub fn extract_fulltext_store(searcher: &Self) -> FulltextStore {
+        searcher.fulltext.clone()
     }
 
     /// Get the SQLite database reference for project isolation filtering (used by BM25 strategy)
@@ -582,7 +571,7 @@ impl Searcher {
                     Err(e) => return Err(format!("Chunk enrichment failed: {e}")),
                 };
             let project_root =
-                cce_storage_relation_sqlite::source_reader::resolve_project_root(&conn, project_id);
+                cce_storage_metadb_sqlite::source_reader::resolve_project_root(&conn, project_id);
             Ok(Some((records, project_root)))
         })
         .await;

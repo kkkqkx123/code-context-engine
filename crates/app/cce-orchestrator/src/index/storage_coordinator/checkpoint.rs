@@ -12,8 +12,8 @@ impl StorageCoordinator {
         &self,
         operation_type: &str,
         root_dir: &str,
-    ) -> Result<Option<cce_storage_relation_sqlite::CheckpointRecord>, OrchestratorError> {
-        use cce_storage_relation_sqlite::CheckpointRepository;
+    ) -> Result<Option<cce_storage_metadb_sqlite::CheckpointRecord>, OrchestratorError> {
+        use cce_storage_metadb_sqlite::CheckpointRepository;
 
         let Some(client) = self.metadata_store.as_deref() else {
             return Ok(None);

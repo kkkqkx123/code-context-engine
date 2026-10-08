@@ -24,14 +24,14 @@ use crate::hot_update::{BatchChangeResult, FileChangeType};
 use cce_config::RelationBuilderParams;
 use cce_metrics::RelationMetrics;
 use cce_plugin::PluginRegistry;
-use cce_relation::BuildConfigParser;
-use cce_relation::IndexBuilder;
-use cce_relation::index::{
+use cce_codegraph::BuildConfigParser;
+use cce_codegraph::IndexBuilder;
+use cce_codegraph::index::{
     RelationDeltaOps, RelationIndex, RelationIndexView, SnapshotFileQueryOps,
 };
-use cce_storage_relation_sqlite::SqliteClient;
-use cce_storage_relation_sqlite::repo::RelationSnapshotRepository;
-use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::repo::RelationSnapshotRepository;
+use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 use cce_types::{LanguageInfo, StorageError};
 
 use crate::index::RelationBaseCache;
@@ -40,11 +40,9 @@ use crate::index::StorageCoordinator;
 use cce_types::normalize_project_path;
 
 pub struct RelationUpdateProcessor {
-    /// SQLite client for persistence (legacy direct access, kept for project_meta reads).
+    /// SQLite client for persistence (project_meta reads, manifest access,
+    /// and the base-cache snapshot port).
     pub(crate) sqlite_client: Option<Arc<SqliteClient>>,
-    /// Abstract snapshot store (preferred over `sqlite_client` for epoch/snapshot/delta ops).
-    pub(crate) relation_store:
-        Option<Arc<dyn crate::index::relation_store_trait::RelationSnapshotStore>>,
     /// Sole publisher for complete canonical snapshots.
     pub(crate) publisher: Option<Arc<dyn RelationSnapshotPublisher>>,
     /// Whether this processor is enabled
@@ -110,7 +108,6 @@ impl RelationUpdateProcessor {
         let params = RelationBuilderParams::default();
         Self {
             sqlite_client: None,
-            relation_store: None,
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -140,7 +137,6 @@ impl RelationUpdateProcessor {
         let params = RelationBuilderParams::default();
         Self {
             sqlite_client: None,
-            relation_store: None,
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -170,12 +166,6 @@ impl RelationUpdateProcessor {
         let params = RelationBuilderParams::default();
         Self {
             sqlite_client: Some(Arc::clone(&sqlite_client)),
-            relation_store: Some(Arc::new(
-                crate::index::relation_store_trait::SqliteRelationStore::new(Arc::clone(
-                    &sqlite_client,
-                )),
-            )
-                as Arc<dyn crate::index::relation_store_trait::RelationSnapshotStore>),
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -209,12 +199,6 @@ impl RelationUpdateProcessor {
         let params = RelationBuilderParams::default();
         Self {
             sqlite_client: Some(Arc::clone(&sqlite_client)),
-            relation_store: Some(Arc::new(
-                crate::index::relation_store_trait::SqliteRelationStore::new(Arc::clone(
-                    &sqlite_client,
-                )),
-            )
-                as Arc<dyn crate::index::relation_store_trait::RelationSnapshotStore>),
             publisher: None,
             enabled: true,
             dependency_propagation_enabled: params.track_cross_file_deps,
@@ -277,15 +261,6 @@ impl RelationUpdateProcessor {
     /// injection into hot-update candidate graphs.
     pub fn with_plugin_registry(mut self, registry: Arc<PluginRegistry>) -> Self {
         self.plugin_registry = Some(registry);
-        self
-    }
-
-    /// Attach an abstract snapshot store (preferred over direct `SqliteClient`).
-    pub fn with_relation_store(
-        mut self,
-        store: Arc<dyn crate::index::relation_store_trait::RelationSnapshotStore>,
-    ) -> Self {
-        self.relation_store = Some(store);
         self
     }
 

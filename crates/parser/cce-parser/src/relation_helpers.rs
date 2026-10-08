@@ -1,7 +1,7 @@
 //! Relation helpers for `cce-parser` internal use.
 //!
 //! The authoritative visibility determination lives in `cce-relation::policy`
-//! (per-language modules under `crates/parser/cce_relation/src/policy/`).
+//! (per-language modules under `crates/parser/cce_codegraph/src/policy/`).
 //! This module provides a lightweight 3-value re-implementation to avoid a
 //! circular dependency between `cce-parser` and `cce-relation`. The dispatch
 //! structure mirrors the authoritative policy but collapses to
@@ -132,7 +132,7 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
     }
 }
 
-/// Export info (subset of cce_relation::index::core::ExportInfo).
+/// Export info (subset of cce_codegraph::index::core::ExportInfo).
 #[derive(Debug, Clone)]
 pub struct ExportInfo {
     pub function_id: EntityId,

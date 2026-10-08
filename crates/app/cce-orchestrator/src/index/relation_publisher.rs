@@ -4,7 +4,7 @@
 //! process-local runtime. This trait keeps that dependency direction intact.
 
 use async_trait::async_trait;
-use cce_relation::index::{LayeredSnapshotIndex, RelationIndex};
+use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndex};
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
 
 /// Result returned after a complete relation snapshot is made active.

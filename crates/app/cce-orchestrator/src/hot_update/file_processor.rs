@@ -8,9 +8,9 @@ use super::change::{EntityChange, EntityChangeType, FileChangeType, ParseResultW
 use super::error::{HotUpdateError, Result};
 use super::watcher::{FileEvent, FileEventType};
 use cce_parser::parser::ParseCoordinator;
-use cce_storage_relation_sqlite::SqliteClient;
-use cce_storage_relation_sqlite::repo::entity_repo::EntityRepository;
-use cce_storage_relation_sqlite::repo::file_repo::FileRepository;
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::repo::entity_repo::EntityRepository;
+use cce_storage_metadb_sqlite::repo::file_repo::FileRepository;
 use cce_types::Span;
 use cce_types::entity::{Entity, EntityId, EntityKind};
 use cce_types::{LanguageInfo, ParsedFile};
@@ -483,7 +483,7 @@ fn parse_entity_kind(s: &str) -> EntityKind {
 }
 
 fn entity_records_to_entities(
-    records: &[cce_storage_relation_sqlite::EntityRecord],
+    records: &[cce_storage_metadb_sqlite::EntityRecord],
 ) -> Vec<Entity> {
     records
         .iter()

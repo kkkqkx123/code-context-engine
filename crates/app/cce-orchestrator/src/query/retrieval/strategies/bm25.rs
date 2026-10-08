@@ -15,35 +15,33 @@
 //! improving query performance by reducing round-trips to external databases.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
+use crate::index::vector_store::FulltextStore;
 use crate::query::error::{QueryError, Result};
 use crate::query::filter::QueryFilter;
 use crate::query::types::{QueryOptions, SearchResult};
-use cce_storage_bm25::Bm25Client;
-use cce_storage_bm25::{Bm25Retrieval, Bm25SearchOptions};
+use cce_storage_common::{FulltextSearchOptions, FulltextStorage};
 
 /// BM25 retrieval strategy — pure keyword-based recall with native project isolation
 ///
 /// Performs native project isolation using the project_id field stored in the BM25 index.
 /// This eliminates the need for external SQLite verification and improves query performance.
+///
+/// The strategy calls the fulltext contract on the backend enum, so the
+/// local and remote branches share one read path.
 #[derive(Clone)]
 pub struct Bm25Strategy {
-    bm25_retrieval: Bm25Retrieval,
-    bm25_client: Arc<tokio::sync::Mutex<Bm25Client>>,
+    fulltext: FulltextStore,
 }
 
 impl Bm25Strategy {
-    pub fn new(bm25_client: Arc<tokio::sync::Mutex<Bm25Client>>) -> Self {
-        Self {
-            bm25_retrieval: Bm25Retrieval::new(),
-            bm25_client,
-        }
+    pub fn new(fulltext: FulltextStore) -> Self {
+        Self { fulltext }
     }
 
     /// Create BM25 strategy (alias for new)
-    pub fn with_client(bm25_client: Arc<tokio::sync::Mutex<Bm25Client>>) -> Self {
-        Self::new(bm25_client)
+    pub fn with_client(fulltext: FulltextStore) -> Self {
+        Self::new(fulltext)
     }
 
     /// Execute BM25 keyword retrieval with native project isolation
@@ -60,22 +58,9 @@ impl Bm25Strategy {
         options: &QueryOptions,
         query_filter: &QueryFilter,
     ) -> Result<Vec<SearchResult>> {
-        // Step 1: Acquire BM25 index resources
-        let client = self.bm25_client.lock().await;
-        let manager = match client.index_manager() {
-            Some(m) => m,
-            None => {
-                return Err(QueryError::Config(
-                    "BM25 index manager not available".to_string(),
-                ));
-            }
-        };
-        let manager_guard = manager.read().await;
-        let schema = manager_guard.schema();
-
-        // Step 2: Build retrieval options with native project_id and epoch filters
+        // Step 1: Build retrieval options with native project_id and epoch filters.
         let limit = options.config.vector.top_k.max(options.config.result.limit);
-        let retrieval_options = Bm25SearchOptions {
+        let retrieval_options = FulltextSearchOptions {
             limit,
             offset: 0,
             field_weights: options.config.bm25.field_weights.clone(),
@@ -95,13 +80,15 @@ impl Bm25Strategy {
             term_operator: options.config.bm25.term_operator,
         };
 
-        // Step 3: Execute BM25 search with project and epoch isolation
+        // Step 2: Execute keyword search through the fulltext contract
+        // with project and epoch isolation.
         let bm25_results = self
-            .bm25_retrieval
-            .search(&manager_guard, schema, &options.query, &retrieval_options)
+            .fulltext
+            .search(&options.query, &retrieval_options)
+            .await
             .map_err(classify_bm25_error)?;
 
-        // Step 4: Convert BM25 results to unified SearchResult
+        // Step 3: Convert BM25 results to unified SearchResult
         let search_results: Vec<SearchResult> = bm25_results
             .into_iter()
             .map(|r| {

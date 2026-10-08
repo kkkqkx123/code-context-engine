@@ -448,7 +448,7 @@ pub async fn handle_aggregated_search(
     let relation_searcher = match state.get_relation_searcher(project_id).await {
         Ok(s) => s,
         Err(_) => Arc::new(cce_orchestrator::query::RelationSearcher::new(Arc::new(
-            cce_relation::CallChainQuery::new(),
+            cce_codegraph::CallChainQuery::new(),
         ))),
     };
 

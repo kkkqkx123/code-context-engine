@@ -16,7 +16,7 @@ use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index_state::{
     ModuleType, ModuleUpdateState, TOKEN_LIMIT_ERROR_CODE, TrackerFailure,
 };
-use cce_storage_relation_sqlite::{
+use cce_storage_metadb_sqlite::{
     NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
 };
 

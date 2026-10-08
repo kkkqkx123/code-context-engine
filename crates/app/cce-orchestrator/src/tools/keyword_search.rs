@@ -30,8 +30,9 @@ mod types;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cce_storage_bm25::{Bm25Client, Bm25Retrieval, Bm25SearchOptions};
-use cce_storage_relation_sqlite::SqliteClient;
+use crate::index::vector_store::FulltextStore;
+use cce_storage_common::{FulltextSearchOptions, FulltextStorage};
+use cce_storage_metadb_sqlite::SqliteClient;
 
 use crate::tools::common::{read_snippets_batch, resolve_epoch_view};
 
@@ -45,8 +46,8 @@ pub use self::types::{
 /// sourced from SQLite content. Results are sorted by BM25 relevance score.
 #[derive(Clone)]
 pub struct KeywordSearchTool {
-    /// BM25 client for Tantivy index access
-    bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+    /// Fulltext backend for keyword recall (called through the contract)
+    fulltext: FulltextStore,
     /// Optional SQLite database for chunk content lookup
     sqlite: Option<Arc<SqliteClient>>,
 }
@@ -56,9 +57,12 @@ impl KeywordSearchTool {
     ///
     /// # Arguments
     ///
-    /// * `bm25` - BM25 client wrapped in Arc<Mutex> for thread-safe access
-    pub fn new(bm25: Arc<tokio::sync::Mutex<Bm25Client>>) -> Self {
-        Self { bm25, sqlite: None }
+    /// * `fulltext` - Fulltext backend (calls go through the contract)
+    pub fn new(fulltext: FulltextStore) -> Self {
+        Self {
+            fulltext,
+            sqlite: None,
+        }
     }
 
     /// Attach SQLite database for chunk content lookup
@@ -111,31 +115,24 @@ impl KeywordSearchTool {
             return Err(KeywordSearchError::SqliteNotConfigured);
         }
 
-        // Step 1: Lock BM25 client and acquire index resources
-        let bm25_client = self.bm25.lock().await;
-
-        let manager_arc = bm25_client
-            .index_manager()
-            .ok_or(KeywordSearchError::IndexNotAvailable)?;
-        let manager_guard = manager_arc.read().await;
-        let schema = bm25_client.schema();
-
-        // Step 2: Resolve the epoch view for version-aware filtering. An
+        // Step 1: Resolve the epoch view for version-aware filtering. An
         // explicit `request.epoch` pins a single full generation; otherwise
         // the active manifest view (own + parent + overridden files) applies.
-        // The same connection serves the chunk lookup below so both stages
-        // observe one consistent snapshot.
+        // Only owned filter data leaves this scope: the SQLite guard is not
+        // `Send`, so it must not be held across the search await below.
         let sqlite_ref = self
             .sqlite
             .as_ref()
             .ok_or(KeywordSearchError::SqliteNotConfigured)?;
-        let conn = sqlite_ref
-            .read_connection()
-            .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
-        let query_filter = resolve_epoch_view(&conn, request.project_id, request.epoch)
-            .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
+        let query_filter = {
+            let conn = sqlite_ref
+                .read_connection()
+                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
+            resolve_epoch_view(&conn, request.project_id, request.epoch)
+                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?
+        };
 
-        let options = Bm25SearchOptions {
+        let options = FulltextSearchOptions {
             limit: request.top_n,
             offset: request.offset,
             field_weights: HashMap::new(),
@@ -152,8 +149,12 @@ impl KeywordSearchTool {
             term_operator: request.term_operator,
         };
 
-        let results =
-            Bm25Retrieval::new().search(&manager_guard, schema, &request.query, &options)?;
+        // Step 2: Run the keyword recall through the fulltext contract.
+        let results = self
+            .fulltext
+            .search(&request.query, &options)
+            .await
+            .map_err(KeywordSearchError::from)?;
 
         tracing::trace!(
             "Keyword search '{}' returned {} BM25 results",
@@ -170,9 +171,13 @@ impl KeywordSearchTool {
 
         // Step 4: Look up chunk metadata from SQLite via the same two-stage
         // epoch-view resolution as the search pipeline; snippets are
-        // lazy-loaded from the source file via the project root.
+        // lazy-loaded from the source file via the project root. The
+        // connection is acquired fresh here so no guard crosses an await.
         let (chunk_records, project_root) = {
-            let project_root = cce_storage_relation_sqlite::source_reader::resolve_project_root(
+            let conn = sqlite_ref
+                .read_connection()
+                .map_err(|e| KeywordSearchError::Sqlite(e.to_string()))?;
+            let project_root = cce_storage_metadb_sqlite::source_reader::resolve_project_root(
                 &conn,
                 request.project_id,
             );

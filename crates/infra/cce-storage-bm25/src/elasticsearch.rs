@@ -438,12 +438,18 @@ mod tests {
     }
 
     #[test]
-    fn config_from_remote_requires_url() {
+    fn config_from_remote_requires_url_and_index_name() {
         let remote = FulltextRemoteConfig::default();
         let bm25 = Bm25Config::default();
         assert!(ElasticsearchConfig::from_remote(&remote, &bm25).is_err());
         let remote = FulltextRemoteConfig {
             url: Some("http://localhost:9200/".to_string()),
+            ..FulltextRemoteConfig::default()
+        };
+        assert!(ElasticsearchConfig::from_remote(&remote, &bm25).is_err());
+        let remote = FulltextRemoteConfig {
+            url: Some("http://localhost:9200/".to_string()),
+            index_name: Some("code_index".to_string()),
             ..FulltextRemoteConfig::default()
         };
         let config = ElasticsearchConfig::from_remote(&remote, &bm25).expect("url suffices");

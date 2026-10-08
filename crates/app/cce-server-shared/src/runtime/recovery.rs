@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use cce_orchestrator::IndexOrchestrator;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::SqliteClient;
 use cce_types::StorageError;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -822,7 +822,7 @@ impl StartupRecoveryCoordinator {
             }
 
             self.manager.sqlite().with_transaction(|tx| {
-                cce_storage_relation_sqlite::FileRepository::delete_by_path(
+                cce_storage_metadb_sqlite::FileRepository::delete_by_path(
                     tx,
                     &classification.path,
                     project_id,
@@ -842,14 +842,14 @@ impl StartupRecoveryCoordinator {
         let conn = self.manager.sqlite().write_connection()?;
 
         // Delete all checkpoint files for this operation
-        let files_deleted = cce_storage_relation_sqlite::repo::CheckpointRepository::delete_checkpoint_files_by_operation_id(
+        let files_deleted = cce_storage_metadb_sqlite::repo::CheckpointRepository::delete_checkpoint_files_by_operation_id(
             &conn,
             project_id,
             operation_id,
         )?;
 
         // Delete all checkpoint batches for this operation
-        let batches_deleted = cce_storage_relation_sqlite::repo::CheckpointRepository::delete_checkpoint_batches_by_operation_id(
+        let batches_deleted = cce_storage_metadb_sqlite::repo::CheckpointRepository::delete_checkpoint_batches_by_operation_id(
             &conn,
             project_id,
             operation_id,
@@ -857,7 +857,7 @@ impl StartupRecoveryCoordinator {
 
         // Delete all work unit checkpoints for this operation
         let work_units_deleted =
-            cce_storage_relation_sqlite::repo::CheckpointRepository::delete_work_units_by_operation_id(
+            cce_storage_metadb_sqlite::repo::CheckpointRepository::delete_work_units_by_operation_id(
                 &conn,
                 project_id,
                 operation_id,

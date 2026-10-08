@@ -24,9 +24,8 @@ use cce_orchestrator::index::{FulltextStore, RelationStore, VectorStore};
 use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_orchestrator::query::searcher::Searcher;
 use cce_plugin::PluginRegistry;
-use cce_storage_bm25::Bm25Client;
-use cce_storage_relation_sqlite::SqliteClient;
-use cce_storage_relation_sqlite::project_registry::ProjectRegistry;
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
 use cce_storage_vector_qdrant::QdrantProcessHandle;
 
 /// Error type for engine operations
@@ -62,7 +61,7 @@ pub enum EngineError {
 #[derive(Clone)]
 pub struct CodeContextEngine {
     vector: VectorStore,
-    bm25: Arc<Mutex<Bm25Client>>,
+    fulltext: FulltextStore,
     embedder: Arc<OpenAICompatibleProvider>,
 
     /// SQLite metadata store for persistent storage
@@ -183,21 +182,17 @@ impl CodeContextEngine {
         let vector = VectorStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
 
-        let fulltext_store = FulltextStore::from_database_config(&config.database)
+        let mut fulltext_store = FulltextStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
-        let bm25 = fulltext_store.into_local().ok_or_else(|| {
-            EngineError::Config(
-                "remote fulltext branch is not wired into the engine write path yet".to_string(),
-            )
-        })?;
 
-        // Initialize BM25 index (Tantivy) if enabled
+        // Initialize the fulltext index if the local branch is active.
+        // The client synchronizes internally, so no lock is taken here;
+        // the one-time connect runs on the single owner before sharing.
+        if let FulltextStore::Local(shared) = &mut fulltext_store
+            && let Some(client) = Arc::get_mut(shared)
+            && let Err(e) = client.connect().await
         {
-            let mut bm25_client = bm25.lock().await;
-            if let Err(e) = bm25_client.connect().await {
-                tracing::warn!(error = %e, "Failed to connect BM25 index, BM25 will be unavailable");
-            }
-            drop(bm25_client);
+            tracing::warn!(error = %e, "Failed to connect BM25 index, BM25 will be unavailable");
         }
 
         let embedder_config = config.embedder.clone();
@@ -269,7 +264,7 @@ impl CodeContextEngine {
 
         Ok(Self {
             vector,
-            bm25,
+            fulltext: fulltext_store,
             embedder,
             metadata_store,
             orchestrator_cache: ProjectCache::new(),

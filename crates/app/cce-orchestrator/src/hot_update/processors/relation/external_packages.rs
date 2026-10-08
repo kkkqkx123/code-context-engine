@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use cce_relation::BuildConfigParser;
+use cce_codegraph::BuildConfigParser;
 use cce_types::Language;
 
 /// Lightweight data structure for external packages

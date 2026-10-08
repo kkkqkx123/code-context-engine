@@ -23,7 +23,6 @@
 //! - `CCE_DB_RELATION_BACKEND` - Relation backend key (local|remote)
 //! - `CCE_DB_FULLTEXT_BACKEND` - Fulltext backend key (local|remote)
 //! - `CCE_DB_RELATION_URL` - PostgreSQL connection URL
-//! - `CCE_DB_RELATION_API_KEY` - Legacy alias for the relation username
 //! - `CCE_DB_RELATION_USERNAME` - PostgreSQL user name
 //! - `CCE_DB_RELATION_PASSWORD` - PostgreSQL password
 //! - `CCE_DB_RELATION_POOL_SIZE` - PostgreSQL pool size
@@ -218,9 +217,6 @@ fn apply_database_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     }
     if let Ok(val) = std::env::var("CCE_DB_RELATION_URL") {
         config.database.relation_remote.url = Some(val);
-    }
-    if let Ok(val) = std::env::var("CCE_DB_RELATION_API_KEY") {
-        config.database.relation_remote.api_key = Some(val);
     }
     if let Ok(val) = std::env::var("CCE_DB_RELATION_USERNAME") {
         config.database.relation_remote.username = Some(val);
@@ -550,9 +546,6 @@ pub fn resolve_config_placeholders(config: &mut AppConfig) {
     let relation_remote = &mut config.database.relation_remote;
     if let Some(ref mut url) = relation_remote.url {
         *url = resolve_env_placeholders(url);
-    }
-    if let Some(ref mut key) = relation_remote.api_key {
-        *key = resolve_env_placeholders(key);
     }
     if let Some(ref mut password) = relation_remote.password {
         *password = resolve_env_placeholders(password);

@@ -55,7 +55,7 @@
 //! use code_context_engine::orchestrator::query::{QueryCoordinator, Searcher};
 //!
 //! // Create a Searcher via its builder
-//! let searcher = Searcher::builder(vector, embedder, bm25, scope)
+//! let searcher = Searcher::builder(vector, embedder, fulltext, scope)
 //!     .with_sqlite(sqlite)
 //!     .with_rerank(rerank_handler)
 //!     .build();

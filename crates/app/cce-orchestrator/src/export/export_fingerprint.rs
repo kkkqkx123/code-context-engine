@@ -15,7 +15,7 @@ use crate::hot_update::ParseResultWithChanges;
 /// Current published relation epoch used for enhancement, or 0 when
 /// relation enhancement is disabled or no snapshot is published.
 pub fn current_relation_epoch(
-    sqlite: &Option<std::sync::Arc<cce_storage_relation_sqlite::SqliteClient>>,
+    sqlite: &Option<std::sync::Arc<cce_storage_metadb_sqlite::SqliteClient>>,
     project_id: i64,
 ) -> i64 {
     match sqlite.as_ref() {
@@ -72,7 +72,7 @@ pub async fn should_skip_export(
     export_config: &ExportConfig,
     ast_to_nl_config: &cce_config::AstToNlConfig,
     grouper_fingerprint: &str,
-    sqlite: &Option<std::sync::Arc<cce_storage_relation_sqlite::SqliteClient>>,
+    sqlite: &Option<std::sync::Arc<cce_storage_metadb_sqlite::SqliteClient>>,
     project_id: i64,
 ) -> bool {
     if !parse_result.already_exported {

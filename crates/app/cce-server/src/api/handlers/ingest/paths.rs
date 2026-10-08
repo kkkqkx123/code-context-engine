@@ -7,7 +7,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use cce_api::models::{ErrorResponse, error_codes};
-use cce_storage_relation_sqlite::ProjectRepository;
+use cce_storage_metadb_sqlite::ProjectRepository;
 
 use crate::api::state::AppState;
 

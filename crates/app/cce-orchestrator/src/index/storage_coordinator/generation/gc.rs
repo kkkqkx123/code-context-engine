@@ -4,10 +4,11 @@
 //! are cleaned before the durable manifest rows are removed so a backend
 //! failure leaves the plan available for a later retry.
 
+use cce_storage_common::FulltextStorage;
 use std::collections::HashSet;
 
 use cce_storage_common::VectorStorage;
-use cce_storage_relation_sqlite::ProjectIndexManifestRepository;
+use cce_storage_metadb_sqlite::ProjectIndexManifestRepository;
 
 use crate::error::OrchestratorError;
 
@@ -60,14 +61,16 @@ impl StorageCoordinator {
             }
         }
 
-        if let Some(bm25) = &self.bm25 {
-            let mut client = bm25.lock().await;
-            let epochs = client.epochs_by_project(self.project_id).await?;
+        if let Some(bm25) = &self.fulltext {
+            let epochs = bm25.epochs_by_project(self.project_id).await?;
             for epoch in epochs {
                 if !plan.protected_data_epochs.contains(&epoch) {
-                    client
-                        .delete_by_project_epoch("default", self.project_id, epoch)
-                        .await?;
+                    bm25.delete_by_project_epoch(
+                        &bm25.configured_index_name(),
+                        self.project_id,
+                        epoch,
+                    )
+                    .await?;
                 }
             }
         }

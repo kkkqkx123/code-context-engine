@@ -30,7 +30,7 @@ use crate::CheckpointManager;
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::IndexQualityMetrics;
 use cce_storage_bm25::Bm25Client;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_vector_qdrant::QdrantClient;
 use cce_types::StorageError;
 
@@ -52,7 +52,7 @@ pub use mapping::build_bm25_documents;
 /// Storage coordinator managing multiple storage backends
 pub struct StorageCoordinator {
     vector: Option<VectorStore>,
-    bm25: Option<Arc<tokio::sync::Mutex<Bm25Client>>>,
+    fulltext: Option<FulltextStore>,
     embedder: Option<Arc<OpenAICompatibleProvider>>,
     metadata_store: Option<Arc<SqliteClient>>,
     project_group_id: String,
@@ -97,7 +97,7 @@ impl StorageCoordinator {
         }
         Ok(Self {
             vector: None,
-            bm25: None,
+            fulltext: None,
             embedder: None,
             metadata_store: None,
             project_group_id: String::new(),
@@ -139,33 +139,25 @@ impl StorageCoordinator {
         self
     }
 
-    /// Set BM25 client
-    pub fn with_bm25(mut self, client: Arc<tokio::sync::Mutex<Bm25Client>>) -> Self {
-        self.bm25 = Some(client);
+    /// Set BM25 client (wraps into the fulltext backend enum).
+    pub fn with_bm25(mut self, client: Arc<Bm25Client>) -> Self {
+        self.fulltext = Some(FulltextStore::local(client));
         self
     }
 
     /// Set fulltext backend via enum dispatch.
     ///
-    /// Only the local branch is wired into the write path. A remote branch
-    /// fails fast so a misconfiguration surfaces instead of degrading to
-    /// index-without-fulltext.
-    pub fn with_fulltext_store(mut self, store: FulltextStore) -> Result<Self, StorageError> {
-        match store {
-            FulltextStore::Local(client) => {
-                self.bm25 = Some(client);
-                Ok(self)
-            }
-            FulltextStore::Remote(_) => Err(StorageError::validation(
-                "remote fulltext branch is not wired into the write path; pass the local branch",
-            )),
-        }
+    /// Calls go through the fulltext contract, so both branches share one
+    /// write path and branch selection stays inside the enum.
+    pub fn with_fulltext_store(mut self, store: FulltextStore) -> Self {
+        self.fulltext = Some(store);
+        self
     }
 
     /// Fulltext backend name for logging.
     pub fn fulltext_backend_name(&self) -> &'static str {
-        match &self.bm25 {
-            Some(_) => "local",
+        match &self.fulltext {
+            Some(store) => store.backend_name(),
             None => "none",
         }
     }
@@ -189,8 +181,9 @@ impl StorageCoordinator {
 
     /// Set relation backend via enum dispatch.
     ///
-    /// Only the local branch is wired into the write path. A remote branch
-    /// fails fast so a misconfiguration surfaces instead of degrading to
+    /// Only the local branch is accepted here: the metadata write path
+    /// uses local-only capabilities (explicit transactions, repositories),
+    /// so a remote branch fails fast instead of degrading to
     /// index-without-metadata.
     pub fn with_relation_store(mut self, store: RelationStore) -> Result<Self, StorageError> {
         match store {
@@ -273,7 +266,7 @@ impl StorageCoordinator {
         let Some(client) = self.metadata_store.clone() else {
             return Ok(None);
         };
-        cce_storage_relation_sqlite::cache::FileHashCache::new(client, self.project_id)
+        cce_storage_metadb_sqlite::cache::FileHashCache::new(client, self.project_id)
             .active_epoch()
             .map_err(OrchestratorError::Storage)
     }
@@ -296,7 +289,7 @@ impl StorageCoordinator {
 
     /// Check if storage is configured
     pub fn is_configured(&self) -> bool {
-        self.vector.is_some() || self.bm25.is_some()
+        self.vector.is_some() || self.fulltext.is_some()
     }
 
     /// Check if any vector backend (local or Qdrant) is configured.
@@ -355,7 +348,7 @@ impl StorageCoordinator {
 
     /// Check if BM25 full-text search is configured
     pub fn has_bm25(&self) -> bool {
-        self.bm25.is_some()
+        self.fulltext.is_some()
     }
 
     /// Get the configured embedder, if any.
@@ -385,11 +378,9 @@ impl StorageCoordinator {
             .map(|store| RelationStore::local(store.clone()))
     }
 
-    /// Get the fulltext backend enum wrapping the configured client.
+    /// Get the configured fulltext backend, if any.
     pub fn fulltext_store(&self) -> Option<FulltextStore> {
-        self.bm25
-            .as_ref()
-            .map(|client| FulltextStore::local(client.clone()))
+        self.fulltext.clone()
     }
 
     /// Get the project ID this coordinator writes for.

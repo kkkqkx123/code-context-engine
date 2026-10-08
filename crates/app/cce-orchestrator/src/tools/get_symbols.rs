@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cce_relation::index::LayeredSnapshotIndex;
-use cce_relation::index::snapshot_query::SnapshotFileQueryOps;
+use cce_codegraph::index::LayeredSnapshotIndex;
+use cce_codegraph::index::snapshot_query::SnapshotFileQueryOps;
 use cce_types::{Entity, EntityId};
 
 use crate::tools::symbol_lookup_types::{

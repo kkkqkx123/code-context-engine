@@ -1,12 +1,13 @@
 //! BM25 full-text write path.
 
+use cce_storage_common::FulltextStorage;
 use std::sync::Arc;
 
 use crate::CheckpointManager;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_bm25::Bm25Document;
-use cce_storage_relation_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
-use cce_storage_relation_sqlite::{ChunkRecord, EntityDetailMapping};
+use cce_storage_metadb_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
+use cce_storage_metadb_sqlite::{ChunkRecord, EntityDetailMapping};
 
 use crate::error::OrchestratorError;
 
@@ -32,7 +33,7 @@ impl StorageCoordinator {
             return Ok(());
         }
 
-        let bm25 = match &self.bm25 {
+        let bm25 = match &self.fulltext {
             Some(b) => b,
             None => {
                 return Err(OrchestratorError::index(
@@ -84,9 +85,8 @@ impl StorageCoordinator {
             let entity_mappings = self.build_bm25_entity_mappings(batch, &documents)?;
 
             if !documents.is_empty() {
-                let mut client = bm25.lock().await;
-                client.batch_index("default", &documents).await?;
-                drop(client);
+                bm25.batch_index(&bm25.configured_index_name(), &documents)
+                    .await?;
             }
 
             if !entity_mappings.is_empty() {

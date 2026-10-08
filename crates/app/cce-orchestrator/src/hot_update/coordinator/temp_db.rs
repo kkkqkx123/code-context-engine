@@ -1,5 +1,5 @@
 use crate::hot_update::error::{HotUpdateError, Result};
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::SqliteClient;
 use std::sync::Arc;
 
 /// Create a temporary database connection for the change detector.

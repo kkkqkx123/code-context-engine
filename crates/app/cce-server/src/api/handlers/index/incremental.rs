@@ -8,7 +8,7 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use std::path::PathBuf;
 
 use cce_api::models::{ErrorResponse, IncrementalIndexRequest, IncrementalIndexResponse};
-use cce_relation::index::entity_index::EntityIndexOps;
+use cce_codegraph::index::entity_index::EntityIndexOps;
 use cce_storage_common::VectorStorage;
 
 /// Handle an explicit incremental index request.

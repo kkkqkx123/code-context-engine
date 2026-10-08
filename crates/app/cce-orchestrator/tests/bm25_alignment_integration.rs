@@ -18,10 +18,10 @@ use cce_orchestrator::query::types::{QueryOptions, SearchConfig, SearchSources};
 use cce_orchestrator::{
     CheckpointManager, IndexOptions, IndexOrchestrator, QueryCoordinator, SearchResult,
 };
-use cce_relation::{CallChainQuery, RelationIndex};
+use cce_codegraph::{CallChainQuery, RelationIndex};
 use cce_storage_bm25::{Bm25Client, Bm25Config};
-use cce_storage_relation_sqlite::ChunkRepository;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::ChunkRepository;
+use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_vector_qdrant::generate_group_id;
 use cce_storage_vector_qdrant::{QdrantClient, QdrantConfig};
 
@@ -111,7 +111,7 @@ impl AlignmentHarness {
             .with_index_path(bm25_dir.path().to_string_lossy().as_ref());
         let mut bm25 = Bm25Client::new(bm25_config);
         rt.block_on(bm25.connect()).expect("bm25 connect");
-        let bm25 = Arc::new(tokio::sync::Mutex::new(bm25));
+        let bm25 = Arc::new(bm25);
 
         let mut orchestrator = IndexOrchestrator::new(1).expect("orchestrator");
         orchestrator = orchestrator
@@ -144,7 +144,7 @@ impl AlignmentHarness {
         let coordinator = QueryCoordinator::builder(
             cce_orchestrator::index::VectorStore::Qdrant(qdrant),
             embedder,
-            bm25,
+            cce_orchestrator::index::FulltextStore::local(bm25),
             call_chain,
             scope,
         )

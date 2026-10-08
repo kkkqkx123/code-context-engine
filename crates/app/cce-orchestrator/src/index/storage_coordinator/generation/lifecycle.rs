@@ -7,7 +7,7 @@
 
 use std::sync::atomic::Ordering;
 
-use cce_storage_relation_sqlite::ProjectIndexManifestRepository;
+use cce_storage_metadb_sqlite::ProjectIndexManifestRepository;
 
 use crate::error::OrchestratorError;
 
@@ -242,7 +242,7 @@ impl StorageCoordinator {
 mod tests {
     use std::sync::Arc;
 
-    use cce_storage_relation_sqlite::{NewProjectRecord, ProjectRepository, SqliteClient};
+    use cce_storage_metadb_sqlite::{NewProjectRecord, ProjectRepository, SqliteClient};
 
     use super::super::StorageCoordinator;
 

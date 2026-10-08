@@ -4,7 +4,7 @@
 
 use axum::extract::{Path, State};
 
-use cce_relation::index::snapshot_query::SnapshotEntityQueryOps;
+use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
 
 use cce_api::models::{ErrorResponse, FunctionDetailResponse, FunctionInfo, error_codes};
 
@@ -108,7 +108,7 @@ pub async fn handle_function_detail(
                 && let Ok(project) = client.for_project(project_id)
                 && let Ok(numeric_id) = id.parse::<i64>()
             {
-                use cce_storage_relation_sqlite::EntityRepository;
+                use cce_storage_metadb_sqlite::EntityRepository;
                 match project.with_transaction(|tx| EntityRepository::get_by_id(tx, numeric_id)) {
                     Ok(Some(record)) => FunctionInfo {
                         id: id.clone(),

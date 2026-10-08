@@ -10,12 +10,12 @@ use cce_orchestrator::tools::keyword_search::{
     KeywordSearchError, KeywordSearchRequest, KeywordSearchTool,
 };
 use cce_storage_bm25::{Bm25Client, Bm25Config, Bm25Document};
-use cce_storage_relation_sqlite::{
+use cce_storage_metadb_sqlite::{
     ChunkRecord, ChunkRepository, NewProjectRecord, ProjectRepository, SqliteClient,
 };
 
 struct TestEnv {
-    bm25: Arc<tokio::sync::Mutex<Bm25Client>>,
+    bm25: Arc<Bm25Client>,
     sqlite: Arc<SqliteClient>,
     project_id: i64,
     _tmpdir: tempfile::TempDir,
@@ -52,7 +52,7 @@ async fn setup() -> TestEnv {
         .expect("Failed to create project");
 
     TestEnv {
-        bm25: Arc::new(tokio::sync::Mutex::new(client)),
+        bm25: Arc::new(client),
         sqlite: Arc::new(sqlite),
         project_id,
         _tmpdir: tmpdir,
@@ -85,7 +85,10 @@ fn doc(document_id: &str, fields: &[(&str, &str)]) -> Bm25Document {
 }
 
 fn tool(env: &TestEnv) -> KeywordSearchTool {
-    KeywordSearchTool::new(env.bm25.clone()).with_sqlite(env.sqlite.clone())
+    KeywordSearchTool::new(cce_orchestrator::index::FulltextStore::local(
+        env.bm25.clone(),
+    ))
+    .with_sqlite(env.sqlite.clone())
 }
 
 fn request(query: &str, top_n: usize, project_id: i64, epoch: Option<i64>) -> KeywordSearchRequest {
@@ -147,8 +150,6 @@ async fn test_keyword_search_full_flow_with_snippets() {
         ),
     ];
     env.bm25
-        .lock()
-        .await
         .batch_index("test_index", &bm25_docs)
         .await
         .expect("Failed to index docs");
@@ -227,8 +228,6 @@ async fn test_keyword_search_project_scoping() {
         ),
     ];
     env.bm25
-        .lock()
-        .await
         .batch_index("test_index", &bm25_docs)
         .await
         .expect("Failed to index docs");
@@ -299,8 +298,6 @@ async fn test_keyword_search_epoch_filtering() {
         ),
     ];
     env.bm25
-        .lock()
-        .await
         .batch_index("test_index", &bm25_docs)
         .await
         .expect("Failed to index docs");
@@ -338,8 +335,6 @@ async fn test_keyword_search_keeps_title_only_hits() {
         ],
     )];
     env.bm25
-        .lock()
-        .await
         .batch_index("test_index", &bm25_docs)
         .await
         .expect("Failed to index docs");
@@ -408,8 +403,6 @@ async fn test_keyword_search_sorted_by_score() {
         ),
     ];
     env.bm25
-        .lock()
-        .await
         .batch_index("test_index", &bm25_docs)
         .await
         .expect("Failed to index docs");
@@ -443,9 +436,11 @@ async fn test_keyword_search_validation_and_errors() {
         .await;
     assert!(matches!(zero_top_n, Err(KeywordSearchError::Bm25(_))));
 
-    let no_sqlite = KeywordSearchTool::new(env.bm25.clone())
-        .search(request("query", 10, env.project_id, None))
-        .await;
+    let no_sqlite = KeywordSearchTool::new(cce_orchestrator::index::FulltextStore::local(
+        env.bm25.clone(),
+    ))
+    .search(request("query", 10, env.project_id, None))
+    .await;
     assert!(matches!(
         no_sqlite,
         Err(KeywordSearchError::SqliteNotConfigured)

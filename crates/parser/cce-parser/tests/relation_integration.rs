@@ -14,7 +14,7 @@ use cce_types::entity::{Entity, EntityId, EntityKind, ParsedFile, RawRelationDat
 use cce_types::language::Language;
 use cce_types::relation::{CallContext, ExternalCallType, RelationType, ResolvedRelation};
 
-use cce_relation::{
+use cce_codegraph::{
     FileDependencyGraph, IndexError, RelationQueryError, UntypedDependency,
     index::{
         EntityIndexOps, ExportIndexOps, FileIndexOps, FileLevelOps, ImportIndexOps,
@@ -873,7 +873,7 @@ fn test_local_call_resolver_skips_cross_file() {
 
 #[test]
 fn test_local_call_resolver_with_signature_matching_config() {
-    let config = cce_relation::index::LocalCallResolverConfig {
+    let config = cce_codegraph::index::LocalCallResolverConfig {
         enable_signature_matching: true,
         skip_cross_file_calls: true,
         log_unresolved_calls: true,
@@ -1004,7 +1004,7 @@ fn test_dependency_graph_cycle_detection() {
         graph.topological_sort(&["a.rs".to_string(), "b.rs".to_string(), "c.rs".to_string()]);
     assert!(sorted.is_err());
     match sorted {
-        Err(cce_relation::DependencyGraphError::CycleDetected(msg)) => {
+        Err(cce_codegraph::DependencyGraphError::CycleDetected(msg)) => {
             assert!(
                 msg.contains("a.rs") || msg.contains("cycle"),
                 "Cycle should be detected"
@@ -1364,7 +1364,7 @@ fn test_traversal_config_validation() {
 
 #[test]
 fn test_dependency_index_prefix_matching() {
-    use cce_relation::index::DependencyIndex;
+    use cce_codegraph::index::DependencyIndex;
 
     let mut deps = HashMap::new();
     deps.insert(

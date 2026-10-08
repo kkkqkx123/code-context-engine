@@ -35,9 +35,11 @@ pub struct ElasticsearchConfig {
 impl ElasticsearchConfig {
     /// Build the client configuration from the database configuration.
     ///
-    /// The index name falls back to the local `bm25.index_name`; the BM25
-    /// algorithm parameters travel into the index similarity so remote
-    /// scoring uses the same saturation and normalization as local scoring.
+    /// Both the URL and the index name are required explicitly: the index
+    /// name never falls back to the local `bm25.index_name`, so local and
+    /// remote indexes cannot silently share a name. The BM25 algorithm
+    /// parameters travel into the index similarity so remote scoring uses
+    /// the same saturation and normalization as local scoring.
     pub fn from_remote(
         remote: &FulltextRemoteConfig,
         bm25: &Bm25Config,
@@ -49,6 +51,11 @@ impl ElasticsearchConfig {
             .ok_or_else(|| {
                 Bm25Error::config("database.fulltext_remote.url must be set for the remote branch")
             })?;
+        let index_name = remote.explicit_index_name().ok_or_else(|| {
+            Bm25Error::config(
+                "database.fulltext_remote.index_name must be set for the remote branch",
+            )
+        })?;
         remote
             .validate_structured()
             .map_err(|e| Bm25Error::config(format!("invalid fulltext remote config: {e}")))?;
@@ -57,7 +64,7 @@ impl ElasticsearchConfig {
             api_key: remote.api_key.clone(),
             username: remote.username.clone(),
             password: remote.password.clone(),
-            index_name: remote.effective_index_name(&bm25.index_name).to_string(),
+            index_name: index_name.to_string(),
             bulk_size: remote.bulk_size,
             request_timeout: Duration::from_millis(remote.request_timeout_ms),
             refresh_interval: remote.refresh_interval.clone(),

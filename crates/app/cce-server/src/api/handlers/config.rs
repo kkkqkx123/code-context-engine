@@ -142,7 +142,7 @@ pub async fn handle_config_reload(
                 });
             let processors_result = factory.create_all_processors(
                 Some(state.engine.vector_clone()),
-                Some(state.engine.bm25_clone()),
+                Some(state.engine.fulltext_clone()),
                 state
                     .engine
                     .metadata_store_clone()

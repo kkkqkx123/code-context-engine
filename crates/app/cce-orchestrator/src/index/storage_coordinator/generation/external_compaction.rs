@@ -5,6 +5,7 @@
 //! reconstructs document text from SQLite, which remains the single source of
 //! truth.
 
+use cce_storage_common::FulltextStorage;
 use std::collections::HashMap;
 
 use cce_parser::summary::FileSummary;
@@ -82,13 +83,11 @@ impl StorageCoordinator {
                 vector.upsert_points(&cloned).await?;
             }
         }
-        if let Some(bm25) = &self.bm25 {
-            let mut client = bm25.lock().await;
-            let documents = client
+        if let Some(bm25) = &self.fulltext {
+            let documents = bm25
                 .snapshot_documents(self.project_id, source_epoch)
                 .await?;
-            if documents.is_empty() && client.document_count_by_project(self.project_id).await? > 0
-            {
+            if documents.is_empty() && bm25.document_count_by_project(self.project_id).await? > 0 {
                 return Err(OrchestratorError::index(
                     "generation_compaction",
                     "BM25 inherited generation cannot be materialized; a full BM25 rebuild is required",
@@ -154,7 +153,8 @@ impl StorageCoordinator {
                 })
                 .collect();
             if !cloned.is_empty() {
-                client.batch_index("default", &cloned).await?;
+                bm25.batch_index(&bm25.configured_index_name(), &cloned)
+                    .await?;
             }
         }
         Ok(())
@@ -256,7 +256,7 @@ impl StorageCoordinator {
 mod tests {
     use std::sync::Arc;
 
-    use cce_storage_relation_sqlite::{
+    use cce_storage_metadb_sqlite::{
         ChunkRecord, ChunkRepository, FileRepository, FileSummaryRepository, NewProjectRecord,
         ProjectRepository, SqliteClient,
     };
@@ -281,7 +281,7 @@ mod tests {
             .with_transaction(|tx| {
                 FileRepository::insert(
                     tx,
-                    &cce_storage_relation_sqlite::FileRecord {
+                    &cce_storage_metadb_sqlite::FileRecord {
                         id: 0,
                         path: "src/lib.rs".to_string(),
                         language: "rust".to_string(),

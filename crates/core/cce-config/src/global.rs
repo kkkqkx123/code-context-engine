@@ -113,10 +113,11 @@ impl DatabaseConfig {
 
     /// Official preset combinations.
     ///
-    /// Supported presets: local-first (`local/local/local`), remote-vector
-    /// (`qdrant/local/local`), and the remote preset
-    /// (`qdrant/remote/remote`). Any other combination is a non-preset mix
-    /// and requires `allow_nonstandard_backends`. Remote branches validate
+    /// Supported presets: local-first (`local/local/local`) and
+    /// remote-vector (`qdrant/local/local`). Remote relation/fulltext
+    /// branches are forward scaffolding, not supported presets: selecting
+    /// them requires `allow_nonstandard_backends`, and assembly rejects them
+    /// at startup until the remote paths are wired. Remote branches validate
     /// their own parameters when selected.
     pub fn validate_backend_combination(&self) -> ValidationResult {
         use crate::modules::VectorBackend as VB;
@@ -146,6 +147,12 @@ impl DatabaseConfig {
                 "database.fulltext_remote.url",
             ));
         }
+        if !self.fulltext_backend.is_local() && self.fulltext_remote.explicit_index_name().is_none()
+        {
+            return Err(ConfigValidationError::missing_field(
+                "database.fulltext_remote.index_name",
+            ));
+        }
         let official = matches!(
             (
                 &self.vector_backend,
@@ -154,7 +161,6 @@ impl DatabaseConfig {
             ),
             (VB::Local, RelationBackend::Local, FulltextBackend::Local)
                 | (VB::Qdrant, RelationBackend::Local, FulltextBackend::Local)
-                | (VB::Qdrant, RelationBackend::Remote, FulltextBackend::Remote)
         );
         if official || self.allow_nonstandard_backends {
             Ok(())

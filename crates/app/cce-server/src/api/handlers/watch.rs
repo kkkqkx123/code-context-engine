@@ -47,7 +47,7 @@ pub async fn handle_start_watch(
     }
     if let Some(store) = state.engine.metadata_store()
         && let Ok(mode) = store.as_ref().with_transaction(|tx| {
-            cce_storage_relation_sqlite::ProjectRepository::meta_get_string_optional(
+            cce_storage_metadb_sqlite::ProjectRepository::meta_get_string_optional(
                 tx,
                 project_id,
                 cce_api::models::SUPPLY_MODE_KEY,
@@ -307,7 +307,7 @@ pub async fn handle_watch_status(
         .and_then(|sqlite| {
             sqlite
                 .with_transaction(|tx| {
-                    cce_storage_relation_sqlite::repo::ProjectIndexManifestRepository::get_active(
+                    cce_storage_metadb_sqlite::repo::ProjectIndexManifestRepository::get_active(
                         tx, project_id,
                     )
                 })

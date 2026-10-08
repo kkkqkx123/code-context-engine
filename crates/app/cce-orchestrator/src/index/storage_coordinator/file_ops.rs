@@ -4,8 +4,9 @@
 //! intact lives here.
 
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
+use cce_storage_common::FulltextStorage;
 use cce_storage_common::VectorStorage;
-use cce_storage_relation_sqlite::{
+use cce_storage_metadb_sqlite::{
     ChunkRepository, EntityDetailMappingRepository, FileSummaryRepository,
 };
 use cce_types::path::normalize_project_path;
@@ -35,10 +36,13 @@ impl StorageCoordinator {
         }
 
         // Remove from BM25 (scoped to project)
-        if let Some(ref bm25) = self.bm25 {
-            let mut client = bm25.lock().await;
-            if let Err(error) = client
-                .delete_by_file_path_scoped("default", &file_id, self.project_id)
+        if let Some(ref bm25) = self.fulltext {
+            if let Err(error) = bm25
+                .delete_by_file_path_scoped(
+                    &bm25.configured_index_name(),
+                    &file_id,
+                    self.project_id,
+                )
                 .await
             {
                 tracing::warn!(path = %file_id, error = %error, "Failed to remove file from BM25");
@@ -117,11 +121,13 @@ impl StorageCoordinator {
                 .await?;
         }
 
-        if let Some(ref bm25) = self.bm25 {
-            let mut client = bm25.lock().await;
-            client
-                .delete_by_file_path_scoped("default", &file_path_str, self.project_id)
-                .await?;
+        if let Some(ref bm25) = self.fulltext {
+            bm25.delete_by_file_path_scoped(
+                &bm25.configured_index_name(),
+                &file_path_str,
+                self.project_id,
+            )
+            .await?;
         }
 
         // Step 3: Remove old entity detail mappings (scope to current epoch)
@@ -305,11 +311,13 @@ impl StorageCoordinator {
         }
 
         // Remove from BM25 (scoped to project)
-        if let Some(ref bm25) = self.bm25 {
-            let mut client = bm25.lock().await;
-            client
-                .delete_by_file_path_scoped("default", &file_id, self.project_id)
-                .await?;
+        if let Some(ref bm25) = self.fulltext {
+            bm25.delete_by_file_path_scoped(
+                &bm25.configured_index_name(),
+                &file_id,
+                self.project_id,
+            )
+            .await?;
         }
 
         // Clear BM25 references in file summary mappings (all epochs)

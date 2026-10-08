@@ -7,8 +7,8 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use cce_relation::index::core::RelationIndex;
-use cce_relation::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
+use cce_codegraph::index::core::RelationIndex;
+use cce_codegraph::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
 use tokio::sync::{Mutex, RwLock};
 
 /// Relation runtime state

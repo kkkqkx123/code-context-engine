@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use cce_relation::index::{EntityIndexOps, RelationIndex, RelationQueryOps};
+use cce_codegraph::index::{EntityIndexOps, RelationIndex, RelationQueryOps};
 use cce_types::{ExternalCallType, RelationType, Span};
 
 use super::aggregator::FileNlDocument;

@@ -238,7 +238,7 @@ impl McpServerHandler {
                 "metadata store is not configured; keyword search unavailable",
             )]));
         };
-        let tool = KeywordSearchTool::new(self.state.engine.bm25().clone()).with_sqlite(sqlite);
+        let tool = KeywordSearchTool::new(self.state.engine.fulltext_clone()).with_sqlite(sqlite);
         let request = cce_orchestrator::KeywordSearchRequest {
             query: args.query.clone(),
             top_n: args.top_n.unwrap_or(10),
@@ -405,7 +405,7 @@ impl McpServerHandler {
         };
         match store
             .as_ref()
-            .with_transaction(|tx| cce_storage_relation_sqlite::ProjectRepository::get_all(tx))
+            .with_transaction(|tx| cce_storage_metadb_sqlite::ProjectRepository::get_all(tx))
         {
             Ok(records) => {
                 let items: Vec<Value> = records
@@ -628,8 +628,12 @@ impl McpServerHandler {
                 })
             });
         let bm25_enabled = {
-            let client = self.state.engine.bm25().lock().await;
-            client.is_enabled()
+            self.state
+                .engine
+                .fulltext()
+                .diagnose_summary()
+                .await
+                .reachable
         };
         Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({

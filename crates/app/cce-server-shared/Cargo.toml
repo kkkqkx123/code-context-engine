@@ -28,9 +28,9 @@ cce-plugin = { path = "../../core/cce-plugin" }
 cce-llm = { path = "../../core/cce-llm" }
 cce-plugin-runtime = { path = "../cce-plugin-runtime" }
 cce-parser = { path = "../../parser/cce-parser" }
-cce-relation = { path = "../../parser/cce-relation" }
+cce-codegraph = { path = "../../parser/cce-codegraph" }
 cce-storage-common = { path = "../../infra/cce-storage-common" }
-cce-storage-relation-sqlite = { path = "../../infra/cce-storage-relation-sqlite" }
+cce-storage-metadb-sqlite = { path = "../../infra/cce-storage-metadb-sqlite" }
 cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
 cce-storage-vector-qdrant = { path = "../../infra/cce-storage-vector-qdrant" }
 cce-storage-vector-local = { path = "../../infra/cce-storage-vector-local" }

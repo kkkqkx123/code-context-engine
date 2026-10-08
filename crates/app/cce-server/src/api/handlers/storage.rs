@@ -20,10 +20,10 @@ use cce_api::models::{
     IndexStatsResponse, QdrantProcessInfo, QdrantProcessStatus, StorageComponentStatus,
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
-use cce_relation::index::entity_index::EntityIndexOps;
-use cce_relation::index::file_index::FileLevelOps;
-use cce_relation::index::relation_query::RelationQueryOps;
-use cce_storage_common::VectorStorage;
+use cce_codegraph::index::entity_index::EntityIndexOps;
+use cce_codegraph::index::file_index::FileLevelOps;
+use cce_codegraph::index::relation_query::RelationQueryOps;
+use cce_storage_common::{FulltextStorage, VectorStorage};
 
 // ============================================================================
 // Clear Index
@@ -60,7 +60,7 @@ pub async fn handle_clear_index(
     let maintenance = ProjectIndexMaintenanceService::new(
         state.engine.clone(),
         Some(state.engine.vector_clone()),
-        Some(state.engine.bm25_clone()),
+        Some(state.engine.fulltext_clone()),
         state.engine.metadata_store_clone(),
     );
 
@@ -151,9 +151,9 @@ pub async fn handle_delete_file(
 
     // Step 2: Remove from BM25
     let bm25_deleted = {
-        let mut client = state.engine.bm25().lock().await;
+        let client = state.engine.fulltext_clone();
         let result = client
-            .delete_by_file_path_scoped("default", &file_path, project_id)
+            .delete_by_file_path_scoped(&client.configured_index_name(), &file_path, project_id)
             .await
             .map(|_| ());
         match result {
@@ -222,7 +222,7 @@ pub async fn handle_delete_file(
 
         if let Some(file_id_num) = file_id_opt {
             match client.with_transaction(|tx| {
-                use cce_storage_relation_sqlite::EntityDetailMappingRepository;
+                use cce_storage_metadb_sqlite::EntityDetailMappingRepository;
                 EntityDetailMappingRepository::delete_by_file_id(tx, file_id_num)?;
                 Ok(())
             }) {
@@ -317,9 +317,9 @@ pub async fn handle_delete_entity(
     let mut bm25_deleted = 0;
     {
         if let Some(ref file_path) = entity_file_path {
-            let mut client = state.engine.bm25().lock().await;
+            let client = state.engine.fulltext_clone();
             let result = client
-                .delete_by_file_path_scoped("default", file_path, project_id)
+                .delete_by_file_path_scoped(&client.configured_index_name(), file_path, project_id)
                 .await
                 .map(|_| ());
             if result.is_ok() {
@@ -365,7 +365,7 @@ pub async fn handle_delete_entity(
         && let Ok(project) = client.for_project(project_id)
     {
         let _ = project.with_transaction(|tx| {
-            use cce_storage_relation_sqlite::EntityDetailMappingRepository;
+            use cce_storage_metadb_sqlite::EntityDetailMappingRepository;
             EntityDetailMappingRepository::delete_by_entity_id(tx, entity_id as i64, project_id)
         });
     }
@@ -441,9 +441,9 @@ pub async fn handle_batch_delete(
 
         // Delete from BM25
         {
-            let mut client = state.engine.bm25().lock().await;
+            let client = state.engine.fulltext_clone();
             let result = client
-                .delete_by_file_path_scoped("default", file_path, project_id)
+                .delete_by_file_path_scoped(&client.configured_index_name(), file_path, project_id)
                 .await
                 .map(|_| ());
             if let Err(e) = result {
@@ -498,9 +498,9 @@ pub async fn handle_batch_delete(
             }
 
             {
-                let mut client = state.engine.bm25().lock().await;
+                let client = state.engine.fulltext_clone();
                 let result = client
-                    .delete_by_file_path_scoped("default", fp, project_id)
+                    .delete_by_file_path_scoped(&client.configured_index_name(), fp, project_id)
                     .await
                     .map(|_| ());
                 if let Err(e) = result {
@@ -609,7 +609,7 @@ pub async fn handle_index_stats(
 
     // Get BM25 stats (project-scoped)
     let bm25_doc_count = {
-        let client = state.engine.bm25().lock().await;
+        let client = state.engine.fulltext_clone();
         client
             .document_count_by_project(project_id)
             .await
@@ -620,7 +620,7 @@ pub async fn handle_index_stats(
     let file_count = if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
         && let Ok(project) = client.for_project(project_id)
     {
-        use cce_storage_relation_sqlite::FileRepository;
+        use cce_storage_metadb_sqlite::FileRepository;
         match project.with_transaction(|tx| FileRepository::count_by_project(tx, project_id)) {
             Ok(count) => count as usize,
             Err(_) => 0,
@@ -673,16 +673,15 @@ pub async fn handle_storage_status(
         }
     };
 
-    // Check BM25
+    // Check BM25 through the backend-neutral diagnostics snapshot.
     let bm25_storage = {
-        let client = state.engine.bm25().lock().await;
-        let item_count = client.document_count().await.unwrap_or(0);
+        let diag = state.engine.fulltext().diagnose_summary().await;
         StorageComponentStatus {
-            connected: client.is_connected(),
-            item_count,
+            connected: diag.reachable,
+            item_count: diag.documents_count as usize,
             disk_usage_mb: 0.0,
-            version: None,
-            last_error: None,
+            version: diag.version,
+            last_error: diag.error,
         }
     };
 

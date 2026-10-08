@@ -3,11 +3,11 @@
 //! Provides a unified interface for relation queries with pagination
 //! and error handling.
 
-use cce_relation::index::{
+use cce_codegraph::index::{
     SnapshotEntityQueryOps, SnapshotHierarchyQueryOps, SnapshotRelationQueryOps,
 };
-use cce_relation::query::QueryCache;
-use cce_relation::{CallChainNode, CallChainQuery};
+use cce_codegraph::query::QueryCache;
+use cce_codegraph::{CallChainNode, CallChainQuery};
 use cce_types::{EntityId, RelationType, ResolvedRelation, TestInfo, language::LanguageInfo};
 use parking_lot::RwLock;
 use std::collections::HashSet;
@@ -323,7 +323,7 @@ impl RelationSearcher {
     pub fn get_callees_checked(
         &self,
         entity_id: EntityId,
-    ) -> std::result::Result<Vec<ResolvedRelation>, cce_relation::RelationQueryError> {
+    ) -> std::result::Result<Vec<ResolvedRelation>, cce_codegraph::RelationQueryError> {
         self.query.get_callees_by_entity(entity_id)
     }
 
@@ -726,14 +726,14 @@ pub struct InterfaceHierarchy {
 
 impl RelationSearcher {
     /// Get quality report for the relation index.
-    pub fn get_quality_report(&self) -> cce_relation::index::core::QualityReport {
+    pub fn get_quality_report(&self) -> cce_codegraph::index::core::QualityReport {
         self.query.get_quality_report()
     }
 
     /// Get diagnostic summary.
     pub fn get_diagnostic_summary(
         &self,
-    ) -> cce_relation::index::stores::diagnostics::DiagnosticSummary {
+    ) -> cce_codegraph::index::stores::diagnostics::DiagnosticSummary {
         self.query.get_diagnostic_summary()
     }
 }
@@ -745,7 +745,7 @@ impl RelationSearcher {
     const IMPACT_MAX_DEPTH: usize = 10;
 
     /// Get change impact analysis for a file.
-    pub fn get_change_impact(&self, file_path: &str) -> cce_relation::ImpactAnalysis<String> {
+    pub fn get_change_impact(&self, file_path: &str) -> cce_codegraph::ImpactAnalysis<String> {
         self.query
             .get_change_impact(file_path, Self::IMPACT_MAX_DEPTH)
     }
@@ -759,7 +759,7 @@ impl RelationSearcher {
         entity_id: EntityId,
         max_depth: usize,
         scope: &str,
-    ) -> cce_relation::ImpactAnalysis<String> {
+    ) -> cce_codegraph::ImpactAnalysis<String> {
         self.query.get_entity_impact(entity_id, max_depth, scope)
     }
 
@@ -877,7 +877,7 @@ impl RelationSearcher {
         kind: StructuralKind,
         direction: StructuralDirection,
     ) -> Vec<StructuralRelation> {
-        use cce_relation::index::snapshot_query::SnapshotFrontendQueryOps;
+        use cce_codegraph::index::snapshot_query::SnapshotFrontendQueryOps;
 
         let index = self.query.index();
         let outgoing = |relations: Vec<cce_types::ResolvedRelation>| {

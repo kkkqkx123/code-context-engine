@@ -6,8 +6,9 @@
 
 use cce_parser::summary::FileSummary;
 use cce_storage_bm25::Bm25Document;
+use cce_storage_common::FulltextStorage;
 use cce_storage_common::{Payload, VectorPoint, VectorStorage};
-use cce_storage_relation_sqlite::FileSummaryRepository;
+use cce_storage_metadb_sqlite::FileSummaryRepository;
 use cce_types::{FileCategory, PointKind};
 
 use crate::error::OrchestratorError;
@@ -128,7 +129,7 @@ impl<'a> SummaryStorage<'a> {
         db.with_transaction(|tx| {
             for (file_path_str, project_id, summary_json) in &rows {
                 let file_record =
-                    cce_storage_relation_sqlite::FileRepository::get_by_path_and_project_at_epoch(
+                    cce_storage_metadb_sqlite::FileRepository::get_by_path_and_project_at_epoch(
                         tx,
                         file_path_str,
                         *project_id,
@@ -140,7 +141,7 @@ impl<'a> SummaryStorage<'a> {
                             "file record missing for summary {file_path_str}"
                         ))
                     })?;
-                cce_storage_relation_sqlite::FileSummaryRepository::upsert_with_epoch(
+                cce_storage_metadb_sqlite::FileSummaryRepository::upsert_with_epoch(
                     tx,
                     file_record.id,
                     epoch,
@@ -159,7 +160,7 @@ impl<'a> SummaryStorage<'a> {
         if summaries.is_empty() {
             return Ok(());
         }
-        let Some(ref bm25) = self.coordinator.bm25 else {
+        let Some(ref bm25) = self.coordinator.fulltext else {
             return Err(OrchestratorError::index(
                 "summary_bm25_store",
                 "BM25 client is not configured but summaries are pending",
@@ -196,9 +197,7 @@ impl<'a> SummaryStorage<'a> {
             .collect();
 
         if !bm25_documents.is_empty() {
-            bm25.lock()
-                .await
-                .batch_index("default", &bm25_documents)
+            bm25.batch_index(&bm25.configured_index_name(), &bm25_documents)
                 .await?;
             // Update bm25_doc_id in SQLite
             self.update_bm25_doc_ids(summaries, &bm25_documents).await?;
@@ -228,7 +227,7 @@ impl<'a> SummaryStorage<'a> {
         db.with_transaction(|tx| {
             for (summary, doc) in summaries.iter().zip(bm25_documents.iter()) {
                 let Some(file_record) =
-                    cce_storage_relation_sqlite::FileRepository::get_by_path_and_project_at_epoch(
+                    cce_storage_metadb_sqlite::FileRepository::get_by_path_and_project_at_epoch(
                         tx,
                         &summary.file_path,
                         project_id,
@@ -240,7 +239,7 @@ impl<'a> SummaryStorage<'a> {
                         summary.file_path
                     )));
                 };
-                cce_storage_relation_sqlite::FileSummaryRepository::update_bm25_doc_id_at_epoch(
+                cce_storage_metadb_sqlite::FileSummaryRepository::update_bm25_doc_id_at_epoch(
                     tx,
                     file_record.id,
                     epoch,
@@ -382,11 +381,13 @@ impl StorageCoordinator {
         }
 
         // Step 2: Remove summary from BM25 index
-        if let Some(ref bm25) = self.bm25 {
-            bm25.lock()
-                .await
-                .delete_by_file_path_scoped("default", &file_id, self.project_id)
-                .await?;
+        if let Some(ref bm25) = self.fulltext {
+            bm25.delete_by_file_path_scoped(
+                &bm25.configured_index_name(),
+                &file_id,
+                self.project_id,
+            )
+            .await?;
         }
 
         // Step 3: Remove summary records from SQLite (all epochs)

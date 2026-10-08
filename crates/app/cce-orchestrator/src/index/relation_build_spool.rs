@@ -14,7 +14,7 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use cce_relation::symbol_table::ProjectSymbolTable;
+use cce_codegraph::symbol_table::ProjectSymbolTable;
 use cce_types::import::ReexportRecord;
 use cce_types::serialization::{deserialize_from_cache, serialize_for_cache};
 use cce_types::{EntityId, EntitySnapshot, ImportTable, Language, ParsedFile, RawRelationData};

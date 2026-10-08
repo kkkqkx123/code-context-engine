@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_relation::index::RelationIndex;
+use cce_codegraph::index::RelationIndex;
 
 use super::aggregator::FileAggregator;
 use super::config::{ExportConfig, RelationEnhancerConfig};

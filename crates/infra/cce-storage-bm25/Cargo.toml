@@ -12,6 +12,7 @@ remote = ["dep:reqwest", "dep:cce-circuit-breaker"]
 [dependencies]
 cce-types = { path = "../../core/cce-types" }
 cce-config = { path = "../../core/cce-config" }
+cce-storage-common = { path = "../cce-storage-common" }
 cce-text = { path = "../../core/cce-text", default-features = false }
 cce-utils = { path = "../../core/cce-utils" }
 cce-circuit-breaker = { path = "../cce-circuit-breaker", optional = true }

@@ -21,7 +21,7 @@ pub async fn handle_keyword_search(
     State(state): State<AppState>,
     Json(request): Json<KeywordSearchRequest>,
 ) -> Json<KeywordSearchApiResponse> {
-    let tool = KeywordSearchTool::new(state.engine.bm25_clone());
+    let tool = KeywordSearchTool::new(state.engine.fulltext_clone());
 
     let request = OrchKeywordSearchRequest {
         query: request.query,

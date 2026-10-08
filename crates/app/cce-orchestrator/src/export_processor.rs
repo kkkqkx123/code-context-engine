@@ -41,9 +41,9 @@ use cce_parser::ast_to_nl::AstToNlConverter;
 use cce_parser::ast_to_nl::chunker::GroupChunker;
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::grouper::types::ProcessingResult;
-use cce_relation::index::snapshot_loader::RelationSnapshotLoader;
-use cce_storage_relation_sqlite::SqliteClient;
-use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 
 use crate::export::export_config_rebuild;
 use crate::export::export_fingerprint::{current_relation_epoch, should_skip_export};

@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use cce_relation::index::RelationIndexView;
+use cce_codegraph::index::RelationIndexView;
 use cce_types::normalize_project_path;
 
 /// Whether the symbol-fingerprint scope is too large relative to the project.

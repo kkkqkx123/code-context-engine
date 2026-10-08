@@ -9,10 +9,11 @@
 //! exclusively in generation GC; when the inheritance chain would grow past
 //! depth 2, the active generation is compacted (materialized) first.
 
+use cce_storage_common::FulltextStorage;
 use std::sync::atomic::Ordering;
 
 use cce_storage_common::VectorStorage;
-use cce_storage_relation_sqlite::{
+use cce_storage_metadb_sqlite::{
     GenerationOverrideRepository, OverrideDisposition, ProjectIndexManifestRepository,
 };
 use cce_types::path::normalize_project_path;
@@ -150,11 +151,13 @@ impl StorageCoordinator {
                     "Vector candidate epoch deleted (idempotent)"
                 );
             }
-            if let Some(bm25) = &self.bm25 {
+            if let Some(bm25) = &self.fulltext {
                 let deleted = bm25
-                    .lock()
-                    .await
-                    .delete_by_project_epoch("default", self.project_id, candidate_epoch)
+                    .delete_by_project_epoch(
+                        &bm25.configured_index_name(),
+                        self.project_id,
+                        candidate_epoch,
+                    )
                     .await?;
                 tracing::info!(
                     operation_id = %operation_id,
@@ -315,7 +318,7 @@ impl StorageCoordinator {
 
     /// Adoption judgment: ready + epoch continuity + parent-chain validity.
     fn candidate_matches_active(
-        manifest: &cce_storage_relation_sqlite::ProjectIndexManifest,
+        manifest: &cce_storage_metadb_sqlite::ProjectIndexManifest,
         active_epoch: i64,
     ) -> bool {
         let expected_parent = if active_epoch > 0 {
@@ -508,11 +511,14 @@ impl StorageCoordinator {
                 .delete_by_file_path_scoped_epoch(path, &self.project_group_id, epoch)
                 .await?;
         }
-        if let Some(bm25) = &self.bm25 {
-            bm25.lock()
-                .await
-                .delete_by_file_path_scoped_epoch("default", path, self.project_id, epoch)
-                .await?;
+        if let Some(bm25) = &self.fulltext {
+            bm25.delete_by_file_path_scoped_epoch(
+                &bm25.configured_index_name(),
+                path,
+                self.project_id,
+                epoch,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -531,11 +537,14 @@ impl StorageCoordinator {
     ) -> Result<(), OrchestratorError> {
         let path = normalize_project_path(&file_path.to_string_lossy());
         let epoch = self.epoch();
-        if let Some(bm25) = &self.bm25 {
-            bm25.lock()
-                .await
-                .delete_by_file_path_scoped_epoch("default", &path, self.project_id, epoch)
-                .await?;
+        if let Some(bm25) = &self.fulltext {
+            bm25.delete_by_file_path_scoped_epoch(
+                &bm25.configured_index_name(),
+                &path,
+                self.project_id,
+                epoch,
+            )
+            .await?;
         }
         if let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) {
             client
@@ -770,7 +779,7 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::super::StorageCoordinator;
-    use cce_storage_relation_sqlite::{
+    use cce_storage_metadb_sqlite::{
         NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
     };
     use std::sync::Arc;
@@ -1056,7 +1065,7 @@ mod tests {
 
     #[tokio::test]
     async fn changed_and_deleted_files_register_generation_overrides() {
-        use cce_storage_relation_sqlite::{
+        use cce_storage_metadb_sqlite::{
             GenerationOverride, GenerationOverrideRepository, OverrideDisposition,
         };
         use std::path::Path;
@@ -1163,12 +1172,12 @@ mod tests {
                 )
                 .map(|_| ())
                 .map_err(|error| cce_types::StorageError::insert("files", error.to_string()))?;
-                cce_storage_relation_sqlite::GenerationOverrideRepository::upsert(
+                cce_storage_metadb_sqlite::GenerationOverrideRepository::upsert(
                     tx,
                     1,
                     2,
                     "src/replaced.rs",
-                    cce_storage_relation_sqlite::OverrideDisposition::Replaced,
+                    cce_storage_metadb_sqlite::OverrideDisposition::Replaced,
                 )?;
                 Ok(())
             })
@@ -1194,7 +1203,7 @@ mod tests {
         assert_eq!(active.data_epoch, 2);
         assert_eq!(active.parent_data_epoch, None);
         assert!(
-            cce_storage_relation_sqlite::GenerationOverrideRepository::list_for_generation(
+            cce_storage_metadb_sqlite::GenerationOverrideRepository::list_for_generation(
                 &conn, 1, 2
             )
             .expect("overrides should list")

@@ -7,10 +7,9 @@ use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{MetricsAggregator, MetricsRegistry, ProgressTracker, QueueMetrics, RenderCache};
 use cce_orchestrator::index::VectorStore;
 use cce_orchestrator::index::{FulltextStore, RelationStore};
-use cce_storage_bm25::Bm25Client;
-use cce_storage_relation_sqlite::SqliteClient;
-use cce_storage_relation_sqlite::project_registry::ProjectRegistry;
-use cce_storage_relation_sqlite::repo::{CheckpointRepository, ProjectRepository};
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::project_registry::ProjectRegistry;
+use cce_storage_metadb_sqlite::repo::{CheckpointRepository, ProjectRepository};
 use tokio::sync::Mutex;
 
 impl super::CodeContextEngine {
@@ -46,19 +45,19 @@ impl super::CodeContextEngine {
         self.vector.as_qdrant().cloned()
     }
 
-    /// Get a reference to the BM25 client
-    pub fn bm25(&self) -> &Arc<Mutex<Bm25Client>> {
-        &self.bm25
+    /// Get a reference to the fulltext backend (backend-neutral).
+    pub fn fulltext(&self) -> &FulltextStore {
+        &self.fulltext
     }
 
-    /// Get a clone of the BM25 client
-    pub fn bm25_clone(&self) -> Arc<Mutex<Bm25Client>> {
-        self.bm25.clone()
+    /// Get a clone of the fulltext backend.
+    pub fn fulltext_clone(&self) -> FulltextStore {
+        self.fulltext.clone()
     }
 
     /// Get the fulltext backend enum (phase-2 branch accessor).
     pub fn fulltext_store(&self) -> FulltextStore {
-        FulltextStore::local(self.bm25.clone())
+        self.fulltext.clone()
     }
 
     /// Get a reference to the embedder
@@ -553,7 +552,7 @@ impl super::CodeContextEngine {
                                     }
                                     let operation_id = &name[".export-backup-".len()..];
                                     let is_expired = if let Some(ref conn) = read_conn {
-                                        match cce_storage_relation_sqlite::CheckpointRepository::get_checkpoint(
+                                        match cce_storage_metadb_sqlite::CheckpointRepository::get_checkpoint(
                                             conn, *project_id, operation_id,
                                         ) {
                                             Ok(Some(checkpoint)) => {

@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use cce_relation::RelationQueryError;
-use cce_relation::index::{
+use cce_codegraph::RelationQueryError;
+use cce_codegraph::index::{
     RelationIndexView,
     snapshot_query::{SnapshotEntityQueryOps, SnapshotRelationQueryOps, SnapshotSymbolQueryOps},
 };
@@ -326,9 +326,9 @@ impl GraphService {
     /// Compute graph centrality and clustering metrics for all entities.
     pub fn compute_metrics(
         &self,
-    ) -> std::collections::HashMap<cce_types::EntityId, cce_relation::graph_metrics::EntityMetrics>
+    ) -> std::collections::HashMap<cce_types::EntityId, cce_codegraph::graph_metrics::EntityMetrics>
     {
-        cce_relation::graph_metrics::compute_metrics(self.searcher.query().index())
+        cce_codegraph::graph_metrics::compute_metrics(self.searcher.query().index())
     }
 
     /// Whether a stored relation survives the graph filter.
@@ -422,14 +422,14 @@ impl GraphService {
 
 /// Incremental builder that deduplicates nodes by id.
 struct SubGraphBuilder<'a> {
-    index: &'a cce_relation::index::snapshot_index::LayeredSnapshotIndex,
+    index: &'a cce_codegraph::index::snapshot_index::LayeredSnapshotIndex,
     nodes: Vec<GraphNode>,
     seen: HashSet<String>,
     edges: Vec<GraphEdge>,
 }
 
 impl<'a> SubGraphBuilder<'a> {
-    fn new(index: &'a cce_relation::index::snapshot_index::LayeredSnapshotIndex) -> Self {
+    fn new(index: &'a cce_codegraph::index::snapshot_index::LayeredSnapshotIndex) -> Self {
         Self {
             index,
             nodes: Vec::new(),
@@ -486,7 +486,7 @@ impl<'a> SubGraphBuilder<'a> {
         });
     }
 
-    fn insert_call_node(&mut self, node: &cce_relation::CallChainNode) -> String {
+    fn insert_call_node(&mut self, node: &cce_codegraph::CallChainNode) -> String {
         let node_id = self.node_id(node.function_id);
         if self.seen.insert(node_id.clone()) {
             let (kind, location) = match self.entity_metadata(node.function_id) {
@@ -541,7 +541,7 @@ impl<'a> SubGraphBuilder<'a> {
         let (caller, relation) = edge;
         self.insert_relation(caller, &relation);
     }
-    fn insert_path_edge(&mut self, source: EntityId, target: &cce_relation::CallChainNode) {
+    fn insert_path_edge(&mut self, source: EntityId, target: &cce_codegraph::CallChainNode) {
         let confidence = if target.relation_type.is_call()
             && matches!(
                 target.call_context,
@@ -653,7 +653,7 @@ pub fn edge_load(relation_type: &cce_types::RelationType, call_frequency: u64) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_relation::CallChainQuery;
+    use cce_codegraph::CallChainQuery;
     use cce_types::{Entity, EntityKind, RelationType, Span};
     use std::collections::HashMap;
 
@@ -687,10 +687,10 @@ mod tests {
 
     /// Service over a chain `a -> b -> c -> d` of direct calls.
     fn chain_service() -> GraphService {
-        use cce_relation::index::EntityIndexOps;
+        use cce_codegraph::index::EntityIndexOps;
 
-        let index = cce_relation::CallChainQuery::from_index({
-            let base = cce_relation::RelationIndex::new();
+        let index = cce_codegraph::CallChainQuery::from_index({
+            let base = cce_codegraph::RelationIndex::new();
             for (id, name) in [(1u64, "a"), (2, "b"), (3, "c"), (4, "d")] {
                 base.add_function_with_path(EntityId(id), entity(id, name), "src/lib.rs".into());
             }
@@ -880,9 +880,9 @@ mod tests {
         // An inheritance edge between two of the chain's functions must not
         // join them into one component once `domains=call` is applied.
         let service = {
-            use cce_relation::index::EntityIndexOps;
+            use cce_codegraph::index::EntityIndexOps;
 
-            let base = cce_relation::RelationIndex::new();
+            let base = cce_codegraph::RelationIndex::new();
             for (id, name) in [(1u64, "a"), (2, "b")] {
                 base.add_function_with_path(EntityId(id), entity(id, name), "src/lib.rs".into());
             }
@@ -962,10 +962,10 @@ mod tests {
 
     #[test]
     fn external_edge_carries_true_domain_and_load() {
-        use cce_relation::index::EntityIndexOps;
+        use cce_codegraph::index::EntityIndexOps;
 
         let service = {
-            let base = cce_relation::RelationIndex::new();
+            let base = cce_codegraph::RelationIndex::new();
             base.add_function_with_path(EntityId(1), entity(1, "a"), "src/lib.rs".into());
             base.add_resolved_relation(cce_types::ResolvedRelation {
                 caller: EntityId(1),

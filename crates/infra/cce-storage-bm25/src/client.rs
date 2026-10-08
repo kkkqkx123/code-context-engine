@@ -150,7 +150,7 @@ impl Bm25Client {
 
     /// Batch index documents
     pub async fn batch_index(
-        &mut self,
+        &self,
         index_name: &str,
         documents: &[Bm25Document],
     ) -> Result<usize, Bm25Error> {
@@ -181,7 +181,7 @@ impl Bm25Client {
     }
 
     async fn batch_index_inner(
-        &mut self,
+        &self,
         _index_name: &str,
         documents: &[Bm25Document],
     ) -> Result<usize, Bm25Error> {
@@ -238,7 +238,7 @@ impl Bm25Client {
     }
 
     /// Delete a document by ID
-    pub async fn delete(&mut self, index_name: &str, document_id: &str) -> Result<(), Bm25Error> {
+    pub async fn delete(&self, index_name: &str, document_id: &str) -> Result<(), Bm25Error> {
         self.validate_index_name(index_name)?;
         let start_time = Instant::now();
         let result = self.delete_inner(index_name, document_id).await;
@@ -251,11 +251,7 @@ impl Bm25Client {
         result
     }
 
-    async fn delete_inner(
-        &mut self,
-        _index_name: &str,
-        document_id: &str,
-    ) -> Result<(), Bm25Error> {
+    async fn delete_inner(&self, _index_name: &str, document_id: &str) -> Result<(), Bm25Error> {
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
 
         let manager_guard = manager.read().await;
@@ -268,7 +264,7 @@ impl Bm25Client {
 
     /// Delete documents matching both a file path AND a project ID from the index.
     pub async fn delete_by_file_path_scoped(
-        &mut self,
+        &self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
@@ -296,7 +292,7 @@ impl Bm25Client {
 
     /// Delete documents for one file in one data epoch.
     pub async fn delete_by_file_path_scoped_epoch(
-        &mut self,
+        &self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
@@ -323,7 +319,7 @@ impl Bm25Client {
 
     /// Delete all documents for one project and data epoch.
     pub async fn delete_by_project_epoch(
-        &mut self,
+        &self,
         index_name: &str,
         project_id: i64,
         epoch: i64,
@@ -435,7 +431,7 @@ impl Bm25Client {
 
     /// Delete all documents for a project from the index.
     pub async fn delete_all_project_docs(
-        &mut self,
+        &self,
         index_name: &str,
         project_id: i64,
     ) -> Result<usize, Bm25Error> {
@@ -513,7 +509,7 @@ impl Bm25Client {
     }
 
     /// Clear an index by recreating it from scratch
-    pub async fn clear_index(&mut self, index_name: &str) -> Result<usize, Bm25Error> {
+    pub async fn clear_index(&self, index_name: &str) -> Result<usize, Bm25Error> {
         self.validate_index_name(index_name)?;
         let removed = self.document_count().await.unwrap_or(0);
         let start_time = Instant::now();

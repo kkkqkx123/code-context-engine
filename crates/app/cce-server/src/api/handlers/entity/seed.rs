@@ -16,7 +16,7 @@
 //! across reindex runs, so an id from an earlier run silently addresses the
 //! wrong entity.
 
-use cce_relation::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
+use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbolQueryOps};
 use cce_types::EntityId;
 
 use cce_api::models::{ErrorResponse, error_codes};

@@ -3,7 +3,7 @@ name = "cce-parser-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Core parser types shared between cce-parser and cce-relation"
+description = "Core parser types shared between cce-parser and cce-codegraph"
 
 [dependencies]
 cce-types = { path = "../../core/cce-types" }

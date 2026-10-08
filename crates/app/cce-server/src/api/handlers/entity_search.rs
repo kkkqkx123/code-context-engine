@@ -102,7 +102,7 @@ pub async fn handle_entity_search(
     // plus legacy-meta fallback is not re-derived here. Resolved before the
     // read connection is taken: the cache acquires the same read lock.
     let active_epoch =
-        cce_storage_relation_sqlite::cache::FileHashCache::new(sqlite_client.clone(), project_id)
+        cce_storage_metadb_sqlite::cache::FileHashCache::new(sqlite_client.clone(), project_id)
             .active_epoch()
             .ok()
             .flatten()
@@ -119,7 +119,7 @@ pub async fn handle_entity_search(
         }
     };
 
-    let results = match cce_storage_relation_sqlite::repo::EntityRepository::search_fts_at_epoch(
+    let results = match cce_storage_metadb_sqlite::repo::EntityRepository::search_fts_at_epoch(
         &conn,
         &request.query,
         project_id,

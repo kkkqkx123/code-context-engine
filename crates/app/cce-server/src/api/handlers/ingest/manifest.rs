@@ -5,7 +5,7 @@ use cce_api::models::{
     ErrorResponse, IngestManifestRequest, IngestManifestResponse, MissingChunk,
     SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, error_codes, total_chunks_for_size,
 };
-use cce_storage_relation_sqlite::{FileRepository, ProjectRepository};
+use cce_storage_metadb_sqlite::{FileRepository, ProjectRepository};
 
 use super::paths::storage_path;
 use super::staging::received_chunk_indices;

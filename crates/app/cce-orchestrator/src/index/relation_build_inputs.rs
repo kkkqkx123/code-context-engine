@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use cce_types::import::ReexportRecord;
 use cce_types::{Entity, EntityId, ImportTable, Language, ParsedFile, RawRelationData};
-use cce_relation::symbol_table::ProjectSymbolTable;
+use cce_codegraph::symbol_table::ProjectSymbolTable;
 
 /// Slim representation of a parsed file for relation construction.
 ///

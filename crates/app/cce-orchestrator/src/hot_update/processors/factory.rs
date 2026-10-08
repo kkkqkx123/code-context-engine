@@ -6,8 +6,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
-
 use crate::NlDocumentUpdateProcessor;
 use crate::export::ExportConfig;
 use crate::export::NlDocumentExporter;
@@ -18,8 +16,7 @@ use cce_config::{NestProcessorConfig, RelationConfig};
 use cce_metrics::RelationMetrics;
 use cce_parser::summary::{RuleBasedGenerator, SummaryGenerator};
 use cce_plugin::PluginRegistry;
-use cce_storage_bm25::Bm25Client;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::SqliteClient;
 use cce_types::error::ConfigError;
 
 use super::{
@@ -194,9 +191,10 @@ impl ProcessorFactory {
 
     /// Create all enabled processors from backend enums.
     ///
-    /// The local branches unwrap once here so processor behavior stays
-    /// unchanged; remote branches resolve to no local client and disable
-    /// the corresponding processor.
+    /// The fulltext backend flows into the storage coordinator through the
+    /// fulltext contract, so both branches share one write path; the
+    /// relation processor keeps the local client for its local-only
+    /// persistence reads.
     #[allow(clippy::too_many_arguments)]
     pub fn create_all_processors_from_stores(
         &self,
@@ -219,19 +217,9 @@ impl ProcessorFactory {
         relation_metrics: Option<Arc<RelationMetrics>>,
         storage_metrics: Option<Arc<cce_metrics::HotUpdateStorageMetrics>>,
     ) -> Result<(Vec<BoxedUpdateProcessor>, Arc<StorageCoordinator>), ConfigError> {
-        if matches!(fulltext, Some(FulltextStore::Remote(_))) {
-            return Err(ConfigError::Other(
-                "remote fulltext branch is not wired into hot-update processors".to_string(),
-            ));
-        }
-        if matches!(relation, Some(RelationStore::Remote(_))) {
-            return Err(ConfigError::Other(
-                "remote relation branch is not wired into hot-update processors".to_string(),
-            ));
-        }
         self.create_all_processors(
             vector,
-            fulltext.and_then(FulltextStore::into_local),
+            fulltext,
             relation.and_then(RelationStore::into_local),
             embedder,
             project_group_id,
@@ -270,7 +258,7 @@ impl ProcessorFactory {
     pub fn create_all_processors(
         &self,
         vector: Option<VectorStore>,
-        bm25: Option<Arc<Mutex<Bm25Client>>>,
+        fulltext: Option<FulltextStore>,
         metadata_store: Option<Arc<SqliteClient>>,
         embedder: Option<Arc<cce_llm_client::OpenAICompatibleProvider>>,
         project_group_id: Option<String>,
@@ -298,7 +286,7 @@ impl ProcessorFactory {
                 "Embedding processor disabled because vector backend or embedder is unavailable"
             );
         }
-        let enable_bm25 = config.enable_bm25 && bm25.is_some();
+        let enable_bm25 = config.enable_bm25 && fulltext.is_some();
         if config.enable_bm25 && !enable_bm25 {
             tracing::warn!("BM25 processor disabled because BM25 is unavailable");
         }
@@ -353,8 +341,8 @@ impl ProcessorFactory {
             storage_coordinator = storage_coordinator.with_vector(vector);
         }
 
-        if let Some(bm25) = bm25 {
-            storage_coordinator = storage_coordinator.with_bm25(bm25);
+        if let Some(fulltext) = fulltext {
+            storage_coordinator = storage_coordinator.with_fulltext_store(fulltext);
         }
 
         if let Some(emb) = embedder {

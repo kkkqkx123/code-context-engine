@@ -6,9 +6,17 @@
 use std::sync::Arc;
 
 use cce_storage_bm25::{Bm25Client, ElasticsearchClient};
-use cce_storage_common::{DenseSearchQuery, ScoredPoint, VectorPoint, VectorStorage};
-use cce_storage_relation_pg::PostgresClient;
-use cce_storage_relation_sqlite::SqliteClient;
+use cce_storage_common::metadb::{
+    AdmissionAuditRecord, CheckpointRecord, CheckpointStatus, ChunkRecord, EntityDetailMapping,
+    EntityRecord, FileCheckpointRecord, FileRecord, GenerationOverride, ProjectIndexManifest,
+    ProjectRecord, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
+};
+use cce_storage_common::{
+    DenseSearchQuery, FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions,
+    FulltextStorage, ScoredPoint, VectorPoint, VectorStorage,
+};
+use cce_storage_metadb_pg::PostgresClient;
+use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_vector_local::LocalVectorStore;
 use cce_storage_vector_qdrant::QdrantClient;
 use cce_types::{PointKind, StorageError};
@@ -365,23 +373,22 @@ impl VectorStorage for VectorStore {
 
 /// Fulltext backend holding one concrete implementation.
 ///
-/// Local is the embedded Tantivy branch and the only branch wired into
-/// indexing, search, and hot-update paths; Remote constructs successfully
-/// but every consumer fails fast until the remote read and write paths are
-/// implemented. The enum mirrors [`VectorStore`] so assembly selects branches
-/// from configuration instead of threading concrete client types through
-/// every caller.
+/// Local is the embedded Tantivy branch and the only supported branch; the
+/// remote Elasticsearch client is forward scaffolding and assembly rejects
+/// it at startup until the remote read and write paths are wired. The enum
+/// mirrors [`VectorStore`] so assembly selects branches from configuration
+/// instead of threading concrete client types through every caller.
 #[derive(Clone)]
 pub enum FulltextStore {
     /// Embedded Tantivy index.
-    Local(Arc<tokio::sync::Mutex<Bm25Client>>),
+    Local(Arc<Bm25Client>),
     /// External Elasticsearch service.
     Remote(Arc<ElasticsearchClient>),
 }
 
 impl FulltextStore {
     /// Wrap a local BM25 client.
-    pub fn local(client: Arc<tokio::sync::Mutex<Bm25Client>>) -> Self {
+    pub fn local(client: Arc<Bm25Client>) -> Self {
         Self::Local(client)
     }
 
@@ -409,7 +416,7 @@ impl FulltextStore {
     }
 
     /// Borrow the local client when this is the embedded branch.
-    pub fn as_local(&self) -> Option<&Arc<tokio::sync::Mutex<Bm25Client>>> {
+    pub fn as_local(&self) -> Option<&Arc<Bm25Client>> {
         match self {
             Self::Local(client) => Some(client),
             _ => None,
@@ -425,7 +432,7 @@ impl FulltextStore {
     }
 
     /// Unwrap into the local handle when this is the embedded branch.
-    pub fn into_local(self) -> Option<Arc<tokio::sync::Mutex<Bm25Client>>> {
+    pub fn into_local(self) -> Option<Arc<Bm25Client>> {
         match self {
             Self::Local(client) => Some(client),
             _ => None,
@@ -441,20 +448,21 @@ impl FulltextStore {
     }
 
     /// Build the store from the resolved database configuration.
+    ///
+    /// The remote branch is rejected at startup: only the local backend is
+    /// supported, and refusing here keeps a remote selection from failing
+    /// halfway through indexing or search.
     pub fn from_database_config(
         database: &cce_config::global::DatabaseConfig,
     ) -> Result<Self, StorageError> {
         match database.fulltext_backend {
             cce_config::modules::FulltextBackend::Local => {
                 let client = Bm25Client::new(database.bm25.clone());
-                Ok(Self::Local(Arc::new(tokio::sync::Mutex::new(client))))
+                Ok(Self::Local(Arc::new(client)))
             }
-            cce_config::modules::FulltextBackend::Remote => {
-                let client = ElasticsearchClient::from_database_config(database).map_err(|e| {
-                    StorageError::query(format!("failed to create remote fulltext client: {e}"))
-                })?;
-                Ok(Self::Remote(Arc::new(client)))
-            }
+            cce_config::modules::FulltextBackend::Remote => Err(StorageError::validation(
+                "remote fulltext backend is not supported yet: the supported matrix is local-only; remote branches are forward scaffolding",
+            )),
         }
     }
 }
@@ -468,13 +476,277 @@ impl std::fmt::Debug for FulltextStore {
     }
 }
 
+impl FulltextStorage for FulltextStore {
+    async fn batch_index(
+        &self,
+        index_name: &str,
+        documents: &[FulltextDocument],
+    ) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::batch_index(client.as_ref(), index_name, documents).await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::batch_index(client.as_ref(), index_name, documents).await
+            }
+        }
+    }
+
+    async fn search(
+        &self,
+        query: &str,
+        options: &FulltextSearchOptions,
+    ) -> Result<Vec<FulltextHit>, FulltextError> {
+        match self {
+            Self::Local(client) => FulltextStorage::search(client.as_ref(), query, options).await,
+            Self::Remote(client) => FulltextStorage::search(client.as_ref(), query, options).await,
+        }
+    }
+
+    async fn delete_by_file_path_scoped(
+        &self,
+        index_name: &str,
+        file_path: &str,
+        project_id: i64,
+    ) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::delete_by_file_path_scoped(
+                    client.as_ref(),
+                    index_name,
+                    file_path,
+                    project_id,
+                )
+                .await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::delete_by_file_path_scoped(
+                    client.as_ref(),
+                    index_name,
+                    file_path,
+                    project_id,
+                )
+                .await
+            }
+        }
+    }
+
+    async fn delete_by_file_path_scoped_epoch(
+        &self,
+        index_name: &str,
+        file_path: &str,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::delete_by_file_path_scoped_epoch(
+                    client.as_ref(),
+                    index_name,
+                    file_path,
+                    project_id,
+                    epoch,
+                )
+                .await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::delete_by_file_path_scoped_epoch(
+                    client.as_ref(),
+                    index_name,
+                    file_path,
+                    project_id,
+                    epoch,
+                )
+                .await
+            }
+        }
+    }
+
+    async fn delete_by_project_epoch(
+        &self,
+        index_name: &str,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::delete_by_project_epoch(
+                    client.as_ref(),
+                    index_name,
+                    project_id,
+                    epoch,
+                )
+                .await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::delete_by_project_epoch(
+                    client.as_ref(),
+                    index_name,
+                    project_id,
+                    epoch,
+                )
+                .await
+            }
+        }
+    }
+
+    async fn delete_all_project_docs(
+        &self,
+        index_name: &str,
+        project_id: i64,
+    ) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::delete_all_project_docs(client.as_ref(), index_name, project_id)
+                    .await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::delete_all_project_docs(client.as_ref(), index_name, project_id)
+                    .await
+            }
+        }
+    }
+
+    async fn snapshot_documents(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Vec<FulltextDocument>, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::snapshot_documents(client.as_ref(), project_id, epoch).await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::snapshot_documents(client.as_ref(), project_id, epoch).await
+            }
+        }
+    }
+
+    async fn document_count(&self) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => FulltextStorage::document_count(client.as_ref()).await,
+            Self::Remote(client) => FulltextStorage::document_count(client.as_ref()).await,
+        }
+    }
+
+    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::document_count_by_project(client.as_ref(), project_id).await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::document_count_by_project(client.as_ref(), project_id).await
+            }
+        }
+    }
+
+    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, FulltextError> {
+        match self {
+            Self::Local(client) => {
+                FulltextStorage::epochs_by_project(client.as_ref(), project_id).await
+            }
+            Self::Remote(client) => {
+                FulltextStorage::epochs_by_project(client.as_ref(), project_id).await
+            }
+        }
+    }
+
+    async fn clear_index(&self, index_name: &str) -> Result<usize, FulltextError> {
+        match self {
+            Self::Local(client) => FulltextStorage::clear_index(client.as_ref(), index_name).await,
+            Self::Remote(client) => FulltextStorage::clear_index(client.as_ref(), index_name).await,
+        }
+    }
+
+    async fn flush(&self) -> Result<(), FulltextError> {
+        match self {
+            Self::Local(client) => FulltextStorage::flush(client.as_ref()).await,
+            Self::Remote(client) => FulltextStorage::flush(client.as_ref()).await,
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        match self {
+            Self::Local(client) => FulltextStorage::is_enabled(client.as_ref()),
+            Self::Remote(client) => FulltextStorage::is_enabled(client.as_ref()),
+        }
+    }
+
+    fn backend_name(&self) -> &'static str {
+        match self {
+            Self::Local(client) => FulltextStorage::backend_name(client.as_ref()),
+            Self::Remote(client) => FulltextStorage::backend_name(client.as_ref()),
+        }
+    }
+}
+
+/// Backend-neutral fulltext diagnostics snapshot.
+///
+/// Mirrors [`VectorDiagnostics`]: the local branch probes its document
+/// count, the remote branch probes the search service over HTTP. Probe
+/// failures fold into the snapshot so handlers stay branch-free.
+#[derive(Debug, Clone)]
+pub struct FulltextDiagnostics {
+    /// Whether the backend is reachable and serving.
+    pub reachable: bool,
+    /// Backend version, when the backend exposes one.
+    pub version: Option<String>,
+    /// Whether the index exists and answers reads.
+    pub index_exists: bool,
+    /// Number of documents in the index.
+    pub documents_count: u64,
+    /// Human-readable failure detail, when unhealthy.
+    pub error: Option<String>,
+}
+
+impl FulltextStore {
+    /// Configured index name of the active branch.
+    ///
+    /// Both branches validate the per-call index name against their own
+    /// configuration, so write and delete paths must use this name instead
+    /// of a hardcoded literal.
+    pub fn configured_index_name(&self) -> String {
+        match self {
+            Self::Local(client) => client.config().index_name.clone(),
+            Self::Remote(client) => client.config().index_name.clone(),
+        }
+    }
+
+    /// Backend-neutral diagnostics snapshot for status endpoints.
+    ///
+    /// Never fails: probe errors are folded into the snapshot so handlers
+    /// stay branch-free.
+    pub async fn diagnose_summary(&self) -> FulltextDiagnostics {
+        match FulltextStorage::document_count(self).await {
+            Ok(count) => FulltextDiagnostics {
+                reachable: FulltextStorage::is_enabled(self),
+                version: None,
+                index_exists: true,
+                documents_count: count as u64,
+                error: if FulltextStorage::is_enabled(self) {
+                    None
+                } else {
+                    Some("Fulltext backend is disabled".to_string())
+                },
+            },
+            Err(e) => FulltextDiagnostics {
+                reachable: false,
+                version: None,
+                index_exists: false,
+                documents_count: 0,
+                error: Some(format!("Diagnostic failed: {e}")),
+            },
+        }
+    }
+}
+
 /// Relation backend holding one concrete implementation.
 ///
 /// Local is the embedded SQLite branch (per-project database files) and the
-/// only branch wired into indexing, search, and hot-update paths; Remote
-/// constructs successfully but every consumer fails fast until the remote
-/// paths are implemented. Path rules, cache eviction, capacity stats, and
-/// the project-delete two-step semantics stay inside the local client.
+/// only supported branch; the remote PostgreSQL client is forward
+/// scaffolding and assembly rejects it at startup until the remote paths
+/// are wired. Path rules, cache eviction, capacity stats, and the
+/// project-delete two-step semantics stay inside the local client.
 #[derive(Clone)]
 pub enum RelationStore {
     /// Embedded SQLite repositories.
@@ -556,6 +828,10 @@ impl RelationStore {
     }
 
     /// Build the store from the resolved database configuration.
+    ///
+    /// The remote branch is rejected at startup: only the local backend is
+    /// supported, and refusing here keeps a remote selection from failing
+    /// halfway through indexing or search.
     pub fn from_database_config(
         database: &cce_config::global::DatabaseConfig,
     ) -> Result<Self, StorageError> {
@@ -566,10 +842,9 @@ impl RelationStore {
                 })?;
                 Ok(Self::Local(Arc::new(client)))
             }
-            cce_config::modules::RelationBackend::Remote => {
-                let client = PostgresClient::from_database_config(database)?;
-                Ok(Self::Remote(Arc::new(client)))
-            }
+            cce_config::modules::RelationBackend::Remote => Err(StorageError::validation(
+                "remote relation backend is not supported yet: the supported matrix is local-only; remote branches are forward scaffolding",
+            )),
         }
     }
 }
@@ -583,33 +858,612 @@ impl std::fmt::Debug for RelationStore {
     }
 }
 
+macro_rules! dispatch_relation {
+    ($self:expr, $method:ident ($($arg:expr),*)) => {
+        match $self {
+            Self::Local(client) => RelationStorage::$method(client.as_ref(), $($arg),*).await,
+            Self::Remote(client) => RelationStorage::$method(client.as_ref(), $($arg),*).await,
+        }
+    };
+}
+
+impl RelationStorage for RelationStore {
+    async fn ensure_project(&self, project_id: i64, root_path: &str) -> Result<(), StorageError> {
+        dispatch_relation!(self, ensure_project(project_id, root_path))
+    }
+
+    async fn project_record(&self, project_id: i64) -> Result<Option<ProjectRecord>, StorageError> {
+        dispatch_relation!(self, project_record(project_id))
+    }
+
+    async fn project_meta_get_int(&self, project_id: i64, key: &str) -> Result<i64, StorageError> {
+        dispatch_relation!(self, project_meta_get_int(project_id, key))
+    }
+
+    async fn project_meta_set_int(
+        &self,
+        project_id: i64,
+        key: &str,
+        value: i64,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(self, project_meta_set_int(project_id, key, value))
+    }
+
+    async fn manifest_begin_building(
+        &self,
+        project_id: i64,
+        data_epoch: i64,
+        operation_id: &str,
+        input_fingerprint: Option<&str>,
+    ) -> Result<ProjectIndexManifest, StorageError> {
+        dispatch_relation!(
+            self,
+            manifest_begin_building(project_id, data_epoch, operation_id, input_fingerprint)
+        )
+    }
+
+    async fn manifest_mark_candidate_ready(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(
+            self,
+            manifest_mark_candidate_ready(project_id, operation_id)
+        )
+    }
+
+    async fn manifest_activate(
+        &self,
+        project_id: i64,
+        data_epoch: i64,
+        relation_epoch: i64,
+        operation_id: &str,
+        input_fingerprint: Option<&str>,
+    ) -> Result<ProjectIndexManifest, StorageError> {
+        dispatch_relation!(
+            self,
+            manifest_activate(
+                project_id,
+                data_epoch,
+                relation_epoch,
+                operation_id,
+                input_fingerprint
+            )
+        )
+    }
+
+    async fn manifest_mark_failed(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        reason: &str,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(self, manifest_mark_failed(project_id, operation_id, reason))
+    }
+
+    async fn manifest_active(
+        &self,
+        project_id: i64,
+    ) -> Result<Option<ProjectIndexManifest>, StorageError> {
+        dispatch_relation!(self, manifest_active(project_id))
+    }
+
+    async fn manifest_recycle_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, manifest_recycle_epoch(project_id, epoch))
+    }
+
+    async fn overrides_replace(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        overrides: &[GenerationOverride],
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(self, overrides_replace(project_id, epoch, overrides))
+    }
+
+    async fn overrides_for_generation(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Vec<GenerationOverride>, StorageError> {
+        dispatch_relation!(self, overrides_for_generation(project_id, epoch))
+    }
+
+    async fn files_upsert(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        files: &[FileRecord],
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, files_upsert(project_id, epoch, files))
+    }
+
+    async fn files_delete_by_project_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, files_delete_by_project_epoch(project_id, epoch))
+    }
+
+    async fn files_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
+        dispatch_relation!(self, files_delete_by_project(project_id))
+    }
+
+    async fn entities_upsert(&self, entities: &[EntityRecord]) -> Result<usize, StorageError> {
+        dispatch_relation!(self, entities_upsert(entities))
+    }
+
+    async fn entities_delete_by_project_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, entities_delete_by_project_epoch(project_id, epoch))
+    }
+
+    async fn entities_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
+        dispatch_relation!(self, entities_delete_by_project(project_id))
+    }
+
+    async fn entities_count(&self, project_id: i64, epoch: i64) -> Result<i64, StorageError> {
+        dispatch_relation!(self, entities_count(project_id, epoch))
+    }
+
+    async fn chunks_upsert(&self, chunks: &[ChunkRecord]) -> Result<usize, StorageError> {
+        dispatch_relation!(self, chunks_upsert(chunks))
+    }
+
+    async fn chunks_by_ids(
+        &self,
+        project_id: i64,
+        chunk_ids: &[String],
+        epochs: &[i64],
+    ) -> Result<Vec<ChunkRecord>, StorageError> {
+        dispatch_relation!(self, chunks_by_ids(project_id, chunk_ids, epochs))
+    }
+
+    async fn chunks_delete_by_file(
+        &self,
+        project_id: i64,
+        file_path: &str,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, chunks_delete_by_file(project_id, file_path))
+    }
+
+    async fn chunks_delete_by_project_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, chunks_delete_by_project_epoch(project_id, epoch))
+    }
+
+    async fn chunks_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
+        dispatch_relation!(self, chunks_delete_by_project(project_id))
+    }
+
+    async fn chunks_count(&self, project_id: i64, epoch: i64) -> Result<i64, StorageError> {
+        dispatch_relation!(self, chunks_count(project_id, epoch))
+    }
+
+    async fn mappings_upsert(
+        &self,
+        mappings: &[EntityDetailMapping],
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, mappings_upsert(mappings))
+    }
+
+    async fn mappings_delete_by_project_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, mappings_delete_by_project_epoch(project_id, epoch))
+    }
+
+    async fn mappings_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
+        dispatch_relation!(self, mappings_delete_by_project(project_id))
+    }
+
+    async fn summary_upsert(
+        &self,
+        file_id: i64,
+        epoch: i64,
+        summary_json: &str,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(self, summary_upsert(file_id, epoch, summary_json))
+    }
+
+    async fn summary_at_epoch(
+        &self,
+        file_id: i64,
+        epoch: i64,
+    ) -> Result<Option<String>, StorageError> {
+        dispatch_relation!(self, summary_at_epoch(file_id, epoch))
+    }
+
+    async fn summaries_by_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Vec<(String, String, i64)>, StorageError> {
+        dispatch_relation!(self, summaries_by_epoch(project_id, epoch))
+    }
+
+    async fn summaries_delete_by_project_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, summaries_delete_by_project_epoch(project_id, epoch))
+    }
+
+    async fn summaries_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError> {
+        dispatch_relation!(self, summaries_delete_by_project(project_id))
+    }
+
+    async fn checkpoint_create(
+        &self,
+        project_id: i64,
+        checkpoint: &CheckpointRecord,
+    ) -> Result<i64, StorageError> {
+        dispatch_relation!(self, checkpoint_create(project_id, checkpoint))
+    }
+
+    async fn checkpoint_get(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+    ) -> Result<Option<CheckpointRecord>, StorageError> {
+        dispatch_relation!(self, checkpoint_get(project_id, operation_id))
+    }
+
+    async fn checkpoint_set_status(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        status: CheckpointStatus,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(
+            self,
+            checkpoint_set_status(project_id, operation_id, status)
+        )
+    }
+
+    async fn checkpoint_update(
+        &self,
+        project_id: i64,
+        checkpoint: &CheckpointRecord,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(self, checkpoint_update(project_id, checkpoint))
+    }
+
+    async fn file_checkpoint_upsert(
+        &self,
+        project_id: i64,
+        file: &FileCheckpointRecord,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(self, file_checkpoint_upsert(project_id, file))
+    }
+
+    async fn file_checkpoint_get(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        file_path: &str,
+    ) -> Result<Option<FileCheckpointRecord>, StorageError> {
+        dispatch_relation!(
+            self,
+            file_checkpoint_get(project_id, operation_id, file_path)
+        )
+    }
+
+    async fn checkpoint_files_delete_by_operation(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(
+            self,
+            checkpoint_files_delete_by_operation(project_id, operation_id)
+        )
+    }
+
+    async fn work_unit_insert(
+        &self,
+        record: &WorkUnitCheckpointRecord,
+    ) -> Result<i64, StorageError> {
+        dispatch_relation!(self, work_unit_insert(record))
+    }
+
+    async fn work_unit_set_status(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        stage: &str,
+        work_unit_hash: &str,
+        status: WorkUnitStatus,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(
+            self,
+            work_unit_set_status(project_id, operation_id, stage, work_unit_hash, status)
+        )
+    }
+
+    async fn work_units_list(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        stage: &str,
+    ) -> Result<Vec<WorkUnitCheckpointRecord>, StorageError> {
+        dispatch_relation!(self, work_units_list(project_id, operation_id, stage))
+    }
+
+    async fn work_unit_by_hash(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        stage: &str,
+        work_unit_hash: &str,
+    ) -> Result<Option<WorkUnitCheckpointRecord>, StorageError> {
+        dispatch_relation!(
+            self,
+            work_unit_by_hash(project_id, operation_id, stage, work_unit_hash)
+        )
+    }
+
+    async fn snapshot_allocate(
+        &self,
+        project_id: i64,
+        operation_id: &str,
+        config_fingerprint: &str,
+    ) -> Result<i64, StorageError> {
+        dispatch_relation!(
+            self,
+            snapshot_allocate(project_id, operation_id, config_fingerprint)
+        )
+    }
+
+    async fn snapshot_write_ready(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        snapshot: &cce_types::CanonicalRelationSnapshot,
+        input_fingerprint: &str,
+        snapshot_fingerprint: &str,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(
+            self,
+            snapshot_write_ready(
+                project_id,
+                epoch,
+                snapshot,
+                input_fingerprint,
+                snapshot_fingerprint
+            )
+        )
+    }
+
+    async fn snapshot_read(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<cce_types::CanonicalRelationSnapshot, StorageError> {
+        dispatch_relation!(self, snapshot_read(project_id, epoch))
+    }
+
+    async fn snapshot_manifest(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<Option<cce_types::RelationSnapshotManifest>, StorageError> {
+        dispatch_relation!(self, snapshot_manifest(project_id, epoch))
+    }
+
+    async fn snapshot_delta_chain(
+        &self,
+        project_id: i64,
+        after_epoch: i64,
+        up_to_epoch: i64,
+    ) -> Result<Vec<cce_types::SnapshotDelta>, StorageError> {
+        dispatch_relation!(
+            self,
+            snapshot_delta_chain(project_id, after_epoch, up_to_epoch)
+        )
+    }
+
+    async fn snapshot_find_base(
+        &self,
+        project_id: i64,
+        delta_epoch: i64,
+    ) -> Result<Option<i64>, StorageError> {
+        dispatch_relation!(self, snapshot_find_base(project_id, delta_epoch))
+    }
+
+    async fn snapshot_mark_failed(
+        &self,
+        project_id: i64,
+        epoch: i64,
+        reason: &str,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(self, snapshot_mark_failed(project_id, epoch, reason))
+    }
+
+    async fn snapshot_delete_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        dispatch_relation!(self, snapshot_delete_epoch(project_id, epoch))
+    }
+
+    async fn snapshot_delete_project(&self, project_id: i64) -> Result<usize, StorageError> {
+        dispatch_relation!(self, snapshot_delete_project(project_id))
+    }
+
+    async fn admission_record_admitted(
+        &self,
+        fingerprint: &str,
+        projects: &[i64],
+        quota_bytes: Option<u64>,
+        bytes: u64,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(
+            self,
+            admission_record_admitted(fingerprint, projects, quota_bytes, bytes)
+        )
+    }
+
+    async fn admission_record_rejection(
+        &self,
+        fingerprint: &str,
+        projects: &[i64],
+        quota_bytes: Option<u64>,
+        reason: &str,
+    ) -> Result<(), StorageError> {
+        dispatch_relation!(
+            self,
+            admission_record_rejection(fingerprint, projects, quota_bytes, reason)
+        )
+    }
+
+    async fn admission_get(
+        &self,
+        fingerprint: &str,
+    ) -> Result<Option<AdmissionAuditRecord>, StorageError> {
+        dispatch_relation!(self, admission_get(fingerprint))
+    }
+
+    async fn admission_list(&self) -> Result<Vec<AdmissionAuditRecord>, StorageError> {
+        dispatch_relation!(self, admission_list())
+    }
+
+    async fn db_size(&self) -> Result<u64, StorageError> {
+        dispatch_relation!(self, db_size())
+    }
+
+    async fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError> {
+        dispatch_relation!(self, delete_project_db(project_id))
+    }
+
+    fn backend_name(&self) -> &'static str {
+        match self {
+            Self::Local(client) => RelationStorage::backend_name(client.as_ref()),
+            Self::Remote(client) => RelationStorage::backend_name(client.as_ref()),
+        }
+    }
+
+    fn is_per_project_db(&self) -> bool {
+        match self {
+            Self::Local(client) => RelationStorage::is_per_project_db(client.as_ref()),
+            Self::Remote(client) => RelationStorage::is_per_project_db(client.as_ref()),
+        }
+    }
+}
+
+/// Backend-neutral relation diagnostics snapshot.
+///
+/// Mirrors [`VectorDiagnostics`]: both branches probe their database size.
+/// Probe failures fold into the snapshot so handlers stay branch-free.
+#[derive(Debug, Clone)]
+pub struct RelationDiagnostics {
+    /// Whether the backend is reachable and serving.
+    pub reachable: bool,
+    /// Backend version, when the backend exposes one.
+    pub version: Option<String>,
+    /// Aggregate on-disk size in bytes, when the probe succeeds.
+    pub size_bytes: u64,
+    /// Human-readable failure detail, when unhealthy.
+    pub error: Option<String>,
+}
+
+impl RelationStore {
+    /// Backend-neutral diagnostics snapshot for status endpoints.
+    ///
+    /// Never fails: probe errors are folded into the snapshot so handlers
+    /// stay branch-free.
+    pub async fn diagnose_summary(&self) -> RelationDiagnostics {
+        match RelationStorage::db_size(self).await {
+            Ok(size) => RelationDiagnostics {
+                reachable: true,
+                version: None,
+                size_bytes: size,
+                error: None,
+            },
+            Err(e) => RelationDiagnostics {
+                reachable: false,
+                version: None,
+                size_bytes: 0,
+                error: Some(format!("Diagnostic failed: {e}")),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn fulltext_store_local_branch_dispatch() {
+    fn fulltext_store_satisfies_fulltext_contract() {
+        cce_storage_common::assert_fulltext_storage::<FulltextStore>();
         let database = cce_config::global::DatabaseConfig::default();
         let store =
             FulltextStore::from_database_config(&database).expect("local branch must build");
-        assert!(store.is_local());
-        assert_eq!(store.backend_name(), "local");
+        assert_eq!(FulltextStorage::backend_name(&store), "local");
     }
 
     #[test]
-    fn fulltext_store_remote_branch_dispatch() {
+    fn relation_store_satisfies_relation_contract() {
+        cce_storage_common::assert_relation_storage::<RelationStore>();
+        let root = Arc::new(SqliteClient::in_memory().expect("in-memory client"));
+        let store = RelationStore::local(root);
+        assert_eq!(RelationStorage::backend_name(&store), "local");
+        assert!(RelationStorage::is_per_project_db(&store));
+    }
+
+    #[tokio::test]
+    async fn fulltext_diagnose_folds_probe_failure() {
+        let database = cce_config::global::DatabaseConfig::default();
+        let store =
+            FulltextStore::from_database_config(&database).expect("local branch must build");
+        let diag = store.diagnose_summary().await;
+        assert!(!diag.reachable);
+        assert!(!diag.index_exists);
+        assert_eq!(diag.documents_count, 0);
+        assert!(diag.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn relation_diagnose_reports_local_size() {
+        let root = Arc::new(SqliteClient::in_memory().expect("in-memory client"));
+        let store = RelationStore::local(root);
+        let diag = store.diagnose_summary().await;
+        assert!(diag.reachable);
+        assert!(diag.error.is_none());
+    }
+
+    #[test]
+    fn fulltext_store_remote_branch_rejected_at_startup() {
         let mut database = cce_config::global::DatabaseConfig {
             fulltext_backend: cce_config::modules::FulltextBackend::Remote,
             ..cce_config::global::DatabaseConfig::default()
         };
         assert!(FulltextStore::from_database_config(&database).is_err());
         database.fulltext_remote.url = Some("http://localhost:9200".to_string());
-        let store =
-            FulltextStore::from_database_config(&database).expect("remote branch must build");
-        assert!(store.is_remote());
-        assert_eq!(store.backend_name(), "remote");
-        assert!(store.as_remote().is_some());
-        assert!(store.as_local().is_none());
+        database.fulltext_remote.index_name = Some("code_index".to_string());
+        let err = FulltextStore::from_database_config(&database)
+            .expect_err("remote branch must fail at startup");
+        assert!(
+            err.to_string().contains("not supported yet"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -623,20 +1477,18 @@ mod tests {
     }
 
     #[test]
-    fn relation_store_remote_branch_dispatch() {
+    fn relation_store_remote_branch_rejected_at_startup() {
         let mut database = cce_config::global::DatabaseConfig {
             relation_backend: cce_config::modules::RelationBackend::Remote,
             ..cce_config::global::DatabaseConfig::default()
         };
         assert!(RelationStore::from_database_config(&database).is_err());
         database.relation_remote.url = Some("postgres://localhost:5432/cce".to_string());
-        let store =
-            RelationStore::from_database_config(&database).expect("remote branch must build");
-        assert!(store.is_remote());
-        assert_eq!(store.backend_name(), "remote");
-        assert!(store.as_remote().is_some());
-        assert!(store.as_local().is_none());
-        let scoped = store.for_project(1).expect("remote scoping clones");
-        assert!(scoped.is_remote());
+        let err = RelationStore::from_database_config(&database)
+            .expect_err("remote branch must fail at startup");
+        assert!(
+            err.to_string().contains("not supported yet"),
+            "unexpected error: {err}"
+        );
     }
 }

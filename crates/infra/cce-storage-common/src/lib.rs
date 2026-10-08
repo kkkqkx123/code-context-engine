@@ -8,8 +8,10 @@
 //! hatch: the Qdrant branch honors it, the local branch rejects queries that
 //! set it instead of silently ignoring it.
 //!
-//! It also holds the relation storage contract (`RelationStorage`) shared by
-//! the embedded SQLite branch and the remote PostgreSQL branch.
+//! It also holds the metadata storage contract (`RelationStorage`) shared by
+//! the embedded SQLite branch and the remote PostgreSQL branch, and the
+//! fulltext storage contract (`FulltextStorage`) shared by the embedded
+//! Tantivy branch and the remote search-service branch.
 //!
 //! # Architecture
 //!
@@ -22,6 +24,9 @@
 //!     └── RelationStorage (operation contract)
 //!             ├── SQLite branch (embedded)
 //!             └── PostgreSQL branch (remote)
+//!     └── FulltextStorage (operation contract)
+//!             ├── Tantivy branch (embedded)
+//!             └── Search-service branch (remote)
 //! ```
 //!
 //! Dispatch uses a backend enum at the assembly layer, never trait objects.
@@ -30,9 +35,14 @@ use serde::{Deserialize, Serialize};
 
 use cce_types::{FileCategory, PointKind, TestSource, normalize_project_path};
 
-pub mod relation;
+pub mod fulltext;
+pub mod metadb;
 
-pub use relation::{
+pub use fulltext::{
+    FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
+    TermOperator, assert_fulltext_storage,
+};
+pub use metadb::{
     RelationChunk, RelationEntity, RelationFile, RelationStorage, assert_relation_storage,
 };
 

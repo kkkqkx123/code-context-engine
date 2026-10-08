@@ -12,7 +12,7 @@ use cce_api::models::{
     DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest, DeadLetterRetryResponse,
     ErrorResponse, ProjectIndexResponse,
 };
-use cce_storage_relation_sqlite::{ProjectRepository, ProjectUpdateRecord};
+use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 /// Handle project indexing request
 #[utoipa::path(

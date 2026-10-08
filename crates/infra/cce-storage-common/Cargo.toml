@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+cce-config = { path = "../../core/cce-config" }
 cce-types = { path = "../../core/cce-types" }
 cce-utils = { path = "../../core/cce-utils" }
 rusqlite = { workspace = true }
@@ -15,7 +16,9 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-cce-config = { path = "../../core/cce-config" }
+cce-storage-bm25 = { path = "../cce-storage-bm25" }
+cce-storage-metadb-pg = { path = "../cce-storage-metadb-pg" }
+cce-storage-metadb-sqlite = { path = "../cce-storage-metadb-sqlite" }
 cce-storage-vector-local = { path = "../cce-storage-vector-local" }
 cce-storage-vector-qdrant = { path = "../cce-storage-vector-qdrant" }
 tempfile = { workspace = true }

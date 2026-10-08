@@ -387,10 +387,10 @@ pub struct DependencyParams {
 
 /// Validate backend preset combination (three-tier logic).
 ///
-/// Official presets pass silently: local-first, remote-vector, and the
-/// remote preset (Qdrant plus remote fulltext plus remote relation).
-/// Non-preset combinations warn and point at the advanced switch; partial
-/// remote mixes additionally warn that they are outside the tested matrix.
+/// Official presets pass silently: local-first and remote-vector. Remote
+/// relation/fulltext branches are forward scaffolding, so any selection of
+/// them warns that the runtime is local-only; non-preset combinations warn
+/// and point at the advanced switch.
 pub fn validate_backend_preset_dependencies(
     vector_backend: crate::modules::VectorBackend,
     relation_backend: crate::modules::RelationBackend,
@@ -406,7 +406,7 @@ pub fn validate_backend_preset_dependencies(
             WarningSeverity::Info,
             "database.relation_backend/database.fulltext_backend",
             "database.qdrant",
-            "Remote relation/fulltext branches require the remote preset (Qdrant plus remote fulltext plus remote relation) and a full reindex; old data is never migrated.",
+            "Remote relation/fulltext branches are forward scaffolding and not wired into indexing, search, or hot-update paths; the supported runtime is local-only, and a full reindex is required when switching backends.",
         ));
     }
     let official = matches!(
@@ -419,10 +419,6 @@ pub fn validate_backend_preset_dependencies(
             VB::Qdrant,
             crate::modules::RelationBackend::Local,
             crate::modules::FulltextBackend::Local,
-        ) | (
-            VB::Qdrant,
-            crate::modules::RelationBackend::Remote,
-            crate::modules::FulltextBackend::Remote,
         )
     );
     if !official {

@@ -6,15 +6,15 @@ use async_trait::async_trait;
 use cce_orchestrator::index::{
     RelationPublication, RelationSnapshotPublisher, ResolutionPipelineService,
 };
-use cce_relation::index::RelationIndexView;
-use cce_relation::index::core::RelationIndex;
-use cce_relation::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
-use cce_relation::index::snapshot_loader::RelationSnapshotLoader;
-use cce_storage_relation_sqlite::SqliteClient;
-use cce_storage_relation_sqlite::repo::{
+use cce_codegraph::index::RelationIndexView;
+use cce_codegraph::index::core::RelationIndex;
+use cce_codegraph::index::snapshot_index::{LayeredSnapshotIndex, RelationSnapshotIndex};
+use cce_codegraph::index::snapshot_loader::RelationSnapshotLoader;
+use cce_storage_metadb_sqlite::SqliteClient;
+use cce_storage_metadb_sqlite::repo::{
     ProjectIndexManifestRepository, RelationSnapshotRepository,
 };
-use cce_storage_relation_sqlite::snapshot_store::SqliteSnapshotStore;
+use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
 use rusqlite::OptionalExtension;
 use tokio::sync::Mutex;
@@ -645,14 +645,14 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_relation::index::snapshot_query::{
+    use cce_codegraph::index::snapshot_query::{
         SnapshotEntityQueryOps, SnapshotFileQueryOps, SnapshotRelationQueryOps,
         SnapshotSymbolQueryOps,
     };
-    use cce_relation::index::{LayeredSnapshotIndex, RelationSnapshotIndex};
-    use cce_storage_relation_sqlite::ProjectRepository;
-    use cce_storage_relation_sqlite::repo::ProjectIndexManifestRepository;
-    use cce_storage_relation_sqlite::types::NewProjectRecord;
+    use cce_codegraph::index::{LayeredSnapshotIndex, RelationSnapshotIndex};
+    use cce_storage_metadb_sqlite::ProjectRepository;
+    use cce_storage_metadb_sqlite::repo::ProjectIndexManifestRepository;
+    use cce_storage_metadb_sqlite::types::NewProjectRecord;
     use cce_types::relation::CallContext;
     use cce_types::{
         CanonicalEntity, CanonicalFile, CanonicalRelation, CanonicalRelationTarget, EntityKind,
@@ -751,7 +751,7 @@ mod tests {
     }
 
     /// Build the in-memory index matching `snapshot()`.
-    fn snapshot_index(snapshot: &CanonicalRelationSnapshot) -> cce_relation::index::RelationIndex {
+    fn snapshot_index(snapshot: &CanonicalRelationSnapshot) -> cce_codegraph::index::RelationIndex {
         RelationSnapshotLoader::load_canonical(snapshot).expect("test snapshot should load")
     }
 
@@ -764,7 +764,7 @@ mod tests {
 
     /// Layered base view over an already-built in-memory index (empty chain).
     fn test_layered_base_from_index(
-        index: &cce_relation::index::RelationIndex,
+        index: &cce_codegraph::index::RelationIndex,
     ) -> LayeredSnapshotIndex {
         LayeredSnapshotIndex::new(Arc::new(RelationSnapshotIndex::from_index_shared(index)))
     }
