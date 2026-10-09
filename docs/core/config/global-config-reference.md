@@ -23,6 +23,26 @@
 [export]              # 导出配置
 ```
 
+## 出口代理配置
+
+模型提供者的出站代理。代理按「用到哪一级，就配在哪一级」逐级收窄影响范围，没有全局开关：需要整体走代理用环境变量即可，配置文件只描述精确的例外与精确的目标。
+
+```toml
+[llm.providers.siliconflow]
+base_url = "https://api.siliconflow.cn/v1"
+proxy_url = "http://127.0.0.1:7890"      # 该提供者所有请求走代理
+
+[llm.embedding_models.proxied-embed]
+provider_id = "siliconflow"
+proxy_url = "http://127.0.0.1:7890"      # 只有这一个模型走代理，同提供者的其他模型不受影响
+```
+
+**优先级**：模型自身的 `proxy_url` > 所属提供者的 `proxy_url` > 直连。项目级配置不改写代理。
+
+**支持的形式**：`http`、`https`、`socks4`、`socks4a`、`socks5`、`socks5h`；代理地址中的用户凭证不会出现在日志与错误信息里。
+
+**环境变量代理**：标准环境变量 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` 与 `NO_PROXY` 始终生效（HTTP 客户端默认读取），配置的代理优先于环境代理。因此「整个部署走代理、个别提供者直连」应通过在提供者/模型上不配置代理并由 `NO_PROXY` 覆盖，或反向用配置精确指定哪些模型走代理来实现。
+
 ## 服务器配置
 
 ```toml
@@ -269,15 +289,16 @@ api_keys = ["${LLM_API_KEY_OPENAI}"]      # API 密钥
 timeout_secs = 30                         # 请求超时（秒）
 max_retries = 3                           # 最大重试次数
 retry_delay_ms = 1000                     # 重试延迟（毫秒）
-retry_jitter = 0.2                        # 重试延迟随机抖动比例（默认 0.2，追加 0~20%）
-rate_limit_max_retries = 5                # 429 限流错误的独立重试预算（默认 5 次）
-rate_limit_max_delay_ms = 60000           # 429 重试等待时间上限（毫秒，默认 60000）
 rate_limit = 60                           # 每分钟最大请求数（0 = 不限速，同上游共享）
+# proxy_url = "http://127.0.0.1:7890"     # 该提供者的出站代理；模型可用同名配置覆盖
+# no_proxy = ["localhost"]                # 绕过代理的主机列表
 
 [llm.providers.openai-gpt4.circuit_breaker] # 熔断器配置（默认全启用）
 enabled = true                            # 是否启用熔断（默认 true）
-failure_threshold = 5                     # 连续失败多少次开启熔断（默认 5）
-recovery_timeout_secs = 60                # 熔断后恢复探测前的等待秒数（默认 60）
+min_samples = 10                          # 滑动窗口最小样本数（默认 10）
+failure_ratio = 0.5                       # 失败率阈值 0.0-1.0（默认 0.5）
+open_duration_ms = 60000                  # 熔断开启时长毫秒（默认 60000）
+half_open_probes = 1                      # 半开探测数（默认 1）
 
 [llm.providers.ollama-local]
 name = "Ollama Local"
@@ -294,9 +315,15 @@ rate_limit = 0                            # 本地服务通常不限速
 
 熔断器与限速器共享同一上游粒度（按 `base_url`）：同一上游的所有模型客户端（embedding / chat / rerank）共用同一个熔断器。计入熔断的失败包括 HTTP 5xx/网络错误、超时和无效响应；429 限流、鉴权、模型不存在等错误不计入。
 
-- `failure_threshold`：连续失败计数达到该值后熔断开启（默认 5）。
-- `recovery_timeout_secs`：熔断开启后，等待该秒数才允许一次半开探测请求（默认 60）。
+- `min_samples`：滑动窗口最小样本数（默认 10）。
+- `failure_ratio`：失败率阈值 0.0-1.0（默认 0.5）。
+- `open_duration_ms`：熔断开启时长毫秒（默认 60000）。
+- `half_open_probes`：半开探测数（默认 1）。
 - 多个提供者引用同一 `base_url` 时，首个注册的熔断配置生效。
+
+### 提供者代理
+
+`[llm.providers.<id>].proxy_url` 让该提供者的全部请求（embedding / chat / rerank）走代理。某个模型需要单独不同的代理时，用模型自己的 `proxy_url` 覆盖，详见 [出口代理配置](#出口代理配置)。
 
 ### 选择策略
 

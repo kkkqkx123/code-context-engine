@@ -19,7 +19,6 @@ use cce_types::error::config::ConfigValidationError;
 // Re-use shared default value functions
 use super::defaults::{
     default_embedder_max_retries as default_max_retries, default_retry_delay, default_timeout,
-    default_true,
 };
 
 // Re-export types from llm_models module
@@ -55,10 +54,6 @@ pub struct EmbedderConfig {
     #[serde(default = "default_retry_delay")]
     pub retry_delay_ms: u64,
 
-    /// Proxy URL (optional)
-    #[serde(deserialize_with = "empty_string_as_none", default)]
-    pub proxy_url: Option<String>,
-
     /// Extra HTTP headers
     #[serde(default)]
     pub extra_headers: HashMap<String, String>,
@@ -66,11 +61,6 @@ pub struct EmbedderConfig {
     /// Extra request parameters
     #[serde(default)]
     pub extra_params: HashMap<String, serde_json::Value>,
-
-    /// Accepted for configuration parsing. The embedding transport always
-    /// requests float arrays, so this flag currently has no effect.
-    #[serde(default = "default_true")]
-    pub use_base64: bool,
 
     /// Path to file containing API key (alternative to api_keys)
     #[serde(deserialize_with = "empty_string_as_none", default)]
@@ -110,10 +100,8 @@ impl Default for EmbedderConfig {
             timeout_secs: default_timeout(),
             max_retries: default_max_retries(),
             retry_delay_ms: default_retry_delay(),
-            proxy_url: None,
             extra_headers: HashMap::new(),
             extra_params: HashMap::new(),
-            use_base64: true,
             api_key_file: None,
         }
     }
@@ -167,6 +155,5 @@ mod tests {
         assert_eq!(config.max_batch_tokens, 8192);
         assert_eq!(config.max_item_tokens, 8192);
         assert_eq!(config.timeout_secs, 30);
-        assert!(config.use_base64);
     }
 }

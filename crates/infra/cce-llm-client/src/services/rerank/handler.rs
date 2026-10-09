@@ -41,30 +41,21 @@ impl<P: RerankProvider> RerankRequestHandler<P> {
     pub async fn rerank(&self, request: &RerankRequest) -> Result<RerankResult, LlmError> {
         self.validate_basic(request)?;
 
-        let limited_request = self.limit_candidates(request);
-
-        if limited_request.candidates.is_empty() {
-            return Err(LlmError::invalid_input(
-                "No valid candidates after filtering".to_string(),
-            ));
-        }
-
         tracing::trace!(
-            query_length = limited_request.query.len(),
-            candidate_count = limited_request.candidates.len(),
-            timeout_ms = limited_request.config.timeout_ms,
+            query_length = request.query.len(),
+            candidate_count = request.candidates.len(),
+            timeout_ms = request.config.timeout_ms,
             "Starting reranking"
         );
 
         let start = std::time::Instant::now();
 
-        let timeout_duration = std::time::Duration::from_millis(limited_request.config.timeout_ms);
-        let outcome =
-            tokio::time::timeout(timeout_duration, self.provider.rerank(&limited_request)).await;
+        let timeout_duration = std::time::Duration::from_millis(request.config.timeout_ms);
+        let outcome = tokio::time::timeout(timeout_duration, self.provider.rerank(request)).await;
 
         let elapsed = start.elapsed();
         let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-        let candidate_count = limited_request.candidates.len();
+        let candidate_count = request.candidates.len();
 
         match outcome {
             Ok(Ok(result)) => {
@@ -91,7 +82,7 @@ impl<P: RerankProvider> RerankRequestHandler<P> {
             Err(_) => {
                 tracing::warn!(
                     elapsed_ms = elapsed.as_millis(),
-                    timeout_ms = limited_request.config.timeout_ms,
+                    timeout_ms = request.config.timeout_ms,
                     "Reranking timed out"
                 );
 
@@ -102,45 +93,25 @@ impl<P: RerankProvider> RerankRequestHandler<P> {
                 Err(LlmError::Timeout(
                     cce_types::error::common::TimeoutError::new(format!(
                         "Rerank timeout after {}ms",
-                        limited_request.config.timeout_ms
+                        request.config.timeout_ms
                     )),
                 ))
             }
         }
     }
 
-    /// Basic validation (excluding number of candidates)
+    /// Basic validation: candidate clipping is owned by the suite provider.
     fn validate_basic(&self, request: &RerankRequest) -> Result<(), LlmError> {
         if request.query.is_empty() {
             return Err(LlmError::invalid_input("Query cannot be empty".to_string()));
         }
+        if request.candidates.is_empty() {
+            return Err(LlmError::invalid_input(
+                "No valid candidates after filtering".to_string(),
+            ));
+        }
 
         Ok(())
-    }
-
-    /// Limiting the number of candidates
-    fn limit_candidates(&self, request: &RerankRequest) -> RerankRequest {
-        if request.candidates.len() <= request.config.max_candidates {
-            return request.clone();
-        }
-
-        let mut sorted_candidates = request.candidates.clone();
-        sorted_candidates.sort_by(|a, b| {
-            b.initial_score
-                .partial_cmp(&a.initial_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        let limited_candidates = sorted_candidates
-            .into_iter()
-            .take(request.config.max_candidates)
-            .collect();
-
-        RerankRequest {
-            query: request.query.clone(),
-            candidates: limited_candidates,
-            config: request.config.clone(),
-        }
     }
 }
 

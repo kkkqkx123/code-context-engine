@@ -12,7 +12,7 @@ cce-metrics = { path = "../../core/cce-metrics" }
 cce-utils = { path = "../../core/cce-utils" }
 llm-codec = { path = "../llm-suite/crates/llm-codec" }
 llm-client = { path = "../llm-suite/crates/llm-client" }
-llm-config = { path = "../llm-suite/crates/llm-config" }
+llm-common = { path = "../llm-suite/crates/llm-common" }
 llm-embedding = { path = "../llm-suite/crates/llm-embedding" }
 llm-gateway = { path = "../llm-suite/crates/llm-gateway" }
 llm-rerank = { path = "../llm-suite/crates/llm-rerank" }

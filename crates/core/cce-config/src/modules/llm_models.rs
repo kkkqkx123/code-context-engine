@@ -95,21 +95,6 @@ pub struct ProviderConfig {
     #[serde(default = "default_retry_delay")]
     pub retry_delay_ms: u64,
 
-    /// Random jitter ratio applied on top of computed retry delays
-    /// (default: 0.2 = up to +20%).
-    #[serde(default = "default_retry_jitter")]
-    pub retry_jitter: f64,
-
-    /// Independent retry budget (attempts) for rate limit (429) errors
-    /// (default: 5).
-    #[serde(default = "default_rate_limit_max_retries")]
-    pub rate_limit_max_retries: u32,
-
-    /// Upper bound (ms) for the retry-after driven delay of rate limit errors
-    /// (default: 60000).
-    #[serde(default = "default_rate_limit_max_delay_ms")]
-    pub rate_limit_max_delay_ms: u64,
-
     /// Maximum requests per minute sent to this provider (0 = no limit).
     ///
     /// Shared by all models of this provider: embedding, chat and rerank
@@ -122,9 +107,16 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub circuit_breaker: CircuitBreakerConfig,
 
-    /// Proxy URL (optional)
+    /// Proxy URL for every request this provider serves (optional).
+    ///
+    /// A model may narrow this further with its own `proxy_url`.
     #[serde(deserialize_with = "empty_string_as_none", default)]
     pub proxy_url: Option<String>,
+
+    /// Hosts that bypass `proxy`: domain names (with or without a leading
+    /// dot), CIDR blocks, or `*`.
+    #[serde(default)]
+    pub no_proxy: Vec<String>,
 
     /// Extra HTTP headers
     #[serde(default)]
@@ -139,28 +131,37 @@ pub struct ProviderConfig {
 ///
 /// The breaker is shared per upstream base URL (same granularity as the rate
 /// limiter); its settings are taken from the first provider that registers
-/// the upstream.
+/// the upstream. Fields pass through to the llm-suite breaker unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitBreakerConfig {
     /// Whether circuit breaking is enabled (default: true)
     #[serde(default = "default_circuit_breaker_enabled")]
     pub enabled: bool,
-    /// Consecutive failures (5xx/timeout/network/invalid response) that open
-    /// the circuit (default: 5)
-    #[serde(default = "default_circuit_breaker_failure_threshold")]
-    pub failure_threshold: u32,
-    /// Recovery timeout in seconds before the circuit goes half-open and
-    /// allows a probe request (default: 60)
-    #[serde(default = "default_circuit_breaker_recovery_timeout_secs")]
-    pub recovery_timeout_secs: u64,
+    /// Minimum number of recent requests sampled before the breaker may trip
+    /// (default: 10)
+    #[serde(default = "default_circuit_breaker_min_samples")]
+    pub min_samples: u32,
+    /// Failure ratio (0.0-1.0) over the sample window that opens the circuit
+    /// (default: 0.5)
+    #[serde(default = "default_circuit_breaker_failure_ratio")]
+    pub failure_ratio: f32,
+    /// Recovery time in milliseconds before the circuit goes half-open
+    /// (default: 60000)
+    #[serde(default = "default_circuit_breaker_open_duration_ms")]
+    pub open_duration_ms: u64,
+    /// Maximum probe requests allowed while half-open (default: 1)
+    #[serde(default = "default_circuit_breaker_half_open_probes")]
+    pub half_open_probes: u32,
 }
 
 impl Default for CircuitBreakerConfig {
     fn default() -> Self {
         Self {
             enabled: default_circuit_breaker_enabled(),
-            failure_threshold: default_circuit_breaker_failure_threshold(),
-            recovery_timeout_secs: default_circuit_breaker_recovery_timeout_secs(),
+            min_samples: default_circuit_breaker_min_samples(),
+            failure_ratio: default_circuit_breaker_failure_ratio(),
+            open_duration_ms: default_circuit_breaker_open_duration_ms(),
+            half_open_probes: default_circuit_breaker_half_open_probes(),
         }
     }
 }
@@ -169,12 +170,20 @@ fn default_circuit_breaker_enabled() -> bool {
     true
 }
 
-fn default_circuit_breaker_failure_threshold() -> u32 {
-    5
+fn default_circuit_breaker_min_samples() -> u32 {
+    10
 }
 
-fn default_circuit_breaker_recovery_timeout_secs() -> u64 {
-    60
+fn default_circuit_breaker_failure_ratio() -> f32 {
+    0.5
+}
+
+fn default_circuit_breaker_open_duration_ms() -> u64 {
+    60_000
+}
+
+fn default_circuit_breaker_half_open_probes() -> u32 {
+    1
 }
 
 impl Validate for ProviderConfig {
@@ -258,28 +267,14 @@ impl Default for ProviderConfig {
             timeout_secs: default_timeout(),
             max_retries: default_max_retries(),
             retry_delay_ms: default_retry_delay(),
-            retry_jitter: default_retry_jitter(),
-            rate_limit_max_retries: default_rate_limit_max_retries(),
-            rate_limit_max_delay_ms: default_rate_limit_max_delay_ms(),
             rate_limit: default_rate_limit(),
             circuit_breaker: CircuitBreakerConfig::default(),
             proxy_url: None,
+            no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
         }
     }
-}
-
-fn default_retry_jitter() -> f64 {
-    0.2
-}
-
-fn default_rate_limit_max_retries() -> u32 {
-    20
-}
-
-fn default_rate_limit_max_delay_ms() -> u64 {
-    60000
 }
 
 fn default_rate_limit() -> u32 {
@@ -312,6 +307,15 @@ pub struct EmbeddingModelConfig {
     #[serde(default)]
     pub api_model_name: Option<String>,
 
+    /// Proxy URL for this model only (optional).
+    ///
+    /// Overrides the provider's `proxy_url`, so a proxy can be scoped to a
+    /// single model instead of every request the provider serves. Unset
+    /// falls back to the provider setting; no setting means a direct
+    /// connection.
+    #[serde(deserialize_with = "empty_string_as_none", default)]
+    pub proxy_url: Option<String>,
+
     /// Maximum tokens per batch request
     #[serde(default = "default_max_batch_tokens")]
     pub max_batch_tokens: usize,
@@ -333,6 +337,7 @@ impl Default for EmbeddingModelConfig {
             vector_dimension: 0,
             request_dimensions: None,
             api_model_name: None,
+            proxy_url: None,
             max_batch_tokens: default_max_batch_tokens(),
             max_item_tokens: default_max_item_tokens(),
             preprocessor: PreprocessorConfig::default(),
@@ -365,6 +370,12 @@ pub struct ChatModelConfig {
     #[serde(default = "default_max_input_tokens")]
     pub max_input_tokens: usize,
 
+    /// Proxy URL for this model only (optional).
+    ///
+    /// Overrides the provider's `proxy_url`; unset falls back to it.
+    #[serde(deserialize_with = "empty_string_as_none", default)]
+    pub proxy_url: Option<String>,
+
     /// Extra parameters (provider-specific)
     #[serde(default)]
     pub extra_params: HashMap<String, serde_json::Value>,
@@ -379,6 +390,7 @@ impl Default for ChatModelConfig {
             max_tokens: default_max_output_tokens(),
             top_p: default_top_p(),
             max_input_tokens: default_max_input_tokens(),
+            proxy_url: None,
             extra_params: HashMap::new(),
         }
     }
@@ -417,6 +429,12 @@ pub struct RerankModelConfig {
     /// Execution mode: generative (chat prompt) or cross-encoder (dedicated endpoint)
     #[serde(default)]
     pub mode: RerankMode,
+
+    /// Proxy URL for this model only (optional).
+    ///
+    /// Overrides the provider's `proxy_url`; unset falls back to it.
+    #[serde(deserialize_with = "empty_string_as_none", default)]
+    pub proxy_url: Option<String>,
 }
 
 /// Preprocessor configuration - re-exported from embedder module
@@ -468,12 +486,10 @@ mod tests {
             timeout_secs: default_timeout(),
             max_retries: default_max_retries(),
             retry_delay_ms: default_retry_delay(),
-            retry_jitter: default_retry_jitter(),
-            rate_limit_max_retries: default_rate_limit_max_retries(),
-            rate_limit_max_delay_ms: default_rate_limit_max_delay_ms(),
             rate_limit: default_rate_limit(),
             circuit_breaker: CircuitBreakerConfig::default(),
             proxy_url: None,
+            no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
         };
@@ -494,12 +510,10 @@ mod tests {
             timeout_secs: 30,
             max_retries: 3,
             retry_delay_ms: 1000,
-            retry_jitter: 0.2,
-            rate_limit_max_retries: 5,
-            rate_limit_max_delay_ms: 60000,
             rate_limit: 100_000,
             circuit_breaker: CircuitBreakerConfig::default(),
             proxy_url: None,
+            no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
         };
@@ -536,12 +550,10 @@ mod tests {
             timeout_secs: default_timeout(),
             max_retries: default_max_retries(),
             retry_delay_ms: default_retry_delay(),
-            retry_jitter: default_retry_jitter(),
-            rate_limit_max_retries: default_rate_limit_max_retries(),
-            rate_limit_max_delay_ms: default_rate_limit_max_delay_ms(),
             rate_limit: default_rate_limit(),
             circuit_breaker: CircuitBreakerConfig::default(),
             proxy_url: None,
+            no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
         };
@@ -571,12 +583,10 @@ mod tests {
             timeout_secs: default_timeout(),
             max_retries: default_max_retries(),
             retry_delay_ms: default_retry_delay(),
-            retry_jitter: default_retry_jitter(),
-            rate_limit_max_retries: default_rate_limit_max_retries(),
-            rate_limit_max_delay_ms: default_rate_limit_max_delay_ms(),
             rate_limit: default_rate_limit(),
             circuit_breaker: CircuitBreakerConfig::default(),
             proxy_url: None,
+            no_proxy: Vec::new(),
             extra_headers: HashMap::new(),
             api_key_file: None,
         };

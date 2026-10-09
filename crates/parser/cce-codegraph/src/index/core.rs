@@ -955,14 +955,47 @@ impl RelationIndex {
             let mut map = self.symbol_key_to_entity.write();
             match map.get(&key) {
                 Some(&existing_id) if existing_id != entity_id => {
-                    self.record_symbol_key_conflict(&key, existing_id, entity_id);
-                    tracing::warn!(
-                        symbol_key = ?key,
-                        existing_entity = existing_id.0,
-                        new_entity = entity_id.0,
-                        "stable symbol key already registered to a different entity; keeping the existing mapping"
+                    drop(map);
+                    // cfg-gated duplicates (e.g. platform-specific `impl`
+                    // blocks sharing name, kind and signature) collide on the
+                    // plain key. Disambiguate with the byte span so every
+                    // entity keeps its own stable key instead of losing its
+                    // reverse mapping (which would collapse snapshot keys).
+                    let span_scoped = format!(
+                        "{scoped_name}#{}-{}",
+                        entity.span.start_byte, entity.span.end_byte
                     );
-                    return false;
+                    let span_key = SymbolKey::for_entity(file_path, &span_scoped, entity);
+                    let mut map = self.symbol_key_to_entity.write();
+                    match map.get(&span_key) {
+                        Some(&existing_id) if existing_id != entity_id => {
+                            self.record_symbol_key_conflict(&span_key, existing_id, entity_id);
+                            tracing::warn!(
+                                symbol_key = ?span_key,
+                                existing_entity = existing_id.0,
+                                new_entity = entity_id.0,
+                                "stable symbol key already registered to a different entity; keeping the existing mapping"
+                            );
+                            return false;
+                        }
+                        Some(_) => return true,
+                        None => {}
+                    }
+                    map.insert(span_key.clone(), entity_id);
+                    drop(map);
+                    self.bump_version();
+                    self.entity_to_symbol_key
+                        .write()
+                        .insert(entity_id, span_key.clone());
+                    self.stable_id_to_entity
+                        .write()
+                        .insert(span_key.stable_id().0, entity_id);
+                    self.file_symbol_keys
+                        .write()
+                        .entry(span_key.file_path.clone())
+                        .or_default()
+                        .push(span_key);
+                    return true;
                 }
                 Some(_) => return true,
                 None => {}

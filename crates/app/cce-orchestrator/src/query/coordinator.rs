@@ -462,7 +462,7 @@ impl QueryCoordinator {
         self.check_capabilities(options)?;
 
         // Check cache first
-        if let Some(cached) = self.cache.get_result_for_view(options, view).await {
+        if let Some(mut cached) = self.cache.get_result_for_view(options, view).await {
             tracing::trace!("Cache hit for query: {}", options.query);
 
             // Record metrics if enabled (cache hit)
@@ -471,6 +471,7 @@ impl QueryCoordinator {
                 metrics.record_query(latency_ms, true, cached.items.len());
             }
 
+            cached.from_cache = true;
             return Ok(cached);
         }
 
@@ -725,6 +726,7 @@ impl QueryCoordinator {
             sources: sources_used,
             sub_queries_count,
             failed_sub_queries,
+            from_cache: false,
         })
     }
 

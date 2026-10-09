@@ -1,36 +1,25 @@
 //! OpenAI-compatible API embedder
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 
 use crate::config::EmbeddingConfig;
 use crate::services::embedding::handler::{EmbeddingRequestHandler, SuiteEmbeddingTransport};
 use cce_llm::{EmbeddingResult, LlmError};
 use cce_metrics::{EmbeddingErrorType, EmbeddingMetrics};
+use cce_utils::token_estimation::estimate_tokens;
 
-use crate::services::embedding::preprocessor::{
-    NomicPreprocessor, NomicTaskType, StellaPreprocessor, StellaTaskType, TemplatePreprocessor,
-    TextPreprocessor,
-};
-use cce_config::PreprocessorConfig;
-use llm_embedding::EmbeddingProvider;
-
-/// Consecutive failures after which the provider reports unhealthy.
-/// Mirrors the previous transport's default failure threshold.
-const HEALTH_FAILURE_THRESHOLD: u32 = 3;
+use llm_embedding::EmbeddingProvider as SuiteEmbeddingProvider;
 
 /// OpenAI-compatible API embedder
 pub struct OpenAICompatibleProvider<P = llm_embedding::OpenAICompatibleProvider> {
     /// Batching handler over the llm-suite transport
     handler: EmbeddingRequestHandler<P>,
     embed_config: EmbeddingConfig,
-    preprocessor: PreprocessorConfig,
     /// Monitoring metrics (optional)
     metrics: Option<Arc<EmbeddingMetrics>>,
-    consecutive_failures: AtomicU32,
 }
 
 impl<P> std::fmt::Debug for OpenAICompatibleProvider<P> {
@@ -71,7 +60,6 @@ impl OpenAICompatibleProvider<llm_embedding::OpenAICompatibleProvider> {
             max_item_tokens: resolved.max_item_tokens,
             vector_dimension: Some(resolved.vector_dimension),
         };
-        let preprocessor = resolved.preprocessor;
 
         info!(
             model = %embed_config.model,
@@ -83,14 +71,12 @@ impl OpenAICompatibleProvider<llm_embedding::OpenAICompatibleProvider> {
         Ok(Self {
             handler: EmbeddingRequestHandler::new(transport),
             embed_config,
-            preprocessor,
             metrics: None,
-            consecutive_failures: AtomicU32::new(0),
         })
     }
 }
 
-impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
+impl<P: SuiteEmbeddingProvider> OpenAICompatibleProvider<P> {
     /// Builds a provider around an injected embedding implementation with
     /// test-friendly batching defaults. Used by tests with scripted mocks.
     pub fn from_embed_provider(provider: P, model: impl Into<String>, dimension: usize) -> Self {
@@ -103,9 +89,7 @@ impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
         Self {
             handler: EmbeddingRequestHandler::new(SuiteEmbeddingTransport::for_testing(provider)),
             embed_config,
-            preprocessor: PreprocessorConfig::None,
             metrics: None,
-            consecutive_failures: AtomicU32::new(0),
         }
     }
 
@@ -116,16 +100,11 @@ impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
         }
 
         let start_time = Instant::now();
-
-        let processed_texts = self.preprocess_texts(texts);
-        let text_refs: Vec<&str> = processed_texts.iter().map(|s| s.as_str()).collect();
-
-        let token_count = texts.iter().map(|t| t.len()).sum();
-        let result = self.handler.embed(&text_refs, &self.embed_config).await;
+        let token_count: usize = texts.iter().map(|t| estimate_tokens(t)).sum();
+        let result = self.handler.embed(texts, &self.embed_config).await;
 
         match result {
             Ok(embedding_result) => {
-                self.consecutive_failures.store(0, Ordering::Relaxed);
                 if let Some(metrics) = &self.metrics {
                     let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
                     metrics.record_request(elapsed_ms, token_count, true);
@@ -133,54 +112,12 @@ impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
                 Ok(embedding_result)
             }
             Err(err) => {
-                self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
                 if let Some(metrics) = &self.metrics {
                     let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
                     metrics.record_request(elapsed_ms, token_count, false);
                     metrics.record_error(Self::classify_error(&err));
                 }
                 Err(err)
-            }
-        }
-    }
-
-    /// Preprocess texts using the configured preprocessor
-    fn preprocess_texts(&self, texts: &[&str]) -> Vec<String> {
-        match &self.preprocessor {
-            PreprocessorConfig::None => texts.iter().map(|s| s.to_string()).collect(),
-            PreprocessorConfig::Prefix { prefix } => {
-                trace!(prefix = %prefix, "Using prefix preprocessor");
-                texts
-                    .iter()
-                    .map(|text| format!("{}{}", prefix, text))
-                    .collect()
-            }
-            PreprocessorConfig::Template { template } => {
-                trace!(template = %template, "Using template preprocessor");
-                let preprocessor = TemplatePreprocessor::new(template.clone());
-                preprocessor.process_batch(texts)
-            }
-            PreprocessorConfig::Nomic { task_type } => {
-                let nomic_task_type = match task_type.as_str() {
-                    "search_document" => NomicTaskType::SearchDocument,
-                    "search_query" => NomicTaskType::SearchQuery,
-                    "clustering" => NomicTaskType::Clustering,
-                    "classification" => NomicTaskType::Classification,
-                    _ => NomicTaskType::SearchDocument,
-                };
-                trace!(task_type = ?nomic_task_type, "Using Nomic preprocessor");
-                let preprocessor = NomicPreprocessor::new(nomic_task_type);
-                preprocessor.process_batch(texts)
-            }
-            PreprocessorConfig::Stella { task_type } => {
-                let stella_task_type = match task_type.as_str() {
-                    "s2p" => StellaTaskType::S2P,
-                    "s2s" => StellaTaskType::S2S,
-                    _ => StellaTaskType::S2P,
-                };
-                trace!(task_type = ?stella_task_type, "Using Stella preprocessor");
-                let preprocessor = StellaPreprocessor::new(stella_task_type);
-                preprocessor.process_batch(texts)
             }
         }
     }
@@ -193,7 +130,7 @@ impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
 
     /// Check if the embedding provider is healthy
     pub fn is_healthy(&self) -> bool {
-        self.consecutive_failures.load(Ordering::Relaxed) < HEALTH_FAILURE_THRESHOLD
+        !self.handler.transport().resilience().is_breaker_open()
     }
 
     /// Classify an LlmError into an EmbeddingErrorType for metrics tracking.
@@ -202,9 +139,10 @@ impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
             LlmError::Timeout(_) => EmbeddingErrorType::Timeout,
             LlmError::RateLimitExceeded(_) => EmbeddingErrorType::RateLimited,
             LlmError::Auth(_) => EmbeddingErrorType::Authentication,
-            LlmError::InvalidInput(_) | LlmError::InvalidResponse(_) => {
-                EmbeddingErrorType::InvalidRequest
-            }
+            LlmError::InvalidInput(_)
+            | LlmError::InvalidResponse(_)
+            | LlmError::TokenLimitExceeded(_, _)
+            | LlmError::ContextLengthExceeded(_) => EmbeddingErrorType::InvalidRequest,
             LlmError::ModelNotFound(_)
             | LlmError::Http(_)
             | LlmError::Api(_)
@@ -250,6 +188,25 @@ impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
     /// inspect scripted mocks).
     pub fn inner_provider(&self) -> &P {
         self.handler.transport().provider()
+    }
+}
+
+impl<P: SuiteEmbeddingProvider> cce_llm::EmbeddingProvider for OpenAICompatibleProvider<P> {
+    async fn embed(&self, texts: &[String]) -> Result<EmbeddingResult, LlmError> {
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        OpenAICompatibleProvider::embed(self, &refs).await
+    }
+
+    fn dimension(&self) -> usize {
+        OpenAICompatibleProvider::dimension(self)
+    }
+
+    fn model_name(&self) -> &str {
+        OpenAICompatibleProvider::model_name(self)
+    }
+
+    fn is_healthy(&self) -> bool {
+        OpenAICompatibleProvider::is_healthy(self)
     }
 }
 

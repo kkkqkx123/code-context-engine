@@ -154,9 +154,7 @@ impl ScriptedEmbeddingServer {
                 base_url: self.base_url.clone(),
                 api_keys: vec!["sk-mock".to_string()],
                 max_retries: 0,
-                rate_limit_max_retries: 0,
                 retry_delay_ms: 0,
-                retry_jitter: 0.0,
                 rate_limit: 0,
                 ..Default::default()
             },

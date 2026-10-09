@@ -147,6 +147,7 @@ fn main() {
         sources: vec!["vector".to_string(), "bm25".to_string()],
         sub_queries_count: 1,
         failed_sub_queries: Vec::new(),
+        from_cache: false,
     };
     rt.block_on(async {
         let cache = QueryCache::new(CacheConfig::default());

@@ -120,8 +120,6 @@ timeout_secs = 60
 max_retries = 3
 # Initial retry delay in milliseconds
 retry_delay_ms = 2000
-# Use base64 encoding for embeddings
-use_base64 = true
 
 # =============================================================================
 # LLM Configuration - Unified Provider and Model Registry
@@ -169,7 +167,6 @@ api_keys = ["${CCE_LLM_API_KEY_AZURE}"]
 timeout_secs = 30
 max_retries = 5
 retry_delay_ms = 1000
-rate_limit_max_retries = 20
 
 # Custom endpoint paths for Azure
 [llm.providers.azure.endpoints]
@@ -186,7 +183,6 @@ api_keys = []  # Local service doesn't need API key
 timeout_secs = 60
 max_retries = 5
 retry_delay_ms = 2000
-rate_limit_max_retries = 20
 
 # SiliconFlow Provider (Chinese LLM provider)
 [llm.providers.siliconflow]
@@ -198,7 +194,6 @@ api_keys = ["${CCE_LLM_API_KEY_SILICONFLOW}"]
 timeout_secs = 30
 max_retries = 5
 retry_delay_ms = 1000
-rate_limit_max_retries = 20
 
 # ---------------------------------------------------------------------------
 # Embedding Models - Reference providers by ID

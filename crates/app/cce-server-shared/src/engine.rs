@@ -160,7 +160,7 @@ impl CodeContextEngine {
         // Wire the llm-suite gateway token sink before any chat request so
         // token usage, request outcome and retry counts land in this
         // registry. Late calls are ignored by the installer.
-        cce_llm_client::suite::init_global_token_metrics(&metrics_registry);
+        cce_llm_client::suite::init_gateway(&metrics_registry);
 
         // Create SQLite client through the relation backend enum so the
         // backend selection is validated once at assembly time. The

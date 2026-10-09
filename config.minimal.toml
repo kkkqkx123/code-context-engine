@@ -33,7 +33,6 @@ api_keys = ["${CCE_LLM_API_KEY_SILICONFLOW}"]
 timeout_secs = 30
 max_retries = 5
 retry_delay_ms = 1000
-rate_limit_max_retries = 20
 
 [llm.embedding_models.bge-m3]
 provider_id = "siliconflow"
@@ -62,7 +61,6 @@ max_item_tokens = 8192
 timeout_secs = 60
 max_retries = 3
 retry_delay_ms = 2000
-use_base64 = true
 
 [scanner]
 follow_symlinks = false

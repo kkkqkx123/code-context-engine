@@ -79,6 +79,8 @@ pub enum ContentStateDto {
     ReferenceFileMissing,
     /// `code_chunk` is a reference because the hit is file-level.
     ReferenceFileLevel,
+    /// `code_chunk` is a reference because no chunk record exists for the hit.
+    ReferenceChunkMissing,
 }
 
 /// Search result item

@@ -537,6 +537,9 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
             ContentStateDto::ReferenceFileMissing
         }
         ContentState::Reference(DowngradeReason::FileLevel) => ContentStateDto::ReferenceFileLevel,
+        ContentState::Reference(DowngradeReason::ChunkMissing) => {
+            ContentStateDto::ReferenceChunkMissing
+        }
     };
 
     SearchResultItem {

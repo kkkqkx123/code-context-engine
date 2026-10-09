@@ -157,10 +157,30 @@ impl StorageCoordinator {
 
                     let scoped_names = parsed.resolve_all_scoped_names();
                     let mut inserted = Vec::with_capacity(parsed.entities.len());
+                    // The symbol key is (project, epoch, file, scoped_name, kind).
+                    // cfg-gated duplicates (e.g. platform-specific `impl` blocks
+                    // in one file) share that key, so disambiguate repeats with
+                    // a counter suffix. The source entity link stays exact via
+                    // `__source_entity_id` metadata; only the key is suffixed.
+                    let mut seen: std::collections::HashMap<(String, String), usize> =
+                        std::collections::HashMap::new();
                     for entity in &parsed.entities {
                         // resolve against the once-built map instead of
                         // rebuilding the id -> entity lookup per entity.
-                        let scoped_name = scoped_names.get(&entity.id).cloned();
+                        let base_name = scoped_names.get(&entity.id).cloned();
+                        let scoped_name = match base_name {
+                            None => None,
+                            Some(name) => {
+                                let key = (name.clone(), entity.kind.to_string());
+                                let count = seen.entry(key).or_insert(0);
+                                *count += 1;
+                                if *count == 1 {
+                                    Some(name)
+                                } else {
+                                    Some(format!("{name}~{}", *count))
+                                }
+                            }
+                        };
                         let mut metadata = entity.metadata.clone();
                         metadata.insert(
                             "__source_entity_id".to_string(),

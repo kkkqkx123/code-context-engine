@@ -266,11 +266,28 @@ fn materialize(
 ) {
     let Some(chunk) = chunk_records.get(&result.id) else {
         // A file-level hit carries no chunk record by construction; point at
-        // the file instead of returning an empty body. A chunk hit without a
-        // record is left as retrieved.
+        // the file instead of returning an empty body.
         if result.content.is_empty() && result.kind == "summary" {
             result.content_state = ContentState::Reference(DowngradeReason::FileLevel);
             result.content = file_level_reference(&result.file_path, DowngradeReason::FileLevel);
+            result.score *= 0.8;
+        } else if result.content.is_empty() {
+            // A chunk hit without a record means the index and query metadata
+            // stores diverged. Downgrade honestly instead of keeping the
+            // recall-stage Full state with an empty body.
+            result.content_state = ContentState::Reference(DowngradeReason::ChunkMissing);
+            if result.start_line == 0 && result.end_line == 0 {
+                result.content =
+                    file_level_reference(&result.file_path, DowngradeReason::ChunkMissing);
+            } else {
+                result.content = reference_content(
+                    &result.file_path,
+                    result.start_line,
+                    result.end_line,
+                    0,
+                    DowngradeReason::ChunkMissing,
+                );
+            }
             result.score *= 0.8;
         }
         return;
@@ -635,5 +652,45 @@ mod tests {
             ContentState::Reference(DowngradeReason::FileLevel)
         );
         assert!(results[0].content.contains("[reference] src/lib.rs"));
+    }
+
+    #[test]
+    fn materialize_missing_chunk_record_downgrades_honestly() {
+        let score = 2.0;
+        let result = SearchResult {
+            id: "group_1_bm25_0".to_string(),
+            file_path: "src/lib.rs".to_string(),
+            score,
+            original_score: score,
+            ..Default::default()
+        };
+        let records = HashMap::new();
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
+
+        assert_eq!(
+            results[0].content_state,
+            ContentState::Reference(DowngradeReason::ChunkMissing)
+        );
+        assert!(!results[0].content.is_empty());
+        assert!(results[0].content.contains("[reference] src/lib.rs"));
+        assert!((results[0].score - score * 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn materialize_missing_chunk_record_keeps_existing_body() {
+        let result = SearchResult {
+            id: "group_1_bm25_0".to_string(),
+            file_path: "src/lib.rs".to_string(),
+            content: "already present".to_string(),
+            content_state: ContentState::Full,
+            ..Default::default()
+        };
+        let records = HashMap::new();
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
+
+        assert_eq!(results[0].content_state, ContentState::Full);
+        assert_eq!(results[0].content, "already present");
     }
 }

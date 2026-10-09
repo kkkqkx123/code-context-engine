@@ -1,4 +1,5 @@
 use super::*;
+use crate::loader::ConfigLoader;
 use crate::modules::ServiceType;
 use crate::project::ProjectAppConfig;
 
@@ -61,12 +62,10 @@ fn test_validate_allows_remote_provider_without_api_key() {
             timeout_secs: 30,
             max_retries: 3,
             retry_delay_ms: 1000,
-            retry_jitter: 0.2,
-            rate_limit_max_retries: 5,
-            rate_limit_max_delay_ms: 60000,
             rate_limit: 60,
             circuit_breaker: crate::modules::CircuitBreakerConfig::default(),
             proxy_url: None,
+            no_proxy: Vec::new(),
             extra_headers: std::collections::HashMap::new(),
             api_key_file: None,
         },
@@ -92,12 +91,10 @@ fn test_validate_rejects_provider_with_empty_base_url() {
             timeout_secs: 30,
             max_retries: 3,
             retry_delay_ms: 1000,
-            retry_jitter: 0.2,
-            rate_limit_max_retries: 5,
-            rate_limit_max_delay_ms: 60000,
             rate_limit: 60,
             circuit_breaker: crate::modules::CircuitBreakerConfig::default(),
             proxy_url: None,
+            no_proxy: Vec::new(),
             extra_headers: std::collections::HashMap::new(),
             api_key_file: None,
         },
@@ -560,6 +557,7 @@ fn config_with_provider_and_models() -> AppConfig {
             provider_id: "mock-provider".to_string(),
             model: "BAAI/bge-reranker-v2-m3".to_string(),
             mode: crate::modules::RerankMode::CrossEncoder,
+            proxy_url: None,
         },
     );
     config
@@ -594,6 +592,113 @@ fn test_resolve_llm_connection_honors_endpoint_overrides() {
     assert_eq!(
         embedding.endpoint_path, "embeddings",
         "unoverridden services keep their default path"
+    );
+}
+
+#[test]
+fn test_resolved_proxy_prefers_model_then_provider_setting() {
+    let mut config = config_with_provider_and_models();
+
+    let chat = config
+        .llm
+        .chat_models
+        .get_mut("chat-model")
+        .expect("chat model exists");
+    chat.proxy_url = Some("http://127.0.0.1:8888".to_string());
+
+    let connection = config
+        .resolve_llm_connection("chat-model", ServiceType::Chat)
+        .expect("chat resolution must succeed");
+    assert_eq!(
+        connection.proxy_url.as_deref(),
+        Some("http://127.0.0.1:8888"),
+        "a model proxy applies to that model only"
+    );
+
+    let embedding = config
+        .resolve_llm_connection("emb-model", ServiceType::Embedding)
+        .expect("embedding resolution must succeed");
+    assert_eq!(
+        embedding.proxy_url, None,
+        "other models of the same provider stay direct"
+    );
+
+    {
+        let provider = config
+            .llm
+            .providers
+            .get_mut("mock-provider")
+            .expect("provider exists");
+        provider.proxy_url = Some("http://127.0.0.1:7890".to_string());
+    }
+
+    let embedding = config
+        .resolve_llm_connection("emb-model", ServiceType::Embedding)
+        .expect("embedding resolution must succeed");
+    assert_eq!(
+        embedding.proxy_url.as_deref(),
+        Some("http://127.0.0.1:7890"),
+        "the provider proxy covers its remaining models"
+    );
+
+    let chat = config
+        .resolve_llm_connection("chat-model", ServiceType::Chat)
+        .expect("chat resolution must succeed");
+    assert_eq!(
+        chat.proxy_url.as_deref(),
+        Some("http://127.0.0.1:8888"),
+        "the model proxy still outranks the provider proxy"
+    );
+}
+
+#[test]
+fn test_model_proxy_survives_the_config_file_pipeline() {
+    let dir = tempfile::tempdir().expect("temp dir must be created");
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        r#"
+[embedder]
+default_model = "bge-m3"
+
+[llm.providers.siliconflow]
+name = "SiliconFlow"
+base_url = "https://api.siliconflow.cn/v1"
+api_keys = ["key"]
+
+[llm.embedding_models.proxied-embed]
+provider_id = "siliconflow"
+model = "BAAI/bge-m3"
+vector_dimension = 1024
+proxy_url = "http://127.0.0.1:7890"
+
+[llm.chat_models.sf-chat]
+provider_id = "siliconflow"
+model = "Qwen/Qwen3-32B"
+"#,
+    )
+    .expect("config file must be written");
+
+    let config = ConfigLoader::new()
+        .with_path(&path)
+        .load()
+        .expect("config with per-model proxy must load");
+
+    let proxied = config
+        .resolve_embedding_config("proxied-embed")
+        .expect("embedding resolution must succeed");
+    assert_eq!(
+        proxied.proxy_url.as_deref(),
+        Some("http://127.0.0.1:7890"),
+        "the model proxy reaches the embedding transport"
+    );
+
+    let direct = config
+        .resolve_chat_config("sf-chat")
+        .expect("chat resolution must succeed");
+    assert_eq!(
+        direct.proxy_url, None,
+        "models without their own proxy stay direct"
     );
 }
 

@@ -17,6 +17,8 @@ pub enum DowngradeReason {
     FileMissing,
     /// The hit is file-level (e.g. a file summary) and carries no body.
     FileLevel,
+    /// No chunk record exists for the hit, so lines and body cannot be resolved.
+    ChunkMissing,
 }
 
 impl DowngradeReason {
@@ -26,6 +28,9 @@ impl DowngradeReason {
             Self::OverLimit => "omitted: over budget; read the file range on demand",
             Self::FileMissing => "file not found; path may be stale, adjust or skip",
             Self::FileLevel => "file-level result; read the file for source",
+            Self::ChunkMissing => {
+                "chunk record missing; index and query stores diverged, reindex or check metadata wiring"
+            }
         }
     }
 }

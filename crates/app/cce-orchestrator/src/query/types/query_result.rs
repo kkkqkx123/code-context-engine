@@ -56,4 +56,6 @@ pub struct QueryResult {
     /// queries). Makes partial degradation visible to the caller instead of a
     /// silent union of the surviving sub-queries.
     pub failed_sub_queries: Vec<String>,
+    /// True when this result was served from the query cache.
+    pub from_cache: bool,
 }

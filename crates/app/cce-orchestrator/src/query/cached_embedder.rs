@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cce_llm::{EmbeddingResult, LlmError};
+use cce_llm::{EmbeddingProvider, EmbeddingResult, LlmError};
 use moka::future::Cache;
 
 /// Maximum number of cached query embeddings per searcher.
@@ -25,14 +25,14 @@ const CACHE_MAX_ENTRIES: u64 = 512;
 const CACHE_TTL: Duration = Duration::from_secs(600);
 
 /// Wrapper that deduplicates `embed_one` calls per query text.
-pub struct CachedEmbedder<P = cce_llm_client::OpenAICompatibleProvider> {
-    inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>,
+pub struct CachedEmbedder<E = cce_llm_client::OpenAICompatibleProvider> {
+    inner: Arc<E>,
     cache: Cache<String, Vec<f32>>,
 }
 
-impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
+impl<E: EmbeddingProvider> CachedEmbedder<E> {
     /// Wrap the given embedder with a small TTL cache.
-    pub fn new(inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>) -> Self {
+    pub fn new(inner: Arc<E>) -> Self {
         Self {
             inner,
             cache: Self::build_cache(CACHE_TTL),
@@ -41,7 +41,7 @@ impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
 
     /// Wrap with an explicit TTL; test-only, used for expiry testing.
     #[cfg(test)]
-    fn with_ttl(inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>, ttl: Duration) -> Self {
+    fn with_ttl(inner: Arc<E>, ttl: Duration) -> Self {
         Self {
             inner,
             cache: Self::build_cache(ttl),
@@ -56,9 +56,10 @@ impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
     }
 }
 
-impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
+impl<E: EmbeddingProvider> CachedEmbedder<E> {
     pub async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
-        self.inner.embed(texts).await
+        let owned: Vec<String> = texts.iter().map(|s| (*s).to_string()).collect();
+        <E as EmbeddingProvider>::embed(&self.inner, &owned).await
     }
 
     pub async fn embed_one(&self, text: &str) -> Result<Vec<f32>, LlmError> {
@@ -66,7 +67,7 @@ impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
         let inner = Arc::clone(&self.inner);
         let pending = {
             let key = key.clone();
-            async move { inner.embed_one(&key).await }
+            async move { <E as EmbeddingProvider>::embed_one(&inner, &key).await }
         };
         self.cache
             .try_get_with(key, pending)
@@ -75,19 +76,40 @@ impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
     }
 
     pub async fn embed_vectors(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlmError> {
-        self.inner.embed_vectors(texts).await
+        let owned: Vec<String> = texts.iter().map(|s| (*s).to_string()).collect();
+        let result = <E as EmbeddingProvider>::embed(&self.inner, &owned).await?;
+        Ok(result.embeddings)
     }
 
     pub fn dimension(&self) -> usize {
-        self.inner.dimension()
+        <E as EmbeddingProvider>::dimension(&self.inner)
     }
 
     pub fn model_name(&self) -> &str {
-        self.inner.model_name()
+        <E as EmbeddingProvider>::model_name(&self.inner)
     }
 
     pub fn is_healthy(&self) -> bool {
-        self.inner.is_healthy()
+        <E as EmbeddingProvider>::is_healthy(&self.inner)
+    }
+}
+
+impl<E: EmbeddingProvider> EmbeddingProvider for CachedEmbedder<E> {
+    async fn embed(&self, texts: &[String]) -> Result<EmbeddingResult, LlmError> {
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        CachedEmbedder::embed(self, &refs).await
+    }
+
+    fn dimension(&self) -> usize {
+        CachedEmbedder::dimension(self)
+    }
+
+    fn model_name(&self) -> &str {
+        CachedEmbedder::model_name(self)
+    }
+
+    fn is_healthy(&self) -> bool {
+        CachedEmbedder::is_healthy(self)
     }
 }
 

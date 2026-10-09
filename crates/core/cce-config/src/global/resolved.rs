@@ -6,6 +6,7 @@ use super::AppConfig;
 /// Resolved embedding configuration - complete config for initializing an embedder
 #[derive(Debug, Clone)]
 pub struct ResolvedEmbeddingConfig {
+    pub provider_id: String,
     pub base_url: String,
     pub api_keys: Vec<String>,
     pub model: String,
@@ -19,13 +20,18 @@ pub struct ResolvedEmbeddingConfig {
     pub timeout_secs: u64,
     pub max_retries: u32,
     pub retry_delay_ms: u64,
+    /// Provider-wide request rate limit (requests per minute, 0 = unlimited)
+    pub rate_limit: u32,
+    /// Circuit breaker settings for this provider's upstream
+    pub circuit_breaker: crate::modules::CircuitBreakerConfig,
     pub proxy_url: Option<String>,
     pub extra_headers: std::collections::HashMap<String, String>,
     pub api_key_file: Option<String>,
-    pub use_base64: bool,
     pub extra_params: std::collections::HashMap<String, serde_json::Value>,
     /// Resolved endpoint path for embedding requests (provider override or default)
     pub endpoint_path: String,
+    /// Hosts that bypass the provider proxy
+    pub no_proxy: Vec<String>,
 }
 
 /// Resolved LLM connection - provider-level settings shared by all LLM services
@@ -42,17 +48,13 @@ pub struct ResolvedLlmConnection {
     pub timeout_secs: u64,
     pub max_retries: u32,
     pub retry_delay_ms: u64,
-    /// Random jitter ratio applied on top of computed retry delays
-    pub retry_jitter: f64,
-    /// Independent retry budget (attempts) for rate limit (429) errors
-    pub rate_limit_max_retries: u32,
-    /// Upper bound (ms) for the retry-after driven delay of rate limit errors
-    pub rate_limit_max_delay_ms: u64,
     /// Provider-wide request rate limit (requests per minute, 0 = unlimited)
     pub rate_limit: u32,
     /// Circuit breaker settings for this provider's upstream
     pub circuit_breaker: crate::modules::CircuitBreakerConfig,
     pub proxy_url: Option<String>,
+    /// Hosts that bypass the provider proxy
+    pub no_proxy: Vec<String>,
     pub extra_headers: std::collections::HashMap<String, String>,
     /// Provider-/model-specific extra parameters (e.g. `extra_params` from a chat model)
     pub extra_params: std::collections::HashMap<String, serde_json::Value>,
@@ -148,6 +150,27 @@ impl AppConfig {
             _ => std::collections::HashMap::new(),
         };
 
+        // The narrowest setting wins: a model may route through its own proxy
+        // while the rest of the provider stays direct (or vice versa).
+        let model_proxy = match service {
+            ServiceType::Embedding => self
+                .llm
+                .embedding_models
+                .get(model_key)
+                .and_then(|m| m.proxy_url.clone()),
+            ServiceType::Chat => self
+                .llm
+                .chat_models
+                .get(model_key)
+                .and_then(|m| m.proxy_url.clone()),
+            ServiceType::Rerank => self
+                .llm
+                .rerank_models
+                .get(model_key)
+                .and_then(|m| m.proxy_url.clone()),
+            ServiceType::Completion => None,
+        };
+
         Ok(ResolvedLlmConnection {
             provider_id: provider_id.clone(),
             api_keys: provider.api_keys.clone(),
@@ -157,12 +180,10 @@ impl AppConfig {
             timeout_secs: provider.timeout_secs,
             max_retries: provider.max_retries,
             retry_delay_ms: provider.retry_delay_ms,
-            retry_jitter: provider.retry_jitter,
-            rate_limit_max_retries: provider.rate_limit_max_retries,
-            rate_limit_max_delay_ms: provider.rate_limit_max_delay_ms,
             rate_limit: provider.rate_limit,
             circuit_breaker: provider.circuit_breaker.clone(),
-            proxy_url: provider.proxy_url.clone(),
+            proxy_url: model_proxy.or_else(|| provider.proxy_url.clone()),
+            no_proxy: provider.no_proxy.clone(),
             extra_headers: provider.extra_headers.clone(),
             extra_params,
         })
@@ -188,10 +209,11 @@ impl AppConfig {
             .ok_or_else(|| format!("Model '{model_name}' not found in llm.embedding_models"))?;
 
         Ok(ResolvedEmbeddingConfig {
-            base_url: connection.base_url,
-            api_keys: connection.api_keys,
-            endpoint_path: connection.endpoint_path,
-            api_key_file: connection.api_key_file,
+            provider_id: connection.provider_id.clone(),
+            base_url: connection.base_url.clone(),
+            api_keys: connection.api_keys.clone(),
+            endpoint_path: connection.endpoint_path.clone(),
+            api_key_file: connection.api_key_file.clone(),
             model: model
                 .api_model_name
                 .clone()
@@ -204,9 +226,11 @@ impl AppConfig {
             timeout_secs: connection.timeout_secs,
             max_retries: connection.max_retries,
             retry_delay_ms: connection.retry_delay_ms,
-            proxy_url: connection.proxy_url,
-            extra_headers: connection.extra_headers,
-            use_base64: self.embedder.use_base64,
+            rate_limit: connection.rate_limit,
+            circuit_breaker: connection.circuit_breaker.clone(),
+            proxy_url: connection.proxy_url.clone(),
+            no_proxy: connection.no_proxy.clone(),
+            extra_headers: connection.extra_headers.clone(),
             extra_params: self.embedder.extra_params.clone(),
         })
     }

@@ -29,6 +29,13 @@ impl Searcher {
     ) -> Result<Vec<SearchResult>> {
         tracing::trace!("Applying post-processing");
 
+        // Step 0: Alignment-key dedup, keeping the highest score per key.
+        // Runs after enrichment (best key quality, SQLite fills missing entity
+        // linkage) and before reranking (no budget spent on dropped repeats).
+        // Hybrid fusion already collapses onto the same key space, so this is
+        // idempotent for the hybrid path.
+        let results = dedup_by_alignment_key(results);
+
         // Step 1: Reranking (plugin + LLM per the configured execution order).
         // The config layer decides whether the rerank handler/plugins exist;
         // the per-request `enable_rerank` override can force it on/off.
@@ -271,6 +278,36 @@ pub(crate) fn merge_fusion_weights_override(
     config
 }
 
+/// Collapse repeats sharing one alignment key, keeping the highest score.
+///
+/// Reuses the fusion key derivation so single search and aggregated search
+/// share one key space. Results without a derivable key are kept as-is.
+fn dedup_by_alignment_key(results: Vec<SearchResult>) -> Vec<SearchResult> {
+    use std::collections::HashMap;
+    let mut best: HashMap<String, SearchResult> = HashMap::new();
+    let mut unkeyed = Vec::new();
+    for item in results {
+        let Some(key) = crate::query::retrieval::post_processing::alignment_key(
+            &item.entity_ids,
+            item.segment_id.as_deref(),
+            &item.id,
+        ) else {
+            unkeyed.push(item);
+            continue;
+        };
+        best.entry(key)
+            .and_modify(|existing| {
+                if item.score > existing.score {
+                    *existing = item.clone();
+                }
+            })
+            .or_insert(item);
+    }
+    let mut deduped: Vec<SearchResult> = best.into_values().collect();
+    deduped.extend(unkeyed);
+    deduped
+}
+
 /// Convert a plugin-supplied algorithm enum to the internal representation.
 /// Returns `None` when the RRF constant is rejected (zero), in which case the
 /// caller keeps the configured algorithm.
@@ -490,4 +527,48 @@ pub(crate) async fn apply_result_filter_chain(
         }
     }
     current
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dedup_by_alignment_key;
+    use crate::query::types::SearchResult;
+
+    fn hit(id: &str, entity: u64, score: f32) -> SearchResult {
+        SearchResult {
+            id: id.to_string(),
+            entity_ids: vec![cce_types::EntityId(entity)],
+            score,
+            original_score: score,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn dedup_keeps_highest_score_per_alignment_key() {
+        let results = vec![
+            hit("group_1_bm25_0", 7, 1.0),
+            hit("group_1_bm25_1", 7, 2.0),
+            hit("group_2_bm25_0", 9, 0.5),
+        ];
+        let deduped = dedup_by_alignment_key(results);
+        assert_eq!(deduped.len(), 2);
+        let kept: Vec<f32> = {
+            let mut scores: Vec<f32> = deduped.iter().map(|r| r.score).collect();
+            scores.sort_by(|a, b| b.partial_cmp(a).unwrap());
+            scores
+        };
+        assert_eq!(kept, vec![2.0, 0.5]);
+    }
+
+    #[test]
+    fn dedup_keeps_unkeyed_results() {
+        let unkeyed = SearchResult {
+            id: String::new(),
+            ..Default::default()
+        };
+        let results = vec![unkeyed, hit("group_1_bm25_0", 7, 1.0)];
+        let deduped = dedup_by_alignment_key(results);
+        assert_eq!(deduped.len(), 2);
+    }
 }

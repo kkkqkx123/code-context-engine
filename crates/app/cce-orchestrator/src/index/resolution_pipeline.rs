@@ -165,7 +165,17 @@ fn validate_snapshot(snapshot: &CanonicalRelationSnapshot) -> Result<(), String>
     let entities: HashSet<&StableSymbolKey> =
         snapshot.entities.iter().map(|entity| &entity.key).collect();
     if entities.len() != snapshot.entities.len() {
-        return Err("canonical snapshot contains duplicate stable symbol keys".to_string());
+        let mut seen = HashSet::new();
+        let mut dupes: Vec<String> = Vec::new();
+        for entity in &snapshot.entities {
+            if !seen.insert(&entity.key) && dupes.len() < 5 {
+                dupes.push(entity.key.sort_key());
+            }
+        }
+        return Err(format!(
+            "canonical snapshot contains duplicate stable symbol keys: {}",
+            dupes.join(", ")
+        ));
     }
     for entity in &snapshot.entities {
         if !files.contains(entity.key.file_path.as_str()) {

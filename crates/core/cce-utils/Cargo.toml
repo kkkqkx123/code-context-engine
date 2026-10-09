@@ -6,6 +6,7 @@ rust-version.workspace = true
 description = "Utility functions for the code context engine"
 
 [dependencies]
+llm-token = { path = "../../infra/llm-suite/crates/llm-token" }
 encoding_rs = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }

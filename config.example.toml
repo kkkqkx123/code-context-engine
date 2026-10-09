@@ -143,8 +143,6 @@ timeout_secs = 60
 max_retries = 3
 # Initial retry delay in milliseconds
 retry_delay_ms = 2000
-# Use base64 encoding for embeddings
-use_base64 = true
 
 # =============================================================================
 # LLM Configuration - Unified Provider and Model Registry
@@ -192,7 +190,6 @@ api_keys = ["${CCE_LLM_API_KEY_OPENAI}"]
 timeout_secs = 60
 max_retries = 5
 retry_delay_ms = 1000
-rate_limit_max_retries = 20
 
 # Azure OpenAI Provider (with custom endpoints)
 [llm.providers.azure]
@@ -204,7 +201,6 @@ api_keys = ["${CCE_LLM_API_KEY_AZURE}"]
 timeout_secs = 60
 max_retries = 5
 retry_delay_ms = 1000
-rate_limit_max_retries = 20
 
 # Custom endpoint paths for Azure
 [llm.providers.azure.endpoints]
@@ -221,7 +217,6 @@ api_keys = []  # Local service doesn't need API key
 timeout_secs = 60
 max_retries = 5
 retry_delay_ms = 2000
-rate_limit_max_retries = 20
 
 # SiliconFlow Provider (Chinese LLM provider)
 [llm.providers.siliconflow]
@@ -233,7 +228,9 @@ api_keys = ["${CCE_LLM_API_KEY_SILICONFLOW}"]
 timeout_secs = 30
 max_retries = 5
 retry_delay_ms = 1000
-rate_limit_max_retries = 20
+# Optional proxy for every request this provider serves (http/https/socks5).
+# A model may narrow this further with its own `proxy_url`.
+# proxy_url = "http://127.0.0.1:7890"
 
 # ---------------------------------------------------------------------------
 # Embedding Models - Reference providers by ID
@@ -254,6 +251,9 @@ vector_dimension = 1024
 max_batch_tokens = 8192
 max_item_tokens = 8192
 preprocessor = { type = "none" }
+# Proxy for this model only; overrides the provider's `proxy_url`, leaving
+# the provider's other models and providers without one untouched.
+# proxy_url = "http://127.0.0.1:7890"
 
 [llm.embedding_models.text-embedding-3-small]
 provider_id = "openai"

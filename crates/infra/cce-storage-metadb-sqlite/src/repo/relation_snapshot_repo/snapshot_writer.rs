@@ -328,7 +328,16 @@ impl RelationSnapshotRepository {
             for file in &snapshot.files {
                 let file_id = required(&file_ids, &file.path, "export file")?;
                 for export in &file.exports {
-                    let symbol_id = required(&symbol_ids, &export.symbol, "export symbol")?;
+                    let Some(symbol_id) = symbol_ids.get(&export.symbol) else {
+                        // Re-exports of external symbols have no local entity;
+                        // skip them instead of failing the whole publish.
+                        tracing::warn!(
+                            file = %file.path,
+                            symbol = ?export.symbol,
+                            "Skipping export with no local snapshot entity"
+                        );
+                        continue;
+                    };
                     rows.push(vec![
                         &project_id,
                         &epoch,

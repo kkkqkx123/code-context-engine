@@ -2,6 +2,8 @@
 //!
 //! The CCE providers keep the workspace-facing request/response contract
 //! and delegate scoring to llm-suite, converting types at the boundary.
+//! Each boundary type has a single conversion helper so field mappings stay
+//! in one place.
 
 use crate::suite::map_rerank_error;
 use cce_config::modules::search::RerankFusionStrategy;
@@ -9,7 +11,7 @@ use cce_llm::{LlmError, RerankProvider, RerankRequest, RerankRuntimeConfig};
 use cce_types::{RerankCandidate, RerankResult, RerankedCandidate};
 use llm_rerank::RerankProvider as SuiteRerankProvider;
 
-fn convert_candidate(candidate: &RerankCandidate) -> llm_rerank::RerankCandidate {
+fn to_suite_candidate(candidate: &RerankCandidate) -> llm_rerank::RerankCandidate {
     llm_rerank::RerankCandidate {
         id: candidate.id.clone(),
         content: candidate.content.clone(),
@@ -20,7 +22,7 @@ fn convert_candidate(candidate: &RerankCandidate) -> llm_rerank::RerankCandidate
     }
 }
 
-fn convert_fusion(strategy: &RerankFusionStrategy) -> llm_rerank::RerankFusionStrategy {
+fn to_suite_fusion(strategy: &RerankFusionStrategy) -> llm_rerank::RerankFusionStrategy {
     match strategy {
         RerankFusionStrategy::RerankOnly => llm_rerank::RerankFusionStrategy::RerankOnly,
         RerankFusionStrategy::LinearWeighted { alpha } => {
@@ -33,25 +35,25 @@ fn convert_fusion(strategy: &RerankFusionStrategy) -> llm_rerank::RerankFusionSt
     }
 }
 
-fn convert_config(config: &RerankRuntimeConfig) -> llm_rerank::RerankRuntimeConfig {
+fn to_suite_config(config: &RerankRuntimeConfig) -> llm_rerank::RerankRuntimeConfig {
     llm_rerank::RerankRuntimeConfig {
         max_candidates: config.max_candidates,
         temperature: config.temperature,
         return_reasoning: config.return_reasoning,
-        score_fusion_strategy: convert_fusion(&config.score_fusion_strategy),
+        score_fusion_strategy: to_suite_fusion(&config.score_fusion_strategy),
         timeout_ms: config.timeout_ms,
     }
 }
 
-fn convert_request(request: &RerankRequest) -> llm_rerank::RerankRequest {
+fn to_suite_request(request: &RerankRequest) -> llm_rerank::RerankRequest {
     llm_rerank::RerankRequest {
         query: request.query.clone(),
-        candidates: request.candidates.iter().map(convert_candidate).collect(),
-        config: convert_config(&request.config),
+        candidates: request.candidates.iter().map(to_suite_candidate).collect(),
+        config: to_suite_config(&request.config),
     }
 }
 
-fn convert_result(result: llm_rerank::RerankResult) -> RerankResult {
+fn from_suite_result(result: llm_rerank::RerankResult) -> RerankResult {
     RerankResult {
         reranked_candidates: result
             .reranked_candidates
@@ -71,83 +73,14 @@ fn convert_result(result: llm_rerank::RerankResult) -> RerankResult {
     }
 }
 
-/// Generative LLM reranking provider.
-pub struct GenerativeRerankProvider {
-    inner: llm_rerank::GenerativeRerankProvider,
-}
-
-impl GenerativeRerankProvider {
-    /// Wraps an already-configured llm-suite generative provider.
-    pub fn new(inner: llm_rerank::GenerativeRerankProvider) -> Self {
-        Self { inner }
-    }
-
-    /// Returns the chat endpoint configuration the provider was built with.
-    pub fn endpoint(&self) -> &llm_rerank::GenerativeChatEndpoint {
-        self.inner.endpoint()
-    }
-}
-
-impl RerankProvider for GenerativeRerankProvider {
-    async fn rerank(&self, request: &RerankRequest) -> Result<RerankResult, LlmError> {
-        self.inner
-            .rerank(&convert_request(request))
-            .await
-            .map(convert_result)
-            .map_err(map_rerank_error)
-    }
-
-    fn provider_name(&self) -> &str {
-        self.inner.provider_name()
-    }
-
-    fn is_available(&self) -> bool {
-        self.inner.is_available()
-    }
-}
-
-/// Cross-encoder rerank provider using a dedicated `/rerank` endpoint.
-pub struct CohereRerankProvider {
-    inner: llm_rerank::CohereRerankProvider,
-}
-
-impl CohereRerankProvider {
-    /// Wraps an already-configured llm-suite Cohere provider.
-    pub fn new(inner: llm_rerank::CohereRerankProvider) -> Self {
-        Self { inner }
-    }
-
-    /// Returns the endpoint configuration the provider was built with.
-    pub fn config(&self) -> &llm_rerank::RerankConfig {
-        self.inner.config()
-    }
-}
-
-impl RerankProvider for CohereRerankProvider {
-    async fn rerank(&self, request: &RerankRequest) -> Result<RerankResult, LlmError> {
-        self.inner
-            .rerank(&convert_request(request))
-            .await
-            .map(convert_result)
-            .map_err(map_rerank_error)
-    }
-
-    fn provider_name(&self) -> &str {
-        self.inner.provider_name()
-    }
-
-    fn is_available(&self) -> bool {
-        self.inner.is_available()
-    }
-}
-
 /// Adapter exposing any llm-suite rerank provider through the CCE
 /// [`RerankProvider`] port with CCE request/response types.
 ///
-/// Production code uses the concrete generative/cross-encoder providers
-/// above; tests inject scripted suite mocks (for example
-/// `llm_rerank::mock::MockRerankProvider`) through this adapter so handler
-/// behavior is verified without network stubs.
+/// Production code instantiates it with the concrete generative or
+/// cross-encoder suite providers (see the `GenerativeRerankProvider` and
+/// `CohereRerankProvider` aliases); tests inject scripted suite mocks (for
+/// example `llm_rerank::mock::MockRerankProvider`) so handler behavior is
+/// verified without network stubs.
 pub struct DelegatingRerankProvider<P> {
     inner: P,
 }
@@ -157,14 +90,33 @@ impl<P> DelegatingRerankProvider<P> {
     pub fn new(inner: P) -> Self {
         Self { inner }
     }
+
+    /// Accesses the wrapped suite provider.
+    pub fn inner(&self) -> &P {
+        &self.inner
+    }
+}
+
+impl DelegatingRerankProvider<llm_rerank::GenerativeRerankProvider> {
+    /// Returns the chat endpoint configuration the provider was built with.
+    pub fn endpoint(&self) -> &llm_rerank::GenerativeChatEndpoint {
+        self.inner.endpoint()
+    }
+}
+
+impl DelegatingRerankProvider<llm_rerank::CohereRerankProvider> {
+    /// Returns the endpoint configuration the provider was built with.
+    pub fn config(&self) -> &llm_rerank::RerankConfig {
+        self.inner.config()
+    }
 }
 
 impl<P: SuiteRerankProvider> RerankProvider for DelegatingRerankProvider<P> {
     async fn rerank(&self, request: &RerankRequest) -> Result<RerankResult, LlmError> {
         self.inner
-            .rerank(&convert_request(request))
+            .rerank(&to_suite_request(request))
             .await
-            .map(convert_result)
+            .map(from_suite_result)
             .map_err(map_rerank_error)
     }
 
@@ -176,6 +128,11 @@ impl<P: SuiteRerankProvider> RerankProvider for DelegatingRerankProvider<P> {
         self.inner.is_available()
     }
 }
+
+/// Production generative LLM reranking provider.
+pub type GenerativeRerankProvider = DelegatingRerankProvider<llm_rerank::GenerativeRerankProvider>;
+/// Production cross-encoder rerank provider using a dedicated endpoint.
+pub type CohereRerankProvider = DelegatingRerankProvider<llm_rerank::CohereRerankProvider>;
 
 #[cfg(test)]
 mod tests {
@@ -209,7 +166,7 @@ mod tests {
 
     #[test]
     fn request_conversion_preserves_candidates_and_config() {
-        let converted = convert_request(&test_request());
+        let converted = to_suite_request(&test_request());
         assert_eq!(converted.query, "how to start the app");
         assert_eq!(converted.candidates.len(), 2);
         assert_eq!(converted.candidates[0].id, "c1");
@@ -226,7 +183,7 @@ mod tests {
             RerankFusionStrategy::ReciprocalRankFusion { k: 60.0 },
         ];
         for strategy in &cases {
-            let converted = convert_fusion(strategy);
+            let converted = to_suite_fusion(strategy);
             assert_eq!(
                 std::mem::discriminant(&converted),
                 std::mem::discriminant(&match strategy {
@@ -245,7 +202,7 @@ mod tests {
 
     #[test]
     fn result_conversion_preserves_scores_and_ranks() {
-        let converted = convert_result(llm_rerank::RerankResult {
+        let converted = from_suite_result(llm_rerank::RerankResult {
             reranked_candidates: vec![llm_rerank::RerankedCandidate {
                 id: "c2".to_string(),
                 rerank_score: 0.9,

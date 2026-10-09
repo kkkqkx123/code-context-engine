@@ -21,7 +21,9 @@ pub use crate::services::rerank::{
     GenerativeRerankRequestHandler, ProductionRerankHandler, RerankCandidate, RerankFusionStrategy,
     RerankRequest, RerankResult, RerankRuntimeConfig, RerankedCandidate,
 };
-pub use crate::suite::{GatewayMetricsSink, SuiteChatClient, init_global_token_metrics};
+pub use crate::suite::{
+    GatewayMetricsSink, SuiteChatClient, init_gateway, init_global_token_metrics,
+};
 pub use cce_llm::{
     ChatConfig, ChatResult, EmbeddingResult, LlmConfigError, LlmError, Message, MessageRole,
     RerankProvider, ResponseFormat,

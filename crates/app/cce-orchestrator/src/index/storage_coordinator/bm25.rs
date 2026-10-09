@@ -154,6 +154,10 @@ impl StorageCoordinator {
             };
 
             for entity_id in chunk.metadata.content_entity_ids() {
+                // File-level pseudo-entities carry no SQLite row by design.
+                if entity_id.0 == u64::MAX || entity_id.0 == u64::MAX - 1 {
+                    continue;
+                }
                 let entity_id_i64 = if self.metadata_store.is_some() {
                     let Some(db_id) = source_entity_ids
                         .get(&(chunk.metadata.file_path.clone(), entity_id.0 as i64))

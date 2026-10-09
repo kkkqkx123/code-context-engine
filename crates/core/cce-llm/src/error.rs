@@ -141,6 +141,12 @@ pub enum LlmError {
     #[error("Token limit exceeded: {0} > {1}")]
     TokenLimitExceeded(usize, usize),
 
+    /// The provider rejected the request because the payload exceeds its
+    /// context window; the dead-letter / truncate-retry flow matches this
+    /// variant explicitly instead of a bare 400 status.
+    #[error("Context length exceeded: {0}")]
+    ContextLengthExceeded(String),
+
     /// Authentication error
     #[error("Authentication failed: {0}")]
     Auth(String),
@@ -208,6 +214,11 @@ impl LlmError {
         Self::TokenLimitExceeded(actual, limit)
     }
 
+    /// Create a context-length-exceeded error
+    pub fn context_length_exceeded(reason: impl Into<String>) -> Self {
+        Self::ContextLengthExceeded(reason.into())
+    }
+
     /// Create an authentication error
     pub fn auth(reason: impl Into<String>) -> Self {
         Self::Auth(reason.into())
@@ -237,6 +248,7 @@ impl LlmError {
             Self::Timeout(_) => "LLM_TIMEOUT_ERROR",
             Self::InvalidResponse(_) => "LLM_INVALID_RESPONSE_ERROR",
             Self::TokenLimitExceeded(_, _) => "LLM_TOKEN_LIMIT_EXCEEDED_ERROR",
+            Self::ContextLengthExceeded(_) => "LLM_CONTEXT_LENGTH_EXCEEDED_ERROR",
             Self::Auth(_) => "LLM_AUTH_ERROR",
             Self::ModelNotFound(_) => "LLM_MODEL_NOT_FOUND_ERROR",
             Self::Internal(_) => "LLM_INTERNAL_ERROR",
@@ -265,6 +277,7 @@ impl cce_types::error::common::ErrorClassify for LlmError {
             Self::Config(_)
             | Self::InvalidInput(_)
             | Self::TokenLimitExceeded(_, _)
+            | Self::ContextLengthExceeded(_)
             | Self::QuotaExhausted(_)
             | Self::Auth(_)
             | Self::ModelNotFound(_)

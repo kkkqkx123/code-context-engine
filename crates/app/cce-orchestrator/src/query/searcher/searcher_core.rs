@@ -203,6 +203,7 @@ impl Searcher {
             sources: vec![strategy.to_string()],
             sub_queries_count: 1, // Single query by default
             failed_sub_queries: Vec::new(),
+            from_cache: false,
         })
     }
 

@@ -23,7 +23,6 @@ cce-storage-metadb-pg = { path = "../../infra/cce-storage-metadb-pg" }
 cce-scanner = { path = "../../infra/cce-scanner" }
 cce-llm-client = { path = "../../infra/cce-llm-client" }
 cce-circuit-breaker = { path = "../../infra/cce-circuit-breaker" }
-llm-embedding = { path = "../../infra/llm-suite/crates/llm-embedding" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

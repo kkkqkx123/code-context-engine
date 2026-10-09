@@ -193,6 +193,7 @@ mod tests {
                 provider_id: "mock-provider".to_string(),
                 model: real_model.to_string(),
                 mode,
+                proxy_url: None,
             },
         );
         config.llm.rerank_models = rerank_models;

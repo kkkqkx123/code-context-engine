@@ -786,6 +786,14 @@ Folded code representation:
                     "Internal LLM error; summary module marked failed"
                 );
             }
+            LlmError::ContextLengthExceeded(msg) => {
+                tracing::warn!(
+                    file = %file_path,
+                    strategy = %strategy,
+                    error = %msg,
+                    "Context length exceeded, using rule-based fallback"
+                );
+            }
         }
     }
 
