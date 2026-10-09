@@ -14,8 +14,7 @@ use cce_config::{AppConfig, Settings};
 
 use cce_llm_client::OpenAICompatibleProvider;
 use cce_metrics::{
-    AggregationConfig, LlmRetryMetrics, MetricsAggregator, MetricsRegistry, ProgressTracker,
-    RenderCache,
+    AggregationConfig, MetricsAggregator, MetricsRegistry, ProgressTracker, RenderCache,
 };
 use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
@@ -158,6 +157,11 @@ impl CodeContextEngine {
         }
         let metrics_system_metrics = cce_metrics::MetricsSystemMetrics::new(&metrics_registry);
 
+        // Wire the llm-suite gateway token sink before any chat request so
+        // token usage, request outcome and retry counts land in this
+        // registry. Late calls are ignored by the installer.
+        cce_llm_client::suite::init_global_token_metrics(&metrics_registry);
+
         // Create SQLite client through the relation backend enum so the
         // backend selection is validated once at assembly time. The
         // PostgreSQL branch constructs at the enum level, but the engine
@@ -196,19 +200,12 @@ impl CodeContextEngine {
         }
 
         let embedder_config = config.embedder.clone();
-        // Use from_model to create embedder with the default model
+        // Use from_model to create embedder with the default model.
+        // Retries run inside llm-suite; per-attempt accounting is
+        // gateway-owned, so no CCE retry metrics are attached here.
         let default_model = &embedder_config.default_model;
-        // Attach LLM retry/circuit-breaker metrics labeled by the provider
-        let embedder_retry_metrics = config
-            .resolve_llm_connection(default_model, cce_config::modules::ServiceType::Embedding)
-            .ok()
-            .map(|connection| LlmRetryMetrics::new(&metrics_registry, &connection.provider_id));
-        let mut embedder = OpenAICompatibleProvider::from_model_with_retry_metrics(
-            &config,
-            default_model,
-            embedder_retry_metrics,
-        )
-        .map_err(EngineError::Llm)?;
+        let mut embedder = OpenAICompatibleProvider::from_model(&config, default_model)
+            .map_err(EngineError::Llm)?;
 
         // Attach embedding metrics (always enabled when metrics registry exists)
         let embedding_metrics =

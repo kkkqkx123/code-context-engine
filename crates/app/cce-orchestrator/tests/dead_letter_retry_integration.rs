@@ -5,12 +5,12 @@
 //! real SQLite generation layout. Integration scope: it exercises the real
 //! storage backends end to end, not in-process logic only.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
 use cce_config::{AstToNlConfig, NestProcessorConfig};
 use cce_llm_client::OpenAICompatibleProvider;
-use cce_llm_client::services::embedding::mock_server::MockEmbeddingServer;
 use cce_orchestrator::hot_update::FileChangeType;
 use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index_state::{
@@ -19,6 +19,139 @@ use cce_orchestrator::index_state::{
 use cce_storage_metadb_sqlite::{
     NewProjectRecord, ProjectIndexManifestRepository, ProjectRepository, SqliteClient,
 };
+
+/// Success-only stand-in for the OpenAI-compatible `/embeddings` endpoint.
+///
+/// The server task is detached on purpose: it lives until the test runtime
+/// shuts down. Vectors are constant; this test asserts repair wiring (chunk
+/// records, truncation markers, queue state), never vector values.
+struct SuccessEmbeddingServer {
+    base_url: String,
+}
+
+impl SuccessEmbeddingServer {
+    async fn start() -> Self {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock embedding port");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(accepted) => accepted,
+                    Err(_) => break,
+                };
+                tokio::spawn(async move {
+                    let mut buf = Vec::with_capacity(4096);
+                    let mut tmp = [0u8; 4096];
+                    let input_count = loop {
+                        match socket.read(&mut tmp).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => {
+                                buf.extend_from_slice(&tmp[..n]);
+                                if let Some((header_end, content_length)) =
+                                    parse_headers(&buf)
+                                {
+                                    let body_start = header_end + 4;
+                                    if buf.len() >= body_start + content_length {
+                                        break parse_input_count(
+                                            &buf[body_start..body_start + content_length],
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    let data: Vec<serde_json::Value> = (0..input_count)
+                        .map(|index| {
+                            serde_json::json!({
+                                "index": index,
+                                "embedding": vec![0.5f32; 2]
+                            })
+                        })
+                        .collect();
+                    let body = serde_json::json!({
+                        "data": data,
+                        "usage": {"prompt_tokens": 0, "total_tokens": 0}
+                    })
+                    .to_string();
+                    let reply = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len(),
+                    );
+                    let _ = socket.write_all(reply.as_bytes()).await;
+                });
+            }
+        });
+        Self {
+            base_url: format!("http://{addr}"),
+        }
+    }
+
+    fn app_config(&self, model_name: &str) -> cce_config::AppConfig {
+        let mut config = cce_config::AppConfig::default();
+        let mut providers = HashMap::new();
+        providers.insert(
+            "mock".to_string(),
+            cce_config::modules::ProviderConfig {
+                id: "mock".to_string(),
+                name: "Mock".to_string(),
+                base_url: self.base_url.clone(),
+                api_keys: vec!["sk-mock".to_string()],
+                max_retries: 0,
+                rate_limit_max_retries: 0,
+                retry_delay_ms: 0,
+                retry_jitter: 0.0,
+                rate_limit: 0,
+                ..Default::default()
+            },
+        );
+        config.llm.providers = providers;
+        let mut models = HashMap::new();
+        models.insert(
+            model_name.to_string(),
+            cce_config::modules::EmbeddingModelConfig {
+                provider_id: "mock".to_string(),
+                model: model_name.to_string(),
+                vector_dimension: 2,
+                ..Default::default()
+            },
+        );
+        config.llm.embedding_models = models;
+        config.embedder.default_model = model_name.to_string();
+        config
+    }
+}
+
+fn parse_headers(buf: &[u8]) -> Option<(usize, usize)> {
+    let haystack = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let header = String::from_utf8_lossy(&buf[..haystack]);
+    let content_length = header
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    Some((haystack, content_length))
+}
+
+fn parse_input_count(body: &[u8]) -> usize {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("input").cloned())
+        .map(|input| match input {
+            serde_json::Value::Array(items) => items.len(),
+            serde_json::Value::String(_) => 1,
+            _ => 1,
+        })
+        .unwrap_or(1)
+}
 
 /// Minimal in-process Qdrant stand-in: answers every request with a
 /// successful upsert response.
@@ -67,8 +200,8 @@ fn mock_qdrant_client(url: &str) -> Arc<cce_storage_vector_qdrant::QdrantClient>
     )
 }
 
-fn create_test_embedder(server: &MockEmbeddingServer) -> Arc<OpenAICompatibleProvider> {
-    let config = server.app_config("test-model", 2);
+fn create_test_embedder(server: &SuccessEmbeddingServer) -> Arc<OpenAICompatibleProvider> {
+    let config = server.app_config("test-model");
     let provider =
         OpenAICompatibleProvider::from_model(&config, "test-model").expect("create embedder");
     Arc::new(provider)
@@ -142,7 +275,7 @@ async fn truncate_retry_repairs_dead_letter_embedding() {
     let mut orchestrator = IndexOrchestrator::new(1)
         .expect("valid project")
         .with_metadata_store(database.clone())
-        .with_embedder(create_test_embedder(&MockEmbeddingServer::start()))
+        .with_embedder(create_test_embedder(&SuccessEmbeddingServer::start().await))
         .with_qdrant_client(mock_qdrant_client(&qdrant_url))
         .with_project_fingerprint("project-1-root".to_string())
         .with_file_processor_configs(

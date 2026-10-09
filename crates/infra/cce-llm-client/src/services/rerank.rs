@@ -10,7 +10,7 @@ use crate::core::error::LlmError;
 use cce_llm::RerankProvider;
 
 pub use handler::RerankRequestHandler;
-pub use provider::{CohereRerankProvider, GenerativeRerankProvider};
+pub use provider::{CohereRerankProvider, DelegatingRerankProvider, GenerativeRerankProvider};
 pub use types::{
     RerankCandidate, RerankFusionStrategy, RerankRequest, RerankResult, RerankRuntimeConfig,
     RerankedCandidate,

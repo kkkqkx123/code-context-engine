@@ -5,11 +5,10 @@ use cce_config::AppConfig;
 use cce_config::modules::RerankMode;
 use cce_config::modules::summary::SummaryGenerationStrategy as SummaryStrategy;
 use cce_llm_client::services::rerank::{
-    CohereRerankProvider, CohereRerankRequestHandler, GenerativeRerankProvider,
-    GenerativeRerankRequestHandler, ProductionRerankHandler,
+    CohereRerankRequestHandler, GenerativeRerankRequestHandler, ProductionRerankHandler,
 };
 use cce_llm_client::{ChatClientHandle, build_chat_client};
-use cce_metrics::{LlmRetryMetrics, MetricsRegistry};
+use cce_metrics::MetricsRegistry;
 use cce_parser::summary::{ModelEnhancedGenerator, RuleBasedGenerator, SummaryGenerator};
 
 /// Build the generative rerank handler for a project when `[rerank] enabled`
@@ -22,12 +21,14 @@ use cce_parser::summary::{ModelEnhancedGenerator, RuleBasedGenerator, SummaryGen
 /// Returns `None` when the summary strategy does not use a model (`RuleBased`
 /// / `Minimal`) or when no chat model is configured in `llm.defaults.chat`.
 ///
-/// `metrics_registry` enables registry-backed LLM retry metrics; `None`
-/// disables them (used by unit tests).
+/// Chat retries run inside the shared gateway, so no per-client retry
+/// metrics are attached; `metrics_registry` is retained for signature
+/// stability and currently unused.
 pub(crate) fn build_chat_handle(
     config: &AppConfig,
     metrics_registry: Option<&Arc<MetricsRegistry>>,
 ) -> Result<Option<ChatClientHandle>, EngineError> {
+    let _ = metrics_registry;
     if !config.llm.enabled {
         return Ok(None);
     }
@@ -43,15 +44,7 @@ pub(crate) fn build_chat_handle(
         return Ok(None);
     };
 
-    let retry_metrics = metrics_registry.map(|registry| {
-        let provider_id = config
-            .resolve_llm_connection(chat_key, cce_config::modules::ServiceType::Chat)
-            .map(|connection| connection.provider_id)
-            .unwrap_or_else(|_| chat_key.to_string());
-        LlmRetryMetrics::new(registry, &provider_id)
-    });
-
-    let handle = build_chat_client(config, chat_key, retry_metrics).map_err(|e| {
+    let handle = build_chat_client(config, chat_key).map_err(|e| {
         EngineError::Config(format!(
             "Failed to build chat client for '{}': {}",
             chat_key, e
@@ -125,47 +118,28 @@ pub(crate) fn build_rerank_handler(
             ))
         })?;
 
-    // Build the shared LLM client from the resolved provider connection.
-    // The client routes requests to the endpoint matching the configured mode
-    // (chat-completions for `generative`, the dedicated `/rerank` endpoint for
-    // `cross_encoder`).
-    let retry_metrics = {
-        let provider_id = config
-            .resolve_llm_connection(
-                &config.rerank.model,
-                cce_config::modules::ServiceType::Rerank,
-            )
-            .map(|connection| connection.provider_id)
-            .unwrap_or_else(|_| config.rerank.model.clone());
-        LlmRetryMetrics::new(metrics_registry, &provider_id)
-    };
-    let llm_client = cce_llm_client::build_rerank_client(
-        config,
-        &config.rerank.model,
-        rerank_model_config.mode,
-        Some(retry_metrics),
-    )
-    .map_err(EngineError::Llm)?;
-
+    // Build the rerank provider matching the configured mode
+    // (generative scores through chat-completions, cross-encoder calls the
+    // dedicated `/rerank` endpoint).
     let rerank_metrics = cce_metrics::RerankMetrics::new(metrics_registry, &config.rerank.model);
 
     // Select the provider implementation by the model's configured mode.
     let handler = match rerank_model_config.mode {
         RerankMode::Generative => {
-            let provider = Arc::new(GenerativeRerankProvider::new(
-                llm_client,
-                rerank_model_config.model.clone(),
-            ));
+            let provider = Arc::new(
+                cce_llm_client::build_generative_rerank_provider(config, &config.rerank.model)
+                    .map_err(EngineError::Llm)?,
+            );
             let handler = Arc::new(
                 GenerativeRerankRequestHandler::new(provider).with_rerank_metrics(rerank_metrics),
             );
             ProductionRerankHandler::Generative(handler)
         }
         RerankMode::CrossEncoder => {
-            let provider = Arc::new(CohereRerankProvider::new(
-                llm_client,
-                rerank_model_config.model.clone(),
-            ));
+            let provider = Arc::new(
+                cce_llm_client::build_cohere_rerank_provider(config, &config.rerank.model)
+                    .map_err(EngineError::Llm)?,
+            );
             let handler = Arc::new(
                 CohereRerankRequestHandler::new(provider).with_rerank_metrics(rerank_metrics),
             );

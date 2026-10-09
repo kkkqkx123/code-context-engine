@@ -1,13 +1,14 @@
 //! OpenAI-compatible API embedder
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
 use tracing::{debug, info, trace};
 
 use crate::core::error::LlmError;
-use crate::core::{EmbeddingConfig, HttpLlmClient};
-use crate::services::embedding::handler::EmbeddingRequestHandler;
+use crate::core::EmbeddingConfig;
+use crate::services::embedding::handler::{EmbeddingRequestHandler, SuiteEmbeddingTransport};
 use crate::services::embedding::types::EmbeddingResult;
 use cce_metrics::{EmbeddingErrorType, EmbeddingMetrics};
 
@@ -16,22 +17,27 @@ use crate::services::embedding::preprocessor::{
     TextPreprocessor,
 };
 use cce_config::PreprocessorConfig;
+use llm_embedding::EmbeddingProvider;
+
+/// Consecutive failures after which the provider reports unhealthy.
+/// Mirrors the previous transport's default failure threshold.
+const HEALTH_FAILURE_THRESHOLD: u32 = 3;
 
 /// OpenAI-compatible API embedder
-pub struct OpenAICompatibleProvider {
-    /// Single LLM client used for embedding requests
-    llm_client: Arc<HttpLlmClient>,
+pub struct OpenAICompatibleProvider<P = llm_embedding::OpenAICompatibleProvider> {
+    /// Batching handler over the llm-suite transport
+    handler: EmbeddingRequestHandler<P>,
     embed_config: EmbeddingConfig,
     preprocessor: PreprocessorConfig,
     /// Monitoring metrics (optional)
     metrics: Option<Arc<EmbeddingMetrics>>,
+    consecutive_failures: AtomicU32,
 }
 
-impl std::fmt::Debug for OpenAICompatibleProvider {
+impl<P> std::fmt::Debug for OpenAICompatibleProvider<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenAICompatibleProvider")
             .field("model", &self.embed_config.model)
-            .field("provider_id", &self.llm_client.provider_id())
             .field("max_batch_tokens", &self.embed_config.max_batch_tokens)
             .field("max_item_tokens", &self.embed_config.max_item_tokens)
             .field("vector_dimension", &self.embed_config.vector_dimension)
@@ -39,22 +45,11 @@ impl std::fmt::Debug for OpenAICompatibleProvider {
     }
 }
 
-impl OpenAICompatibleProvider {
+impl OpenAICompatibleProvider<llm_embedding::OpenAICompatibleProvider> {
     /// Create embedder from global AppConfig and a single model name.
     pub fn from_model(
         global_config: &cce_config::AppConfig,
         model_name: &str,
-    ) -> Result<Self, LlmError> {
-        Self::from_model_with_retry_metrics(global_config, model_name, None)
-    }
-
-    /// Create embedder from global AppConfig and a single model name, attaching
-    /// LLM retry/circuit-breaker metrics when a registry-backed instance is
-    /// provided.
-    pub fn from_model_with_retry_metrics(
-        global_config: &cce_config::AppConfig,
-        model_name: &str,
-        retry_metrics: Option<std::sync::Arc<cce_metrics::LlmRetryMetrics>>,
     ) -> Result<Self, LlmError> {
         debug!(model = model_name, "Creating embedder from model registry");
 
@@ -63,21 +58,19 @@ impl OpenAICompatibleProvider {
             .map_err(|e| {
                 LlmError::config(format!("Failed to resolve model '{}': {}", model_name, e))
             })?;
+        global_config
+            .resolve_llm_connection(model_name, cce_config::modules::ServiceType::Embedding)
+            .map_err(|e| {
+                LlmError::config(format!("Failed to resolve model '{}': {}", model_name, e))
+            })?;
 
-        let llm_client = crate::factory::build_llm_client(
-            global_config,
-            model_name,
-            cce_config::modules::ServiceType::Embedding,
-            None,
-            retry_metrics,
-        )?;
+        let transport = SuiteEmbeddingTransport::from_resolved(&resolved)?;
 
         let embed_config = EmbeddingConfig {
             model: resolved.model.clone(),
             max_batch_tokens: resolved.max_batch_tokens,
             max_item_tokens: resolved.max_item_tokens,
             vector_dimension: Some(resolved.vector_dimension),
-            use_base64: resolved.use_base64,
         };
         let preprocessor = resolved.preprocessor;
 
@@ -89,11 +82,36 @@ impl OpenAICompatibleProvider {
         );
 
         Ok(Self {
-            llm_client,
+            handler: EmbeddingRequestHandler::new(transport),
             embed_config,
             preprocessor,
             metrics: None,
+            consecutive_failures: AtomicU32::new(0),
         })
+    }
+}
+
+impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
+    /// Builds a provider around an injected embedding implementation with
+    /// test-friendly batching defaults. Used by tests with scripted mocks.
+    pub fn from_embed_provider(
+        provider: P,
+        model: impl Into<String>,
+        dimension: usize,
+    ) -> Self {
+        let embed_config = EmbeddingConfig {
+            model: model.into(),
+            max_batch_tokens: 8192,
+            max_item_tokens: 2048,
+            vector_dimension: Some(dimension),
+        };
+        Self {
+            handler: EmbeddingRequestHandler::new(SuiteEmbeddingTransport::for_testing(provider)),
+            embed_config,
+            preprocessor: PreprocessorConfig::None,
+            metrics: None,
+            consecutive_failures: AtomicU32::new(0),
+        }
     }
 
     /// Create embeddings for texts
@@ -108,11 +126,11 @@ impl OpenAICompatibleProvider {
         let text_refs: Vec<&str> = processed_texts.iter().map(|s| s.as_str()).collect();
 
         let token_count = texts.iter().map(|t| t.len()).sum();
-        let handler = EmbeddingRequestHandler::new(Arc::clone(&self.llm_client));
-        let result = handler.embed(&text_refs, &self.embed_config).await;
+        let result = self.handler.embed(&text_refs, &self.embed_config).await;
 
         match result {
             Ok(embedding_result) => {
+                self.consecutive_failures.store(0, Ordering::Relaxed);
                 if let Some(metrics) = &self.metrics {
                     let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
                     metrics.record_request(elapsed_ms, token_count, true);
@@ -120,6 +138,7 @@ impl OpenAICompatibleProvider {
                 Ok(embedding_result)
             }
             Err(err) => {
+                self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
                 if let Some(metrics) = &self.metrics {
                     let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
                     metrics.record_request(elapsed_ms, token_count, false);
@@ -179,7 +198,7 @@ impl OpenAICompatibleProvider {
 
     /// Check if the embedding provider is healthy
     pub fn is_healthy(&self) -> bool {
-        self.llm_client.is_healthy()
+        self.consecutive_failures.load(Ordering::Relaxed) < HEALTH_FAILURE_THRESHOLD
     }
 
     /// Classify an LlmError into an EmbeddingErrorType for metrics tracking.
@@ -230,6 +249,12 @@ impl OpenAICompatibleProvider {
     /// Get monitoring metrics (optional)
     pub fn get_metrics(&self) -> Option<Arc<EmbeddingMetrics>> {
         self.metrics.clone()
+    }
+
+    /// Accesses the injected embedding implementation (used by tests to
+    /// inspect scripted mocks).
+    pub fn inner_provider(&self) -> &P {
+        self.handler.transport().provider()
     }
 }
 

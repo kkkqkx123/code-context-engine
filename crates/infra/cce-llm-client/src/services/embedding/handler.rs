@@ -1,26 +1,90 @@
 //! Embedding Request Handler
 
-use crate::core::client::HttpLlmClient;
 use crate::core::config::EmbeddingConfig;
 use crate::core::error::LlmError;
-use crate::services::embedding::response_parser::StandardEmbeddingData;
 use crate::services::embedding::types::EmbeddingResult;
-use crate::services::request_builder::RequestBuilder;
-use cce_config::modules::ServiceType;
-use cce_types::error::common::ErrorClassify;
+use crate::suite::{full_endpoint_url, map_embedding_error, query_string};
+use cce_config::global::ResolvedEmbeddingConfig;
 use cce_utils::token_estimation::estimate_tokens;
-use std::sync::Arc;
+use llm_embedding::EmbeddingProvider;
 
-/// Embedding Request Handler - handles batching and request orchestration
-pub struct EmbeddingRequestHandler {
-    /// Underlying HTTP client
-    inner: Arc<HttpLlmClient>,
+/// Transport for one embedding batch: an llm-suite provider.
+///
+/// Retries live inside llm-suite (gateway profiles for chat, provider
+/// timeouts for embedding); the transport performs a single attempt so a
+/// rate-limit error always propagates to the caller's deferred-retry queue
+/// instead of being absorbed here.
+pub struct SuiteEmbeddingTransport<P = llm_embedding::OpenAICompatibleProvider> {
+    provider: P,
 }
 
-impl EmbeddingRequestHandler {
+impl SuiteEmbeddingTransport<llm_embedding::OpenAICompatibleProvider> {
+    /// Builds the transport from a resolved embedding model.
+    pub fn from_resolved(resolved: &ResolvedEmbeddingConfig) -> Result<Self, LlmError> {
+        let mut config = llm_embedding::EmbeddingConfig::new(
+            full_endpoint_url(&resolved.base_url, &resolved.endpoint_path),
+            resolved.model.clone(),
+        )
+        .with_dimension(resolved.vector_dimension)
+        .with_timeout(resolved.timeout_secs);
+        if let Some(api_key) = resolved.api_keys.first() {
+            config = config.with_api_key(api_key.clone());
+        }
+        if let Some(proxy) = resolved.proxy_url.as_deref() {
+            config = config.with_proxy(proxy);
+        }
+        config.headers = resolved.extra_headers.clone();
+        config.query_params = resolved
+            .extra_params
+            .iter()
+            .map(|(key, value)| (key.clone(), query_string(value)))
+            .collect();
+        let provider =
+            llm_embedding::OpenAICompatibleProvider::new(config).map_err(map_embedding_error)?;
+        Ok(Self { provider })
+    }
+}
+
+impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
+    /// Sends one batch, converting errors into the CCE contract.
+    pub async fn embed_batch(&self, batch: Vec<String>) -> Result<EmbeddingResult, LlmError> {
+        self.provider
+            .embed(&batch)
+            .await
+            .map(|result| EmbeddingResult {
+                embeddings: result.embeddings,
+                prompt_tokens: result.prompt_tokens,
+                total_tokens: result.total_tokens,
+            })
+            .map_err(map_embedding_error)
+    }
+
+    /// Builds a transport around an injected provider for tests.
+    pub fn for_testing(provider: P) -> Self {
+        Self { provider }
+    }
+
+    /// Accesses the wrapped provider (used by tests to inspect mocks).
+    pub fn provider(&self) -> &P {
+        &self.provider
+    }
+}
+
+/// Embedding Request Handler - handles batching and request orchestration
+pub struct EmbeddingRequestHandler<P = llm_embedding::OpenAICompatibleProvider> {
+    /// Suite-backed batch transport
+    inner: SuiteEmbeddingTransport<P>,
+}
+
+impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
     /// Create a new request handler
-    pub fn new(client: Arc<HttpLlmClient>) -> Self {
-        Self { inner: client }
+    pub fn new(transport: SuiteEmbeddingTransport<P>) -> Self {
+        Self { inner: transport }
+    }
+
+    /// Accesses the underlying transport (used by tests to inspect mocks).
+    pub fn transport(&self) -> &SuiteEmbeddingTransport<P> {
+        &self.inner
     }
 
     /// Generate embeddings with batching
@@ -41,9 +105,14 @@ impl EmbeddingRequestHandler {
 
         let mut idx = 0;
         while idx < batches.len() {
-            let result = match self.embed_batch(&batches[idx], config).await {
+            let batch: Vec<String> =
+                batches[idx].iter().map(|text| (*text).to_string()).collect();
+            let result = match self.inner.embed_batch(batch).await {
                 Ok(result) => result,
-                Err(error) if !all_embeddings.is_empty() && ErrorClassify::is_transient(&error) => {
+                Err(error)
+                    if !all_embeddings.is_empty()
+                        && cce_types::error::common::ErrorClassify::is_transient(&error) =>
+                {
                     // A later failed sub-batch must not discard the already
                     // embedded ones; replay only this sub-batch once and let a
                     // second failure propagate.
@@ -53,7 +122,9 @@ impl EmbeddingRequestHandler {
                         error = %error,
                         "Embedding sub-batch failed after partial progress; replaying once"
                     );
-                    self.embed_batch(&batches[idx], config).await?
+                    let batch: Vec<String> =
+                        batches[idx].iter().map(|text| (*text).to_string()).collect();
+                    self.inner.embed_batch(batch).await?
                 }
                 Err(error) => return Err(error),
             };
@@ -110,104 +181,35 @@ impl EmbeddingRequestHandler {
 
         Ok(batches)
     }
-
-    /// Embed a single batch
-    async fn embed_batch(
-        &self,
-        batch: &[&str],
-        config: &EmbeddingConfig,
-    ) -> Result<EmbeddingResult, LlmError> {
-        let mut builder = RequestBuilder::new(&config.model).with_input(batch);
-
-        if let Some(dimension) = config.vector_dimension {
-            if dimension > 0 {
-                builder = builder.with_dimensions(dimension);
-            }
-        }
-
-        if config.use_base64 {
-            builder = builder.with_encoding_format("base64");
-        }
-
-        let request_body = builder.build();
-
-        let response: crate::services::embedding::response_parser::StandardEmbeddingResponse = self
-            .inner
-            .request(
-                &self.inner.endpoint_path(ServiceType::Embedding),
-                &request_body,
-            )
-            .await?;
-
-        let mut data = response.data;
-        data.sort_by_key(|d| d.index);
-
-        validate_embedding_data(&data, batch.len(), config.vector_dimension)?;
-
-        let embeddings: Vec<Vec<f32>> = data.into_iter().map(|d| d.embedding).collect();
-
-        let usage = response.usage.unwrap_or_default();
-
-        Ok(EmbeddingResult {
-            embeddings,
-            prompt_tokens: usage.prompt_tokens,
-            total_tokens: usage.total_tokens,
-        })
-    }
-}
-
-fn validate_embedding_data(
-    data: &[StandardEmbeddingData],
-    expected_count: usize,
-    expected_dimension: Option<usize>,
-) -> Result<(), LlmError> {
-    if data.len() != expected_count {
-        return Err(LlmError::invalid_response(format!(
-            "Embedding response count mismatch: expected {expected_count}, received {}",
-            data.len()
-        )));
-    }
-
-    for (expected_index, item) in data.iter().enumerate() {
-        if item.index != expected_index {
-            return Err(LlmError::invalid_response(format!(
-                "Embedding response index mismatch: expected {expected_index}, received {}",
-                item.index
-            )));
-        }
-        if item.embedding.is_empty() {
-            return Err(LlmError::invalid_input(format!(
-                "Embedding at index {expected_index} is empty; check the embedder dimension configuration",
-            )));
-        }
-        if let Some(expected_dimension) = expected_dimension
-            && expected_dimension > 0
-            && item.embedding.len() != expected_dimension
-        {
-            return Err(LlmError::invalid_input(format!(
-                "Embedding dimension mismatch at index {expected_index}: expected {expected_dimension}, received {}",
-                item.embedding.len()
-            )));
-        }
-        if item.embedding.iter().any(|value| !value.is_finite()) {
-            return Err(LlmError::invalid_input(format!(
-                "Embedding at index {expected_index} contains a non-finite value"
-            )));
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::config::LlmConfig;
+    use std::collections::HashMap;
 
     fn test_handler() -> EmbeddingRequestHandler {
-        let client = HttpLlmClient::new(LlmConfig::openai("sk-test".to_string()))
-            .expect("test client should build");
-        EmbeddingRequestHandler::new(Arc::new(client))
+        let resolved = ResolvedEmbeddingConfig {
+            base_url: "http://localhost:1".to_string(),
+            api_keys: Vec::new(),
+            model: "test-model".to_string(),
+            vector_dimension: 8,
+            preprocessor: cce_config::PreprocessorConfig::None,
+            max_batch_tokens: 8192,
+            max_item_tokens: 2048,
+            timeout_secs: 5,
+            max_retries: 0,
+            retry_delay_ms: 1,
+            proxy_url: None,
+            extra_headers: HashMap::new(),
+            api_key_file: None,
+            use_base64: false,
+            extra_params: HashMap::new(),
+            endpoint_path: "embeddings".to_string(),
+        };
+        let transport = SuiteEmbeddingTransport::from_resolved(&resolved)
+            .expect("test transport should build");
+        EmbeddingRequestHandler::new(transport)
     }
 
     #[test]
@@ -228,26 +230,5 @@ mod tests {
         };
         let result = test_handler().create_batches(&["text"], &config);
         assert!(matches!(result, Err(LlmError::InvalidInput(_))));
-    }
-
-    #[test]
-    fn rejects_invalid_embedding_response_contract() {
-        let duplicate_index = vec![
-            StandardEmbeddingData {
-                embedding: vec![1.0, 2.0],
-                index: 0,
-            },
-            StandardEmbeddingData {
-                embedding: vec![3.0, 4.0],
-                index: 0,
-            },
-        ];
-        assert!(validate_embedding_data(&duplicate_index, 2, Some(2)).is_err());
-
-        let invalid_value = vec![StandardEmbeddingData {
-            embedding: vec![f32::NAN, 2.0],
-            index: 0,
-        }];
-        assert!(validate_embedding_data(&invalid_value, 1, Some(2)).is_err());
     }
 }

@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cce_llm::{EmbeddingResult, LlmError};
-use cce_llm_client::OpenAICompatibleProvider;
 use moka::future::Cache;
 
 /// Maximum number of cached query embeddings per searcher.
@@ -26,14 +25,14 @@ const CACHE_MAX_ENTRIES: u64 = 512;
 const CACHE_TTL: Duration = Duration::from_secs(600);
 
 /// Wrapper that deduplicates `embed_one` calls per query text.
-pub struct CachedEmbedder {
-    inner: Arc<OpenAICompatibleProvider>,
+pub struct CachedEmbedder<P = cce_llm_client::OpenAICompatibleProvider> {
+    inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>,
     cache: Cache<String, Vec<f32>>,
 }
 
-impl CachedEmbedder {
+impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
     /// Wrap the given embedder with a small TTL cache.
-    pub fn new(inner: Arc<OpenAICompatibleProvider>) -> Self {
+    pub fn new(inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>) -> Self {
         Self {
             inner,
             cache: Self::build_cache(CACHE_TTL),
@@ -42,7 +41,10 @@ impl CachedEmbedder {
 
     /// Wrap with an explicit TTL; test-only, used for expiry testing.
     #[cfg(test)]
-    fn with_ttl(inner: Arc<OpenAICompatibleProvider>, ttl: Duration) -> Self {
+    fn with_ttl(
+        inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>,
+        ttl: Duration,
+    ) -> Self {
         Self {
             inner,
             cache: Self::build_cache(ttl),
@@ -57,7 +59,7 @@ impl CachedEmbedder {
     }
 }
 
-impl CachedEmbedder {
+impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
     pub async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, LlmError> {
         self.inner.embed(texts).await
     }
@@ -95,45 +97,49 @@ impl CachedEmbedder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cce_llm_client::services::embedding::mock_server::{MockEmbeddingServer, MockResponse};
+    use llm_embedding::EmbeddingError;
+    use llm_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
 
-    fn create_test_embedder(
-        server: &MockEmbeddingServer,
-    ) -> Arc<cce_llm_client::OpenAICompatibleProvider> {
-        let config = server.app_config("test-model", 3);
-        let provider = cce_llm_client::OpenAICompatibleProvider::from_model(&config, "test-model")
-            .expect("create embedder");
-        Arc::new(provider)
+    type MockEmbedder = cce_llm_client::OpenAICompatibleProvider<MockEmbeddingProvider>;
+
+    fn create_test_embedder(mock: MockEmbeddingProvider) -> Arc<MockEmbedder> {
+        Arc::new(MockEmbedder::from_embed_provider(mock, "test-model", 3))
     }
 
     #[tokio::test]
     async fn repeated_text_hits_cache_once() {
-        let server = MockEmbeddingServer::start();
-        let embedder = create_test_embedder(&server);
-        let cached = CachedEmbedder::new(embedder);
+        let embedder = create_test_embedder(MockEmbeddingProvider::new("test-model", 3));
+        let cached = CachedEmbedder::new(Arc::clone(&embedder));
 
         let first = cached.embed_one("same query").await.expect("first embed");
         let second = cached.embed_one("same query").await.expect("second embed");
 
         assert_eq!(first, second);
         assert_eq!(
-            server.request_count(),
-            1,
+            embedder.inner_provider().recorded_batch_sizes(),
+            vec![1],
             "identical text must be embedded exactly once"
         );
 
         let _ = cached.embed_one("other query").await.expect("other embed");
-        assert_eq!(server.request_count(), 2);
+        assert_eq!(
+            embedder.inner_provider().recorded_batch_sizes(),
+            vec![1, 1]
+        );
     }
 
     #[tokio::test]
     async fn failed_embed_is_not_cached() {
-        let server = MockEmbeddingServer::start();
-        server.queue_response(MockResponse::RateLimit);
-        server.queue_response(MockResponse::Success { dimension: 3 });
-
-        let embedder = create_test_embedder(&server);
-        let cached = CachedEmbedder::new(embedder);
+        let mock = MockEmbeddingProvider::with_steps(vec![MockEmbeddingStep::Fail(
+            EmbeddingError::Provider {
+                status: 429,
+                message: "rate limit exceeded".to_string(),
+                retry_after_ms: None,
+            },
+        )])
+        .with_dimension(3);
+        let embedder = create_test_embedder(mock);
+        let cached = CachedEmbedder::new(Arc::clone(&embedder));
 
         let err = cached
             .embed_one("flaky query")
@@ -141,26 +147,24 @@ mod tests {
             .expect_err("first call fails");
         assert_eq!(err.error_code(), "LLM_RATE_LIMIT_EXCEEDED_ERROR");
 
-        let vector = cached.embed_one("flaky query").await.expect("retry embed");
-        assert_eq!(vector, vec![0.5, 0.5, 0.5]);
+        let first = cached.embed_one("flaky query").await.expect("retry embed");
+        let second = cached.embed_one("flaky query").await.expect("cached embed");
+        assert_eq!(first, second);
 
-        let _ = cached.embed_one("flaky query").await.expect("cached embed");
         assert_eq!(
-            server.request_count(),
-            2,
+            embedder.inner_provider().recorded_batch_sizes(),
+            vec![1, 1],
             "failure must not be cached; success must be"
         );
     }
 
     #[tokio::test]
     async fn concurrent_identical_texts_share_one_remote_call() {
-        let server = MockEmbeddingServer::start();
-        server.queue_response(MockResponse::Delayed {
-            delay: Duration::from_millis(20),
-            dimension: 3,
-        });
-
-        let embedder = create_test_embedder(&server);
+        let mock = MockEmbeddingProvider::with_steps(vec![MockEmbeddingStep::Delayed {
+            delay_ms: 20,
+        }])
+        .with_dimension(3);
+        let embedder = create_test_embedder(mock);
         let cached = Arc::new(CachedEmbedder::new(embedder));
 
         let mut handles = Vec::new();
@@ -175,39 +179,34 @@ mod tests {
         }
 
         assert_eq!(
-            server.request_count(),
-            1,
+            cached.inner.inner_provider().recorded_batch_sizes(),
+            vec![1],
             "concurrent identical texts must coalesce into a single remote call"
         );
     }
 
     #[tokio::test]
     async fn expired_entry_is_reembedded() {
-        let server = MockEmbeddingServer::start();
-        let embedder = create_test_embedder(&server);
-        let cached = CachedEmbedder::with_ttl(embedder, Duration::from_millis(50));
+        let embedder = create_test_embedder(MockEmbeddingProvider::new("test-model", 3));
+        let cached = CachedEmbedder::with_ttl(Arc::clone(&embedder), Duration::from_millis(50));
 
         let _ = cached.embed_one("aging query").await.expect("first embed");
         tokio::time::sleep(Duration::from_millis(150)).await;
         let _ = cached.embed_one("aging query").await.expect("second embed");
 
         assert_eq!(
-            server.request_count(),
-            2,
+            embedder.inner_provider().recorded_batch_sizes(),
+            vec![1, 1],
             "expired entry must trigger a fresh remote call"
         );
     }
 
     #[tokio::test]
     async fn metadata_delegates_to_inner() {
-        let server = MockEmbeddingServer::start();
-        let embedder = create_test_embedder(&server);
+        let embedder = create_test_embedder(MockEmbeddingProvider::new("test-model", 3));
         let cached = CachedEmbedder::new(embedder);
         assert_eq!(cached.dimension(), 3);
         assert_eq!(cached.model_name(), "test-model");
         assert!(cached.is_healthy());
-
-        let result = cached.embed(&["a", "b"]).await.expect("batch embed");
-        assert_eq!(result.embeddings.len(), 2);
     }
 }

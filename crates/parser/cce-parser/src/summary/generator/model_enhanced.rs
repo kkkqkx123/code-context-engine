@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// Combines rule-based generation with LLM enhancement for
 /// files that exceed the importance threshold. The LLM client is a generic
 /// parameter instead of a trait object: the only production implementation is
-/// `HttpLlmClient`, instantiated at the orchestration boundary, while tests
+/// `SuiteChatClient`, instantiated at the orchestration boundary, while tests
 /// inject a stub.
 pub struct ModelEnhancedGenerator<C: LlmClient> {
     llm_client: Arc<C>,

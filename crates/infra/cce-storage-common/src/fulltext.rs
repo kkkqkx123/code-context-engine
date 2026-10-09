@@ -17,6 +17,7 @@
 //! count and no lock crosses module boundaries.
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use serde::{Deserialize, Serialize};
 
@@ -131,81 +132,90 @@ pub type FulltextError = cce_types::error::Bm25Error;
 /// normalization on every branch.
 pub trait FulltextStorage: Clone + Send + Sync + 'static {
     /// Index a batch of documents into the configured index.
-    async fn batch_index(
+    fn batch_index(
         &self,
         index_name: &str,
         documents: &[FulltextDocument],
-    ) -> Result<usize, FulltextError>;
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// Run a keyword retrieval with project and generation filters.
     ///
     /// The output carries only the stored readback fields (document and
     /// chunk ids, title, file path, alignment ids); the indexed-only body
     /// and keyword fields never participate in readback on any branch.
-    async fn search(
+    fn search(
         &self,
         query: &str,
         options: &FulltextSearchOptions,
-    ) -> Result<Vec<FulltextHit>, FulltextError>;
+    ) -> impl Future<Output = Result<Vec<FulltextHit>, FulltextError>> + Send;
 
     /// Delete documents for one file within one project.
-    async fn delete_by_file_path_scoped(
+    fn delete_by_file_path_scoped(
         &self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
-    ) -> Result<usize, FulltextError>;
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// Delete documents for one file in one data epoch.
-    async fn delete_by_file_path_scoped_epoch(
+    fn delete_by_file_path_scoped_epoch(
         &self,
         index_name: &str,
         file_path: &str,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, FulltextError>;
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// Delete all documents for one project and data epoch.
-    async fn delete_by_project_epoch(
+    fn delete_by_project_epoch(
         &self,
         index_name: &str,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, FulltextError>;
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// Delete all documents for a project.
-    async fn delete_all_project_docs(
+    fn delete_all_project_docs(
         &self,
         index_name: &str,
         project_id: i64,
-    ) -> Result<usize, FulltextError>;
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// Read back the stored fields needed to copy an epoch into a
     /// candidate generation.
-    async fn snapshot_documents(
+    fn snapshot_documents(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Vec<FulltextDocument>, FulltextError>;
+    ) -> impl Future<Output = Result<Vec<FulltextDocument>, FulltextError>> + Send;
 
     /// Count all documents in the index.
-    async fn document_count(&self) -> Result<usize, FulltextError>;
+    fn document_count(&self) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// Count documents belonging to one project.
-    async fn document_count_by_project(&self, project_id: i64) -> Result<usize, FulltextError>;
+    fn document_count_by_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// List data epochs currently present for a project.
-    async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, FulltextError>;
+    fn epochs_by_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<Vec<i64>, FulltextError>> + Send;
 
     /// Recreate the index from scratch (generation rebuild/cleanup).
-    async fn clear_index(&self, index_name: &str) -> Result<usize, FulltextError>;
+    fn clear_index(
+        &self,
+        index_name: &str,
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
     /// Make recent writes visible to counts and snapshot readbacks.
     ///
     /// The local branch reloads its reader per batch, so this is a no-op
     /// there; the remote branch refreshes the index. Call it after the last
     /// batch before a generation is marked ready or activated.
-    async fn flush(&self) -> Result<(), FulltextError>;
+    fn flush(&self) -> impl Future<Output = Result<(), FulltextError>> + Send;
 
     /// Whether the branch is enabled and connected.
     fn is_enabled(&self) -> bool;

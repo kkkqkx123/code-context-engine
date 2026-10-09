@@ -2,10 +2,7 @@
 
 pub mod handler;
 pub mod provider;
-pub mod response_parser;
 pub mod types;
-
-pub mod mock_server;
 
 pub(crate) mod preprocessor;
 

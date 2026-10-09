@@ -19,6 +19,8 @@
 //! aggregation, in-process caches) stays local and is intentionally outside
 //! this contract.
 
+use std::future::Future;
+
 use cce_types::StorageError;
 use cce_types::{CanonicalRelationSnapshot, RelationSnapshotManifest, SnapshotDelta};
 
@@ -56,400 +58,448 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
     // -- Project directory --
 
     /// Ensure the project registry row exists (idempotent).
-    async fn ensure_project(&self, project_id: i64, root_path: &str) -> Result<(), StorageError>;
+    fn ensure_project(
+        &self,
+        project_id: i64,
+        root_path: &str,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Fetch the project registry row, if present.
-    async fn project_record(&self, project_id: i64) -> Result<Option<ProjectRecord>, StorageError>;
+    fn project_record(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<Option<ProjectRecord>, StorageError>> + Send;
 
     /// Read an integer project metadata value.
-    async fn project_meta_get_int(&self, project_id: i64, key: &str) -> Result<i64, StorageError>;
+    fn project_meta_get_int(
+        &self,
+        project_id: i64,
+        key: &str,
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
 
     /// Write an integer project metadata value.
-    async fn project_meta_set_int(
+    fn project_meta_set_int(
         &self,
         project_id: i64,
         key: &str,
         value: i64,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     // -- Generation manifest --
 
     /// Allocate (or reattach to) the building manifest for an operation.
-    async fn manifest_begin_building(
+    fn manifest_begin_building(
         &self,
         project_id: i64,
         data_epoch: i64,
         operation_id: &str,
         input_fingerprint: Option<&str>,
-    ) -> Result<ProjectIndexManifest, StorageError>;
+    ) -> impl Future<Output = Result<ProjectIndexManifest, StorageError>> + Send;
 
     /// Mark the inheritance registration of a candidate complete.
-    async fn manifest_mark_candidate_ready(
+    fn manifest_mark_candidate_ready(
         &self,
         project_id: i64,
         operation_id: &str,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Atomically activate a generation: the manifest row, the relation
     /// snapshot state, and the project metadata advance in one transaction.
-    async fn manifest_activate(
+    fn manifest_activate(
         &self,
         project_id: i64,
         data_epoch: i64,
         relation_epoch: i64,
         operation_id: &str,
         input_fingerprint: Option<&str>,
-    ) -> Result<ProjectIndexManifest, StorageError>;
+    ) -> impl Future<Output = Result<ProjectIndexManifest, StorageError>> + Send;
 
     /// Mark the building manifest of an operation failed.
-    async fn manifest_mark_failed(
+    fn manifest_mark_failed(
         &self,
         project_id: i64,
         operation_id: &str,
         reason: &str,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Fetch the currently active manifest, if any.
-    async fn manifest_active(
+    fn manifest_active(
         &self,
         project_id: i64,
-    ) -> Result<Option<ProjectIndexManifest>, StorageError>;
+    ) -> impl Future<Output = Result<Option<ProjectIndexManifest>, StorageError>> + Send;
 
     /// Recycle one data epoch: content rows, overrides, manifest rows, and
     /// snapshot rows of the epoch are removed in one transaction.
-    async fn manifest_recycle_epoch(
+    fn manifest_recycle_epoch(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     // -- Generation overrides --
 
     /// Replace the override set of one generation atomically.
-    async fn overrides_replace(
+    fn overrides_replace(
         &self,
         project_id: i64,
         epoch: i64,
         overrides: &[GenerationOverride],
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// List the overrides of one generation ordered by file path.
-    async fn overrides_for_generation(
+    fn overrides_for_generation(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Vec<GenerationOverride>, StorageError>;
+    ) -> impl Future<Output = Result<Vec<GenerationOverride>, StorageError>> + Send;
 
     // -- Content index --
 
     /// Idempotent batch write of file rows for one project and epoch.
-    async fn files_upsert(
+    fn files_upsert(
         &self,
         project_id: i64,
         epoch: i64,
         files: &[FileRecord],
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete file rows of one project and epoch.
-    async fn files_delete_by_project_epoch(
+    fn files_delete_by_project_epoch(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete all file rows of one project.
-    async fn files_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError>;
+    fn files_delete_by_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Idempotent batch write of entity rows (records carry project/epoch).
-    async fn entities_upsert(&self, entities: &[EntityRecord]) -> Result<usize, StorageError>;
+    fn entities_upsert(
+        &self,
+        entities: &[EntityRecord],
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete entity rows of one project and epoch.
-    async fn entities_delete_by_project_epoch(
+    fn entities_delete_by_project_epoch(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete all entity rows of one project.
-    async fn entities_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError>;
+    fn entities_delete_by_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Count entity rows of one project and epoch.
-    async fn entities_count(&self, project_id: i64, epoch: i64) -> Result<i64, StorageError>;
+    fn entities_count(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
 
     /// Idempotent batch write of chunk rows (records carry project/epoch).
-    async fn chunks_upsert(&self, chunks: &[ChunkRecord]) -> Result<usize, StorageError>;
+    fn chunks_upsert(
+        &self,
+        chunks: &[ChunkRecord],
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Read back chunk rows by id for enrichment. An empty epoch list
     /// disables epoch filtering.
-    async fn chunks_by_ids(
+    fn chunks_by_ids(
         &self,
         project_id: i64,
         chunk_ids: &[String],
         epochs: &[i64],
-    ) -> Result<Vec<ChunkRecord>, StorageError>;
+    ) -> impl Future<Output = Result<Vec<ChunkRecord>, StorageError>> + Send;
 
     /// Delete chunk rows of one file.
-    async fn chunks_delete_by_file(
+    fn chunks_delete_by_file(
         &self,
         project_id: i64,
         file_path: &str,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete chunk rows of one project and epoch.
-    async fn chunks_delete_by_project_epoch(
+    fn chunks_delete_by_project_epoch(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete all chunk rows of one project.
-    async fn chunks_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError>;
+    fn chunks_delete_by_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Count chunk rows of one project and epoch.
-    async fn chunks_count(&self, project_id: i64, epoch: i64) -> Result<i64, StorageError>;
-
-    /// Idempotent batch write of entity detail mappings.
-    async fn mappings_upsert(
-        &self,
-        mappings: &[EntityDetailMapping],
-    ) -> Result<usize, StorageError>;
-
-    /// Delete mapping rows of one project and epoch.
-    async fn mappings_delete_by_project_epoch(
+    fn chunks_count(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
+
+    /// Idempotent batch write of entity detail mappings.
+    fn mappings_upsert(
+        &self,
+        mappings: &[EntityDetailMapping],
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
+
+    /// Delete mapping rows of one project and epoch.
+    fn mappings_delete_by_project_epoch(
+        &self,
+        project_id: i64,
+        epoch: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete all mapping rows of one project.
-    async fn mappings_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError>;
+    fn mappings_delete_by_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Idempotent write of one file summary at an epoch.
-    async fn summary_upsert(
+    fn summary_upsert(
         &self,
         file_id: i64,
         epoch: i64,
         summary_json: &str,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Read one file summary at an epoch.
-    async fn summary_at_epoch(
+    fn summary_at_epoch(
         &self,
         file_id: i64,
         epoch: i64,
-    ) -> Result<Option<String>, StorageError>;
+    ) -> impl Future<Output = Result<Option<String>, StorageError>> + Send;
 
     /// List summary payloads of one project and epoch.
-    async fn summaries_by_epoch(
+    fn summaries_by_epoch(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Vec<(String, String, i64)>, StorageError>;
+    ) -> impl Future<Output = Result<Vec<(String, String, i64)>, StorageError>> + Send;
 
     /// Delete summary rows of one project and epoch.
-    async fn summaries_delete_by_project_epoch(
+    fn summaries_delete_by_project_epoch(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete all summary rows of one project.
-    async fn summaries_delete_by_project(&self, project_id: i64) -> Result<usize, StorageError>;
+    fn summaries_delete_by_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     // -- Progress checkpoints --
 
     /// Create an operation-level checkpoint.
-    async fn checkpoint_create(
+    fn checkpoint_create(
         &self,
         project_id: i64,
         checkpoint: &CheckpointRecord,
-    ) -> Result<i64, StorageError>;
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
 
     /// Fetch an operation-level checkpoint.
-    async fn checkpoint_get(
+    fn checkpoint_get(
         &self,
         project_id: i64,
         operation_id: &str,
-    ) -> Result<Option<CheckpointRecord>, StorageError>;
+    ) -> impl Future<Output = Result<Option<CheckpointRecord>, StorageError>> + Send;
 
     /// Update an operation-level checkpoint status.
-    async fn checkpoint_set_status(
+    fn checkpoint_set_status(
         &self,
         project_id: i64,
         operation_id: &str,
         status: CheckpointStatus,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Replace an operation-level checkpoint.
-    async fn checkpoint_update(
+    fn checkpoint_update(
         &self,
         project_id: i64,
         checkpoint: &CheckpointRecord,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Idempotent write of one file checkpoint.
-    async fn file_checkpoint_upsert(
+    fn file_checkpoint_upsert(
         &self,
         project_id: i64,
         file: &FileCheckpointRecord,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Fetch one file checkpoint.
-    async fn file_checkpoint_get(
+    fn file_checkpoint_get(
         &self,
         project_id: i64,
         operation_id: &str,
         file_path: &str,
-    ) -> Result<Option<FileCheckpointRecord>, StorageError>;
+    ) -> impl Future<Output = Result<Option<FileCheckpointRecord>, StorageError>> + Send;
 
     /// Delete file checkpoints of one operation.
-    async fn checkpoint_files_delete_by_operation(
+    fn checkpoint_files_delete_by_operation(
         &self,
         project_id: i64,
         operation_id: &str,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Insert a work-unit checkpoint.
-    async fn work_unit_insert(
+    fn work_unit_insert(
         &self,
         record: &WorkUnitCheckpointRecord,
-    ) -> Result<i64, StorageError>;
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
 
     /// Update a work-unit checkpoint status.
-    async fn work_unit_set_status(
+    fn work_unit_set_status(
         &self,
         project_id: i64,
         operation_id: &str,
         stage: &str,
         work_unit_hash: &str,
         status: WorkUnitStatus,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// List work-unit checkpoints of one operation stage.
-    async fn work_units_list(
+    fn work_units_list(
         &self,
         project_id: i64,
         operation_id: &str,
         stage: &str,
-    ) -> Result<Vec<WorkUnitCheckpointRecord>, StorageError>;
+    ) -> impl Future<Output = Result<Vec<WorkUnitCheckpointRecord>, StorageError>> + Send;
 
     /// Fetch one work-unit checkpoint by hash.
-    async fn work_unit_by_hash(
+    fn work_unit_by_hash(
         &self,
         project_id: i64,
         operation_id: &str,
         stage: &str,
         work_unit_hash: &str,
-    ) -> Result<Option<WorkUnitCheckpointRecord>, StorageError>;
+    ) -> impl Future<Output = Result<Option<WorkUnitCheckpointRecord>, StorageError>> + Send;
 
     // -- Relation snapshots --
 
     /// Allocate a building relation epoch for an operation.
-    async fn snapshot_allocate(
+    fn snapshot_allocate(
         &self,
         project_id: i64,
         operation_id: &str,
         config_fingerprint: &str,
-    ) -> Result<i64, StorageError>;
+    ) -> impl Future<Output = Result<i64, StorageError>> + Send;
 
     /// Persist a full snapshot and mark its epoch ready, atomically.
-    async fn snapshot_write_ready(
+    fn snapshot_write_ready(
         &self,
         project_id: i64,
         epoch: i64,
         snapshot: &CanonicalRelationSnapshot,
         input_fingerprint: &str,
         snapshot_fingerprint: &str,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Read back the canonical snapshot of an epoch.
-    async fn snapshot_read(
+    fn snapshot_read(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<CanonicalRelationSnapshot, StorageError>;
+    ) -> impl Future<Output = Result<CanonicalRelationSnapshot, StorageError>> + Send;
 
     /// Fetch the snapshot manifest of an epoch, if present.
-    async fn snapshot_manifest(
+    fn snapshot_manifest(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<Option<RelationSnapshotManifest>, StorageError>;
+    ) -> impl Future<Output = Result<Option<RelationSnapshotManifest>, StorageError>> + Send;
 
     /// Read the incremental delta chain of an epoch range.
-    async fn snapshot_delta_chain(
+    fn snapshot_delta_chain(
         &self,
         project_id: i64,
         after_epoch: i64,
         up_to_epoch: i64,
-    ) -> Result<Vec<SnapshotDelta>, StorageError>;
+    ) -> impl Future<Output = Result<Vec<SnapshotDelta>, StorageError>> + Send;
 
     /// Resolve the base epoch a delta epoch was built from.
-    async fn snapshot_find_base(
+    fn snapshot_find_base(
         &self,
         project_id: i64,
         delta_epoch: i64,
-    ) -> Result<Option<i64>, StorageError>;
+    ) -> impl Future<Output = Result<Option<i64>, StorageError>> + Send;
 
     /// Mark a relation epoch failed.
-    async fn snapshot_mark_failed(
+    fn snapshot_mark_failed(
         &self,
         project_id: i64,
         epoch: i64,
         reason: &str,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Delete every snapshot row of one epoch.
-    async fn snapshot_delete_epoch(
+    fn snapshot_delete_epoch(
         &self,
         project_id: i64,
         epoch: i64,
-    ) -> Result<usize, StorageError>;
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Delete every snapshot row of one project.
-    async fn snapshot_delete_project(&self, project_id: i64) -> Result<usize, StorageError>;
+    fn snapshot_delete_project(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     // -- Admission audit --
 
     /// Record one admitted ingest batch.
-    async fn admission_record_admitted(
+    fn admission_record_admitted(
         &self,
         fingerprint: &str,
         projects: &[i64],
         quota_bytes: Option<u64>,
         bytes: u64,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Record one rejection with its cause.
-    async fn admission_record_rejection(
+    fn admission_record_rejection(
         &self,
         fingerprint: &str,
         projects: &[i64],
         quota_bytes: Option<u64>,
         reason: &str,
-    ) -> Result<(), StorageError>;
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
     /// Fetch one audit row by fingerprint.
-    async fn admission_get(
+    fn admission_get(
         &self,
         fingerprint: &str,
-    ) -> Result<Option<AdmissionAuditRecord>, StorageError>;
+    ) -> impl Future<Output = Result<Option<AdmissionAuditRecord>, StorageError>> + Send;
 
     /// List every audit row ordered by fingerprint.
-    async fn admission_list(&self) -> Result<Vec<AdmissionAuditRecord>, StorageError>;
+    fn admission_list(
+        &self,
+    ) -> impl Future<Output = Result<Vec<AdmissionAuditRecord>, StorageError>> + Send;
 
     // -- Capacity --
 
     /// Aggregate on-disk size (local: main plus per-project files; remote:
     /// whole database size plus per-project estimate where available).
-    async fn db_size(&self) -> Result<u64, StorageError>;
+    fn db_size(&self) -> impl Future<Output = Result<u64, StorageError>> + Send;
 
     /// Remove a project: local deletes the per-project database files
     /// (evict handle, then main plus WAL/SHM sidecars); remote deletes the
     /// project rows across business tables in one transaction.
     /// Returns the number of removed business records; snapshot-only
     /// deletion stays on `snapshot_delete_project`.
-    async fn delete_project_db(&self, project_id: i64) -> Result<usize, StorageError>;
+    fn delete_project_db(
+        &self,
+        project_id: i64,
+    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
 
     /// Backend name for logging (`local` for the embedded branch).
     fn backend_name(&self) -> &'static str {

@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// Covers the original hardcoded allowlist plus the keys already used by
 /// built-in domain metrics (`capability` for plugins, `method`/`path`/
-/// `status_class` for HTTP, `format` for export self-monitoring).
+/// `status_class` for HTTP, `format` for export self-monitoring, `model`
+/// for the LLM gateway token sink).
 pub fn default_allowed_label_keys() -> Vec<String> {
     vec![
         "operation".to_string(),
@@ -21,6 +22,7 @@ pub fn default_allowed_label_keys() -> Vec<String> {
         "project_id".to_string(),
         "language".to_string(),
         "provider".to_string(),
+        "model".to_string(),
         "error_type".to_string(),
         "search_type".to_string(),
         "stage".to_string(),
@@ -185,6 +187,7 @@ mod tests {
             "project_id",
             "language",
             "provider",
+            "model",
             "error_type",
             "search_type",
             "stage",

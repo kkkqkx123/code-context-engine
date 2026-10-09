@@ -11,16 +11,18 @@ cce-llm = { path = "../../core/cce-llm" }
 cce-circuit-breaker = { path = "../cce-circuit-breaker" }
 cce-metrics = { path = "../../core/cce-metrics" }
 cce-utils = { path = "../../core/cce-utils" }
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+llm-codec = { path = "../llm-suite/crates/llm-codec" }
+llm-client = { path = "../llm-suite/crates/llm-client" }
+llm-config = { path = "../llm-suite/crates/llm-config" }
+llm-embedding = { path = "../llm-suite/crates/llm-embedding" }
+llm-gateway = { path = "../llm-suite/crates/llm-gateway" }
+llm-rerank = { path = "../llm-suite/crates/llm-rerank" }
+llm-types = { path = "../llm-suite/crates/llm-types" }
 tokio = { workspace = true }
-governor = { workspace = true }
 tracing = { workspace = true }
-thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-async-trait = { workspace = true }
-chrono = { workspace = true }
-fastrand = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+llm-rerank = { path = "../llm-suite/crates/llm-rerank", features = ["mock"] }

@@ -31,6 +31,8 @@
 //!
 //! Dispatch uses a backend enum at the assembly layer, never trait objects.
 
+use std::future::Future;
+
 use serde::{Deserialize, Serialize};
 
 use cce_types::{FileCategory, PointKind, TestSource, normalize_project_path};
@@ -443,81 +445,100 @@ pub trait VectorStorage: Clone + Send + Sync + 'static {
 
     /// Ensure the collection exists (create when missing).
     /// Returns true when the collection was created.
-    async fn ensure_collection(&self) -> Result<bool, cce_types::StorageError>;
+    fn ensure_collection(
+        &self,
+    ) -> impl Future<Output = Result<bool, cce_types::StorageError>> + Send;
 
     /// Whether the collection exists.
-    async fn collection_exists(&self) -> Result<bool, cce_types::StorageError>;
+    fn collection_exists(
+        &self,
+    ) -> impl Future<Output = Result<bool, cce_types::StorageError>> + Send;
 
     /// Delete the whole collection.
-    async fn delete_collection(&self) -> Result<(), cce_types::StorageError>;
+    fn delete_collection(&self)
+    -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
 
     /// Remove all points from the collection.
-    async fn clear_collection(&self) -> Result<(), cce_types::StorageError>;
+    fn clear_collection(&self) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
 
     /// Upsert vector points (insert or overwrite by point ID).
-    async fn upsert_points(&self, points: &[VectorPoint]) -> Result<(), cce_types::StorageError>;
+    fn upsert_points(
+        &self,
+        points: &[VectorPoint],
+    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
 
     /// Dense vector similarity search (higher score is better).
-    async fn search_dense(
+    fn search_dense(
         &self,
         query: DenseSearchQuery,
-    ) -> Result<Vec<ScoredPoint>, cce_types::StorageError>;
+    ) -> impl Future<Output = Result<Vec<ScoredPoint>, cce_types::StorageError>> + Send;
 
     /// Delete one file's points inside a group.
-    async fn delete_by_file_path_scoped(
+    fn delete_by_file_path_scoped(
         &self,
         file_path: &str,
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> Result<(), cce_types::StorageError>;
+    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
 
     /// Delete one file's points inside a group and epoch.
-    async fn delete_by_file_path_scoped_epoch(
+    fn delete_by_file_path_scoped_epoch(
         &self,
         file_path: &str,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), cce_types::StorageError>;
+    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
 
     /// Delete all points of a group and epoch.
-    async fn delete_by_group_epoch(
+    fn delete_by_group_epoch(
         &self,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), cce_types::StorageError>;
+    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
 
     /// Delete all points of a group.
-    async fn delete_by_group(&self, group_id: &str) -> Result<(), cce_types::StorageError>;
+    fn delete_by_group(
+        &self,
+        group_id: &str,
+    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
 
     /// Delete several files' points inside a group.
     ///
     /// Backends may serve this as one native batch or as sequential single
     /// deletes; the visible result must match sequential deletes.
-    async fn delete_by_file_paths_scoped(
+    fn delete_by_file_paths_scoped(
         &self,
         file_paths: &[&str],
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> Result<(), cce_types::StorageError> {
-        for path in file_paths {
-            self.delete_by_file_path_scoped(path, group_id, point_type)
-                .await?;
+    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send {
+        async move {
+            for path in file_paths {
+                self.delete_by_file_path_scoped(path, group_id, point_type)
+                    .await?;
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     /// List all points (used by generation GC and compaction).
-    async fn scroll_all_points(&self) -> Result<Vec<VectorPoint>, cce_types::StorageError>;
+    fn scroll_all_points(
+        &self,
+    ) -> impl Future<Output = Result<Vec<VectorPoint>, cce_types::StorageError>> + Send;
 
     /// Count points of a group.
-    async fn count_points_by_group(&self, group_id: &str)
-    -> Result<usize, cce_types::StorageError>;
+    fn count_points_by_group(
+        &self,
+        group_id: &str,
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send;
 
     /// Count all points in the collection.
-    async fn count_all_points(&self) -> Result<usize, cce_types::StorageError>;
+    fn count_all_points(
+        &self,
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send;
 
     /// Liveness probe (local always true when the engine is open).
-    async fn health(&self) -> Result<bool, cce_types::StorageError>;
+    fn health(&self) -> impl Future<Output = Result<bool, cce_types::StorageError>> + Send;
 }
 
 #[cfg(test)]

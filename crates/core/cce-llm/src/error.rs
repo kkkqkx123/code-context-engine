@@ -1,8 +1,8 @@
 //! LLM chat contract types shared by the whole workspace
 //!
 //! The parser's summary pipeline consumes LLM chat through the [`LlmClient`]
-//! port; the concrete HTTP implementation lives in
-//! `cce_infrastructure::llm::HttpLlmClient` and is injected as a generic
+//! port; the concrete gateway-backed implementation lives in
+//! `cce_llm_client::SuiteChatClient` and is injected as a generic
 //! parameter (no trait objects).
 
 use thiserror::Error;

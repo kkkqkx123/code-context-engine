@@ -45,7 +45,7 @@ use cce_config::{
     default_embed_input_token_limit,
 };
 use cce_llm::ChatConfig;
-use cce_llm_client::HttpLlmClient;
+use cce_llm_client::SuiteChatClient;
 use cce_metrics::ProgressTracker;
 use cce_metrics::{
     FileProcessingMetrics, MetricsRegistry, ParserMetrics, PipelineStage, PipelineStageMetrics,
@@ -85,7 +85,7 @@ pub struct IndexOrchestrator {
     /// Stored summary config (for deferred ModelEnhancedGenerator creation)
     summary_config: Option<SummaryConfig>,
     /// LLM client for model-enhanced generation
-    llm_client: Option<Arc<HttpLlmClient>>,
+    llm_client: Option<Arc<SuiteChatClient>>,
     /// Chat completion configuration
     chat_config: Option<ChatConfig>,
     state_tracker: UpdateStateTracker,
@@ -334,7 +334,7 @@ impl IndexOrchestrator {
     /// the orchestrator uses `ModelEnhancedGenerator` for per-file decisions.
     pub fn with_llm_client(
         mut self,
-        llm_client: Arc<HttpLlmClient>,
+        llm_client: Arc<SuiteChatClient>,
         chat_config: ChatConfig,
     ) -> Self {
         self.llm_client = Some(llm_client);

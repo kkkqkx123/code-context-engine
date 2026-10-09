@@ -1,32 +1,31 @@
 //! LLM Client
 //!
-//! Provides unified HTTP client infrastructure for LLM APIs including
-//! embeddings, chat/completions, and reranking.
+//! llm-suite-backed embedding, chat and rerank providers plus the factory
+//! assembling them from the global config.
 
 pub mod core;
 pub mod factory;
-pub mod rate_limiter_registry;
 pub mod services;
+pub mod suite;
 
 pub use crate::core::{
-    client::{HttpLlmClient, HttpLlmClientBuilder},
-    config::{ChatConfig, EmbeddingConfig, LlmConfig, ProviderType, ResponseFormat},
+    config::{ChatConfig, EmbeddingConfig, ResponseFormat},
     error::{LlmConfigError, LlmError},
-    rate_limiter::{RateLimiter, TokenBucket},
-    retry::{FixedIntervalPolicy, NoRetry, RetryPolicy},
 };
 
 pub use crate::factory::{
-    ChatClientHandle, build_chat_client, build_llm_client, build_rerank_client,
+    ChatClientHandle, build_chat_client, build_cohere_rerank_provider,
+    build_generative_rerank_provider,
 };
 
 pub use crate::services::chat::handler::ChatRequestHandler;
 pub use crate::services::chat::types::{ChatResult, Message, MessageRole};
-pub use crate::services::embedding::handler::EmbeddingRequestHandler;
+pub use crate::services::embedding::handler::{EmbeddingRequestHandler, SuiteEmbeddingTransport};
 pub use crate::services::embedding::provider::OpenAICompatibleProvider;
 pub use crate::services::rerank::{
-    CohereRerankProvider, GenerativeRerankProvider, GenerativeRerankRequestHandler,
-    ProductionRerankHandler, RerankCandidate, RerankFusionStrategy, RerankRequest, RerankResult,
-    RerankRuntimeConfig, RerankedCandidate,
+    CohereRerankProvider, DelegatingRerankProvider, GenerativeRerankProvider,
+    GenerativeRerankRequestHandler, ProductionRerankHandler, RerankCandidate, RerankFusionStrategy,
+    RerankRequest, RerankResult, RerankRuntimeConfig, RerankedCandidate,
 };
 pub use cce_llm::{EmbeddingResult, RerankProvider};
+pub use crate::suite::{GatewayMetricsSink, SuiteChatClient, init_global_token_metrics};
