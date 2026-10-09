@@ -1,9 +1,8 @@
 //! Rearranging request processors
 
-use crate::core::error::LlmError;
-use crate::services::rerank::types::{RerankRequest, RerankResult};
-use cce_llm::RerankProvider;
+use cce_llm::{LlmError, RerankProvider, RerankRequest};
 use cce_metrics::RerankMetrics;
+use cce_types::RerankResult;
 use std::sync::Arc;
 
 /// Rearrangement of request processors
@@ -148,7 +147,8 @@ impl<P: RerankProvider> RerankRequestHandler<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::rerank::types::{RerankCandidate, RerankRuntimeConfig};
+    use cce_llm::RerankRuntimeConfig;
+    use cce_types::{RerankCandidate, RerankedCandidate};
     use std::collections::HashMap;
 
     struct MockProvider;
@@ -159,7 +159,7 @@ mod tests {
                 .candidates
                 .iter()
                 .enumerate()
-                .map(|(i, c)| crate::services::rerank::types::RerankedCandidate {
+                .map(|(i, c)| RerankedCandidate {
                     id: c.id.clone(),
                     rerank_score: 1.0 - (i as f32 * 0.1),
                     initial_score: c.initial_score,

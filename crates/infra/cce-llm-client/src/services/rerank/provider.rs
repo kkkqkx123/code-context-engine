@@ -3,13 +3,10 @@
 //! The CCE providers keep the workspace-facing request/response contract
 //! and delegate scoring to llm-suite, converting types at the boundary.
 
-use crate::core::error::LlmError;
-use crate::services::rerank::types::{
-    RerankCandidate, RerankFusionStrategy, RerankRequest, RerankResult, RerankRuntimeConfig,
-    RerankedCandidate,
-};
 use crate::suite::map_rerank_error;
-use cce_llm::RerankProvider;
+use cce_config::modules::search::RerankFusionStrategy;
+use cce_llm::{LlmError, RerankProvider, RerankRequest, RerankRuntimeConfig};
+use cce_types::{RerankCandidate, RerankResult, RerankedCandidate};
 use llm_rerank::RerankProvider as SuiteRerankProvider;
 
 fn convert_candidate(candidate: &RerankCandidate) -> llm_rerank::RerankCandidate {
@@ -23,17 +20,13 @@ fn convert_candidate(candidate: &RerankCandidate) -> llm_rerank::RerankCandidate
     }
 }
 
-fn convert_fusion(
-    strategy: &RerankFusionStrategy,
-) -> llm_rerank::RerankFusionStrategy {
+fn convert_fusion(strategy: &RerankFusionStrategy) -> llm_rerank::RerankFusionStrategy {
     match strategy {
         RerankFusionStrategy::RerankOnly => llm_rerank::RerankFusionStrategy::RerankOnly,
         RerankFusionStrategy::LinearWeighted { alpha } => {
             llm_rerank::RerankFusionStrategy::LinearWeighted { alpha: *alpha }
         }
-        RerankFusionStrategy::Multiplicative => {
-            llm_rerank::RerankFusionStrategy::Multiplicative
-        }
+        RerankFusionStrategy::Multiplicative => llm_rerank::RerankFusionStrategy::Multiplicative,
         RerankFusionStrategy::ReciprocalRankFusion { k } => {
             llm_rerank::RerankFusionStrategy::ReciprocalRankFusion { k: *k }
         }
@@ -187,7 +180,6 @@ impl<P: SuiteRerankProvider> RerankProvider for DelegatingRerankProvider<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::rerank::types::RerankCandidate;
     use std::collections::HashMap;
 
     fn test_request() -> RerankRequest {
@@ -211,7 +203,7 @@ mod tests {
                     metadata: HashMap::new(),
                 },
             ],
-            config: crate::services::rerank::types::RerankRuntimeConfig::default(),
+            config: RerankRuntimeConfig::default(),
         }
     }
 

@@ -205,8 +205,8 @@ mod tests {
         first_score: f32,
         second_id: &str,
         second_score: f32,
-    ) -> cce_llm_client::services::rerank::types::RerankRequest {
-        use cce_llm_client::services::rerank::types::{
+    ) -> cce_llm_client::RerankRequest {
+        use cce_llm_client::{
             RerankCandidate, RerankRequest, RerankRuntimeConfig as ServiceRerankConfig,
         };
 
@@ -305,7 +305,7 @@ mod tests {
     /// top-scored candidate reaches the mock.
     #[tokio::test]
     async fn test_mock_rerank_limits_candidates_before_provider() {
-        use cce_llm_client::services::rerank::types::RerankRuntimeConfig as ServiceRerankConfig;
+        use cce_llm_client::RerankRuntimeConfig as ServiceRerankConfig;
         use cce_llm_client::services::rerank::{DelegatingRerankProvider, RerankRequestHandler};
         use llm_rerank::mock::MockRerankProvider;
 

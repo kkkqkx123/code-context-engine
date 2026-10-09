@@ -2,19 +2,16 @@
 
 pub mod handler;
 pub mod provider;
-pub mod types;
 
 use std::sync::Arc;
 
-use crate::core::error::LlmError;
-use cce_llm::RerankProvider;
+use cce_llm::{LlmError, RerankProvider};
 
+pub use cce_config::modules::search::RerankFusionStrategy;
+pub use cce_llm::{RerankRequest, RerankRuntimeConfig};
+pub use cce_types::{RerankCandidate, RerankResult, RerankedCandidate};
 pub use handler::RerankRequestHandler;
 pub use provider::{CohereRerankProvider, DelegatingRerankProvider, GenerativeRerankProvider};
-pub use types::{
-    RerankCandidate, RerankFusionStrategy, RerankRequest, RerankResult, RerankRuntimeConfig,
-    RerankedCandidate,
-};
 
 /// Rerank handler used by the production generative LLM provider.
 pub type GenerativeRerankRequestHandler = RerankRequestHandler<GenerativeRerankProvider>;

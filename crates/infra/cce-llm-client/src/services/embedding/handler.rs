@@ -1,10 +1,9 @@
 //! Embedding Request Handler
 
-use crate::core::config::EmbeddingConfig;
-use crate::core::error::LlmError;
-use crate::services::embedding::types::EmbeddingResult;
+use crate::config::EmbeddingConfig;
 use crate::suite::{full_endpoint_url, map_embedding_error, query_string};
 use cce_config::global::ResolvedEmbeddingConfig;
+use cce_llm::{EmbeddingResult, LlmError};
 use cce_utils::token_estimation::estimate_tokens;
 use llm_embedding::EmbeddingProvider;
 
@@ -105,8 +104,10 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
 
         let mut idx = 0;
         while idx < batches.len() {
-            let batch: Vec<String> =
-                batches[idx].iter().map(|text| (*text).to_string()).collect();
+            let batch: Vec<String> = batches[idx]
+                .iter()
+                .map(|text| (*text).to_string())
+                .collect();
             let result = match self.inner.embed_batch(batch).await {
                 Ok(result) => result,
                 Err(error)
@@ -122,8 +123,10 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
                         error = %error,
                         "Embedding sub-batch failed after partial progress; replaying once"
                     );
-                    let batch: Vec<String> =
-                        batches[idx].iter().map(|text| (*text).to_string()).collect();
+                    let batch: Vec<String> = batches[idx]
+                        .iter()
+                        .map(|text| (*text).to_string())
+                        .collect();
                     self.inner.embed_batch(batch).await?
                 }
                 Err(error) => return Err(error),
@@ -207,8 +210,8 @@ mod tests {
             extra_params: HashMap::new(),
             endpoint_path: "embeddings".to_string(),
         };
-        let transport = SuiteEmbeddingTransport::from_resolved(&resolved)
-            .expect("test transport should build");
+        let transport =
+            SuiteEmbeddingTransport::from_resolved(&resolved).expect("test transport should build");
         EmbeddingRequestHandler::new(transport)
     }
 

@@ -6,10 +6,9 @@ use std::time::Instant;
 
 use tracing::{debug, info, trace};
 
-use crate::core::error::LlmError;
-use crate::core::EmbeddingConfig;
+use crate::config::EmbeddingConfig;
 use crate::services::embedding::handler::{EmbeddingRequestHandler, SuiteEmbeddingTransport};
-use crate::services::embedding::types::EmbeddingResult;
+use cce_llm::{EmbeddingResult, LlmError};
 use cce_metrics::{EmbeddingErrorType, EmbeddingMetrics};
 
 use crate::services::embedding::preprocessor::{
@@ -94,11 +93,7 @@ impl OpenAICompatibleProvider<llm_embedding::OpenAICompatibleProvider> {
 impl<P: EmbeddingProvider> OpenAICompatibleProvider<P> {
     /// Builds a provider around an injected embedding implementation with
     /// test-friendly batching defaults. Used by tests with scripted mocks.
-    pub fn from_embed_provider(
-        provider: P,
-        model: impl Into<String>,
-        dimension: usize,
-    ) -> Self {
+    pub fn from_embed_provider(provider: P, model: impl Into<String>, dimension: usize) -> Self {
         let embed_config = EmbeddingConfig {
             model: model.into(),
             max_batch_tokens: 8192,

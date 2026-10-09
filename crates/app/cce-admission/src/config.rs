@@ -217,7 +217,9 @@ fn parse_token_env(raw: &str) -> Result<Vec<TokenEntry>, crate::middleware::Admi
             Some(scope) => match scope.split_once(':') {
                 Some((projects_part, quota_part)) => {
                     let quota: u64 = quota_part.trim().parse().map_err(|_| {
-                        AdmissionError::config("admission token quota must be a positive byte count")
+                        AdmissionError::config(
+                            "admission token quota must be a positive byte count",
+                        )
                     })?;
                     if quota == 0 {
                         return Err(AdmissionError::config(

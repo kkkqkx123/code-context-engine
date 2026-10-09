@@ -10,10 +10,8 @@ use std::sync::OnceLock;
 
 use cce_config::global::{ResolvedChatConfig, ResolvedLlmConnection};
 use cce_config::modules::ServiceType;
-use cce_llm::{ChatConfig, ChatResult, LlmClient, Message, MessageRole};
+use cce_llm::{ChatConfig, ChatResult, LlmClient, LlmError, Message, MessageRole};
 use cce_types::error::common::TimeoutError;
-
-use crate::core::error::LlmError;
 
 /// Process-wide gateway. Breakers and rate limiters live in the gateway
 /// keyed by base URL, so sharing one instance preserves the previous
@@ -41,8 +39,7 @@ pub struct GatewayMetricsSink {
 
 /// Latency histogram buckets (milliseconds), shared by the gateway latency
 /// instruments.
-const GATEWAY_LATENCY_BUCKETS: [f64; 8] =
-    [10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0];
+const GATEWAY_LATENCY_BUCKETS: [f64; 8] = [10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0];
 
 impl GatewayMetricsSink {
     /// Builds a sink writing into the given registry.
@@ -66,10 +63,7 @@ impl llm_client::TokenUsageSink for GatewayMetricsSink {
             .counter("llm_gateway_tokens_prompt_total", &[("model", model)])
             .add(prompt_tokens);
         self.registry
-            .counter(
-                "llm_gateway_tokens_completion_total",
-                &[("model", model)],
-            )
+            .counter("llm_gateway_tokens_completion_total", &[("model", model)])
             .add(completion_tokens);
     }
 }
@@ -333,9 +327,16 @@ pub fn generative_chat_endpoint(
 /// than throttling. Mirrors the previous HTTP layer's quota signals.
 fn is_quota_message(message: &str) -> bool {
     let lower = message.to_lowercase();
-    ["quota", "billing", "insufficient", "credit", "payment", "topup"]
-        .iter()
-        .any(|signal| lower.contains(signal))
+    [
+        "quota",
+        "billing",
+        "insufficient",
+        "credit",
+        "payment",
+        "topup",
+    ]
+    .iter()
+    .any(|signal| lower.contains(signal))
 }
 
 fn map_status_error(status: Option<u16>, message: String) -> LlmError {
@@ -361,9 +362,9 @@ pub fn map_chat_error(error: llm_codec::error::LlmError) -> LlmError {
             LlmError::CircuitBreakerOpen("llm-suite circuit breaker is open".to_string())
         }
         SuiteError::ProxyError(message) => LlmError::http(format!("proxy error: {message}")),
-        SuiteError::Timeout(ms) => LlmError::Timeout(TimeoutError(format!(
-            "LLM request timed out after {ms}ms"
-        ))),
+        SuiteError::Timeout(ms) => {
+            LlmError::Timeout(TimeoutError(format!("LLM request timed out after {ms}ms")))
+        }
         SuiteError::AuthError(message) => LlmError::Auth(message),
         SuiteError::ContextLengthExceeded(message) => LlmError::HttpStatus {
             status: 400,
@@ -411,9 +412,9 @@ pub fn map_embedding_error(error: llm_embedding::EmbeddingError) -> LlmError {
         SuiteError::InvalidRequest(message) => LlmError::InvalidInput(message),
         SuiteError::Decode(message) => LlmError::InvalidResponse(message),
         SuiteError::Transport(message) => LlmError::http(message),
-        SuiteError::Timeout => LlmError::Timeout(TimeoutError(
-            "embedding request timed out".to_string(),
-        )),
+        SuiteError::Timeout => {
+            LlmError::Timeout(TimeoutError("embedding request timed out".to_string()))
+        }
         SuiteError::Provider {
             status: 429,
             message,
@@ -525,7 +526,10 @@ impl LlmClient for SuiteChatClient {
             messages: messages
                 .iter()
                 .map(|message| {
-                    llm_types::message::Message::text(suite_role(&message.role), message.content.as_str())
+                    llm_types::message::Message::text(
+                        suite_role(&message.role),
+                        message.content.as_str(),
+                    )
                 })
                 .collect(),
             parameters: None,
@@ -544,8 +548,16 @@ impl LlmClient for SuiteChatClient {
             .generate(&request, None)
             .await
             .map_err(map_chat_error)?;
-        let prompt_tokens = response.usage.as_ref().map(|usage| usage.prompt_tokens).unwrap_or(0);
-        let total_tokens = response.usage.as_ref().map(|usage| usage.total_tokens).unwrap_or(0);
+        let prompt_tokens = response
+            .usage
+            .as_ref()
+            .map(|usage| usage.prompt_tokens)
+            .unwrap_or(0);
+        let total_tokens = response
+            .usage
+            .as_ref()
+            .map(|usage| usage.total_tokens)
+            .unwrap_or(0);
         Ok(ChatResult {
             content: response.content.unwrap_or_default(),
             prompt_tokens: u64::from(prompt_tokens),
@@ -583,7 +595,10 @@ mod tests {
     #[test]
     fn profile_ids_are_namespaced_by_service() {
         assert_eq!(profile_id_for("m", ServiceType::Chat), "cce-chat-m");
-        assert_eq!(profile_id_for("m", ServiceType::Embedding), "cce-embedding-m");
+        assert_eq!(
+            profile_id_for("m", ServiceType::Embedding),
+            "cce-embedding-m"
+        );
         assert_eq!(profile_id_for("m", ServiceType::Rerank), "cce-rerank-m");
     }
 
@@ -597,19 +612,29 @@ mod tests {
 
     #[test]
     fn disabled_breaker_yields_no_config() {
-        let mut breaker = cce_config::modules::CircuitBreakerConfig::default();
-        breaker.enabled = false;
-        assert!(circuit_breaker_config(&breaker).is_none());
-        breaker.enabled = true;
-        let config = circuit_breaker_config(&breaker).expect("enabled");
-        assert_eq!(config.open_duration_ms, breaker.recovery_timeout_secs * 1000);
+        let disabled = cce_config::modules::CircuitBreakerConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(circuit_breaker_config(&disabled).is_none());
+        let enabled = cce_config::modules::CircuitBreakerConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let config = circuit_breaker_config(&enabled).expect("enabled");
+        assert_eq!(
+            config.open_duration_ms,
+            enabled.recovery_timeout_secs * 1000
+        );
     }
 
     #[test]
     fn chat_error_mapping_covers_contract_variants() {
         use llm_codec::error::LlmError as SuiteError;
         assert!(matches!(
-            map_chat_error(SuiteError::RateLimited { retry_after_ms: Some(1500) }),
+            map_chat_error(SuiteError::RateLimited {
+                retry_after_ms: Some(1500)
+            }),
             LlmError::RateLimitExceeded(1500)
         ));
         assert!(matches!(
@@ -637,7 +662,10 @@ mod tests {
     fn provider_definition_carries_connection_settings() {
         let definition = provider_definition(&connection());
         assert_eq!(definition.id, "acme");
-        assert_eq!(definition.base_url.as_deref(), Some("https://api.acme.test/v1"));
+        assert_eq!(
+            definition.base_url.as_deref(),
+            Some("https://api.acme.test/v1")
+        );
         assert!(definition.rate_limit.is_some());
     }
 }

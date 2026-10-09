@@ -213,13 +213,10 @@ impl LuaStdlibDetector {
             let parts: Vec<&str> = call_name.split('.').collect();
             if parts.len() >= 2 {
                 // Check if module prefix exists in stdlib
-                if Self::STDLIB_MODULES
-                    .iter()
-                    .any(|&m| {
-                        m.starts_with(parts[0])
-                            && (m == parts[0] || (m.chars().nth(parts[0].len()) == Some('.')))
-                    })
-                {
+                if Self::STDLIB_MODULES.iter().any(|&m| {
+                    m.starts_with(parts[0])
+                        && (m == parts[0] || (m.chars().nth(parts[0].len()) == Some('.')))
+                }) {
                     return true;
                 }
             }

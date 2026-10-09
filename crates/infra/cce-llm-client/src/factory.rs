@@ -9,13 +9,12 @@ use std::sync::Arc;
 use cce_config::AppConfig;
 use cce_config::modules::ServiceType;
 
-use crate::core::config::ChatConfig;
-use crate::core::error::LlmError;
 use crate::services::rerank::{CohereRerankProvider, GenerativeRerankProvider};
 use crate::suite::{
     SuiteChatClient, ensure_chat_profile, full_endpoint_url, generative_chat_endpoint,
     map_rerank_error, rerank_endpoint_config,
 };
+use cce_llm::{ChatConfig, LlmError};
 
 /// Builds the chat profile for a registered chat model and returns a client
 /// bound to it together with the resolved call configuration.
@@ -86,16 +85,15 @@ pub fn build_generative_rerank_provider(
                 model_key, e
             ))
         })?;
-    let model_config =
-        global_config
-            .llm
-            .rerank_models
-            .get(model_key)
-            .ok_or_else(|| {
-                LlmError::config(format!(
-                    "Rerank model '{model_key}' not found in llm.rerank_models"
-                ))
-            })?;
+    let model_config = global_config
+        .llm
+        .rerank_models
+        .get(model_key)
+        .ok_or_else(|| {
+            LlmError::config(format!(
+                "Rerank model '{model_key}' not found in llm.rerank_models"
+            ))
+        })?;
     let provider = global_config
         .llm
         .providers
@@ -136,20 +134,18 @@ pub fn build_cohere_rerank_provider(
                 model_key, e
             ))
         })?;
-    let model_config =
-        global_config
-            .llm
-            .rerank_models
-            .get(model_key)
-            .ok_or_else(|| {
-                LlmError::config(format!(
-                    "Rerank model '{model_key}' not found in llm.rerank_models"
-                ))
-            })?;
+    let model_config = global_config
+        .llm
+        .rerank_models
+        .get(model_key)
+        .ok_or_else(|| {
+            LlmError::config(format!(
+                "Rerank model '{model_key}' not found in llm.rerank_models"
+            ))
+        })?;
     let rerank_url = full_endpoint_url(&connection.base_url, &connection.endpoint_path);
     let config = rerank_endpoint_config(&connection, rerank_url, model_config.model.clone());
-    let inner =
-        llm_rerank::CohereRerankProvider::new(config).map_err(map_rerank_error)?;
+    let inner = llm_rerank::CohereRerankProvider::new(config).map_err(map_rerank_error)?;
 
     tracing::info!(
         model = %model_key,

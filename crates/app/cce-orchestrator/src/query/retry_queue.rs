@@ -130,7 +130,7 @@ impl RetryQueue {
         let mut ready = Vec::new();
         let mut remaining = Vec::new();
 
-        for mut entry in inner.queue.drain(..).collect::<Vec<_>>() {
+        for mut entry in std::mem::take(&mut inner.queue) {
             if entry.retry_count >= self.max_retries {
                 warn!(
                     retry_count = entry.retry_count,

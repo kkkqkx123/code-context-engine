@@ -51,9 +51,7 @@ impl SuccessEmbeddingServer {
                             Ok(0) | Err(_) => return,
                             Ok(n) => {
                                 buf.extend_from_slice(&tmp[..n]);
-                                if let Some((header_end, content_length)) =
-                                    parse_headers(&buf)
-                                {
+                                if let Some((header_end, content_length)) = parse_headers(&buf) {
                                     let body_start = header_end + 4;
                                     if buf.len() >= body_start + content_length {
                                         break parse_input_count(

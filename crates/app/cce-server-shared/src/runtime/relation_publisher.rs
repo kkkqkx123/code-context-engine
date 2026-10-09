@@ -482,8 +482,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
         // The runtime projection IS the supplied layered view on the hot
         // path (base + accumulated chain, zero conversions); the cold path
         // assembles it from a full SQLite load.
-        let scoped_base: LayeredSnapshotIndex;
-        match base {
+        let scoped_base: LayeredSnapshotIndex = match base {
             Some(view) => {
                 // Hot path: reuse the in-process base cache instead of
                 // re-reading the full base from SQLite. The base was validated
@@ -493,7 +492,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                 // Zero-copy pass-through: the view already shares the cached
                 // materialized base's maps and carries the accumulated chain,
                 // so no conversion or re-cloning happens here.
-                scoped_base = view;
+                view
             }
             None => {
                 // Cold path: validate the delta's own surface against the
@@ -517,11 +516,11 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
                         return Err(error);
                     }
                 };
-                scoped_base = LayeredSnapshotIndex::new(Arc::new(
-                    RelationSnapshotIndex::from_index_shared(&loaded),
-                ));
+                LayeredSnapshotIndex::new(Arc::new(RelationSnapshotIndex::from_index_shared(
+                    &loaded,
+                )))
             }
-        }
+        };
 
         if let Err(error) = Self::validate_delta_scoped(&scoped_base, &delta) {
             self.runtime.report_failure(error.clone()).await;

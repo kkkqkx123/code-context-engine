@@ -41,10 +41,7 @@ impl<P: llm_embedding::EmbeddingProvider> CachedEmbedder<P> {
 
     /// Wrap with an explicit TTL; test-only, used for expiry testing.
     #[cfg(test)]
-    fn with_ttl(
-        inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>,
-        ttl: Duration,
-    ) -> Self {
+    fn with_ttl(inner: Arc<cce_llm_client::OpenAICompatibleProvider<P>>, ttl: Duration) -> Self {
         Self {
             inner,
             cache: Self::build_cache(ttl),
@@ -122,10 +119,7 @@ mod tests {
         );
 
         let _ = cached.embed_one("other query").await.expect("other embed");
-        assert_eq!(
-            embedder.inner_provider().recorded_batch_sizes(),
-            vec![1, 1]
-        );
+        assert_eq!(embedder.inner_provider().recorded_batch_sizes(), vec![1, 1]);
     }
 
     #[tokio::test]
@@ -160,10 +154,9 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_identical_texts_share_one_remote_call() {
-        let mock = MockEmbeddingProvider::with_steps(vec![MockEmbeddingStep::Delayed {
-            delay_ms: 20,
-        }])
-        .with_dimension(3);
+        let mock =
+            MockEmbeddingProvider::with_steps(vec![MockEmbeddingStep::Delayed { delay_ms: 20 }])
+                .with_dimension(3);
         let embedder = create_test_embedder(mock);
         let cached = Arc::new(CachedEmbedder::new(embedder));
 
