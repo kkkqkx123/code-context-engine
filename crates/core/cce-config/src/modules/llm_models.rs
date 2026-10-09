@@ -302,6 +302,12 @@ pub struct EmbeddingModelConfig {
     /// Vector dimension (required)
     pub vector_dimension: usize,
 
+    /// `dimensions` request parameter sent to the API. Only set for models
+    /// supporting output truncation (e.g. OpenAI text-embedding-3-*);
+    /// fixed-dimension models (e.g. BAAI/bge-m3) reject the parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_dimensions: Option<usize>,
+
     /// API model name (if different from model ID)
     #[serde(default)]
     pub api_model_name: Option<String>,
@@ -325,6 +331,7 @@ impl Default for EmbeddingModelConfig {
             provider_id: String::new(),
             model: String::new(),
             vector_dimension: 0,
+            request_dimensions: None,
             api_model_name: None,
             max_batch_tokens: default_max_batch_tokens(),
             max_item_tokens: default_max_item_tokens(),

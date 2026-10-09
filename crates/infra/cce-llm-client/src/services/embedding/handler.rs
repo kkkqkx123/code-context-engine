@@ -26,6 +26,9 @@ impl SuiteEmbeddingTransport<llm_embedding::OpenAICompatibleProvider> {
         )
         .with_dimension(resolved.vector_dimension)
         .with_timeout(resolved.timeout_secs);
+        if let Some(request_dimensions) = resolved.request_dimensions {
+            config = config.with_request_dimensions(request_dimensions);
+        }
         if let Some(api_key) = resolved.api_keys.first() {
             config = config.with_api_key(api_key.clone());
         }
@@ -197,6 +200,7 @@ mod tests {
             api_keys: Vec::new(),
             model: "test-model".to_string(),
             vector_dimension: 8,
+            request_dimensions: None,
             preprocessor: cce_config::PreprocessorConfig::None,
             max_batch_tokens: 8192,
             max_item_tokens: 2048,

@@ -10,6 +10,9 @@ pub struct ResolvedEmbeddingConfig {
     pub api_keys: Vec<String>,
     pub model: String,
     pub vector_dimension: usize,
+    /// `dimensions` request parameter for models supporting output
+    /// truncation; absent for fixed-dimension models.
+    pub request_dimensions: Option<usize>,
     pub preprocessor: crate::modules::PreprocessorConfig,
     pub max_batch_tokens: usize,
     pub max_item_tokens: usize,
@@ -194,6 +197,7 @@ impl AppConfig {
                 .clone()
                 .unwrap_or_else(|| model.model.clone()),
             vector_dimension: model.vector_dimension,
+            request_dimensions: model.request_dimensions,
             preprocessor: model.preprocessor.clone(),
             max_batch_tokens: model.max_batch_tokens.min(self.embedder.max_batch_tokens),
             max_item_tokens: model.max_item_tokens.min(self.embedder.max_item_tokens),
