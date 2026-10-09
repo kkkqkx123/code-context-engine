@@ -293,10 +293,12 @@ fn materialize(
         return;
     };
 
-    // Metadata is authoritative from the chunk record.
+    // Metadata is authoritative from the chunk record. Chunk records store
+    // tree-sitter's zero-based rows; this type exposes one-based line numbers,
+    // so the boundary conversion happens here and nowhere downstream.
     result.file_path = chunk.file_path.clone();
-    result.start_line = chunk.start_line.max(0) as u32;
-    result.end_line = chunk.end_line.max(0) as u32;
+    result.start_line = to_one_based_line(chunk.start_line);
+    result.end_line = to_one_based_line(chunk.end_line);
     result.kind = chunk.chunk_type.clone();
     result.truncated = chunk.truncated != 0;
 
@@ -318,13 +320,15 @@ fn materialize(
             .collect();
     }
 
-    // Body materialization: read the live source, then apply the budget.
+    // Body materialization: read the live source, then apply the budget. The
+    // reader indexes by zero-based row, so it keeps the raw chunk values while
+    // `result` carries the one-based translation for presentation.
     match read_source_lines_cached(
         cache,
         project_root,
         &chunk.file_path,
-        result.start_line,
-        result.end_line,
+        chunk.start_line.max(0) as u32,
+        chunk.end_line.max(0) as u32,
     ) {
         None => {
             result.content_state = ContentState::Reference(DowngradeReason::FileMissing);
@@ -355,6 +359,17 @@ fn materialize(
             }
         }
     }
+}
+
+/// Translate a stored zero-based row index into a one-based line number.
+///
+/// Chunk records persist tree-sitter rows, whose zero encodes the first line.
+/// Presentation layers — reference lines, search hits, judgment expectations —
+/// all speak one-based line numbers, so the conversion is centralized here.
+/// A negative stored value is treated as line one rather than clamped away,
+/// keeping the result a valid one-based line for any input.
+fn to_one_based_line(row: i64) -> u32 {
+    if row < 0 { 1 } else { (row as u64 + 1) as u32 }
 }
 
 /// Pick the display name for an enriched hit.
@@ -573,10 +588,10 @@ mod tests {
             results[0].content_state,
             ContentState::Reference(DowngradeReason::OverLimit)
         );
-        assert!(results[0].content.contains("[reference] src/big.rs:0-399"));
+        assert!(results[0].content.contains("[reference] src/big.rs:1-400"));
         assert!(results[0].content.contains("over budget"));
-        assert_eq!(results[0].start_line, 0);
-        assert_eq!(results[0].end_line, 399);
+        assert_eq!(results[0].start_line, 1);
+        assert_eq!(results[0].end_line, 400);
     }
 
     #[test]
@@ -603,7 +618,7 @@ mod tests {
             results[0].content_state,
             ContentState::Reference(DowngradeReason::FileMissing)
         );
-        assert!(results[0].content.contains("[reference] src/gone.rs:3-9"));
+        assert!(results[0].content.contains("[reference] src/gone.rs:4-10"));
         assert!(results[0].content.contains("not found"));
     }
 
@@ -631,8 +646,8 @@ mod tests {
 
         assert_eq!(results[0].content_state, ContentState::Full);
         assert_eq!(results[0].content, "fn a() {}\nfn b() {}");
-        assert_eq!(results[0].start_line, 0);
-        assert_eq!(results[0].end_line, 1);
+        assert_eq!(results[0].start_line, 1);
+        assert_eq!(results[0].end_line, 2);
     }
 
     #[test]
@@ -675,6 +690,14 @@ mod tests {
         assert!(!results[0].content.is_empty());
         assert!(results[0].content.contains("[reference] src/lib.rs"));
         assert!((results[0].score - score * 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn to_one_based_line_translates_stored_rows() {
+        assert_eq!(to_one_based_line(0), 1);
+        assert_eq!(to_one_based_line(3), 4);
+        assert_eq!(to_one_based_line(9), 10);
+        assert_eq!(to_one_based_line(-1), 1);
     }
 
     #[test]
