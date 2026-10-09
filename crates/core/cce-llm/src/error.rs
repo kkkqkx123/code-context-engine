@@ -282,54 +282,6 @@ impl From<LlmConfigError> for LlmError {
     }
 }
 
-/// Error classes used for LLM retry accounting and circuit breaker counting
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LlmRetryErrorClass {
-    /// Rate limit (429) responses
-    RateLimited,
-    /// HTTP transport/server errors (5xx, network)
-    Http,
-    /// Request timeouts
-    Timeout,
-    /// Invalid/unparseable responses
-    InvalidResponse,
-    /// Any other error
-    Other,
-}
-
-impl LlmRetryErrorClass {
-    /// Stable label value used in metrics
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::RateLimited => "rate_limited",
-            Self::Http => "http",
-            Self::Timeout => "timeout",
-            Self::InvalidResponse => "invalid_response",
-            Self::Other => "other",
-        }
-    }
-
-    /// Classify an LLM error
-    pub fn from_error(error: &LlmError) -> Self {
-        match error {
-            LlmError::RateLimitExceeded(_) => Self::RateLimited,
-            // 5xx responses indicate an unhealthy upstream; 4xx (client
-            // errors) are permanent and do not count toward the circuit.
-            LlmError::HttpStatus { status, .. } if (500..=599).contains(status) => Self::Http,
-            LlmError::Http(_) => Self::Http,
-            LlmError::Timeout(_) => Self::Timeout,
-            LlmError::InvalidResponse(_) => Self::InvalidResponse,
-            _ => Self::Other,
-        }
-    }
-
-    /// Whether errors of this class indicate an unhealthy upstream and should
-    /// count toward opening the circuit breaker
-    pub fn counts_toward_circuit_failure(self) -> bool {
-        matches!(self, Self::Http | Self::Timeout | Self::InvalidResponse)
-    }
-}
-
 impl cce_circuit_breaker::CircuitBreakerRejected for LlmError {
     fn circuit_open(message: impl Into<String>) -> Self {
         LlmError::CircuitBreakerOpen(message.into())

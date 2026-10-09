@@ -67,7 +67,8 @@ pub struct EmbedderConfig {
     #[serde(default)]
     pub extra_params: HashMap<String, serde_json::Value>,
 
-    /// Use base64 encoding for embeddings (default: true)
+    /// Accepted for configuration parsing. The embedding transport always
+    /// requests float arrays, so this flag currently has no effect.
     #[serde(default = "default_true")]
     pub use_base64: bool,
 

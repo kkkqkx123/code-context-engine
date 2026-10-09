@@ -88,6 +88,11 @@ impl GenerativeRerankProvider {
     pub fn new(inner: llm_rerank::GenerativeRerankProvider) -> Self {
         Self { inner }
     }
+
+    /// Returns the chat endpoint configuration the provider was built with.
+    pub fn endpoint(&self) -> &llm_rerank::GenerativeChatEndpoint {
+        self.inner.endpoint()
+    }
 }
 
 impl RerankProvider for GenerativeRerankProvider {
@@ -117,6 +122,11 @@ impl CohereRerankProvider {
     /// Wraps an already-configured llm-suite Cohere provider.
     pub fn new(inner: llm_rerank::CohereRerankProvider) -> Self {
         Self { inner }
+    }
+
+    /// Returns the endpoint configuration the provider was built with.
+    pub fn config(&self) -> &llm_rerank::RerankConfig {
+        self.inner.config()
     }
 }
 

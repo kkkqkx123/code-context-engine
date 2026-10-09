@@ -37,3 +37,6 @@ cce-storage-vector-local = { path = "../../infra/cce-storage-vector-local" }
 cce-llm-client = { path = "../../infra/cce-llm-client" }
 cce-scanner = { path = "../../infra/cce-scanner" }
 cce-orchestrator = { path = "../cce-orchestrator" }
+
+[dev-dependencies]
+llm-rerank = { path = "../../infra/llm-suite/crates/llm-rerank", features = ["mock"] }

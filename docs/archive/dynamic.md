@@ -195,4 +195,45 @@ The remote fulltext client accepts an optional metrics collector shared with the
 
 **Status:** Necessary — metrics injection boundary shared by both fulltext branches.
 
+### llm-suite Codec Registry
+
+**Files:**
+- `crates/infra/llm-suite/crates/llm-codec/src/registry.rs` (`Arc<dyn LlmCodec>`)
+- `crates/infra/llm-suite/crates/llm-client/src/client.rs` (`Arc<dyn LlmCodec>`)
+- `crates/infra/llm-suite/crates/llm-client/src/stream.rs` (`Arc<dyn LlmCodec>`)
+
+Wire formats are selected at runtime by profile configuration, and custom
+formats register their own codec. An enum would close the format extension
+boundary that the registry exists to provide.
+
+**Status:** Necessary — runtime wire-format dispatch in the LLM toolbox.
+
+### llm-suite Metrics Sinks
+
+**File:** `crates/infra/llm-suite/crates/llm-client/src/token_stream.rs`
+
+```rust
+pub type SharedTokenUsageSink = Arc<dyn TokenUsageSink>;
+pub type SharedLlmMetricsSink = Arc<dyn LlmMetricsSink>;
+```
+
+The gateway reports token usage, latency and retry counts through host
+injected sinks (`GatewayMetricsSink` in `cce-llm-client`). The toolbox
+cannot name the host type at compile time.
+
+**Status:** Necessary — host-owned observability injection boundary.
+
+### llm-suite Message Streams
+
+**Files:**
+- `crates/infra/llm-suite/crates/llm-client/src/client.rs` (streaming responses as `Box<dyn MessageStream>`)
+- `crates/infra/llm-suite/crates/llm-client/src/token_stream.rs` (`Box<dyn MessageStream>`)
+- `crates/infra/llm-suite/crates/llm-chat-basic/src/stream.rs` (pinned event stream)
+
+Streaming bodies resolve to different concrete stream types per transport
+and codec. Boxing at the response boundary keeps a single return type
+without leaking transport generics through the gateway.
+
+**Status:** Necessary — transport-independent streaming return type.
+
 
