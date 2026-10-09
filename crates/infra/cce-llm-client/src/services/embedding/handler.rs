@@ -1,20 +1,61 @@
 //! Embedding Request Handler
 
+use std::time::Duration;
+
 use crate::config::EmbeddingConfig;
 use crate::suite::{full_endpoint_url, map_embedding_error, query_string};
 use cce_config::global::ResolvedEmbeddingConfig;
 use cce_llm::{EmbeddingResult, LlmError};
+use cce_types::error::common::ErrorClassify;
 use cce_utils::token_estimation::estimate_tokens;
 use llm_embedding::EmbeddingProvider;
 
+/// Upper bound for one computed retry delay, so a long retry budget cannot
+/// stall a caller for minutes on a single batch.
+const MAX_RETRY_DELAY_MS: u64 = 30_000;
+
+/// Retry budget for embedding requests against one provider.
+///
+/// Only transient failures are retried: request timeouts, transport
+/// failures, 5xx responses and rate limits. A permanent rejection (auth,
+/// context length, invalid request) surfaces on the first attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    /// Attempts made after the first failed one.
+    pub max_retries: u32,
+    /// Delay before the first retry; doubles per attempt.
+    pub retry_delay_ms: u64,
+}
+
+impl RetryPolicy {
+    /// No retries: a transient failure propagates to the caller at once.
+    pub fn fail_fast() -> Self {
+        Self {
+            max_retries: 0,
+            retry_delay_ms: 0,
+        }
+    }
+
+    /// Delay before `attempt` (1-based) in ms: exponential with saturation,
+    /// capped by [`MAX_RETRY_DELAY_MS`].
+    pub fn backoff_ms(&self, attempt: u32) -> u64 {
+        let growth = 1u64 << attempt.saturating_sub(1).min(32);
+        self.retry_delay_ms
+            .saturating_mul(growth)
+            .min(MAX_RETRY_DELAY_MS)
+    }
+}
+
 /// Transport for one embedding batch: an llm-suite provider.
 ///
-/// Retries live inside llm-suite (gateway profiles for chat, provider
-/// timeouts for embedding); the transport performs a single attempt so a
-/// rate-limit error always propagates to the caller's deferred-retry queue
-/// instead of being absorbed here.
+/// Retries are owned here rather than inside llm-suite: the provider config
+/// carries the retry budget (`max_retries`, `retry_delay_ms`) which the
+/// embedding transport is the only component able to apply. A batch that
+/// still fails after the budget is exhausted propagates to the caller, which
+/// defers it to its own outer retry pass.
 pub struct SuiteEmbeddingTransport<P = llm_embedding::OpenAICompatibleProvider> {
     provider: P,
+    retries: RetryPolicy,
 }
 
 impl SuiteEmbeddingTransport<llm_embedding::OpenAICompatibleProvider> {
@@ -43,27 +84,85 @@ impl SuiteEmbeddingTransport<llm_embedding::OpenAICompatibleProvider> {
             .collect();
         let provider =
             llm_embedding::OpenAICompatibleProvider::new(config).map_err(map_embedding_error)?;
-        Ok(Self { provider })
+        Ok(Self {
+            provider,
+            retries: RetryPolicy {
+                max_retries: resolved.max_retries,
+                retry_delay_ms: resolved.retry_delay_ms,
+            },
+        })
     }
 }
 
 impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
     /// Sends one batch, converting errors into the CCE contract.
+    ///
+    /// A transient failure is retried within the provider's retry budget with
+    /// exponential backoff; a rate limit waits at least the window the
+    /// provider reported. Permanent failures surface on the first attempt.
     pub async fn embed_batch(&self, batch: Vec<String>) -> Result<EmbeddingResult, LlmError> {
-        self.provider
-            .embed(&batch)
-            .await
-            .map(|result| EmbeddingResult {
-                embeddings: result.embeddings,
-                prompt_tokens: result.prompt_tokens,
-                total_tokens: result.total_tokens,
-            })
-            .map_err(map_embedding_error)
+        let mut attempt = 0u32;
+        loop {
+            let outcome = self
+                .provider
+                .embed(&batch)
+                .await
+                .map(|result| EmbeddingResult {
+                    embeddings: result.embeddings,
+                    prompt_tokens: result.prompt_tokens,
+                    total_tokens: result.total_tokens,
+                })
+                .map_err(map_embedding_error);
+            match outcome {
+                Ok(result) => return Ok(result),
+                Err(error) => {
+                    if attempt >= self.retries.max_retries || !error.is_retryable() {
+                        return Err(error);
+                    }
+                    attempt += 1;
+                    let delay_ms = self.retry_delay(&error, attempt);
+                    tracing::warn!(
+                        attempt,
+                        max_retries = self.retries.max_retries,
+                        delay_ms,
+                        error = %error,
+                        "Embedding attempt failed transiently; retrying"
+                    );
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+
+    /// Delay before the next attempt: the exponential backoff, or the
+    /// provider's retry-after window for a rate limit, whichever is longer.
+    fn retry_delay(&self, error: &LlmError, attempt: u32) -> u64 {
+        let backoff = self.retries.backoff_ms(attempt);
+        match error {
+            LlmError::RateLimitExceeded(retry_after_ms) => backoff.max(*retry_after_ms),
+            _ => backoff,
+        }
     }
 
     /// Builds a transport around an injected provider for tests.
     pub fn for_testing(provider: P) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            retries: RetryPolicy::fail_fast(),
+        }
+    }
+
+    /// Sets the retry budget (test-only; production reads it from the
+    /// resolved provider configuration).
+    #[cfg(test)]
+    pub fn with_retry_policy(mut self, retries: RetryPolicy) -> Self {
+        self.retries = retries;
+        self
+    }
+
+    /// The active retry budget.
+    pub fn retry_policy(&self) -> RetryPolicy {
+        self.retries
     }
 
     /// Accesses the wrapped provider (used by tests to inspect mocks).
@@ -111,29 +210,7 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
                 .iter()
                 .map(|text| (*text).to_string())
                 .collect();
-            let result = match self.inner.embed_batch(batch).await {
-                Ok(result) => result,
-                Err(error)
-                    if !all_embeddings.is_empty()
-                        && cce_types::error::common::ErrorClassify::is_transient(&error) =>
-                {
-                    // A later failed sub-batch must not discard the already
-                    // embedded ones; replay only this sub-batch once and let a
-                    // second failure propagate.
-                    tracing::warn!(
-                        sub_batch = idx,
-                        sub_batch_count = batches.len(),
-                        error = %error,
-                        "Embedding sub-batch failed after partial progress; replaying once"
-                    );
-                    let batch: Vec<String> = batches[idx]
-                        .iter()
-                        .map(|text| (*text).to_string())
-                        .collect();
-                    self.inner.embed_batch(batch).await?
-                }
-                Err(error) => return Err(error),
-            };
+            let result = self.inner.embed_batch(batch).await?;
             all_embeddings.extend(result.embeddings);
             total_prompt_tokens += result.prompt_tokens;
             total_tokens += result.total_tokens;
@@ -192,10 +269,11 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use llm_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
     use std::collections::HashMap;
 
-    fn test_handler() -> EmbeddingRequestHandler {
-        let resolved = ResolvedEmbeddingConfig {
+    fn test_resolved() -> ResolvedEmbeddingConfig {
+        ResolvedEmbeddingConfig {
             base_url: "http://localhost:1".to_string(),
             api_keys: Vec::new(),
             model: "test-model".to_string(),
@@ -213,10 +291,28 @@ mod tests {
             use_base64: false,
             extra_params: HashMap::new(),
             endpoint_path: "embeddings".to_string(),
+        }
+    }
+
+    fn test_handler() -> EmbeddingRequestHandler {
+        let transport = SuiteEmbeddingTransport::from_resolved(&test_resolved())
+            .expect("test transport should build");
+        EmbeddingRequestHandler::new(transport)
+    }
+
+    #[test]
+    fn provider_retry_budget_reaches_the_transport() {
+        let resolved = ResolvedEmbeddingConfig {
+            max_retries: 4,
+            retry_delay_ms: 250,
+            ..test_resolved()
         };
+
         let transport =
             SuiteEmbeddingTransport::from_resolved(&resolved).expect("test transport should build");
-        EmbeddingRequestHandler::new(transport)
+
+        assert_eq!(transport.retry_policy().max_retries, 4);
+        assert_eq!(transport.retry_policy().retry_delay_ms, 250);
     }
 
     #[test]
@@ -237,5 +333,112 @@ mod tests {
         };
         let result = test_handler().create_batches(&["text"], &config);
         assert!(matches!(result, Err(LlmError::InvalidInput(_))));
+    }
+
+    fn retrying_transport(
+        provider: MockEmbeddingProvider,
+    ) -> SuiteEmbeddingTransport<MockEmbeddingProvider> {
+        SuiteEmbeddingTransport::for_testing(provider).with_retry_policy(RetryPolicy {
+            max_retries: 2,
+            retry_delay_ms: 1,
+        })
+    }
+
+    #[tokio::test]
+    async fn retries_transient_failure_until_success() {
+        let mock = MockEmbeddingProvider::with_steps(vec![
+            MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::Timeout),
+            MockEmbeddingStep::Respond,
+        ]);
+        let transport = retrying_transport(mock);
+
+        let result = transport
+            .embed_batch(vec!["first".to_string(), "second".to_string()])
+            .await
+            .expect("second attempt succeeds");
+
+        assert_eq!(result.embeddings.len(), 2);
+        assert_eq!(
+            transport.provider().recorded_batch_sizes(),
+            vec![2, 2],
+            "the same batch is replayed, never split"
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_budget_exhaustion_reports_the_failure() {
+        let mock = MockEmbeddingProvider::with_steps(
+            (0..3)
+                .map(|_| MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::Timeout))
+                .collect(),
+        );
+        let transport = retrying_transport(mock);
+
+        let error = transport
+            .embed_batch(vec!["text".to_string()])
+            .await
+            .expect_err("budget of two retries is exhausted");
+
+        assert!(matches!(error, LlmError::Timeout(_)));
+        assert_eq!(transport.provider().recorded_batch_sizes(), vec![1, 1, 1]);
+    }
+
+    #[tokio::test]
+    async fn permanent_failure_is_not_retried() {
+        let mock = MockEmbeddingProvider::with_steps(
+            (0..3)
+                .map(|_| {
+                    MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::InvalidRequest(
+                        "model does not support this input".to_string(),
+                    ))
+                })
+                .collect(),
+        );
+        let transport = retrying_transport(mock);
+
+        let error = transport
+            .embed_batch(vec!["text".to_string()])
+            .await
+            .expect_err("invalid request is permanent");
+
+        assert!(matches!(error, LlmError::InvalidInput(_)));
+        assert_eq!(transport.provider().recorded_batch_sizes(), vec![1]);
+    }
+
+    #[test]
+    fn rate_limit_retry_after_sets_the_delay_floor() {
+        let transport = retrying_transport(MockEmbeddingProvider::new("model", 8));
+
+        assert_eq!(
+            transport.retry_delay(&LlmError::RateLimitExceeded(400), 1),
+            400,
+            "a retry-after window longer than the backoff wins"
+        );
+        assert_eq!(
+            transport.retry_delay(&LlmError::RateLimitExceeded(1), 1),
+            1,
+            "a retry-after window shorter than the backoff is raised to it"
+        );
+    }
+
+    #[test]
+    fn backoff_doubles_per_attempt_and_stays_capped() {
+        let policy = RetryPolicy {
+            max_retries: 8,
+            retry_delay_ms: 500,
+        };
+
+        assert_eq!(policy.backoff_ms(1), 500);
+        assert_eq!(policy.backoff_ms(2), 1000);
+        assert_eq!(policy.backoff_ms(3), 2000);
+        assert_eq!(
+            policy.backoff_ms(64),
+            MAX_RETRY_DELAY_MS,
+            "a long retry budget cannot produce an unbounded delay"
+        );
+
+        let fail_fast = RetryPolicy::fail_fast();
+        assert_eq!(fail_fast.max_retries, 0);
+        assert_eq!(fail_fast.backoff_ms(1), 0);
     }
 }
