@@ -11,12 +11,30 @@ use super::aggregator::{AggregatedSegment, SegmentAggregator};
 use super::types::{ExpandedUnit, ExpansionOrigin, FileInfo, RelationAnnotationConfig};
 use crate::query::types::content_reference::{DowngradeReason, reference_content};
 
+/// Escape a string for use inside a double-quoted XML attribute value.
+/// Only the five XML-mandatory characters are escaped; code bodies are never
+/// attribute values and stay verbatim.
+fn xml_escape_attr(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Structure-aware concatenator
 ///
-/// Concatenates code units with:
-/// - File boundary markers
-/// - Relation markers (`// [calls] name (file:lines)`)
-/// - Unit-boundary-respecting truncation (never splits a semantic unit)
+/// Concatenates code units into an XML-wrapped annotation document:
+/// `<annotation>` root, `<file>` grouping (multi-file results only), and
+/// `<unit>` fragments carrying relation/name/position as attributes, with
+/// code placed verbatim between the open and close tags.
 pub struct StructureConcatenator {
     config: RelationAnnotationConfig,
 }
@@ -55,10 +73,11 @@ impl StructureConcatenator {
         let primary_count = segments.len();
 
         // Expansion units keep explicit relation ordering; position-based
-        // merging must not fold them into primary segments.
+        // merging must not fold them into primary segments. The relation is
+        // rendered as the `rel` attribute of the fragment tag, so no marker
+        // line is needed here.
         for unit in forward.iter().chain(backward.iter()) {
-            let mut segment = AggregatedSegment::from_unit(unit.clone());
-            segment.marker = Self::relation_marker(unit);
+            let segment = AggregatedSegment::from_unit(unit.clone());
             segments.push(segment);
         }
 
@@ -72,14 +91,10 @@ impl StructureConcatenator {
         self.select_and_render(segments, primary_count)
     }
 
-    /// Build the relation marker line for an expansion unit.
-    ///
-    /// The marker is a uniform `// [<label>] <name> (<file>:<start>-<end>)`
-    /// line, with the producing edge's relation type appended to the label
-    /// when the caller classified it (e.g. `calls:call.direct`). The edge
-    /// label carries the direction (`calls` / `called by`), so no separate
-    /// arrow is needed.
-    fn relation_marker(unit: &ExpandedUnit) -> Option<String> {
+    /// Relation key for an expansion unit, rendered as the `rel` attribute of
+    /// its fragment tag (e.g. `calls` / `called by:call.direct`). The edge
+    /// label carries the direction, so no separate arrow is needed.
+    fn relation_key(unit: &ExpandedUnit) -> Option<String> {
         let default_label = match unit.origin {
             ExpansionOrigin::Primary => return None,
             ExpansionOrigin::Forward => "calls",
@@ -90,14 +105,10 @@ impl StructureConcatenator {
         } else {
             unit.edge_label.as_str()
         };
-        let label = match &unit.relation_type {
+        Some(match &unit.relation_type {
             Some(relation_type) => format!("{direction}:{relation_type}"),
             None => direction.to_string(),
-        };
-        Some(format!(
-            "// [{label}] {} ({}:{}-{})",
-            unit.name, unit.file_path, unit.start_line, unit.end_line
-        ))
+        })
     }
 
     /// Downgrade segments whose source file no longer exists to references.
@@ -208,20 +219,32 @@ impl StructureConcatenator {
         let mut current_file: Option<String> = None;
         let mut file_info_map: std::collections::HashMap<String, FileInfo> =
             std::collections::HashMap::new();
+        // XML style groups segments per file only when the result spans more
+        // than one file; single-file output skips the layer to save tokens.
+        let multi_file = order.len() > 1
+            && order
+                .iter()
+                .map(|index| segments[*index].file_path.as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                > 1;
+        result.push_str("<annotation>\n");
         for index in order {
             self.render_segment(
                 &mut result,
                 &mut current_file,
                 &mut file_info_map,
                 &segments[index],
+                multi_file,
             );
         }
+        result.push_str("</annotation>");
 
         // Add informative truncation marker if we stopped early
         if omitted_count > 0 {
             result.push_str("\n\n");
             result.push_str(&format!(
-                "// [omitted] {} unit(s) (~{} tokens)",
+                "<omitted units=\"{}\" tokens=\"~{}\"/>",
                 omitted_count, omitted_size
             ));
         }
@@ -230,40 +253,36 @@ impl StructureConcatenator {
         (result, involved_files)
     }
 
-    /// Render a segment with appropriate markers
+    /// Render one segment: a `<unit>` fragment tag carrying
+    /// relation, name, position, and state attributes, with the code placed
+    /// verbatim between the open and close tags. Reference segments render
+    /// as self-closing `<reference>` tags instead. File-level grouping
+    /// tags are emitted only when segments from more than one file appear
+    /// (single-file results skip the layer to save tokens).
     fn render_segment(
         &self,
         result: &mut String,
         current_file: &mut Option<String>,
         file_info_map: &mut std::collections::HashMap<String, FileInfo>,
         segment: &AggregatedSegment,
+        multi_file: bool,
     ) {
-        // A reference line already carries the file path, so a separate file
-        // marker would duplicate it. Only body-bearing segments get a marker.
-        if segment.reference.is_none()
-            && self.config.include_file_markers
-            && *current_file != Some(segment.file_path.clone())
-        {
+        // Close the previous file group when crossing a file boundary.
+        if multi_file && current_file.as_deref() != Some(segment.file_path.as_str()) {
             if current_file.is_some() {
-                result.push('\n');
+                result.push_str("</file>\n");
             }
-            result.push_str(&self.format_file_marker(&segment.file_path));
-            result.push('\n');
+            result.push_str(&format!(
+                "<file path=\"{}\">\n",
+                segment.file_path
+            ));
             *current_file = Some(segment.file_path.clone());
         }
 
-        // Initialize file info if not exists
         file_info_map
             .entry(segment.file_path.clone())
             .or_insert_with(|| FileInfo::new(segment.file_path.clone()));
 
-        // Add the relation marker for expansion segments
-        if let Some(marker) = &segment.marker {
-            result.push_str(marker);
-            result.push('\n');
-        }
-
-        // Reference segments render only the path-and-range line.
         if let Some(reason) = segment.reference {
             result.push_str(&reference_content(
                 &segment.file_path,
@@ -274,64 +293,94 @@ impl StructureConcatenator {
             ));
             result.push('\n');
         } else {
-            // Add the code
+            let rel = segment
+                .source_units
+                .first()
+                .and_then(Self::relation_key)
+                .map(|key| format!(" rel=\"{}\"", xml_escape_attr(&key)))
+                .unwrap_or_default();
+            let name = segment
+                .source_units
+                .first()
+                .map(|unit| unit.name.as_str())
+                .unwrap_or("");
+            let excerpt = segment
+                .source_units
+                .first()
+                .map(|unit| unit.is_excerpt)
+                .unwrap_or(false);
+            let excerpt_attr = if excerpt { " excerpt=\"true\"" } else { "" };
+            result.push_str(&format!(
+                "<unit{} name=\"{}\" lines=\"{}-{}\"{}>\n",
+                rel,
+                xml_escape_attr(name),
+                segment.start_line,
+                segment.end_line,
+                excerpt_attr
+            ));
             result.push_str(&segment.code);
             result.push('\n');
+            result.push_str("</unit>\n");
         }
 
-        // Update file info
         if let Some(file_info) = file_info_map.get_mut(&segment.file_path) {
             file_info.unit_count += segment.source_units.len();
             file_info.total_lines += segment.end_line - segment.start_line + 1;
         }
     }
 
-    /// Standalone token cost of a segment body: code plus its own markers.
+    /// Standalone token cost of a segment body: fragment tags plus code.
     ///
-    /// The file marker is always counted so selection stays order-independent
-    /// (rendering may elide a repeated file marker, so actual output is at
-    /// most this estimate).
+    /// The file tag is always counted so selection stays order-independent
+    /// (single-file rendering elides it, so actual output is at most this
+    /// estimate).
     fn standalone_cost(&self, segment: &AggregatedSegment) -> usize {
-        let mut cost = TokenEstimator::estimate(&segment.code) + 1; // Code + newline
-
-        if let Some(marker) = &segment.marker {
-            cost += TokenEstimator::estimate(marker) + 1; // Marker + newline
-        }
-
-        if self.config.include_file_markers {
-            cost += TokenEstimator::estimate(&self.format_file_marker(&segment.file_path)) + 1;
-        }
-
-        cost
+        self.xml_segment_cost(segment)
     }
 
-    /// Token cost used for budget selection: body cost, or the reference
-    /// line cost for downgraded segments.
-    ///
-    /// Reference segments render no file marker (their reference line already
-    /// names the file), so the estimate omits it to stay order-independent.
-    fn selection_cost(&self, segment: &AggregatedSegment) -> usize {
+    /// Token cost of a segment: open/close fragment tags, code, and the file
+    /// grouping tag counted per segment so the selection estimate matches the
+    /// actual multi-file output (actual single-file output is at most this
+    /// estimate).
+    fn xml_segment_cost(&self, segment: &AggregatedSegment) -> usize {
         if let Some(reason) = segment.reference {
-            let line = reference_content(
+            let tag = reference_content(
                 &segment.file_path,
                 segment.start_line,
                 segment.end_line,
                 segment.body_tokens,
                 reason,
             );
-            let mut cost = TokenEstimator::estimate(&line) + 1;
-            if let Some(marker) = &segment.marker {
-                cost += TokenEstimator::estimate(marker) + 1;
-            }
-            cost
-        } else {
-            self.standalone_cost(segment)
+            return TokenEstimator::estimate(&tag) + 1;
         }
+        let name = segment
+            .source_units
+            .first()
+            .map(|unit| unit.name.as_str())
+            .unwrap_or("");
+        let rel = segment
+            .source_units
+            .first()
+            .and_then(Self::relation_key)
+            .unwrap_or_default();
+        let open = format!(
+            "<unit rel=\"{}\" name=\"{}\" lines=\"{}-{}\">",
+            rel,
+            name,
+            segment.start_line,
+            segment.end_line
+        );
+        let close = "</unit>";
+        let file_tag = format!("<file path=\"{}\">", segment.file_path);
+        TokenEstimator::estimate(&segment.code) + 1
+            + TokenEstimator::estimate(&open) + 1
+            + TokenEstimator::estimate(close) + 1
+            + TokenEstimator::estimate(&file_tag) + 1
     }
 
-    /// Format a file marker
-    fn format_file_marker(&self, file_path: &str) -> String {
-        format!("// [file] {}", file_path)
+    /// Token cost used for budget selection: same estimate as standalone.
+    fn selection_cost(&self, segment: &AggregatedSegment) -> usize {
+        self.xml_segment_cost(segment)
     }
 
     /// Get the configuration
@@ -371,20 +420,11 @@ mod tests {
 
         let (result, files) = concat.concatenate(&primary, &forward, &[]).await;
 
-        // Forward expansion is attached with its relation marker
+        // Forward expansion is attached with its relation in the fragment tag
         assert!(result.contains("multiply"));
         assert!(result.contains("fn add"));
-        assert!(result.contains("// [calls] add (src/math.rs:1-3)"));
+        assert!(result.contains("<unit rel=\"calls\" name=\"add\""));
         assert_eq!(files.len(), 2);
-    }
-
-    #[test]
-    fn test_format_file_marker() {
-        let config = RelationAnnotationConfig::default();
-        let concat = StructureConcatenator::new(config);
-
-        let marker = concat.format_file_marker("src/main.rs");
-        assert_eq!(marker, "// [file] src/main.rs");
     }
 
     #[tokio::test]
@@ -436,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn test_informative_truncation_markers() {
         let primary_code = "fn large_function() {\n    let x = 1;\n    let y = 2;\n    x + y\n}";
-        let budget = standalone_cost(primary_code, None, "src/a.rs") + 1;
+        let budget = standalone_cost(primary_code, "large_function", "", "src/a.rs") + 1;
         let config = RelationAnnotationConfig {
             max_annotated_length: budget,
             ..Default::default()
@@ -495,14 +535,14 @@ mod tests {
             .with_score(score)
     }
 
-    /// Standalone selection cost mirror: code + relation marker + file marker.
-    fn standalone_cost(code: &str, marker: Option<&str>, path: &str) -> usize {
-        let mut cost = TokenEstimator::estimate(code) + 1;
-        if let Some(marker) = marker {
-            cost += TokenEstimator::estimate(marker) + 1;
-        }
-        cost += TokenEstimator::estimate(&format!("// [file] {}", path)) + 1;
-        cost
+    /// Standalone selection cost mirror: fragment tags + file tag + code.
+    fn standalone_cost(code: &str, name: &str, rel: &str, path: &str) -> usize {
+        let open = format!("<unit rel=\"{}\" name=\"{}\" lines=\"1-3\">", rel, name);
+        let file_tag = format!("<file path=\"{}\">", path);
+        TokenEstimator::estimate(code) + 1
+            + TokenEstimator::estimate(&open) + 1
+            + TokenEstimator::estimate("</unit>") + 1
+            + TokenEstimator::estimate(&file_tag) + 1
     }
 
     #[tokio::test]
@@ -523,10 +563,8 @@ mod tests {
 
         let (result, files) = concat.concatenate(&primary, &[], &[]).await;
 
-        // A reference already names the file, so no separate file marker.
-        assert!(!result.contains("// [file]"));
-        assert!(result.contains("[reference] src/missing.rs:1-3"));
-        assert!(result.contains("not found"));
+        // The reference tag carries path and range as attributes; no body.
+        assert!(result.contains("<reference path=\"src/missing.rs\" lines=\"1-3\" reason=\"file_missing\""));
         assert!(!result.contains("fn ghost"));
         assert_eq!(files.len(), 1);
     }
@@ -547,18 +585,17 @@ mod tests {
         let (result, _) = concat.concatenate(&primary, &[], &[]).await;
 
         assert!(result.contains("fn ghost"));
-        assert!(!result.contains("[reference]"));
+        assert!(!result.contains("<reference"));
     }
 
     #[tokio::test]
     async fn test_oversized_segment_becomes_reference() {
         // The quota fits the tiny expansion plus the primary's downgraded
-        // reference line; the huge primary body must exceed it and degrade.
+        // reference tag; the huge primary body must exceed it and degrade.
         let huge_code = "let value = compute();\n".repeat(200);
         let tiny_code = "fn tiny() {}";
-        let tiny_marker = "// [calls] tiny (src/tiny.rs:1-3)";
 
-        let tiny_cost = standalone_cost(tiny_code, Some(tiny_marker), "src/tiny.rs");
+        let tiny_cost = standalone_cost(tiny_code, "tiny", "calls", "src/tiny.rs");
         let primary_reference = reference_content(
             "src/huge.rs",
             1,
@@ -566,7 +603,8 @@ mod tests {
             TokenEstimator::estimate(&huge_code),
             DowngradeReason::OverLimit,
         );
-        // Reference segments render no file marker; selection counts the line.
+        // Reference segments render no file tag in the single-file estimate;
+        // selection counts the tag only.
         let primary_reference_cost = TokenEstimator::estimate(&primary_reference) + 1;
         let limit = tiny_cost + primary_reference_cost + 2;
 
@@ -589,8 +627,8 @@ mod tests {
 
         // The pinned primary degrades to a reference instead of crowding out
         // the small expansion.
-        assert!(result.contains("[reference] src/huge.rs:1-200"));
-        assert!(result.contains("over budget"));
+        assert!(result.contains("<reference path=\"src/huge.rs\" lines=\"1-200\""));
+        assert!(result.contains("reason=\"over_limit\""));
         assert!(!result.contains("let value = compute();"));
         assert!(result.contains("fn tiny() {}"));
     }
@@ -600,10 +638,9 @@ mod tests {
         let primary_code = "fn main() {}";
         let high_code = "fn high() {\n    work();\n}";
         let low_code = "fn low() {\n    rest();\n}";
-        let high_marker = "// [calls] high (src/high.rs:1-3)";
 
-        let budget = standalone_cost(primary_code, None, "src/main.rs")
-            + standalone_cost(high_code, Some(high_marker), "src/high.rs")
+        let budget = standalone_cost(primary_code, "main", "", "src/main.rs")
+            + standalone_cost(high_code, "high", "calls", "src/high.rs")
             + 5;
         let config = RelationAnnotationConfig {
             max_annotated_length: budget,
@@ -633,7 +670,7 @@ mod tests {
     #[tokio::test]
     async fn test_omitted_size_counts_markers() {
         let low_code = "fn low() {}";
-        let budget = standalone_cost("fn main() {}", None, "src/main.rs") + 1;
+        let budget = standalone_cost("fn main() {}", "main", "", "src/main.rs") + 1;
         let config = RelationAnnotationConfig {
             max_annotated_length: budget,
             ..RelationAnnotationConfig::new().enable(true)
@@ -652,11 +689,11 @@ mod tests {
         let (result, _) = concat.concatenate(&primary, &[low], &[]).await;
 
         assert!(result.contains("omitted"));
-        let start = result.find("(~").expect("omitted magnitude");
-        let tail = &result[start + 2..];
-        let end = tail.find(" tokens)").expect("magnitude unit");
+        let start = result.find("tokens=\"~").expect("omitted magnitude");
+        let tail = &result[start + "tokens=\"~".len()..];
+        let end = tail.find('"').expect("magnitude end");
         let omitted: usize = tail[..end].trim().parse().expect("magnitude number");
-        // The reported magnitude covers code plus file and relation markers.
+        // The reported magnitude covers code plus fragment and file tags.
         assert!(omitted > TokenEstimator::estimate(low_code));
     }
 
@@ -675,7 +712,7 @@ mod tests {
 
         let (result, _) = concat.concatenate(&primary, &[typed], &[]).await;
 
-        assert!(result.contains("// [calls:call.constructor] new (src/lib.rs:1-3)"));
+        assert!(result.contains("rel=\"calls:call.constructor\""));
     }
 
     #[tokio::test]
@@ -697,7 +734,137 @@ mod tests {
 
         assert!(!result.contains("fn main"));
         assert!(result.contains("fn high"));
-        assert!(result.contains("// [calls] high (src/high.rs:1-3)"));
+        assert!(result.contains("<unit rel=\"calls\" name=\"high\""));
         assert_eq!(files.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_xml_style_three_layer_wrapping() {
+        let config = RelationAnnotationConfig::new().enable(true);
+        let concat = StructureConcatenator::new(config);
+        let primary = ExpandedUnit::new(
+            "fn main() {}".to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let high = expansion_unit("high", "src/high.rs", "fn high() {}", 0.9);
+
+        let (result, _) = concat.concatenate(&primary, &[high], &[]).await;
+
+        // Root layer wraps everything; per-file layers group fragments; each
+        // expansion fragment carries the relation as an attribute.
+        assert!(result.starts_with("<annotation>\n"));
+        assert!(result.contains("<file path=\"src/main.rs\">"));
+        assert!(result.contains("<file path=\"src/high.rs\">"));
+        assert!(result.contains("rel=\"calls\""));
+        assert!(result.contains("<unit rel=\"calls\" name=\"high\" lines=\"1-3\">"));
+        assert!(result.contains("</unit>"));
+        assert!(result.trim_end().ends_with("</annotation>"));
+    }
+
+    #[tokio::test]
+    async fn test_xml_style_single_file_omits_file_layer() {
+        let config = RelationAnnotationConfig::new().enable(true);
+        let concat = StructureConcatenator::new(config);
+        let primary = ExpandedUnit::new(
+            "fn main() {}".to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+
+        let (result, _) = concat.concatenate(&primary, &[], &[]).await;
+
+        // Single-file results skip the file grouping layer to save tokens.
+        assert!(!result.contains("<file"));
+        assert!(result.contains("<unit"));
+        assert!(result.contains("fn main() {}"));
+    }
+
+    #[tokio::test]
+    async fn test_xml_style_reference_is_self_closing_tag() {
+        // A workspace root enables the existence check so the vanished file
+        // downgrades to a reference.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = RelationAnnotationConfig::new()
+            .enable(true)
+            .with_workspace_root(dir.path());
+        let concat = StructureConcatenator::new(config);
+        let primary = ExpandedUnit::new(
+            "fn ghost() {}".to_string(),
+            "src/missing.rs".to_string(),
+            1,
+            3,
+            "ghost".to_string(),
+        );
+
+        let (result, _) = concat.concatenate(&primary, &[], &[]).await;
+
+        // Downgraded references encode location and reason as attributes
+        // only; no comment-style reference line remains. The token magnitude
+        // of the dropped body is non-zero here, so the tokens attribute
+        // renders too.
+        assert!(result.contains(
+            "<reference path=\"src/missing.rs\" lines=\"1-3\" reason=\"file_missing\" tokens=\""
+        ));
+        assert!(result.contains("/>"));
+        assert!(!result.contains("[reference]"));
+        assert!(!result.contains("fn ghost"));
+    }
+
+    #[tokio::test]
+    async fn test_xml_style_omitted_tag() {
+        let primary_code = "fn main() {}";
+        // Comment-style mirror of the XML cost keeps the budget tight so the
+        // expansion is dropped and reported through the omission tag.
+        let budget = TokenEstimator::estimate(primary_code)
+            + 1
+            + TokenEstimator::estimate("<file path=\"src/main.rs\">")
+            + 1
+            + TokenEstimator::estimate("<unit rel=\"\" name=\"main\" lines=\"1-1\">")
+            + 1
+            + TokenEstimator::estimate("</unit>") + 1;
+        let config = RelationAnnotationConfig {
+            max_annotated_length: budget,
+            ..RelationAnnotationConfig::new().enable(true)
+        };
+        let concat = StructureConcatenator::new(config);
+        let primary = ExpandedUnit::new(
+            primary_code.to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let low = expansion_unit("low", "src/low.rs", "fn low() {}", 0.1);
+
+        let (result, _) = concat.concatenate(&primary, &[low], &[]).await;
+
+        assert!(result.contains("<omitted units=\"1\""));
+        assert!(!result.contains("// [omitted]"));
+    }
+
+    #[tokio::test]
+    async fn test_xml_style_excerpt_attribute() {
+        let config = RelationAnnotationConfig::new().enable(true);
+        let concat = StructureConcatenator::new(config);
+        let primary = ExpandedUnit::new(
+            "fn main() {}".to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let snippet = expansion_unit("snippet", "src/snip.rs", "fn snippet();", 0.9)
+            .with_excerpt(true);
+
+        let (result, _) = concat.concatenate(&primary, &[snippet], &[]).await;
+
+        // Windowed excerpts carry the excerpt state attribute; full bodies do not.
+        assert!(result.contains("excerpt=\"true\""));
+        assert!(!result.contains("<unit rel=\"\" name=\"main\" excerpt=\"true\""));
     }
 }

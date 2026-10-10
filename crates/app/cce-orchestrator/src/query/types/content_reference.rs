@@ -53,12 +53,11 @@ impl ContentState {
     }
 }
 
-/// Render a file-path-plus-range reference line.
+/// Render a downgrade reference as a self-closing XML tag.
 ///
-/// The line carries the location, an optional token-magnitude estimate of the
-/// dropped body, and the downgrade reason so the model can decide whether to
-/// read on. A zero magnitude (the body is unknown, e.g. the file is gone) is
-/// omitted rather than rendered as `~0 tokens`.
+/// Location and reason are encoded entirely as attributes (no inner text),
+/// which is the lower-token-cost form compared to wrapping a reference line.
+/// A zero magnitude (the body is unknown) omits the `tokens` attribute.
 pub fn reference_content(
     file_path: &str,
     start_line: u32,
@@ -66,27 +65,35 @@ pub fn reference_content(
     body_tokens: usize,
     reason: DowngradeReason,
 ) -> String {
-    if body_tokens == 0 {
-        format!(
-            "// [reference] {}:{}-{} ({})",
-            file_path,
-            start_line,
-            end_line,
-            reason.note()
-        )
-    } else {
-        format!(
-            "// [reference] {}:{}-{} (~{} tokens, {})",
-            file_path,
-            start_line,
-            end_line,
-            body_tokens,
-            reason.note()
-        )
+    let mut tag = format!(
+        "<reference path=\"{}\" lines=\"{}-{}\" reason=\"{}\"",
+        file_path,
+        start_line,
+        end_line,
+        reason_xml_key(reason)
+    );
+    if body_tokens > 0 {
+        tag.push_str(&format!(" tokens=\"~{}\"", body_tokens));
     }
+    tag.push_str("/>");
+    tag
 }
 
-/// Render a file-level reference line for hits without a line range.
+/// Render a file-level downgrade reference as a self-closing XML tag.
 pub fn file_level_reference(file_path: &str, reason: DowngradeReason) -> String {
-    format!("// [reference] {} ({})", file_path, reason.note())
+    format!(
+        "<reference path=\"{}\" reason=\"{}\"/>",
+        file_path,
+        reason_xml_key(reason)
+    )
+}
+
+/// Compact machine-oriented key for a downgrade reason in XML attributes.
+fn reason_xml_key(reason: DowngradeReason) -> &'static str {
+    match reason {
+        DowngradeReason::OverLimit => "over_limit",
+        DowngradeReason::FileMissing => "file_missing",
+        DowngradeReason::FileLevel => "file_level",
+        DowngradeReason::ChunkMissing => "chunk_missing",
+    }
 }

@@ -220,9 +220,9 @@ impl SegmentAggregator {
         result
     }
 
-    /// Merge two code strings, reporting unknown gap lines with an omission
-    /// marker that names the omitted line interval instead of faking
-    /// continuity with blank lines.
+    /// Merge two code strings, reporting unknown gap lines with a
+    /// self-closing `<gap/>` tag that names the omitted line interval instead
+    /// of faking continuity with blank lines.
     fn merge_code_with_omission(
         code1: &str,
         code2: &str,
@@ -231,7 +231,7 @@ impl SegmentAggregator {
         omitted_end: u32,
     ) -> String {
         let marker = if gap > 0 {
-            format!("// [omitted] {gap} line(s) [{omitted_start}-{omitted_end}]\n")
+            format!("<gap lines=\"{gap}\" range=\"{omitted_start}-{omitted_end}\"/>\n")
         } else {
             String::new()
         };
@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(result[0].start_line, 1);
         assert_eq!(result[0].end_line, 8);
         // Gap lines are reported with an omission marker, not blank-filled.
-        assert!(result[0].code.contains("// [omitted] 2 line(s) [4-5]"));
+        assert!(result[0].code.contains("<gap lines=\"2\" range=\"4-5\"/>"));
         assert!(result[0].code.contains("fn foo()"));
         assert!(result[0].code.contains("fn bar()"));
     }

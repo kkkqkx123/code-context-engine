@@ -79,6 +79,7 @@ impl SemanticUnitExtractor {
             score: 0.0,
             is_stdlib: false,
             is_external: false,
+            is_excerpt: false,
         })
     }
 

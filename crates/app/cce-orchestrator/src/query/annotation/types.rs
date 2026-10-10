@@ -117,6 +117,10 @@ pub struct ExpandedUnit {
     pub is_stdlib: bool,
     /// True when the target has no in-workspace source.
     pub is_external: bool,
+    /// True when the unit body is a windowed excerpt rather than the full
+    /// definition (set by report-side expansion builders); rendered as the
+    /// `excerpt="true"` attribute in XML-style output.
+    pub is_excerpt: bool,
 }
 
 impl ExpandedUnit {
@@ -142,6 +146,7 @@ impl ExpandedUnit {
             score: 0.0,
             is_stdlib: false,
             is_external: false,
+            is_excerpt: false,
         }
     }
 
@@ -189,6 +194,13 @@ impl ExpandedUnit {
     /// Mark the target as external to the workspace (or not)
     pub fn with_external(mut self, is_external: bool) -> Self {
         self.is_external = is_external;
+        self
+    }
+
+    /// Mark the unit body as a windowed excerpt rather than the full
+    /// definition (builder pattern).
+    pub fn with_excerpt(mut self, excerpt: bool) -> Self {
+        self.is_excerpt = excerpt;
         self
     }
 

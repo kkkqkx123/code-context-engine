@@ -358,12 +358,12 @@ mod tests {
         assert!(
             result
                 .annotated_content
-                .contains("// [calls] b (src/b.rs:1-3)")
+                .contains("<unit rel=\"calls\" name=\"b\"")
         );
         assert!(
             result
                 .annotated_content
-                .contains("// [called by] c (src/c.rs:1-3)")
+                .contains("<unit rel=\"called by\" name=\"c\"")
         );
     }
 
