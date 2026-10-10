@@ -28,19 +28,22 @@ pub fn entity_query() -> &'static str {
 
 ; Class definition
 (class_declaration
-  name: (identifier) @entity.class.name
+  name: (identifier) @entity.class.name @entity.class.signature.name
+  type_parameters: (_)? @entity.class.signature.type_params
+  superclass: (superclass (_)? @entity.class.base @entity.class.signature.base)?
   body: (class_body) @entity.class.body
-  superclass: (type_identifier)? @entity.class.base
 ) @entity.class
 
 ; Interface definition
 (interface_declaration
-  name: (identifier) @entity.interface.name
+  name: (identifier) @entity.interface.name @entity.interface.signature.name
+  type_parameters: (_)? @entity.interface.signature.type_params
+  (extends_interfaces)? @entity.interface.signature.extends
 ) @entity.interface
 
 ; Enum definition
 (enum_declaration
-  name: (identifier) @entity.enum.name
+  name: (identifier) @entity.enum.name @entity.enum.signature.name
 ) @entity.enum
 
 ; Enum constant
@@ -50,7 +53,9 @@ pub fn entity_query() -> &'static str {
 
 ; Record definition (Java 14+)
 (record_declaration
-  name: (identifier) @entity.record.name
+  name: (identifier) @entity.record.name @entity.record.signature.name
+  type_parameters: (_)? @entity.record.signature.type_params
+  parameters: (formal_parameters) @entity.record.params @entity.record.signature.params
 ) @entity.record
 
 ; Record components (Java 14+, implicitly private final fields)
@@ -66,7 +71,7 @@ pub fn entity_query() -> &'static str {
 
 ; Annotation type definition
 (annotation_type_declaration
-  name: (identifier) @entity.annotation.name
+  name: (identifier) @entity.annotation.name @entity.annotation.signature.name
 ) @entity.annotation
 
 ; Annotation usage (e.g., @Override, @Entity, @Test)
@@ -77,7 +82,7 @@ pub fn entity_query() -> &'static str {
 
 ; Normal annotation (with arguments): @Entity(name = "User")
 (annotation
-  (identifier) @entity.annotation.name
+  (identifier) @entity.annotation.name @entity.annotation.signature.name
   (annotation_argument_list) @entity.annotation.body
 ) @entity.annotation
 
@@ -88,16 +93,17 @@ pub fn entity_query() -> &'static str {
 ; Method definition. The body is optional so interface abstract method
 ; declarations (no `(block)` child) are extracted as entities too.
 (method_declaration
-  type: (_) @entity.method.return_type
-  name: (identifier) @entity.method.name
-  parameters: (formal_parameters) @entity.method.params
+  type_parameters: (_)? @entity.method.signature.type_params
+  type: (_) @entity.method.return_type @entity.method.signature.return_type
+  name: (identifier) @entity.method.name @entity.method.signature.name
+  parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
   body: (block)? @entity.method.body
 ) @entity.method
 
 ; Constructor definition
 (constructor_declaration
-  name: (identifier) @entity.constructor.name
-  parameters: (formal_parameters) @entity.constructor.params
+  name: (identifier) @entity.constructor.name @entity.constructor.signature.name
+  parameters: (formal_parameters) @entity.constructor.params @entity.constructor.signature.params
   body: (block)? @entity.constructor.body
 ) @entity.constructor
 
@@ -149,8 +155,8 @@ pub fn entity_query() -> &'static str {
 ; Enhanced-for loop variable
 ; e.g., for (String current : args)
 (enhanced_for_statement
-  name: (identifier) @entity.variable.loop.name
-  value: (_) @entity.variable.loop.source
+  name: (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
+  value: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 ; ============================================
@@ -164,7 +170,7 @@ pub fn entity_query() -> &'static str {
 
 ; Module declaration (Java 9+)
 (module_declaration
-  name: (scoped_identifier) @entity.module.name
+  name: (scoped_identifier) @entity.module.name @entity.module.signature.name
 ) @entity.module
 
 "#
@@ -445,6 +451,28 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.class.signature.base",
+            "@entity.class.signature.type_params",
+            "@entity.interface.signature.name",
+            "@entity.enum.signature.name",
+            "@entity.record.signature.name",
+            "@entity.method.signature.params",
+            "@entity.method.signature.return_type",
+            "@entity.constructor.signature.name",
+            "@entity.annotation.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

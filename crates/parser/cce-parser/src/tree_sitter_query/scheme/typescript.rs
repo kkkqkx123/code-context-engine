@@ -16,10 +16,11 @@ fn entity_ts_only() -> &'static str {
 
 ; Class declaration (name is type_identifier in TS grammar; heritage optional)
 (class_declaration
-  name: (type_identifier) @entity.class.name
+  name: (type_identifier) @entity.class.name @entity.class.signature.name
+  type_parameters: (_)? @entity.class.signature.type_params
   (class_heritage
     (extends_clause
-      value: (_) @entity.class.base
+      value: (_) @entity.class.base @entity.class.signature.base
     )
   )?
   body: (class_body) @entity.class.body
@@ -32,7 +33,7 @@ fn entity_ts_only() -> &'static str {
 
 ; Interface declaration
 (interface_declaration
-  name: (type_identifier) @entity.interface.name
+  name: (type_identifier) @entity.interface.name @entity.interface.signature.name
   body: (interface_body) @entity.interface.body
 ) @entity.interface
 
@@ -44,7 +45,7 @@ fn entity_ts_only() -> &'static str {
 
 ; Enum declaration
 (enum_declaration
-  name: (identifier) @entity.enum.name
+  name: (identifier) @entity.enum.name @entity.enum.signature.name
   body: (enum_body) @entity.enum.body
 ) @entity.enum
 
@@ -125,14 +126,18 @@ fn entity_ts_function_method_patterns() -> &'static str {
 
 ; Method definition (excluding constructor)
 (method_definition
-  name: (property_identifier) @entity.method.name
-  return_type: (type_annotation (_)? @entity.method.return_type)?
+  name: (property_identifier) @entity.method.name @entity.method.signature.name
+  parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
+  return_type: (type_annotation (_)? @entity.method.return_type @entity.method.signature.return_type)?
+  body: (statement_block)? @entity.method.body
 ) @entity.method
 
 ; Constructor method
 (method_definition
-  name: (property_identifier) @entity.constructor.name
+  name: (property_identifier) @entity.constructor.name @entity.constructor.signature.name
   (#eq? @entity.constructor.name "constructor")
+  parameters: (formal_parameters) @entity.constructor.params @entity.constructor.signature.params
+  body: (statement_block)? @entity.constructor.body
 ) @entity.constructor
 
 ; NOTE: no dedicated getter/setter patterns. tree-sitter-typescript
@@ -148,9 +153,9 @@ fn entity_ts_function_method_patterns() -> &'static str {
 
 ; Named function declaration
 (function_declaration
-  name: (identifier) @entity.function.name
-  parameters: (formal_parameters) @entity.function.params
-  return_type: (type_annotation (_)? @entity.function.return_type)?
+  name: (identifier) @entity.function.name @entity.function.signature.name
+  parameters: (formal_parameters) @entity.function.params @entity.function.signature.params
+  return_type: (type_annotation (_)? @entity.function.return_type @entity.function.signature.return_type)?
   body: (_) @entity.function.body
 ) @entity.function
 
@@ -160,23 +165,26 @@ fn entity_ts_function_method_patterns() -> &'static str {
 ; signature as its own callable entity so overload resolution can select by
 ; argument types.
 (function_signature
-  name: (identifier) @entity.function.overload.name
-  parameters: (formal_parameters) @entity.function.overload.params
-  return_type: (type_annotation (_)? @entity.function.overload.return_type)?
+  name: (identifier) @entity.function.overload.name @entity.function.overload.signature.name
+  parameters: (formal_parameters) @entity.function.overload.params @entity.function.overload.signature.params
+  return_type: (type_annotation (_)? @entity.function.overload.return_type @entity.function.overload.signature.return_type)?
 ) @entity.function.overload
 
 ; Generator function declaration
 (generator_function_declaration
-  name: (identifier) @entity.function.generator.name
-  return_type: (type_annotation (_)? @entity.function.generator.return_type)?
+  name: (identifier) @entity.function.generator.name @entity.function.generator.signature.name
+  parameters: (formal_parameters) @entity.function.generator.params @entity.function.generator.signature.params
+  return_type: (type_annotation (_)? @entity.function.generator.return_type @entity.function.generator.signature.return_type)?
+  body: (statement_block) @entity.function.generator.body
 ) @entity.function.generator
 
 ; Arrow function assigned to variable (lexical declaration)
 (lexical_declaration
   (variable_declarator
-    name: (identifier) @entity.function.arrow.name
+    name: (identifier) @entity.function.arrow.name @entity.function.arrow.signature.name
     value: (arrow_function
-      return_type: (type_annotation (_)? @entity.function.arrow.return_type)?
+      (formal_parameters)? @entity.function.arrow.params @entity.function.arrow.signature.params
+      return_type: (type_annotation (_)? @entity.function.arrow.return_type @entity.function.arrow.signature.return_type)?
     )
   )
 ) @entity.function.arrow
@@ -184,9 +192,10 @@ fn entity_ts_function_method_patterns() -> &'static str {
 ; Arrow function assigned to variable (var declaration)
 (variable_declaration
   (variable_declarator
-    name: (identifier) @entity.function.arrow_var.name
+    name: (identifier) @entity.function.arrow_var.name @entity.function.arrow_var.signature.name
     value: (arrow_function
-      return_type: (type_annotation (_)? @entity.function.arrow_var.return_type)?
+      (formal_parameters)? @entity.function.arrow_var.params @entity.function.arrow_var.signature.params
+      return_type: (type_annotation (_)? @entity.function.arrow_var.return_type @entity.function.arrow_var.signature.return_type)?
     )
   )
 ) @entity.function.arrow_var
@@ -194,9 +203,10 @@ fn entity_ts_function_method_patterns() -> &'static str {
 ; Function expression assigned to variable (lexical declaration)
 (lexical_declaration
   (variable_declarator
-    name: (identifier) @entity.function.expression.name
+    name: (identifier) @entity.function.expression.name @entity.function.expression.signature.name
     value: (function_expression
-      return_type: (type_annotation (_)? @entity.function.expression.return_type)?
+      parameters: (formal_parameters) @entity.function.expression.params @entity.function.expression.signature.params
+      return_type: (type_annotation (_)? @entity.function.expression.return_type @entity.function.expression.signature.return_type)?
     )
   )
 ) @entity.function.expression
@@ -204,9 +214,10 @@ fn entity_ts_function_method_patterns() -> &'static str {
 ; Function expression assigned to variable (var declaration)
 (variable_declaration
   (variable_declarator
-    name: (identifier) @entity.function.expression_var.name
+    name: (identifier) @entity.function.expression_var.name @entity.function.expression_var.signature.name
     value: (function_expression
-      return_type: (type_annotation (_)? @entity.function.expression_var.return_type)?
+      parameters: (formal_parameters) @entity.function.expression_var.params @entity.function.expression_var.signature.params
+      return_type: (type_annotation (_)? @entity.function.expression_var.return_type @entity.function.expression_var.signature.return_type)?
     )
   )
 ) @entity.function.expression_var
@@ -439,6 +450,32 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.class.signature.base",
+            "@entity.class.signature.type_params",
+            "@entity.interface.signature.name",
+            "@entity.enum.signature.name",
+            "@entity.method.signature.name",
+            "@entity.method.signature.params",
+            "@entity.method.signature.return_type",
+            "@entity.constructor.signature.params",
+            "@entity.function.signature.name",
+            "@entity.function.overload.signature.params",
+            "@entity.function.generator.signature.params",
+            "@entity.function.arrow.signature.params",
+            "@entity.function.expression.signature.return_type",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

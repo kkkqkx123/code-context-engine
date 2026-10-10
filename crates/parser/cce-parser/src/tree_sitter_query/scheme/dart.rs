@@ -32,7 +32,8 @@ pub fn entity_query() -> &'static str {
 
 ; Class definition
 (class_declaration
-  name: (identifier) @entity.class.name
+  name: (identifier) @entity.class.name @entity.class.signature.name
+  type_parameters: (_)? @entity.class.signature.type_params
   body: (class_body) @entity.class.body
 ) @entity.class
 
@@ -43,7 +44,7 @@ pub fn entity_query() -> &'static str {
 
 ; Enum definition
 (enum_declaration
-  name: (identifier) @entity.enum.name
+  name: (identifier) @entity.enum.name @entity.enum.signature.name
   body: (enum_body) @entity.enum.body
 ) @entity.enum
 
@@ -64,31 +65,31 @@ pub fn entity_query() -> &'static str {
 ; Method signature (method definition)
 (method_signature
   (function_signature
-    return_type: (_)? @entity.method.return_type
-    name: (identifier) @entity.method.name
-    (formal_parameter_list) @entity.method.params
+    return_type: (_)? @entity.method.return_type @entity.method.signature.return_type
+    name: (identifier) @entity.method.name @entity.method.signature.name
+    (formal_parameter_list) @entity.method.params @entity.method.signature.params
   )
 ) @entity.method
 
 ; Constructor signature
 (constructor_signature
-  name: (identifier) @entity.constructor.name
-  (formal_parameter_list) @entity.constructor.params
+  name: (identifier) @entity.constructor.name @entity.constructor.signature.name
+  (formal_parameter_list) @entity.constructor.params @entity.constructor.signature.params
 ) @entity.constructor
 
 ; Factory constructor
 (factory_constructor_signature
-  name: (identifier) @entity.constructor.factory.name
+  name: (identifier) @entity.constructor.factory.name @entity.constructor.factory.signature.name
 ) @entity.constructor.factory
 
 ; Getter signature
 (getter_signature
-  name: (identifier) @entity.method.getter.name
+  name: (identifier) @entity.method.getter.name @entity.method.getter.signature.name
 ) @entity.method.getter
 
 ; Setter signature
 (setter_signature
-  name: (identifier) @entity.method.setter.name
+  name: (identifier) @entity.method.setter.name @entity.method.setter.signature.name
 ) @entity.method.setter
 
 ; ============================================
@@ -97,9 +98,9 @@ pub fn entity_query() -> &'static str {
 
 ; Top-level function signature
 (function_signature
-  return_type: (_)? @entity.function.return_type
-  name: (identifier) @entity.function.name
-  (formal_parameter_list) @entity.function.params
+  return_type: (_)? @entity.function.return_type @entity.function.signature.return_type
+  name: (identifier) @entity.function.name @entity.function.signature.name
+  (formal_parameter_list) @entity.function.params @entity.function.signature.params
 ) @entity.function
 
 ; ============================================
@@ -502,6 +503,28 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.class.signature.type_params",
+            "@entity.enum.signature.name",
+            "@entity.method.signature.name",
+            "@entity.method.signature.params",
+            "@entity.function.signature.name",
+            "@entity.function.signature.return_type",
+            "@entity.constructor.signature.params",
+            "@entity.constructor.factory.signature.name",
+            "@entity.method.getter.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

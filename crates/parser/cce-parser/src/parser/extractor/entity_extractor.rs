@@ -1000,6 +1000,340 @@ class Point:
     }
 
     #[test]
+    fn test_extract_python_async_and_generator() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "async def fetch(url: str) -> str:\n    return url\n\ndef gen(n: int):\n    yield n\n\ndouble = lambda x: x * 2\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Python)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Python)
+            .expect("Failed to extract");
+
+        let fetch = entities
+            .iter()
+            .find(|e| e.name == "fetch")
+            .expect("Should find fetch");
+        assert_eq!(fetch.signature, "fetch (url: str) str");
+
+        let generator = entities
+            .iter()
+            .find(|e| e.name == "gen")
+            .expect("Should find gen");
+        assert_eq!(generator.signature, "gen (n: int)");
+
+        let double = entities
+            .iter()
+            .find(|e| e.name == "double")
+            .expect("Should find double");
+        assert_eq!(double.signature, "double = lambda x: x * 2");
+    }
+
+    #[test]
+    fn test_extract_rust_generic_struct_and_fn() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "pub struct OnceCell<T> {\n    value: T,\n}\n\npub fn get<T>(key: &str) -> Option<T> {\n    None\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Rust)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Rust)
+            .expect("Failed to extract");
+
+        let strukt = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Struct && e.name == "OnceCell")
+            .expect("Should find struct OnceCell");
+        assert_eq!(strukt.signature, "OnceCell <T>");
+        assert!(
+            !strukt.signature.contains("value: T,"),
+            "struct body must not leak, got {:?}",
+            strukt.signature
+        );
+
+        let func = entities
+            .iter()
+            .find(|e| e.name == "get")
+            .expect("Should find fn get");
+        assert_eq!(func.signature, "get <T> (key: &str) Option<T>");
+        assert!(
+            !func.signature.contains("None"),
+            "function body must not leak, got {:?}",
+            func.signature
+        );
+    }
+
+    #[test]
+    fn test_extract_rust_enum_trait_impl_const() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "pub enum Color {\n    Red,\n    Green,\n}\n\npub trait Shape {\n    fn area(&self) -> f64;\n}\n\nimpl Point {\n    pub fn new() -> Self {\n        Point\n    }\n}\n\npub const MAX: u32 = 100;\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Rust)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Rust)
+            .expect("Failed to extract");
+
+        let color = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Enum && e.name == "Color")
+            .expect("Should find enum Color");
+        assert_eq!(color.signature, "Color");
+
+        let shape = entities
+            .iter()
+            .find(|e| e.name == "Shape")
+            .expect("Should find trait Shape");
+        assert_eq!(shape.signature, "Shape");
+        assert!(
+            !shape.signature.contains("area"),
+            "trait body must not leak, got {:?}",
+            shape.signature
+        );
+
+        let imp = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::InherentImpl)
+            .expect("Should find inherent impl");
+        assert_eq!(imp.signature, "Point");
+        assert!(
+            !imp.signature.contains("Self"),
+            "impl body must not leak, got {:?}",
+            imp.signature
+        );
+
+        let max = entities
+            .iter()
+            .find(|e| e.name == "MAX")
+            .expect("Should find const MAX");
+        assert_eq!(max.signature, "MAX u32");
+    }
+
+    #[test]
+    fn test_extract_go_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "package main\n\ntype Point struct {\n    X int\n}\n\nfunc (p Point) Distance(other Point) int {\n    return 0\n}\n\nfunc New(name string) Point {\n    return Point{}\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Go)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Go)
+            .expect("Failed to extract");
+
+        for expected in [
+            ("Point", "Point"),
+            ("Distance", "Distance (other Point) int"),
+            ("New", "New (name string) Point"),
+        ] {
+            let entity = entities
+                .iter()
+                .find(|e| e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+            assert!(
+                !entity.signature.contains("return 0") && !entity.signature.contains("X int"),
+                "body must not leak for {}, got {:?}",
+                expected.0,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_java_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "public class Point extends Shape {\n    public Point(int x) {\n        this.x = x;\n    }\n    public int getX() {\n        return x;\n    }\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Java)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Java)
+            .expect("Failed to extract");
+
+        for expected in [("Point", "Point Shape"), ("getX", "int getX ()")] {
+            let entity = entities
+                .iter()
+                .find(|e| e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+        }
+        let ctor = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Constructor)
+            .expect("Should find constructor");
+        assert_eq!(ctor.signature, "Point (int x)");
+        for entity in &entities {
+            assert!(
+                !entity.signature.contains("this.x") && !entity.signature.contains("return x"),
+                "body must not leak for {}, got {:?}",
+                entity.name,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_typescript_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "class Store extends Base {\n    get(key: string): string {\n        return \"\";\n    }\n}\nfunction add(a: number, b: number): number {\n    return a + b;\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::TypeScript)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::TypeScript)
+            .expect("Failed to extract");
+
+        for expected in [
+            ("Store", "Store Base"),
+            ("get", "get (key: string) string"),
+            ("add", "add (a: number, b: number) number"),
+        ] {
+            let entity = entities
+                .iter()
+                .find(|e| e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+            assert!(
+                !entity.signature.contains("return"),
+                "body must not leak for {}, got {:?}",
+                expected.0,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_javascript_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "class Dog extends Animal {\n    bark(volume) {\n        return volume;\n    }\n}\nfunction add(a, b) {\n    return a + b;\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::JavaScript)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::JavaScript)
+            .expect("Failed to extract");
+
+        for expected in [
+            ("Dog", "Dog Animal"),
+            ("bark", "bark (volume)"),
+            ("add", "add (a, b)"),
+        ] {
+            let entity = entities
+                .iter()
+                .find(|e| e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+            assert!(
+                !entity.signature.contains("return"),
+                "body must not leak for {}, got {:?}",
+                expected.0,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_c_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code =
+            "struct Point {\n    int x;\n};\n\nint add(int a, int b) {\n    return a + b;\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::C)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::C)
+            .expect("Failed to extract");
+
+        for expected in [("Point", "Point"), ("add", "int add (int a, int b)")] {
+            let entity = entities
+                .iter()
+                .find(|e| e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+            assert!(
+                !entity.signature.contains("return a") && !entity.signature.contains("int x;"),
+                "body must not leak for {}, got {:?}",
+                expected.0,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_csharp_method_signature() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "public class Store {\n    public string Get(string key) {\n        return key;\n    }\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::CSharp)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::CSharp)
+            .expect("Failed to extract");
+
+        let class = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Class && e.name == "Store")
+            .expect("Should find class Store");
+        assert_eq!(class.signature, "Store");
+
+        let method = entities
+            .iter()
+            .find(|e| e.name == "Get")
+            .expect("Should find method Get");
+        assert_eq!(method.signature, "string Get (string key)");
+        assert!(
+            !method.signature.contains("return key"),
+            "body must not leak, got {:?}",
+            method.signature
+        );
+    }
+
+    #[test]
     fn test_extract_rust_module_excludes_body() {
         let mut ast_parser = AstParser::new();
         let extractor = EntityExtractor::new();
@@ -1019,7 +1353,7 @@ class Point:
             .iter()
             .find(|e| e.kind == EntityKind::Module && e.name == "sync")
             .expect("Should find mod sync");
-        assert_eq!(module.signature, "pub mod sync");
+        assert_eq!(module.signature, "sync");
         assert!(
             !module.signature.contains("Guard"),
             "module body must not leak into signature, got {:?}",

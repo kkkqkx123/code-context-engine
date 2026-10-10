@@ -121,6 +121,9 @@ fn main_expects_body(main_name: &str) -> bool {
         || lower.contains("iife")
         || lower.contains("top_call")
         || lower.contains("top_if")
+        || lower.contains("variant")
+        || lower.contains("enum_")
+        || lower.contains("enum.")
     {
         return false;
     }
@@ -897,6 +900,40 @@ mod tests {
         )]);
         assert_eq!(extract_signature(&mat, source), "");
         assert!(signature_missing_count() > before, "gap must be counted");
+    }
+
+    #[test]
+    fn test_extract_signature_enum_variant_returns_full_text() {
+        let source = "Some(x)";
+        let before = signature_missing_count();
+        let mat = make_match(vec![make_capture(
+            "entity.enum_variant",
+            source,
+            0,
+            source.len(),
+        )]);
+        assert_eq!(extract_signature(&mat, source), "Some(x)");
+        assert_eq!(
+            signature_missing_count(),
+            before,
+            "variant-like kinds must not count as missing"
+        );
+    }
+
+    #[test]
+    fn test_extract_signature_lambda_returns_full_text() {
+        let source = "double = lambda x: x * 2";
+        let before = signature_missing_count();
+        let mat = make_match(vec![
+            make_capture("entity.lambda", source, 0, source.len()),
+            make_capture("entity.lambda.name", "double", 0, 6),
+        ]);
+        assert_eq!(extract_signature(&mat, source), source);
+        assert_eq!(
+            signature_missing_count(),
+            before,
+            "inline lambda must keep its full text"
+        );
     }
 
     #[test]

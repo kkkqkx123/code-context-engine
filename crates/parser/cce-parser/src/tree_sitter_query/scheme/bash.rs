@@ -18,7 +18,7 @@ pub fn entity_query() -> &'static str {
 
 ; Function definition: name() { ... }
 (function_definition
-  name: (word) @entity.function.name
+  name: (word) @entity.function.name @entity.function.signature.name
   body: (compound_statement) @entity.function.body
 ) @entity.function
 
@@ -153,6 +153,15 @@ mod tests {
             result.is_ok(),
             "Entity query syntax validation failed: {:?}",
             result.err()
+        );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        assert!(
+            query.contains("@entity.function.signature.name"),
+            "entity query must declare signature sub-capture @entity.function.signature.name"
         );
     }
 

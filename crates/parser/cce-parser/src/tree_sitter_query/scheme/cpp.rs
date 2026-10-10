@@ -28,7 +28,7 @@ pub fn entity_query() -> String {
 
 ; Class definition
 (class_specifier
-  name: (type_identifier) @entity.class.name
+  name: (type_identifier) @entity.class.name @entity.class.signature.name
   body: (field_declaration_list) @entity.class.body
 ) @entity.class
 
@@ -41,10 +41,10 @@ pub fn entity_query() -> String {
 ; the return-type field constraint in this order (same constraint-ordering
 ; quirk as tree-sitter-c-sharp `returns:`).
 (function_definition
-  type: (_) @entity.method.return_type
+  type: (_) @entity.method.return_type @entity.method.signature.return_type
   declarator: (function_declarator
-    declarator: (field_identifier) @entity.method.name
-    parameters: (parameter_list) @entity.method.params
+    declarator: (field_identifier) @entity.method.name @entity.method.signature.name
+    parameters: (parameter_list) @entity.method.params @entity.method.signature.params
   )
   body: (compound_statement) @entity.method.body
 ) @entity.method
@@ -52,8 +52,8 @@ pub fn entity_query() -> String {
 ; Method declaration
 (declaration
   declarator: (function_declarator
-    declarator: (field_identifier) @entity.method.prototype.name
-    parameters: (parameter_list) @entity.method.prototype.params
+    declarator: (field_identifier) @entity.method.prototype.name @entity.method.prototype.signature.name
+    parameters: (parameter_list) @entity.method.prototype.params @entity.method.prototype.signature.params
   )
 ) @entity.method.prototype
 
@@ -61,10 +61,10 @@ pub fn entity_query() -> String {
 (class_specifier
   body: (field_declaration_list
     (field_declaration
-      type: (_) @entity.method.prototype.return_type
+      type: (_) @entity.method.prototype.return_type @entity.method.prototype.signature.return_type
       declarator: (function_declarator
-        declarator: (field_identifier) @entity.method.prototype.name
-        parameters: (parameter_list) @entity.method.prototype.params
+        declarator: (field_identifier) @entity.method.prototype.name @entity.method.prototype.signature.name
+        parameters: (parameter_list) @entity.method.prototype.params @entity.method.prototype.signature.params
       )
     ) @entity.method.prototype
   )
@@ -75,8 +75,8 @@ pub fn entity_query() -> String {
   body: (field_declaration_list
     (declaration
       declarator: (function_declarator
-        declarator: (identifier) @entity.constructor.prototype.name
-        parameters: (parameter_list) @entity.constructor.prototype.params
+        declarator: (identifier) @entity.constructor.prototype.name @entity.constructor.prototype.signature.name
+        parameters: (parameter_list) @entity.constructor.prototype.params @entity.constructor.prototype.signature.params
       )
     ) @entity.constructor.prototype
   )
@@ -87,8 +87,8 @@ pub fn entity_query() -> String {
   body: (field_declaration_list
     (declaration
       declarator: (function_declarator
-        declarator: (destructor_name) @entity.destructor.prototype.name
-        parameters: (parameter_list) @entity.destructor.prototype.params
+        declarator: (destructor_name) @entity.destructor.prototype.name @entity.destructor.prototype.signature.name
+        parameters: (parameter_list) @entity.destructor.prototype.params @entity.destructor.prototype.signature.params
       )
     ) @entity.destructor.prototype
   )
@@ -97,8 +97,8 @@ pub fn entity_query() -> String {
 ; Constructor definition
 (function_definition
   declarator: (function_declarator
-    declarator: (identifier) @entity.constructor.name
-    parameters: (parameter_list) @entity.constructor.params
+    declarator: (identifier) @entity.constructor.name @entity.constructor.signature.name
+    parameters: (parameter_list) @entity.constructor.params @entity.constructor.signature.params
   )
   body: (compound_statement) @entity.constructor.body
 ) @entity.constructor
@@ -106,18 +106,18 @@ pub fn entity_query() -> String {
 ; Destructor definition
 (function_definition
   declarator: (function_declarator
-    declarator: (destructor_name) @entity.destructor.name
-    parameters: (parameter_list) @entity.destructor.params
+    declarator: (destructor_name) @entity.destructor.name @entity.destructor.signature.name
+    parameters: (parameter_list) @entity.destructor.params @entity.destructor.signature.params
   )
   body: (compound_statement) @entity.destructor.body
 ) @entity.destructor
 
 ; Operator overload
 (function_definition
-  type: (_) @entity.method.operator.return_type
+  type: (_) @entity.method.operator.return_type @entity.method.operator.signature.return_type
   declarator: (function_declarator
-    declarator: (operator_name) @entity.method.operator.name
-    parameters: (parameter_list) @entity.method.operator.params
+    declarator: (operator_name) @entity.method.operator.name @entity.method.operator.signature.name
+    parameters: (parameter_list) @entity.method.operator.params @entity.method.operator.signature.params
   )
   body: (compound_statement) @entity.method.operator.body
 ) @entity.method.operator
@@ -128,7 +128,7 @@ pub fn entity_query() -> String {
 
 ; Namespace definition
 (namespace_definition
-  name: (namespace_identifier) @entity.namespace.definition.name
+  name: (namespace_identifier) @entity.namespace.definition.name @entity.namespace.definition.signature.name
   body: (declaration_list) @entity.namespace.definition.body
 ) @entity.namespace.definition
 
@@ -136,7 +136,7 @@ pub fn entity_query() -> String {
 (namespace_definition
   body: (declaration_list
     (namespace_definition
-      name: (namespace_identifier) @entity.namespace.nested.name
+      name: (namespace_identifier) @entity.namespace.nested.name @entity.namespace.nested.signature.name
     )
   )
 ) @entity.namespace.nested
@@ -147,42 +147,44 @@ pub fn entity_query() -> String {
 
 ; Template class declaration
 (template_declaration
-  parameters: (template_parameter_list) @entity.template.class.params
+  parameters: (template_parameter_list) @entity.template.class.params @entity.template.class.signature.params
   (class_specifier
-    name: (type_identifier) @entity.template.class.name
+    name: (type_identifier) @entity.template.class.name @entity.template.class.signature.name
     body: (field_declaration_list) @entity.template.class.body
   )
 ) @entity.template.class
 
 ; Template struct declaration
 (template_declaration
-  parameters: (template_parameter_list) @entity.template.struct.params
+  parameters: (template_parameter_list) @entity.template.struct.params @entity.template.struct.signature.params
   (struct_specifier
-    name: (type_identifier) @entity.template.struct.name
+    name: (type_identifier) @entity.template.struct.name @entity.template.struct.signature.name
     body: (field_declaration_list) @entity.template.struct.body
   )
 ) @entity.template.struct
 
 ; Template function declaration
 (template_declaration
-  parameters: (template_parameter_list) @entity.template.function.params
+  parameters: (template_parameter_list) @entity.template.function.params @entity.template.function.signature.params
   (function_definition
-    type: (_) @entity.template.function.return_type
+    type: (_) @entity.template.function.return_type @entity.template.function.signature.return_type
     declarator: (function_declarator
-      declarator: (identifier) @entity.template.function.name
-      parameters: (parameter_list) @entity.template.function.params
+      declarator: (identifier) @entity.template.function.name @entity.template.function.signature.name
+      parameters: (parameter_list) @entity.template.function.params @entity.template.function.signature.params
     )
+    body: (compound_statement)? @entity.template.function.body
   )
 ) @entity.template.function
 
 ; Template method declaration
 (template_declaration
-  parameters: (template_parameter_list) @entity.template.method.params
+  parameters: (template_parameter_list) @entity.template.method.params @entity.template.method.signature.params
   (function_definition
     declarator: (function_declarator
-      declarator: (field_identifier) @entity.template.method.name
-      parameters: (parameter_list) @entity.template.method.params
+      declarator: (field_identifier) @entity.template.method.name @entity.template.method.signature.name
+      parameters: (parameter_list) @entity.template.method.params @entity.template.method.signature.params
     )
+    body: (compound_statement)? @entity.template.method.body
   )
 ) @entity.template.method
 
@@ -197,15 +199,15 @@ pub fn entity_query() -> String {
 ; Range-based for loop variable, e.g. `for (auto& elem : items)`
 (for_range_loop
   declarator: (reference_declarator
-    (identifier) @entity.variable.loop.name
+    (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
   )
-  right: (_) @entity.variable.loop.source
+  right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 ; Range-based for loop variable without reference, e.g. `for (auto elem : items)`
 (for_range_loop
-  declarator: (identifier) @entity.variable.loop.name
-  right: (_) @entity.variable.loop.source
+  declarator: (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
+  right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 ; Structured binding declaration, e.g. `auto [a, b] = pair;`
@@ -363,6 +365,28 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.method.signature.name",
+            "@entity.method.signature.params",
+            "@entity.method.operator.signature.name",
+            "@entity.constructor.signature.name",
+            "@entity.destructor.signature.name",
+            "@entity.namespace.definition.signature.name",
+            "@entity.template.class.signature.name",
+            "@entity.template.function.signature.params",
+            "@entity.method.prototype.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

@@ -52,8 +52,8 @@ pub fn entity_query() -> &'static str {
 
 ; Class definition
 (class
-  name: (constant) @entity.class.name
-  superclass: (constant)? @entity.class.superclass
+  name: (constant) @entity.class.name @entity.class.signature.name
+  superclass: (constant)? @entity.class.superclass @entity.class.signature.base
   body: (body_statement) @entity.class.body
 ) @entity.class
 
@@ -69,7 +69,7 @@ pub fn entity_query() -> &'static str {
 
 ; Module definition
 (module
-  name: (constant) @entity.module.name
+  name: (constant) @entity.module.name @entity.module.signature.name
   body: (body_statement) @entity.module.body
 ) @entity.module
 
@@ -79,16 +79,16 @@ pub fn entity_query() -> &'static str {
 
 ; Instance method definition
 (method
-  name: (identifier) @entity.method.instance.name
-  parameters: (method_parameters)? @entity.method.instance.params
+  name: (identifier) @entity.method.instance.name @entity.method.instance.signature.name
+  parameters: (method_parameters)? @entity.method.instance.params @entity.method.instance.signature.params
   body: (body_statement)? @entity.method.instance.body
 ) @entity.method.instance
 
 ; Singleton method definition
 (singleton_method
   object: (_) @entity.method.singleton.object
-  name: (identifier) @entity.method.singleton.name
-  parameters: (method_parameters)? @entity.method.singleton.params
+  name: (identifier) @entity.method.singleton.name @entity.method.singleton.signature.name
+  parameters: (method_parameters)? @entity.method.singleton.params @entity.method.singleton.signature.params
   body: (body_statement)? @entity.method.singleton.body
 ) @entity.method.singleton
 
@@ -425,6 +425,25 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.class.signature.base",
+            "@entity.module.signature.name",
+            "@entity.method.instance.signature.name",
+            "@entity.method.instance.signature.params",
+            "@entity.method.singleton.signature.name",
+            "@entity.method.singleton.signature.params",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

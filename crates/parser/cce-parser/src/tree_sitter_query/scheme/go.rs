@@ -40,7 +40,8 @@ pub fn entity_query() -> &'static str {
 ; Struct type definition
 (type_declaration
   (type_spec
-    name: (type_identifier) @entity.struct.name
+    name: (type_identifier) @entity.struct.name @entity.struct.signature.name
+    type_parameters: (_)? @entity.struct.signature.type_params
     type: (struct_type) @entity.struct.body
   ) @entity.struct
 )
@@ -48,7 +49,8 @@ pub fn entity_query() -> &'static str {
 ; Interface type definition
 (type_declaration
   (type_spec
-    name: (type_identifier) @entity.interface.name
+    name: (type_identifier) @entity.interface.name @entity.interface.signature.name
+    type_parameters: (_)? @entity.interface.signature.type_params
     type: (interface_type) @entity.interface.body
   ) @entity.interface
 )
@@ -56,9 +58,9 @@ pub fn entity_query() -> &'static str {
 ; Interface method specification
 (interface_type
   (method_elem
-    name: (field_identifier) @entity.interface_method.name
-    parameters: (parameter_list) @entity.interface_method.params
-    result: (_)? @entity.interface_method.return_type
+    name: (field_identifier) @entity.interface_method.name @entity.interface_method.signature.name
+    parameters: (parameter_list) @entity.interface_method.params @entity.interface_method.signature.params
+    result: (_)? @entity.interface_method.return_type @entity.interface_method.signature.return_type
   ) @entity.interface_method
 )
 
@@ -68,9 +70,10 @@ pub fn entity_query() -> &'static str {
 
 ; Function declaration
 (function_declaration
-  name: (identifier) @entity.function.name
-  parameters: (parameter_list) @entity.function.params
-  result: (_)? @entity.function.return_type
+  name: (identifier) @entity.function.name @entity.function.signature.name
+  type_parameters: (_)? @entity.function.signature.type_params
+  parameters: (parameter_list) @entity.function.params @entity.function.signature.params
+  result: (_)? @entity.function.return_type @entity.function.signature.return_type
   body: (block) @entity.function.body
 ) @entity.function
 
@@ -78,9 +81,9 @@ pub fn entity_query() -> &'static str {
 ; `func <receiver> <name> <params> <result> <body>`.
 (method_declaration
   receiver: (parameter_list) @entity.method.receiver
-  name: (field_identifier) @entity.method.name
-  parameters: (parameter_list) @entity.method.params
-  result: (_)? @entity.method.return_type
+  name: (field_identifier) @entity.method.name @entity.method.signature.name
+  parameters: (parameter_list) @entity.method.params @entity.method.signature.params
+  result: (_)? @entity.method.return_type @entity.method.signature.return_type
   body: (block) @entity.method.body
 ) @entity.method
 
@@ -92,7 +95,7 @@ pub fn entity_query() -> &'static str {
 ; e.g., f := func(x int) int { return x + 1 }
 (short_var_declaration
   left: (expression_list
-    (identifier) @entity.function_literal.name
+    (identifier) @entity.function_literal.name @entity.function_literal.signature.name
   )
   right: (expression_list
     (func_literal) @entity.function_literal.params
@@ -145,9 +148,9 @@ pub fn entity_query() -> &'static str {
 (for_statement
   (range_clause
     left: (expression_list
-      (identifier) @entity.variable.loop.name
+      (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
     )
-    right: (_) @entity.variable.loop.source
+    right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
   )
 ) @entity.variable.loop
 
@@ -505,6 +508,27 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.struct.signature.name",
+            "@entity.struct.signature.type_params",
+            "@entity.interface.signature.name",
+            "@entity.function.signature.name",
+            "@entity.function.signature.params",
+            "@entity.method.signature.name",
+            "@entity.method.signature.return_type",
+            "@entity.interface_method.signature.params",
+            "@entity.function_literal.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

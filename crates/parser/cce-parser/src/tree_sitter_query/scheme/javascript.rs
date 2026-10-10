@@ -37,17 +37,19 @@ pub fn entity_function_method_patterns() -> &'static str {
 
 ; Method definition (excluding constructor)
 (method_definition
-  name: (property_identifier) @entity.method.name
-  parameters: (formal_parameters)
+  name: (property_identifier) @entity.method.name @entity.method.signature.name
+  parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
   body: (statement_block
     (return_statement (_) @entity.method.return_type)?
-  )
+  )? @entity.method.body
 ) @entity.method
 
 ; Constructor method
 (method_definition
-  name: (property_identifier) @entity.constructor.name
+  name: (property_identifier) @entity.constructor.name @entity.constructor.signature.name
   (#eq? @entity.constructor.name "constructor")
+  parameters: (formal_parameters) @entity.constructor.params @entity.constructor.signature.params
+  body: (statement_block)? @entity.constructor.body
 ) @entity.constructor
 
 ; NOTE: no dedicated getter/setter patterns. The grammar drops the
@@ -62,8 +64,8 @@ pub fn entity_function_method_patterns() -> &'static str {
 
 ; Named function declaration
 (function_declaration
-  name: (identifier) @entity.function.name
-  parameters: (formal_parameters) @entity.function.params
+  name: (identifier) @entity.function.name @entity.function.signature.name
+  parameters: (formal_parameters) @entity.function.params @entity.function.signature.params
   body: (statement_block
     (return_statement (_) @entity.function.return_type)?
   ) @entity.function.body
@@ -71,37 +73,42 @@ pub fn entity_function_method_patterns() -> &'static str {
 
 ; Generator function declaration
 (generator_function_declaration
-  name: (identifier) @entity.function.generator.name
-  parameters: (formal_parameters)
+  name: (identifier) @entity.function.generator.name @entity.function.generator.signature.name
+  parameters: (formal_parameters) @entity.function.generator.params @entity.function.generator.signature.params
   body: (statement_block
     (return_statement (_) @entity.function.generator.return_type)?
-  )
+  )? @entity.function.generator.body
 ) @entity.function.generator
 
 ; Arrow function assigned to variable (lexical declaration)
 (lexical_declaration
   (variable_declarator
-    name: (identifier) @entity.function.arrow.name
-    value: (arrow_function)
+    name: (identifier) @entity.function.arrow.name @entity.function.arrow.signature.name
+    value: (arrow_function
+      (formal_parameters)? @entity.function.arrow.params @entity.function.arrow.signature.params
+    )
   )
 ) @entity.function.arrow
 
 ; Arrow function assigned to variable (var declaration)
 (variable_declaration
   (variable_declarator
-    name: (identifier) @entity.function.arrow_var.name
-    value: (arrow_function)
+    name: (identifier) @entity.function.arrow_var.name @entity.function.arrow_var.signature.name
+    value: (arrow_function
+      (formal_parameters)? @entity.function.arrow_var.params @entity.function.arrow_var.signature.params
+    )
   )
 ) @entity.function.arrow_var
 
 ; Function expression assigned to variable (lexical declaration)
 (lexical_declaration
   (variable_declarator
-    name: (identifier) @entity.function.expression.name
+    name: (identifier) @entity.function.expression.name @entity.function.expression.signature.name
     value: (function_expression
+      parameters: (formal_parameters) @entity.function.expression.params @entity.function.expression.signature.params
       body: (statement_block
         (return_statement (_) @entity.function.expression.return_type)?
-      )
+      ) @entity.function.expression.body
     )
   )
 ) @entity.function.expression
@@ -109,11 +116,12 @@ pub fn entity_function_method_patterns() -> &'static str {
 ; Function expression assigned to variable (var declaration)
 (variable_declaration
   (variable_declarator
-    name: (identifier) @entity.function.expression_var.name
+    name: (identifier) @entity.function.expression_var.name @entity.function.expression_var.signature.name
     value: (function_expression
+      parameters: (formal_parameters) @entity.function.expression_var.params @entity.function.expression_var.signature.params
       body: (statement_block
         (return_statement (_) @entity.function.expression_var.return_type)?
-      )
+      ) @entity.function.expression_var.body
     )
   )
 ) @entity.function.expression_var
@@ -222,16 +230,16 @@ pub fn entity_non_function_patterns() -> &'static str {
 ; For-of destructuring: for (const [k, v] of scores)
 (for_in_statement
   left: (array_pattern
-    (identifier) @entity.variable.loop.name
+    (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
   )
-  right: (_) @entity.variable.loop.source
+  right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 (for_in_statement
   left: (object_pattern
-    (shorthand_property_identifier_pattern) @entity.variable.loop.name
+    (shorthand_property_identifier_pattern) @entity.variable.loop.name @entity.variable.loop.signature.name
   )
-  right: (_) @entity.variable.loop.source
+  right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 ; ============================================
@@ -315,16 +323,16 @@ pub fn entity_js_only() -> &'static str {
 
 ; Class declaration (heritage is optional so plain classes match)
 (class_declaration
-  name: (identifier) @entity.class.name
+  name: (identifier) @entity.class.name @entity.class.signature.name
   (class_heritage
-    (identifier) @entity.class.base
+    (identifier) @entity.class.base @entity.class.signature.base
   )?
   body: (class_body) @entity.class.body
 ) @entity.class
 
 ; Class expression
 (class
-  name: (identifier)? @entity.class_expression.name
+  name: (identifier)? @entity.class_expression.name @entity.class_expression.signature.name
 ) @entity.class_expression
 
 ; Class field (`foo = 1` / `static bar = 2` inside a class body).
@@ -359,10 +367,10 @@ pub fn entity_js_only() -> &'static str {
 ; e.g., View.prototype.lookup = function lookup(name) { ... }
 (assignment_expression
   left: (member_expression
-    property: (property_identifier) @entity.method.name
+    property: (property_identifier) @entity.method.name @entity.method.signature.name
   )
   right: (function_expression
-    parameters: (formal_parameters) @entity.method.params
+    parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
     body: (statement_block
       (return_statement (_) @entity.method.return_type)?
     ) @entity.method.body
@@ -373,10 +381,10 @@ pub fn entity_js_only() -> &'static str {
 ; e.g., res.send = (body) => { ... }
 (assignment_expression
   left: (member_expression
-    property: (property_identifier) @entity.method.name
+    property: (property_identifier) @entity.method.name @entity.method.signature.name
   )
   right: (arrow_function
-    parameters: (formal_parameters) @entity.method.params
+    (formal_parameters)? @entity.method.params @entity.method.signature.params
   )
 ) @entity.method
 
@@ -442,9 +450,9 @@ pub fn entity_js_only() -> &'static str {
 ; Object literal property with function expression
 (object
   (pair
-    key: (property_identifier) @entity.method.name
+    key: (property_identifier) @entity.method.name @entity.method.signature.name
     value: (function_expression
-      parameters: (formal_parameters) @entity.method.params
+      parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
       body: (statement_block
         (return_statement (_) @entity.method.return_type)?
       ) @entity.method.body
@@ -455,9 +463,9 @@ pub fn entity_js_only() -> &'static str {
 ; Object literal property with arrow function
 (object
   (pair
-    key: (property_identifier) @entity.method.name
+    key: (property_identifier) @entity.method.name @entity.method.signature.name
     value: (arrow_function
-      parameters: (formal_parameters) @entity.method.params
+      (formal_parameters)? @entity.method.params @entity.method.signature.params
     )
   )
 ) @entity.method
@@ -936,6 +944,29 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.method.signature.name",
+            "@entity.method.signature.params",
+            "@entity.constructor.signature.name",
+            "@entity.function.signature.name",
+            "@entity.function.signature.params",
+            "@entity.function.generator.signature.params",
+            "@entity.function.arrow.signature.params",
+            "@entity.function.expression.signature.params",
+            "@entity.class.signature.name",
+            "@entity.class.signature.base",
+            "@entity.class_expression.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

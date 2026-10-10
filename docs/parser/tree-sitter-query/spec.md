@@ -76,7 +76,7 @@
 | `@entity.class.name`                   | 类名             | C#, Go, Java, JS, TS, C++, Python |
 | `@entity.class.body`                   | 类体             | C#, C++, Python                   |
 | `@entity.class.signature.type_params`  | 类型参数         | Rust                              |
-| `@entity.class.signature.base`         | 基类             | Java, Python, Ruby                |
+| `@entity.class.signature.base`         | 基类             | Java, Python, Ruby, JS, TS, C#    |
 | `@entity.struct.name`                  | 结构体名         | C, C++, Go, Rust                  |
 | `@entity.struct.body`                  | 结构体体         | C, C++, Go                        |
 | `@entity.struct.signature.type_params` | 类型参数         | Rust                              |
@@ -110,9 +110,9 @@
 | `@entity.function.params`              | 参数列表         | 所有语言                          |
 | `@entity.function.return_type`         | 返回类型         | C, C++, Go, Java, Rust, PHP       |
 | `@entity.function.body`                | 函数体           | 所有语言                          |
-| `@entity.function.signature.name`      | 函数名           | C, Go, Java, Rust, PHP, Lua       |
-| `@entity.function.signature.params`    | 参数列表         | C, Go, Java, Rust, PHP, Lua       |
-| `@entity.function.signature.return_type`| 返回类型         | C, Go, Java, Rust, PHP            |
+| `@entity.function.signature.name`      | 函数名           | C, C++, Go, Java, Rust, PHP, Lua, JS, TS, Python, Bash, Scala |
+| `@entity.function.signature.params`    | 参数列表         | C, C++, Go, Java, Rust, PHP, Lua, JS, TS, Python, Scala |
+| `@entity.function.signature.return_type`| 返回类型         | C, C++, Go, Java, Rust, PHP, TS, Python, Scala |
 
 ### 方法定义 (@entity.method)
 
@@ -122,9 +122,9 @@
 | `@entity.method.params`                | 参数列表         | 所有语言                          |
 | `@entity.method.return_type`           | 返回类型         | C++, Java, Rust, TS               |
 | `@entity.method.body`                  | 方法体           | 所有语言                          |
-| `@entity.method.signature.name`        | 方法名           | C++, Dart, Java, Rust, PHP        |
-| `@entity.method.signature.params`      | 参数列表         | C++, Dart, Java, Rust, PHP        |
-| `@entity.method.signature.return_type` | 返回类型         | C++, Java, Rust, TS               |
+| `@entity.method.signature.name`        | 方法名           | C++, Dart, Java, Rust, PHP, JS, TS, Python, Go, Ruby, C#, Kotlin |
+| `@entity.method.signature.params`      | 参数列表         | C++, Dart, Java, Rust, PHP, JS, TS, Python, Go, Ruby, C#, Kotlin |
+| `@entity.method.signature.return_type` | 返回类型         | C++, Java, Rust, TS, Go, PHP, Python, C#, Kotlin, Dart |
 
 | 捕获名称                                 | 描述                      | 支持语言                           |
 | ---------------------------------------- | ------------------------- | ---------------------------------- |

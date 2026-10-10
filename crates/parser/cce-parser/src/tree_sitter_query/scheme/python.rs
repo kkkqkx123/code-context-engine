@@ -106,7 +106,7 @@ pub fn entity_query() -> &'static str {
 (function_definition
   name: (identifier) @entity.function.async.name @entity.function.async.signature.name
   parameters: (parameters) @entity.function.async.params @entity.function.async.signature.params
-  return_type: [(type) (string)]? @entity.function.return_type @entity.function.async.signature.return_type
+  return_type: [(type) (string)]? @entity.function.async.return_type @entity.function.async.signature.return_type
   body: (block) @entity.function.async.body
 ) @entity.function.async
 
@@ -150,7 +150,7 @@ pub fn entity_query() -> &'static str {
       name: (identifier) @entity.method.class.name @entity.method.class.signature.name
       parameters: (parameters
         (identifier) @entity.method.class.cls_param
-      ) @entity.method.params @entity.method.class.signature.params
+      ) @entity.method.class.params @entity.method.class.signature.params
       return_type: [(type) (string)]? @entity.method.class.return_type @entity.method.class.signature.return_type
       body: (block) @entity.method.class.body
     ) @entity.method.class
@@ -164,7 +164,7 @@ pub fn entity_query() -> &'static str {
       name: (identifier) @entity.method.instance.name @entity.method.instance.signature.name
       parameters: (parameters
         (identifier) @entity.method.instance.self_param
-      ) @entity.method.params @entity.method.instance.signature.params
+      ) @entity.method.instance.params @entity.method.instance.signature.params
       return_type: [(type) (string)]? @entity.method.instance.return_type @entity.method.instance.signature.return_type
       body: (block) @entity.method.instance.body
     ) @entity.method.instance
@@ -178,7 +178,7 @@ pub fn entity_query() -> &'static str {
       (decorator (identifier) @entity.method.static.decorator)
       (function_definition
         name: (identifier) @entity.method.static.name @entity.method.static.signature.name
-        parameters: (parameters) @entity.method.params @entity.method.static.signature.params
+        parameters: (parameters) @entity.method.static.params @entity.method.static.signature.params
         return_type: [(type) (string)]? @entity.method.static.return_type @entity.method.static.signature.return_type
         body: (block) @entity.method.static.body
       )
@@ -193,7 +193,7 @@ pub fn entity_query() -> &'static str {
       (decorator (identifier) @entity.method.getter.decorator)
       (function_definition
         name: (identifier) @entity.method.getter.name @entity.method.getter.signature.name
-        parameters: (parameters) @entity.method.params @entity.method.getter.signature.params
+        parameters: (parameters) @entity.method.getter.params @entity.method.getter.signature.params
         return_type: [(type) (string)]? @entity.method.getter.return_type @entity.method.getter.signature.return_type
         body: (block) @entity.method.getter.body
       )
@@ -205,12 +205,14 @@ pub fn entity_query() -> &'static str {
 ; Lambda Expressions
 ; ============================================
 
-; Lambda expression assigned to variable
+; Lambda expression assigned to variable.
+; Inline form: no signature sub-captures, the full statement text is the
+; signature so the lambda body is preserved.
 (expression_statement
   (assignment
-    left: (identifier) @entity.lambda.name @entity.lambda.signature.name
+    left: (identifier) @entity.lambda.name
     right: (lambda
-      parameters: (lambda_parameters) @entity.lambda.params @entity.lambda.signature.params
+      parameters: (lambda_parameters) @entity.lambda.params
     )
   )
 ) @entity.lambda
@@ -222,8 +224,8 @@ pub fn entity_query() -> &'static str {
 ; Generator function (containing yield)
 (function_definition
   name: (identifier) @entity.function.generator.name @entity.function.generator.signature.name
-  parameters: (parameters) @entity.function.params @entity.function.generator.signature.params
-  return_type: [(type) (string)]? @entity.function.return_type @entity.function.generator.signature.return_type
+  parameters: (parameters) @entity.function.generator.params @entity.function.generator.signature.params
+  return_type: [(type) (string)]? @entity.function.generator.return_type @entity.function.generator.signature.return_type
   body: (block
     (expression_statement
       (yield)
@@ -297,15 +299,15 @@ pub fn entity_query() -> &'static str {
 ; The iterable is recorded as provenance only: loop variables hold
 ; elements, so inference must never bind them to the iterable type itself.
 (for_statement
-  left: (identifier) @entity.variable.loop.name
-  right: (_) @entity.variable.loop.source
+  left: (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
+  right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 (for_statement
   left: (pattern_list
-    (identifier) @entity.variable.loop.name
+    (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
   )
-  right: (_) @entity.variable.loop.source
+  right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 ; Except-as binding: `except ValueError as e` binds e to the exception type.
@@ -811,6 +813,28 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.function.signature.name",
+            "@entity.function.signature.params",
+            "@entity.function.signature.return_type",
+            "@entity.method.signature.name",
+            "@entity.method.class.signature.params",
+            "@entity.method.instance.signature.params",
+            "@entity.class.signature.base",
+            "@entity.enum.signature.base",
+            "@entity.function.async.signature.name",
+            "@entity.function.generator.signature.params",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

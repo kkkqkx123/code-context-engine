@@ -37,14 +37,16 @@ pub fn entity_query() -> &'static str {
 
 ; Struct definition
 (struct_item
-  name: (type_identifier) @entity.struct.name
+  name: (type_identifier) @entity.struct.name @entity.struct.signature.name
   type_parameters: (_)? @entity.struct.signature.type_params
   body: (_) @entity.struct.body
 ) @entity.struct
 
 ; Enum definition
 (enum_item
-  name: (type_identifier) @entity.enum.name
+  name: (type_identifier) @entity.enum.name @entity.enum.signature.name
+  type_parameters: (_)? @entity.enum.signature.type_params
+  body: (enum_variant_list) @entity.enum.body
 ) @entity.enum
 
 ; Enum variant
@@ -54,12 +56,16 @@ pub fn entity_query() -> &'static str {
 
 ; Union definition
 (union_item
-  name: (type_identifier) @entity.union.name
+  name: (type_identifier) @entity.union.name @entity.union.signature.name
+  type_parameters: (_)? @entity.union.signature.type_params
+  body: (field_declaration_list) @entity.union.body
 ) @entity.union
 
 ; Trait definition
 (trait_item
-  name: (type_identifier) @entity.trait.name
+  name: (type_identifier) @entity.trait.name @entity.trait.signature.name
+  type_parameters: (_)? @entity.trait.signature.type_params
+  body: (declaration_list) @entity.trait.body
 ) @entity.trait
 
 ; Type alias
@@ -73,15 +79,17 @@ pub fn entity_query() -> &'static str {
 
 ; Function definition
 (function_item
-  name: (identifier) @entity.function.signature.name
-  parameters: (parameters) @entity.function.signature.params
-  return_type: (_)? @entity.function.signature.return_type
+  name: (identifier) @entity.function.name @entity.function.signature.name
+  type_parameters: (_)? @entity.function.signature.type_params
+  parameters: (parameters) @entity.function.params @entity.function.signature.params
+  return_type: (_)? @entity.function.return_type @entity.function.signature.return_type
   body: (_) @entity.function.body
 ) @entity.function
 
 ; Function signature item (trait method declaration)
 (function_signature_item
   name: (identifier) @entity.function.name @entity.function.signature.name
+  type_parameters: (_)? @entity.function.signature.type_params
   parameters: (parameters) @entity.function.params @entity.function.signature.params
   return_type: (_)? @entity.function.return_type @entity.function.signature.return_type
 ) @entity.function
@@ -92,21 +100,9 @@ pub fn entity_query() -> &'static str {
 
 ; Module definition
 (mod_item
-  name: (identifier) @entity.module.name
+  name: (identifier) @entity.module.name @entity.module.signature.name
   body: (declaration_list) @entity.module.body
 ) @entity.module
-
-; Use declaration
-(use_declaration
-  argument: (_) @dependency.import.path
-) @dependency.import
-
-; Use declaration with alias
-(use_declaration
-  argument: (use_as_clause
-    alias: (identifier) @dependency.import.alias.name
-  )
-) @dependency.import.alias
 
 ; ============================================
 ; 5. Constants and Static
@@ -114,12 +110,14 @@ pub fn entity_query() -> &'static str {
 
 ; Constant definition
 (const_item
-  name: (identifier) @entity.constant.name
+  name: (identifier) @entity.constant.name @entity.constant.signature.name
+  type: (_) @entity.constant.signature.type
 ) @entity.constant
 
 ; Static item
 (static_item
-  name: (identifier) @entity.static.name
+  name: (identifier) @entity.static.name @entity.static.signature.name
+  type: (_) @entity.static.signature.type
 ) @entity.static
 
 ; ============================================
@@ -128,7 +126,7 @@ pub fn entity_query() -> &'static str {
 
 ; Macro definition (macro_rules!)
 (macro_definition
-  name: (identifier) @entity.macro.name
+  name: (identifier) @entity.macro.name @entity.macro.signature.name
   (macro_rule) @entity.macro.body
 ) @entity.macro
 
@@ -149,14 +147,18 @@ pub fn entity_query() -> &'static str {
 ; Inherent impl block (impl Type / impl<T> Type<T>)
 ; Note: !trait excludes trait impl blocks (impl Trait for Type)
 (impl_item
-  type: (_) @entity.impl.type.name
+  type_parameters: (_)? @entity.impl.signature.type_params
+  type: (_) @entity.impl.type.name @entity.impl.signature.type
+  body: (declaration_list)? @entity.impl.body
   !trait
 ) @entity.impl
 
 ; Trait impl block (impl Trait for Type / impl<T> Trait for Type<T>)
 (impl_item
-  trait: (_) @entity.impl.trait.name
-  type: (_) @entity.impl.for.type.name
+  type_parameters: (_)? @entity.impl.trait.signature.type_params
+  trait: (_) @entity.impl.trait.name @entity.impl.trait.signature.trait
+  type: (_) @entity.impl.for.type.name @entity.impl.trait.signature.type
+  body: (declaration_list)? @entity.impl.trait.body
 ) @entity.impl.trait
 
 ; ============================================
@@ -615,12 +617,30 @@ mod tests {
 
     #[test]
     fn test_entity_query_contains_signature_subcaptures() {
-        let query = entity_query();
+        let query = entity_query().to_string();
         // Verify signature sub-captures are embedded in entity captures
-        assert!(query.contains("@entity.struct.signature.type_params"));
-        assert!(query.contains("@entity.function.signature.name"));
-        assert!(query.contains("@entity.function.signature.params"));
-        assert!(query.contains("@entity.function.signature.return_type"));
+        for expected in [
+            "@entity.struct.signature.name",
+            "@entity.struct.signature.type_params",
+            "@entity.enum.signature.name",
+            "@entity.union.signature.name",
+            "@entity.trait.signature.name",
+            "@entity.function.signature.name",
+            "@entity.function.signature.params",
+            "@entity.function.signature.return_type",
+            "@entity.function.signature.type_params",
+            "@entity.module.signature.name",
+            "@entity.macro.signature.name",
+            "@entity.constant.signature.name",
+            "@entity.static.signature.type",
+            "@entity.impl.signature.type",
+            "@entity.impl.trait.signature.trait",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
         // No separate whole-node signature patterns should exist: every
         // `.signature` capture must be a sub-capture (e.g. `.signature.name`).
         // The check is line-anchored so sub-capture lines such as
@@ -733,18 +753,23 @@ mod tests {
         while let Some(mat) = matches.next() {
             // Find the entity.struct match
             let mut has_struct = false;
+            let mut has_name = false;
             let mut has_type_params = false;
             for capture in mat.captures {
                 let capture_name = &query.capture_names()[capture.index as usize];
                 if *capture_name == "@entity.struct" {
                     has_struct = true;
                 }
+                if *capture_name == "@entity.struct.signature.name" {
+                    has_name = true;
+                }
                 if *capture_name == "@entity.struct.signature.type_params" {
                     has_type_params = true;
                 }
             }
-            // The struct entity should have a type_params sub-capture
+            // The struct entity should have both name and type_params sub-captures
             if has_struct {
+                assert!(has_name, "Struct should have signature.name sub-capture");
                 assert!(
                     has_type_params,
                     "Struct should have type_params sub-capture"

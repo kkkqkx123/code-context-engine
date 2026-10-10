@@ -35,25 +35,27 @@ pub fn entity_query() -> &'static str {
 ; Base list entries feed `@entity.class.base` so `base_classes` metadata is
 ; recorded for hierarchy-aware narrowing (mirrors the dependency captures).
 (class_declaration
-  name: (identifier) @entity.class.name
+  name: (identifier) @entity.class.name @entity.class.signature.name
+  (type_parameter_list)? @entity.class.signature.type_params
   (base_list
-    (_) @entity.class.base
+    (_) @entity.class.base @entity.class.signature.base
   )?
 ) @entity.class
 
 ; Interface definition
 (interface_declaration
-  name: (identifier) @entity.interface.name
+  name: (identifier) @entity.interface.name @entity.interface.signature.name
 ) @entity.interface
 
 ; Struct definition
 (struct_declaration
-  name: (identifier) @entity.struct.name
+  name: (identifier) @entity.struct.name @entity.struct.signature.name
+  (type_parameter_list)? @entity.struct.signature.type_params
 ) @entity.struct
 
 ; Enum definition
 (enum_declaration
-  name: (identifier) @entity.enum.name
+  name: (identifier) @entity.enum.name @entity.enum.signature.name
 ) @entity.enum
 
 ; Enum member
@@ -63,7 +65,7 @@ pub fn entity_query() -> &'static str {
 
 ; Record definition
 (record_declaration
-  name: (identifier) @entity.record.name
+  name: (identifier) @entity.record.name @entity.record.signature.name
 ) @entity.record
 
 ; ============================================
@@ -75,20 +77,23 @@ pub fn entity_query() -> &'static str {
 ; it precedes `name:` in the pattern; placing it after `name:` silently drops
 ; the capture (or raises a Structure error without the `?` quantifier).
 (method_declaration
-  returns: (_)? @entity.method.return_type
-  name: (identifier) @entity.method.name
-  parameters: (parameter_list) @entity.method.params
+  returns: (_)? @entity.method.return_type @entity.method.signature.return_type
+  name: (identifier) @entity.method.name @entity.method.signature.name
+  parameters: (parameter_list) @entity.method.params @entity.method.signature.params
   body: (_) @entity.method.body
 ) @entity.method
 
 ; Constructor definition
 (constructor_declaration
-  name: (identifier) @entity.constructor.name
+  name: (identifier) @entity.constructor.name @entity.constructor.signature.name
+  (parameter_list) @entity.constructor.params @entity.constructor.signature.params
+  (block)? @entity.constructor.body
 ) @entity.constructor
 
 ; Destructor definition
 (destructor_declaration
-  name: (identifier) @entity.destructor.name
+  name: (identifier) @entity.destructor.name @entity.destructor.signature.name
+  (block)? @entity.destructor.body
 ) @entity.destructor
 
 ; Operator overload
@@ -194,8 +199,8 @@ pub fn entity_query() -> &'static str {
 
 ; foreach loop variable, e.g. `foreach (var current in items)`
 (foreach_statement
-  left: (identifier) @entity.variable.loop.name
-  right: (_) @entity.variable.loop.source
+  left: (identifier) @entity.variable.loop.name @entity.variable.loop.signature.name
+  right: (_) @entity.variable.loop.source @entity.variable.loop.signature.source
 ) @entity.variable.loop
 
 ; is-pattern declaration, e.g. `if (obj is string s)`
@@ -451,6 +456,27 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.class.signature.base",
+            "@entity.class.signature.type_params",
+            "@entity.interface.signature.name",
+            "@entity.struct.signature.name",
+            "@entity.enum.signature.name",
+            "@entity.method.signature.name",
+            "@entity.method.signature.params",
+            "@entity.constructor.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

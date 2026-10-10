@@ -22,7 +22,7 @@ pub fn entity_query() -> &'static str {
 
 ; Struct definition
 (struct_specifier
-  name: (type_identifier) @entity.struct.name
+  name: (type_identifier) @entity.struct.name @entity.struct.signature.name
   body: (field_declaration_list) @entity.struct.body
 ) @entity.struct
 
@@ -33,7 +33,7 @@ pub fn entity_query() -> &'static str {
 
 ; Union definition
 (union_specifier
-  name: (type_identifier) @entity.union.name
+  name: (type_identifier) @entity.union.name @entity.union.signature.name
   body: (field_declaration_list) @entity.union.body
 ) @entity.union
 
@@ -44,7 +44,7 @@ pub fn entity_query() -> &'static str {
 
 ; Enum definition
 (enum_specifier
-  name: (type_identifier) @entity.enum.name
+  name: (type_identifier) @entity.enum.name @entity.enum.signature.name
   body: (enumerator_list) @entity.enum.body
 ) @entity.enum
 
@@ -70,7 +70,7 @@ pub fn entity_query() -> &'static str {
     name: (type_identifier)? @entity.typedef_struct.original_name
     body: (field_declaration_list) @entity.typedef_struct.body
   )
-  declarator: (type_identifier) @entity.typedef_struct.name
+  declarator: (type_identifier) @entity.typedef_struct.name @entity.typedef_struct.signature.name
 ) @entity.typedef_struct
 
 ; typedef union definition
@@ -79,7 +79,7 @@ pub fn entity_query() -> &'static str {
     name: (type_identifier)? @entity.typedef_union.original_name
     body: (field_declaration_list) @entity.typedef_union.body
   )
-  declarator: (type_identifier) @entity.typedef_union.name
+  declarator: (type_identifier) @entity.typedef_union.name @entity.typedef_union.signature.name
 ) @entity.typedef_union
 
 ; typedef enum definition
@@ -88,17 +88,17 @@ pub fn entity_query() -> &'static str {
     name: (type_identifier)? @entity.typedef_enum.original_name
     body: (enumerator_list) @entity.typedef_enum.body
   )
-  declarator: (type_identifier) @entity.typedef_enum.name
+  declarator: (type_identifier) @entity.typedef_enum.name @entity.typedef_enum.signature.name
 ) @entity.typedef_enum
 
 ; typedef function pointer definition
 (type_definition
   type: (pointer_declarator
     declarator: (function_declarator
-      parameters: (parameter_list) @entity.typedef_function_pointer.params
+      parameters: (parameter_list) @entity.typedef_function_pointer.params @entity.typedef_function_pointer.signature.params
     )
   )
-  declarator: (type_identifier) @entity.typedef_function_pointer.name
+  declarator: (type_identifier) @entity.typedef_function_pointer.name @entity.typedef_function_pointer.signature.name
 ) @entity.typedef_function_pointer
 
 ; ============================================
@@ -107,42 +107,42 @@ pub fn entity_query() -> &'static str {
 
 ; Function definition
 (function_definition
-  type: (_) @entity.function.return_type
+  type: (_) @entity.function.return_type @entity.function.signature.return_type
   declarator: (function_declarator
-    declarator: (identifier) @entity.function.name
-    parameters: (parameter_list) @entity.function.params
+    declarator: (identifier) @entity.function.name @entity.function.signature.name
+    parameters: (parameter_list) @entity.function.params @entity.function.signature.params
   )
   body: (compound_statement) @entity.function.body
 ) @entity.function
 
 ; Function declaration (prototype)
 (declaration
-  type: (_) @entity.function.prototype.return_type
+  type: (_) @entity.function.prototype.return_type @entity.function.prototype.signature.return_type
   declarator: (function_declarator
-    declarator: (identifier) @entity.function.prototype.name
-    parameters: (parameter_list) @entity.function.prototype.params
+    declarator: (identifier) @entity.function.prototype.name @entity.function.prototype.signature.name
+    parameters: (parameter_list) @entity.function.prototype.params @entity.function.prototype.signature.params
   )
 ) @entity.function.prototype
 
 ; Function pointer declaration
 (declaration
-  type: (_) @entity.function.pointer.return_type
+  type: (_) @entity.function.pointer.return_type @entity.function.pointer.signature.return_type
   declarator: (pointer_declarator
     declarator: (function_declarator
-      declarator: (identifier) @entity.function.pointer.name
-      parameters: (parameter_list) @entity.function.pointer.params
+      declarator: (identifier) @entity.function.pointer.name @entity.function.pointer.signature.name
+      parameters: (parameter_list) @entity.function.pointer.params @entity.function.pointer.signature.params
     )
   )
 ) @entity.function.pointer
 
 ; Function pointer array declaration
 (declaration
-  type: (_) @entity.function.pointer_array.return_type
+  type: (_) @entity.function.pointer_array.return_type @entity.function.pointer_array.signature.return_type
   declarator: (array_declarator
     declarator: (pointer_declarator
       declarator: (function_declarator
-        declarator: (identifier) @entity.function.pointer_array.name
-        parameters: (parameter_list) @entity.function.pointer_array.params
+        declarator: (identifier) @entity.function.pointer_array.name @entity.function.pointer_array.signature.name
+        parameters: (parameter_list) @entity.function.pointer_array.params @entity.function.pointer_array.signature.params
       )
     )
     size: (_) @entity.function.pointer_array.size
@@ -215,8 +215,8 @@ pub fn entity_query() -> &'static str {
 
 ; Macro function definition
 (preproc_function_def
-  name: (identifier) @entity.preprocessor.macro_function.name
-  parameters: (preproc_params) @entity.preprocessor.macro_function.params
+  name: (identifier) @entity.preprocessor.macro_function.name @entity.preprocessor.macro_function.signature.name
+  parameters: (preproc_params) @entity.preprocessor.macro_function.params @entity.preprocessor.macro_function.signature.params
 ) @entity.preprocessor.macro_function
 
 ; ============================================
@@ -398,6 +398,27 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.struct.signature.name",
+            "@entity.union.signature.name",
+            "@entity.enum.signature.name",
+            "@entity.function.signature.name",
+            "@entity.function.signature.params",
+            "@entity.function.signature.return_type",
+            "@entity.typedef_struct.signature.name",
+            "@entity.function.prototype.signature.params",
+            "@entity.function.pointer.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

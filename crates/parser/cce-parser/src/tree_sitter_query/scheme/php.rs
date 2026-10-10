@@ -49,12 +49,12 @@ pub fn entity_query() -> &'static str {
 
 ; Class declaration
 (class_declaration
-  name: (name) @entity.class.name
+  name: (name) @entity.class.name @entity.class.signature.name
   (base_clause
-    (name) @entity.class.extends
+    (name) @entity.class.extends @entity.class.signature.extends
   )?
   (class_interface_clause
-    (name) @entity.class.implements
+    (name) @entity.class.implements @entity.class.signature.implements
   )?
   body: (declaration_list) @entity.class.body
 ) @entity.class
@@ -65,9 +65,9 @@ pub fn entity_query() -> &'static str {
 
 ; Interface declaration
 (interface_declaration
-  name: (name) @entity.interface.name
+  name: (name) @entity.interface.name @entity.interface.signature.name
   (base_clause
-    (name) @entity.interface.extends
+    (name) @entity.interface.extends @entity.interface.signature.extends
   )?
   body: (declaration_list) @entity.interface.body
 ) @entity.interface
@@ -78,7 +78,7 @@ pub fn entity_query() -> &'static str {
 
 ; Trait declaration
 (trait_declaration
-  name: (name) @entity.trait.name
+  name: (name) @entity.trait.name @entity.trait.signature.name
   body: (declaration_list) @entity.trait.body
 ) @entity.trait
 
@@ -88,7 +88,7 @@ pub fn entity_query() -> &'static str {
 
 ; Enum declaration
 (enum_declaration
-  name: (name) @entity.enum.name
+  name: (name) @entity.enum.name @entity.enum.signature.name
   (enum_declaration_list
     (enum_case
       name: (name) @entity.enum.case.name
@@ -102,9 +102,9 @@ pub fn entity_query() -> &'static str {
 
 ; Function definition
 (function_definition
-  name: (name) @entity.function.name
-  parameters: (formal_parameters) @entity.function.params
-  return_type: (_)? @entity.function.return_type
+  name: (name) @entity.function.name @entity.function.signature.name
+  parameters: (formal_parameters) @entity.function.params @entity.function.signature.params
+  return_type: (_)? @entity.function.return_type @entity.function.signature.return_type
   body: (compound_statement) @entity.function.body
 ) @entity.function
 
@@ -118,25 +118,28 @@ pub fn entity_query() -> &'static str {
   (static_modifier)? @entity.method.static
   (abstract_modifier)? @entity.method.abstract
   (final_modifier)? @entity.method.final
-  name: (name) @entity.method.name
-  parameters: (formal_parameters) @entity.method.params
-  return_type: (_)? @entity.method.return_type
+  name: (name) @entity.method.name @entity.method.signature.name
+  parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
+  return_type: (_)? @entity.method.return_type @entity.method.signature.return_type
   body: (compound_statement)? @entity.method.body
 ) @entity.method
 
 ; Constructor method
 (method_declaration
   (visibility_modifier)? @entity.constructor.visibility
-  name: (name) @entity.constructor.name
+  name: (name) @entity.constructor.name @entity.constructor.signature.name
   (#eq? @entity.constructor.name "__construct")
-  parameters: (formal_parameters) @entity.constructor.params
+  parameters: (formal_parameters) @entity.constructor.params @entity.constructor.signature.params
+  body: (compound_statement)? @entity.constructor.body
 ) @entity.constructor
 
 ; Destructor method
 (method_declaration
   (visibility_modifier)? @entity.destructor.visibility
-  name: (name) @entity.destructor.name
+  name: (name) @entity.destructor.name @entity.destructor.signature.name
   (#eq? @entity.destructor.name "__destruct")
+  parameters: (formal_parameters)? @entity.destructor.params @entity.destructor.signature.params
+  body: (compound_statement)? @entity.destructor.body
 ) @entity.destructor
 
 ; ============================================
@@ -467,6 +470,27 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.class.signature.extends",
+            "@entity.interface.signature.name",
+            "@entity.trait.signature.name",
+            "@entity.enum.signature.name",
+            "@entity.function.signature.params",
+            "@entity.method.signature.name",
+            "@entity.method.signature.return_type",
+            "@entity.constructor.signature.params",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

@@ -28,25 +28,27 @@ pub fn entity_query() -> &'static str {
 
 ; Class definition
 (class_definition
-  name: (identifier) @entity.class.name
+  name: (identifier) @entity.class.name @entity.class.signature.name
+  (type_parameters)? @entity.class.signature.type_params
   body: (template_body)? @entity.class.body
 ) @entity.class
 
 ; Trait definition
 (trait_definition
-  name: (identifier) @entity.trait.name
+  name: (identifier) @entity.trait.name @entity.trait.signature.name
+  (type_parameters)? @entity.trait.signature.type_params
   body: (template_body)? @entity.trait.body
 ) @entity.trait
 
 ; Object definition (singleton)
 (object_definition
-  name: (identifier) @entity.object.name
+  name: (identifier) @entity.object.name @entity.object.signature.name
   body: (template_body)? @entity.object.body
 ) @entity.object
 
 ; Enum definition (Scala 3)
 (enum_definition
-  name: (identifier) @entity.enum.name
+  name: (identifier) @entity.enum.name @entity.enum.signature.name
   body: (enum_body)? @entity.enum.body
 ) @entity.enum
 
@@ -57,7 +59,7 @@ pub fn entity_query() -> &'static str {
 
 ; Given definition (Scala 3)
 (given_definition
-  name: (identifier)? @entity.given.name
+  name: (identifier)? @entity.given.name @entity.given.signature.name
 ) @entity.given
 
 ; ============================================
@@ -66,14 +68,14 @@ pub fn entity_query() -> &'static str {
 
 ; Function definition (def)
 (function_definition
-  name: (identifier) @entity.function.name
+  name: (identifier) @entity.function.name @entity.function.signature.name
   ; Generic definitions carry two `parameters`-field children
   ; (`type_parameters` plus the real list), and a quantified field
   ; pattern then matches neither. Consume the type parameters
   ; uncaptured so the whole-text capture binds the real list.
   (type_parameters)?
-  parameters: (parameters)? @entity.function.params
-  return_type: (_)? @entity.function.return_type
+  parameters: (parameters)? @entity.function.params @entity.function.signature.params
+  return_type: (_)? @entity.function.return_type @entity.function.signature.return_type
   body: (_)? @entity.function.body
 ) @entity.function
 
@@ -355,6 +357,26 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.class.signature.name",
+            "@entity.class.signature.type_params",
+            "@entity.trait.signature.name",
+            "@entity.object.signature.name",
+            "@entity.enum.signature.name",
+            "@entity.function.signature.name",
+            "@entity.function.signature.params",
+            "@entity.function.signature.return_type",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]

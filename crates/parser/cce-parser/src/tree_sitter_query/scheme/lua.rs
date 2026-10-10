@@ -33,19 +33,19 @@ pub fn entity_query() -> &'static str {
 ; Function declaration: function name(...) ... end
 (function_declaration
   name: [
-    (identifier) @entity.function.name
+    (identifier) @entity.function.name @entity.function.signature.name
     (dot_index_expression
-      field: (identifier) @entity.function.name)
+      field: (identifier) @entity.function.name @entity.function.signature.name)
   ]
-  parameters: (parameters)? @entity.function.params
+  parameters: (parameters)? @entity.function.params @entity.function.signature.params
   body: (block)? @entity.function.body
 ) @entity.function
 
 ; Method declaration: function obj:method(...) ... end
 (function_declaration
   name: (method_index_expression
-    method: (identifier) @entity.method.name)
-  parameters: (parameters)? @entity.method.params
+    method: (identifier) @entity.method.name @entity.method.signature.name)
+  parameters: (parameters)? @entity.method.params @entity.method.signature.params
   body: (block)? @entity.method.body
 ) @entity.method
 
@@ -57,11 +57,11 @@ pub fn entity_query() -> &'static str {
 (assignment_statement
   (variable_list
     .
-    (identifier) @entity.variable.name)
+    (identifier) @entity.variable.name @entity.function.signature.name)
   (expression_list
     .
     value: (function_definition
-      parameters: (parameters)? @entity.function.params
+      parameters: (parameters)? @entity.function.params @entity.function.signature.params
       body: (block)? @entity.function.body
     )
   )
@@ -97,9 +97,9 @@ pub fn entity_query() -> &'static str {
 ; Table field: { name = function(...) ... end }
 (table_constructor
   (field
-    name: (identifier) @entity.field.name
+    name: (identifier) @entity.field.name @entity.field.signature.name
     value: (function_definition
-      parameters: (parameters)? @entity.field.params
+      parameters: (parameters)? @entity.field.params @entity.field.signature.params
       body: (block)? @entity.field.body
     )
   ) @entity.field
@@ -113,7 +113,7 @@ pub fn entity_query() -> &'static str {
 (assignment_statement
   (variable_list
     .
-    (identifier) @entity.table.name)
+    (identifier) @entity.table.name @entity.table.signature.name)
   (expression_list
     .
     value: (table_constructor) @entity.table.body)
@@ -244,6 +244,24 @@ mod tests {
             "Entity query syntax validation failed: {:?}",
             result.err()
         );
+    }
+
+    #[test]
+    fn test_entity_query_contains_signature_subcaptures() {
+        let query = entity_query().to_string();
+        for expected in [
+            "@entity.function.signature.name",
+            "@entity.function.signature.params",
+            "@entity.method.signature.name",
+            "@entity.method.signature.params",
+            "@entity.field.signature.name",
+            "@entity.table.signature.name",
+        ] {
+            assert!(
+                query.contains(expected),
+                "entity query must declare signature sub-capture {expected}"
+            );
+        }
     }
 
     #[test]
