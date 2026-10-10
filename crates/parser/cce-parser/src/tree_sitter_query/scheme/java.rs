@@ -48,7 +48,9 @@ pub fn entity_query() -> &'static str {
 
 ; Enum constant
 (enum_constant
-  name: (identifier) @entity.enum_constant.name
+  name: (identifier) @entity.enum_constant.name @entity.enum_constant.signature.name
+  arguments: (argument_list)? @entity.enum_constant.signature.arguments
+  body: (class_body)? @entity.enum_constant.body
 ) @entity.enum_constant
 
 ; Record definition (Java 14+)
@@ -467,6 +469,9 @@ mod tests {
             "@entity.method.signature.return_type",
             "@entity.constructor.signature.name",
             "@entity.annotation.signature.name",
+            "@entity.enum_constant.signature.name",
+            "@entity.enum_constant.signature.arguments",
+            "@entity.enum_constant.body",
         ] {
             assert!(
                 query.contains(expected),

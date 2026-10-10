@@ -1268,6 +1268,128 @@ class Point:
     }
 
     #[test]
+    fn test_extract_javascript_chained_assignment_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "req.get =\nreq.header = function header(name) {\n    return name;\n};\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::JavaScript)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::JavaScript)
+            .expect("Failed to extract");
+
+        for expected in [("get", "get (name)"), ("header", "header (name)")] {
+            let entity = entities
+                .iter()
+                .find(|e| e.kind == EntityKind::Method && e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find method {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+            assert!(
+                !entity.signature.contains("return"),
+                "body must not leak for {}, got {:?}",
+                expected.0,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_javascript_chained_non_function_stays_variable() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "req.originalUrl = req.url = req.originalUrl.replace(/x/, 'y');\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::JavaScript)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::JavaScript)
+            .expect("Failed to extract");
+
+        assert!(
+            entities.iter().all(|e| !e.signature.trim().is_empty()),
+            "chained non-function assignment must not produce empty signatures"
+        );
+        assert!(
+            entities
+                .iter()
+                .all(|e| e.kind != EntityKind::Method || !e.name.contains("originalUrl")),
+            "chained non-function assignment must not be classified as a method"
+        );
+    }
+
+    #[test]
+    fn test_extract_javascript_callback_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "function suite() {\n    describe('Auth', function () {\n        it('logs in', function (done) {\n            return done;\n        });\n    });\n    app.post('/login', function (req, res) {\n        return res;\n    });\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::JavaScript)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::JavaScript)
+            .expect("Failed to extract");
+
+        for expected in [
+            ("describe", "describe 'Auth'"),
+            ("it", "it 'logs in'"),
+            ("app.post", "app.post '/login'"),
+        ] {
+            let entity = entities
+                .iter()
+                .find(|e| e.kind == EntityKind::Function && e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find callback {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+            assert!(
+                !entity.signature.contains("return"),
+                "callback body must not leak for {}, got {:?}",
+                expected.0,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_javascript_arrow_callback_without_label() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "function setup() {\n    app.use(function (req, res, next) {\n        return next;\n    });\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::JavaScript)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::JavaScript)
+            .expect("Failed to extract");
+
+        let entity = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Function && e.name == "app.use")
+            .expect("Should find callback app.use");
+        assert_eq!(entity.signature, "app.use");
+        assert!(
+            !entity.signature.contains("return"),
+            "callback body must not leak, got {:?}",
+            entity.signature
+        );
+    }
+
+    #[test]
     fn test_extract_c_signatures() {
         let mut ast_parser = AstParser::new();
         let extractor = EntityExtractor::new();
@@ -1330,6 +1452,160 @@ class Point:
             !method.signature.contains("return key"),
             "body must not leak, got {:?}",
             method.signature
+        );
+    }
+
+    #[test]
+    fn test_extract_csharp_namespace_signatures() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "namespace Shop {\n    public class Store {\n    }\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::CSharp)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::CSharp)
+            .expect("Failed to extract");
+
+        let namespace = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Namespace && e.name == "Shop")
+            .expect("Should find namespace Shop");
+        assert_eq!(namespace.signature, "Shop");
+        assert!(
+            !namespace.signature.contains("class Store"),
+            "namespace body must not leak, got {:?}",
+            namespace.signature
+        );
+
+        let file_scoped = "namespace Shop;\npublic class Store {\n}\n";
+        let tree = ast_parser
+            .parse_with_tree(file_scoped, &Language::CSharp)
+            .expect("Failed to parse")
+            .0;
+        let entities = extractor
+            .extract(&tree, file_scoped, &Language::CSharp)
+            .expect("Failed to extract");
+        let namespace = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Namespace && e.name == "Shop")
+            .expect("Should find file-scoped namespace Shop");
+        assert_eq!(namespace.signature, "Shop");
+    }
+
+    #[test]
+    fn test_extract_csharp_property_signature() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "public class Fixture {\n    public IServiceProvider Provider {\n        get {\n            return container;\n        }\n    }\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::CSharp)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::CSharp)
+            .expect("Failed to extract");
+
+        let property = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Property && e.name == "Provider")
+            .expect("Should find property Provider");
+        assert_eq!(property.signature, "IServiceProvider Provider");
+        assert!(
+            !property.signature.contains("return"),
+            "accessor body must not leak, got {:?}",
+            property.signature
+        );
+    }
+
+    #[test]
+    fn test_extract_typescript_namespace_signature() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "namespace Shop {\n    export const rate = 1;\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::TypeScript)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::TypeScript)
+            .expect("Failed to extract");
+
+        let namespace = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Namespace && e.name == "Shop")
+            .expect("Should find namespace Shop");
+        assert_eq!(namespace.signature, "Shop");
+        assert!(
+            !namespace.signature.contains("rate"),
+            "namespace body must not leak, got {:?}",
+            namespace.signature
+        );
+    }
+
+    #[test]
+    fn test_extract_java_enum_constant_signature() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "enum Status {\n    ASYNC(\"a\") {\n        void run() {\n        }\n    },\n    SYNC;\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Java)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Java)
+            .expect("Failed to extract");
+
+        let constant = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::EnumVariant && e.name == "ASYNC")
+            .expect("Should find enum constant ASYNC");
+        assert_eq!(constant.signature, "ASYNC (\"a\")");
+        assert!(
+            !constant.signature.contains("run"),
+            "constant class body must not leak, got {:?}",
+            constant.signature
+        );
+    }
+
+    #[test]
+    fn test_extract_python_except_signature() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "try:\n    risky()\nexcept ValueError as e:\n    raise e\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Python)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Python)
+            .expect("Failed to extract");
+
+        let binding = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Variable && e.name == "e")
+            .expect("Should find except binding e");
+        assert_eq!(binding.signature, "ValueError e");
+        assert!(
+            !binding.signature.contains("raise"),
+            "except body must not leak, got {:?}",
+            binding.signature
         );
     }
 

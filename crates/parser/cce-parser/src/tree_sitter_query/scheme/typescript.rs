@@ -103,12 +103,14 @@ fn entity_ts_only() -> &'static str {
 
 ; Namespace declaration
 (internal_module
-  name: (identifier) @entity.namespace.name
+  name: (identifier) @entity.namespace.name @entity.namespace.signature.name
+  body: (statement_block)? @entity.namespace.body
 ) @entity.namespace
 
 ; Module declaration
 (module
-  name: (identifier) @entity.module.name
+  name: (identifier) @entity.module.name @entity.module.signature.name
+  body: (statement_block)? @entity.module.body
 ) @entity.module
 
 "#
@@ -470,6 +472,13 @@ mod tests {
             "@entity.function.generator.signature.params",
             "@entity.function.arrow.signature.params",
             "@entity.function.expression.signature.return_type",
+            "@entity.function.callback.signature.name",
+            "@entity.function.callback.signature.description",
+            "@entity.function.callback.body",
+            "@entity.namespace.signature.name",
+            "@entity.namespace.body",
+            "@entity.module.signature.name",
+            "@entity.module.body",
         ] {
             assert!(
                 query.contains(expected),

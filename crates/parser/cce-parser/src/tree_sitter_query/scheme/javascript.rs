@@ -250,30 +250,42 @@ pub fn entity_non_function_patterns() -> &'static str {
 ; The entity span is the whole call so the handler is grouped with its callee.
 
 (call_expression
-  function: (identifier) @entity.function.callback.name
+  function: (identifier) @entity.function.callback.name @entity.function.callback.signature.name
   arguments: (arguments
-    (function_expression)
+    (string)? @entity.function.callback.signature.description
+    (function_expression
+      body: (statement_block) @entity.function.callback.body
+    )
   )
 ) @entity.function.callback
 
 (call_expression
-  function: (member_expression) @entity.function.callback.name
+  function: (member_expression) @entity.function.callback.name @entity.function.callback.signature.name
   arguments: (arguments
-    (function_expression)
+    (string)? @entity.function.callback.signature.description
+    (function_expression
+      body: (statement_block) @entity.function.callback.body
+    )
   )
 ) @entity.function.callback
 
 (call_expression
-  function: (identifier) @entity.function.callback.name
+  function: (identifier) @entity.function.callback.name @entity.function.callback.signature.name
   arguments: (arguments
-    (arrow_function)
+    (string)? @entity.function.callback.signature.description
+    (arrow_function
+      body: (_) @entity.function.callback.body
+    )
   )
 ) @entity.function.callback
 
 (call_expression
-  function: (member_expression) @entity.function.callback.name
+  function: (member_expression) @entity.function.callback.name @entity.function.callback.signature.name
   arguments: (arguments
-    (arrow_function)
+    (string)? @entity.function.callback.signature.description
+    (arrow_function
+      body: (_) @entity.function.callback.body
+    )
   )
 ) @entity.function.callback
 
@@ -388,13 +400,39 @@ pub fn entity_js_only() -> &'static str {
   )
 ) @entity.method
 
-; Chained assignment outermost span, e.g. res.set = res.header = function() {}
+; Chained assignment where the chain ultimately assigns a function
+; expression, e.g. req.get = req.header = function header(name) {}.
+; The outer alias gets its own method entity: the name comes from the
+; outer member property while params and body pass through from the
+; terminal function expression. Chains whose terminal value is not a
+; function fall through to the generic member-assignment pattern below
+; and stay variable entities instead of empty methods.
 (assignment_expression
   left: (member_expression
-    property: (property_identifier) @entity.method.chain.name
+    property: (property_identifier) @entity.method.name @entity.method.signature.name
   )
-  right: (assignment_expression)
-) @entity.method.chain
+  right: (assignment_expression
+    right: (function_expression
+      parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
+      body: (statement_block
+        (return_statement (_) @entity.method.return_type)?
+      ) @entity.method.body
+    )
+  )
+) @entity.method
+
+; Chained assignment with a terminal arrow function,
+; e.g. res.send = res.emit = (body) => {}.
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @entity.method.name @entity.method.signature.name
+  )
+  right: (assignment_expression
+    right: (arrow_function
+      (formal_parameters)? @entity.method.params @entity.method.signature.params
+    )
+  )
+) @entity.method
 
 ; Generic member assignment with non-function value, e.g. exports.etag,
 ; module.exports = req, process.env.NODE_ENV = 'test', app.request = ...
@@ -422,7 +460,7 @@ pub fn entity_js_only() -> &'static str {
 (program
   (expression_statement
     (call_expression
-      function: (_) @entity.function.top_call.name
+      function: (_) @entity.function.top_call.name @entity.function.top_call.signature.name
     ) @entity.function.top_call
   )
 )
@@ -958,6 +996,10 @@ mod tests {
             "@entity.function.generator.signature.params",
             "@entity.function.arrow.signature.params",
             "@entity.function.expression.signature.params",
+            "@entity.function.callback.signature.name",
+            "@entity.function.callback.signature.description",
+            "@entity.function.callback.body",
+            "@entity.function.top_call.signature.name",
             "@entity.class.signature.name",
             "@entity.class.signature.base",
             "@entity.class_expression.signature.name",

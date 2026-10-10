@@ -93,13 +93,41 @@ pub fn reconstruct_signature_from_subcaptures(mat: &QueryMatch, source: &str) ->
         .map(|c| {
             let raw = utils::extract_text_from_source(source, c.start_byte, c.end_byte);
             let text = if raw.is_empty() { c.text.clone() } else { raw };
-            text.trim().to_string()
+            let text = text.trim().to_string();
+            // Provenance roles (`for x in <collection>`) can bind a whole
+            // literal as the source part. Declaration roles (name, params,
+            // types, arguments) stay verbatim; only data roles are capped so
+            // the signature keeps the collection head, not its rows.
+            if c.name.ends_with(".signature.source") && text.chars().count() > MAX_SIGNATURE_LEN {
+                text.chars().take(MAX_SIGNATURE_LEN).collect()
+            } else {
+                text
+            }
         })
         .filter(|t| !t.is_empty())
         .collect();
     parts.join(" ")
 }
 
+/// Maximum signature length in chars for the bodiless full-text fallback.
+///
+/// Bodiless entities (variables, fields, imports, and friends) take their
+/// whole main span as the signature. Initializers can be arbitrarily large
+/// (giant literals, table fixtures, chained builder calls), and that data
+/// flows verbatim into NL conversion, retrieval text, and snapshot keys.
+/// The cap keeps the declaration head and drops the data tail. Composed
+/// and header-sliced signatures are bounded by construction and stay
+/// verbatim; only this unbounded branch is capped.
+pub const MAX_SIGNATURE_LEN: usize = 500;
+
+/// Truncate a fallback signature to [`MAX_SIGNATURE_LEN`] on a char boundary.
+fn truncate_fallback_signature(signature: String) -> String {
+    if signature.chars().count() > MAX_SIGNATURE_LEN {
+        signature.chars().take(MAX_SIGNATURE_LEN).collect()
+    } else {
+        signature
+    }
+}
 /// Whether a capture marks the start of an entity body (function block,
 /// class block, field list, and their per-language equivalents).
 fn is_body_capture(name: &str) -> bool {
@@ -150,7 +178,8 @@ fn main_expects_body(main_name: &str) -> bool {
 /// 2. Transitional: slice the header before the body capture for patterns
 ///    that predate signature aliases. No cleaning and no truncation.
 /// 3. Bodiless entities (module, import, macro, and friends): the full
-///    main text is the header.
+///    main text is the header, capped at [`MAX_SIGNATURE_LEN`] chars so
+///    giant initializers cannot leak unbounded data downstream.
 ///    Otherwise return empty and count the gap instead of fabricating text.
 pub fn extract_signature(mat: &QueryMatch, source: &str) -> String {
     let composed = reconstruct_signature_from_subcaptures(mat, source);
@@ -186,9 +215,11 @@ pub fn extract_signature(mat: &QueryMatch, source: &str) -> String {
         record_signature_missing();
         return String::new();
     }
-    utils::extract_text_from_source(source, main.start_byte, main.end_byte)
-        .trim()
-        .to_string()
+    truncate_fallback_signature(
+        utils::extract_text_from_source(source, main.start_byte, main.end_byte)
+            .trim()
+            .to_string(),
+    )
 }
 
 /// Extract parameters from match, returning (name, optional_type) pairs
@@ -934,6 +965,56 @@ mod tests {
             before,
             "inline lambda must keep its full text"
         );
+    }
+
+    #[test]
+    fn test_extract_signature_bodiless_fallback_truncates() {
+        let filler = "x".repeat(MAX_SIGNATURE_LEN + 100);
+        let source = format!("data = [{filler}]");
+        let before = signature_missing_count();
+        let mat = make_match(vec![make_capture(
+            "entity.variable",
+            source.as_str(),
+            0,
+            source.len(),
+        )]);
+        let signature = extract_signature(&mat, source.as_str());
+        assert_eq!(signature.chars().count(), MAX_SIGNATURE_LEN);
+        assert!(
+            source.starts_with(&signature),
+            "truncation must keep the declaration head"
+        );
+        assert_eq!(
+            signature_missing_count(),
+            before,
+            "truncated fallback must not count as missing"
+        );
+    }
+
+    #[test]
+    fn test_extract_signature_source_part_truncates() {
+        let big = format!("[{}]", "1,".repeat(MAX_SIGNATURE_LEN));
+        let source = format!("for x in {big}:\n    use(x)\n");
+        let name_start = source.find('x').expect("name");
+        let src_start = source.find('[').expect("source");
+        let mat = make_match(vec![
+            make_capture("entity.variable.loop", source.as_str(), 0, source.len()),
+            make_capture(
+                "entity.variable.loop.signature.name",
+                "x",
+                name_start,
+                name_start + 1,
+            ),
+            make_capture(
+                "entity.variable.loop.signature.source",
+                big.as_str(),
+                src_start,
+                src_start + big.len(),
+            ),
+        ]);
+        let signature = extract_signature(&mat, source.as_str());
+        assert!(signature.starts_with("x ["));
+        assert!(signature.chars().count() <= MAX_SIGNATURE_LEN + 2);
     }
 
     #[test]

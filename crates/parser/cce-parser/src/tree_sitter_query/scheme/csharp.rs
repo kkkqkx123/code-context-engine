@@ -107,7 +107,9 @@ pub fn entity_query() -> &'static str {
 
 ; Property declaration
 (property_declaration
-  name: (identifier) @entity.property.name
+  type: (_) @entity.property.type @entity.property.signature.type
+  name: (identifier) @entity.property.name @entity.property.signature.name
+  accessors: (accessor_list)? @entity.property.body
 ) @entity.property
 
 ; Event declaration
@@ -121,22 +123,24 @@ pub fn entity_query() -> &'static str {
 
 ; Namespace declaration (simple name)
 (namespace_declaration
-  name: (identifier) @entity.namespace.name
+  name: (identifier) @entity.namespace.name @entity.namespace.signature.name
+  body: (declaration_list) @entity.namespace.body
 ) @entity.namespace
 
 ; Namespace declaration (qualified name)
 (namespace_declaration
-  name: (qualified_name) @entity.namespace.qualified_name
+  name: (qualified_name) @entity.namespace.qualified_name @entity.namespace.signature.name
+  body: (declaration_list) @entity.namespace.body
 ) @entity.namespace.qualified
 
 ; File-scoped namespace declaration (simple name)
 (file_scoped_namespace_declaration
-  name: (identifier) @entity.namespace.file_scoped.name
+  name: (identifier) @entity.namespace.file_scoped.name @entity.namespace.file_scoped.signature.name
 ) @entity.namespace.file_scoped
 
 ; File-scoped namespace declaration (qualified name)
 (file_scoped_namespace_declaration
-  name: (qualified_name) @entity.namespace.file_scoped.qualified_name
+  name: (qualified_name) @entity.namespace.file_scoped.qualified_name @entity.namespace.file_scoped.signature.name
 ) @entity.namespace.file_scoped.qualified
 
 ; ============================================
@@ -471,6 +475,12 @@ mod tests {
             "@entity.method.signature.name",
             "@entity.method.signature.params",
             "@entity.constructor.signature.name",
+            "@entity.namespace.signature.name",
+            "@entity.namespace.body",
+            "@entity.namespace.file_scoped.signature.name",
+            "@entity.property.signature.name",
+            "@entity.property.signature.type",
+            "@entity.property.body",
         ] {
             assert!(
                 query.contains(expected),

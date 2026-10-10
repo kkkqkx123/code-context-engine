@@ -313,11 +313,12 @@ pub fn entity_query() -> &'static str {
 ; Except-as binding: `except ValueError as e` binds e to the exception type.
 (except_clause
   value: (as_pattern
-    (identifier) @entity.variable.except.source
+    (identifier) @entity.variable.except.source @entity.variable.except.signature.source
     alias: (as_pattern_target
-      (identifier) @entity.variable.except.name
+      (identifier) @entity.variable.except.name @entity.variable.except.signature.name
     )
   )
+  (block)? @entity.variable.except.body
 ) @entity.variable.except
 
 ; With-as binding: `with open('f') as fh` binds fh to the call result.
@@ -829,6 +830,9 @@ mod tests {
             "@entity.enum.signature.base",
             "@entity.function.async.signature.name",
             "@entity.function.generator.signature.params",
+            "@entity.variable.except.signature.name",
+            "@entity.variable.except.signature.source",
+            "@entity.variable.except.body",
         ] {
             assert!(
                 query.contains(expected),

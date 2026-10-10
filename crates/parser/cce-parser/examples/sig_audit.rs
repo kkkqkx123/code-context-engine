@@ -86,6 +86,7 @@ fn main() {
     let mut parser = AstParser::new();
     let extractor = EntityExtractor::new();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut overlong_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut empty: Vec<String> = Vec::new();
     let mut overlong: Vec<(usize, String)> = Vec::new();
     let mut parse_failures = 0usize;
@@ -116,9 +117,8 @@ fn main() {
             }
         };
         for entity in &entities {
-            *counts
-                .entry(format!("{:?}/{:?}", language, entity.kind))
-                .or_insert(0) += 1;
+            let key = format!("{:?}/{:?}", language, entity.kind);
+            *counts.entry(key.clone()).or_insert(0) += 1;
             let len = entity.signature.chars().count();
             if entity.signature.trim().is_empty() {
                 empty.push(format!(
@@ -129,6 +129,7 @@ fn main() {
                     entity.span.start_position.row + 1
                 ));
             } else if len > threshold {
+                *overlong_counts.entry(key).or_insert(0) += 1;
                 let preview: String = entity.signature.chars().take(120).collect();
                 overlong.push((
                     len,
@@ -158,7 +159,10 @@ fn main() {
         "--- signatures over {threshold} chars ({}) ---",
         overlong.len()
     );
-    for (_, line) in overlong.iter().take(100) {
+    for (key, count) in &overlong_counts {
+        println!("{count:>6}  {key}");
+    }
+    for (_, line) in overlong.iter().take(2000) {
         println!("LONG  {line}");
     }
 }
