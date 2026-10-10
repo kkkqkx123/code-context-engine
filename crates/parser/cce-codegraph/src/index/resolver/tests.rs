@@ -4,6 +4,111 @@ use cce_types::{Entity, EntityId, EntityKind, Language, RawRelationData, Relatio
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Helper function to create a test entity of any kind
+fn create_test_entity(id: u32, name: &str, kind: EntityKind) -> Entity {
+    Entity {
+        id: EntityId(id.into()),
+        kind,
+        name: name.to_string(),
+        signature: name.to_string(),
+        parameters: Vec::new(),
+        return_type: None,
+        span: Span::default(),
+        depth: 0,
+        parent: None,
+        children: Vec::new(),
+        doc_comment: None,
+        modifiers: Vec::new(),
+        attributes: HashMap::new(),
+        metadata: HashMap::new(),
+        is_stdlib: false,
+        subtype: None,
+        stdlib_category: None,
+    }
+}
+
+/// Build a one-file project: `caller_name()` contains a bare `dst_name()`
+/// call recorded as `DirectCall`, and resolve it.
+fn resolve_bare_call(
+    caller_name: &str,
+    dst_name: &str,
+    callees: Vec<Entity>,
+) -> cce_types::ResolvedRelation {
+    let mut file = ParsedFile::new(Language::Rust, "lib.rs".to_string(), "");
+    let caller_id = 100u32;
+    file.add_entity(create_test_entity(caller_id, caller_name, EntityKind::Function));
+    for callee in callees {
+        file.add_entity(callee);
+    }
+    file.add_relation(RawRelationData {
+        src: EntityId(caller_id.into()),
+        level: cce_types::RelationLevel::Entity,
+        dst_name: dst_name.to_string(),
+        relation_type: RelationType::DirectCall,
+        span: Span::default(),
+        stdlib_category: None,
+    });
+
+    let files = [&file];
+    let symbols = SymbolTableBuilder::new(PathBuf::from(".")).build(&files);
+    let builder = crate::index::builder::IndexBuilder::new();
+    for file in &files {
+        builder.register_file_entities(file);
+    }
+    let index = builder.build();
+
+    let resolver = RelationResolver::new();
+    resolver
+        .resolve_batch(&file.raw_relations, &file, &symbols, &index)
+        .into_iter()
+        .next()
+        .expect("bare call must produce a relation")
+}
+
+#[test]
+fn test_bare_call_to_struct_upgrades_to_constructor() {
+    // `OnceCell(Imp::new())` inside `new()` parses as a bare-identifier
+    // call, but the callee resolves to the struct: the edge must carry
+    // construction semantics.
+    let resolved = resolve_bare_call(
+        "new",
+        "OnceCell",
+        vec![create_test_entity(0, "OnceCell", EntityKind::Struct)],
+    );
+    assert!(!resolved.is_external);
+    assert_eq!(resolved.callee_name, "OnceCell");
+    assert_eq!(resolved.relation_type, RelationType::ConstructorCall);
+}
+
+#[test]
+fn test_bare_call_to_class_upgrades_to_constructor() {
+    let resolved = resolve_bare_call(
+        "make",
+        "Widget",
+        vec![create_test_entity(0, "Widget", EntityKind::Class)],
+    );
+    assert!(!resolved.is_external);
+    assert_eq!(resolved.relation_type, RelationType::ConstructorCall);
+}
+
+#[test]
+fn test_bare_call_to_function_keeps_direct_call() {
+    let resolved = resolve_bare_call(
+        "main",
+        "helper",
+        vec![create_test_entity(0, "helper", EntityKind::Function)],
+    );
+    assert!(!resolved.is_external);
+    assert_eq!(resolved.relation_type, RelationType::DirectCall);
+}
+
+#[test]
+fn test_bare_call_to_unresolved_keeps_direct_call() {
+    let resolved = resolve_bare_call("main", "missing_type", vec![]);
+    assert!(resolved.is_external);
+    assert_eq!(resolved.relation_type, RelationType::DirectCall);
+}
+
 /// Helper function to create a test function entity
 fn create_test_function_entity(id: u32, name: &str) -> Entity {
     Entity {

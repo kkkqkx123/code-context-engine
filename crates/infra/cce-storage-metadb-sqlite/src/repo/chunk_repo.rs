@@ -47,13 +47,13 @@ impl ChunkRepository {
             tx,
             "INSERT INTO chunks (
                 chunk_id, file_path, content,
-                start_line, end_line, entity_ids, entity_names,
+                start_line, end_line, entity_ids, entity_names, entity_kinds, group_title,
                 chunk_type, test_status, test_source,
                 created_at, updated_at, project_id, epoch, batch_id, path,
                 bm25_keywords,
                 segment_id,
                 truncated
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
              ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
                 file_path = excluded.file_path,
                 content = excluded.content,
@@ -61,6 +61,8 @@ impl ChunkRepository {
                 end_line = excluded.end_line,
                 entity_ids = excluded.entity_ids,
                 entity_names = excluded.entity_names,
+                entity_kinds = excluded.entity_kinds,
+                group_title = excluded.group_title,
                 chunk_type = excluded.chunk_type,
                 test_status = excluded.test_status,
                 test_source = excluded.test_source,
@@ -80,6 +82,8 @@ impl ChunkRepository {
                 chunk.end_line,
                 chunk.entity_ids,
                 chunk.entity_names,
+                chunk.entity_kinds,
+                chunk.group_title,
                 chunk.chunk_type,
                 chunk.test_status,
                 chunk.test_source,
@@ -110,13 +114,13 @@ impl ChunkRepository {
             .prepare(
                 "INSERT INTO chunks (
                 chunk_id, file_path, content,
-                start_line, end_line, entity_ids, entity_names,
+                start_line, end_line, entity_ids, entity_names, entity_kinds, group_title,
                 chunk_type, test_status, test_source,
                 created_at, updated_at, project_id, epoch, batch_id, path,
                 bm25_keywords,
                 segment_id,
                 truncated
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
              ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
                 file_path = excluded.file_path,
                 content = excluded.content,
@@ -124,6 +128,8 @@ impl ChunkRepository {
                 end_line = excluded.end_line,
                 entity_ids = excluded.entity_ids,
                 entity_names = excluded.entity_names,
+                entity_kinds = excluded.entity_kinds,
+                group_title = excluded.group_title,
                 chunk_type = excluded.chunk_type,
                 test_status = excluded.test_status,
                 test_source = excluded.test_source,
@@ -147,6 +153,8 @@ impl ChunkRepository {
                 chunk.end_line,
                 chunk.entity_ids,
                 chunk.entity_names,
+                chunk.entity_kinds,
+                chunk.group_title,
                 chunk.chunk_type,
                 chunk.test_status,
                 chunk.test_source,
@@ -179,7 +187,7 @@ impl ChunkRepository {
         execute_query_optional(
             conn,
             "SELECT chunk_id, file_path, content,
-                    start_line, end_line, entity_ids, entity_names,
+                    start_line, end_line, entity_ids, entity_names, entity_kinds, group_title,
                     chunk_type, test_status, test_source,
                     created_at, updated_at, project_id, epoch, batch_id, path,
                     bm25_keywords, segment_id, truncated
@@ -207,7 +215,7 @@ impl ChunkRepository {
         execute_query(
             conn,
             "SELECT chunk_id, file_path, content,
-                    start_line, end_line, entity_ids, entity_names,
+                    start_line, end_line, entity_ids, entity_names, entity_kinds, group_title,
                     chunk_type, test_status, test_source,
                     created_at, updated_at, project_id, epoch, batch_id, path,
                     bm25_keywords, segment_id, truncated
@@ -245,7 +253,7 @@ impl ChunkRepository {
         execute_query(
             conn,
             "SELECT chunk_id, file_path, content,
-                    start_line, end_line, entity_ids, entity_names,
+                    start_line, end_line, entity_ids, entity_names, entity_kinds, group_title,
                     chunk_type, test_status, test_source,
                     created_at, updated_at, project_id, epoch, batch_id, path,
                     bm25_keywords, segment_id, truncated
@@ -283,7 +291,7 @@ impl ChunkRepository {
         execute_query(
             conn,
             "SELECT c.chunk_id, c.file_path, c.content,
-                    c.start_line, c.end_line, c.entity_ids, c.entity_names,
+                    c.start_line, c.end_line, c.entity_ids, c.entity_names, c.entity_kinds, c.group_title,
                     c.chunk_type, c.test_status, c.test_source,
                     c.created_at, c.updated_at, c.project_id, c.epoch,
                     c.batch_id, c.path, c.bm25_keywords, c.segment_id, c.truncated,
@@ -297,7 +305,7 @@ impl ChunkRepository {
             params![project_id, epoch, limit, offset],
             |row| {
                 let record = Self::map_row(row)?;
-                let category = row.get(19)?;
+                let category = row.get(21)?;
                 Ok((record, category))
             },
         )
@@ -328,7 +336,7 @@ impl ChunkRepository {
                 .unwrap_or_default();
             let query = format!(
                 "SELECT chunk_id, file_path, content,
-                        start_line, end_line, entity_ids, entity_names,
+                        start_line, end_line, entity_ids, entity_names, entity_kinds, group_title,
                         chunk_type, test_status, test_source,
                         created_at, updated_at, project_id, epoch, batch_id, path,
                         bm25_keywords, segment_id, truncated
@@ -453,18 +461,20 @@ impl ChunkRepository {
             end_line: row.get(4)?,
             entity_ids: row.get(5)?,
             entity_names: row.get(6)?,
-            chunk_type: row.get(7)?,
-            test_status: row.get::<_, u8>(8)?,
-            test_source: row.get::<_, u8>(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-            project_id: row.get(12)?,
-            epoch: row.get(13)?,
-            batch_id: row.get(14)?,
-            path: row.get(15)?,
-            bm25_keywords: row.get(16)?,
-            segment_id: row.get(17)?,
-            truncated: row.get::<_, u8>(18)?,
+            entity_kinds: row.get(7)?,
+            group_title: row.get(8)?,
+            chunk_type: row.get(9)?,
+            test_status: row.get::<_, u8>(10)?,
+            test_source: row.get::<_, u8>(11)?,
+            created_at: row.get(12)?,
+            updated_at: row.get(13)?,
+            project_id: row.get(14)?,
+            epoch: row.get(15)?,
+            batch_id: row.get(16)?,
+            path: row.get(17)?,
+            bm25_keywords: row.get(18)?,
+            segment_id: row.get(19)?,
+            truncated: row.get::<_, u8>(20)?,
         })
     }
 }
@@ -483,6 +493,8 @@ mod tests {
                 end_line INTEGER NOT NULL,
                 entity_ids TEXT NOT NULL,
                 entity_names TEXT NOT NULL,
+                entity_kinds TEXT NOT NULL DEFAULT '[]',
+                group_title TEXT NOT NULL DEFAULT '',
                 chunk_type TEXT NOT NULL,
                 test_status INTEGER NOT NULL DEFAULT 0,
                 test_source INTEGER NOT NULL DEFAULT 0,

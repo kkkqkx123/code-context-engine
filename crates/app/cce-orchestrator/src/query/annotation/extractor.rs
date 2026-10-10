@@ -24,7 +24,10 @@ impl SemanticUnitExtractor {
 
     /// Extract unit from content string (no file I/O)
     ///
-    /// Useful when content is already available.
+    /// The content is already the exact unit code; the line range is the
+    /// unit's file-absolute span and is recorded as-is, never used to slice
+    /// the content. Callers must pass the true file span with the matching
+    /// body so downstream position math stays in one coordinate system.
     pub fn extract_unit_from_content(
         &self,
         content: &str,
@@ -34,39 +37,31 @@ impl SemanticUnitExtractor {
         name: &str,
         kind: &str,
     ) -> Result<ExpandedUnit> {
-        let lines: Vec<&str> = content.lines().collect();
-        let line_count = lines.len() as u32;
-
         // Validate line range
         if start_line == 0 || end_line == 0 {
             return Err(AnnotationError::invalid_line_range(
-                file_path, start_line, end_line, line_count,
-            ));
-        }
-
-        if start_line > line_count || end_line > line_count {
-            return Err(AnnotationError::invalid_line_range(
-                file_path, start_line, end_line, line_count,
+                file_path, start_line, end_line, content.lines().count() as u32,
             ));
         }
 
         if start_line > end_line {
             return Err(AnnotationError::invalid_line_range(
-                file_path, start_line, end_line, line_count,
+                file_path, start_line, end_line, content.lines().count() as u32,
             ));
         }
 
-        // Extract the code
-        let start_idx = (start_line - 1) as usize;
-        let end_idx = end_line as usize;
-
-        let code = lines[start_idx..end_idx.min(lines.len())].join("\n");
+        if content.trim().is_empty() {
+            return Err(AnnotationError::extraction_failed(
+                file_path,
+                "empty unit body".to_string(),
+            ));
+        }
 
         let unit_type = Self::parse_unit_type(kind);
 
         Ok(ExpandedUnit {
             entity_id: None,
-            code,
+            code: content.to_string(),
             file_path: file_path.to_string(),
             start_line,
             end_line,
@@ -111,21 +106,17 @@ mod tests {
         let extractor = SemanticUnitExtractor::new();
         let content = r#"fn add(a: i32, b: i32) -> i32 {
     a + b
-}
-
-fn multiply(a: i32, b: i32) -> i32 {
-    a * b
 }"#;
 
         let unit = extractor
-            .extract_unit_from_content(content, "src/math.rs", 1, 3, "add", "function")
+            .extract_unit_from_content(content, "src/math.rs", 10, 12, "add", "function")
             .expect("Failed to extract unit");
 
         assert_eq!(unit.name, "add");
-        assert_eq!(unit.start_line, 1);
-        assert_eq!(unit.end_line, 3);
+        assert_eq!(unit.start_line, 10);
+        assert_eq!(unit.end_line, 12);
+        assert_eq!(unit.code, content);
         assert_eq!(unit.unit_type, SemanticUnitType::Function);
-        assert!(unit.code.contains("fn add"));
     }
 
     #[test]
@@ -133,10 +124,28 @@ fn multiply(a: i32, b: i32) -> i32 {
         let extractor = SemanticUnitExtractor::new();
         let content = "fn foo() {}";
 
-        let result =
-            extractor.extract_unit_from_content(content, "test.rs", 1, 10, "foo", "function");
+        // A file-absolute span beyond the body length is legal; the body is
+        // already the exact unit and is never sliced.
+        let unit = extractor
+            .extract_unit_from_content(content, "test.rs", 9, 9, "foo", "function")
+            .expect("absolute span accepted");
+        assert_eq!(unit.code, content);
 
-        assert!(result.is_err());
+        assert!(
+            extractor
+                .extract_unit_from_content(content, "test.rs", 0, 1, "foo", "function")
+                .is_err()
+        );
+        assert!(
+            extractor
+                .extract_unit_from_content(content, "test.rs", 5, 4, "foo", "function")
+                .is_err()
+        );
+        assert!(
+            extractor
+                .extract_unit_from_content("   \n ", "test.rs", 1, 2, "foo", "function")
+                .is_err()
+        );
     }
 
     #[test]

@@ -126,11 +126,10 @@ impl Searcher {
                 name: result.name.clone(),
                 kind: result.kind.clone(),
                 file_path: result.file_path.clone(),
-                // The body is already the exact unit; a 1-based whole-unit
-                // range makes extraction identity, so absolute line metadata
-                // stays owned by the result itself.
-                start_line: 1,
-                end_line: u32::try_from(line_count).unwrap_or(u32::MAX),
+                // The body is already the exact unit and the span is its
+                // file-absolute range; extraction records both as-is.
+                start_line: result.start_line,
+                end_line: result.end_line,
                 content: result.content.clone(),
                 score: result.score,
             };

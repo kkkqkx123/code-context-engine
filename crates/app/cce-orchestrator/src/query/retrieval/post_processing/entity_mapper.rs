@@ -299,15 +299,23 @@ fn materialize(
     result.file_path = chunk.file_path.clone();
     result.start_line = to_one_based_line(chunk.start_line);
     result.end_line = to_one_based_line(chunk.end_line);
-    result.kind = chunk.chunk_type.clone();
+    // The chunk-level type describes the group container; refine to the hit's
+    // own entity kind the same way the display name is refined below.
+    result.kind = choose_entity_kind(chunk, &result.entity_ids, &chunk.chunk_type);
     result.truncated = chunk.truncated != 0;
 
     let entity_names: Vec<String> = serde_json::from_str(&chunk.entity_names).unwrap_or_default();
     if !entity_names.is_empty() {
         // After hybrid expansion a result carries at most one entity; name
         // it with that entity's own display name when available. Otherwise
-        // fall back to the first named entry (the group title).
-        result.name = choose_entity_name(&chunk.entity_ids, &entity_names, &result.entity_ids);
+        // fall back to the group title (the owning type for container
+        // groups), and only then to the first named entry.
+        result.name = choose_entity_name(
+            &chunk.entity_ids,
+            &entity_names,
+            &chunk.group_title,
+            &result.entity_ids,
+        );
     }
 
     let sqlite_entity_ids: Vec<i64> = serde_json::from_str(&chunk.entity_ids).unwrap_or_default();
@@ -372,15 +380,39 @@ fn to_one_based_line(row: i64) -> u32 {
     if row < 0 { 1 } else { (row as u64 + 1) as u32 }
 }
 
+/// Pick the display kind for an enriched hit.
+///
+/// Mirrors the display-name refinement: when the hit represents exactly one
+/// entity, the kind stored positionally alongside that entity wins; missing
+/// entries fall back to the chunk-level type.
+fn choose_entity_kind(
+    chunk: &ChunkRecord,
+    hit_entity_ids: &[cce_types::EntityId],
+    chunk_type: &str,
+) -> String {
+    let stored_ids: Vec<i64> = serde_json::from_str(&chunk.entity_ids).unwrap_or_default();
+    if let [only] = hit_entity_ids {
+        if let Some(index) = stored_ids.iter().position(|&id| id as u64 == only.0) {
+            let kinds: Vec<String> = serde_json::from_str(&chunk.entity_kinds).unwrap_or_default();
+            if let Some(kind) = kinds.get(index).filter(|kind| !kind.is_empty()) {
+                return kind.clone();
+            }
+        }
+    }
+    chunk_type.to_string()
+}
 /// Pick the display name for an enriched hit.
 ///
 /// `stored_ids`/`names` are positionally aligned lists persisted with the
 /// chunk. When the hit represents exactly one entity (the post-expansion
-/// contract), the matching entry wins; entries are otherwise scanned in order
-/// and empty strings (unknown names) are skipped.
+/// contract), the matching entry wins. Otherwise the group title wins when
+/// present (it names the owning container, unlike the first member); entries
+/// are scanned in order only on legacy rows, and empty strings (unknown
+/// names) are skipped.
 fn choose_entity_name(
     stored_ids: &str,
     names: &[String],
+    group_title: &str,
     hit_entity_ids: &[cce_types::EntityId],
 ) -> String {
     let stored_ids: Vec<i64> = serde_json::from_str(stored_ids).unwrap_or_default();
@@ -390,6 +422,9 @@ fn choose_entity_name(
                 return name.clone();
             }
         }
+    }
+    if !group_title.is_empty() {
+        return group_title.to_string();
     }
     names
         .iter()
@@ -546,10 +581,72 @@ mod tests {
     #[test]
     fn test_choose_entity_name_falls_back_to_first_named_entry() {
         assert_eq!(
-            choose_entity_name("[1,2]", &["a".to_string()], &[EntityId(2)]),
+            choose_entity_name("[1,2]", &["a".to_string()], "", &[EntityId(2)]),
             "a"
         );
-        assert_eq!(choose_entity_name("[1,2]", &[], &[EntityId(1)]), "");
+        assert_eq!(choose_entity_name("[1,2]", &[], "", &[EntityId(1)]), "");
+    }
+
+    #[test]
+    fn test_choose_entity_name_prefers_group_title_for_multi_entity_hits() {
+        // A container-group hit carries several entity IDs; the group title
+        // (owning type) wins over the first member name.
+        assert_eq!(
+            choose_entity_name(
+                "[1,2]",
+                &["new".to_string(), "open".to_string()],
+                "OnceCell",
+                &[EntityId(1), EntityId(2)],
+            ),
+            "OnceCell"
+        );
+        // Single-entity hits still resolve to their own entry.
+        assert_eq!(
+            choose_entity_name(
+                "[1,2]",
+                &["new".to_string(), "open".to_string()],
+                "OnceCell",
+                &[EntityId(2)],
+            ),
+            "open"
+        );
+    }
+
+    #[test]
+    fn test_enrich_kinds_single_entity_hit_by_its_own_kind() {
+        let mut record = chunk_record(&[7, 8]);
+        record.entity_names = serde_json::to_string(&["C".to_string(), "m".to_string()])
+            .expect("serialize names");
+        record.entity_kinds = serde_json::to_string(&["class".to_string(), "method".to_string()])
+            .expect("serialize kinds");
+        let records = HashMap::from([("chunk_x".to_string(), record)]);
+
+        // Expanded hit for entity 8 must carry "method", not the group type.
+        let result = SearchResult {
+            id: "chunk_x".to_string(),
+            entity_ids: vec![EntityId(8)],
+            kind: "stale".to_string(),
+            ..Default::default()
+        };
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
+        assert_eq!(results[0].kind, "method");
+    }
+
+    #[test]
+    fn test_enrich_kind_falls_back_to_chunk_type_without_kinds() {
+        let records = HashMap::from([("chunk_x".to_string(), chunk_record(&[7]))]);
+        let result = SearchResult {
+            id: "chunk_x".to_string(),
+            entity_ids: vec![EntityId(7)],
+            kind: "stale".to_string(),
+            ..Default::default()
+        };
+        let mut results = vec![result];
+        enrich_results(&mut results, &records, None, 2000);
+        // Legacy rows carry no kinds list; the chunk-level type ("unknown"
+        // from the test helper) is kept instead of an empty string.
+        assert_eq!(results[0].kind, "unknown");
     }
 
     fn write_source(dir: &std::path::Path, rel: &str, body: &str) {

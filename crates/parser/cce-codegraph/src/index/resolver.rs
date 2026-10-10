@@ -522,7 +522,7 @@ impl RelationResolver {
         let mut effective_callee_id = callee_id;
         let mut overload_signature: Option<String> = None;
         // Determine owner_type and call_context using TypeMemberIndex
-        let (owner_type, call_context) = if let Some(callee_id) = effective_callee_id {
+        let (owner_type, call_context, relation_type) = if let Some(callee_id) = effective_callee_id {
             // Try to find the owner type from TypeMemberIndex
             let global_type_index = symbol_table.global_type_index();
             let owner_type = global_type_index
@@ -574,7 +574,27 @@ impl RelationResolver {
             }
 
             // Determine call context based on relation type and owner_type
-            let call_context = match raw_data.relation_type {
+            // A bare call that resolves to a nominal value type (struct,
+            // class, enum, union, enum variant) is a value construction,
+            // not a function call: upgrade the edge so the call context,
+            // the stored edge type and downstream consumers (annotation
+            // labels, call-chain queries, edge weights) see construction
+            // semantics. The decision is driven by the resolved callee
+            // kind, never by name spelling. The kind lookup goes through
+            // the entity index (index-global ID space): the per-file
+            // entity map carries caller-local IDs, which no longer match
+            // once the callee ID has been translated to global space.
+            let relation_type = match raw_data.relation_type {
+                cce_types::relation::RelationType::DirectCall
+                    if effective_callee_id
+                        .and_then(|id| entity_index.get_function_by_entity_id(id))
+                        .is_some_and(|callee| callee.kind.is_constructible_type()) =>
+                {
+                    cce_types::relation::RelationType::ConstructorCall
+                }
+                other => other,
+            };
+            let call_context = match relation_type {
                 cce_types::relation::RelationType::InstanceMethodCall => {
                     if let Some(ref owner) = owner_type {
                         instance_call_context(owner)
@@ -640,10 +660,10 @@ impl RelationResolver {
                 _ => CallContext::Direct,
             };
 
-            (owner_type, call_context)
+            (owner_type, call_context, relation_type)
         } else {
             // External call: no owner_type, default call_context
-            (None, CallContext::Direct)
+            (None, CallContext::Direct, raw_data.relation_type)
         };
 
         if let Some(effective) = effective_callee_id {
@@ -660,7 +680,7 @@ impl RelationResolver {
                 .next()
                 .unwrap_or(&raw_data.dst_name);
             let is_name_match = caller_name == callee_name && last_segment == caller_name;
-            if (effective == global_src || is_name_match) && raw_data.relation_type.is_call() {
+            if (effective == global_src || is_name_match) && relation_type.is_call() {
                 let is_explicit_self = raw_data.dst_name.starts_with("Self::")
                     || raw_data.dst_name.starts_with("Self.")
                     || raw_data.dst_name == "self"
@@ -687,7 +707,7 @@ impl RelationResolver {
             caller: raw_data.src,
             callee_id: effective_callee_id,
             callee_name,
-            relation_type: raw_data.relation_type,
+            relation_type,
             span: raw_data.span,
             is_external,
             external_type,

@@ -65,6 +65,8 @@ fn chunk(project_id: i64, epoch: i64, chunk_id: &str, file_path: &str) -> ChunkR
         end_line: 1,
         entity_ids: "[]".to_string(),
         entity_names: "[]".to_string(),
+        entity_kinds: "[]".to_string(),
+        group_title: String::new(),
         chunk_type: "code".to_string(),
         test_status: 0,
         test_source: 0,

@@ -38,6 +38,8 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             end_line INTEGER NOT NULL,
             entity_ids TEXT NOT NULL DEFAULT '[]',
             entity_names TEXT NOT NULL DEFAULT '[]',
+            entity_kinds TEXT NOT NULL DEFAULT '[]',
+            group_title TEXT NOT NULL DEFAULT '',
             chunk_type TEXT NOT NULL,
             test_status INTEGER NOT NULL DEFAULT 0,
             test_source INTEGER NOT NULL DEFAULT 0,

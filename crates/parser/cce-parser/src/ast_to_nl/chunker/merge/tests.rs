@@ -62,6 +62,7 @@ fn make_test_chunk_with_code_meta(
     let code_metadata = CodeSpecificMetadata {
         content_entity_ids: content_entity_ids.clone(),
         content_entity_names: Vec::new(),
+        content_entity_kinds: Vec::new(),
         context_entity_ids,
         entity_kind: EntityKind::Function,
         modifiers,

@@ -110,6 +110,12 @@ pub(crate) fn build_chunk_record(
             .map(|n| vec![n.clone()])
             .unwrap_or_default(),
     };
+    // Per-entity display kinds, positionally aligned with the entity IDs the
+    // same way names are; empty on legacy/plugin chunks.
+    let entity_kinds: Vec<String> = match chunk.metadata.as_code() {
+        Some(code) => code.content_entity_kinds.clone(),
+        _ => Vec::new(),
+    };
     let refs = ChunkEntityRefs::new(chunk.metadata.content_entity_ids().to_vec(), "");
 
     Ok(ChunkRecord::new(
@@ -121,6 +127,8 @@ pub(crate) fn build_chunk_record(
     )
     .with_entity_ids_json(refs.to_sql_json())
     .with_entity_names(&entity_names)
+    .with_entity_kinds(&entity_kinds)
+    .with_group_title(chunk.bm25_title.clone().unwrap_or_default())
     // tantivy stores keywords index-only, so SQLite keeps the only copy for
     // epoch cloning to rebuild BM25 documents.
     .with_bm25_keywords(chunk.bm25_keywords.join(" "))

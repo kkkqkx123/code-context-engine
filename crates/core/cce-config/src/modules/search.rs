@@ -702,9 +702,21 @@ pub struct RelationAnnotationConfig {
     /// Number of top results to annotate
     pub annotation_top_n: usize,
     /// Enable adjacent segment merging
+    ///
+    /// Only multi-primary concatenations can trigger a merge; the single-hit
+    /// annotation paths always supply exactly one primary unit, so merging
+    /// stays dormant there regardless of this switch.
     pub enable_segment_merge: bool,
     /// Maximum gap between segments to merge (in lines)
+    ///
+    /// Applies only when merging triggers (see `enable_segment_merge`); inert
+    /// on the single-primary paths.
     pub segment_merge_gap: u32,
+    /// Omit the primary body from the rendered annotation, keeping only
+    /// expansion segments. The primary stays pinned for scoring and metadata;
+    /// only its rendered echo is dropped. Off by default so existing payloads
+    /// keep their shape.
+    pub omit_primary_body: bool,
     /// Enable relation expansion: attach pre-resolved call-graph neighbours
     /// (callees/callers) supplied by the caller to each annotated result.
     pub expansion_enabled: bool,
@@ -741,6 +753,7 @@ impl Default for RelationAnnotationConfig {
             annotation_top_n: 3,
             enable_segment_merge: true,
             segment_merge_gap: 2,
+            omit_primary_body: false,
             expansion_enabled: false,
             max_expanded_units: 4,
             expansion_include_callers: true,
@@ -795,6 +808,12 @@ impl RelationAnnotationConfig {
     /// Allow or forbid non-call (structural) expansion edges (builder pattern).
     pub fn with_structural_edges(mut self, allow: bool) -> Self {
         self.allow_structural_edges = allow;
+        self
+    }
+
+    /// Omit or keep the primary body echo in rendered annotations (builder pattern).
+    pub fn omit_primary_body(mut self, omit: bool) -> Self {
+        self.omit_primary_body = omit;
         self
     }
 

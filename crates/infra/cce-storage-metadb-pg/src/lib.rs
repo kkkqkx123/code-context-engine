@@ -116,6 +116,19 @@ impl PostgresClient {
                 .map_err(error::classify_pg)?;
             tx.execute(
                 "INSERT INTO schema_migrations (version) VALUES ($1)",
+                &[&1i64],
+            )
+            .await
+            .map_err(error::classify_pg)?;
+            tx.commit().await.map_err(error::classify_pg)?;
+        }
+        if applied < schema::POSTGRES_SCHEMA_VERSION {
+            let tx = client.transaction().await.map_err(error::classify_pg)?;
+            tx.batch_execute(schema::V2_DDL)
+                .await
+                .map_err(error::classify_pg)?;
+            tx.execute(
+                "INSERT INTO schema_migrations (version) VALUES ($1)",
                 &[&schema::POSTGRES_SCHEMA_VERSION],
             )
             .await

@@ -154,6 +154,13 @@ pub struct CodeSpecificMetadata {
     /// treat a missing entry as "name unknown".
     #[serde(default)]
     pub content_entity_names: Vec<String>,
+    /// Display kinds positionally aligned with `content_entity_ids`.
+    ///
+    /// Same population and fallback convention as `content_entity_names`;
+    /// consumers must treat a missing entry as "kind unknown" and fall back
+    /// to the chunk-level kind.
+    #[serde(default)]
+    pub content_entity_kinds: Vec<String>,
     /// Entities repeated only to make the chunk understandable.
     ///
     /// Context must never expand source coverage or make two member chunks

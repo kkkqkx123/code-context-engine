@@ -224,15 +224,16 @@ impl PostgresClient {
                 let project_id: Option<i64> = chunk.project_id;
                 tx.execute(
                     "INSERT INTO chunks (chunk_id, file_path, content, start_line, end_line, \
-                     entity_ids, entity_names, chunk_type, test_status, test_source, created_at, \
+                     entity_ids, entity_names, entity_kinds, group_title, chunk_type, test_status, test_source, created_at, \
                      updated_at, project_id, epoch, batch_id, path, bm25_keywords, segment_id, \
                      truncated) \
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                     $16, $17, $18, $19) \
+                     $16, $17, $18, $19, $20, $21) \
                      ON CONFLICT (project_id, epoch, chunk_id) DO UPDATE SET \
                         file_path = EXCLUDED.file_path, content = EXCLUDED.content, \
                         start_line = EXCLUDED.start_line, end_line = EXCLUDED.end_line, \
                         entity_ids = EXCLUDED.entity_ids, entity_names = EXCLUDED.entity_names, \
+                        entity_kinds = EXCLUDED.entity_kinds, group_title = EXCLUDED.group_title, \
                         chunk_type = EXCLUDED.chunk_type, test_status = EXCLUDED.test_status, \
                         test_source = EXCLUDED.test_source, updated_at = EXCLUDED.updated_at, \
                         batch_id = EXCLUDED.batch_id, path = EXCLUDED.path, \
@@ -246,6 +247,8 @@ impl PostgresClient {
                         &chunk.end_line,
                         &chunk.entity_ids,
                         &chunk.entity_names,
+                        &chunk.entity_kinds,
+                        &chunk.group_title,
                         &chunk.chunk_type,
                         &(chunk.test_status as i64),
                         &(chunk.test_source as i64),

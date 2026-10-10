@@ -1108,6 +1108,7 @@ mod tests {
                 split_reason: Default::default(),
                 content_entity_ids: vec![],
                 content_entity_names: vec![],
+                content_entity_kinds: vec![],
                 context_entity_ids: vec![],
                 overlap_entities: vec![],
                 has_overlap: false,

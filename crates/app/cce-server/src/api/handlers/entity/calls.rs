@@ -293,7 +293,8 @@ pub async fn handle_function_callers(
             ));
         }
     };
-    let caller_edges: Vec<cce_types::ResolvedRelation> = searcher.filter_callers(entity_id, &options);
+    let caller_edges: Vec<cce_types::ResolvedRelation> =
+        searcher.filter_callers(entity_id, &options);
     let total_callers = caller_edges.len();
     let resolved_callers: Vec<cce_types::ResolvedRelation> = caller_edges
         .into_iter()

@@ -442,6 +442,24 @@ impl EntityKind {
         )
     }
 
+    /// Check if this kind is a nominal value type whose bare-name invocation
+    /// constructs a value (struct, class, enum, union, enum variant).
+    ///
+    /// Call resolution uses this to recognize construction sites: a
+    /// `DirectCall` edge whose callee resolves to one of these kinds is a
+    /// value construction, not a function call. The decision is driven by
+    /// the resolved callee kind, never by name spelling.
+    pub fn is_constructible_type(&self) -> bool {
+        matches!(
+            self,
+            EntityKind::Struct
+                | EntityKind::Class
+                | EntityKind::Enum
+                | EntityKind::EnumVariant
+                | EntityKind::Union
+        )
+    }
+
     /// Check if this is test-related (including assertions and mocks)
     pub fn is_test_related(&self) -> bool {
         matches!(
@@ -562,6 +580,47 @@ impl EntityKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_constructible_type_covers_nominal_value_types() {
+        // A bare-name call resolving to one of these kinds constructs a
+        // value; call resolution upgrades such edges to ConstructorCall.
+        for kind in [
+            EntityKind::Struct,
+            EntityKind::Class,
+            EntityKind::Enum,
+            EntityKind::EnumVariant,
+            EntityKind::Union,
+        ] {
+            assert!(
+                kind.is_constructible_type(),
+                "{kind:?} must be treated as constructible"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_constructible_type_excludes_non_value_kinds() {
+        // Functions, traits, aliases, modules and impl blocks are never
+        // construction targets: a call resolving to them keeps its raw type.
+        for kind in [
+            EntityKind::Function,
+            EntityKind::Method,
+            EntityKind::Constructor,
+            EntityKind::Trait,
+            EntityKind::Interface,
+            EntityKind::InherentImpl,
+            EntityKind::TypeAlias,
+            EntityKind::Variable,
+            EntityKind::Module,
+            EntityKind::Unknown,
+        ] {
+            assert!(
+                !kind.is_constructible_type(),
+                "{kind:?} must NOT be treated as constructible"
+            );
+        }
+    }
 
     #[test]
     fn test_is_import_like_covers_all_dependency_kinds() {

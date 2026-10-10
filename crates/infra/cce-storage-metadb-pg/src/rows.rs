@@ -72,6 +72,8 @@ pub fn chunk_from_row(row: &Row) -> Result<ChunkRecord, StorageError> {
         end_line: row.try_get("end_line").map_err(classify_pg)?,
         entity_ids: row.try_get("entity_ids").map_err(classify_pg)?,
         entity_names: row.try_get("entity_names").map_err(classify_pg)?,
+        entity_kinds: row.try_get("entity_kinds").map_err(classify_pg)?,
+        group_title: row.try_get("group_title").map_err(classify_pg)?,
         chunk_type: row.try_get("chunk_type").map_err(classify_pg)?,
         test_status: test_status as u8,
         test_source: test_source as u8,
@@ -88,7 +90,7 @@ pub fn chunk_from_row(row: &Row) -> Result<ChunkRecord, StorageError> {
 }
 
 pub const CHUNK_COLUMNS: &str = "chunk_id, file_path, content, start_line, end_line, entity_ids, \
-     entity_names, chunk_type, test_status, test_source, created_at, updated_at, project_id, \
+     entity_names, entity_kinds, group_title, chunk_type, test_status, test_source, created_at, updated_at, project_id, \
      epoch, batch_id, path, bm25_keywords, segment_id, truncated";
 
 pub fn admission_from_row(row: &Row) -> Result<AdmissionAuditRecord, StorageError> {

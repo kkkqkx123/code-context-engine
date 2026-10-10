@@ -3,6 +3,10 @@
 //! Merges adjacent unmarked same-file primary segments and reports gaps with
 //! omission markers. Relation-marked expansion segments and reference
 //! segments never position-merge.
+//!
+//! Merging only triggers on multi-primary inputs. The single-hit annotation
+//! paths always supply exactly one primary unit, so aggregation there is an
+//! identity pass and the merge gap configuration stays dormant.
 
 use cce_utils::token_estimation::TokenEstimator;
 

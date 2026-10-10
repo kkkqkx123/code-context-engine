@@ -691,6 +691,31 @@ impl EntityGroup {
             .collect()
     }
 
+    /// Resolve a display kind for each of the given entity IDs.
+    ///
+    /// Kinds come from the group header and members, using the same fallback
+    /// convention as display names (group kind for unknown IDs), so the
+    /// returned list stays positionally aligned with the input IDs and with
+    /// the display-name list.
+    pub fn entity_display_kinds(&self, entity_ids: &[EntityId]) -> Vec<String> {
+        let kind_by_id: std::collections::HashMap<EntityId, EntityKind> = self
+            .header
+            .iter()
+            .map(|h| (h.id, h.kind))
+            .chain(self.members.iter().map(|m| (m.id, m.kind)))
+            .collect();
+        let group_kind = self.kind.to_string();
+        entity_ids
+            .iter()
+            .map(|id| {
+                kind_by_id
+                    .get(id)
+                    .map(|kind| kind.to_string())
+                    .unwrap_or_else(|| group_kind.clone())
+            })
+            .collect()
+    }
+
     pub fn get_combined_source(&self, file_source: &str) -> &str {
         if let Some(ref source) = self.combined_source {
             return source;

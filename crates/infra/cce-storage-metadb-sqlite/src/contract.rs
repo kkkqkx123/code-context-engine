@@ -352,14 +352,15 @@ impl RelationStorage for SqliteClient {
             for chunk in chunks {
                 tx.execute(
                     "INSERT INTO chunks (chunk_id, file_path, content, start_line, end_line, \
-                     entity_ids, entity_names, chunk_type, test_status, test_source, created_at, \
+                     entity_ids, entity_names, entity_kinds, group_title, chunk_type, test_status, test_source, created_at, \
                      updated_at, project_id, epoch, batch_id, path, bm25_keywords, segment_id, truncated)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
-                     ?16, ?17, ?18, ?19)
+                     ?16, ?17, ?18, ?19, ?20, ?21)
                      ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
                         file_path = excluded.file_path, content = excluded.content,
                         start_line = excluded.start_line, end_line = excluded.end_line,
                         entity_ids = excluded.entity_ids, entity_names = excluded.entity_names,
+                        entity_kinds = excluded.entity_kinds, group_title = excluded.group_title,
                         chunk_type = excluded.chunk_type, test_status = excluded.test_status,
                         test_source = excluded.test_source, updated_at = excluded.updated_at,
                         batch_id = excluded.batch_id, path = excluded.path,
@@ -373,6 +374,8 @@ impl RelationStorage for SqliteClient {
                         chunk.end_line,
                         chunk.entity_ids,
                         chunk.entity_names,
+                        chunk.entity_kinds,
+                        chunk.group_title,
                         chunk.chunk_type,
                         chunk.test_status,
                         chunk.test_source,
@@ -1086,6 +1089,8 @@ mod tests {
             end_line: 1,
             entity_ids: "[]".to_string(),
             entity_names: "[]".to_string(),
+            entity_kinds: "[]".to_string(),
+            group_title: String::new(),
             chunk_type: "code".to_string(),
             test_status: 0,
             test_source: 0,

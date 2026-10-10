@@ -295,10 +295,8 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callees = searcher.get_callees_paginated(
-            EntityId(args.entity_id),
-            &call_domain_relation_options(),
-        );
+        let callees = searcher
+            .get_callees_paginated(EntityId(args.entity_id), &call_domain_relation_options());
         let items: Vec<Value> = callees
             .iter()
             .map(|relation| {
@@ -331,10 +329,8 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callers = searcher.get_callers_paginated(
-            EntityId(args.entity_id),
-            &call_domain_relation_options(),
-        );
+        let callers = searcher
+            .get_callers_paginated(EntityId(args.entity_id), &call_domain_relation_options());
         let items: Vec<Value> = callers
             .iter()
             .map(|relation| {

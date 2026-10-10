@@ -979,8 +979,7 @@ impl RelationIndex {
                     );
                     let span_key = SymbolKey::for_entity(file_path, &span_scoped, entity);
                     let mut map = self.symbol_key_to_entity.write();
-                    let span_taken =
-                        matches!(map.get(&span_key), Some(&id) if id != entity_id);
+                    let span_taken = matches!(map.get(&span_key), Some(&id) if id != entity_id);
                     if !owner_differs || span_taken {
                         self.record_symbol_key_conflict(&key, existing_id, entity_id);
                         tracing::warn!(

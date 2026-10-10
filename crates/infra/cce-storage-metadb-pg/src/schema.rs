@@ -1,4 +1,11 @@
-pub const POSTGRES_SCHEMA_VERSION: i64 = 1;
+pub const POSTGRES_SCHEMA_VERSION: i64 = 2;
+
+/// Incremental migration bringing pre-V2 databases to the current shape.
+/// Fresh databases get the column from `V1_DDL` directly.
+pub const V2_DDL: &str = r#"
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS entity_kinds TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS group_title TEXT NOT NULL DEFAULT '';
+"#;
 
 pub const V1_DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS projects (
@@ -131,6 +138,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     end_line BIGINT NOT NULL,
     entity_ids TEXT NOT NULL DEFAULT '[]',
     entity_names TEXT NOT NULL DEFAULT '[]',
+    entity_kinds TEXT NOT NULL DEFAULT '[]',
+    group_title TEXT NOT NULL DEFAULT '',
     chunk_type TEXT NOT NULL,
     test_status BIGINT NOT NULL DEFAULT 0,
     test_source BIGINT NOT NULL DEFAULT 0,

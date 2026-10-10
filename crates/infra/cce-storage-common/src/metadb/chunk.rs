@@ -11,6 +11,13 @@ pub struct ChunkRecord {
     pub end_line: i64,
     pub entity_ids: String,
     pub entity_names: String,
+    /// Display kinds positionally aligned with `entity_ids`, same convention
+    /// as `entity_names`. May be empty on legacy rows; consumers must fall
+    /// back to the chunk-level type for missing entries.
+    pub entity_kinds: String,
+    /// Group title for multi-entity display fallback (owner-qualified).
+    /// Empty on legacy rows; consumers then keep the first-name fallback.
+    pub group_title: String,
     pub chunk_type: String,
     pub test_status: u8,
     pub test_source: u8,
@@ -43,6 +50,8 @@ impl ChunkRecord {
             end_line,
             entity_ids: "[]".to_string(),
             entity_names: "[]".to_string(),
+            entity_kinds: "[]".to_string(),
+            group_title: String::new(),
             chunk_type: "unknown".to_string(),
             test_status: 0,
             test_source: 0,
@@ -90,6 +99,21 @@ impl ChunkRecord {
             tracing::warn!(error = %error, "Failed to serialize entity names; storing empty list");
             "[]".to_string()
         });
+        self.updated_at = chrono::Utc::now().timestamp();
+        self
+    }
+
+    pub fn with_entity_kinds(mut self, entity_kinds: &[String]) -> Self {
+        self.entity_kinds = serde_json::to_string(entity_kinds).unwrap_or_else(|error| {
+            tracing::warn!(error = %error, "Failed to serialize entity kinds; storing empty list");
+            "[]".to_string()
+        });
+        self.updated_at = chrono::Utc::now().timestamp();
+        self
+    }
+
+    pub fn with_group_title(mut self, group_title: String) -> Self {
+        self.group_title = group_title;
         self.updated_at = chrono::Utc::now().timestamp();
         self
     }
@@ -161,6 +185,16 @@ impl ChunkRecord {
             Ok(names) => names,
             Err(error) => {
                 tracing::warn!(error = %error, "Corrupt entity names; returning empty list");
+                Vec::new()
+            }
+        }
+    }
+
+    pub fn get_entity_kinds(&self) -> Vec<String> {
+        match serde_json::from_str(&self.entity_kinds) {
+            Ok(kinds) => kinds,
+            Err(error) => {
+                tracing::warn!(error = %error, "Corrupt entity kinds; returning empty list");
                 Vec::new()
             }
         }

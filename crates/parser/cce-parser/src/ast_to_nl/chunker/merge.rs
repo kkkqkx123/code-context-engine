@@ -143,6 +143,32 @@ pub(crate) fn merge_two_chunks(
         })
         .collect();
 
+    // Merge display kinds with the same positional convention as names.
+    fn aligned_kinds(chunk: &ChunkedResult) -> Vec<(EntityId, String)> {
+        let code = chunk.metadata.as_code();
+        let ids = chunk.metadata.content_entity_ids();
+        let kinds = code
+            .map(|m| m.content_entity_kinds.as_slice())
+            .unwrap_or(&[]);
+        ids.iter()
+            .enumerate()
+            .map(|(i, id)| (*id, kinds.get(i).cloned().unwrap_or_default()))
+            .collect()
+    }
+    let mut kind_by_id: Vec<(EntityId, String)> = aligned_kinds(a);
+    kind_by_id.extend(aligned_kinds(b));
+    kind_by_id.dedup_by(|a, b| a.0 == b.0);
+    let content_entity_kinds: Vec<String> = content_entity_ids
+        .iter()
+        .map(|id| {
+            kind_by_id
+                .iter()
+                .find(|(nid, _)| nid == id)
+                .map(|(_, kind)| kind.clone())
+                .unwrap_or_default()
+        })
+        .collect();
+
     let mut context_entity_ids = a.metadata.context_entity_ids().to_vec();
     context_entity_ids.extend_from_slice(b.metadata.context_entity_ids());
     dedup_preserving_order(&mut context_entity_ids);
@@ -206,6 +232,7 @@ pub(crate) fn merge_two_chunks(
     let code_metadata = CodeSpecificMetadata {
         content_entity_ids,
         content_entity_names,
+        content_entity_kinds,
         context_entity_ids,
         entity_kind: a.metadata.entity_kind().unwrap_or_default(),
         modifiers,

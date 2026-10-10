@@ -403,6 +403,7 @@ impl ChunkBuilder {
                     ctx.group.language,
                     CodeSpecificMetadata {
                         content_entity_names: ctx.group.entity_display_names(&content_entity_ids),
+                        content_entity_kinds: ctx.group.entity_display_kinds(&content_entity_ids),
                         content_entity_ids,
                         entity_kind: ctx.group.kind,
                         modifiers: ctx
@@ -621,6 +622,8 @@ impl ChunkBuilder {
                             CodeSpecificMetadata {
                                 content_entity_names: group
                                     .entity_display_names(&content_entity_ids),
+                                content_entity_kinds: group
+                                    .entity_display_kinds(&content_entity_ids),
                                 content_entity_ids,
                                 context_entity_ids: header_ctx
                                     .as_ref()
@@ -729,6 +732,7 @@ impl ChunkBuilder {
                     ctx.group.language,
                     CodeSpecificMetadata {
                         content_entity_names: ctx.group.entity_display_names(&content_entity_ids),
+                        content_entity_kinds: ctx.group.entity_display_kinds(&content_entity_ids),
                         content_entity_ids,
                         context_entity_ids: ctx.context_entity_ids,
                         entity_kind: ctx.group.kind,

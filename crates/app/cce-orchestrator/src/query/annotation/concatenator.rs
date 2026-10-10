@@ -75,22 +75,28 @@ impl StructureConcatenator {
     /// Build the relation marker line for an expansion unit.
     ///
     /// The marker is a uniform `// [<label>] <name> (<file>:<start>-<end>)`
-    /// line. The edge label carries the direction (`calls` / `called by`), so
-    /// no separate arrow is needed.
+    /// line, with the producing edge's relation type appended to the label
+    /// when the caller classified it (e.g. `calls:call.direct`). The edge
+    /// label carries the direction (`calls` / `called by`), so no separate
+    /// arrow is needed.
     fn relation_marker(unit: &ExpandedUnit) -> Option<String> {
         let default_label = match unit.origin {
             ExpansionOrigin::Primary => return None,
             ExpansionOrigin::Forward => "calls",
             ExpansionOrigin::Backward => "called by",
         };
-        let label = if unit.edge_label.is_empty() {
+        let direction = if unit.edge_label.is_empty() {
             default_label
         } else {
             unit.edge_label.as_str()
         };
+        let label = match &unit.relation_type {
+            Some(relation_type) => format!("{direction}:{relation_type}"),
+            None => direction.to_string(),
+        };
         Some(format!(
-            "// [{}] {} ({}:{}-{})",
-            label, unit.name, unit.file_path, unit.start_line, unit.end_line
+            "// [{label}] {} ({}:{}-{})",
+            unit.name, unit.file_path, unit.start_line, unit.end_line
         ))
     }
 
@@ -136,7 +142,9 @@ impl StructureConcatenator {
 
     /// Select segments by score with the primary pinned, then render the
     /// survivors in structural order: primary first, remaining expansions
-    /// grouped by file and line for readability.
+    /// grouped by file and line for readability. With primary-body omission
+    /// enabled the pinned primary still reserves nothing and renders nothing;
+    /// only expansion segments reach the output.
     fn select_and_render(
         &self,
         segments: Vec<AggregatedSegment>,
@@ -144,13 +152,19 @@ impl StructureConcatenator {
     ) -> (String, Vec<FileInfo>) {
         let max_length = self.config.get_max_length();
         let primary_count = primary_count.min(segments.len());
+        let render_primary = !self.config.omit_primary_body;
 
         // The primary is always kept; an oversized primary already shrank to
-        // a small reference above, so pinning cannot blow the budget.
-        let mut total: usize = segments[..primary_count]
-            .iter()
-            .map(|segment| self.selection_cost(segment))
-            .sum();
+        // a small reference above, so pinning cannot blow the budget. An
+        // omitted primary neither reserves budget nor renders.
+        let mut total: usize = if render_primary {
+            segments[..primary_count]
+                .iter()
+                .map(|segment| self.selection_cost(segment))
+                .sum()
+        } else {
+            0
+        };
         let mut picked = vec![false; segments.len()];
         for slot in picked.iter_mut().take(primary_count) {
             *slot = true;
@@ -174,7 +188,11 @@ impl StructureConcatenator {
             }
         }
 
-        let mut order: Vec<usize> = (0..primary_count).collect();
+        let mut order: Vec<usize> = if render_primary {
+            (0..primary_count).collect()
+        } else {
+            Vec::new()
+        };
         let mut picked_rest: Vec<usize> = (primary_count..segments.len())
             .filter(|index| picked[*index])
             .collect();
@@ -640,5 +658,46 @@ mod tests {
         let omitted: usize = tail[..end].trim().parse().expect("magnitude number");
         // The reported magnitude covers code plus file and relation markers.
         assert!(omitted > TokenEstimator::estimate(low_code));
+    }
+
+    #[tokio::test]
+    async fn test_typed_marker_appends_relation_type() {
+        let concat = StructureConcatenator::new(RelationAnnotationConfig::new().enable(true));
+        let primary = ExpandedUnit::new(
+            "fn main() {}".to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let typed = expansion_unit("new", "src/lib.rs", "pub const fn new() {}", 0.9)
+            .with_relation_type(cce_types::RelationType::ConstructorCall);
+
+        let (result, _) = concat.concatenate(&primary, &[typed], &[]).await;
+
+        assert!(result.contains("// [calls:call.constructor] new (src/lib.rs:1-3)"));
+    }
+
+    #[tokio::test]
+    async fn test_omit_primary_body_keeps_expansions_only() {
+        let config = RelationAnnotationConfig::new()
+            .enable(true)
+            .omit_primary_body(true);
+        let concat = StructureConcatenator::new(config);
+        let primary = ExpandedUnit::new(
+            "fn main() {}".to_string(),
+            "src/main.rs".to_string(),
+            1,
+            1,
+            "main".to_string(),
+        );
+        let high = expansion_unit("high", "src/high.rs", "fn high() {}", 0.9);
+
+        let (result, files) = concat.concatenate(&primary, &[high], &[]).await;
+
+        assert!(!result.contains("fn main"));
+        assert!(result.contains("fn high"));
+        assert!(result.contains("// [calls] high (src/high.rs:1-3)"));
+        assert_eq!(files.len(), 1);
     }
 }
