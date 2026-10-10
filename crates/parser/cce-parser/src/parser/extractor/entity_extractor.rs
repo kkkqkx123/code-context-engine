@@ -894,6 +894,33 @@ class Point:
             .filter(|e| e.kind == EntityKind::Class)
             .collect();
         assert!(!classes.is_empty());
+
+        let point = classes
+            .iter()
+            .find(|e| e.name == "Point")
+            .expect("Should find class Point");
+        assert_eq!(point.signature, "class Point:");
+
+        for entity in entities.iter().filter(|e| {
+            matches!(
+                e.kind,
+                EntityKind::Function | EntityKind::Method | EntityKind::Class
+            )
+        }) {
+            assert!(
+                !entity.signature.contains('\n'),
+                "signature of {} must be single-line, got {:?}",
+                entity.name,
+                entity.signature
+            );
+            assert!(
+                !entity.signature.contains("self.x = x")
+                    && !entity.signature.contains("return 0.0"),
+                "signature of {} must exclude the body, got {:?}",
+                entity.name,
+                entity.signature
+            );
+        }
     }
 
     #[test]
