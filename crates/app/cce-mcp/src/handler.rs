@@ -295,7 +295,10 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callees = searcher.get_callees(EntityId(args.entity_id));
+        let callees = searcher.get_callees_paginated(
+            EntityId(args.entity_id),
+            &call_domain_relation_options(),
+        );
         let items: Vec<Value> = callees
             .iter()
             .map(|relation| {
@@ -303,6 +306,7 @@ impl McpServerHandler {
                     "caller": relation.caller.to_string(),
                     "callee_id": relation.callee_id.map(|id| id.to_string()),
                     "callee_name": relation.callee_name,
+                    "relation_type": format!("{:?}", relation.relation_type),
                     "is_external": relation.is_external,
                     "start_line": relation.span.start_position.row,
                 })
@@ -327,8 +331,20 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callers = searcher.get_callers(EntityId(args.entity_id));
-        let items: Vec<String> = callers.iter().map(EntityId::to_string).collect();
+        let callers = searcher.get_callers_paginated(
+            EntityId(args.entity_id),
+            &call_domain_relation_options(),
+        );
+        let items: Vec<Value> = callers
+            .iter()
+            .map(|relation| {
+                json!({
+                    "caller": relation.caller.to_string(),
+                    "relation_type": format!("{:?}", relation.relation_type),
+                    "is_external": relation.is_external,
+                })
+            })
+            .collect();
         Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({ "entity_id": args.entity_id, "callers": items }).to_string(),
         )]))
@@ -351,11 +367,7 @@ impl McpServerHandler {
             }
         };
         let max_depth = args.max_depth.unwrap_or(3);
-        let options = RelationQueryOptions {
-            max_depth,
-            limit: usize::MAX,
-            ..Default::default()
-        };
+        let options = call_domain_relation_options().with_max_depth(max_depth);
         let backward = matches!(
             args.direction.as_deref().map(str::to_ascii_lowercase),
             Some(ref direction) if direction == "backward"
@@ -375,6 +387,7 @@ impl McpServerHandler {
                             "function_name": node.function_name,
                             "file_path": node.file_path,
                             "depth": node.depth,
+                            "relation_type": format!("{:?}", node.relation_type),
                             "call_line": node.call_line,
                         })
                     })
@@ -660,4 +673,17 @@ impl ServerHandler for McpServerHandler {
                     .to_string(),
             )
     }
+}
+
+/// Relation options for the call-semantics tools.
+///
+/// `entity_callees`, `entity_callers` and `call_chain` promise call
+/// relationships, so only call-domain edges qualify: structural edges (impl
+/// association, trait bound, inheritance) and dependency edges (import/use)
+/// belong to other tools, and edges to unresolved external targets carry no
+/// entity to navigate to.
+fn call_domain_relation_options() -> RelationQueryOptions {
+    RelationQueryOptions::new()
+        .with_relation_domains(vec!["call".to_string()])
+        .with_include_external(false)
 }

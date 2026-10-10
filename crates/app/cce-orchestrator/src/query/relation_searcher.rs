@@ -381,11 +381,15 @@ impl RelationSearcher {
     }
 
     /// Get callers with pagination (file-filtered per options)
+    ///
+    /// Each entry is the edge by which the caller calls `entity_id`, so the
+    /// direction stays symmetric with [`Self::get_callees_paginated`] and
+    /// callers can report the real relation type.
     pub fn get_callers_paginated(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
-    ) -> Vec<EntityId> {
+    ) -> Vec<ResolvedRelation> {
         self.filter_callers(entity_id, options)
             .into_iter()
             .skip(options.offset)
@@ -393,44 +397,45 @@ impl RelationSearcher {
             .collect()
     }
 
-    /// Get callers after applying the file and relation filters (pre-pagination).
+    /// Get the incoming call edges after applying the file and relation
+    /// filters (pre-pagination).
+    ///
+    /// The reverse index stores caller ids only, so the producing edge is
+    /// recovered from the caller's own outgoing relations — the same read a
+    /// domain filter already required, so typed callers cost nothing extra on
+    /// the filtered path. A caller whose edge cannot be recovered is dropped
+    /// instead of being reported with a fabricated edge.
     pub fn filter_callers(
         &self,
         entity_id: EntityId,
         options: &RelationQueryOptions,
-    ) -> Vec<EntityId> {
+    ) -> Vec<ResolvedRelation> {
         let filter = RelationFileFilter::from_options(options);
-        let callers = self.get_callers(entity_id);
-        if filter.is_empty() {
-            return callers;
-        }
-        callers
+        self.get_callers(entity_id)
             .into_iter()
             .filter(|caller_id| {
-                if !filter.matches_path(
+                filter.matches_path(
                     self.query
                         .index()
                         .get_file_path_by_entity(*caller_id)
                         .as_deref(),
-                ) {
-                    return false;
-                }
-                // Domain/external filtering needs the edge, not just the id.
-                // Keep the caller when any edge to this callee passes.
-                if filter.relation_domains.is_empty() && filter.include_external {
-                    return true;
-                }
-                self.query
-                    .index()
-                    .get_resolved_relations_by_caller(*caller_id)
-                    .is_some_and(|relations| {
-                        relations.iter().any(|relation| {
-                            relation.callee_id == Some(entity_id)
-                                && filter.matches_relation(relation)
-                        })
-                    })
+                )
             })
+            .filter_map(|caller_id| self.incoming_edge(caller_id, entity_id))
+            .filter(|relation| filter.matches_relation(relation))
             .collect()
+    }
+
+    /// The edge by which `caller` calls `callee`, when that edge exists.
+    fn incoming_edge(&self, caller: EntityId, callee: EntityId) -> Option<ResolvedRelation> {
+        self.query
+            .index()
+            .get_resolved_relations_by_caller(caller)
+            .and_then(|relations| {
+                relations
+                    .into_iter()
+                    .find(|relation| relation.callee_id == Some(callee))
+            })
     }
 
     // ========== Call Chain Queries ==========
@@ -1008,5 +1013,118 @@ mod tests {
 
         assert_eq!(options.max_depth, 20);
         assert_eq!(options.max_nodes, 5000);
+    }
+
+    fn entity(id: u64) -> cce_types::Entity {
+        use cce_types::{Entity, EntityKind, Span};
+        Entity {
+            id: EntityId(id),
+            kind: EntityKind::Function,
+            name: format!("fn{id}"),
+            signature: String::new(),
+            parameters: Vec::new(),
+            return_type: None,
+            span: Span::default(),
+            depth: 0,
+            parent: None,
+            children: Vec::new(),
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: std::collections::HashMap::new(),
+            metadata: std::collections::HashMap::new(),
+            is_stdlib: false,
+            subtype: None,
+            stdlib_category: None,
+        }
+    }
+
+    /// Searcher whose entity 1 is called by entity 2 and implemented by
+    /// entity 3, i.e. two incoming edges from different relation domains.
+    fn mixed_domain_caller_searcher() -> RelationSearcher {
+        use cce_codegraph::index::EntityIndexOps;
+        use cce_types::relation::CallContext;
+
+        let base = cce_codegraph::RelationIndex::new();
+        for id in [1u64, 2, 3] {
+            base.add_function_with_path(EntityId(id), entity(id), "src/lib.rs".to_string());
+        }
+        for (caller, relation_type) in [
+            (2u64, RelationType::DirectCall),
+            (3, RelationType::ImplAssociation),
+        ] {
+            base.add_resolved_relation(ResolvedRelation {
+                caller: EntityId(caller),
+                callee_id: Some(EntityId(1)),
+                callee_name: "fn1".to_string(),
+                relation_type,
+                span: cce_types::Span::default(),
+                is_external: false,
+                external_type: None,
+                callee_symbol: None,
+                stdlib_category: None,
+                owner_type: None,
+                call_context: CallContext::Direct,
+                overload_signature: None,
+                call_frequency: 1,
+                cfg_condition: None,
+            });
+        }
+        RelationSearcher::new(Arc::new(CallChainQuery::from_index(base)))
+    }
+
+    #[test]
+    fn callers_carry_the_edge_that_reached_them() {
+        let searcher = mixed_domain_caller_searcher();
+
+        let callers = searcher.get_callers_paginated(EntityId(1), &RelationQueryOptions::default());
+
+        assert_eq!(callers.len(), 2, "every relation domain is kept unfiltered");
+        assert_eq!(callers[0].caller, EntityId(2));
+        assert_eq!(callers[0].relation_type, RelationType::DirectCall);
+        assert_eq!(callers[1].caller, EntityId(3));
+        assert_eq!(
+            callers[1].relation_type,
+            RelationType::ImplAssociation,
+            "the structural edge must be reported with its own type"
+        );
+    }
+
+    #[test]
+    fn call_domain_filter_keeps_only_call_edges() {
+        let searcher = mixed_domain_caller_searcher();
+        let options = RelationQueryOptions::new()
+            .with_relation_domains(vec!["call".to_string()])
+            .with_include_external(false);
+
+        let callers = searcher.get_callers_paginated(EntityId(1), &options);
+
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0].caller, EntityId(2));
+        assert_eq!(callers[0].relation_type, RelationType::DirectCall);
+    }
+
+    #[test]
+    fn caller_pagination_applies_after_filtering() {
+        let searcher = mixed_domain_caller_searcher();
+        let options = RelationQueryOptions::new()
+            .with_relation_domains(vec!["call".to_string()])
+            .with_limit(1);
+
+        let callers = searcher.get_callers_paginated(EntityId(1), &options);
+
+        assert_eq!(callers.len(), 1, "limit counts call-domain callers only");
+        assert_eq!(callers[0].caller, EntityId(2));
+    }
+
+    #[test]
+    fn missing_edge_is_dropped_instead_of_fabricated() {
+        let searcher = mixed_domain_caller_searcher();
+
+        let callers = searcher.get_callers_paginated(EntityId(2), &RelationQueryOptions::default());
+
+        assert!(
+            callers.is_empty(),
+            "entity 2 has no incoming edge, so no caller may be reported"
+        );
     }
 }

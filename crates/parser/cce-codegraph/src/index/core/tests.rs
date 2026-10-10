@@ -314,6 +314,51 @@ fn symbol_key_conflict_first_wins_and_idempotent() {
     assert_eq!(record.rejected_entity, 2);
 }
 
+/// Duplicates separated by source span (e.g. cfg-gated variants sharing
+/// name, kind and signature) each keep their own span-disambiguated key:
+/// both register and no conflict is recorded.
+#[test]
+fn span_separated_duplicates_both_register_without_conflict() {
+    let index = RelationIndex::new();
+    let mut first = create_test_function_entity(1, "dup");
+    first.span.start_byte = 10;
+    first.span.end_byte = 20;
+    let mut second = create_test_function_entity(2, "dup");
+    second.span.start_byte = 30;
+    second.span.end_byte = 40;
+    // Production registration always follows entity insertion, which is
+    // what makes the owner's span available for the separation check.
+    index.function_index.insert(EntityId(1), first.clone());
+    index.function_index.insert(EntityId(2), second.clone());
+
+    assert!(index.register_symbol_key("a.rs", "dup", &first, EntityId(1)));
+    assert!(index.register_symbol_key("a.rs", "dup", &second, EntityId(2)));
+
+    assert_eq!(
+        index.get_entity_id_by_symbol_key(&SymbolKey::new(
+            "a.rs",
+            "dup",
+            EntityKind::Function,
+            "fn dup()"
+        )),
+        Some(EntityId(1)),
+        "the first registration keeps the plain key"
+    );
+    assert_eq!(
+        index.get_entity_id_by_symbol_key(&SymbolKey::for_entity("a.rs", "dup#30-40", &second)),
+        Some(EntityId(2)),
+        "the second registration keeps its span key"
+    );
+    assert_eq!(
+        index
+            .diagnostics
+            .symbol_key_conflict_count
+            .load(Ordering::Relaxed),
+        0,
+        "separable variants are not conflicts"
+    );
+}
+
 /// The conflict sample buffer is capped; the oldest sample is dropped at
 /// capacity while the counter keeps the full total.
 #[test]

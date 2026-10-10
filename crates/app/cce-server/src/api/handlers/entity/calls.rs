@@ -293,27 +293,28 @@ pub async fn handle_function_callers(
             ));
         }
     };
-    let filtered_callers: Vec<cce_types::EntityId> = searcher.filter_callers(entity_id, &options);
-    let total_callers = filtered_callers.len();
-    let caller_ids: Vec<cce_types::EntityId> = filtered_callers
+    let caller_edges: Vec<cce_types::ResolvedRelation> = searcher.filter_callers(entity_id, &options);
+    let total_callers = caller_edges.len();
+    let resolved_callers: Vec<cce_types::ResolvedRelation> = caller_edges
         .into_iter()
         .skip(options.offset)
         .take(options.limit)
         .collect();
 
-    // Convert EntityId to CallChainNode
-    let callers: Vec<CallChainNode> = caller_ids
+    // Convert ResolvedRelation to CallChainNode
+    let callers: Vec<CallChainNode> = resolved_callers
         .into_iter()
-        .map(|id| {
+        .map(|relation| {
+            let caller_id = relation.caller;
             let (function_name, file_path) = searcher
                 .query()
                 .index()
-                .get_function_by_entity_id(id)
+                .get_function_by_entity_id(caller_id)
                 .map(|entity| {
                     let path = searcher
                         .query()
                         .index()
-                        .get_file_path_by_entity(id)
+                        .get_file_path_by_entity(caller_id)
                         .unwrap_or_else(|| "Unknown".to_string());
                     (entity.name.clone(), path)
                 })
@@ -323,13 +324,13 @@ pub async fn handle_function_callers(
                 function_id: searcher
                     .query()
                     .index()
-                    .get_symbol_key_by_entity_id(id)
+                    .get_symbol_key_by_entity_id(caller_id)
                     .map(|key| key.stable_id().0)
                     .unwrap_or_default(),
                 function_name,
                 file_path,
                 depth: 0,
-                relation_type: "caller".to_string(),
+                relation_type: format!("{:?}", relation.relation_type),
                 call_line: None,
             }
         })

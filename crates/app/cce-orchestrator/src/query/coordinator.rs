@@ -787,7 +787,11 @@ impl QueryCoordinator {
     // ========== Relation Queries ==========
     // These methods delegate to RelationSearcher for consistent behavior
 
-    /// Get callees (functions called by this function).
+    /// Get callees across every relation domain (raw diagnostic accessor).
+    ///
+    /// Not scoped to the call domain: prefer [`Self::get_callees_paginated`]
+    /// with [`RelationQueryOptions`] when the result is presented as call
+    /// semantics.
     ///
     /// Missing entities report not found; existing entities without outgoing
     /// edges return an empty list.
@@ -803,7 +807,11 @@ impl QueryCoordinator {
             .map_err(QueryError::from)
     }
 
-    /// Get callers (functions that call this function)
+    /// Get callers across every relation domain (raw diagnostic accessor).
+    ///
+    /// Not scoped to the call domain: prefer
+    /// [`Self::get_callers_paginated`] with [`RelationQueryOptions`] when the
+    /// result is presented as call semantics.
     pub fn get_callers(&self, entity_id: cce_types::EntityId) -> Result<Vec<cce_types::EntityId>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
@@ -825,12 +833,17 @@ impl QueryCoordinator {
             .get_callees_paginated(entity_id, options))
     }
 
-    /// Get callers with pagination
+    /// Get callers with pagination.
+    ///
+    /// Filtering is driven by [`RelationQueryOptions`] (relation domains,
+    /// external edges, file scope); each returned relation is the edge by
+    /// which that caller calls `entity_id`, mirroring
+    /// [`Self::get_callees_paginated`].
     pub fn get_callers_paginated(
         &self,
         entity_id: cce_types::EntityId,
         options: &RelationQueryOptions,
-    ) -> Result<Vec<cce_types::EntityId>> {
+    ) -> Result<Vec<cce_types::ResolvedRelation>> {
         if !self.capabilities.has_relations() {
             return Err(QueryError::index_not_available("relation"));
         }

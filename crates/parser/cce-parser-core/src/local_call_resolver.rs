@@ -158,6 +158,13 @@ impl LocalCallResolver {
 
         // Try to resolve callee for each call relation
         for relation in &call_relations {
+            // Local calls are entity-scoped edges, so only entity-level
+            // records can produce them. File-level records stay indexed
+            // through the dedicated file-relation path and must never
+            // become entity-scoped edges with a placeholder caller.
+            if relation.caller_level != RelationLevel::Entity {
+                continue;
+            }
             let callee_name = relation.dst_name();
 
             // Find matching callee within the file. The entity map is keyed
@@ -391,12 +398,15 @@ impl LocalCallResolver {
     ///
     /// Vector of resolved local calls
     pub fn resolve_from_parsed_file(&self, parsed_file: &cce_types::ParsedFile) -> Vec<LocalCall> {
-        // Convert raw relations to Relations
+        // Convert raw relations to Relations, preserving each record's
+        // own level. File-level records (module-level calls with no
+        // containing entity) must stay distinguishable so they cannot
+        // be mistaken for entity-scoped calls downstream.
         let relations: Vec<Relation> = parsed_file
             .raw_relations
             .iter()
             .map(|r| Relation {
-                caller_level: RelationLevel::Entity,
+                caller_level: r.level,
                 caller_id: r.src.0 as i64,
                 dst: cce_types::RelationTarget::unresolved(r.dst_name.clone()),
                 relation_type: r.relation_type,
@@ -713,5 +723,62 @@ mod tests {
         let local_calls = resolver.resolve(&relations, &entities);
 
         assert_eq!(local_calls[0].callee, EntityId(1));
+    }
+
+    /// File-level call records must never become entity-scoped local
+    /// calls, even when the callee resolves to a same-file entity.
+    /// Module-level calls carry no containing entity; emitting them
+    /// here would fabricate a caller id that collides with an
+    /// unrelated global entity downstream. They stay indexed through
+    /// the dedicated file-relation path instead.
+    #[test]
+    fn file_level_call_records_produce_no_local_calls() {
+        let resolver = LocalCallResolver::new();
+
+        let entities = vec![
+            create_test_function_entity(1, "caller"),
+            create_test_function_entity(2, "target"),
+        ];
+        let raw_relations = vec![
+            cce_types::RawRelationData {
+                src: EntityId(0),
+                level: RelationLevel::File,
+                dst_name: "target".to_string(),
+                relation_type: RelationType::DirectCall,
+                span: Span::default(),
+                stdlib_category: None,
+            },
+            cce_types::RawRelationData {
+                src: EntityId(1),
+                level: RelationLevel::Entity,
+                dst_name: "target".to_string(),
+                relation_type: RelationType::DirectCall,
+                span: Span::default(),
+                stdlib_category: None,
+            },
+        ];
+        let parsed = cce_types::ParsedFile {
+            language: cce_types::language::Language::Rust,
+            path: "test.rs".to_string(),
+            source: std::sync::Arc::from("fn caller() { target(); } target();"),
+            entities,
+            local_symbols: HashMap::new(),
+            raw_relations,
+            behavior: Default::default(),
+            control_flow: Default::default(),
+            embedded_blocks: Vec::new(),
+            block_relations: Vec::new(),
+            import_table: None,
+            reexports: Vec::new(),
+            file_doc_comment: None,
+            file_doc_span: None,
+            file_hash: None,
+        };
+
+        let local_calls = resolver.resolve_from_parsed_file(&parsed);
+
+        assert_eq!(local_calls.len(), 1);
+        assert_eq!(local_calls[0].caller, EntityId(1));
+        assert_eq!(local_calls[0].callee, EntityId(2));
     }
 }

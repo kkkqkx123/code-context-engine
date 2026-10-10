@@ -937,11 +937,15 @@ impl RelationIndex {
     /// process-local EntityId counters. Also maintains the stable-ID side map
     /// for O(1) `get_entity_id_by_stable_symbol_id` lookups.
     ///
-    /// Registration is first-wins: when the key already maps to a *different*
-    /// entity, the new mapping is rejected with a warning (the existing
-    /// mapping wins) and `false` is returned so callers can record the
-    /// collision. Re-registering the same key for the same entity is
-    /// idempotent and returns `true`.
+    /// Registration is first-wins on the plain key: the first entity keeps
+    /// the canonical address. A different entity colliding on the plain key
+    /// (e.g. cfg-gated duplicates sharing name, kind and signature) earns
+    /// its own span-disambiguated address only with evidence of difference:
+    /// the registered owner's span must provably differ from the
+    /// newcomer's. Without that evidence the collision is recorded and the
+    /// newcomer is rejected with `false` so callers can account for it.
+    /// Re-registering the same key for the same entity is idempotent and
+    /// returns `true`.
     pub fn register_symbol_key(
         &self,
         file_path: &str,
@@ -958,28 +962,34 @@ impl RelationIndex {
                     drop(map);
                     // cfg-gated duplicates (e.g. platform-specific `impl`
                     // blocks sharing name, kind and signature) collide on the
-                    // plain key. Disambiguate with the byte span so every
-                    // entity keeps its own stable key instead of losing its
-                    // reverse mapping (which would collapse snapshot keys).
+                    // plain key. A separate span address is earned only with
+                    // evidence of difference: the registered owner's span
+                    // must provably differ from the newcomer's. Otherwise —
+                    // or when the span address itself is already taken — this
+                    // is a true duplicate: record it against the plain key
+                    // the first winner keeps and reject.
+                    let owner_differs =
+                        self.function_index.get(&existing_id).is_some_and(|owner| {
+                            owner.span.start_byte != entity.span.start_byte
+                                || owner.span.end_byte != entity.span.end_byte
+                        });
                     let span_scoped = format!(
                         "{scoped_name}#{}-{}",
                         entity.span.start_byte, entity.span.end_byte
                     );
                     let span_key = SymbolKey::for_entity(file_path, &span_scoped, entity);
                     let mut map = self.symbol_key_to_entity.write();
-                    match map.get(&span_key) {
-                        Some(&existing_id) if existing_id != entity_id => {
-                            self.record_symbol_key_conflict(&span_key, existing_id, entity_id);
-                            tracing::warn!(
-                                symbol_key = ?span_key,
-                                existing_entity = existing_id.0,
-                                new_entity = entity_id.0,
-                                "stable symbol key already registered to a different entity; keeping the existing mapping"
-                            );
-                            return false;
-                        }
-                        Some(_) => return true,
-                        None => {}
+                    let span_taken =
+                        matches!(map.get(&span_key), Some(&id) if id != entity_id);
+                    if !owner_differs || span_taken {
+                        self.record_symbol_key_conflict(&key, existing_id, entity_id);
+                        tracing::warn!(
+                            symbol_key = ?key,
+                            existing_entity = existing_id.0,
+                            new_entity = entity_id.0,
+                            "stable symbol key already registered to a different entity; keeping the existing mapping"
+                        );
+                        return false;
                     }
                     map.insert(span_key.clone(), entity_id);
                     drop(map);
