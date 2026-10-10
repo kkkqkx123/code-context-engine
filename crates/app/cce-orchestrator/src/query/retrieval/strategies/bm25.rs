@@ -97,6 +97,12 @@ impl Bm25Strategy {
                     .get("chunk_id")
                     .cloned()
                     .unwrap_or_else(|| r.document_id.clone());
+                // Summary documents are the only index docs without a
+                // chunk_id (the generation-compaction path relies on the same
+                // invariant). They are file-level by construction, so mark
+                // them for the enrichment downgrade instead of letting them
+                // masquerade as chunk hits with a missing record.
+                let is_summary = !r.fields.contains_key("chunk_id");
                 let file_path = r.fields.get("file_path").cloned().unwrap_or_default();
                 let title = r.fields.get("title").cloned().unwrap_or_default();
                 // Decode the entity list via the shared chunk-entity codec
@@ -114,7 +120,11 @@ impl Bm25Strategy {
                     id: chunk_id,
                     entity_ids,
                     segment_id: r.fields.get("segment_id").cloned(),
-                    kind: String::new(),
+                    kind: if is_summary {
+                        "summary".to_string()
+                    } else {
+                        String::new()
+                    },
                     name: title,
                     file_path,
                     score: r.score,
