@@ -615,8 +615,8 @@ mod tests {
     #[test]
     fn test_enrich_kinds_single_entity_hit_by_its_own_kind() {
         let mut record = chunk_record(&[7, 8]);
-        record.entity_names = serde_json::to_string(&["C".to_string(), "m".to_string()])
-            .expect("serialize names");
+        record.entity_names =
+            serde_json::to_string(&["C".to_string(), "m".to_string()]).expect("serialize names");
         record.entity_kinds = serde_json::to_string(&["class".to_string(), "method".to_string()])
             .expect("serialize kinds");
         let records = HashMap::from([("chunk_x".to_string(), record)]);

@@ -36,7 +36,11 @@ fn resolve_bare_call(
 ) -> cce_types::ResolvedRelation {
     let mut file = ParsedFile::new(Language::Rust, "lib.rs".to_string(), "");
     let caller_id = 100u32;
-    file.add_entity(create_test_entity(caller_id, caller_name, EntityKind::Function));
+    file.add_entity(create_test_entity(
+        caller_id,
+        caller_name,
+        EntityKind::Function,
+    ));
     for callee in callees {
         file.add_entity(callee);
     }

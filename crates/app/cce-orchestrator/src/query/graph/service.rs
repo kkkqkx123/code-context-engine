@@ -450,7 +450,11 @@ impl<'a> SubGraphBuilder<'a> {
     }
 
     fn insert_entity(&mut self, id: EntityId) {
-        let node_id = self.node_id(id);
+        let key = self.index.get_symbol_key_by_entity_id(id);
+        let node_id = match &key {
+            Some(key) => key.stable_id().0,
+            None => self.fallback_id(id),
+        };
         if !self.seen.insert(node_id.clone()) {
             return;
         }
@@ -462,7 +466,11 @@ impl<'a> SubGraphBuilder<'a> {
                     kind_label(&entity.kind),
                     file,
                     location_of(&entity.span),
-                    Some(entity.name.clone()),
+                    Some(
+                        key.as_ref()
+                            .map(|key| key.scoped_name.clone())
+                            .unwrap_or_else(|| entity.name.clone()),
+                    ),
                     (!entity.signature.is_empty()).then_some(entity.signature.clone()),
                 )
             }
@@ -489,9 +497,13 @@ impl<'a> SubGraphBuilder<'a> {
     fn insert_call_node(&mut self, node: &cce_codegraph::CallChainNode) -> String {
         let node_id = self.node_id(node.function_id);
         if self.seen.insert(node_id.clone()) {
-            let (kind, location) = match self.entity_metadata(node.function_id) {
-                Some(entity) => (kind_label(&entity.kind), location_of(&entity.span)),
-                None => ("unknown".to_string(), String::new()),
+            let (kind, location, signature) = match self.entity_metadata(node.function_id) {
+                Some(entity) => (
+                    kind_label(&entity.kind),
+                    location_of(&entity.span),
+                    (!entity.signature.is_empty()).then_some(entity.signature.clone()),
+                ),
+                None => ("unknown".to_string(), String::new(), None),
             };
             let location = match node.call_line {
                 Some(line) if location.is_empty() => format!("L{line}"),
@@ -504,7 +516,7 @@ impl<'a> SubGraphBuilder<'a> {
                 source_file: node.file_path.clone(),
                 source_location: location,
                 scoped_name: Some(node.function_name.clone()),
-                signature: None,
+                signature,
             });
         }
         node_id
@@ -581,10 +593,33 @@ impl<'a> SubGraphBuilder<'a> {
     }
 
     fn node_id(&self, id: EntityId) -> String {
-        self.index
-            .get_symbol_key_by_entity_id(id)
-            .map(|key| key.stable_id().0)
-            .unwrap_or_else(|| format!("entity:{}", id.0))
+        match self.index.get_symbol_key_by_entity_id(id) {
+            Some(key) => key.stable_id().0,
+            None => self.fallback_id(id),
+        }
+    }
+
+    /// Deterministic fallback for entities without a registered symbol key.
+    ///
+    /// Derived from file, kind, name and byte span instead of the run-local
+    /// counter, so identical snapshots always produce the same id. The
+    /// `local:` namespace marks it as snapshot-bound: unlike `sym_*` it must
+    /// not be used to join entities across runs.
+    fn fallback_id(&self, id: EntityId) -> String {
+        match self.entity_metadata(id) {
+            Some(entity) => {
+                let file = self.index.get_file_path_by_entity(id).unwrap_or_default();
+                format!(
+                    "local:{}:{}:{}:{}-{}",
+                    file,
+                    kind_label(&entity.kind),
+                    entity.name,
+                    entity.span.start_byte,
+                    entity.span.end_byte,
+                )
+            }
+            None => format!("entity:{}", id.0),
+        }
     }
 
     fn external_id(&self, name: &str) -> String {

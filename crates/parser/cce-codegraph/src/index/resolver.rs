@@ -522,7 +522,8 @@ impl RelationResolver {
         let mut effective_callee_id = callee_id;
         let mut overload_signature: Option<String> = None;
         // Determine owner_type and call_context using TypeMemberIndex
-        let (owner_type, call_context, relation_type) = if let Some(callee_id) = effective_callee_id {
+        let (owner_type, call_context, relation_type) = if let Some(callee_id) = effective_callee_id
+        {
             // Try to find the owner type from TypeMemberIndex
             let global_type_index = symbol_table.global_type_index();
             let owner_type = global_type_index

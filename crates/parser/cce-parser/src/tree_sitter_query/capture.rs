@@ -130,6 +130,9 @@ pub fn is_main_entity_capture(name: &str) -> bool {
     if !name.starts_with(ENTITY_PREFIX) {
         return false;
     }
+    if name.contains(".signature") {
+        return false;
+    }
 
     let rest = &name[ENTITY_PREFIX.len()..];
     let first_dot = rest.find('.');
@@ -276,6 +279,11 @@ mod tests {
         assert!(!is_main_entity_capture("entity.at_rule.url"));
         assert!(!is_main_entity_capture("entity.at_rule.encoding"));
         assert!(!is_main_entity_capture("entity.css_value.important"));
+        assert!(!is_main_entity_capture("entity.function.signature.name"));
+        assert!(!is_main_entity_capture("entity.function.signature.params"));
+        assert!(!is_main_entity_capture(
+            "entity.struct.signature.type_params"
+        ));
     }
 
     #[test]

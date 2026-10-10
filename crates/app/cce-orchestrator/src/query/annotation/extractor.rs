@@ -40,13 +40,19 @@ impl SemanticUnitExtractor {
         // Validate line range
         if start_line == 0 || end_line == 0 {
             return Err(AnnotationError::invalid_line_range(
-                file_path, start_line, end_line, content.lines().count() as u32,
+                file_path,
+                start_line,
+                end_line,
+                content.lines().count() as u32,
             ));
         }
 
         if start_line > end_line {
             return Err(AnnotationError::invalid_line_range(
-                file_path, start_line, end_line, content.lines().count() as u32,
+                file_path,
+                start_line,
+                end_line,
+                content.lines().count() as u32,
             ));
         }
 

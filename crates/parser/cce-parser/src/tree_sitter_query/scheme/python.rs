@@ -54,12 +54,12 @@ pub fn entity_query() -> &'static str {
 
 ; Class definition
 (class_definition
-  name: (identifier) @entity.class.name
+  name: (identifier) @entity.class.name @entity.class.signature.name
   superclasses: (argument_list
     [
-      (identifier) @entity.class.base
-      (attribute) @entity.class.base
-      (keyword_argument value: (_) @entity.class.base)
+      (identifier) @entity.class.base @entity.class.signature.base
+      (attribute) @entity.class.base @entity.class.signature.base
+      (keyword_argument value: (_) @entity.class.base @entity.class.signature.base)
     ]
   )?
   body: (block) @entity.class.body
@@ -68,12 +68,12 @@ pub fn entity_query() -> &'static str {
 ; Decorated class definition
 (decorated_definition
   (class_definition
-    name: (identifier) @entity.class.name
+    name: (identifier) @entity.class.name @entity.class.signature.name
     superclasses: (argument_list
       [
-        (identifier) @entity.class.base
-        (attribute) @entity.class.base
-        (keyword_argument value: (_) @entity.class.base)
+        (identifier) @entity.class.base @entity.class.signature.base
+        (attribute) @entity.class.base @entity.class.signature.base
+        (keyword_argument value: (_) @entity.class.base @entity.class.signature.base)
       ]
     )?
     body: (block) @entity.class.body
@@ -86,27 +86,27 @@ pub fn entity_query() -> &'static str {
 
 ; Function definition
 (function_definition
-  name: (identifier) @entity.function.name
-  parameters: (parameters) @entity.function.params
-  return_type: [(type) (string)]? @entity.function.return_type
+  name: (identifier) @entity.function.name @entity.function.signature.name
+  parameters: (parameters) @entity.function.params @entity.function.signature.params
+  return_type: [(type) (string)]? @entity.function.return_type @entity.function.signature.return_type
   body: (block) @entity.function.body
 ) @entity.function
 
 ; Decorated function definition
 (decorated_definition
   (function_definition
-    name: (identifier) @entity.function.name
-    parameters: (parameters) @entity.function.params
-    return_type: [(type) (string)]? @entity.function.return_type
+    name: (identifier) @entity.function.name @entity.function.signature.name
+    parameters: (parameters) @entity.function.params @entity.function.signature.params
+    return_type: [(type) (string)]? @entity.function.return_type @entity.function.signature.return_type
     body: (block) @entity.function.body
   )
 ) @entity.function
 
 ; Async function definition
 (function_definition
-  name: (identifier) @entity.function.async.name
-  parameters: (parameters) @entity.function.async.params
-  return_type: [(type) (string)]? @entity.function.return_type
+  name: (identifier) @entity.function.async.name @entity.function.async.signature.name
+  parameters: (parameters) @entity.function.async.params @entity.function.async.signature.params
+  return_type: [(type) (string)]? @entity.function.return_type @entity.function.async.signature.return_type
   body: (block) @entity.function.async.body
 ) @entity.function.async
 
@@ -120,9 +120,9 @@ pub fn entity_query() -> &'static str {
 (class_definition
   body: (block
     (function_definition
-      name: (identifier) @entity.method.name
-      parameters: (parameters) @entity.method.params
-      return_type: [(type) (string)]? @entity.method.return_type
+      name: (identifier) @entity.method.name @entity.method.signature.name
+      parameters: (parameters) @entity.method.params @entity.method.signature.params
+      return_type: [(type) (string)]? @entity.method.return_type @entity.method.signature.return_type
       body: (block) @entity.method.body
     ) @entity.method
   )
@@ -134,9 +134,9 @@ pub fn entity_query() -> &'static str {
   body: (block
     (decorated_definition
       (function_definition
-        name: (identifier) @entity.method.name
-        parameters: (parameters) @entity.method.params
-        return_type: [(type) (string)]? @entity.method.return_type
+        name: (identifier) @entity.method.name @entity.method.signature.name
+        parameters: (parameters) @entity.method.params @entity.method.signature.params
+        return_type: [(type) (string)]? @entity.method.return_type @entity.method.signature.return_type
         body: (block) @entity.method.body
       )
     ) @entity.method
@@ -147,11 +147,12 @@ pub fn entity_query() -> &'static str {
 (class_definition
   body: (block
     (function_definition
-      name: (identifier) @entity.method.class.name
+      name: (identifier) @entity.method.class.name @entity.method.class.signature.name
       parameters: (parameters
         (identifier) @entity.method.class.cls_param
-      ) @entity.method.params
-      return_type: [(type) (string)]? @entity.method.class.return_type
+      ) @entity.method.params @entity.method.class.signature.params
+      return_type: [(type) (string)]? @entity.method.class.return_type @entity.method.class.signature.return_type
+      body: (block) @entity.method.class.body
     ) @entity.method.class
   )
 )
@@ -160,11 +161,12 @@ pub fn entity_query() -> &'static str {
 (class_definition
   body: (block
     (function_definition
-      name: (identifier) @entity.method.instance.name
+      name: (identifier) @entity.method.instance.name @entity.method.instance.signature.name
       parameters: (parameters
         (identifier) @entity.method.instance.self_param
-      ) @entity.method.params
-      return_type: [(type) (string)]? @entity.method.instance.return_type
+      ) @entity.method.params @entity.method.instance.signature.params
+      return_type: [(type) (string)]? @entity.method.instance.return_type @entity.method.instance.signature.return_type
+      body: (block) @entity.method.instance.body
     ) @entity.method.instance
   )
 )
@@ -175,7 +177,10 @@ pub fn entity_query() -> &'static str {
     (decorated_definition
       (decorator (identifier) @entity.method.static.decorator)
       (function_definition
-        name: (identifier) @entity.method.static.name
+        name: (identifier) @entity.method.static.name @entity.method.static.signature.name
+        parameters: (parameters) @entity.method.params @entity.method.static.signature.params
+        return_type: [(type) (string)]? @entity.method.static.return_type @entity.method.static.signature.return_type
+        body: (block) @entity.method.static.body
       )
     ) @entity.method.static
   )
@@ -187,7 +192,10 @@ pub fn entity_query() -> &'static str {
     (decorated_definition
       (decorator (identifier) @entity.method.getter.decorator)
       (function_definition
-        name: (identifier) @entity.method.getter.name
+        name: (identifier) @entity.method.getter.name @entity.method.getter.signature.name
+        parameters: (parameters) @entity.method.params @entity.method.getter.signature.params
+        return_type: [(type) (string)]? @entity.method.getter.return_type @entity.method.getter.signature.return_type
+        body: (block) @entity.method.getter.body
       )
     ) @entity.method.getter
   )
@@ -200,9 +208,9 @@ pub fn entity_query() -> &'static str {
 ; Lambda expression assigned to variable
 (expression_statement
   (assignment
-    left: (identifier) @entity.lambda.name
+    left: (identifier) @entity.lambda.name @entity.lambda.signature.name
     right: (lambda
-      parameters: (lambda_parameters) @entity.lambda.params
+      parameters: (lambda_parameters) @entity.lambda.params @entity.lambda.signature.params
     )
   )
 ) @entity.lambda
@@ -213,12 +221,14 @@ pub fn entity_query() -> &'static str {
 
 ; Generator function (containing yield)
 (function_definition
-  name: (identifier) @entity.function.generator.name
+  name: (identifier) @entity.function.generator.name @entity.function.generator.signature.name
+  parameters: (parameters) @entity.function.params @entity.function.generator.signature.params
+  return_type: [(type) (string)]? @entity.function.return_type @entity.function.generator.signature.return_type
   body: (block
     (expression_statement
       (yield)
     )
-  )
+  ) @entity.function.generator.body
 ) @entity.function.generator
 
 ; ============================================
@@ -439,9 +449,9 @@ pub fn entity_query() -> &'static str {
 
 ; Enum class definition
 (class_definition
-  name: (identifier) @entity.enum.name
+  name: (identifier) @entity.enum.name @entity.enum.signature.name
   superclasses: (argument_list
-    (identifier) @entity.enum.base
+    (identifier) @entity.enum.base @entity.enum.signature.base
   )
   body: (block) @entity.enum.body
 ) @entity.enum
@@ -476,9 +486,9 @@ pub fn entity_query() -> &'static str {
 
 ; Function with type constraints
 (function_definition
-  name: (identifier) @entity.function.generic.name
-  parameters: (parameters) @entity.function.generic.params
-  return_type: (type) @entity.function.generic.return_type
+  name: (identifier) @entity.function.generic.name @entity.function.generic.signature.name
+  parameters: (parameters) @entity.function.generic.params @entity.function.generic.signature.params
+  return_type: (type) @entity.function.generic.return_type @entity.function.generic.signature.return_type
   body: (block) @entity.function.generic.body
 ) @entity.function.generic
 "#

@@ -81,7 +81,9 @@ pub fn entity_query() -> &'static str {
 
 ; Function signature item (trait method declaration)
 (function_signature_item
-  name: (identifier) @entity.function.name
+  name: (identifier) @entity.function.name @entity.function.signature.name
+  parameters: (parameters) @entity.function.params @entity.function.signature.params
+  return_type: (_)? @entity.function.return_type @entity.function.signature.return_type
 ) @entity.function
 
 ; ============================================
@@ -91,6 +93,7 @@ pub fn entity_query() -> &'static str {
 ; Module definition
 (mod_item
   name: (identifier) @entity.module.name
+  body: (declaration_list) @entity.module.body
 ) @entity.module
 
 ; Use declaration
@@ -126,6 +129,7 @@ pub fn entity_query() -> &'static str {
 ; Macro definition (macro_rules!)
 (macro_definition
   name: (identifier) @entity.macro.name
+  (macro_rule) @entity.macro.body
 ) @entity.macro
 
 ; Attribute macro (e.g., #[derive(...)])

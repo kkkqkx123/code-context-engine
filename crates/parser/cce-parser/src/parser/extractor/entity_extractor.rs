@@ -899,7 +899,19 @@ class Point:
             .iter()
             .find(|e| e.name == "Point")
             .expect("Should find class Point");
-        assert_eq!(point.signature, "class Point:");
+        assert_eq!(point.signature, "Point");
+
+        let init = entities
+            .iter()
+            .find(|e| e.name == "__init__")
+            .expect("Should find __init__");
+        assert_eq!(init.signature, "__init__ (self, x, y)");
+
+        let distance = entities
+            .iter()
+            .find(|e| e.name == "distance")
+            .expect("Should find distance");
+        assert_eq!(distance.signature, "distance (self, other)");
 
         for entity in entities.iter().filter(|e| {
             matches!(
@@ -908,17 +920,135 @@ class Point:
             )
         }) {
             assert!(
-                !entity.signature.contains('\n'),
-                "signature of {} must be single-line, got {:?}",
-                entity.name,
-                entity.signature
-            );
-            assert!(
                 !entity.signature.contains("self.x = x")
                     && !entity.signature.contains("return 0.0"),
                 "signature of {} must exclude the body, got {:?}",
                 entity.name,
                 entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_python_decorated_and_default_spacing() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "@app.route(\"/read\")\ndef read() -> str:\n    return \"ok\"\n\ndef greet(name: str = \"a  b\"):\n    return name\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Python)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Python)
+            .expect("Failed to extract");
+
+        let read = entities
+            .iter()
+            .find(|e| e.name == "read")
+            .expect("Should find read");
+        assert_eq!(read.signature, "read () str");
+        assert!(
+            !read.signature.contains("@app.route"),
+            "decorator must not enter signature, got {:?}",
+            read.signature
+        );
+
+        let greet = entities
+            .iter()
+            .find(|e| e.name == "greet")
+            .expect("Should find greet");
+        assert_eq!(greet.signature, "greet (name: str = \"a  b\")");
+    }
+
+    #[test]
+    fn test_extract_python_method_variants() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "class Service:\n    @classmethod\n    def create(cls, name: str) -> str:\n        return name\n\n    def get(self, key: str) -> str:\n        return key\n\n    @staticmethod\n    def helper(x: int) -> int:\n        return x\n\n    @property\n    def label(self) -> str:\n        return \"x\"\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Python)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Python)
+            .expect("Failed to extract");
+
+        for expected in [
+            ("create", "create (cls, name: str) str"),
+            ("get", "get (self, key: str) str"),
+            ("helper", "helper (x: int) int"),
+            ("label", "label (self) str"),
+        ] {
+            let entity = entities
+                .iter()
+                .find(|e| e.name == expected.0)
+                .unwrap_or_else(|| panic!("Should find {}", expected.0));
+            assert_eq!(entity.signature, expected.1, "signature of {}", expected.0);
+            assert!(
+                !entity.signature.contains("return"),
+                "body must not leak for {}, got {:?}",
+                expected.0,
+                entity.signature
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_rust_module_excludes_body() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "pub mod sync {\n    pub struct Guard;\n    pub fn lock() -> Guard {\n        Guard\n    }\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Rust)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Rust)
+            .expect("Failed to extract");
+
+        let module = entities
+            .iter()
+            .find(|e| e.kind == EntityKind::Module && e.name == "sync")
+            .expect("Should find mod sync");
+        assert_eq!(module.signature, "pub mod sync");
+        assert!(
+            !module.signature.contains("Guard"),
+            "module body must not leak into signature, got {:?}",
+            module.signature
+        );
+    }
+
+    #[test]
+    fn test_extract_rust_macro_rules_excludes_rules() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "macro_rules! setup {\n    () => { 1 };\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Rust)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Rust)
+            .expect("Failed to extract");
+
+        let found = entities.iter().find(|e| e.name == "setup");
+        if let Some(mac) = found {
+            assert!(
+                !mac.signature.contains("=>"),
+                "macro rules must not leak into signature, got {:?}",
+                mac.signature
             );
         }
     }

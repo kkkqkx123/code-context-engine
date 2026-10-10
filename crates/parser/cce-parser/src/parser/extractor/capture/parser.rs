@@ -5,11 +5,11 @@
 //! depend only on the capture/match data.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::parser::extractor::utils;
 use crate::tree_sitter_query::capture;
 use crate::tree_sitter_query::executor::{Capture, QueryMatch};
-use cce_utils::normalize_whitespace;
 
 /// Find the main entity capture (e.g., @entity.type.class, @entity.function.definition)
 ///
@@ -54,21 +54,28 @@ pub fn extract_subtype_from_capture(capture_name: &str) -> Option<String> {
     }
 }
 
-/// Reconstruct signature text from sub-captures of a signature match.
+/// Number of matches that produced no composable signature parts and no
+/// usable header fallback. The empty signature itself is the observable
+/// failure signal; this counter makes the gap countable in tests.
+static SIGNATURE_MISSING_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Current value of the signature-missing counter.
+pub fn signature_missing_count() -> u64 {
+    SIGNATURE_MISSING_COUNT.load(Ordering::Relaxed)
+}
+
+fn record_signature_missing() {
+    SIGNATURE_MISSING_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Reconstruct signature text from structural sub-captures.
 ///
-/// For a signature match like:
-/// ```text
-/// (struct_item
-///   name: (type_identifier) @entity.struct.signature.name
-///   type_parameters: (_)? @entity.struct.signature.type_params
-/// ) @entity.struct.signature
-/// ```
-///
-/// This extracts and concatenates the sub-capture texts (name, type_params, etc.)
-/// in source order, producing a clean signature without body/fields/comments.
+/// Signature equals the named structural parts in source order. Each part
+/// keeps its source text verbatim (including consecutive spaces inside
+/// string defaults); only the separator between parts is a single space.
+/// Decorators, comments, and docstrings are never captured so they cannot
+/// enter the signature.
 pub fn reconstruct_signature_from_subcaptures(mat: &QueryMatch, source: &str) -> String {
-    // Collect sub-captures (those with ".signature." in their name, excluding the main
-    // signature capture which has ".signature" at the end without trailing dot).
     let mut sub_captures: Vec<&Capture> = mat
         .captures
         .iter()
@@ -79,23 +86,19 @@ pub fn reconstruct_signature_from_subcaptures(mat: &QueryMatch, source: &str) ->
         return String::new();
     }
 
-    // Sort by start_byte to preserve source order
     sub_captures.sort_by_key(|c| c.start_byte);
 
-    // Extract text from each sub-capture and join with space
-    sub_captures
+    let parts: Vec<String> = sub_captures
         .iter()
-        .map(|c| utils::extract_text_from_source(source, c.start_byte, c.end_byte))
-        .collect::<Vec<_>>()
-        .join(" ")
+        .map(|c| {
+            let raw = utils::extract_text_from_source(source, c.start_byte, c.end_byte);
+            let text = if raw.is_empty() { c.text.clone() } else { raw };
+            text.trim().to_string()
+        })
+        .filter(|t| !t.is_empty())
+        .collect();
+    parts.join(" ")
 }
-
-/// Maximum signature length in chars.
-///
-/// Definition headers are short by nature; anything beyond this bound is
-/// body text that escaped header detection. The cap keeps snapshots, graph
-/// payloads, and symbol identity hashing bounded.
-pub const MAX_SIGNATURE_LEN: usize = 500;
 
 /// Whether a capture marks the start of an entity body (function block,
 /// class block, field list, and their per-language equivalents).
@@ -103,81 +106,86 @@ fn is_body_capture(name: &str) -> bool {
     name.ends_with(".body")
 }
 
-/// Extract full entity signature text from source
+/// Whether the main capture names a kind that conceptually owns a block
+/// body. Inline forms (arrow, lambda, callbacks) keep the full text as
+/// their header; block forms without a body capture are query gaps and
+/// must surface as empty signatures, never as full-text fallbacks.
+fn main_expects_body(main_name: &str) -> bool {
+    let lower = main_name.to_lowercase();
+    if lower.contains("arrow")
+        || lower.contains("callback")
+        || lower.contains("lambda")
+        || lower.contains("closure")
+        || lower.contains("literal")
+        || lower.contains("comprehension")
+        || lower.contains("iife")
+        || lower.contains("top_call")
+        || lower.contains("top_if")
+    {
+        return false;
+    }
+    lower.contains("function")
+        || lower.contains("method")
+        || lower.contains("constructor")
+        || lower.contains("destructor")
+        || lower.contains("operator")
+        || lower.contains("class")
+        || lower.contains("struct")
+        || lower.contains("enum")
+        || lower.contains("interface")
+        || lower.contains("trait")
+        || lower.contains(".impl")
+        || lower.contains("union")
+        || lower.contains("getter")
+        || lower.contains("setter")
+}
+
+/// Extract full entity signature text from source.
 ///
 /// Priority:
-/// 1. Reconstruct from signature sub-captures (e.g., @entity.struct.signature.type_params)
-/// 2. Fall back to the header slice before the body capture
+/// 1. Compose from signature sub-captures in source order.
+/// 2. Transitional: slice the header before the body capture for patterns
+///    that predate signature aliases. No cleaning and no truncation.
+/// 3. Bodiless entities (module, import, macro, and friends): the full
+///    main text is the header.
+///    Otherwise return empty and count the gap instead of fabricating text.
 pub fn extract_signature(mat: &QueryMatch, source: &str) -> String {
-    // Priority 1: Reconstruct from signature sub-captures if available
-    let sig = reconstruct_signature_from_subcaptures(mat, source);
-    if !sig.is_empty() {
-        return truncate_signature(clean_signature_header(&sig));
+    let composed = reconstruct_signature_from_subcaptures(mat, source);
+    if !composed.trim().is_empty() {
+        return composed;
     }
 
-    // Priority 2: Slice the header before the body capture. The body
-    // capture marks where the implementation starts in every language
-    // scheme, so this works for brace blocks as well as colon blocks and
-    // `end` blocks where no `{` exists to cut at.
-    if let Some(main) = find_main_capture(mat) {
-        let mut header_end = main.end_byte;
-        for capture in mat.captures.iter().filter(|c| is_body_capture(&c.name)) {
-            if capture.start_byte > main.start_byte
-                && capture.start_byte < header_end
-                && capture.end_byte <= main.end_byte
-            {
-                header_end = capture.start_byte;
-            }
-        }
-        if header_end > main.start_byte {
-            let sliced = utils::extract_text_from_source(source, main.start_byte, header_end);
-            if !sliced.is_empty() {
-                return truncate_signature(clean_signature_header(&sliced));
-            }
-        }
-        return extract_signature_from_text(&main.text);
-    }
-
-    String::new()
-}
-
-/// Keep only definition-header lines and collapse them into one line.
-///
-/// Drops decorator lines and comment lines; preprocessor lines are kept
-/// so C-style directives never blank a signature. The caller guarantees
-/// the input ends before the body, so no implementation can leak through.
-fn clean_signature_header(text: &str) -> String {
-    let kept: Vec<&str> = text
-        .lines()
-        .map(|line| line.trim())
-        .filter(|line| {
-            !line.is_empty()
-                && !line.starts_with('@')
-                && !line.starts_with("//")
-                && !line.starts_with("/*")
-                && !line.starts_with('*')
-                && !line.starts_with("<!--")
-        })
-        .collect();
-    normalize_whitespace(&kept.join(" "))
-}
-
-/// Truncate a signature to [`MAX_SIGNATURE_LEN`] on a char boundary.
-fn truncate_signature(signature: String) -> String {
-    if signature.chars().count() > MAX_SIGNATURE_LEN {
-        signature.chars().take(MAX_SIGNATURE_LEN).collect()
-    } else {
-        signature
-    }
-}
-
-/// Extract signature part from full text (e.g., remove body, fields, comments)
-fn extract_signature_from_text(text: &str) -> String {
-    let head = match text.find('{') {
-        Some(brace_pos) => &text[..brace_pos],
-        None => text,
+    let Some(main) = find_main_capture(mat) else {
+        record_signature_missing();
+        return String::new();
     };
-    truncate_signature(clean_signature_header(head))
+
+    let mut header_end = main.end_byte;
+    for capture in mat.captures.iter().filter(|c| is_body_capture(&c.name)) {
+        if capture.start_byte > main.start_byte
+            && capture.start_byte < header_end
+            && capture.end_byte <= main.end_byte
+        {
+            header_end = capture.start_byte;
+        }
+    }
+    if header_end > main.start_byte && header_end < main.end_byte {
+        let sliced = utils::extract_text_from_source(source, main.start_byte, header_end);
+        let header = sliced.trim();
+        if !header.is_empty() {
+            return header.to_string();
+        }
+        record_signature_missing();
+        return String::new();
+    }
+
+    if main_expects_body(&main.name) {
+        record_signature_missing();
+        return String::new();
+    }
+    utils::extract_text_from_source(source, main.start_byte, main.end_byte)
+        .trim()
+        .to_string()
 }
 
 /// Extract parameters from match, returning (name, optional_type) pairs
@@ -638,16 +646,24 @@ pub fn extract_python_method_type(mat: &QueryMatch) -> Option<String> {
     None
 }
 
-/// Extract base class names from `@entity.class.base` captures
+/// Extract base class names from `@entity.class.base` captures.
+/// Stacked signature aliases share the same span as the plain capture, so
+/// duplicates are removed while keeping source order.
 pub fn extract_base_classes(mat: &QueryMatch) -> Vec<String> {
-    mat.captures
+    let mut seen = std::collections::HashSet::new();
+    let mut bases = Vec::new();
+    let mut ordered: Vec<&Capture> = mat
+        .captures
         .iter()
-        .filter(|c| {
-            let name_lower = c.name.to_lowercase();
-            name_lower.ends_with(".base")
-        })
-        .map(|c| c.text.clone())
-        .collect()
+        .filter(|c| c.name.to_lowercase().ends_with(".base"))
+        .collect();
+    ordered.sort_by_key(|c| c.start_byte);
+    for c in ordered {
+        if seen.insert((c.start_byte, c.end_byte, c.text.clone())) {
+            bases.push(c.text.clone());
+        }
+    }
+    bases
 }
 
 /// Extract enum variant type from captures
@@ -747,19 +763,26 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_signature_strips_decorator() {
+    fn test_extract_signature_composition_excludes_decorator() {
         let source = "@app.route(\"/read\")\ndef read():\n    return str(x)\n";
-        let body_start = source.find("    return").expect("body");
+        let name_start = source.find("read").expect("name");
+        let params_start = source.find("()").expect("params");
         let mat = make_match(vec![
             make_capture("entity.function", source, 0, source.len()),
             make_capture(
-                "entity.function.body",
-                &source[body_start..],
-                body_start,
-                source.len(),
+                "entity.function.signature.name",
+                "read",
+                name_start,
+                name_start + 4,
+            ),
+            make_capture(
+                "entity.function.signature.params",
+                "()",
+                params_start,
+                params_start + 2,
             ),
         ]);
-        assert_eq!(extract_signature(&mat, source), "def read():");
+        assert_eq!(extract_signature(&mat, source), "read ()");
     }
 
     #[test]
@@ -793,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_signature_truncates_long_header() {
+    fn test_extract_signature_preserves_long_header() {
         let header = format!("def f({}):", vec!["arg: int"; 200].join(", "));
         let source = format!("{header}\n    return 1\n");
         let body_start = header.len() + 1;
@@ -807,8 +830,73 @@ mod tests {
             ),
         ]);
         let signature = extract_signature(&mat, source.as_str());
-        assert_eq!(signature.chars().count(), MAX_SIGNATURE_LEN);
+        assert_eq!(signature, header);
         assert!(!signature.contains("return"));
+    }
+
+    #[test]
+    fn test_extract_signature_preserves_string_default_spacing() {
+        let source = "def greet(name: str = \"a  b\"):\n    return name\n";
+        let name_start = source.find("greet").expect("name");
+        let params_text = "(name: str = \"a  b\")";
+        let params_start = source.find(params_text).expect("params");
+        let mat = make_match(vec![
+            make_capture("entity.function", source, 0, source.len()),
+            make_capture(
+                "entity.function.signature.name",
+                "greet",
+                name_start,
+                name_start + 5,
+            ),
+            make_capture(
+                "entity.function.signature.params",
+                params_text,
+                params_start,
+                params_start + params_text.len(),
+            ),
+        ]);
+        assert_eq!(
+            extract_signature(&mat, source),
+            format!("greet {params_text}")
+        );
+    }
+
+    #[test]
+    fn test_extract_signature_dict_default_not_cut() {
+        let source = "def f(opts: dict = {\"a\": 1}):\n    return opts\n";
+        let name_start = source.find("f(").expect("name");
+        let params_text = "(opts: dict = {\"a\": 1})";
+        let params_start = source.find(params_text).expect("params");
+        let mat = make_match(vec![
+            make_capture("entity.function", source, 0, source.len()),
+            make_capture(
+                "entity.function.signature.name",
+                "f",
+                name_start,
+                name_start + 1,
+            ),
+            make_capture(
+                "entity.function.signature.params",
+                params_text,
+                params_start,
+                params_start + params_text.len(),
+            ),
+        ]);
+        assert_eq!(extract_signature(&mat, source), format!("f {params_text}"));
+    }
+
+    #[test]
+    fn test_extract_signature_missing_returns_empty() {
+        let source = "def broken(arg):\n    return arg\n";
+        let before = signature_missing_count();
+        let mat = make_match(vec![make_capture(
+            "entity.function",
+            source,
+            0,
+            source.len(),
+        )]);
+        assert_eq!(extract_signature(&mat, source), "");
+        assert!(signature_missing_count() > before, "gap must be counted");
     }
 
     #[test]
