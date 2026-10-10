@@ -74,7 +74,10 @@ fn record_signature_missing() {
 /// keeps its source text verbatim (including consecutive spaces inside
 /// string defaults); only the separator between parts is a single space.
 /// Decorators, comments, and docstrings are never captured so they cannot
-/// enter the signature.
+/// enter the signature. Two roles are summarized, never cut mid-token by a
+/// blind length cap: provenance sources keep their head
+/// ([`utils::summarize_provenance_source`]) and argument lists fold embedded
+/// block bodies to shape markers ([`collapse_long_brace_blocks`]).
 pub fn reconstruct_signature_from_subcaptures(mat: &QueryMatch, source: &str) -> String {
     let mut sub_captures: Vec<&Capture> = mat
         .captures
@@ -94,12 +97,15 @@ pub fn reconstruct_signature_from_subcaptures(mat: &QueryMatch, source: &str) ->
             let raw = utils::extract_text_from_source(source, c.start_byte, c.end_byte);
             let text = if raw.is_empty() { c.text.clone() } else { raw };
             let text = text.trim().to_string();
-            // Provenance roles (`for x in <collection>`) can bind a whole
-            // literal as the source part. Declaration roles (name, params,
-            // types, arguments) stay verbatim; only data roles are capped so
-            // the signature keeps the collection head, not its rows.
-            if c.name.ends_with(".signature.source") && text.chars().count() > MAX_SIGNATURE_LEN {
-                text.chars().take(MAX_SIGNATURE_LEN).collect()
+            // Provenance roles (`for x in <collection>`) bind data, not
+            // declarations: keep the collection head, drop the rows.
+            // Declaration roles (name, params, types) stay verbatim, except
+            // argument lists whose embedded block bodies are folded to shape
+            // markers so implementation detail cannot leak into signatures.
+            if c.name.ends_with(".signature.source") {
+                utils::summarize_provenance_source(&text)
+            } else if c.name.ends_with(".signature.arguments") {
+                collapse_long_brace_blocks(&text)
             } else {
                 text
             }
@@ -127,6 +133,159 @@ fn truncate_fallback_signature(signature: String) -> String {
     } else {
         signature
     }
+}
+
+/// Maximum inline brace-block length in chars for argument lists.
+///
+/// Blocks at or below this size (small literals, short lambdas) stay
+/// verbatim; longer ones are implementation detail inside a declaration
+/// role and fold to a shape marker.
+const MAX_INLINE_BLOCK_LEN: usize = 100;
+
+/// Fold long brace blocks inside an argument list to shape markers.
+///
+/// Keeps argument structure, scalar arguments, and lambda parameter lists
+/// while replacing block bodies (`{ ... }`) longer than
+/// [`MAX_INLINE_BLOCK_LEN`] with `{...}`. The scan is aware of strings,
+/// chars, line/block comments, and text blocks so braces inside them never
+/// open a fold; unbalanced trailing text passes through verbatim.
+fn collapse_long_brace_blocks(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                let end = skip_quoted(bytes, i, true);
+                out.push_str(&text[i..end]);
+                i = end;
+            }
+            b'\'' => {
+                let end = skip_quoted(bytes, i, false);
+                out.push_str(&text[i..end]);
+                i = end;
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+                let mut end = i + 2;
+                while end < bytes.len() && bytes[end] != b'\n' {
+                    end += 1;
+                }
+                out.push_str(&text[i..end]);
+                i = end;
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                let mut end = i + 2;
+                while end + 1 < bytes.len() && !(bytes[end] == b'*' && bytes[end + 1] == b'/') {
+                    end += 1;
+                }
+                end = (end + 2).min(bytes.len());
+                out.push_str(&text[i..end]);
+                i = end;
+            }
+            b'{' => match match_brace(bytes, i) {
+                Some(end) if text[i..end].chars().count() > MAX_INLINE_BLOCK_LEN => {
+                    out.push_str("{...}");
+                    i = end;
+                }
+                Some(end) => {
+                    out.push_str(&text[i..end]);
+                    i = end;
+                }
+                None => {
+                    out.push_str(&text[i..]);
+                    break;
+                }
+            },
+            _ => {
+                let next = next_char_boundary(text, i);
+                out.push_str(&text[i..next]);
+                i = next;
+            }
+        }
+    }
+    out
+}
+
+/// Byte index one char past `i`. All scanned delimiters are ASCII, so every
+/// produced index is a char boundary.
+fn next_char_boundary(text: &str, i: usize) -> usize {
+    let mut indices = text[i..].char_indices();
+    indices.next();
+    match indices.next() {
+        Some((offset, _)) => i + offset,
+        None => text.len(),
+    }
+}
+
+/// End index just past a quoted region starting at `i` (which holds the
+/// opening quote). `text_block` selects `"""`-style text blocks; otherwise a
+/// single `'`/`"` quote with backslash escapes. Unterminated regions run to
+/// the end of the text.
+fn skip_quoted(bytes: &[u8], i: usize, text_block: bool) -> usize {
+    if text_block && i + 2 < bytes.len() && bytes[i + 1] == b'"' && bytes[i + 2] == b'"' {
+        let mut j = i + 3;
+        while j + 2 < bytes.len() {
+            if bytes[j] == b'"' && bytes[j + 1] == b'"' && bytes[j + 2] == b'"' {
+                return j + 3;
+            }
+            j += 1;
+        }
+        return bytes.len();
+    }
+    let quote = bytes[i];
+    let mut j = i + 1;
+    while j < bytes.len() {
+        if bytes[j] == b'\\' {
+            j += 2;
+            continue;
+        }
+        if bytes[j] == quote {
+            return j + 1;
+        }
+        if bytes[j] == b'\n' && quote != b'"' {
+            return j;
+        }
+        j += 1;
+    }
+    bytes.len()
+}
+
+/// End index just past the `}` balancing the `{` at `i`, or `None` when
+/// unbalanced. Nested blocks and quoted/commented regions are honored.
+fn match_brace(bytes: &[u8], i: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut j = i;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'"' => j = skip_quoted(bytes, j, true),
+            b'\'' => j = skip_quoted(bytes, j, false),
+            b'/' if j + 1 < bytes.len() && bytes[j + 1] == b'/' => {
+                while j < bytes.len() && bytes[j] != b'\n' {
+                    j += 1;
+                }
+            }
+            b'/' if j + 1 < bytes.len() && bytes[j + 1] == b'*' => {
+                j += 2;
+                while j + 1 < bytes.len() && !(bytes[j] == b'*' && bytes[j + 1] == b'/') {
+                    j += 1;
+                }
+                j = (j + 2).min(bytes.len());
+            }
+            b'{' => {
+                depth += 1;
+                j += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                j += 1;
+                if depth == 0 {
+                    return Some(j);
+                }
+            }
+            _ => j += 1,
+        }
+    }
+    None
 }
 /// Whether a capture marks the start of an entity body (function block,
 /// class block, field list, and their per-language equivalents).
@@ -1015,6 +1174,83 @@ mod tests {
         let signature = extract_signature(&mat, source.as_str());
         assert!(signature.starts_with("x ["));
         assert!(signature.chars().count() <= MAX_SIGNATURE_LEN + 2);
+    }
+
+    #[test]
+    fn test_extract_signature_source_part_summarizes_multiline_head() {
+        let head = "[]struct {\n\tname string\n\tvalue any\n}";
+        let rows = "{\n\t{\"base type\", 1},\n\t{\"zero value\", 0},\n}".repeat(10);
+        let big = format!("{head}{rows}");
+        let source = format!("for _, tt := range {big} {{ use(tt) }}");
+        let name_start = source.find("tt").expect("name");
+        let src_start = source.find("[]struct").expect("source");
+        let mat = make_match(vec![
+            make_capture("entity.variable.loop", source.as_str(), 0, source.len()),
+            make_capture(
+                "entity.variable.loop.signature.name",
+                "tt",
+                name_start,
+                name_start + 2,
+            ),
+            make_capture(
+                "entity.variable.loop.signature.source",
+                big.as_str(),
+                src_start,
+                src_start + big.len(),
+            ),
+        ]);
+        let signature = extract_signature(&mat, source.as_str());
+        assert!(
+            signature.starts_with("tt []struct {"),
+            "summary must keep the collection head, got: {signature}"
+        );
+        assert!(
+            !signature.contains("base type"),
+            "summary must drop literal rows, got: {signature}"
+        );
+        assert!(
+            signature.ends_with("..."),
+            "summary must be marked, got: {signature}"
+        );
+        assert!(signature.chars().count() <= MAX_SIGNATURE_LEN);
+    }
+
+    #[test]
+    fn test_extract_signature_arguments_collapses_lambda_body() {
+        let body =
+            "JsonParser parser = create();\nfeeder.feed(input);\nreturn parser;\n".repeat(10);
+        let args = format!("(\n(String input) -> {{\n{body}}},\ntrue,\nfalse,\ntrue\n)");
+        let source = format!("ASYNC{args}\n;");
+        let name_end = "ASYNC".len();
+        let args_start = source.find('(').expect("args");
+        let mat = make_match(vec![
+            make_capture("entity.enum_constant", source.as_str(), 0, source.len()),
+            make_capture("entity.enum_constant.signature.name", "ASYNC", 0, name_end),
+            make_capture(
+                "entity.enum_constant.signature.arguments",
+                args.as_str(),
+                args_start,
+                args_start + args.len(),
+            ),
+        ]);
+        let signature = extract_signature(&mat, source.as_str());
+        assert!(
+            signature.starts_with("ASYNC ("),
+            "variant name and argument shape must survive, got: {signature}"
+        );
+        assert!(
+            signature.contains("(String input)"),
+            "lambda parameters must survive, got: {signature}"
+        );
+        assert!(
+            signature.contains("true"),
+            "scalar arguments must survive, got: {signature}"
+        );
+        assert!(
+            !signature.contains("feed(input)"),
+            "lambda implementation must fold away, got: {signature}"
+        );
+        assert!(signature.chars().count() <= MAX_SIGNATURE_LEN);
     }
 
     #[test]

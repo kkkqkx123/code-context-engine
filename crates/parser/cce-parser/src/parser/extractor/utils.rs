@@ -212,6 +212,80 @@ pub fn truncate_entity_name(name: String) -> String {
     }
 }
 
+/// Maximum provenance-source head length in chars.
+///
+/// Provenance roles (`for x in <collection>`) bind data, not declarations:
+/// the collection head (type, shape, callee) carries the retrieval signal
+/// while literal rows are noise. The head budget fits struct/type heads and
+/// collection expressions; anything past it is summarized away.
+pub const MAX_SOURCE_HEAD_LEN: usize = 200;
+
+/// Summarize a provenance-source expression to its head.
+///
+/// Short sources pass through verbatim. Long sources keep the collection
+/// head and drop the data tail, ending with `...` so consumers never
+/// mistake the summary for a complete expression:
+/// - Composite literals (`Type{...}{rows...}`) cut at the type/value seam,
+///   keeping the full type head.
+/// - Everything else keeps whole leading lines within
+///   [`MAX_SOURCE_HEAD_LEN`]; a single long line is cut on a char boundary.
+pub fn summarize_provenance_source(text: &str) -> String {
+    let text = text.trim();
+    if text.chars().count() <= MAX_SOURCE_HEAD_LEN {
+        return text.to_string();
+    }
+    if let Some(head) = composite_type_head(text) {
+        let mut summary = head.trim_end().to_string();
+        summary.push_str("...");
+        return summary;
+    }
+    let mut kept = String::new();
+    let mut kept_chars = 0usize;
+    for line in text.split_inclusive('\n') {
+        let line_chars = line.chars().count();
+        if kept_chars + line_chars > MAX_SOURCE_HEAD_LEN {
+            break;
+        }
+        kept.push_str(line);
+        kept_chars += line_chars;
+    }
+    let mut summary = if kept.is_empty() {
+        text.chars().take(MAX_SOURCE_HEAD_LEN).collect::<String>()
+    } else {
+        kept.trim_end().to_string()
+    };
+    summary.push_str("...");
+    summary
+}
+
+/// Type head of a composite literal: text through the `}` that closes the
+/// type part of a `Type{...}{...}` seam.
+///
+/// Returns `None` when there is no seam or the head alone exceeds
+/// [`MAX_SOURCE_HEAD_LEN`]. All seam characters are ASCII, so every
+/// produced index is a char boundary.
+fn composite_type_head(text: &str) -> Option<&str> {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'}' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                let head = &text[..i + 1];
+                if !head.trim().is_empty() && head.chars().count() <= MAX_SOURCE_HEAD_LEN {
+                    return Some(head);
+                }
+                return None;
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 fn collect_comment_ranges(
     node: Node<'_>,
     start: usize,

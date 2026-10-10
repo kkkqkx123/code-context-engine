@@ -18,7 +18,7 @@
 
 use crate::parser::comment_processor::CommentProcessor;
 use crate::tree_sitter_query::error::TreeSitterQueryError;
-use crate::tree_sitter_query::executor::{QueryExecutor, QueryMatch};
+use crate::tree_sitter_query::executor::{Capture, QueryExecutor, QueryMatch};
 use cce_types::language::Language;
 use cce_types::{Entity, EntityKind};
 use std::sync::Arc;
@@ -184,23 +184,30 @@ impl EntityExtractor {
                 // the first. Clone one entity per extra name sharing the
                 // same provenance metadata. (`.multiple` instead folds into
                 // a single comma-separated entity for positional mapping.)
+                // Blank bindings (`_`) are wildcards, never references: they
+                // carry no symbol value and are dropped. When the first name
+                // is blank but real siblings exist, the entity is re-homed
+                // onto the first real name instead of the wildcard.
                 let mut pattern_siblings = Vec::new();
                 if let Some(main) = capture_module::parser::find_main_capture(mat) {
                     if main.name.ends_with(".loop") || main.name.ends_with(".case") {
-                        let mut first_name = true;
-                        for cap in mat
+                        let mut real_names: Vec<&Capture> = mat
                             .captures
                             .iter()
                             .filter(|c| crate::tree_sitter_query::capture::is_name_capture(&c.name))
-                        {
-                            if first_name {
-                                first_name = false;
-                                continue;
-                            }
+                            .filter(|c| {
+                                let name = c.text.trim();
+                                !name.is_empty() && name != "_"
+                            })
+                            .collect();
+                        if real_names.is_empty() {
+                            continue;
+                        }
+                        let first = real_names.remove(0);
+                        entity.name = utils::truncate_entity_name(first.text.trim().to_string());
+                        entity.span = utils::create_span_from_capture(first);
+                        for cap in real_names {
                             let sibling_name = cap.text.trim();
-                            if sibling_name.is_empty() {
-                                continue;
-                            }
                             let mut sibling = entity.clone();
                             sibling.id = context.next_entity_id();
                             sibling.name = utils::truncate_entity_name(sibling_name.to_string());
@@ -1157,6 +1164,53 @@ class Point:
                 entity.signature
             );
         }
+    }
+
+    #[test]
+    fn test_extract_go_range_loop_skips_blank_and_summarizes_source() {
+        let mut ast_parser = AstParser::new();
+        let extractor = EntityExtractor::new();
+
+        let code = "package main\n\nfunc f() {\n\tfor _, tt := range []struct {\n\t\tname string\n\t\tvalue any\n\t}{\n\t\t{\"base type\", 1},\n\t\t{\"zero value\", 0},\n\t\t{\"base type\", 1},\n\t\t{\"zero value\", 0},\n\t\t{\"base type\", 1},\n\t\t{\"zero value\", 0},\n\t\t{\"base type\", 1},\n\t\t{\"zero value\", 0},\n\t\t{\"base type\", 1},\n\t\t{\"zero value\", 0},\n\t} {\n\t\tprintln(tt.name)\n\t}\n}\n";
+
+        let tree = ast_parser
+            .parse_with_tree(code, &Language::Go)
+            .expect("Failed to parse")
+            .0;
+
+        let entities = extractor
+            .extract(&tree, code, &Language::Go)
+            .expect("Failed to extract");
+
+        assert!(
+            entities.iter().all(|e| e.name != "_"),
+            "blank range bindings must not become entities"
+        );
+        let tt = entities
+            .iter()
+            .find(|e| e.name == "tt")
+            .expect("Should find range variable tt");
+        assert!(
+            tt.signature.starts_with("tt []struct {"),
+            "summary must keep the collection head, got {:?}",
+            tt.signature
+        );
+        assert!(
+            tt.signature.contains("name string"),
+            "summary must keep field shapes, got {:?}",
+            tt.signature
+        );
+        assert!(
+            !tt.signature.contains("base type"),
+            "summary must drop literal rows, got {:?}",
+            tt.signature
+        );
+        assert!(
+            tt.signature.ends_with("..."),
+            "summary must be marked, got {:?}",
+            tt.signature
+        );
+        assert!(tt.signature.chars().count() <= 500);
     }
 
     #[test]

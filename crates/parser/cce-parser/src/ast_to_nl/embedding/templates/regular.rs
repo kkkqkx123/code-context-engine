@@ -27,6 +27,7 @@ use super::group_trait::GroupTemplate;
 use crate::ast_to_nl::common::{GroupTemplateBase, TemplateHelpers};
 use crate::ast_to_nl::noise::NoiseProfile;
 use crate::grouper::types::{EntityGroup, GroupType};
+use crate::parser::extractor::utils::summarize_provenance_source;
 use cce_types::entity::{EntityKind, meta_keys};
 use cce_utils::normalize_whitespace;
 use cce_utils::token_estimation::estimate_tokens;
@@ -347,6 +348,10 @@ impl RegularGroupTemplate {
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
         {
+            // Provenance heads carry the signal; literal rows would drown
+            // the description. Metadata stays verbatim for inference; only
+            // the emitted text is summarized.
+            let source = summarize_provenance_source(source);
             if is_loop {
                 return Some(format!("from {} (loop iteration).", source));
             }
@@ -1004,6 +1009,51 @@ mod tests {
         assert!(
             member_desc.contains("of type i32."),
             "type info must be kept when the signature is not emitted, got: {}",
+            member_desc
+        );
+    }
+
+    #[test]
+    fn test_variable_loop_source_summarized_in_relation() {
+        let head = "[]struct {\nname string\nvalue any\n}";
+        let rows = "{\n{\"base type\", 1},\n{\"zero value\", 0},\n}".repeat(20);
+        let group = EntityGroup {
+            name: "Engine".into(),
+            kind: EntityKind::Struct,
+            members: vec![cce_types::entity::GroupedEntity {
+                id: cce_types::entity::EntityId(1),
+                name: "tt".to_string(),
+                kind: EntityKind::Variable,
+                subtype: Some("loop variable".to_string()),
+                signature: String::new(),
+                metadata: [("source_type".to_string(), format!("{head}{rows}"))]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        let template = RegularGroupTemplate::new();
+        let results = template.generate(&group);
+        let member_desc = results
+            .iter()
+            .find(|r| r.contains("Engine.tt"))
+            .expect("member description should be emitted");
+        assert!(
+            member_desc.contains("[]struct"),
+            "collection head must survive, got: {}",
+            member_desc
+        );
+        assert!(
+            member_desc.contains("(loop iteration)"),
+            "loop iteration marker must survive, got: {}",
+            member_desc
+        );
+        assert!(
+            !member_desc.contains("zero value"),
+            "literal rows must not leak into text, got: {}",
             member_desc
         );
     }

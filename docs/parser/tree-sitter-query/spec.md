@@ -46,12 +46,16 @@
 | `@entity.*.signature.base`          | 基类/父接口        | class, interface                  |
 | `@entity.*.signature.extends`       | 继承               | class (PHP, Ruby)                 |
 | `@entity.*.signature.implements`    | 实现接口           | class (PHP)                       |
+| `@entity.*.signature.source`        | 来源表达式         | loop 变量（取集合头部，摘要见下） |
+| `@entity.*.signature.arguments`    | 实参表             | enum 常量（块体折叠为形状标记）   |
+| `@entity.*.signature.description`  | 首个字符串实参     | JS/TS 回调                        |
 
 **设计原则**：
 
 1. 签名子捕获嵌入实体捕获内部，无需独立匹配
-2. 签名提取通过 `reconstruct_signature_from_subcaptures` 按源码顺序拼接子捕获文本，各部分原文保留，仅部分之间以单空格连接
-3. 无签名子捕获时：有体捕获则取体起点之前的头切片（过渡期，不清洗不截断）；无体实体的全文即签名；有体概念却无体捕获时返回空并计数，不做全文回退与截断
+2. 签名提取通过 `reconstruct_signature_from_subcaptures` 按源码顺序拼接子捕获文本，各部分原文保留，仅部分之间以单空格连接；其中来源角色保留集合头部并丢弃数据行，实参角色将超长块体折叠为形状标记
+3. 无签名子捕获时：有体捕获则取体起点之前的头切片（过渡期，不清洗不截断）；无体实体的全文即签名，上限 500 字符；有体概念却无体捕获时返回空并计数，不做全文回退与截断
+4. 模式绑定中的空白标识符（`_`）不建实体；首名为 wildcards 时实体改挂首个具名
 
 ---
 
