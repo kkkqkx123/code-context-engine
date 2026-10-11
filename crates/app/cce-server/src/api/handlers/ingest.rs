@@ -14,6 +14,8 @@ pub mod event;
 pub mod manifest;
 pub mod paths;
 pub mod staging;
+#[cfg(test)]
+mod staging_tests;
 
 use axum::Router;
 use axum::routing::{get, post};

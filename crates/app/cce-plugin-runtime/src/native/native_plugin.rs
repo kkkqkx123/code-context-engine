@@ -71,6 +71,7 @@ use super::ffi_helpers::{
     call_owned_string_only, call_plugin_string, capability_label, parse_ffi_json_result,
     symbol_missing_err,
 };
+use super::symbols::*;
 
 /// Minimum supported ABI version (inclusive).
 ///
@@ -276,46 +277,40 @@ impl NativePlugin {
 
         // ── 2. Load required symbols ──
 
-        // cce_plugin_abi_version
         let abi_version_fn: AbiVersionFn = *unsafe {
             library
-                .get(b"cce_plugin_abi_version\0")
-                .map_err(|_| symbol_missing_err(path, "cce_plugin_abi_version"))?
+                .get(ABI_VERSION.bytes)
+                .map_err(|_| symbol_missing_err(path, ABI_VERSION.name))?
         };
 
-        // cce_plugin_metadata
         let metadata_fn: MetadataFn = *unsafe {
             library
-                .get(b"cce_plugin_metadata\0")
-                .map_err(|_| symbol_missing_err(path, "cce_plugin_metadata"))?
+                .get(METADATA.bytes)
+                .map_err(|_| symbol_missing_err(path, METADATA.name))?
         };
 
-        // cce_plugin_has_bm25_generation
         let has_bm25_fn: HasCapabilityFn = *unsafe {
             library
-                .get(b"cce_plugin_has_bm25_generation\0")
-                .map_err(|_| symbol_missing_err(path, "cce_plugin_has_bm25_generation"))?
+                .get(HAS_BM25_GENERATION.bytes)
+                .map_err(|_| symbol_missing_err(path, HAS_BM25_GENERATION.name))?
         };
 
-        // cce_plugin_has_embedding_generation
         let has_embedding_fn: HasCapabilityFn = *unsafe {
             library
-                .get(b"cce_plugin_has_embedding_generation\0")
-                .map_err(|_| symbol_missing_err(path, "cce_plugin_has_embedding_generation"))?
+                .get(HAS_EMBEDDING_GENERATION.bytes)
+                .map_err(|_| symbol_missing_err(path, HAS_EMBEDDING_GENERATION.name))?
         };
 
-        // cce_plugin_free_string
         let free_string_fn: FreeStringFn = *unsafe {
             library
-                .get(b"cce_plugin_free_string\0")
-                .map_err(|_| symbol_missing_err(path, "cce_plugin_free_string"))?
+                .get(FREE_STRING.bytes)
+                .map_err(|_| symbol_missing_err(path, FREE_STRING.name))?
         };
 
-        // cce_plugin_has_lifecycle
         let has_lifecycle_fn: HasCapabilityFn = *unsafe {
             library
-                .get(b"cce_plugin_has_lifecycle\0")
-                .map_err(|_| symbol_missing_err(path, "cce_plugin_has_lifecycle"))?
+                .get(HAS_LIFECYCLE.bytes)
+                .map_err(|_| symbol_missing_err(path, HAS_LIFECYCLE.name))?
         };
 
         // ── 3. Validate ABI version ──
@@ -353,212 +348,112 @@ impl NativePlugin {
 
         // ── 5. Load optional symbols ──
 
-        // cce_plugin_generate_bm25
         let generate_bm25_fn: Option<PluginStringFn> =
-            unsafe { library.get(b"cce_plugin_generate_bm25\0").ok().map(|s| *s) };
+            unsafe { library.get(GENERATE_BM25.bytes).ok().map(|s| *s) };
 
-        // cce_plugin_generate_embedding
-        let generate_embedding_fn: Option<PluginStringFn> = unsafe {
-            library
-                .get(b"cce_plugin_generate_embedding\0")
-                .ok()
-                .map(|s| *s)
-        };
+        let generate_embedding_fn: Option<PluginStringFn> =
+            unsafe { library.get(GENERATE_EMBEDDING.bytes).ok().map(|s| *s) };
 
-        // cce_plugin_generate_bm25_batch
-        let generate_bm25_batch_fn: Option<PluginStringFn> = unsafe {
-            library
-                .get(b"cce_plugin_generate_bm25_batch\0")
-                .ok()
-                .map(|s| *s)
-        };
+        let generate_bm25_batch_fn: Option<PluginStringFn> =
+            unsafe { library.get(GENERATE_BM25_BATCH.bytes).ok().map(|s| *s) };
 
-        // cce_plugin_generate_embedding_batch
-        let generate_embedding_batch_fn: Option<PluginStringFn> = unsafe {
-            library
-                .get(b"cce_plugin_generate_embedding_batch\0")
-                .ok()
-                .map(|s| *s)
-        };
+        let generate_embedding_batch_fn: Option<PluginStringFn> =
+            unsafe { library.get(GENERATE_EMBEDDING_BATCH.bytes).ok().map(|s| *s) };
 
-        // cce_plugin_has_parse
         let has_parse_fn: Option<HasCapabilityFn> =
-            unsafe { library.get(b"cce_plugin_has_parse\0").ok().map(|s| *s) };
-        // cce_plugin_has_extract
+            unsafe { library.get(HAS_PARSE.bytes).ok().map(|s| *s) };
         let has_extract_fn: Option<HasCapabilityFn> =
-            unsafe { library.get(b"cce_plugin_has_extract\0").ok().map(|s| *s) };
-        // cce_plugin_has_group
+            unsafe { library.get(HAS_EXTRACT.bytes).ok().map(|s| *s) };
         let has_group_fn: Option<HasCapabilityFn> =
-            unsafe { library.get(b"cce_plugin_has_group\0").ok().map(|s| *s) };
-        // cce_plugin_has_chunk
+            unsafe { library.get(HAS_GROUP.bytes).ok().map(|s| *s) };
         let has_chunk_fn: Option<HasCapabilityFn> =
-            unsafe { library.get(b"cce_plugin_has_chunk\0").ok().map(|s| *s) };
-        // cce_plugin_has_rerank
+            unsafe { library.get(HAS_CHUNK.bytes).ok().map(|s| *s) };
         let has_rerank_fn: Option<HasCapabilityFn> =
-            unsafe { library.get(b"cce_plugin_has_rerank\0").ok().map(|s| *s) };
-        // cce_plugin_has_ast_language
-        let has_ast_language_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_ast_language\0")
-                .ok()
-                .map(|s| *s)
-        };
-        // cce_plugin_has_language_remap
-        let has_language_remap_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_language_remap\0")
-                .ok()
-                .map(|s| *s)
-        };
+            unsafe { library.get(HAS_RERANK.bytes).ok().map(|s| *s) };
+        let has_ast_language_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_AST_LANGUAGE.bytes).ok().map(|s| *s) };
+        let has_language_remap_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_LANGUAGE_REMAP.bytes).ok().map(|s| *s) };
         // LangHeuristics capability guards
-        let has_stdlib_heuristic_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_stdlib_heuristic\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let has_test_file_heuristic_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_test_file_heuristic\0")
-                .ok()
-                .map(|s| *s)
-        };
+        let has_stdlib_heuristic_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_STDLIB_HEURISTIC.bytes).ok().map(|s| *s) };
+        let has_test_file_heuristic_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_TEST_FILE_HEURISTIC.bytes).ok().map(|s| *s) };
         let has_entity_kind_heuristic_fn: Option<HasCapabilityFn> = unsafe {
             library
-                .get(b"cce_plugin_has_entity_kind_heuristic\0")
+                .get(HAS_ENTITY_KIND_HEURISTIC.bytes)
                 .ok()
                 .map(|s| *s)
         };
         // Capability guards
-        let has_group_override_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_group_override\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let has_relation_extract_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_relation_extract\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let has_symbol_extract_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_symbol_extract\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let has_query_rewrite_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_query_rewrite\0")
-                .ok()
-                .map(|s| *s)
-        };
+        let has_group_override_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_GROUP_OVERRIDE.bytes).ok().map(|s| *s) };
+        let has_relation_extract_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_RELATION_EXTRACT.bytes).ok().map(|s| *s) };
+        let has_symbol_extract_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_SYMBOL_EXTRACT.bytes).ok().map(|s| *s) };
+        let has_query_rewrite_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_QUERY_REWRITE.bytes).ok().map(|s| *s) };
         let has_fusion_fn: Option<HasCapabilityFn> =
-            unsafe { library.get(b"cce_plugin_has_fusion\0").ok().map(|s| *s) };
-        let has_result_filter_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_result_filter\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let has_file_filter_fn: Option<HasCapabilityFn> = unsafe {
-            library
-                .get(b"cce_plugin_has_file_filter\0")
-                .ok()
-                .map(|s| *s)
-        };
+            unsafe { library.get(HAS_FUSION.bytes).ok().map(|s| *s) };
+        let has_result_filter_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_RESULT_FILTER.bytes).ok().map(|s| *s) };
+        let has_file_filter_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_FILE_FILTER.bytes).ok().map(|s| *s) };
 
         // cce_plugin_parse_document / post_group / chunk / rerank
         let parse_document_fn: Option<PluginStringFn2> =
-            unsafe { library.get(b"cce_plugin_parse_document\0").ok().map(|s| *s) };
-        let extract_entities_fn: Option<PluginStringFn3> = unsafe {
-            library
-                .get(b"cce_plugin_extract_entities\0")
-                .ok()
-                .map(|s| *s)
-        };
+            unsafe { library.get(PARSE_DOCUMENT.bytes).ok().map(|s| *s) };
+        let extract_entities_fn: Option<PluginStringFn3> =
+            unsafe { library.get(EXTRACT_ENTITIES.bytes).ok().map(|s| *s) };
         let post_group_fn: Option<PluginStringFn2> =
-            unsafe { library.get(b"cce_plugin_post_group\0").ok().map(|s| *s) };
-        let group_fn: Option<PluginStringFn> =
-            unsafe { library.get(b"cce_plugin_group\0").ok().map(|s| *s) };
+            unsafe { library.get(POST_GROUP.bytes).ok().map(|s| *s) };
+        let group_fn: Option<PluginStringFn> = unsafe { library.get(GROUP.bytes).ok().map(|s| *s) };
         let chunk_fn: Option<PluginStringFn2> =
-            unsafe { library.get(b"cce_plugin_chunk\0").ok().map(|s| *s) };
+            unsafe { library.get(CHUNK.bytes).ok().map(|s| *s) };
         let rerank_fn: Option<PluginStringFn2> =
-            unsafe { library.get(b"cce_plugin_rerank\0").ok().map(|s| *s) };
-        let extract_symbols_fn: Option<PluginStringFn3> = unsafe {
-            library
-                .get(b"cce_plugin_extract_symbols\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let extract_relations_fn: Option<PluginStringFn3> = unsafe {
-            library
-                .get(b"cce_plugin_extract_relations\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let extract_imports_fn: Option<PluginStringFn3> = unsafe {
-            library
-                .get(b"cce_plugin_extract_imports\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let extract_exports_fn: Option<PluginStringFn3> = unsafe {
-            library
-                .get(b"cce_plugin_extract_exports\0")
-                .ok()
-                .map(|s| *s)
-        };
+            unsafe { library.get(RERANK.bytes).ok().map(|s| *s) };
+        let extract_symbols_fn: Option<PluginStringFn3> =
+            unsafe { library.get(EXTRACT_SYMBOLS.bytes).ok().map(|s| *s) };
+        let extract_relations_fn: Option<PluginStringFn3> =
+            unsafe { library.get(EXTRACT_RELATIONS.bytes).ok().map(|s| *s) };
+        let extract_imports_fn: Option<PluginStringFn3> =
+            unsafe { library.get(EXTRACT_IMPORTS.bytes).ok().map(|s| *s) };
+        let extract_exports_fn: Option<PluginStringFn3> =
+            unsafe { library.get(EXTRACT_EXPORTS.bytes).ok().map(|s| *s) };
         let rewrite_query_fn: Option<PluginStringFn> =
-            unsafe { library.get(b"cce_plugin_rewrite_query\0").ok().map(|s| *s) };
+            unsafe { library.get(REWRITE_QUERY.bytes).ok().map(|s| *s) };
         let fusion_weights_fn: Option<FusionWeightsFn> =
-            unsafe { library.get(b"cce_plugin_fusion_weights\0").ok().map(|s| *s) };
+            unsafe { library.get(FUSION_WEIGHTS.bytes).ok().map(|s| *s) };
         let filter_results_fn: Option<PluginStringFn2> =
-            unsafe { library.get(b"cce_plugin_filter_results\0").ok().map(|s| *s) };
+            unsafe { library.get(FILTER_RESULTS.bytes).ok().map(|s| *s) };
         let filter_file_fn: Option<FilterFileFn> =
-            unsafe { library.get(b"cce_plugin_filter_file\0").ok().map(|s| *s) };
+            unsafe { library.get(FILTER_FILE.bytes).ok().map(|s| *s) };
 
         // AstLanguage symbols
         let query_scheme_fn: Option<QuerySchemeFn> =
-            unsafe { library.get(b"cce_plugin_query_scheme\0").ok().map(|s| *s) };
-        let tree_sitter_language_fn: Option<TreeSitterLangFn> = unsafe {
-            library
-                .get(b"cce_plugin_tree_sitter_language\0")
-                .ok()
-                .map(|s| *s)
-        };
+            unsafe { library.get(QUERY_SCHEME.bytes).ok().map(|s| *s) };
+        let tree_sitter_language_fn: Option<TreeSitterLangFn> =
+            unsafe { library.get(TREE_SITTER_LANGUAGE.bytes).ok().map(|s| *s) };
         let language_name_fn: Option<StringOnlyFn> =
-            unsafe { library.get(b"cce_plugin_language_name\0").ok().map(|s| *s) };
-        let language_extensions_fn: Option<StringOnlyFn> = unsafe {
-            library
-                .get(b"cce_plugin_language_extensions\0")
-                .ok()
-                .map(|s| *s)
-        };
-        let remap_grammar_language_fn: Option<StringOnlyFn> = unsafe {
-            library
-                .get(b"cce_plugin_remap_grammar_language\0")
-                .ok()
-                .map(|s| *s)
-        };
+            unsafe { library.get(LANGUAGE_NAME.bytes).ok().map(|s| *s) };
+        let language_extensions_fn: Option<StringOnlyFn> =
+            unsafe { library.get(LANGUAGE_EXTENSIONS.bytes).ok().map(|s| *s) };
+        let remap_grammar_language_fn: Option<StringOnlyFn> =
+            unsafe { library.get(REMAP_GRAMMAR_LANGUAGE.bytes).ok().map(|s| *s) };
         // LangHeuristics entry points
-        let classify_stdlib_fn: Option<PluginStringFn> = unsafe {
-            library
-                .get(b"cce_plugin_classify_stdlib\0")
-                .ok()
-                .map(|s| *s)
-        };
+        let classify_stdlib_fn: Option<PluginStringFn> =
+            unsafe { library.get(CLASSIFY_STDLIB.bytes).ok().map(|s| *s) };
         let is_test_file_fn: Option<PluginStringFn2> =
-            unsafe { library.get(b"cce_plugin_is_test_file\0").ok().map(|s| *s) };
+            unsafe { library.get(IS_TEST_FILE.bytes).ok().map(|s| *s) };
         let entity_kind_fn: Option<PluginStringFn> =
-            unsafe { library.get(b"cce_plugin_entity_kind\0").ok().map(|s| *s) };
+            unsafe { library.get(ENTITY_KIND.bytes).ok().map(|s| *s) };
 
         // cce_plugin_create / cce_plugin_destroy (lifecycle)
         let create_ctx_fn: Option<CreateContextFn> =
-            unsafe { library.get(b"cce_plugin_create\0").ok().map(|s| *s) };
+            unsafe { library.get(CREATE.bytes).ok().map(|s| *s) };
         let destroy_ctx_fn: Option<DestroyContextFn> =
-            unsafe { library.get(b"cce_plugin_destroy\0").ok().map(|s| *s) };
+            unsafe { library.get(DESTROY.bytes).ok().map(|s| *s) };
 
         // ── 6. Query capability bits once and cache them ──
         let has_bm25 = unsafe { has_bm25_fn() };

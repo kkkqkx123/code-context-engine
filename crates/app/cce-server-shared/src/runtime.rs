@@ -1,6 +1,8 @@
 pub mod gc_worker;
 pub mod recovery;
 pub mod relation_publisher;
+#[cfg(test)]
+mod relation_publisher_tests;
 pub mod relation_runtime;
 pub mod startup;
 

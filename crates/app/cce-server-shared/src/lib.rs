@@ -9,4 +9,5 @@
 pub mod engine;
 pub mod maintenance;
 pub mod runtime;
+pub mod services;
 pub mod state;

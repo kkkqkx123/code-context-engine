@@ -28,6 +28,7 @@ import {
 	type RelationDomain,
 } from '../utils/graph-style';
 import { currentProjectId } from './project';
+import { errorCodeOf, errorMessage } from '../utils/errors';
 
 /** Maximum number of nodes held in memory before expansion is refused. */
 export const MAX_RENDERED_NODES = 800;
@@ -124,7 +125,7 @@ function toGraphError(
 	// Preserve structured shape from fetch helpers.
 	if (error instanceof ApiError) {
 		const base: GraphError = {
-			code: error.code ?? statusToCode(error.status),
+			code: errorCodeOf(error),
 			message: error.message,
 			details: { status: error.status },
 		};
@@ -136,27 +137,17 @@ function toGraphError(
 	if (error && typeof error === 'object') {
 		const obj = error as Record<string, unknown>;
 		if ('message' in obj && typeof obj.message === 'string') {
-			if ('status' in obj && typeof obj.status === 'number') {
-				return {
-					code: statusToCode(obj.status as number),
-					message: obj.message,
-					details: { status: obj.status, url: obj.url },
-				};
-			}
-			return { code: 'UNKNOWN', message: obj.message, details: error };
+			return {
+				code: errorCodeOf(error),
+				message: errorMessage(error),
+				details: { status: obj.status, url: obj.url },
+			};
 		}
 		if ('code' in obj && typeof obj.code === 'string') {
 			return { code: obj.code, message: fallback, details: error };
 		}
 	}
 	return { code: 'UNKNOWN', message: fallback, details: error };
-}
-
-function statusToCode(status: number): string {
-	if (status === 404) return 'NOT_FOUND';
-	if (status >= 400 && status < 500) return 'INVALID_ARGUMENT';
-	if (status >= 500) return 'SERVER_ERROR';
-	return 'NETWORK';
 }
 
 /**

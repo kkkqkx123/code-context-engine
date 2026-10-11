@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { BASE_URL, call, client } from './client';
+import { ApiError, BASE_URL, call, client } from './client';
 import type { components } from './schema';
 
 export type MetricsData = Record<string, unknown>;
@@ -20,9 +20,18 @@ export const metricsApi = {
 	// Get metrics in Prometheus format.
 	// Non-JSON exception: the endpoint answers with Prometheus text exposition,
 	// which OpenAPI cannot model as a JSON schema, so it bypasses the typed
-	// client and is not covered by codegen.
-	getPrometheusMetrics: (): Promise<string> =>
-		fetch(`${BASE_URL}/api/metrics`).then((res) => res.text()),
+	// client and is not covered by codegen. Still uses the shared BASE_URL.
+	getPrometheusMetrics: async (): Promise<string> => {
+		const res = await fetch(`${BASE_URL}/api/metrics`);
+		if (!res.ok) {
+			throw new ApiError(
+				`HTTP ${res.status}`,
+				res.status,
+				'PROMETHEUS_METRICS_ERROR',
+			);
+		}
+		return res.text();
+	},
 
 	// Get metrics history
 	getHistory: (params: {

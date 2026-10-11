@@ -24,6 +24,7 @@ schemars = "1.0"
 cce-config = { path = "../../core/cce-config" }
 cce-types = { path = "../../core/cce-types" }
 cce-server-shared = { path = "../cce-server-shared" }
+cce-api = { path = "../cce-api" }
 cce-orchestrator = { path = "../cce-orchestrator" }
 cce-parser = { path = "../../parser/cce-parser" }
 cce-codegraph = { path = "../../parser/cce-codegraph" }

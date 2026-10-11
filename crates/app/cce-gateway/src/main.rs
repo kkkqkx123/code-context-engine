@@ -9,7 +9,7 @@
 use anyhow::Result;
 use clap::Parser;
 
-use cce_gateway::{GatewayClient, SyncParams, sync_once, watch_loop};
+use cce_gateway::{GatewayClient, SyncParamOverrides, SyncParams, sync_once, watch_loop};
 
 /// Resident file supply gateway.
 #[derive(Debug, Parser)]
@@ -105,31 +105,18 @@ struct Args {
 /// defaults; anything the caller left out keeps the shared value.
 fn params_from(args: &Args) -> SyncParams {
     let mut params = SyncParams::with_defaults(args.project_id, args.path.clone());
-    if let Some(extensions) = &args.extensions {
-        params.extensions = extensions.clone();
-    }
-    if let Some(exclude) = &args.exclude {
-        params.exclude = exclude.clone();
-    }
-    if let Some(gitignore) = args.gitignore {
-        params.gitignore = gitignore;
-    }
-    if args.no_commit {
-        params.commit = false;
-    }
-    if let Some(compress) = args.compress {
-        params.compress = compress;
-    }
-    if let Some(interval_secs) = args.interval_secs {
-        params.interval_secs = interval_secs;
-    }
-    if let Some(cache_file) = args.cache_file.clone() {
-        params.cache_file = Some(cache_file);
-    }
-    if let Some(adaptive_interval) = args.adaptive_interval {
-        params.adaptive_interval = adaptive_interval;
-    }
-    params.health_file = args.health_file.clone();
+    params.apply_overrides(SyncParamOverrides {
+        extensions: args.extensions.clone(),
+        exclude: args.exclude.clone(),
+        gitignore: args.gitignore,
+        commit: Some(!args.no_commit),
+        compress: args.compress,
+        interval_secs: args.interval_secs,
+        cache_file: args.cache_file.clone(),
+        adaptive_interval: args.adaptive_interval,
+        health_file: args.health_file.clone(),
+        json_progress: false,
+    });
     params
 }
 

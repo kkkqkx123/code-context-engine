@@ -59,14 +59,14 @@
 </script>
 
 <svelte:head>
-	<title>File Watcher - Code Context Engine</title>
+	<title>Local File Watcher - Code Context Engine</title>
 </svelte:head>
 
 <div class="page">
 	<div class="container">
 		<PageHeader
-			title="File Watcher"
-			subtitle="Monitor file system changes for automatic incremental indexing"
+			title="Local File Watcher (Same Machine)"
+			subtitle="Server-side local watching only. Remote projects use gateway push from the machine where files live; this page cannot start gateway supply."
 		/>
 
 		{#if $watchState.error}
@@ -80,8 +80,20 @@
 			</div>
 		{/if}
 
+		{#if $watchState.error && $watchState.error.includes('gateway-supplied')}
+			<div class="gateway-hint">
+				<span
+					>This project is gateway-supplied; local watching is disabled. Push changes
+					with `cce-cli gateway watch` from the machine where the files live.</span
+				>
+			</div>
+		{/if}
+
 		<!-- Watch Control Panel -->
-		<Card title="Watch Control" subtitle="Configure and start file monitoring">
+		<Card
+			title="Watch Control"
+			subtitle="Server-side local watching (requires same machine)"
+		>
 			<div class="control-grid">
 				<div class="control-group">
 					<label class="field-label" for="watch-path">Directory Path</label>
@@ -186,7 +198,7 @@
 		<!-- Live Event Feed -->
 		<Card
 			title="Event Feed"
-			subtitle="No live stream by design — progress comes from status polling (events_processed + epochs)"
+			subtitle="No live stream by design — progress comes from status polling (events_processed + epochs). For gateway projects freshness comes from gateway push, not local watching."
 		>
 			<div class="feed-controls">
 				<Button variant="secondary" onclick={togglePause}>
@@ -224,6 +236,16 @@
 		font-size: 1.5rem;
 		cursor: pointer;
 		line-height: 1;
+	}
+
+	.gateway-hint {
+		background: var(--gray-100);
+		color: var(--black);
+		padding: 1rem;
+		margin-bottom: 2rem;
+		border: 1px solid var(--black);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.8rem;
 	}
 
 	.control-grid {

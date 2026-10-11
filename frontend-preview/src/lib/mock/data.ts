@@ -1,7 +1,48 @@
 /**
  * Mock Data - Hardcoded data for all API responses
  * Used when VITE_USE_MOCK=true to preview UI without backend
+ *
+ * Every payload is annotated with its OpenAPI response type so mock drift
+ * fails `npm run check` instead of silently diverging from the backend.
  */
+
+import type { IndexStatsResponse, Project } from '../api/index';
+import type {
+	Bm25HealthStatus,
+	EmbeddingHealthStatus,
+	HealthStatus,
+	QdrantHealthStatus,
+	RetryQueueStatus
+} from '../api/health';
+import type { SearchResponse } from '../api/search';
+import type {
+	CallChainResponse,
+	ClassImplementationsResponse,
+	ClassInheritanceResponse,
+	FunctionCallersResponse,
+	FunctionCallsResponse,
+	FunctionDetailResponse
+} from '../api/entities';
+import type {
+	GraphComponentsResponse,
+	GraphEdge,
+	GraphImpactResponse,
+	GraphNode,
+	GraphPathResponse,
+	GraphSubgraphResponse
+} from '../api/graph';
+import type { StorageStatusResponse } from '../api/storage';
+import type { MetricsData } from '../api/metrics';
+import type { WatchStatus } from '../api/watch';
+import type { ConfigInfoResponse, ConfigValidateResponse } from '../api/config';
+import type {
+	CompressApiResponse,
+	DiagnoseApiResponse,
+	FoldResponse,
+	GetSymbolsResponse
+} from '../api/tools';
+import type { SummaryResponse } from '../api/summary';
+import type { QdrantActionResponse, QdrantProcessStatusResponse } from '../api/qdrant';
 
 export const isMockMode = import.meta.env.VITE_USE_MOCK === 'true';
 
@@ -13,7 +54,7 @@ export function mockDelay(ms: number = 100): Promise<void> {
 
 // ─── Index & Project Mock Data ─────────────────────────────────────
 
-export const mockProjects = [
+export const mockProjects: Project[] = [
 	{
 		id: '1',
 		name: 'code-context-engine',
@@ -46,7 +87,7 @@ export const mockProjects = [
 	}
 ];
 
-export const mockIndexStats = {
+export const mockIndexStats: IndexStatsResponse = {
 	success: true,
 	statistics: {
 		total_entities: 12847,
@@ -60,14 +101,14 @@ export const mockIndexStats = {
 
 // ─── Health Mock Data ──────────────────────────────────────────────
 
-export const mockHealthStatus = {
+export const mockHealthStatus: HealthStatus = {
 	healthy: true,
 	qdrant: { reachable: true, message: 'Connected to Qdrant v1.8.0' },
 	bm25: { reachable: true, message: 'BM25 index loaded (12847 documents)' },
 	embedding: { reachable: true, message: 'Model: text-embedding-3-small' }
 };
 
-export const mockQdrantHealth = {
+export const mockQdrantHealth: QdrantHealthStatus = {
 	healthy: true,
 	circuit_breaker: 'Closed',
 	diagnostic: {
@@ -79,26 +120,27 @@ export const mockQdrantHealth = {
 	}
 };
 
-export const mockEmbeddingHealth = {
+export const mockEmbeddingHealth: EmbeddingHealthStatus = {
 	healthy: true,
 	model_name: 'text-embedding-3-small',
 	message: 'Embedding service ready'
 };
 
-export const mockBm25Health = {
+export const mockBm25Health: Bm25HealthStatus = {
 	enabled: true,
 	connected: true,
 	index_path: '/data/bm25_index'
 };
 
-export const mockRetryQueueStatus = {
+export const mockRetryQueueStatus: RetryQueueStatus = {
 	pending_count: 0,
+	dead_count: 0,
 	is_empty: true
 };
 
 // ─── Search Mock Data ──────────────────────────────────────────────
 
-export const mockSearchResults = {
+export const mockSearchResults: SearchResponse = {
 	success: true,
 	total: 5,
 	items: [
@@ -110,11 +152,7 @@ export const mockSearchResults = {
 			start_line: 45,
 			end_line: 55,
 			entity_type: 'function',
-			source: 'vector',
-			call_chain: [
-				{ function_id: '101', function_name: 'group_entities', file_path: 'crates/cce-parser/src/grouper.rs', depth: 0, relation_type: 'root' },
-				{ function_id: '102', function_name: 'process_chunk', file_path: 'crates/cce-parser/src/chunker.rs', depth: 1, relation_type: 'callee' }
-			]
+			sources: ['vector']
 		},
 		{
 			entity_ids: [201],
@@ -124,8 +162,7 @@ export const mockSearchResults = {
 			start_line: 23,
 			end_line: 30,
 			entity_type: 'function',
-			source: 'vector',
-			call_chain: []
+			sources: ['vector']
 		},
 		{
 			entity_ids: [301],
@@ -135,8 +172,7 @@ export const mockSearchResults = {
 			start_line: 12,
 			end_line: 18,
 			entity_type: 'struct',
-			source: 'bm25',
-			call_chain: []
+			sources: ['bm25']
 		},
 		{
 			entity_ids: [401],
@@ -146,8 +182,7 @@ export const mockSearchResults = {
 			start_line: 67,
 			end_line: 75,
 			entity_type: 'function',
-			source: 'hybrid',
-			call_chain: []
+			sources: ['vector', 'bm25']
 		},
 		{
 			entity_ids: [501],
@@ -157,8 +192,7 @@ export const mockSearchResults = {
 			start_line: 15,
 			end_line: 22,
 			entity_type: 'function',
-			source: 'bm25',
-			call_chain: []
+			sources: ['bm25']
 		}
 	],
 	elapsed_ms: 45,
@@ -167,7 +201,7 @@ export const mockSearchResults = {
 
 // ─── Entity Mock Data ──────────────────────────────────────────────
 
-export const mockFunctionDetail = {
+export const mockFunctionDetail: FunctionDetailResponse = {
 	success: true,
 	function: {
 		id: '101',
@@ -182,7 +216,7 @@ export const mockFunctionDetail = {
 	}
 };
 
-export const mockFunctionCalls = {
+export const mockFunctionCalls: FunctionCallsResponse = {
 	success: true,
 	relation_epoch: 1,
 	function_id: '101',
@@ -194,7 +228,7 @@ export const mockFunctionCalls = {
 	total_callees: 2
 };
 
-export const mockFunctionCallers = {
+export const mockFunctionCallers: FunctionCallersResponse = {
 	success: true,
 	relation_epoch: 1,
 	function_id: '101',
@@ -206,7 +240,7 @@ export const mockFunctionCallers = {
 	total_callers: 2
 };
 
-export const mockCallChain = {
+export const mockCallChain: CallChainResponse = {
 	success: true,
 	relation_epoch: 1,
 	function_id: '101',
@@ -220,7 +254,7 @@ export const mockCallChain = {
 	]
 };
 
-export const mockClassInheritance = {
+export const mockClassInheritance: ClassInheritanceResponse = {
 	success: true,
 	relation_epoch: 1,
 	class_id: '301',
@@ -233,7 +267,7 @@ export const mockClassInheritance = {
 	]
 };
 
-export const mockClassImplementations = {
+export const mockClassImplementations: ClassImplementationsResponse = {
 	success: true,
 	relation_epoch: 1,
 	class_id: '301',
@@ -250,7 +284,7 @@ export const mockClassImplementations = {
 // (parser pipeline) plus two small ones (storage, config), covering
 // every relation domain and confidence level.
 
-export const mockGraphNodes = [
+export const mockGraphNodes: GraphNode[] = [
 	{ id: '101', kind: 'function', label: 'group_entities', source_file: 'crates/cce-parser/src/grouper.rs', source_location: '45:0' },
 	{ id: '102', kind: 'function', label: 'process_chunk', source_file: 'crates/cce-parser/src/chunker.rs', source_location: '20:0' },
 	{ id: '103', kind: 'function', label: 'calculate_similarity', source_file: 'crates/cce-parser/src/similarity.rs', source_location: '15:0' },
@@ -274,7 +308,7 @@ export const mockGraphNodes = [
 	{ id: '303', kind: 'struct', label: 'Config', source_file: 'crates/cce-config/src/model.rs', source_location: '4:0' }
 ];
 
-export const mockGraphEdges = [
+export const mockGraphEdges: GraphEdge[] = [
 	// main component: parser pipeline
 	{ source: '106', target: '105', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
 	{ source: '105', target: '107', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
@@ -310,14 +344,14 @@ export const mockGraphEdges = [
 const graphBase = { success: true, relation_epoch: 1 };
 
 /** Full export — drives the default "project overview" seed. */
-export const mockGraphExport = {
+export const mockGraphExport: GraphSubgraphResponse = {
 	...graphBase,
 	nodes: mockGraphNodes,
 	edges: mockGraphEdges
 };
 
 /** Ego neighborhood around group_entities (101), depth 2, both directions. */
-export const mockGraphEgo = {
+export const mockGraphEgo: GraphSubgraphResponse = {
 	...graphBase,
 	nodes: mockGraphNodes.filter((n) =>
 		['101', '102', '103', '104', '105', '106', '108', '110', '112'].includes(n.id)
@@ -329,7 +363,7 @@ export const mockGraphEgo = {
 };
 
 /** Shortest path from batch_parse (106) to normalize_text (104). */
-export const mockGraphPath = {
+export const mockGraphPath: GraphPathResponse = {
 	...graphBase,
 	path_found: true,
 	nodes: mockGraphNodes.filter((n) => ['106', '105', '101', '104'].includes(n.id)),
@@ -342,7 +376,7 @@ export const mockGraphPath = {
 };
 
 /** Connected components: parser pipeline, storage, config. */
-export const mockGraphComponents = {
+export const mockGraphComponents: GraphComponentsResponse = {
 	...graphBase,
 	components: [
 		['101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112'],
@@ -352,17 +386,17 @@ export const mockGraphComponents = {
 };
 
 /** Impact of changing grouper.rs. */
-export const mockGraphImpact = {
+export const mockGraphImpact: GraphImpactResponse = {
 	...graphBase,
 	changed_file: 'crates/cce-parser/src/grouper.rs',
 	direct_dependents: ['105', '106', '110'],
-	transitive_dependents: ['105', '106', '110', '112'],
+	indirect_dependents: ['105', '106', '110', '112'],
 	impact_score: 0.42
 };
 
 // ─── Storage Mock Data ─────────────────────────────────────────────
 
-export const mockStorageStatus = {
+export const mockStorageStatus: StorageStatusResponse = {
 	success: true,
 	status: {
 		vector_storage: {
@@ -381,15 +415,10 @@ export const mockStorageStatus = {
 			item_count: 3421,
 			disk_usage_mb: 12.4
 		},
-		cache_storage: {
-			connected: true,
-			item_count: 856,
-			disk_usage_mb: 45.8
-		},
 		total_disk_usage_mb: 393.0,
 		process_status: {
 			managed: true,
-			status: 'Running',
+			status: { type: 'Running' },
 			running: true
 		}
 	}
@@ -397,7 +426,7 @@ export const mockStorageStatus = {
 
 // ─── Metrics Mock Data ─────────────────────────────────────────────
 
-export const mockMetricsData = {
+export const mockMetricsData: MetricsData = {
 	server: {
 		uptime_seconds: 86400,
 		total_requests: 15234,
@@ -416,7 +445,7 @@ export const mockMetricsData = {
 
 // ─── Watch Mock Data ───────────────────────────────────────────────
 
-export const mockWatchStatus = {
+export const mockWatchStatus: WatchStatus = {
 	active: true,
 	events_processed: 23,
 	watched_dirs: ['/home/user/projects/code-context-engine/src'],
@@ -425,8 +454,9 @@ export const mockWatchStatus = {
 
 // ─── Config Mock Data ──────────────────────────────────────────────
 
-export const mockConfigInfo = {
+export const mockConfigInfo: ConfigInfoResponse = {
 	initialized: true,
+	config: {},
 	database: {
 		qdrant_url: 'http://localhost:6333',
 		qdrant_collection: 'cce_entities',
@@ -440,7 +470,7 @@ export const mockConfigInfo = {
 	project_count: 3
 };
 
-export const mockConfigValidation = {
+export const mockConfigValidation: ConfigValidateResponse = {
 	valid: true,
 	errors: [],
 	warnings: [],
@@ -451,7 +481,7 @@ export const mockConfigValidation = {
 
 // ─── Tools Mock Data ───────────────────────────────────────────────
 
-export const mockCompressResult = {
+export const mockCompressResult: CompressApiResponse = {
 	success: true,
 	result: {
 		file_path: 'crates/cce-parser/src/grouper.rs',
@@ -462,7 +492,7 @@ export const mockCompressResult = {
 	}
 };
 
-export const mockDiagnoseResult = {
+export const mockDiagnoseResult: DiagnoseApiResponse = {
 	success: true,
 	result: {
 		language: 'rust',
@@ -474,7 +504,7 @@ export const mockDiagnoseResult = {
 	}
 };
 
-export const mockFoldResult = {
+export const mockFoldResult: FoldResponse = {
 	success: true,
 	folded_text:
 		'// File: fold.rs\n// Language: Rust\n\n// Definitions:\n1 | struct User\n12 | [normalize_name, format_user] fn normalize_name(), fn format_user()',
@@ -486,7 +516,7 @@ export const mockFoldResult = {
 	dropped_sections: 0
 };
 
-export const mockSymbolsResult = {
+export const mockSymbolsResult: GetSymbolsResponse = {
 	success: true,
 	result: {
 		results: [
@@ -508,7 +538,7 @@ export const mockSymbolsResult = {
 
 // ─── Summary Mock Data ─────────────────────────────────────────────
 
-export const mockSummaryResult = {
+export const mockSummaryResult: SummaryResponse = {
 	success: true,
 	total_files: 3,
 	success_count: 3,
@@ -522,7 +552,10 @@ export const mockSummaryResult = {
 			imports: ['crate::types::Entity', 'crate::similarity::cosine_similarity'],
 			exports: ['group_entities', 'EntityGroup'],
 			entity_count: 3,
-			loc: 120
+			line_count: 120,
+			tags: ['grouping', 'core'],
+			importance_level: 'high',
+			success: true
 		},
 		{
 			file_path: 'crates/cce-parser/src/chunker.rs',
@@ -532,7 +565,10 @@ export const mockSummaryResult = {
 			imports: ['tree_sitter::Tree'],
 			exports: ['process_chunk', 'Chunk'],
 			entity_count: 3,
-			loc: 95
+			line_count: 95,
+			tags: ['chunking'],
+			importance_level: 'medium',
+			success: true
 		},
 		{
 			file_path: 'crates/cce-parser/src/ast_to_nl.rs',
@@ -542,7 +578,10 @@ export const mockSummaryResult = {
 			imports: ['tree_sitter::Node'],
 			exports: ['ast_to_natural_language'],
 			entity_count: 2,
-		LOC: 78
+			line_count: 78,
+			tags: ['nl'],
+			importance_level: 'medium',
+			success: true
 		}
 	],
 	elapsed_ms: 2340,
@@ -551,12 +590,12 @@ export const mockSummaryResult = {
 
 // ─── Qdrant Process Mock Data ──────────────────────────────────────
 
-export const mockQdrantProcessStatus = {
+export const mockQdrantProcessStatus: QdrantProcessStatusResponse = {
 	managed: true,
 	status: { type: 'Running' }
 };
 
-export const mockQdrantActionResponse = {
+export const mockQdrantActionResponse: QdrantActionResponse = {
 	success: true,
 	message: 'Qdrant process restarted successfully',
 	status: { type: 'Running' }

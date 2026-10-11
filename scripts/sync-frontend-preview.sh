@@ -65,6 +65,21 @@ mkdir -p "$PREVIEW_DIR/src/lib/components"
 cp -r "$FRONTEND_DIR/src/lib/components/." "$PREVIEW_DIR/src/lib/components/"
 prune_deleted "$PREVIEW_DIR/src/lib/components" "$FRONTEND_DIR/src/lib/components" ""
 
+# Sync top-level lib helpers (e.g. dead-letter-actions.ts), preserving the
+# preview-only mock tree.
+echo "Syncing top-level lib helpers..."
+for file in "$FRONTEND_DIR/src/lib/"*.ts; do
+    [ -e "$file" ] || continue
+    cp "$file" "$PREVIEW_DIR/src/lib/"
+done
+for file in "$PREVIEW_DIR/src/lib/"*.ts; do
+    [ -e "$file" ] || continue
+    if [ ! -e "$FRONTEND_DIR/src/lib/$(basename "$file")" ]; then
+        rm "$file"
+        echo "  removed (deleted in frontend): src/lib/$(basename "$file")"
+    fi
+done
+
 # Sync stores
 echo "Syncing stores..."
 mkdir -p "$PREVIEW_DIR/src/lib/stores"
@@ -117,6 +132,7 @@ echo ""
 echo "Files synced:"
 echo "  - static/**/* (all static assets, e.g. favicon.png)"
 echo "  - src/app.html, src/app.css, src/app.d.ts"
+echo "  - src/lib/*.ts (top-level helpers, except mock/)"
 echo "  - src/lib/components/**/* (all components)"
 echo "  - src/lib/stores/*.ts (all stores)"
 echo "  - src/lib/utils/*.ts (all utils)"

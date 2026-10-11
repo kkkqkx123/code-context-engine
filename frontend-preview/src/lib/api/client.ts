@@ -10,6 +10,7 @@
 
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
+import { readStoredToken } from '../stores/auth';
 import { isMockMode, mockDelay } from '../mock/data';
 import { mockClient } from '../mock/client';
 
@@ -113,6 +114,20 @@ export async function call<T>(
 const realClient = createClient<paths>({
 	baseUrl: BASE_URL,
 	headers: { 'Content-Type': 'application/json' }
+});
+
+// Mirror the main app: attach the admission token when one is stored, so
+// non-mock runs against a protected backend behave identically.
+realClient.use({
+	async onRequest({ request }) {
+		const token = readStoredToken();
+		if (!token) return undefined;
+		const headers = new Headers(request.headers);
+		if (!headers.has('authorization')) {
+			headers.set('authorization', `Bearer ${token}`);
+		}
+		return new Request(request, { headers });
+	}
 });
 
 interface CallOptions {

@@ -10,37 +10,9 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use cce_gateway::{sync_once, watch_loop, GatewayClient, SyncParams};
+use cce_gateway::{sync_once, watch_loop, GatewayClient, SyncParamOverrides, SyncParams};
 
 use crate::cli::OutputFormat;
-
-/// Apply the overrides both gateway variants share.
-fn apply_shared(
-    params: &mut SyncParams,
-    extensions: &Option<String>,
-    exclude: &Option<String>,
-    gitignore: &Option<bool>,
-    compress: &Option<bool>,
-    cache_file: &Option<std::path::PathBuf>,
-    health_file: &Option<std::path::PathBuf>,
-) {
-    if let Some(extensions) = extensions {
-        params.extensions = extensions.clone();
-    }
-    if let Some(exclude) = exclude {
-        params.exclude = exclude.clone();
-    }
-    if let Some(gitignore) = gitignore {
-        params.gitignore = *gitignore;
-    }
-    if let Some(compress) = compress {
-        params.compress = *compress;
-    }
-    if let Some(cache_file) = cache_file {
-        params.cache_file = Some(cache_file.clone());
-    }
-    params.health_file = health_file.clone();
-}
 
 /// Translate one gateway subcommand over the shared defaults.
 ///
@@ -62,19 +34,17 @@ fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
             token: _,
         } => {
             let mut params = SyncParams::with_defaults(*project_id, path.clone());
-            apply_shared(
-                &mut params,
-                extensions,
-                exclude,
-                gitignore,
-                compress,
-                cache_file,
-                health_file,
-            );
-            if *no_commit {
-                params.commit = false;
-            }
-            params.json_progress = json_progress;
+            params.apply_overrides(SyncParamOverrides {
+                extensions: extensions.clone(),
+                exclude: exclude.clone(),
+                gitignore: *gitignore,
+                commit: Some(!no_commit),
+                compress: *compress,
+                cache_file: cache_file.clone(),
+                health_file: health_file.clone(),
+                json_progress,
+                ..Default::default()
+            });
             params
         }
         GatewayCommands::Watch {
@@ -91,22 +61,18 @@ fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
             token: _,
         } => {
             let mut params = SyncParams::with_defaults(*project_id, path.clone());
-            apply_shared(
-                &mut params,
-                extensions,
-                exclude,
-                gitignore,
-                compress,
-                cache_file,
-                health_file,
-            );
-            if let Some(interval_secs) = interval_secs {
-                params.interval_secs = *interval_secs;
-            }
-            if let Some(adaptive_interval) = adaptive_interval {
-                params.adaptive_interval = *adaptive_interval;
-            }
-            params.json_progress = json_progress;
+            params.apply_overrides(SyncParamOverrides {
+                extensions: extensions.clone(),
+                exclude: exclude.clone(),
+                gitignore: *gitignore,
+                compress: *compress,
+                interval_secs: *interval_secs,
+                cache_file: cache_file.clone(),
+                adaptive_interval: *adaptive_interval,
+                health_file: health_file.clone(),
+                json_progress,
+                ..Default::default()
+            });
             params
         }
     }

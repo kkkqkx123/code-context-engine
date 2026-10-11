@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use cce_codegraph::index::snapshot_query::SnapshotSymbolQueryOps;
 use cce_orchestrator::query::RelationQueryOptions;
-use cce_orchestrator::query::types::QueryOptions;
+use cce_orchestrator::query::types::SearchSources;
 use cce_orchestrator::{IndexOptions, KeywordSearchTool};
+use cce_server_shared::services::search::{SearchService, SharedQueryFields, SingleQuerySpec};
 use cce_server_shared::state::AppState;
 use rmcp::{
     ErrorData as McpError, ServerHandler,
@@ -181,91 +182,34 @@ impl McpServerHandler {
         Parameters(args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("search")?;
-        let mut options = QueryOptions::new(args.query.clone(), args.project_id);
-        // Merge the project search configuration so the MCP path observes the
-        // same runtime parameters as the HTTP path.
-        if let Ok(entry) = self
-            .state
-            .engine
-            .project_registry()
-            .get_or_load(args.project_id)
-            .await
-        {
-            options.config.rerank = entry.config.rerank.clone();
-            options.config.vector = entry.config.search.vector.clone();
-            options.config.bm25 = entry.config.search.bm25.clone();
-            options.config.fusion = entry.config.search.fusion.clone();
-            options.config.summary = entry.config.search.summary.clone();
-            options.config.score = entry.config.search.score.clone();
-            options.config.boost = entry.config.search.boost.clone();
-            options.config.plugin = entry.config.search.plugin.clone();
-            options.config.annotation = entry.config.search.annotation.clone();
-            options.config.timeout_ms = entry.config.search.timeout_ms;
-            let limit = args.limit.unwrap_or(entry.config.search.result.limit);
-            options.config.result = {
-                let mut r = entry.config.search.result.clone();
-                r.limit = limit;
-                r
-            };
-        } else if let Some(limit) = args.limit {
-            options = options.with_limit(limit);
-        }
-        if let Some(prefix) = args.directory_prefix.clone() {
-            options = options.with_directory_prefix(prefix);
-        }
-        // Per-request expansion opt-in: inject the neighbour resolver so the
-        // engine pass itself resolves real neighbours and wraps once.
-        // Expansion implies annotation, so both switches are enabled together.
-        if args.expand.unwrap_or(false) {
-            let resolver = self.build_resolver(args.project_id).await;
-            if resolver.is_some() {
-                options.config.annotation.enable_annotation = true;
-                options.config.annotation.expansion_enabled = true;
-            }
-            options = options.with_neighbour_resolver(resolver);
-        }
-        match self.state.engine.search(args.project_id, &options).await {
-            Ok(result) => {
-                let items: Vec<Value> = result
-                    .items
-                    .iter()
-                    .map(|item| {
-                        let expanded_nodes = metadata_count(item, "expanded_nodes");
-                        let forward_nodes = metadata_count(item, "forward_nodes");
-                        let backward_nodes = metadata_count(item, "backward_nodes");
-                        let omitted_self_evident =
-                            metadata_count(item, "omitted_self_evident");
-                        json!({
-                            "id": item.id,
-                            "entity_ids": item.entity_ids.iter().map(cce_types::EntityId::to_string).collect::<Vec<_>>(),
-                            "kind": item.kind,
-                            "name": item.name,
-                            "file_path": item.file_path,
-                            "score": item.score,
-                            "bm25_score": item.bm25_score,
-                            "sources": item.sources,
-                            "start_line": item.start_line,
-                            "end_line": item.end_line,
-                            "content": item.content,
-                            "content_state": content_state_key(&item.content_state),
-                            "expanded": item.metadata.get("expanded").is_some_and(|v| v == "true"),
-                            "expanded_nodes": expanded_nodes,
-                            "forward_nodes": forward_nodes,
-                            "backward_nodes": backward_nodes,
-                            "omitted_self_evident": omitted_self_evident,
-                        })
-                    })
-                    .collect();
-                Ok(CallToolResult::success(vec![ContentBlock::text(
-                    json!({
-                        "total": result.total,
-                        "elapsed_ms": result.elapsed_ms,
-                        "sources": result.sources,
-                        "items": items,
-                    })
-                    .to_string(),
-                )]))
-            }
+        // Query assembly, execution, and conversion live in the shared query
+        // service together with the HTTP surface, so both transports observe
+        // the same runtime parameters and expansion behavior. Items reuse the
+        // shared API DTO shape instead of a parallel MCP-only mapping.
+        let service = SearchService::new(&self.state);
+        let spec = SingleQuerySpec {
+            query: args.query.clone(),
+            sources: SearchSources::default(),
+            fields: SharedQueryFields {
+                limit: args.limit,
+                directory_prefix: args.directory_prefix.clone(),
+                expand: args.expand.unwrap_or(false),
+                ..Default::default()
+            },
+        };
+        match service.run_single(args.project_id, spec).await {
+            Ok(outcome) => Ok(CallToolResult::success(vec![ContentBlock::text(
+                json!({
+                    "total": outcome.total,
+                    "elapsed_ms": outcome.elapsed_ms,
+                    "sources": outcome.sources,
+                    "failed_sub_queries": outcome.failed_sub_queries,
+                    "relation_epoch": outcome.relation_epoch,
+                    "relation_stale": outcome.relation_stale,
+                    "items": outcome.items,
+                })
+                .to_string(),
+            )])),
             Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "search failed: {error}"
             ))])),
@@ -726,40 +670,6 @@ impl McpServerHandler {
             .to_string(),
         )]))
     }
-
-    /// Build the neighbour resolver for engine-side relation expansion.
-    ///
-    /// Returns `None` when the project config or relation searcher is
-    /// unavailable; expansion then silently degrades to unexpanded hits.
-    async fn build_resolver(
-        &self,
-        project_id: i64,
-    ) -> Option<cce_orchestrator::query::expansion::NeighbourResolver> {
-        let entry = match self
-            .state
-            .engine
-            .project_registry()
-            .get_or_load(project_id)
-            .await
-        {
-            Ok(entry) => entry,
-            Err(error) => {
-                tracing::warn!(%error, "Expansion requested but project config unavailable; skipping");
-                return None;
-            }
-        };
-        let searcher = match self.state.get_relation_searcher(project_id).await {
-            Ok(searcher) => searcher,
-            Err(error) => {
-                tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
-                return None;
-            }
-        };
-        Some(cce_orchestrator::query::expansion::NeighbourResolver::new(
-            searcher,
-            std::path::PathBuf::from(&entry.metadata.root_path),
-        ))
-    }
 }
 
 #[tool_handler]
@@ -775,28 +685,6 @@ impl ServerHandler for McpServerHandler {
                     .to_string(),
             )
     }
-}
-
-/// Machine-oriented content-state key matching the HTTP `ContentStateDto`.
-fn content_state_key(state: &cce_orchestrator::query::types::ContentState) -> &'static str {
-    use cce_orchestrator::query::types::ContentState;
-    use cce_orchestrator::query::types::content_reference::DowngradeReason;
-    match state {
-        ContentState::Full => "full",
-        ContentState::Reference(DowngradeReason::OverLimit) => "reference_over_limit",
-        ContentState::Reference(DowngradeReason::FileMissing) => "reference_file_missing",
-        ContentState::Reference(DowngradeReason::FileLevel) => "reference_file_level",
-        ContentState::Reference(DowngradeReason::ChunkMissing) => "reference_chunk_missing",
-    }
-}
-
-/// Read a numeric expansion counter from hit metadata, defaulting to zero
-/// when the hit went through no expansion pass.
-fn metadata_count(item: &cce_orchestrator::SearchResult, key: &str) -> usize {
-    item.metadata
-        .get(key)
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0)
 }
 
 /// Relation options for the call-semantics tools.

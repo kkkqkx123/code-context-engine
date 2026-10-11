@@ -103,6 +103,71 @@ impl SyncParams {
             base_secs.max(30)
         }
     }
+
+    /// Apply explicit caller overrides over the shared defaults.
+    ///
+    /// Every entry point translates its arguments into one override bundle
+    /// and funnels through here, so the override semantics cannot drift
+    /// between the CLI branch and the standalone daemon. Explicit values
+    /// outrank the environment-backed defaults; anything left unset keeps
+    /// the shared value.
+    pub fn apply_overrides(&mut self, overrides: SyncParamOverrides) {
+        if let Some(extensions) = overrides.extensions {
+            self.extensions = extensions;
+        }
+        if let Some(exclude) = overrides.exclude {
+            self.exclude = exclude;
+        }
+        if let Some(gitignore) = overrides.gitignore {
+            self.gitignore = gitignore;
+        }
+        if let Some(commit) = overrides.commit {
+            self.commit = commit;
+        }
+        if let Some(compress) = overrides.compress {
+            self.compress = compress;
+        }
+        if let Some(interval_secs) = overrides.interval_secs {
+            self.interval_secs = interval_secs;
+        }
+        if let Some(cache_file) = overrides.cache_file {
+            self.cache_file = Some(cache_file);
+        }
+        if let Some(adaptive_interval) = overrides.adaptive_interval {
+            self.adaptive_interval = adaptive_interval;
+        }
+        self.health_file = overrides.health_file;
+        self.json_progress = overrides.json_progress;
+    }
+}
+
+/// Explicit caller overrides translated over the shared defaults.
+///
+/// Each field mirrors one `SyncParams` knob; `None` keeps the shared value.
+/// Entry points build one bundle from their own argument shapes instead of
+/// reimplementing the override logic.
+#[derive(Debug, Clone, Default)]
+pub struct SyncParamOverrides {
+    /// File extensions to include, comma separated.
+    pub extensions: Option<String>,
+    /// Directories to exclude, comma separated.
+    pub exclude: Option<String>,
+    /// Whether to respect gitignore files.
+    pub gitignore: Option<bool>,
+    /// Whether to run the index commit after staging.
+    pub commit: Option<bool>,
+    /// Whether to compress batch chunks before upload.
+    pub compress: Option<bool>,
+    /// Poll interval in seconds for watch mode.
+    pub interval_secs: Option<u64>,
+    /// Scan cache file for cross-restart hash reuse.
+    pub cache_file: Option<PathBuf>,
+    /// Whether the watch interval adapts to the baseline file count.
+    pub adaptive_interval: Option<bool>,
+    /// Heartbeat file for supervisors and health probes.
+    pub health_file: Option<PathBuf>,
+    /// Emit single-line JSON progress records instead of human text.
+    pub json_progress: bool,
 }
 
 /// Whether chunk compression is enabled. Optional negotiation, off by
