@@ -57,6 +57,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             span_start_byte INTEGER,
             span_end_byte INTEGER,
             scoped_name TEXT,
+            overload_discriminator TEXT NOT NULL DEFAULT '',
             depth INTEGER,
             parent_id INTEGER,
             metadata TEXT,
@@ -67,7 +68,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             project_id INTEGER NOT NULL,
             epoch INTEGER NOT NULL DEFAULT 0,
             batch_id INTEGER NOT NULL DEFAULT 0,
-            UNIQUE(project_id, epoch, file_id, scoped_name, kind),
+            UNIQUE(project_id, epoch, file_id, scoped_name, kind, overload_discriminator),
             FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE,
             FOREIGN KEY (parent_id) REFERENCES entities(id) ON DELETE SET NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -75,6 +76,11 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
         [],
     )
     .map_err(|e| StorageError::Table(format!("Failed to create entities table: {}", e)))?;
+
+    let _ = conn.execute(
+        "ALTER TABLE entities ADD COLUMN overload_discriminator TEXT NOT NULL DEFAULT ''",
+        [],
+    );
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS project_meta (

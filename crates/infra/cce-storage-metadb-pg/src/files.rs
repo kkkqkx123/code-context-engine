@@ -102,11 +102,11 @@ impl PostgresClient {
                 tx.execute(
                     "INSERT INTO entities (name, kind, file_id, signature, span_start_row, \
                      span_end_row, span_start_column, span_end_column, span_start_byte, \
-                     span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, \
+                     span_end_byte, scoped_name, overload_discriminator, depth, parent_id, metadata, parameters_json, \
                      return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank) \
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                     $16, $17, $18, $19, $20, $21, $22) \
-                     ON CONFLICT (project_id, epoch, file_id, scoped_name, kind) DO UPDATE SET \
+                     $16, $17, $18, $19, $20, $21, $22, $23) \
+                     ON CONFLICT (project_id, epoch, file_id, scoped_name, kind, overload_discriminator) DO UPDATE SET \
                         name = EXCLUDED.name, signature = EXCLUDED.signature, \
                         span_start_row = EXCLUDED.span_start_row, \
                         span_end_row = EXCLUDED.span_end_row, \
@@ -131,6 +131,7 @@ impl PostgresClient {
                         &entity.span_start_byte,
                         &entity.span_end_byte,
                         &entity.scoped_name,
+                        &entity.overload_discriminator,
                         &entity.depth,
                         &entity.parent_id,
                         &entity.metadata,

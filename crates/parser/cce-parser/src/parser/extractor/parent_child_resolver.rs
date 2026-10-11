@@ -282,12 +282,11 @@ pub fn establish_function_scope_relationships(entities: &mut [Entity]) {
 
 /// Tag duplicate siblings with a deterministic source-order ordinal.
 ///
-/// Entities that resolve to the same scoped name, kind, and normalized
-/// signature collapse onto one stable symbol key. Rebinding is legal in the
-/// source — a test function defining `class Module` twice to swap mock
-/// behavior, a re-`def` of the same method name — so each occurrence is tagged
-/// with its zero-based index (ordered by span start) in
-/// `DUPLICATE_SIBLING_ORDINAL`, which the stable key folds into its
+/// The stable symbol key no longer hashes the signature, so every sibling
+/// that resolves to the same scoped name and kind — including true overloads
+/// (same name, distinct signatures) — would collapse onto one key. Each
+/// occurrence is therefore tagged with its zero-based index (ordered by span
+/// start) in `DUPLICATE_SIBLING_ORDINAL`, which the stable key folds into its
 /// discriminator.
 ///
 /// Grouping uses the resolved scoped name (not the direct parent id): members
@@ -296,30 +295,25 @@ pub fn establish_function_scope_relationships(entities: &mut [Entity]) {
 /// `test_find_best_app::Module::create_app`), so the disambiguation must
 /// propagate down the whole chain.
 ///
-/// Position-scoped kinds and empty signatures are skipped: their key already
-/// folds the entity span, which keeps occurrences distinct without metadata.
-/// Entities in groups of one receive no tag, leaving their key untouched.
+/// Position-scoped kinds are skipped: their key already folds the entity
+/// span, which keeps occurrences distinct without metadata. Entities in
+/// groups of one receive no tag, leaving their key untouched.
 ///
 /// Runs after every parenting pass so `parent` reflects the final hierarchy.
 pub fn disambiguate_duplicate_siblings(entities: &mut [Entity]) {
     use std::collections::HashMap;
 
     let scoped_names = cce_types::entity::ParsedFile::resolve_scoped_names(entities);
-    let mut groups: HashMap<(String, EntityKind, String), Vec<usize>> = HashMap::new();
+    let mut groups: HashMap<(String, EntityKind), Vec<usize>> = HashMap::new();
     for (idx, entity) in entities.iter().enumerate() {
-        let normalized_signature = entity
-            .signature
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        if entity.kind.is_position_scoped() || normalized_signature.is_empty() {
+        if entity.kind.is_position_scoped() {
             continue;
         }
         let Some(scoped_name) = scoped_names.get(&entity.id) else {
             continue;
         };
         groups
-            .entry((scoped_name.clone(), entity.kind, normalized_signature))
+            .entry((scoped_name.clone(), entity.kind))
             .or_default()
             .push(idx);
     }

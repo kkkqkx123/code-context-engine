@@ -30,6 +30,11 @@ pub struct EntityRecord {
     pub span_start_byte: Option<i64>,
     pub span_end_byte: Option<i64>,
     pub scoped_name: Option<String>,
+    /// Overload discriminator aligning the data-side natural key with the
+    /// relation-side `(scoped_name, kind, overload_discriminator)` identity.
+    /// Empty when the entity has no overload siblings.
+    #[serde(default)]
+    pub overload_discriminator: String,
     pub depth: Option<i64>,
     pub parent_id: Option<i64>,
     pub metadata: Option<String>,

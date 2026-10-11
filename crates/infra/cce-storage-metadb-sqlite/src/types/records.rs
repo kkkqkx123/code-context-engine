@@ -60,6 +60,10 @@ impl FromRow for EntityRecord {
             span_start_byte: row.get(9)?,
             span_end_byte: row.get(10)?,
             scoped_name: row.get(11)?,
+            overload_discriminator: row
+                .get::<_, Option<String>>(23)
+                .unwrap_or(None)
+                .unwrap_or_default(),
             depth: row.get(12)?,
             parent_id: row.get(13)?,
             metadata: row.get(14)?,

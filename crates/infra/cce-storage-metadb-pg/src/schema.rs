@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS entities (
     span_start_byte BIGINT,
     span_end_byte BIGINT,
     scoped_name TEXT,
+    overload_discriminator TEXT NOT NULL DEFAULT '',
     depth BIGINT,
     parent_id BIGINT REFERENCES entities(id) ON DELETE SET NULL,
     metadata TEXT,
@@ -109,7 +110,7 @@ CREATE TABLE IF NOT EXISTS entities (
     epoch BIGINT NOT NULL DEFAULT 0,
     batch_id BIGINT NOT NULL DEFAULT 0,
     rank DOUBLE PRECISION NOT NULL DEFAULT 0,
-    UNIQUE (project_id, epoch, file_id, scoped_name, kind)
+    UNIQUE (project_id, epoch, file_id, scoped_name, kind, overload_discriminator)
 );
 CREATE INDEX IF NOT EXISTS idx_entities_project ON entities (project_id);
 CREATE INDEX IF NOT EXISTS idx_entities_project_name ON entities (project_id, name);

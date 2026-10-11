@@ -179,7 +179,8 @@ pub async fn handle_call_chain(
         Ok(nodes) => nodes
             .into_iter()
             .map(|node| CallChainNode {
-                function_id: stable_id(searcher.query().index(), node.function_id),
+                function_id: stable_id(searcher.query().index(), node.function_id)
+                    .unwrap_or_else(|| format!("entity:{}", node.function_id.0)),
                 function_name: node.function_name,
                 file_path: node.file_path,
                 depth: node.depth,
@@ -264,7 +265,8 @@ pub async fn handle_call_path(
             let call_chain_nodes: Vec<CallChainNode> = path
                 .into_iter()
                 .map(|node| CallChainNode {
-                    function_id: stable_id(snapshot.index.as_ref(), node.function_id),
+                    function_id: stable_id(snapshot.index.as_ref(), node.function_id)
+                        .unwrap_or_else(|| format!("entity:{}", node.function_id.0)),
                     function_name: node.function_name,
                     file_path: node.file_path,
                     depth: node.depth,
@@ -355,7 +357,7 @@ pub async fn handle_class_inheritance(
             .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
 
         cce_api::models::ClassRelation {
-            class_id: stable_id(index, id),
+            class_id: stable_id(index, id).unwrap_or_else(|| format!("entity:{}", id.0)),
             class_name,
             file_path,
             depth,
@@ -451,7 +453,8 @@ pub async fn handle_class_implementations(
                     .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
 
                 cce_api::models::InterfaceRelation {
-                    interface_id: stable_id(searcher.query().index(), id),
+                    interface_id: stable_id(searcher.query().index(), id)
+                        .unwrap_or_else(|| format!("entity:{}", id.0)),
                     interface_name,
                     file_path,
                 }
@@ -475,7 +478,8 @@ pub async fn handle_class_implementations(
                     .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
 
                 cce_api::models::ClassRelation {
-                    class_id: stable_id(searcher.query().index(), id),
+                    class_id: stable_id(searcher.query().index(), id)
+                        .unwrap_or_else(|| format!("entity:{}", id.0)),
                     class_name,
                     file_path,
                     depth: 0,

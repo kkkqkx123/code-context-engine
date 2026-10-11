@@ -8,6 +8,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
+
 use cce_codegraph::RelationQueryError;
 use cce_codegraph::index::{
     RelationIndexView,
@@ -426,6 +428,10 @@ struct SubGraphBuilder<'a> {
     nodes: Vec<GraphNode>,
     seen: HashSet<String>,
     edges: Vec<GraphEdge>,
+    /// Edge identities already emitted. Both-direction traversals reach the
+    /// same edge from each endpoint; without this set every internal edge
+    /// would be recorded twice and degree-based metrics would double-count.
+    seen_edges: HashSet<String>,
 }
 
 impl<'a> SubGraphBuilder<'a> {
@@ -435,6 +441,7 @@ impl<'a> SubGraphBuilder<'a> {
             nodes: Vec::new(),
             seen: HashSet::new(),
             edges: Vec::new(),
+            seen_edges: HashSet::new(),
         }
     }
 
@@ -527,7 +534,7 @@ impl<'a> SubGraphBuilder<'a> {
         // classification, confidence and bearing all derive from the same
         // parsed relation type, so they must not diverge by endpoint.
         let (target, is_external) = if relation.is_external {
-            let id = self.external_id(&relation.callee_name);
+            let id = Self::external_id(relation);
             self.insert_external(&id, &relation.callee_name);
             (id, true)
         } else if let Some(callee) = relation.callee_id {
@@ -536,16 +543,37 @@ impl<'a> SubGraphBuilder<'a> {
         } else {
             return;
         };
+        let source = self.node_id(caller);
+        let relation_str = relation.relation_type.to_string();
+        let callsite = relation
+            .relation_type
+            .is_call()
+            .then(|| super::model::callsite_of(&relation.span));
+        let identity = super::model::edge_id_with_callsite(
+            &source,
+            &target,
+            &relation_str,
+            callsite.as_deref(),
+        );
+        // Both-direction traversals reach the same call site from each end;
+        // the edge identity, not the emission count, decides what the graph
+        // holds. Call-class edges are per call site, non-call edges per
+        // entity pair.
+        if !self.seen_edges.insert(identity.clone()) {
+            return;
+        }
         self.edges.push(GraphEdge {
-            source: self.node_id(caller),
+            source,
             target,
-            relation: relation.relation_type.to_string(),
+            relation: relation_str,
             domain: relation.relation_type.domain().to_string(),
             confidence: confidence_of(relation),
             call_context: Some(relation.call_context.tag().to_string()),
             is_external,
             weight: edge_load(&relation.relation_type, relation.call_frequency),
             cfg_condition: relation.cfg_condition.clone(),
+            callsite,
+            edge_id: identity,
         });
     }
 
@@ -563,18 +591,29 @@ impl<'a> SubGraphBuilder<'a> {
         } else {
             Confidence::Inferred
         };
+        let relation_type = target.relation_type;
+        let call_context = target.call_context.clone();
+        let source = self.node_id(source);
+        let target = self.node_id(target.function_id);
+        let relation_str = relation_type.to_string();
+        let identity = super::model::edge_id(&source, &target, &relation_str);
+        if !self.seen_edges.insert(identity.clone()) {
+            return;
+        }
         self.edges.push(GraphEdge {
-            source: self.node_id(source),
-            target: self.node_id(target.function_id),
-            relation: target.relation_type.to_string(),
-            domain: target.relation_type.domain().to_string(),
+            source,
+            target,
+            relation: relation_str,
+            domain: relation_type.domain().to_string(),
             confidence,
-            call_context: Some(target.call_context.tag().to_string()),
+            call_context: Some(call_context.tag().to_string()),
             is_external: false,
             // A path node records the traversal step, not a per-site tally, so
             // the heat factor stays neutral; the bearing is the type's own.
-            weight: edge_load(&target.relation_type, 0),
+            weight: edge_load(&relation_type, 0),
             cfg_condition: None,
+            callsite: None,
+            edge_id: identity,
         });
     }
 
@@ -622,8 +661,39 @@ impl<'a> SubGraphBuilder<'a> {
         }
     }
 
-    fn external_id(&self, name: &str) -> String {
-        format!("external::{name}")
+    /// Content-addressed external node id.
+    ///
+    /// The receiver call text is display data, not identity. The id hashes the
+    /// normalized call text together with the resolved receiver type when
+    /// known and the external classification, so same-named variables of
+    /// different types stay apart and identical targets hash identically. The
+    /// `xsym_` namespace uses the same digest shape as
+    /// `StableSymbolKey::stable_id`, which bounds both length and charset
+    /// regardless of the source text.
+    fn external_id(relation: &cce_types::ResolvedRelation) -> String {
+        let normalized_name: String = relation
+            .callee_name
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let owner: String = relation
+            .owner_type
+            .as_deref()
+            .unwrap_or("")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let classification = serde_json::to_string(&relation.external_type)
+            .unwrap_or_else(|_| "unknown".to_string());
+        let mut hasher = Sha256::new();
+        const EXTERNAL_NODE_SCHEMA_VERSION: u64 = 1;
+        hasher.update(EXTERNAL_NODE_SCHEMA_VERSION.to_le_bytes());
+        for component in [&normalized_name, &owner, &classification] {
+            let bytes = component.as_bytes();
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(bytes);
+        }
+        format!("xsym_{:x}", hasher.finalize())
     }
 
     fn entity_metadata(&self, id: EntityId) -> Option<Entity> {
@@ -1089,6 +1159,8 @@ mod tests {
             is_external: false,
             weight: 1.0,
             cfg_condition: None,
+            callsite: None,
+            edge_id: crate::query::graph::model::edge_id(source, target, relation),
         }
     }
 }

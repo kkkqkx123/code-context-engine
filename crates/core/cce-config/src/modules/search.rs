@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use crate::validation::{Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
 
+// Re-use shared default value functions
+use super::defaults::default_true;
+
 // ============================================================================
 // Score normalization strategy (serde-compatible)
 // ============================================================================
@@ -733,6 +736,17 @@ pub struct RelationAnnotationConfig {
     pub filter_stdlib: bool,
     /// Drop external targets without workspace source during expansion.
     pub filter_external: bool,
+    /// Drop forward (callee) expansion units when the primary body is fully
+    /// rendered: the call site is then visible in the primary's own code, so
+    /// the relation is self-evident and the `rel` label is redundant.
+    /// Backward (caller) expansion is never affected.
+    #[serde(default = "default_true")]
+    pub omit_self_evident_edges: bool,
+    /// Share the dedup state (seen entity IDs and content hashes) across all
+    /// results of one `annotate_batch` call, so the same entity is not
+    /// concatenated twice as an expansion of different hits.
+    #[serde(default = "default_true")]
+    pub batch_shared_dedup: bool,
     /// Workspace root for file existence checks. Relative segment paths
     /// resolve against it; absolute paths are checked directly. Missing files
     /// are downgraded to references. `None` skips the check entirely.
@@ -760,6 +774,8 @@ impl Default for RelationAnnotationConfig {
             allow_structural_edges: false,
             filter_stdlib: true,
             filter_external: true,
+            omit_self_evident_edges: true,
+            batch_shared_dedup: true,
             workspace_root: None,
         }
     }
@@ -826,6 +842,19 @@ impl RelationAnnotationConfig {
     /// Enable or disable external-target filtering during expansion (builder pattern).
     pub fn with_external_filter(mut self, filter: bool) -> Self {
         self.filter_external = filter;
+        self
+    }
+
+    /// Drop or keep forward (callee) expansion units whose relation is
+    /// already inferable from the fully rendered primary body (builder pattern).
+    pub fn omit_self_evident_edges(mut self, omit: bool) -> Self {
+        self.omit_self_evident_edges = omit;
+        self
+    }
+
+    /// Share or isolate the dedup state across one annotate batch (builder pattern).
+    pub fn with_batch_shared_dedup(mut self, share: bool) -> Self {
+        self.batch_shared_dedup = share;
         self
     }
 

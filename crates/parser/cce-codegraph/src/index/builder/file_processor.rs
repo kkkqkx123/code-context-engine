@@ -195,16 +195,13 @@ impl<'a> FileProcessor<'a> {
 
         let scoped_names = file.resolve_all_scoped_names();
         for entity in &file.entities {
-            // Import directives are not addressable definitions: nothing
-            // references them by stable symbol key (call and import resolution
-            // go through the project symbol table and the dedicated
-            // import/export tables). Impl blocks stay registered: methods
-            // parent to them and snapshots export them, so skipping them only
-            // produces spurious fallback-key collisions between cfg-gated
-            // duplicates (handled with span disambiguation on conflict).
-            if entity.kind.is_import_like() {
-                continue;
-            }
+            // Every entity is registered, including import directives: they
+            // appear as inheritance/reference edge endpoints in the graph, so
+            // leaving them unregistered would force clients onto a second,
+            // span-fragile `local:` id space for the same nodes. Repeated
+            // same-name imports in one file stay distinguishable through the
+            // duplicate-sibling ordinal, which the stable key folds into its
+            // discriminator.
             let new_id = remap.get(&entity.id).copied().unwrap_or(entity.id);
             if self.index.function_index().contains_key(&new_id)
                 && let Some(scoped_name) = scoped_names.get(&entity.id)

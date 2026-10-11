@@ -151,6 +151,22 @@ impl StructureConcatenator {
         }
     }
 
+    /// Whether the primary segment will render with its full body in the
+    /// final output: not omitted by configuration, present on disk, and
+    /// small enough to survive the budget check. Callers use this to decide
+    /// whether forward (callee) relations are self-evident from the
+    /// primary's own rendered code.
+    pub async fn primary_renders_fully(&self, primary: &ExpandedUnit) -> bool {
+        if self.config.omit_primary_body {
+            return false;
+        }
+        let mut segment = AggregatedSegment::from_unit(primary.clone());
+        self.apply_existence_check(std::slice::from_mut(&mut segment))
+            .await;
+        self.apply_segment_budget(std::slice::from_mut(&mut segment));
+        !segment.is_reference()
+    }
+
     /// Select segments by score with the primary pinned, then render the
     /// survivors in structural order: primary first, remaining expansions
     /// grouped by file and line for readability. With primary-body omission

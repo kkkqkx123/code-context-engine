@@ -163,12 +163,14 @@ where
     })
 }
 
-/// Stable id of an entity, or an empty string when the entity has no symbol key.
-pub fn stable_id<I: SnapshotSymbolQueryOps>(index: &I, entity_id: EntityId) -> String {
+/// Stable id of an entity, or `None` when the entity has no symbol key.
+///
+/// The failure is explicit: an empty string is a valid-looking id that would
+/// silently leak into API payloads and be indistinguishable from a real one.
+pub fn stable_id<I: SnapshotSymbolQueryOps>(index: &I, entity_id: EntityId) -> Option<String> {
     index
         .get_symbol_key_by_entity_id(entity_id)
         .map(|key| key.stable_id().0)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

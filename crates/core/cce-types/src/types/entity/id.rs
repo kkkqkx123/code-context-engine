@@ -5,7 +5,11 @@ use std::str::FromStr;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize};
 use serde::{Deserialize, Deserializer, Serialize as SerdeSerialize, Serializer};
 
-/// Entity ID (file-local incremental, simple and efficient)
+/// Entity ID: epoch-internal parse-order ordinal, never a cross-run identity.
+///
+/// Allocated by a per-epoch atomic counter during indexing, so any file-set
+/// change shifts later ids. External consumers must join on `StableSymbolId`
+/// (`sym_…`); this number is only valid inside the epoch that allocated it.
 #[derive(
     Debug,
     Clone,

@@ -188,7 +188,9 @@ pub async fn handle_function_calls(
                             .get_symbol_key_by_entity_id(callee_id)
                     })
                     .map(|key| key.stable_id().0)
-                    .unwrap_or_default(),
+                    .unwrap_or_else(|| {
+                        format!("entity:{}", r.callee_id.map(|id| id.0).unwrap_or(0))
+                    }),
                 function_name,
                 file_path,
                 depth: 0,
@@ -327,7 +329,7 @@ pub async fn handle_function_callers(
                     .index()
                     .get_symbol_key_by_entity_id(caller_id)
                     .map(|key| key.stable_id().0)
-                    .unwrap_or_default(),
+                    .unwrap_or_else(|| format!("entity:{}", caller_id.0)),
                 function_name,
                 file_path,
                 depth: 0,

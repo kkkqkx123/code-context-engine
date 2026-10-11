@@ -76,6 +76,8 @@ fn convert_subgraph(graph: &SubGraph) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)
             is_external: edge.is_external,
             weight: edge.weight,
             cfg_condition: edge.cfg_condition.clone(),
+            callsite: edge.callsite.clone(),
+            edge_id: edge.edge_id.clone(),
         })
         .collect::<Vec<_>>();
 
@@ -860,7 +862,7 @@ pub async fn handle_graph_module(
                         .index
                         .get_symbol_key_by_entity_id(id)
                         .map(|key| key.stable_id().0)
-                        .unwrap_or_default()
+                        .unwrap_or_else(|| format!("entity:{}", id.0))
                 })
                 .unwrap_or_default(),
             target: relation.callee_name,

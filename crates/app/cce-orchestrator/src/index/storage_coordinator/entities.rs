@@ -157,30 +157,27 @@ impl StorageCoordinator {
 
                     let scoped_names = parsed.resolve_all_scoped_names();
                     let mut inserted = Vec::with_capacity(parsed.entities.len());
-                    // The symbol key is (project, epoch, file, scoped_name, kind).
-                    // cfg-gated duplicates (e.g. platform-specific `impl` blocks
-                    // in one file) share that key, so disambiguate repeats with
-                    // a counter suffix. The source entity link stays exact via
-                    // `__source_entity_id` metadata; only the key is suffixed.
-                    let mut seen: std::collections::HashMap<(String, String), usize> =
-                        std::collections::HashMap::new();
+                    // The symbol key aligns with the relation side:
+                    // (project, epoch, file, scoped_name, kind,
+                    // overload_discriminator). Overloads and cfg-gated
+                    // duplicates share the name but carry distinct
+                    // discriminators, so no suffix mangling is needed. The
+                    // source entity link stays exact via `__source_entity_id`.
                     for entity in &parsed.entities {
                         // resolve against the once-built map instead of
                         // rebuilding the id -> entity lookup per entity.
-                        let base_name = scoped_names.get(&entity.id).cloned();
-                        let scoped_name = match base_name {
-                            None => None,
-                            Some(name) => {
-                                let key = (name.clone(), entity.kind.to_string());
-                                let count = seen.entry(key).or_insert(0);
-                                *count += 1;
-                                if *count == 1 {
-                                    Some(name)
-                                } else {
-                                    Some(format!("{name}~{}", *count))
-                                }
-                            }
-                        };
+                        let scoped_name = scoped_names.get(&entity.id).cloned();
+                        let overload_discriminator = scoped_name.as_ref().map_or_else(
+                            String::new,
+                            |name| {
+                                cce_types::StableSymbolKey::for_entity(
+                                    &parsed.path,
+                                    name,
+                                    entity,
+                                )
+                                .overload_discriminator
+                            },
+                        );
                         let mut metadata = entity.metadata.clone();
                         metadata.insert(
                             "__source_entity_id".to_string(),
@@ -199,6 +196,7 @@ impl StorageCoordinator {
                             span_start_byte: Some(entity.span.start_byte as i64),
                             span_end_byte: Some(entity.span.end_byte as i64),
                             scoped_name,
+                            overload_discriminator,
                             depth: Some(entity.depth as i64),
                             parent_id: None,
                             metadata: Some(serde_json::to_string(&metadata).map_err(|error| {

@@ -33,8 +33,8 @@ impl EntityRepository {
     pub fn insert(tx: &rusqlite::Transaction, entity: &EntityRecord) -> Result<i64, StorageError> {
         execute_insert(
             tx,
-            "INSERT INTO entities (name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            "INSERT INTO entities (name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, overload_discriminator, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 entity.name,
                 entity.kind,
@@ -47,6 +47,7 @@ impl EntityRepository {
                 entity.span_start_byte,
                 entity.span_end_byte,
                 entity.scoped_name,
+                entity.overload_discriminator,
                 entity.depth,
                 entity.parent_id,
                 entity.metadata,
@@ -86,6 +87,7 @@ impl EntityRepository {
                     &entity.span_start_byte,
                     &entity.span_end_byte,
                     &entity.scoped_name,
+                    &entity.overload_discriminator,
                     &entity.depth,
                     &entity.parent_id,
                     &entity.metadata,
@@ -102,8 +104,8 @@ impl EntityRepository {
 
         execute_insert_batch(
             tx,
-            "INSERT INTO entities (name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            "INSERT INTO entities (name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, overload_discriminator, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             &param_list,
             "entities",
         )
@@ -117,7 +119,7 @@ impl EntityRepository {
     pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<EntityRecord>, StorageError> {
         execute_query_optional(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE id = ?1",
             params![id],
             Self::from_row,
@@ -135,7 +137,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE file_id = ?1",
             params![file_id],
             Self::from_row,
@@ -150,7 +152,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE file_id = ?1 AND epoch = ?2",
             params![file_id, epoch],
             Self::from_row,
@@ -169,7 +171,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE file_id = ?1 AND project_id = ?2",
             params![file_id, project_id],
             Self::from_row,
@@ -188,7 +190,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE name = ?1 AND project_id = ?2",
             params![name, project_id],
             Self::from_row,
@@ -208,7 +210,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.rank
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.rank, e.overload_discriminator
              FROM entities e
              JOIN entities_fts f ON e.id = f.rowid
              WHERE entities_fts MATCH ?1 AND e.project_id = ?2
@@ -228,7 +230,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.rank
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, f.rank, e.overload_discriminator
              FROM entities e
              JOIN entities_fts f ON e.id = f.rowid
              WHERE entities_fts MATCH ?1 AND e.project_id = ?2 AND e.epoch = ?4
@@ -249,7 +251,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE kind = ?1 AND project_id = ?2",
             params![kind, project_id],
             Self::from_row,
@@ -266,7 +268,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE project_id = ?1",
             params![project_id],
             Self::from_row,
@@ -285,7 +287,7 @@ impl EntityRepository {
     ) -> Result<Vec<EntityRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank
+            "SELECT id, name, kind, file_id, signature, span_start_row, span_end_row, span_start_column, span_end_column, span_start_byte, span_end_byte, scoped_name, depth, parent_id, metadata, parameters_json, return_type, doc_comment, modifiers_json, project_id, epoch, batch_id, rank, overload_discriminator
              FROM entities WHERE project_id = ?1 ORDER BY id LIMIT ?2 OFFSET ?3",
             params![project_id, limit, offset],
             Self::from_row,
@@ -301,13 +303,13 @@ impl EntityRepository {
     ) -> Result<Vec<(EntityRecord, String)>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, f.path
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, e.overload_discriminator, f.path
              FROM entities e JOIN files f ON e.file_id = f.id
              WHERE e.project_id = ?1",
             params![project_id],
             |row| {
                 let entity = Self::parse_entity_from_row(row)?;
-                let file_path: String = row.get(23)?;
+                let file_path: String = row.get(24)?;
                 Ok((entity, file_path))
             },
         )
@@ -322,13 +324,13 @@ impl EntityRepository {
     ) -> Result<Vec<(EntityRecord, String)>, StorageError> {
         execute_query(
             conn,
-            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, f.path
+            "SELECT e.id, e.name, e.kind, e.file_id, e.signature, e.span_start_row, e.span_end_row, e.span_start_column, e.span_end_column, e.span_start_byte, e.span_end_byte, e.scoped_name, e.depth, e.parent_id, e.metadata, e.parameters_json, e.return_type, e.doc_comment, e.modifiers_json, e.project_id, e.epoch, e.batch_id, 0.0 as rank, e.overload_discriminator, f.path
              FROM entities e JOIN files f ON e.file_id = f.id
              WHERE e.project_id = ?1 AND e.epoch = ?2",
             params![project_id, epoch],
             |row| {
                 let entity = Self::parse_entity_from_row(row)?;
-                let file_path: String = row.get(23)?;
+                let file_path: String = row.get(24)?;
                 Ok((entity, file_path))
             },
         )
@@ -467,6 +469,10 @@ impl EntityRepository {
     }
 
     fn parse_entity_from_row(row: &Row) -> Result<EntityRecord, rusqlite::Error> {
+        let overload_discriminator: String = row
+            .get::<_, Option<String>>(23)
+            .unwrap_or(None)
+            .unwrap_or_default();
         Ok(EntityRecord {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -480,6 +486,7 @@ impl EntityRepository {
             span_start_byte: row.get(9)?,
             span_end_byte: row.get(10)?,
             scoped_name: row.get(11)?,
+            overload_discriminator,
             depth: row.get(12)?,
             parent_id: row.get(13)?,
             metadata: row.get(14)?,
@@ -520,6 +527,7 @@ mod tests {
                 span_start_byte INTEGER,
                 span_end_byte INTEGER,
                 scoped_name TEXT,
+                overload_discriminator TEXT NOT NULL DEFAULT '',
                 depth INTEGER,
                 parent_id INTEGER,
                 metadata TEXT,
@@ -559,6 +567,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             depth: Some(0),
             parent_id: None,
             metadata: None,
@@ -598,6 +607,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             depth: Some(0),
             parent_id: None,
             metadata: None,
@@ -639,6 +649,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             depth: Some(0),
             parent_id: None,
             metadata: None,
@@ -681,6 +692,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             depth: Some(0),
             parent_id: None,
             metadata: None,
@@ -715,6 +727,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             parameters_json: None,
             return_type: None,
             doc_comment: None,
@@ -741,6 +754,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             parameters_json: None,
             return_type: None,
             doc_comment: None,
@@ -791,6 +805,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             depth: Some(0),
             parent_id: None,
             metadata: None,
@@ -831,6 +846,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             depth: Some(0),
             parent_id: None,
             metadata: None,
@@ -872,6 +888,7 @@ mod tests {
             span_start_byte: None,
             span_end_byte: None,
             scoped_name: None,
+            overload_discriminator: String::new(),
             depth: Some(0),
             parent_id: None,
             metadata: None,
@@ -912,6 +929,7 @@ mod tests {
                 span_start_byte INTEGER,
                 span_end_byte INTEGER,
                 scoped_name TEXT,
+                overload_discriminator TEXT NOT NULL DEFAULT '',
                 depth INTEGER,
                 parent_id INTEGER,
                 metadata TEXT,
@@ -962,6 +980,7 @@ mod tests {
                 span_start_byte: None,
                 span_end_byte: None,
                 scoped_name: None,
+                overload_discriminator: String::new(),
                 parameters_json: None,
                 return_type: None,
                 doc_comment: None,
@@ -987,6 +1006,7 @@ mod tests {
                 span_start_byte: None,
                 span_end_byte: None,
                 scoped_name: None,
+                overload_discriminator: String::new(),
                 parameters_json: None,
                 return_type: None,
                 doc_comment: None,
@@ -1012,6 +1032,7 @@ mod tests {
                 span_start_byte: None,
                 span_end_byte: None,
                 scoped_name: None,
+                overload_discriminator: String::new(),
                 parameters_json: None,
                 return_type: None,
                 doc_comment: None,

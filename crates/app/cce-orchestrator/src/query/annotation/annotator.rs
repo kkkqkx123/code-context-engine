@@ -76,13 +76,29 @@ impl RelationAnnotator {
 
         // 2. Prepare expansion units (dedup + budget cap)
         let (forward, backward) = if self.config.expansion_enabled {
-            self.prepare_expansion(
-                input.entity_id,
-                &primary_unit,
-                forward,
-                backward,
-                &self.config,
-            )
+            let (forward, backward) =
+                self.prepare_expansion(
+                    input.entity_id,
+                    &primary_unit,
+                    forward,
+                    backward,
+                    &self.config,
+                );
+            // Self-evident edge filter: when the primary renders with its
+            // full body, its outgoing call sites are visible in the primary's
+            // own code, so forward (callee) fragments add no information.
+            // Backward (caller) fragments are kept regardless.
+            let forward = if self.config.omit_self_evident_edges {
+                let concatenator = StructureConcatenator::new(self.config.clone());
+                if concatenator.primary_renders_fully(&primary_unit).await {
+                    Vec::new()
+                } else {
+                    forward
+                }
+            } else {
+                forward
+            };
+            (forward, backward)
         } else {
             (Vec::new(), Vec::new())
         };
@@ -142,9 +158,39 @@ impl RelationAnnotator {
             .enumerate()
             .partition(|(idx, _)| *idx < top_n);
 
-        // Process top-N results in parallel
+        // Batch-shared dedup: the same entity must not be concatenated twice
+        // as an expansion of different hits. The seen state is seeded with
+        // every primary entity first (hits reserve their own identity), then
+        // expansion units are pre-filtered first-come before the parallel
+        // annotation pass. Units dropped by the noise filter do not consume
+        // the seen state.
+        let mut seen_entities: std::collections::HashSet<EntityId> =
+            std::collections::HashSet::new();
+        let mut seen_hashes: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let share = self.config.batch_shared_dedup && self.config.expansion_enabled;
+        if share {
+            for (_, (input, _, _)) in &top_results {
+                if let Some(id) = input.entity_id {
+                    seen_entities.insert(id);
+                }
+                seen_hashes.insert(Self::expanded_unit_hash(
+                    &input.file_path,
+                    input.start_line,
+                    input.end_line,
+                    &input.content,
+                ));
+            }
+        }
         let mut futures = Vec::new();
-        for (_, (input, forward, backward)) in top_results {
+        for (_, (input, mut forward, mut backward)) in top_results {
+            if share {
+                if self.config.expansion_include_callers {
+                    backward.retain(|unit| Self::admit_unit(unit, &self.config, &mut seen_entities, &mut seen_hashes));
+                } else {
+                    backward.clear();
+                }
+                forward.retain(|unit| Self::admit_unit(unit, &self.config, &mut seen_entities, &mut seen_hashes));
+            }
             futures.push(self.annotate_single(input, forward, backward));
         }
 
@@ -161,6 +207,47 @@ impl RelationAnnotator {
         }
 
         Ok(annotated)
+    }
+
+    /// Batch-level admission check mirroring the per-result dedup: an
+    /// expansion unit is admitted only when neither its entity ID nor its
+    /// content hash has been seen anywhere in the batch yet. Admitted units
+    /// consume the seen state; rejected ones do not.
+    fn admit_unit(
+        unit: &ExpandedUnit,
+        config: &RelationAnnotationConfig,
+        seen_entities: &mut std::collections::HashSet<EntityId>,
+        seen_hashes: &mut std::collections::HashSet<u64>,
+    ) -> bool {
+        if let Some(id) = unit.entity_id {
+            if !seen_entities.insert(id) {
+                return false;
+            }
+        }
+        if config.dedup_strategy == DedupStrategy::ByContentHash
+            && !seen_hashes.insert(unit.content_hash())
+        {
+            return false;
+        }
+        true
+    }
+
+    /// Stable identity hash of a primary unit (FNV-1a over file path, line
+    /// range and body), matching the semantics of `ExpandedUnit::content_hash`
+    /// so batch seeding and expansion dedup agree on identity.
+    fn expanded_unit_hash(file_path: &str, start_line: u32, end_line: u32, content: &str) -> u64 {
+        let mut hash: u64 = 0xcbf29ce484222325;
+        let mut mix = |bytes: &[u8]| {
+            for byte in bytes {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+        };
+        mix(file_path.as_bytes());
+        mix(&start_line.to_le_bytes());
+        mix(&end_line.to_le_bytes());
+        mix(content.as_bytes());
+        hash
     }
 
     /// Deduplicate caller-supplied expansion units against the primary and
@@ -338,6 +425,9 @@ mod tests {
             .with_expansion(true)
             .with_max_expanded_units(cap)
             .with_caller_expansion(callers)
+            // These tests exercise the legacy expansion semantics; the
+            // self-evident filter has dedicated tests below.
+            .omit_self_evident_edges(false)
     }
 
     #[tokio::test]
@@ -544,5 +634,147 @@ mod tests {
         for result in &annotated {
             assert!(result.annotated_content.contains("call_b"));
         }
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_forward_dropped_when_primary_renders_fully() {
+        // The filter defaults to on; re-enable it explicitly because the
+        // shared `expansion_config` helper disables it for legacy tests.
+        // The primary body fits the quota and is fully rendered, so its
+        // callee is self-evident and dropped.
+        let annotator = RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let result = annotator
+            .annotate_single(
+                input(PRIMARY_CODE, 1),
+                vec![unit(2, "b", ExpansionOrigin::Forward)],
+                vec![unit(3, "c", ExpansionOrigin::Backward)],
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 0);
+        assert_eq!(result.metadata.backward_nodes, 1);
+        assert!(!result.annotated_content.contains("rel=\"calls\""));
+        assert!(result.annotated_content.contains("rel=\"called by\""));
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_filter_kept_when_switch_off() {
+        let config = expansion_config(4, true).omit_self_evident_edges(false);
+        let annotator = RelationAnnotator::new(config);
+        let result = annotator
+            .annotate_single(
+                input(PRIMARY_CODE, 1),
+                vec![unit(2, "b", ExpansionOrigin::Forward)],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_filter_kept_when_primary_omitted() {
+        // omit_primary_body means the primary's call sites are not visible,
+        // so forward expansion must survive.
+        let config = expansion_config(4, true).omit_primary_body(true);
+        let annotator = RelationAnnotator::new(config);
+        let result = annotator
+            .annotate_single(
+                input(PRIMARY_CODE, 1),
+                vec![unit(2, "b", ExpansionOrigin::Forward)],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_filter_kept_when_primary_downgraded() {
+        // An oversized primary degrades to a reference: its code is not in
+        // the output, so the callee relation is no longer self-evident.
+        let big = "x".repeat(5000);
+        let config = expansion_config(4, true).with_max_length(1000);
+        let annotator = RelationAnnotator::new(config);
+        let result = annotator
+            .annotate_single(
+                input(&big, 1),
+                vec![unit(2, "b", ExpansionOrigin::Forward)],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+    }
+
+    #[tokio::test]
+    async fn test_batch_shared_dedup_drops_repeat_expansion() {
+        // Hit 1 and hit 2 are different primaries, but both list entity 9 as
+        // a callee. With the shared dedup (default on), only the first hit
+        // keeps the expansion.
+        let annotator = RelationAnnotator::new(expansion_config(4, true));
+        let results = vec![
+            (
+                input(PRIMARY_CODE, 1),
+                vec![unit(9, "shared", ExpansionOrigin::Forward)],
+                Vec::new(),
+            ),
+            (
+                input(PRIMARY_CODE, 2),
+                vec![unit(9, "shared", ExpansionOrigin::Forward)],
+                Vec::new(),
+            ),
+        ];
+        let annotated = annotator
+            .annotate_batch(results)
+            .await
+            .expect("annotation ok");
+        assert_eq!(annotated[0].metadata.forward_nodes, 1);
+        assert_eq!(annotated[1].metadata.forward_nodes, 0);
+        assert!(!annotated[1].annotated_content.contains("fn shared()"));
+    }
+
+    #[tokio::test]
+    async fn test_batch_shared_dedup_off_keeps_independent_expansions() {
+        let config = expansion_config(4, true).with_batch_shared_dedup(false);
+        let annotator = RelationAnnotator::new(config);
+        let results = vec![
+            (
+                input(PRIMARY_CODE, 1),
+                vec![unit(9, "shared", ExpansionOrigin::Forward)],
+                Vec::new(),
+            ),
+            (
+                input(PRIMARY_CODE, 2),
+                vec![unit(9, "shared", ExpansionOrigin::Forward)],
+                Vec::new(),
+            ),
+        ];
+        let annotated = annotator
+            .annotate_batch(results)
+            .await
+            .expect("annotation ok");
+        assert_eq!(annotated[0].metadata.forward_nodes, 1);
+        assert_eq!(annotated[1].metadata.forward_nodes, 1);
+    }
+
+    #[tokio::test]
+    async fn test_batch_shared_dedup_primary_reserves_its_own_entity() {
+        // An expansion unit whose entity equals another hit's primary entity
+        // must be dropped by the shared dedup seeding.
+        let annotator = RelationAnnotator::new(expansion_config(4, true));
+        let results = vec![
+            (input(PRIMARY_CODE, 1), Vec::new(), Vec::new()),
+            (
+                input(PRIMARY_CODE, 2),
+                vec![unit(1, "hit1_primary", ExpansionOrigin::Backward)],
+                Vec::new(),
+            ),
+        ];
+        let annotated = annotator
+            .annotate_batch(results)
+            .await
+            .expect("annotation ok");
+        assert_eq!(annotated[1].metadata.backward_nodes, 0);
     }
 }

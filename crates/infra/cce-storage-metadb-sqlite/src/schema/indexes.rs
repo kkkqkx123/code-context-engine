@@ -142,7 +142,7 @@ pub fn create_all(conn: &Connection) -> Result<(), StorageError> {
     conn.execute("DROP INDEX IF EXISTS idx_entities_symbol_key", [])
         .map_err(|e| StorageError::Table(format!("Failed to migrate symbol index: {}", e)))?;
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_symbol_key ON entities(project_id, epoch, file_id, scoped_name, kind)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_symbol_key ON entities(project_id, epoch, file_id, scoped_name, kind, overload_discriminator)",
         [],
     )
     .map_err(|e| StorageError::Table(format!("Failed to create index: {}", e)))?;

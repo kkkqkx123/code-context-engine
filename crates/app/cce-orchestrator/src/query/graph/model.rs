@@ -5,6 +5,8 @@
 //! between the in-memory graph service, the HTTP graph endpoints,
 //! and future offline consumers.
 
+use sha2::{Digest, Sha256};
+
 use cce_types::{ResolvedRelation, relation::CallContext};
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +99,58 @@ pub struct GraphEdge {
     /// graph by platform can exclude it without re-reading the source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cfg_condition: Option<String>,
+    /// Call-site byte span (`start-end`) for call-class edges; `None` for
+    /// non-call edges whose identity does not vary by call site.
+    ///
+    /// Callers use this to tell repeated calls between one entity pair apart.
+    /// Edge counts are per call site when this is present, per entity pair
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callsite: Option<String>,
+    /// Stable edge identity: content digest over
+    /// `(source, target, relation[, callsite])`.
+    ///
+    /// Endpoints are node ids, so the identity survives the run-local entity
+    /// numbering. Call-class edges fold the call site in, matching the index
+    /// `RelationEdgeIdentity`; non-call edges hash the triple only.
+    /// Consumers use it to tell one edge emitted from both directions apart
+    /// from genuinely distinct edges.
+    pub edge_id: String,
+}
+
+/// Content-addressed identity of a graph edge.
+///
+/// Hashes the `(source, target, relation)` triple with the same digest shape
+/// as node ids, so edge and node ids share one encoding convention.
+pub fn edge_id(source: &str, target: &str, relation: &str) -> String {
+    edge_id_with_callsite(source, target, relation, None)
+}
+
+/// Content-addressed identity with an optional call-site discriminator.
+///
+/// Call-class edges pass their `start-end` span so each call site is a
+/// distinct edge; non-call edges pass `None` and collapse to the triple.
+pub fn edge_id_with_callsite(
+    source: &str,
+    target: &str,
+    relation: &str,
+    callsite: Option<&str>,
+) -> String {
+    let mut hasher = Sha256::new();
+    for component in [source, target, relation] {
+        hasher.update((component.len() as u64).to_le_bytes());
+        hasher.update(component.as_bytes());
+    }
+    if let Some(site) = callsite {
+        hasher.update((site.len() as u64).to_le_bytes());
+        hasher.update(site.as_bytes());
+    }
+    format!("edge_{:x}", hasher.finalize())
+}
+
+/// Render a call-site span for edge identity and display.
+pub fn callsite_of(span: &cce_types::Span) -> String {
+    format!("{}-{}", span.start_byte, span.end_byte)
 }
 
 fn default_edge_weight() -> f32 {

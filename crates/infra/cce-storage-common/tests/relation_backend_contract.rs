@@ -42,6 +42,7 @@ fn entity(project_id: i64, epoch: i64, name: &str) -> EntityRecord {
         span_start_byte: None,
         span_end_byte: None,
         scoped_name: None,
+        overload_discriminator: String::new(),
         depth: None,
         parent_id: None,
         metadata: None,

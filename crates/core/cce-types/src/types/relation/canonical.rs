@@ -210,36 +210,43 @@ pub struct StableSymbolKey {
     pub file_path: String,
     pub scoped_name: String,
     pub kind: EntityKind,
-    /// Full signature is used as the language-independent overload discriminator.
+    /// Overload discriminator. Deliberately excludes the signature bytes:
+    /// identity must survive rename-free edits (parameter renames, default
+    /// values, return-type annotations) so hot-update rename/relink keeps
+    /// working. Signature-distinct overloads of one name are separated by the
+    /// registration conflict path (span-suffixed scoped name), not baked in
+    /// here.
     pub overload_discriminator: String,
 }
 
 impl StableSymbolKey {
     /// The single discriminator rule shared by every key constructor.
     ///
-    /// Hash inputs (in order): the normalized signature — or a `__span__`
-    /// marker when the signature is empty — the kind, the `cfg` predicate,
-    /// the duplicate-sibling ordinal, and the byte span when `fold_span` is
-    /// set. Empty inputs add no bytes, so plain signature-addressed keys are
-    /// unaffected by the extra slots.
+    /// The signature is deliberately NOT an input: identity must survive
+    /// rename-free edits (parameter renames, default values, return-type
+    /// annotations), otherwise hot-update rename/relink misclassifies every
+    /// such edit as remove+add and drops cross-file edges. Distinct overloads
+    /// of one name are separated by the source-order ordinal the extractor
+    /// tags in `DUPLICATE_SIBLING_ORDINAL`, not by their signature bytes.
+    ///
+    /// Hash inputs (in order): the kind, the `cfg` predicate, the
+    /// overload/sibling ordinal, and the byte span when `fold_span` is set
+    /// (position-scoped kinds, whose same-named siblings are told apart by
+    /// position because they never participate in overload resolution). Empty
+    /// inputs add no bytes, so a plain symbol's discriminator is unaffected by
+    /// the extra slots.
     fn discriminator(
-        normalized_signature: &str,
         kind: EntityKind,
         cfg_predicate: &str,
-        sibling_ordinal: &str,
+        ordinal: &str,
         span_start: usize,
         span_end: usize,
         fold_span: bool,
     ) -> String {
         let mut hasher = Sha256::new();
-        if normalized_signature.is_empty() {
-            hasher.update(b"__span__");
-        } else {
-            hasher.update(normalized_signature.as_bytes());
-        }
         hasher.update(kind.to_string().as_bytes());
         hasher.update(cfg_predicate.as_bytes());
-        hasher.update(sibling_ordinal.as_bytes());
+        hasher.update(ordinal.as_bytes());
         if fold_span {
             hasher.update(span_start.to_le_bytes().as_ref());
             hasher.update(span_end.to_le_bytes().as_ref());
@@ -258,30 +265,23 @@ impl StableSymbolKey {
             !kind.is_position_scoped() && !signature.trim().is_empty(),
             "entity-backed keys must use for_entity: position-scoped kinds and empty signatures fold the entity span into the discriminator"
         );
-        let normalized_signature = signature.split_whitespace().collect::<Vec<_>>().join(" ");
+        let _ = signature;
         Self {
             file_path: normalize_project_path(file_path),
             scoped_name: scoped_name.to_string(),
             kind,
-            overload_discriminator: Self::discriminator(
-                &normalized_signature,
-                kind,
-                "",
-                "",
-                0,
-                0,
-                false,
-            ),
+            overload_discriminator: Self::discriminator(kind, "", "", 0, 0, false),
         }
     }
 
     /// Build the key from a live entity, folding the inputs that define a
     /// stable symbol identity into the discriminator.
     ///
-    /// Discriminator inputs (in order): normalized signature, kind, the
-    /// entity's own `cfg` predicate, the duplicate-sibling ordinal, and the
-    /// byte span when the signature is empty or the kind is position-scoped
-    /// (`is_position_scoped`: variable-like kinds and annotations).
+    /// Discriminator inputs (in order): kind, the entity's own `cfg`
+    /// predicate, the duplicate-sibling ordinal, and the byte span when the
+    /// kind is position-scoped (`is_position_scoped`: variable-like kinds and
+    /// annotations). The signature is intentionally not an input — see
+    /// [`Self::discriminator`].
     ///
     /// The `cfg` fold lets mutually-exclusive conditional-compilation variants
     /// of a same-named symbol each keep their own key. An empty predicate adds
@@ -299,11 +299,6 @@ impl StableSymbolKey {
     /// Every input is persisted on the entity (signature, span, metadata), so a
     /// later reload reconstructs an identical key and stays conflict-free.
     pub fn for_entity(file_path: &str, scoped_name: &str, entity: &Entity) -> Self {
-        let normalized_signature = entity
-            .signature
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
         let cfg_predicate = entity
             .get_metadata(crate::types::entity::meta_keys::CFG_PREDICATE)
             .map(String::as_str)
@@ -312,14 +307,15 @@ impl StableSymbolKey {
             .get_metadata(crate::types::entity::meta_keys::DUPLICATE_SIBLING_ORDINAL)
             .map(String::as_str)
             .unwrap_or("");
-        let fold_span = normalized_signature.is_empty() || entity.kind.is_position_scoped();
+        // Position-scoped kinds fold the span: their same-named siblings
+        // never participate in overload resolution, so position is identity.
+        let fold_span = entity.kind.is_position_scoped();
 
         Self {
             file_path: normalize_project_path(file_path),
             scoped_name: scoped_name.to_string(),
             kind: entity.kind,
             overload_discriminator: Self::discriminator(
-                &normalized_signature,
                 entity.kind,
                 cfg_predicate,
                 sibling_ordinal,
@@ -354,7 +350,7 @@ impl StableSymbolKey {
     }
 
     pub fn is_file_placeholder(&self) -> bool {
-        self.scoped_name == "<file>"
+        self.scoped_name == "<file>" && self.kind == EntityKind::Module
     }
 }
 

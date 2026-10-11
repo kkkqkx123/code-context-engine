@@ -70,6 +70,12 @@ pub struct GraphEdge {
     /// one. The edge exists only under that predicate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cfg_condition: Option<String>,
+    /// Call-site byte span for call-class edges; absent for non-call edges.
+    /// Edge counts are per call site when present, per entity pair otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callsite: Option<String>,
+    /// Stable edge identity over `(source, target, relation[, callsite])`.
+    pub edge_id: String,
 }
 
 impl GraphNode {

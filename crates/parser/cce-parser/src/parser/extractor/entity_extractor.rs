@@ -410,9 +410,10 @@ impl EntityExtractor {
         // entity remains for the relation index.
         post_processing::drop_js_require_bound_variables(&mut entities, language);
 
-        // 7.85: tag duplicate siblings (same parent, name, kind, and signature)
-        // with a source-order ordinal so each occurrence keeps its own stable
-        // symbol key. Runs after every parenting pass so parents are final.
+        // 7.85: tag duplicate siblings (same resolved scoped name and kind,
+        // including signature-distinct overloads) with a source-order ordinal
+        // so each occurrence keeps its own stable symbol key. Runs after every
+        // parenting pass so parents are final.
         disambiguate_duplicate_siblings(&mut entities);
 
         // Eighth pass: fill children based on parent field

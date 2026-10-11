@@ -215,11 +215,31 @@ impl RelationSnapshotLoader {
             );
         }
 
-        for (offset, canonical) in snapshot.entities.iter().enumerate() {
-            let entity_id = canonical
-                .entity_id
-                .map(EntityId)
-                .unwrap_or_else(|| EntityId((offset + 1) as u64));
+        let mut used_ids: std::collections::HashSet<u64> = snapshot
+            .entities
+            .iter()
+            .filter_map(|entity| entity.entity_id)
+            .collect();
+        let mut next_fallback = snapshot
+            .entities
+            .iter()
+            .filter_map(|entity| entity.entity_id)
+            .max()
+            .map(|max| max + 1)
+            .unwrap_or(1);
+        for canonical in snapshot.entities.iter() {
+            let entity_id = match canonical.entity_id {
+                Some(id) => EntityId(id),
+                None => {
+                    while used_ids.contains(&next_fallback) {
+                        next_fallback += 1;
+                    }
+                    let id = next_fallback;
+                    next_fallback += 1;
+                    used_ids.insert(id);
+                    EntityId(id)
+                }
+            };
             if symbol_ids
                 .insert(canonical.key.clone(), entity_id)
                 .is_some()
@@ -781,9 +801,12 @@ mod tests {
             EntityKind::Function,
             "fn run(value: u32)",
         );
+        // Signature-distinct overloads no longer differ on the key itself;
+        // registration disambiguates the loser with a span-suffixed scoped
+        // name, which is the shape reproduced here.
         let second_key = StableSymbolKey::new(
             "src/lib.rs",
-            "service::run",
+            "service::run#96-136",
             EntityKind::Function,
             "fn run(value: String)",
         );
