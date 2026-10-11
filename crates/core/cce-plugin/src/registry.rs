@@ -387,6 +387,48 @@ impl PluginRegistry {
         rows.sort();
         calculate_hash(rows.join("\u{1e}").as_bytes())
     }
+
+    /// Fingerprint of relation-affecting plugins (`SymbolExtract`,
+    /// `RelationExtract`, `AstLanguage`, `LanguageRemap` and
+    /// `LangHeuristics`).
+    ///
+    /// Sorted by plugin id so the value is deterministic across processes.
+    /// Plugin script or version changes drift the fingerprint so relation
+    /// rebuilds can detect stale graphs.
+    pub fn relation_fingerprint(&self) -> String {
+        use cce_utils::hash::calculate_hash;
+
+        let mut rows: Vec<String> = self
+            .entries
+            .values()
+            .filter(|entry| {
+                [
+                    PluginCapability::SymbolExtract,
+                    PluginCapability::RelationExtract,
+                    PluginCapability::AstLanguage,
+                    PluginCapability::LanguageRemap,
+                    PluginCapability::LangHeuristics,
+                ]
+                .into_iter()
+                .any(|capability| {
+                    PluginCapability::declared(&entry.capabilities, capability)
+                        && PluginCapability::supported(entry.plugin.as_ref(), capability)
+                })
+            })
+            .map(|entry| {
+                let meta = entry.plugin.metadata();
+                format!(
+                    "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                    meta.id,
+                    meta.version,
+                    entry.priority,
+                    entry.content_digest.as_deref().unwrap_or("-")
+                )
+            })
+            .collect();
+        rows.sort();
+        calculate_hash(rows.join("\u{1e}").as_bytes())
+    }
 }
 
 #[cfg(test)]

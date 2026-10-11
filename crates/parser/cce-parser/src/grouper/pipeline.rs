@@ -753,10 +753,12 @@ impl PreprocessingPipeline {
     /// file (path granularity), `Some(false)` keeps the built-in result.
     fn plugin_test_file_info(&self, parsed_file: &ParsedFile) -> TestInfo {
         if let Some(registry) = &self.plugin_registry {
+            let language_name = parsed_file.language.to_string();
             if crate::plugin::heuristics::is_test_file(
                 registry,
                 &parsed_file.path,
                 &parsed_file.source,
+                Some(language_name.as_str()),
             ) == Some(true)
             {
                 return TestInfo::test_path();

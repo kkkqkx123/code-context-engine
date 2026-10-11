@@ -14,6 +14,7 @@ use cce_types::{ImportTable, ParseError};
 use tree_sitter::Tree;
 
 use crate::parser::extractor::create_extractor_with_registry;
+use crate::parser::extractor::create_extractor;
 
 mod common;
 mod dart;
@@ -199,8 +200,24 @@ pub fn extract_imports(
     language: &Language,
     _context: Option<()>,
 ) -> Result<ImportTable, ParseError> {
+    extract_imports_with_registry(tree, source, language, None, "")
+}
+
+/// Extract imports routing through `SymbolExtract` plugins when a registry is
+/// attached. Plugin extractors form the override tier: a non-empty plugin
+/// result wins, while a declining plugin falls back to the built-in
+/// extractor for built-in languages.
+pub fn extract_imports_with_registry(
+    tree: &Tree,
+    source: &str,
+    language: &Language,
+    registry: Option<&cce_plugin::PluginRegistry>,
+    file_path: &str,
+) -> Result<ImportTable, ParseError> {
     let language_str = language.to_string();
-    let Some(extractor) = create_extractor_with_registry(*language, None, "", &language_str) else {
+    let Some(extractor) =
+        create_extractor_with_registry(*language, registry, file_path, &language_str)
+    else {
         if matches!(language, Language::Custom(_)) {
             return Err(ParseError::ast_parsing(format!(
                 "No extractor available for language: {}",
@@ -212,7 +229,15 @@ pub fn extract_imports(
         ));
     };
 
-    let standardized_imports = extractor.extract_imports(tree, source);
+    let mut standardized_imports = extractor.extract_imports(tree, source);
+    if standardized_imports.is_empty()
+        && registry.is_some()
+        && !matches!(language, Language::Custom(_))
+    {
+        if let Some(builtin) = create_extractor(*language) {
+            standardized_imports = builtin.extract_imports(tree, source);
+        }
+    }
     let mut std_table = StandardizedImportTable::new("");
     for import in standardized_imports {
         std_table.add_import(import);
@@ -221,8 +246,23 @@ pub fn extract_imports(
 }
 
 pub fn extract_reexports(tree: &Tree, source: &str, language: &Language) -> Vec<ReexportRecord> {
+    extract_reexports_with_registry(tree, source, language, None, "")
+}
+
+/// Extract re-exports routing through `SymbolExtract` plugins when a registry
+/// is attached. Plugin exports carrying source module linkage become
+/// re-export records alongside built-in ones.
+pub fn extract_reexports_with_registry(
+    tree: &Tree,
+    source: &str,
+    language: &Language,
+    registry: Option<&cce_plugin::PluginRegistry>,
+    file_path: &str,
+) -> Vec<ReexportRecord> {
     let language_str = language.to_string();
-    let Some(extractor) = create_extractor_with_registry(*language, None, "", &language_str) else {
+    let Some(extractor) =
+        create_extractor_with_registry(*language, registry, file_path, &language_str)
+    else {
         if matches!(language, Language::Custom(_)) {
             tracing::warn!(
                 language = %language,
@@ -231,8 +271,16 @@ pub fn extract_reexports(tree: &Tree, source: &str, language: &Language) -> Vec<
         }
         return Vec::new();
     };
-    extractor
-        .extract_exports(tree, source)
+    let mut exports = extractor.extract_exports(tree, source);
+    if exports.is_empty()
+        && registry.is_some()
+        && !matches!(language, Language::Custom(_))
+    {
+        if let Some(builtin) = create_extractor(*language) {
+            exports = builtin.extract_exports(tree, source);
+        }
+    }
+    exports
         .into_iter()
         .filter(|export| export.is_reexport && export.target.name != "*")
         .filter_map(|export| {

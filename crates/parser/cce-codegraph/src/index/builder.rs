@@ -393,7 +393,13 @@ impl IndexBuilder {
     }
 
     pub fn config_fingerprint(&self) -> String {
-        self.config.fingerprint()
+        let base = self.config.fingerprint();
+        let plugins = self
+            .plugin_registry
+            .as_ref()
+            .map(|registry| registry.relation_fingerprint())
+            .unwrap_or_else(|| "no-plugin-registry".to_string());
+        format!("{base}:{plugins}")
     }
 
     pub fn has_external_packages(&self) -> bool {
@@ -448,6 +454,7 @@ impl IndexBuilder {
     /// gate.
     pub fn with_plugin_symbols_enabled(&mut self, enabled: bool) -> &mut Self {
         self.plugin_symbols_enabled = enabled;
+        self.config.set_plugin_symbols_enabled(enabled);
         self
     }
 

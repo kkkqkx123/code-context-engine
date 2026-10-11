@@ -1,9 +1,9 @@
-//! Plugin-backed symbol extraction for custom languages
+//! Plugin-backed symbol extraction for plugin-covered languages
 //!
 //! Wraps a [`cce_plugin::CodePlugin`] with the `SymbolExtract`
-//! capability behind the [`SymbolExtractor`] trait, so custom languages
-//! (`Language::Custom(_)`) obtain import/export extraction without a
-//! built-in extractor.
+//! capability behind the [`SymbolExtractor`] trait, so languages with a
+//! matching plugin obtain import/export extraction without (or in place of)
+//! a built-in extractor.
 //!
 //! The plugin operates on raw source text (`content`), while the trait
 //! receives a parsed tree + source. The tree is ignored; the source text
@@ -118,13 +118,16 @@ impl PluginSymbolExtractor {
             .plugin
             .extract_imports(source, &self.file_path, &self.language_str)
         {
-            Ok(Some(imports)) => imports.into_iter().map(Into::into).collect(),
+            Ok(Some(imports)) => imports
+                .into_iter()
+                .flat_map(|import| import.into_standardized_list())
+                .collect(),
             Ok(None) => Vec::new(),
             Err(e) => {
                 tracing::warn!(
                     plugin = %self.plugin.metadata().id,
                     error = %e,
-                    "extract_imports failed, falling through to next plugin"
+                    "extract_imports failed (relation.plugin_symbol_extract_enabled must be true), falling through to next plugin"
                 );
                 Vec::new()
             }
@@ -137,13 +140,16 @@ impl PluginSymbolExtractor {
             .plugin
             .extract_exports(source, &self.file_path, &self.language_str)
         {
-            Ok(Some(exports)) => exports.into_iter().map(Into::into).collect(),
+            Ok(Some(exports)) => exports
+                .into_iter()
+                .map(|export| export.into_standardized())
+                .collect(),
             Ok(None) => Vec::new(),
             Err(e) => {
                 tracing::warn!(
                     plugin = %self.plugin.metadata().id,
                     error = %e,
-                    "extract_exports failed, falling through to next plugin"
+                    "extract_exports failed (relation.plugin_symbol_extract_enabled must be true), falling through to next plugin"
                 );
                 Vec::new()
             }

@@ -15,8 +15,13 @@ use std::sync::Arc;
 ///
 /// Returns the category decided by the first plugin that answers, or `None`
 /// when every plugin declined or the answer is not a known category.
-pub fn classify_stdlib(registry: &PluginRegistry, module_path: &str) -> Option<StdlibCategory> {
-    for plugin in heuristics_plugins(registry) {
+pub fn classify_stdlib(
+    registry: &PluginRegistry,
+    module_path: &str,
+    file_path: Option<&str>,
+    language: Option<&str>,
+) -> Option<StdlibCategory> {
+    for plugin in heuristics_plugins(registry, file_path, language) {
         if !plugin.supports_stdlib_heuristic() {
             continue;
         }
@@ -60,8 +65,13 @@ pub fn classify_stdlib(registry: &PluginRegistry, module_path: &str) -> Option<S
 ///
 /// Returns the first plugin decision, or `None` to defer to the built-in
 /// path/AST rules.
-pub fn is_test_file(registry: &PluginRegistry, file_path: &str, content: &str) -> Option<bool> {
-    for plugin in heuristics_plugins(registry) {
+pub fn is_test_file(
+    registry: &PluginRegistry,
+    file_path: &str,
+    content: &str,
+    language: Option<&str>,
+) -> Option<bool> {
+    for plugin in heuristics_plugins(registry, Some(file_path), language) {
         if !plugin.supports_test_file_heuristic() {
             continue;
         }
@@ -86,8 +96,13 @@ pub fn is_test_file(registry: &PluginRegistry, file_path: &str, content: &str) -
 ///
 /// Returns the first plugin mapping that parses as an [`EntityKind`], or
 /// `None` to defer to the built-in capture→kind mapping.
-pub fn entity_kind(registry: &PluginRegistry, capture_name: &str) -> Option<EntityKind> {
-    for plugin in heuristics_plugins(registry) {
+pub fn entity_kind(
+    registry: &PluginRegistry,
+    capture_name: &str,
+    file_path: Option<&str>,
+    language: Option<&str>,
+) -> Option<EntityKind> {
+    for plugin in heuristics_plugins(registry, file_path, language) {
         if !plugin.supports_entity_kind_heuristic() {
             continue;
         }
@@ -121,8 +136,12 @@ pub fn entity_kind(registry: &PluginRegistry, capture_name: &str) -> Option<Enti
 }
 
 /// Heuristics plugins in priority order.
-fn heuristics_plugins(registry: &PluginRegistry) -> Vec<&Arc<dyn CodePlugin>> {
-    registry.get_plugins(PluginCapability::LangHeuristics, None, None)
+fn heuristics_plugins<'a>(
+    registry: &'a PluginRegistry,
+    file_path: Option<&str>,
+    language: Option<&str>,
+) -> Vec<&'a Arc<dyn CodePlugin>> {
+    registry.get_plugins(PluginCapability::LangHeuristics, file_path, language)
 }
 
 /// Wrap a plain enum-variant name (e.g. `"function"`) as a JSON string so

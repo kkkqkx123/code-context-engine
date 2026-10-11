@@ -1,4 +1,5 @@
 use super::IndexBuilder;
+use crate::index::core::RelationIndex;
 use crate::index::{EntityIndexOps, FileLevelOps};
 use crate::symbol_table::ProjectSymbolTable;
 use cce_plugin::PluginCapability;
@@ -7,6 +8,7 @@ use cce_types::{
     EntityId, ParsedFile, PluginRelation, PluginSymbol, RelationType, normalize_project_path,
 };
 use std::collections::HashMap;
+use std::path::Path;
 
 impl IndexBuilder {
     /// Register plugin symbols (`RelationExtract`) into the project symbol
@@ -46,7 +48,7 @@ impl IndexBuilder {
                         plugin = %plugin.metadata().id,
                         file_path = %file.path,
                         error = %e,
-                        "extract_symbols failed, skipping plugin symbols"
+                        "extract_symbols failed (relation.plugin_symbols_enabled must be true), skipping plugin symbols"
                     );
                 }
             }
@@ -58,28 +60,72 @@ impl IndexBuilder {
 
     /// Inject plugin symbols into the project's global + simple-name indexes.
     ///
-    /// Returns the number of symbols registered (including nested children).
+    /// Identifiers come from the global entity allocator with the synthetic
+    /// mark set, so symbols from different files never collide. An empty `id`
+    /// falls back to `name`. The module path falls back to the language-aware
+    /// derivation when the plugin leaves it empty. Child symbols register
+    /// under their parent qualifier to preserve the declared hierarchy, and an
+    /// `id` that differs from `name` registers an additional alias so
+    /// relations may reference either form. Returns the number of symbols
+    /// registered (including nested children).
     fn inject_plugin_symbols(
         &self,
         file: &ParsedFile,
         symbols: &ProjectSymbolTable,
         plugin_symbols: &[PluginSymbol],
     ) -> usize {
+        let fallback_module = cce_parser_core::determine_module_path(
+            Path::new(&file.path),
+            &symbols.root_path,
+            file.language,
+        )
+        .unwrap_or_default();
         let mut count = 0;
-        let mut queue: Vec<&PluginSymbol> = plugin_symbols.iter().collect();
-        while let Some(sym) = queue.pop() {
-            // Generate a synthetic entity ID for plugin symbols.
-            // Use a counter in the high bits to avoid collision with real entity IDs.
-            let entity_id = EntityId((1u64 << 63) | (count as u64));
-            let qualified_name = format!("{}::{}", file.path, sym.name);
+        let mut queue: Vec<(&PluginSymbol, String)> = plugin_symbols
+            .iter()
+            .map(|sym| (sym, normalize_project_path(&file.path)))
+            .collect();
+        while let Some((sym, parent_qualifier)) = queue.pop() {
+            if sym.name.is_empty() {
+                tracing::trace!(
+                    file_path = %file.path,
+                    "plugin symbol with empty name skipped"
+                );
+                continue;
+            }
+            // Globally unique synthetic id: the allocator is process-wide and
+            // monotonic, the mark bit keeps the space disjoint from real ids.
+            let entity_id =
+                EntityId(RelationIndex::SYNTHETIC_MARK | self.index.allocate_entity_id().0);
+            let module_path = sym
+                .module_path
+                .clone()
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| fallback_module.clone());
+            let qualified_name = format!("{parent_qualifier}::{}", sym.name);
             symbols.insert_symbol(
-                qualified_name,
+                qualified_name.clone(),
                 entity_id,
                 file.path.clone(),
-                sym.module_path.clone().unwrap_or_default(),
+                module_path.clone(),
             );
+            let effective_id = if sym.id.is_empty() {
+                &sym.name
+            } else {
+                &sym.id
+            };
+            if effective_id != &sym.name {
+                symbols.insert_symbol(
+                    format!("{parent_qualifier}::{effective_id}"),
+                    entity_id,
+                    file.path.clone(),
+                    module_path,
+                );
+            }
             count += 1;
-            queue.extend(sym.children.iter());
+            for child in &sym.children {
+                queue.push((child, qualified_name.clone()));
+            }
         }
         count
     }
@@ -104,7 +150,7 @@ impl IndexBuilder {
         for plugin in extractors {
             match plugin.extract_relations(&file.source, &file.path, &language) {
                 Ok(Some(relations)) if !relations.is_empty() => {
-                    self.resolve_plugin_relations(file, symbols, &relations);
+                    self.resolve_plugin_relations(file, symbols, &relations, &plugin.metadata().id);
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -112,11 +158,65 @@ impl IndexBuilder {
                         plugin = %plugin.metadata().id,
                         file_path = %file.path,
                         error = %e,
-                        "extract_relations failed, skipping plugin relations"
+                        "extract_relations failed (relation.plugin_symbols_enabled must be true), skipping plugin relations"
                     );
                 }
             }
         }
+    }
+
+    /// Resolve one reference to an entity id.
+    ///
+    /// Accepts bare names, `file::name` qualified names, and `module::name`
+    /// qualified names. Same-file entities win, then symbol-table hits
+    /// (including synthetic plugin symbols, which are addressable without a
+    /// function-index entry), then the function index with a deterministic
+    /// smallest-id choice among ambiguous matches.
+    fn resolve_plugin_ref(
+        &self,
+        file: &ParsedFile,
+        symbols: &ProjectSymbolTable,
+        entity_ids_by_name: &HashMap<String, EntityId>,
+        reference: &str,
+    ) -> Option<EntityId> {
+        let normalized_path = normalize_project_path(&file.path);
+        if let Some(id) = entity_ids_by_name.get(reference) {
+            return Some(*id);
+        }
+        if let Some(id) = entity_ids_by_name.get(&format!("{normalized_path}::{reference}")) {
+            return Some(*id);
+        }
+        if reference.contains("::") {
+            if let Some(id) = entity_ids_by_name.get(&normalize_project_path(reference)) {
+                return Some(*id);
+            }
+            if let Some(id) = symbols
+                .get_by_qualified_name(reference)
+                .or_else(|| symbols.get_by_qualified_name(&normalize_project_path(reference)))
+            {
+                return Some(id);
+            }
+            let bare = reference.rsplit("::").next().unwrap_or(reference);
+            if let Some(id) = entity_ids_by_name.get(bare) {
+                return Some(*id);
+            }
+            if let Some(id) = symbols.get_by_simple_name(bare) {
+                return Some(id);
+            }
+        } else {
+            if let Some(id) =
+                symbols.get_by_qualified_name(&format!("{normalized_path}::{reference}"))
+            {
+                return Some(id);
+            }
+            if let Some(id) = symbols.get_by_simple_name(reference) {
+                return Some(id);
+            }
+        }
+        self.index
+            .get_function_ids_by_name(reference)
+            .into_iter()
+            .min_by_key(|id| id.0)
     }
 
     /// Resolve plugin relations to entity ids and register them.
@@ -127,6 +227,7 @@ impl IndexBuilder {
         file: &ParsedFile,
         symbols: &ProjectSymbolTable,
         relations: &[PluginRelation],
+        plugin_id: &str,
     ) -> usize {
         // `file.entities` carry ParsedFile-local IDs; the index stores
         // globally remapped IDs. Plugin relations are injected in a separate
@@ -142,11 +243,20 @@ impl IndexBuilder {
                 .unwrap_or(id)
         };
 
-        let entity_ids_by_name: HashMap<&str, EntityId> = file
-            .entities
-            .iter()
-            .map(|e| (e.name.as_str(), remap_id(e.id)))
-            .collect();
+        // Deterministic name map: entities sorted by local id keep the first
+        // registration on duplicates instead of the hash order last win.
+        let mut sorted_entities: Vec<_> = file.entities.iter().collect();
+        sorted_entities.sort_by_key(|e| e.id.0);
+        let mut entity_ids_by_name: HashMap<String, EntityId> = HashMap::new();
+        for entity in sorted_entities {
+            let global = remap_id(entity.id);
+            entity_ids_by_name
+                .entry(entity.name.clone())
+                .or_insert(global);
+            entity_ids_by_name
+                .entry(format!("{normalized_path}::{}", entity.name))
+                .or_insert(global);
+        }
         // Seed the dedup set with the file's already-resolved (built-in)
         // relations so plugin relations duplicating built-in edges (e.g. a
         // plugin that also parses imports) are skipped instead of injected
@@ -162,36 +272,24 @@ impl IndexBuilder {
             .collect();
         let mut injected = 0;
         for rel in relations {
-            let Some(from_id) = entity_ids_by_name.get(rel.from.as_str()).copied() else {
-                tracing::trace!(
+            let Some(from_id) =
+                self.resolve_plugin_ref(file, symbols, &entity_ids_by_name, &rel.from)
+            else {
+                tracing::warn!(
+                    plugin = %plugin_id,
                     file_path = %file.path,
                     from = %rel.from,
-                    "plugin relation source not found, dropping"
+                    "plugin relation source not found, dropping (relation.plugin_symbols_enabled must be true and the source must name a file entity or plugin symbol)"
                 );
                 continue;
             };
-            let target_id = entity_ids_by_name
-                .get(rel.to.as_str())
-                .copied()
-                .or_else(|| {
-                    // Cross-file target: resolve through the entity index by
-                    // name. Symbol-table IDs must never be cast into entity
-                    // IDs ; a symbol without a real entity (e.g. a
-                    // plugin symbol) is not an addressable relation target.
-                    let registered = symbols.get_by_simple_name(&rel.to).or_else(|| {
-                        symbols.get_by_qualified_name(&format!("{}::{}", file.path, rel.to))
-                    });
-                    registered?;
-                    self.index
-                        .get_function_ids_by_name(&rel.to)
-                        .into_iter()
-                        .next()
-                });
-            let Some(to_id) = target_id else {
-                tracing::trace!(
+            let Some(to_id) = self.resolve_plugin_ref(file, symbols, &entity_ids_by_name, &rel.to)
+            else {
+                tracing::warn!(
+                    plugin = %plugin_id,
                     file_path = %file.path,
                     to = %rel.to,
-                    "plugin relation target not found, dropping"
+                    "plugin relation target not found, dropping (relation.plugin_symbols_enabled must be true and the target must name a file entity or plugin symbol)"
                 );
                 continue;
             };
@@ -206,7 +304,15 @@ impl IndexBuilder {
                 "uses" | "reference" | "references" | "type_reference" => {
                     cce_types::RelationType::TypeReference
                 }
-                _ => cce_types::RelationType::DirectCall,
+                unknown => {
+                    tracing::warn!(
+                        plugin = %plugin_id,
+                        file_path = %file.path,
+                        relation_type = %unknown,
+                        "unknown plugin relation type, defaulting to DirectCall"
+                    );
+                    cce_types::RelationType::DirectCall
+                }
             };
             let key = (from_id, Some(to_id), relation_type);
             if !seen.insert(key) {

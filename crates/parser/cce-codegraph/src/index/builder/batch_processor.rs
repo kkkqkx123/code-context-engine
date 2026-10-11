@@ -217,6 +217,13 @@ impl IndexBuilder {
             processor.index_file_core(file);
         }
 
+        // Mirror the full-build order: built-in relations resolve first so the
+        // plugin dedup set observes them, then plugin symbols register and
+        // plugin relations inject.
+        for file in files {
+            processor.process_relations(file, &project_symbols, &resolver);
+        }
+
         if self.plugin_symbols_enabled && self.plugin_registry.is_some() {
             for file in files {
                 self.register_file_plugin_symbols(file, &project_symbols);
@@ -224,10 +231,6 @@ impl IndexBuilder {
             for file in files {
                 self.inject_plugin_relations(file, &project_symbols);
             }
-        }
-
-        for file in files {
-            processor.process_relations(file, &project_symbols, &resolver);
         }
 
         if let Some(metrics) = &self.metrics {

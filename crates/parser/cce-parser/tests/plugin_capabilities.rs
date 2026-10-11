@@ -395,27 +395,27 @@ fn test_lang_heuristics_full_chain() {
     // 0. Facade-level checks: the three heuristics answer in priority order.
     use cce_types::StdlibCategory;
     assert_eq!(
-        cce_parser::plugin::heuristics::classify_stdlib(&registry, "core.utils.fmt"),
+        cce_parser::plugin::heuristics::classify_stdlib(&registry, "core.utils.fmt", None, None),
         Some(StdlibCategory::Utility)
     );
     assert_eq!(
-        cce_parser::plugin::heuristics::classify_stdlib(&registry, "my.lib"),
+        cce_parser::plugin::heuristics::classify_stdlib(&registry, "my.lib", None, None),
         None
     );
     assert_eq!(
-        cce_parser::plugin::heuristics::is_test_file(&registry, "src/app_spec.tplx", ""),
+        cce_parser::plugin::heuristics::is_test_file(&registry, "src/app_spec.tplx", "", None),
         Some(true)
     );
     assert_eq!(
-        cce_parser::plugin::heuristics::is_test_file(&registry, "src/app.rs", ""),
+        cce_parser::plugin::heuristics::is_test_file(&registry, "src/app.rs", "", None),
         None
     );
     assert_eq!(
-        cce_parser::plugin::heuristics::entity_kind(&registry, "entity.tpl_block"),
+        cce_parser::plugin::heuristics::entity_kind(&registry, "entity.tpl_block", None, None),
         Some(EntityKind::Function)
     );
     assert_eq!(
-        cce_parser::plugin::heuristics::entity_kind(&registry, "entity.unknown.thing"),
+        cce_parser::plugin::heuristics::entity_kind(&registry, "entity.unknown.thing", None, None),
         None
     );
 

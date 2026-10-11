@@ -271,11 +271,17 @@ pub fn apply_stdlib_heuristics(
         return parsed_file.entities.clone();
     };
     let mut entities = parsed_file.entities.clone();
+    let language_name = parsed_file.language.to_string();
     for entity in entities.iter_mut() {
         if entity.is_stdlib || entity.stdlib_category.is_some() {
             continue;
         }
-        if let Some(category) = crate::plugin::heuristics::classify_stdlib(registry, &entity.name) {
+        if let Some(category) = crate::plugin::heuristics::classify_stdlib(
+            registry,
+            &entity.name,
+            Some(parsed_file.path.as_str()),
+            Some(language_name.as_str()),
+        ) {
             entity.is_stdlib = true;
             entity.stdlib_category = Some(category);
         }

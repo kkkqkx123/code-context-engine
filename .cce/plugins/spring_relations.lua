@@ -49,20 +49,25 @@ end
 
 function plugin.extract_relations(content, file_path, language)
     local relations = {}
+    local current_class = nil
     local autowired_pending = false
     for line in content:gmatch("[^\r\n]+") do
+        local class_name = line:match("class%s+([%w_]+)") or line:match("interface%s+([%w_]+)")
+        if class_name then
+            current_class = class_name
+        end
         if line:match("@Autowired") then
             autowired_pending = true
         end
-        if autowired_pending then
-            local field = line:match("private%s+[%w_]+%s+([%w_]+)")
-            if not field then
-                field = line:match("([%w_]+)%s+%w+%s*;")
+        if autowired_pending and current_class then
+            local dep_type = line:match("private%s+([%w_]+)%s+[%w_]+")
+            if not dep_type then
+                dep_type = line:match("([%w_]+)%s+%w+%s*;")
             end
-            if field then
+            if dep_type and dep_type ~= current_class then
                 relations[#relations + 1] = {
-                    from = field,
-                    to = field,
+                    from = current_class,
+                    to = dep_type,
                     relation_type = "injects",
                     metadata = { framework = "spring" }
                 }

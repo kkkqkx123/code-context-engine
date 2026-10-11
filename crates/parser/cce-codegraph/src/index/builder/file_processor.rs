@@ -115,11 +115,31 @@ impl<'a> FileProcessor<'a> {
             self.extract_imports_fallback(file)
         };
 
-        let exports: Vec<ExportInfo> = if self.config.policy.analyze_imports {
+        let mut exports: Vec<ExportInfo> = if self.config.policy.analyze_imports {
             crate::helpers::extract_exports_from_entities(&file.entities, &file.language)
         } else {
             Vec::new()
         };
+        // Merge plugin-declared exports when the SymbolExtract gate is on.
+        // Matching is by entity name; unmatched declarations are skipped by
+        // the helper so they never abort the build.
+        if self.config.policy.analyze_imports && self.config.policy.symbol_extract_enabled {
+            for plugin_export in crate::helpers::extract_plugin_exports(
+                &file.source,
+                &file.language,
+                self.plugin_registry,
+                &file.path,
+                &file.entities,
+            ) {
+                let duplicate = exports.iter().any(|existing| {
+                    existing.function_id == plugin_export.function_id
+                        && existing.function_name == plugin_export.function_name
+                });
+                if !duplicate {
+                    exports.push(plugin_export);
+                }
+            }
+        }
 
         let dependencies: Vec<String> = if self.config.policy.track_cross_file_deps {
             crate::helpers::extract_dependencies_from_imports(&imports)

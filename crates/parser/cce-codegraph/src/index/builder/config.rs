@@ -114,9 +114,14 @@ pub struct BuildPolicy {
     pub analyze_imports: bool,
     /// Whether cross-file dependency edges are tracked.
     pub track_cross_file_deps: bool,
-    /// Whether `SymbolExtract` plugins supply import/export extraction for
-    /// custom languages. Default off (see `relation.plugin_symbol_extract_enabled`).
+    /// Whether `SymbolExtract` plugins supply import/export extraction.
+    /// Consulted for every language when set; custom languages have no
+    /// built-in extractor so a matching plugin is required. Default off
+    /// (see `relation.plugin_symbol_extract_enabled`).
     pub symbol_extract_enabled: bool,
+    /// Whether `RelationExtract` plugin symbols/relations enter the relation
+    /// index. Default off (see `relation.plugin_symbols_enabled`).
+    pub plugin_symbols_enabled: bool,
     /// Whether to auto-load external dependency symbols from package manager
     /// caches during the build phase. When enabled, the builder discovers
     /// installed packages and extracts their public API surface for improved
@@ -177,6 +182,7 @@ impl BuilderConfig {
                 analyze_imports: true,
                 track_cross_file_deps: true,
                 symbol_extract_enabled: false,
+                plugin_symbols_enabled: false,
                 load_external_symbols: true,
                 require_import_table: false,
                 auto_detect_external_symbols: true,
@@ -201,6 +207,7 @@ impl BuilderConfig {
                 analyze_imports: params.analyze_imports,
                 track_cross_file_deps: params.track_cross_file_deps,
                 symbol_extract_enabled: params.symbol_extract_enabled,
+                plugin_symbols_enabled: params.plugin_symbols_enabled,
                 load_external_symbols: true,
                 require_import_table: false,
                 auto_detect_external_symbols: true,
@@ -453,6 +460,14 @@ impl BuilderConfig {
         }
     }
 
+    /// Set whether `RelationExtract` plugin symbols/relations enter the index.
+    pub fn set_plugin_symbols_enabled(&mut self, enabled: bool) {
+        if self.policy.plugin_symbols_enabled != enabled {
+            self.policy.plugin_symbols_enabled = enabled;
+            self.invalidate_cache();
+        }
+    }
+
     /// Set whether to auto-load external dependency symbols from package
     /// manager caches during the build phase.
     pub fn set_load_external_symbols(&mut self, enabled: bool) {
@@ -532,6 +547,7 @@ impl BuilderConfig {
                 self.policy.track_cross_file_deps
             ),
             format!("symbol_extract={}", self.policy.symbol_extract_enabled),
+            format!("plugin_symbols={}", self.policy.plugin_symbols_enabled),
             format!(
                 "load_external_symbols={}",
                 self.policy.load_external_symbols

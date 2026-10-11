@@ -107,6 +107,11 @@ impl EntityExtractor {
         self
     }
 
+    /// Replace the heuristics registry in place.
+    pub fn set_heuristics_registry(&mut self, registry: Arc<cce_plugin::PluginRegistry>) {
+        self.heuristics_registry = Some(registry);
+    }
+
     /// Set the license header filtering configuration on the embedded
     /// comment processor.
     pub fn with_license_config(mut self, config: cce_config::LicenseHeaderConfig) -> Self {
@@ -447,7 +452,12 @@ impl EntityExtractor {
                 let Some(registry) = &self.heuristics_registry else {
                     return None;
                 };
-                crate::plugin::heuristics::entity_kind(registry, &main_capture.name)?
+                crate::plugin::heuristics::entity_kind(
+                    registry,
+                    &main_capture.name,
+                    None,
+                    Some(language.to_string().as_str()),
+                )?
             }
         };
         let mut subtype = capture_module::parser::extract_subtype_from_capture(&main_capture.name);

@@ -70,11 +70,27 @@ pub fn extract_imports_with_registry(
         ));
     };
 
-    let standardized_imports = if let Some(ctx) = context {
+    let standardized_imports = match context.as_ref() {
         // Use context-aware extraction for relative import resolution
-        extractor.extract_imports_with_context(tree, source, &ctx)
+        Some(ctx) => extractor.extract_imports_with_context(tree, source, ctx),
+        None => extractor.extract_imports(tree, source),
+    };
+
+    // Override-tier fallback: a plugin chain that declines everything yields
+    // no imports. Built-in languages fall back to the built-in extractor so a
+    // declining plugin never blanks built-in import metadata.
+    let standardized_imports = if standardized_imports.is_empty()
+        && registry.is_some()
+        && !matches!(language, Language::Custom(_))
+    {
+        cce_parser::parser::extractor::create_extractor(*language)
+            .map(|builtin| match context.as_ref() {
+                Some(ctx) => builtin.extract_imports_with_context(tree, source, ctx),
+                None => builtin.extract_imports(tree, source),
+            })
+            .unwrap_or(standardized_imports)
     } else {
-        extractor.extract_imports(tree, source)
+        standardized_imports
     };
 
     // Build import table
@@ -180,7 +196,9 @@ pub fn extract_imports_from_plugin(
         match plugin.extract_imports(source, file_path, &language_str) {
             Ok(Some(imports)) => {
                 for import in imports {
-                    std_table.add_import(import.into());
+                    for standardized in import.into_standardized_list() {
+                        std_table.add_import(standardized);
+                    }
                 }
             }
             Ok(None) => {}
@@ -189,12 +207,82 @@ pub fn extract_imports_from_plugin(
                     plugin = %plugin.metadata().id,
                     file_path = file_path,
                     error = %e,
-                    "extract_imports failed, continuing with remaining plugins"
+                    "extract_imports failed (relation.plugin_symbol_extract_enabled must be true), continuing with remaining plugins"
                 );
             }
         }
     }
     Ok(ImportTable::from_standardized(&std_table))
+}
+
+/// Extract plugin-declared exports for a file.
+///
+/// Matches plugin exports against the file entities by name and converts the
+/// hits into export records. Declared exports without a matching entity are
+/// skipped with a trace so framework-level declarations never abort the build.
+pub fn extract_plugin_exports(
+    source: &str,
+    language: &Language,
+    registry: Option<&PluginRegistry>,
+    file_path: &str,
+    entities: &[Entity],
+) -> Vec<ExportInfo> {
+    let Some(registry) = registry else {
+        return Vec::new();
+    };
+    let language_str = language.to_string();
+    let plugins = registry.get_plugins(
+        cce_plugin::PluginCapability::SymbolExtract,
+        Some(file_path),
+        Some(&language_str),
+    );
+    let mut exports = Vec::new();
+    for plugin in plugins {
+        let declared = match plugin.extract_exports(source, file_path, &language_str) {
+            Ok(Some(declared)) => declared,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::warn!(
+                    plugin = %plugin.metadata().id,
+                    file_path = file_path,
+                    error = %e,
+                    "extract_exports failed (relation.plugin_symbol_extract_enabled must be true), continuing with remaining plugins"
+                );
+                continue;
+            }
+        };
+        for plugin_export in declared {
+            let standardized: cce_types::StandardizedExport = plugin_export.into_standardized();
+            let target_name = standardized.target.name.trim();
+            if target_name.is_empty() {
+                continue;
+            }
+            let Some(entity) = entities
+                .iter()
+                .filter(|e| e.name.trim() == target_name)
+                .min_by_key(|e| e.id.0)
+            else {
+                tracing::trace!(
+                    plugin = %plugin.metadata().id,
+                    file_path = file_path,
+                    export = %standardized.target.name,
+                    "plugin export has no matching entity, skipping"
+                );
+                continue;
+            };
+            let export_type = match standardized.kind {
+                cce_types::ExportKind::Default => ExportType::Default,
+                cce_types::ExportKind::Wildcard => ExportType::Wildcard,
+                _ => ExportType::Named,
+            };
+            exports.push(ExportInfo {
+                function_id: entity.id,
+                function_name: entity.name.clone(),
+                export_type,
+            });
+        }
+    }
+    exports
 }
 
 /// Detect entity visibility based on language-specific rules.

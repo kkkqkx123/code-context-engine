@@ -167,24 +167,20 @@ pub fn create_extractor(language: Language) -> Option<Box<dyn SymbolExtractor>> 
     }
 }
 
-/// Create an extractor for a language, consulting the plugin registry for
-/// custom languages.
+/// Create an extractor for a language, consulting the plugin registry first.
 ///
-/// Built-in languages use [`create_extractor`]. For `Language::Custom(_)`,
-/// the registry is queried for a `SymbolExtract`-capable plugin matching the
-/// file path and detected language name; all matches are wrapped in a
-/// [`super::plugin_extractor::PluginSymbolExtractorChain`] in priority order,
-/// so a declined or failed plugin falls through to the next (override-tier
-/// semantics). Returns `None` when no built-in extractor or matching plugin
-/// exists.
+/// `SymbolExtract` plugins form the override tier for every language: when the
+/// registry holds a matching plugin it wins and the built-in extractor is the
+/// fallback for declined or failed plugins. For `Language::Custom(_)` there is
+/// no built-in extractor, so a missing plugin means `None`. Returns `None`
+/// when no built-in extractor or matching plugin exists.
 pub fn create_extractor_with_registry(
     language: Language,
     registry: Option<&PluginRegistry>,
     file_path: &str,
     language_str: &str,
 ) -> Option<Box<dyn SymbolExtractor>> {
-    if let Language::Custom(_) = language {
-        let registry = registry?;
+    if let Some(registry) = registry {
         let plugins: Vec<Arc<dyn CodePlugin>> = registry
             .get_plugins(
                 PluginCapability::SymbolExtract,
@@ -194,16 +190,18 @@ pub fn create_extractor_with_registry(
             .into_iter()
             .map(Arc::clone)
             .collect();
-        if plugins.is_empty() {
-            return None;
+        if !plugins.is_empty() {
+            let extractor: Box<dyn SymbolExtractor> =
+                Box::new(super::plugin_extractor::PluginSymbolExtractorChain::new(
+                    plugins,
+                    file_path.to_string(),
+                    language,
+                ));
+            return Some(extractor);
         }
-        let extractor: Box<dyn SymbolExtractor> =
-            Box::new(super::plugin_extractor::PluginSymbolExtractorChain::new(
-                plugins,
-                file_path.to_string(),
-                language,
-            ));
-        return Some(extractor);
+    }
+    if matches!(language, Language::Custom(_)) {
+        return None;
     }
     create_extractor(language)
 }

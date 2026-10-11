@@ -110,6 +110,13 @@ impl Components {
         }
     }
 
+    /// Replace the plugin registry in place without discarding other
+    /// component configuration.
+    pub fn set_plugin_registry(&mut self, registry: Arc<cce_plugin::PluginRegistry>) {
+        self.entity_extractor
+            .set_heuristics_registry(registry);
+    }
+
     /// Apply the license header filtering configuration to every component
     /// that strips header comments (the shared comment processor and the
     /// entity extractor's own processor).

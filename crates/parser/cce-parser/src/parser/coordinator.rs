@@ -34,15 +34,22 @@ pub struct ParseCoordinator {
     components: Components,
     /// Monitoring metrics (optional)
     metrics: Option<Arc<ParserMetrics>>,
+    /// Plugin registry for `SymbolExtract` import and re-export extraction.
+    plugin_registry: Option<Arc<cce_plugin::PluginRegistry>>,
 }
 
 impl Clone for ParseCoordinator {
     fn clone(&self) -> Self {
-        // Create a new coordinator with the same plugin registry and metrics
-        // but a fresh Components (components are stateless or have internal sharing)
+        // Preserve the plugin registry so cloned coordinators keep the same
+        // symbol extraction behavior; components are rebuilt with it.
+        let components = match &self.plugin_registry {
+            Some(registry) => Components::with_plugin_registry(Arc::clone(registry)),
+            None => Components::new(),
+        };
         Self {
-            components: Components::new(),
+            components,
             metrics: self.metrics.clone(),
+            plugin_registry: self.plugin_registry.clone(),
         }
     }
 }
@@ -53,6 +60,7 @@ impl ParseCoordinator {
         Self {
             components: Components::new(),
             metrics: None,
+            plugin_registry: None,
         }
     }
 
@@ -60,8 +68,9 @@ impl ParseCoordinator {
     /// `LangHeuristics` entity-kind hook.
     pub fn with_plugin_registry(registry: Arc<cce_plugin::PluginRegistry>) -> Self {
         Self {
-            components: Components::with_plugin_registry(registry),
+            components: Components::with_plugin_registry(Arc::clone(&registry)),
             metrics: None,
+            plugin_registry: Some(registry),
         }
     }
 
@@ -70,6 +79,7 @@ impl ParseCoordinator {
         Self {
             components: Components::with_embedded_config(config),
             metrics: None,
+            plugin_registry: None,
         }
     }
 
@@ -82,6 +92,7 @@ impl ParseCoordinator {
         Self {
             components: Components::with_entity_id_seed(seed),
             metrics: None,
+            plugin_registry: None,
         }
     }
 
@@ -106,6 +117,13 @@ impl ParseCoordinator {
     /// Set monitoring metrics after construction
     pub fn set_metrics(&mut self, metrics: Arc<ParserMetrics>) {
         self.metrics = Some(metrics);
+    }
+
+    /// Replace the plugin registry after construction without discarding
+    /// other coordinator configuration.
+    pub fn set_plugin_registry(&mut self, registry: Arc<cce_plugin::PluginRegistry>) {
+        self.components.set_plugin_registry(Arc::clone(&registry));
+        self.plugin_registry = Some(registry);
     }
 
     /// Parse a file and return structured result
@@ -253,7 +271,10 @@ impl ParseCoordinator {
 
         // Extract imports from AST if available (before source is moved into ParsedFile)
         let import_table = tree.as_ref().and_then(|tree| {
-            match crate::relation_helpers::extract_imports(tree, &source, &language, None) {
+            let registry = self.plugin_registry.as_deref();
+            match crate::relation_helpers::extract_imports_with_registry(
+                tree, &source, &language, registry, &file_path,
+            ) {
                 Ok(table) => Some(table),
                 Err(e) => {
                     tracing::warn!(
@@ -271,7 +292,12 @@ impl ParseCoordinator {
         // raw records are enough here.
         let reexports = tree
             .as_ref()
-            .map(|tree| crate::relation_helpers::extract_reexports(tree, &source, &language))
+            .map(|tree| {
+                let registry = self.plugin_registry.as_deref();
+                crate::relation_helpers::extract_reexports_with_registry(
+                    tree, &source, &language, registry, &file_path,
+                )
+            })
             .unwrap_or_default();
 
         // The full-content hash is computed once here (source is in hand) and

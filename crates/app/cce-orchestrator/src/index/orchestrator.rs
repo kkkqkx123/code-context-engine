@@ -836,6 +836,7 @@ impl IndexOrchestrator {
             params.track_cross_file_deps,
         );
         builder.set_symbol_extract_enabled(params.symbol_extract_enabled);
+        builder.with_plugin_symbols_enabled(params.plugin_symbols_enabled);
         // The registry is attached when either plugin-facing capability
         // is enabled; individual capabilities filter by their own guard.
         let use_plugin_registry = params.plugin_symbols_enabled || params.symbol_extract_enabled;
