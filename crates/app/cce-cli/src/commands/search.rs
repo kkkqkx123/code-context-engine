@@ -22,8 +22,8 @@ struct SearchQueryParams<'a> {
     include: &'a Option<String>,
     enable_rerank: Option<bool>,
     rerank_max_candidates: Option<usize>,
+    expand: Option<bool>,
 }
-
 pub async fn execute(
     cmd: &SearchCommands,
     server: &str,
@@ -46,6 +46,7 @@ pub async fn execute(
             include,
             enable_rerank,
             rerank_max_candidates,
+            expand,
         } => {
             let params = SearchQueryParams {
                 project_id: *project_id,
@@ -60,6 +61,7 @@ pub async fn execute(
                 include,
                 enable_rerank: *enable_rerank,
                 rerank_max_candidates: *rerank_max_candidates,
+                expand: *expand,
             };
             search_query(&client, &params, params.project_id, verbose, format).await
         }
@@ -107,6 +109,7 @@ async fn search_query(
         enable_rerank: params.enable_rerank,
         rerank_max_candidates: params.rerank_max_candidates,
         query_intent: None,
+        expand: params.expand,
     };
 
     if verbose {
@@ -225,5 +228,9 @@ pub enum SearchCommands {
         /// Override the maximum number of rerank candidates
         #[arg(long)]
         rerank_max_candidates: Option<usize>,
+
+        /// Resolve call-graph neighbours for the top hits
+        #[arg(long)]
+        expand: Option<bool>,
     },
 }

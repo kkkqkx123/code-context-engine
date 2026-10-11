@@ -151,6 +151,19 @@ pub async fn handle_search(
     query_opts.config.result = project_entry.config.search.result.clone();
     query_opts.config.annotation = project_entry.config.search.annotation.clone();
 
+    // Per-request relation-expansion opt-in. The engine recall pass stays
+    // unannotated so bodies remain raw; the expansion post-pass below wraps
+    // them exactly once with real neighbour units.
+    let expansion_config = if request.expand.unwrap_or(false) {
+        query_opts.config.annotation.enable_annotation = false;
+        let mut cfg = project_entry.config.search.annotation.clone();
+        cfg.enable_annotation = true;
+        cfg.expansion_enabled = true;
+        Some(cfg)
+    } else {
+        None
+    };
+
     // Per-request rerank overrides take precedence over the config.
     if let Some(enable_rerank) = request.enable_rerank {
         query_opts = query_opts.with_enable_rerank(enable_rerank);
@@ -173,8 +186,7 @@ pub async fn handle_search(
         for ct in &request.exclude_content_types {
             match ct.to_lowercase().as_str() {
                 "test" | "tests" => {
-                    query_opts =
-                        query_opts.add_exclude_content_type(ExcludableContentType::Test);
+                    query_opts = query_opts.add_exclude_content_type(ExcludableContentType::Test);
                 }
                 _ => {
                     return SearchApiResponse::Error(ErrorResponse::new(
@@ -245,7 +257,17 @@ pub async fn handle_search(
     let result = state.engine.search(project_id, &query_opts).await;
 
     match result {
-        Ok(result) => {
+        Ok(mut result) => {
+            if let Some(cfg) = expansion_config {
+                apply_expansion_post_pass(
+                    &state,
+                    project_id,
+                    &project_entry,
+                    &cfg,
+                    &mut result.items,
+                )
+                .await;
+            }
             let items: Vec<SearchResultItem> = result
                 .items
                 .into_iter()
@@ -403,6 +425,17 @@ pub async fn handle_aggregated_search(
     global_config.boost = project_entry.config.search.boost.clone();
     global_config.rerank = project_entry.config.rerank.clone();
     global_config.annotation = project_entry.config.search.annotation.clone();
+    // Per-request expansion opt-in for the merged hits. Sub-query passes stay
+    // unannotated so bodies remain raw; the post-pass below wraps once.
+    let expansion_config = if request.expand.unwrap_or(false) {
+        global_config.annotation.enable_annotation = false;
+        let mut cfg = project_entry.config.search.annotation.clone();
+        cfg.enable_annotation = true;
+        cfg.expansion_enabled = true;
+        Some(cfg)
+    } else {
+        None
+    };
     global_config.result = {
         let mut r = project_entry.config.search.result.clone();
         r.limit = request.limit;
@@ -547,7 +580,7 @@ pub async fn handle_aggregated_search(
     };
     let query_coordinator = cce_orchestrator::query::QueryCoordinator::with_capabilities(
         Arc::new(searcher),
-        relation_searcher,
+        relation_searcher.clone(),
         capabilities,
         project_id,
     )
@@ -558,7 +591,17 @@ pub async fn handle_aggregated_search(
 
     // Execute aggregated search
     match query_coordinator.search_aggregated(&agg_options).await {
-        Ok(result) => {
+        Ok(mut result) => {
+            if let Some(cfg) = expansion_config {
+                let project_root = std::path::PathBuf::from(&project_entry.metadata.root_path);
+                cce_orchestrator::query::expansion::annotate_hits_with_expansion(
+                    &relation_searcher,
+                    &project_root,
+                    &mut result.items,
+                    &cfg,
+                )
+                .await;
+            }
             let items: Vec<SearchResultItem> = result
                 .items
                 .into_iter()
@@ -599,6 +642,35 @@ fn parse_query_intent(raw: Option<&str>) -> Option<cce_orchestrator::query::Quer
     }
 }
 
+/// Run the opt-in relation-expansion post-pass over raw recall hits.
+///
+/// The engine pass ran unannotated so bodies are still raw here; this resolves
+/// real call-graph neighbours and wraps the top-N hits exactly once. Failures
+/// degrade to unexpanded hits, never to a failed request.
+async fn apply_expansion_post_pass(
+    state: &crate::api::state::AppState,
+    project_id: i64,
+    project_entry: &cce_config::project_registry::ProjectEntry,
+    config: &cce_orchestrator::query::types::RelationAnnotationConfig,
+    items: &mut [OrchestratorResultItem],
+) {
+    let searcher = match state.get_relation_searcher(project_id).await {
+        Ok(searcher) => searcher,
+        Err(error) => {
+            tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
+            return;
+        }
+    };
+    let project_root = std::path::PathBuf::from(&project_entry.metadata.root_path);
+    cce_orchestrator::query::expansion::annotate_hits_with_expansion(
+        &searcher,
+        &project_root,
+        items,
+        config,
+    )
+    .await;
+}
+
 /// Convert orchestrator result item to API result item
 fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem {
     // Get entity type from kind
@@ -625,12 +697,27 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
         start_line: item.start_line,
         end_line: item.end_line,
         entity_type,
-        entity_names: Vec::new(),
+        entity_names: if item.name.is_empty() {
+            Vec::new()
+        } else {
+            vec![item.name.clone()]
+        },
         entity_ids: item.entity_ids.iter().map(|id| id.0 as i64).collect(),
         score: item.score,
         sources: item.sources,
         content_state,
+        expanded: item.metadata.get("expanded").is_some_and(|v| v == "true"),
+        expanded_nodes: metadata_count(&item.metadata, "expanded_nodes"),
+        forward_nodes: metadata_count(&item.metadata, "forward_nodes"),
+        backward_nodes: metadata_count(&item.metadata, "backward_nodes"),
+        omitted_self_evident: metadata_count(&item.metadata, "omitted_self_evident"),
     }
+}
+
+/// Read a numeric expansion counter from hit metadata, defaulting to zero
+/// when the hit went through no expansion pass.
+fn metadata_count(metadata: &std::collections::HashMap<String, String>, key: &str) -> usize {
+    metadata.get(key).and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -655,6 +742,7 @@ mod tests {
             enable_rerank: None,
             rerank_max_candidates: None,
             query_intent: None,
+            expand: None,
         };
 
         assert_eq!(request.query_type, ""); // will use default
@@ -667,5 +755,40 @@ mod tests {
         assert!(!error.success);
         assert_eq!(error.error.code, error_codes::INVALID_REQUEST);
         assert_eq!(error.error.message, "Invalid input");
+    }
+
+    #[test]
+    fn test_convert_carries_expansion_counters() {
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("expanded".to_string(), "true".to_string());
+        metadata.insert("expanded_nodes".to_string(), "3".to_string());
+        metadata.insert("forward_nodes".to_string(), "2".to_string());
+        metadata.insert("backward_nodes".to_string(), "1".to_string());
+        metadata.insert("omitted_self_evident".to_string(), "1".to_string());
+        let item = OrchestratorResultItem {
+            content: "fn a() {}".to_string(),
+            metadata,
+            ..Default::default()
+        };
+        let converted = convert_orchestrator_result(item);
+        assert!(converted.expanded);
+        assert_eq!(converted.expanded_nodes, 3);
+        assert_eq!(converted.forward_nodes, 2);
+        assert_eq!(converted.backward_nodes, 1);
+        assert_eq!(converted.omitted_self_evident, 1);
+    }
+
+    #[test]
+    fn test_convert_defaults_counters_without_expansion() {
+        let item = OrchestratorResultItem {
+            content: "fn a() {}".to_string(),
+            ..Default::default()
+        };
+        let converted = convert_orchestrator_result(item);
+        assert!(!converted.expanded);
+        assert_eq!(converted.expanded_nodes, 0);
+        assert_eq!(converted.forward_nodes, 0);
+        assert_eq!(converted.backward_nodes, 0);
+        assert_eq!(converted.omitted_self_evident, 0);
     }
 }

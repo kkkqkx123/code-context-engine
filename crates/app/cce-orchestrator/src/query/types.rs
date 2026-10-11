@@ -22,8 +22,8 @@ pub use query_options::{
 };
 pub use query_result::{AggregatedQueryOptions, QueryResult, SubQuery};
 pub use search_config::{
-    Bm25RetrievalConfig, HybridFusionConfig, HybridWeightConfig, QueryIntentWeights, RerankConfig,
-    ResultFilterConfig, ScoreNormalizationConfig, SearchConfig, SummaryBoostConfig,
-    VectorRetrievalConfig,
+    Bm25RetrievalConfig, HybridFusionConfig, HybridWeightConfig, QueryIntentWeights,
+    RelationAnnotationConfig, RerankConfig, ResultFilterConfig, ScoreNormalizationConfig,
+    SearchConfig, SummaryBoostConfig, VectorRetrievalConfig,
 };
 pub use search_result::{BoostStats, SearchResult};

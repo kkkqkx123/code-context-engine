@@ -46,6 +46,10 @@ pub struct AggSearchCommand {
     /// Include patterns (comma-separated)
     #[arg(long)]
     pub include_patterns: Option<String>,
+
+    /// Resolve call-graph neighbours for the merged top hits
+    #[arg(long)]
+    pub expand: Option<bool>,
 }
 
 impl AggSearchCommand {
@@ -109,6 +113,7 @@ impl AggSearchCommand {
             enable_rerank: None,
             rerank_max_candidates: None,
             query_intent: None,
+            expand: self.expand,
         };
 
         if verbose {

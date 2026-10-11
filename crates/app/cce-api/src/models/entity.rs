@@ -278,6 +278,10 @@ pub struct EntitySearchResult {
     pub name: String,
     pub kind: String,
     pub file_id: i64,
+    /// Project-relative file path resolved from `file_id`. `None` when the
+    /// file row is missing, so callers without a second lookup stay actionable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

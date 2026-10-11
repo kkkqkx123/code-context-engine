@@ -103,6 +103,9 @@ pub mod ranking;
 // Relation annotation
 pub mod annotation;
 
+// Caller-driven relation expansion for opt-in query requests
+pub mod expansion;
+
 // Independent graph retrieval path
 pub mod graph;
 
@@ -121,7 +124,7 @@ pub mod cached_embedder;
 // Re-export main types
 pub use types::{
     AggregatedQueryOptions, ExcludableContentType, ExecutionStrategy, QueryConfigBuilder,
-    QueryOptions, QueryResult, SearchConfig, SearchResult, SearchSources, SubQuery,
+    QueryIntent, QueryOptions, QueryResult, SearchConfig, SearchResult, SearchSources, SubQuery,
 };
 
 // Re-export cache types
@@ -142,6 +145,9 @@ pub use relation_searcher::{
     PathQueryOptions, RelationQueryOptions, RelationSearcher, StructuralDirection, StructuralKind,
     StructuralRelation,
 };
+
+// Re-export relation expansion helpers
+pub use expansion::{annotate_hits_with_expansion, resolve_expansion_units, stable_id_of};
 
 // Re-export graph path
 pub use graph::{

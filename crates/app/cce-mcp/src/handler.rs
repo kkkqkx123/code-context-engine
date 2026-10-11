@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use cce_codegraph::index::snapshot_query::SnapshotSymbolQueryOps;
 use cce_orchestrator::query::RelationQueryOptions;
-use cce_orchestrator::query::types::{ContentState, QueryOptions};
+use cce_orchestrator::query::types::QueryOptions;
 use cce_orchestrator::{IndexOptions, KeywordSearchTool};
 use cce_server_shared::state::AppState;
 use rmcp::{
@@ -52,6 +52,9 @@ pub struct SearchArgs {
     /// Optional directory prefix to restrict results (e.g. "src/parser").
     #[serde(default)]
     pub directory_prefix: Option<String>,
+    /// Opt-in relation expansion: resolve call-graph neighbours for top hits.
+    #[serde(default)]
+    pub expand: Option<bool>,
 }
 
 /// Arguments for keyword (BM25) search.
@@ -186,14 +189,23 @@ impl McpServerHandler {
             options = options.with_directory_prefix(prefix);
         }
         match self.state.engine.search(args.project_id, &options).await {
-            Ok(result) => {
+            Ok(mut result) => {
+                if args.expand.unwrap_or(false) {
+                    self.apply_expansion(args.project_id, &mut result.items)
+                        .await;
+                }
                 let items: Vec<Value> = result
                     .items
                     .iter()
                     .map(|item| {
+                        let expanded_nodes = metadata_count(item, "expanded_nodes");
+                        let forward_nodes = metadata_count(item, "forward_nodes");
+                        let backward_nodes = metadata_count(item, "backward_nodes");
+                        let omitted_self_evident =
+                            metadata_count(item, "omitted_self_evident");
                         json!({
                             "id": item.id,
-                            "entity_ids": item.entity_ids.iter().map(EntityId::to_string).collect::<Vec<_>>(),
+                            "entity_ids": item.entity_ids.iter().map(cce_types::EntityId::to_string).collect::<Vec<_>>(),
                             "kind": item.kind,
                             "name": item.name,
                             "file_path": item.file_path,
@@ -202,10 +214,13 @@ impl McpServerHandler {
                             "sources": item.sources,
                             "start_line": item.start_line,
                             "end_line": item.end_line,
-                            "content_state": match item.content_state {
-                                ContentState::Full => "full",
-                                ContentState::Reference(_) => "reference",
-                            },
+                            "content": item.content,
+                            "content_state": content_state_key(&item.content_state),
+                            "expanded": item.metadata.get("expanded").is_some_and(|v| v == "true"),
+                            "expanded_nodes": expanded_nodes,
+                            "forward_nodes": forward_nodes,
+                            "backward_nodes": backward_nodes,
+                            "omitted_self_evident": omitted_self_evident,
                         })
                     })
                     .collect();
@@ -304,8 +319,7 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callees =
-            searcher.get_callees_paginated(entity_id, &call_domain_relation_options());
+        let callees = searcher.get_callees_paginated(entity_id, &call_domain_relation_options());
         let items: Vec<Value> = callees
             .iter()
             .map(|relation| {
@@ -347,8 +361,7 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callers =
-            searcher.get_callers_paginated(entity_id, &call_domain_relation_options());
+        let callers = searcher.get_callers_paginated(entity_id, &call_domain_relation_options());
         let items: Vec<Value> = callers
             .iter()
             .map(|relation| {
@@ -681,6 +694,41 @@ impl McpServerHandler {
             .to_string(),
         )]))
     }
+
+    /// Opt-in relation-expansion post-pass shared by the search tool.
+    ///
+    /// Resolves real call-graph neighbours for the top-N hits and annotates
+    /// them in place. Failures degrade to unexpanded hits.
+    async fn apply_expansion(&self, project_id: i64, items: &mut [cce_orchestrator::SearchResult]) {
+        let entry = match self
+            .state
+            .engine
+            .project_registry()
+            .get_or_load(project_id)
+            .await
+        {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::warn!(%error, "Expansion requested but project config unavailable; skipping");
+                return;
+            }
+        };
+        let searcher = match self.state.get_relation_searcher(project_id).await {
+            Ok(searcher) => searcher,
+            Err(error) => {
+                tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
+                return;
+            }
+        };
+        let project_root = std::path::PathBuf::from(&entry.metadata.root_path);
+        cce_orchestrator::query::expansion::annotate_hits_with_expansion(
+            &searcher,
+            &project_root,
+            items,
+            &entry.config.search.annotation,
+        )
+        .await;
+    }
 }
 
 #[tool_handler]
@@ -698,8 +746,29 @@ impl ServerHandler for McpServerHandler {
     }
 }
 
+/// Machine-oriented content-state key matching the HTTP `ContentStateDto`.
+fn content_state_key(state: &cce_orchestrator::query::types::ContentState) -> &'static str {
+    use cce_orchestrator::query::types::ContentState;
+    use cce_orchestrator::query::types::content_reference::DowngradeReason;
+    match state {
+        ContentState::Full => "full",
+        ContentState::Reference(DowngradeReason::OverLimit) => "reference_over_limit",
+        ContentState::Reference(DowngradeReason::FileMissing) => "reference_file_missing",
+        ContentState::Reference(DowngradeReason::FileLevel) => "reference_file_level",
+        ContentState::Reference(DowngradeReason::ChunkMissing) => "reference_chunk_missing",
+    }
+}
+
+/// Read a numeric expansion counter from hit metadata, defaulting to zero
+/// when the hit went through no expansion pass.
+fn metadata_count(item: &cce_orchestrator::SearchResult, key: &str) -> usize {
+    item.metadata
+        .get(key)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
 /// Relation options for the call-semantics tools.
-///
 /// `entity_callees`, `entity_callers` and `call_chain` promise call
 /// relationships, so only call-domain edges qualify: structural edges (impl
 /// association, trait bound, inheritance) and dependency edges (import/use)
@@ -712,7 +781,6 @@ fn call_domain_relation_options() -> RelationQueryOptions {
 }
 
 /// Resolve a stable symbol ID to a runtime entity ID.
-///
 /// Runtime numeric IDs are never accepted: they are allocated per process and
 /// are not reproducible across reindex runs.
 fn resolve_stable_id(

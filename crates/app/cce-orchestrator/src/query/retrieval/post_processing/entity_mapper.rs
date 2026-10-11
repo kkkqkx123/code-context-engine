@@ -405,10 +405,13 @@ fn choose_entity_kind(
 ///
 /// `stored_ids`/`names` are positionally aligned lists persisted with the
 /// chunk. When the hit represents exactly one entity (the post-expansion
-/// contract), the matching entry wins. Otherwise the group title wins when
-/// present (it names the owning container, unlike the first member); entries
-/// are scanned in order only on legacy rows, and empty strings (unknown
-/// names) are skipped.
+/// contract), the matching entry wins. Otherwise a bare group title wins when
+/// present (it names the owning container, unlike the first member). A dotted
+/// title is ownership qualification synthesized for BM25 retrieval (file stem
+/// or parent owner), not a display name, so multi-entity hits prefer the
+/// first bare per-entity name in that case and keep the title only as a last
+/// resort. Entries are scanned in order only on legacy rows, and empty
+/// strings (unknown names) are skipped.
 fn choose_entity_name(
     stored_ids: &str,
     names: &[String],
@@ -423,14 +426,15 @@ fn choose_entity_name(
             }
         }
     }
-    if !group_title.is_empty() {
-        return group_title.to_string();
-    }
-    names
+    let first_bare = names
         .iter()
         .find(|name| !name.is_empty())
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if group_title.is_empty() || (group_title.contains('.') && !first_bare.is_empty()) {
+        return first_bare;
+    }
+    group_title.to_string()
 }
 
 #[cfg(test)]
@@ -609,6 +613,28 @@ mod tests {
                 &[EntityId(2)],
             ),
             "open"
+        );
+    }
+
+    #[test]
+    fn test_choose_entity_name_prefers_bare_name_over_qualified_title() {
+        // A dotted group title is retrieval-time ownership qualification
+        // (file stem / parent owner), not a display name: multi-entity hits
+        // fall back to the first bare per-entity name.
+        assert_eq!(
+            choose_entity_name(
+                "[0,1]",
+                &["add".to_string(), "subtract".to_string()],
+                "lib.add",
+                &[EntityId(0), EntityId(1)],
+            ),
+            "add"
+        );
+        // With no bare name available the qualified title is still better
+        // than an empty display name.
+        assert_eq!(
+            choose_entity_name("[0,1]", &[], "lib.add", &[EntityId(0), EntityId(1)],),
+            "lib.add"
         );
     }
 

@@ -45,6 +45,11 @@ pub struct SearchRequest {
     /// Empty means auto-detect.
     #[serde(default)]
     pub query_intent: Option<String>,
+    /// Per-request relation-expansion opt-in. When `Some(true)` the server
+    /// resolves call-graph neighbours for the top-N hits and annotates them
+    /// into `code_chunk`; `None` defers to the project configuration.
+    #[serde(default)]
+    pub expand: Option<bool>,
 }
 
 /// Search response shared by single and aggregated search endpoints
@@ -110,6 +115,21 @@ pub struct SearchResultItem {
     /// Whether `code_chunk` is the full body or a reference.
     #[serde(default)]
     pub content_state: ContentStateDto,
+    /// True when relation expansion attached at least one neighbour unit.
+    #[serde(default)]
+    pub expanded: bool,
+    /// Number of attached expansion units (forward + backward).
+    #[serde(default)]
+    pub expanded_nodes: usize,
+    /// Attached callee (forward) units.
+    #[serde(default)]
+    pub forward_nodes: usize,
+    /// Attached caller (backward) units.
+    #[serde(default)]
+    pub backward_nodes: usize,
+    /// Forward units dropped as directly inferable from the rendered body.
+    #[serde(default)]
+    pub omitted_self_evident: usize,
 }
 
 /// Sub-query definition for aggregated search
@@ -170,6 +190,9 @@ pub struct AggregatedSearchRequest {
     /// Empty means auto-detect per sub-query text.
     #[serde(default)]
     pub query_intent: Option<String>,
+    /// Per-request relation-expansion opt-in, applied to the merged hits.
+    #[serde(default)]
+    pub expand: Option<bool>,
 }
 
 fn default_query_type() -> String {

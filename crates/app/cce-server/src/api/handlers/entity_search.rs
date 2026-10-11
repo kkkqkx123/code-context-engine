@@ -158,18 +158,28 @@ pub async fn handle_entity_search(
     // Convert to response format
     let items: Vec<EntitySearchResult> = filtered_results
         .into_iter()
-        .map(|record| EntitySearchResult {
-            id: record.id,
-            name: record.name,
-            kind: record.kind,
-            file_id: record.file_id,
-            signature: record.signature,
-            span_start_row: record.span_start_row,
-            span_end_row: record.span_end_row,
-            depth: record.depth,
-            parent_id: record.parent_id,
-            project_id: record.project_id,
-            rank: record.rank,
+        .map(|record| {
+            // Resolve the project-relative path so the hit is directly
+            // actionable without a second file lookup.
+            let file_path =
+                cce_storage_metadb_sqlite::repo::FileRepository::get_by_id(&conn, record.file_id)
+                    .ok()
+                    .flatten()
+                    .map(|file| file.path);
+            EntitySearchResult {
+                id: record.id,
+                name: record.name,
+                kind: record.kind,
+                file_id: record.file_id,
+                file_path,
+                signature: record.signature,
+                span_start_row: record.span_start_row,
+                span_end_row: record.span_end_row,
+                depth: record.depth,
+                parent_id: record.parent_id,
+                project_id: record.project_id,
+                rank: record.rank,
+            }
         })
         .collect();
 
