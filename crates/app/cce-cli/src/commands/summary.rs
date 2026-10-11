@@ -6,59 +6,10 @@
 use clap::Subcommand;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use cce_api::models::{SummaryRequest, SummaryResponse};
 
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success, print_warning};
-
-/// Summary request structure (matches API model)
-#[derive(Debug, Serialize)]
-struct SummaryRequest {
-    #[serde(default)]
-    file_paths: Vec<String>,
-    #[serde(default)]
-    directory_paths: Vec<String>,
-    #[serde(default)]
-    extensions: Vec<String>,
-    #[serde(default)]
-    exclude_dirs: Vec<String>,
-    respect_gitignore: bool,
-    #[serde(default)]
-    ignore_patterns: Vec<String>,
-    recursive: bool,
-    max_files: usize,
-}
-
-/// File summary item (matches API response model)
-#[derive(Debug, Deserialize)]
-struct FileSummaryItem {
-    file_path: String,
-    language: String,
-    summary: String,
-    main_entities: Vec<String>,
-    imports: Vec<String>,
-    exports: Vec<String>,
-    entity_count: u32,
-    line_count: u32,
-    tags: Vec<String>,
-    importance_level: String,
-    success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
-
-/// Summary response structure (matches API model)
-#[derive(Debug, Deserialize)]
-struct SummaryResponse {
-    success: bool,
-    total_files: usize,
-    success_count: usize,
-    failed_count: usize,
-    summaries: Vec<FileSummaryItem>,
-    elapsed_ms: u64,
-    #[serde(default)]
-    warnings: Vec<String>,
-}
 
 /// Input paths configuration
 #[derive(Debug, Clone)]

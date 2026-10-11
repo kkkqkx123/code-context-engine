@@ -91,7 +91,11 @@ impl Searcher {
         // injected neighbour resolver the engine pass resolves real
         // call-domain neighbours and runs the batch annotation entry here;
         // without one the historical empty-vector semantics are kept.
-        if options.config.annotation.enable_annotation {
+        // A per-request expansion opt-in implies annotation even when the
+        // project config leaves annotation disabled.
+        let expansion_requested =
+            options.neighbour_resolver.is_some() && options.config.annotation.expansion_enabled;
+        if options.config.annotation.enable_annotation || expansion_requested {
             return Ok(self
                 .annotate_results(final_results, &options.config.annotation, options)
                 .await);
@@ -121,8 +125,10 @@ impl Searcher {
     ) -> Vec<SearchResult> {
         use crate::query::annotation::{RelationAnnotator, SearchResultInput};
 
-        if let (Some(resolver), true) = (options.neighbour_resolver.as_ref(), config.expansion_enabled)
-        {
+        if let (Some(resolver), true) = (
+            options.neighbour_resolver.as_ref(),
+            config.expansion_enabled,
+        ) {
             return Self::annotate_results_with_resolver(results, resolver, config).await;
         }
 

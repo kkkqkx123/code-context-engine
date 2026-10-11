@@ -721,6 +721,21 @@ impl QueryCoordinator {
             merged.truncate(limit);
         }
 
+        // Relation expansion runs once on the merged hits so budget,
+        // shared dedup and single wrapping observe the final Top-N instead of
+        // each sub-query's intermediate list. Sub-queries run without
+        // annotation when a resolver is present (see build_sub_query_options).
+        if let Some(resolver) = agg_options.neighbour_resolver.as_ref() {
+            if agg_options.global_config.annotation.expansion_enabled {
+                crate::query::expansion::annotate_hits_with_resolver(
+                    resolver,
+                    &mut merged,
+                    &agg_options.global_config.annotation,
+                )
+                .await;
+            }
+        }
+
         let total = merged.len();
 
         Ok(QueryResult {
@@ -740,17 +755,27 @@ impl QueryCoordinator {
     /// option surfaces stay in sync: global filters/config/patterns are shared,
     /// the query text and sources come from the sub-query itself, and source
     /// content is always requested for aggregated results.
+    /// When a neighbour resolver is present, sub-queries run without
+    /// annotation and without the resolver; expansion is applied once to the
+    /// merged hits in search_aggregated so budget and shared dedup observe
+    /// the final Top-N.
     fn build_sub_query_options(
         &self,
         agg_options: &AggregatedQueryOptions,
         sub_query: &crate::query::types::SubQuery,
     ) -> QueryOptions {
         let filters = agg_options.filters.as_ref();
+        let has_expansion = agg_options.neighbour_resolver.is_some();
+        let mut config = agg_options.global_config.clone();
+        if has_expansion {
+            config.annotation.enable_annotation = false;
+            config.annotation.expansion_enabled = false;
+        }
         QueryOptions {
             query: sub_query.text.clone(),
             project_id: agg_options.project_id,
             sources: sub_query.sources,
-            config: agg_options.global_config.clone(),
+            config,
             directory_prefix: filters.and_then(|f| f.directory_prefix.clone()),
             exclude_content_types: filters.map_or(Vec::new(), |f| f.exclude_content_types.clone()),
             include_categories: filters.map_or(Vec::new(), |f| f.include_categories.clone()),
@@ -760,7 +785,7 @@ impl QueryCoordinator {
             with_source: true,
             query_intent: agg_options.query_intent,
             enable_rerank: agg_options.enable_rerank,
-            neighbour_resolver: agg_options.neighbour_resolver.clone(),
+            neighbour_resolver: None,
         }
     }
 

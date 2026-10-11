@@ -145,16 +145,29 @@ pub async fn handle_search(
         .with_limit(request.limit);
 
     // Merge the project's search and rerank configuration into the query options
-    // so runtime parameters come from the config layer.
+    // so runtime parameters come from the config layer. The per-request limit
+    // is preserved across the merge.
     query_opts.config.rerank = project_entry.config.rerank.clone();
+    query_opts.config.vector = project_entry.config.search.vector.clone();
+    query_opts.config.bm25 = project_entry.config.search.bm25.clone();
+    query_opts.config.fusion = project_entry.config.search.fusion.clone();
+    query_opts.config.summary = project_entry.config.search.summary.clone();
+    query_opts.config.score = project_entry.config.search.score.clone();
     query_opts.config.boost = project_entry.config.search.boost.clone();
-    query_opts.config.result = project_entry.config.search.result.clone();
+    query_opts.config.plugin = project_entry.config.search.plugin.clone();
     query_opts.config.annotation = project_entry.config.search.annotation.clone();
+    query_opts.config.timeout_ms = project_entry.config.search.timeout_ms;
+    query_opts.config.result = {
+        let mut r = project_entry.config.search.result.clone();
+        r.limit = request.limit;
+        r
+    };
 
     // Per-request relation-expansion opt-in. When requested, the neighbour
     // resolver is injected into the query options so the engine pass itself
     // resolves real neighbours and runs the batch annotation (single wrap,
-    // cross-hit shared dedup). Without the request the annotation config is
+    // cross-hit shared dedup). Expansion implies annotation, so both switches
+    // are enabled together; without the request the annotation config is
     // passed through unchanged and default behavior is identical to before.
     let resolver = if request.expand.unwrap_or(false) {
         let searcher = match state.get_relation_searcher(project_id).await {
@@ -174,6 +187,7 @@ pub async fn handle_search(
         None
     };
     if resolver.is_some() {
+        query_opts.config.annotation.enable_annotation = true;
         query_opts.config.annotation.expansion_enabled = true;
     }
     query_opts = query_opts.with_neighbour_resolver(resolver);
@@ -421,7 +435,9 @@ pub async fn handle_aggregated_search(
         });
     }
 
-    // Build global config
+    // Build global config from the project configuration so runtime
+    // parameters come from the config layer. Expansion is applied once to
+    // the merged hits; sub-queries run without annotation (see coordinator).
     let mut global_config = SearchConfig {
         result: ResultFilterConfig {
             limit: request.limit,
@@ -429,15 +445,23 @@ pub async fn handle_aggregated_search(
         },
         ..Default::default()
     };
+    global_config.vector = project_entry.config.search.vector.clone();
+    global_config.bm25 = project_entry.config.search.bm25.clone();
+    global_config.fusion = project_entry.config.search.fusion.clone();
+    global_config.summary = project_entry.config.search.summary.clone();
+    global_config.score = project_entry.config.search.score.clone();
     global_config.boost = project_entry.config.search.boost.clone();
-    global_config.rerank = project_entry.config.rerank.clone();
+    global_config.plugin = project_entry.config.search.plugin.clone();
     global_config.annotation = project_entry.config.search.annotation.clone();
-    // Per-request expansion opt-in for the merged hits. The resolver is
-    // injected into every sub-query so the engine pass itself resolves real
-    // neighbours and wraps once; without the request nothing changes.
+    global_config.timeout_ms = project_entry.config.search.timeout_ms;
+    global_config.rerank = project_entry.config.rerank.clone();
+    // Per-request expansion opt-in for the merged hits. Expansion implies
+    // annotation, so both switches are enabled together; without the request
+    // the annotation config is passed through unchanged.
     let resolver = if request.expand.unwrap_or(false) {
         match state.get_relation_searcher(project_id).await {
             Ok(searcher) => {
+                global_config.annotation.enable_annotation = true;
                 global_config.annotation.expansion_enabled = true;
                 Some(cce_orchestrator::query::expansion::NeighbourResolver::new(
                     searcher,
@@ -694,9 +718,7 @@ fn convert_orchestrator_result(
             .map(|searcher| {
                 item.entity_ids
                     .iter()
-                    .map(|id| {
-                        cce_orchestrator::query::expansion::stable_id_of(searcher, *id)
-                    })
+                    .map(|id| cce_orchestrator::query::expansion::stable_id_of(searcher, *id))
                     .collect()
             })
             .unwrap_or_default(),

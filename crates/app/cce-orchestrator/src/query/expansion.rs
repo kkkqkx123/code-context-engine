@@ -87,7 +87,10 @@ impl std::fmt::Debug for NeighbourResolver {
 
 impl NeighbourResolver {
     /// Bundle a relation searcher with the project root used for source reads.
-    pub fn new(searcher: std::sync::Arc<RelationSearcher>, project_root: std::path::PathBuf) -> Self {
+    pub fn new(
+        searcher: std::sync::Arc<RelationSearcher>,
+        project_root: std::path::PathBuf,
+    ) -> Self {
         Self {
             searcher,
             project_root,
@@ -529,7 +532,10 @@ mod tests {
     #[test]
     fn test_window_excerpt_passes_short_body_through() {
         assert_eq!(window_excerpt("fn a() {}"), None);
-        let short: String = (0..10).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let short: String = (0..10)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert_eq!(window_excerpt(&short), None);
     }
 }

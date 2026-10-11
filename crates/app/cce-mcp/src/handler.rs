@@ -182,18 +182,47 @@ impl McpServerHandler {
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("search")?;
         let mut options = QueryOptions::new(args.query.clone(), args.project_id);
-        if let Some(limit) = args.limit {
+        // Merge the project search configuration so the MCP path observes the
+        // same runtime parameters as the HTTP path.
+        if let Ok(entry) = self
+            .state
+            .engine
+            .project_registry()
+            .get_or_load(args.project_id)
+            .await
+        {
+            options.config.rerank = entry.config.rerank.clone();
+            options.config.vector = entry.config.search.vector.clone();
+            options.config.bm25 = entry.config.search.bm25.clone();
+            options.config.fusion = entry.config.search.fusion.clone();
+            options.config.summary = entry.config.search.summary.clone();
+            options.config.score = entry.config.search.score.clone();
+            options.config.boost = entry.config.search.boost.clone();
+            options.config.plugin = entry.config.search.plugin.clone();
+            options.config.annotation = entry.config.search.annotation.clone();
+            options.config.timeout_ms = entry.config.search.timeout_ms;
+            let limit = args.limit.unwrap_or(entry.config.search.result.limit);
+            options.config.result = {
+                let mut r = entry.config.search.result.clone();
+                r.limit = limit;
+                r
+            };
+        } else if let Some(limit) = args.limit {
             options = options.with_limit(limit);
         }
         if let Some(prefix) = args.directory_prefix.clone() {
             options = options.with_directory_prefix(prefix);
         }
         // Per-request expansion opt-in: inject the neighbour resolver so the
-        // engine pass itself resolves real neighbours and wraps once. MCP
-        // options are not merged with the project config, so there is no
-        // double-annotation risk; the resolver is the single expansion path.
+        // engine pass itself resolves real neighbours and wraps once.
+        // Expansion implies annotation, so both switches are enabled together.
         if args.expand.unwrap_or(false) {
-            options = options.with_neighbour_resolver(self.build_resolver(args.project_id).await);
+            let resolver = self.build_resolver(args.project_id).await;
+            if resolver.is_some() {
+                options.config.annotation.enable_annotation = true;
+                options.config.annotation.expansion_enabled = true;
+            }
+            options = options.with_neighbour_resolver(resolver);
         }
         match self.state.engine.search(args.project_id, &options).await {
             Ok(result) => {
