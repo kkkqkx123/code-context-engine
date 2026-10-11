@@ -106,11 +106,7 @@ pub fn merge_rerank_results(
         }
     }
 
-    updated_results.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    updated_results.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
 
     updated_results
 }
@@ -205,6 +201,18 @@ mod tests {
         assert!((merged[0].score - 0.8).abs() < 1e-6);
         assert_eq!(merged[0].metadata["rerank_score"], "0.9");
         assert_eq!(merged[1].metadata["rerank_reasoning"], "less relevant");
+    }
+
+    #[test]
+    fn test_merge_rerank_results_breaks_score_ties_stably() {
+        let mut later = make_result("later", 0.6);
+        later.file_path = "src/flask/blueprints.py".to_string();
+        let mut earlier = make_result("earlier", 0.6);
+        earlier.file_path = "src/flask/app.py".to_string();
+        let reranked = RerankResult::new(vec![]);
+        let merged = merge_rerank_results(vec![later, earlier], reranked);
+        assert_eq!(merged[0].id, "earlier");
+        assert_eq!(merged[1].id, "later");
     }
 
     #[test]

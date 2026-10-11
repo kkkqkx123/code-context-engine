@@ -194,7 +194,7 @@ pub async fn handle_function_calls(
                 function_name,
                 file_path,
                 depth: 0,
-                relation_type: format!("{:?}", r.relation_type),
+                relation_type: r.relation_type.to_string(),
                 call_line: None,
             }
         })
@@ -333,7 +333,7 @@ pub async fn handle_function_callers(
                 function_name,
                 file_path,
                 depth: 0,
-                relation_type: format!("{:?}", relation.relation_type),
+                relation_type: relation.relation_type.to_string(),
                 call_line: None,
             }
         })

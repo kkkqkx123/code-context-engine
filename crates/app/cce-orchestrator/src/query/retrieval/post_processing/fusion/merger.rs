@@ -544,7 +544,8 @@ fn fuse_borda(
 /// Rank each path's alignment keys by their best raw score.
 ///
 /// Returns `key -> (result index, rank)` with ranks starting at 1; ties on
-/// score are broken by key so the ranking is deterministic.
+/// score resolve on the stable content order of the representative hits, so
+/// rank-based fusion stays identical across index rebuilds.
 fn rank_by_key(
     results: &[SearchResult],
     raw_score: impl Fn(&SearchResult) -> f32,
@@ -555,7 +556,7 @@ fn rank_by_key(
         b.1.1
             .partial_cmp(&a.1.1)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| results[a.1.0].cmp_stable(&results[b.1.0]))
     });
     by_key
         .into_iter()
@@ -644,26 +645,10 @@ fn dedup_by_chunk_id(results: Vec<SearchResult>, enabled: bool) -> Vec<SearchRes
 /// Sort by fused score descending, with deterministic tie-breaking.
 /// Ties arise when a path yields few distinct raw scores (min-max then maps
 /// them onto few discrete normalized values, e.g. two results -> {0, 1}) or
-/// when raw scores coincide (multi-entity expansion duplicates scores);
-/// without a stable secondary key the order would depend on HashMap
-/// iteration order and differ across requests.
+/// when raw scores coincide (multi-entity expansion duplicates scores).
+/// Ties resolve on stable content coordinates, never on index-assigned
+/// identifiers, so the order survives index rebuilds instead of following
+/// identifier allocation order.
 fn sort_fused_by_score(fused: &mut [SearchResult]) {
-    fused.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                let a_key = (
-                    a.entity_ids.first().map(|e| e.0),
-                    a.segment_id.clone().unwrap_or_default(),
-                    a.id.clone(),
-                );
-                let b_key = (
-                    b.entity_ids.first().map(|e| e.0),
-                    b.segment_id.clone().unwrap_or_default(),
-                    b.id.clone(),
-                );
-                a_key.cmp(&b_key)
-            })
-    });
+    fused.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
 }

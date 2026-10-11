@@ -9,11 +9,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use cce_codegraph::index::snapshot_query::SnapshotSymbolQueryOps;
 use cce_orchestrator::query::RelationQueryOptions;
 use cce_orchestrator::query::types::{ContentState, QueryOptions};
 use cce_orchestrator::{IndexOptions, KeywordSearchTool};
 use cce_server_shared::state::AppState;
-use cce_types::EntityId;
 use rmcp::{
     ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -71,8 +71,8 @@ pub struct KeywordSearchArgs {
 pub struct EntityArgs {
     /// Project ID the entity belongs to (required).
     pub project_id: i64,
-    /// Numeric entity ID.
-    pub entity_id: u64,
+    /// Stable symbol ID (for example `sym_…`).
+    pub entity_id: String,
 }
 
 /// Arguments for call-chain traversal.
@@ -80,8 +80,8 @@ pub struct EntityArgs {
 pub struct CallChainArgs {
     /// Project ID the entity belongs to (required).
     pub project_id: i64,
-    /// Numeric entity ID.
-    pub entity_id: u64,
+    /// Stable symbol ID (for example `sym_…`).
+    pub entity_id: String,
     /// Traversal direction: "forward" (callees, default) or "backward" (callers).
     #[serde(default)]
     pub direction: Option<String>,
@@ -295,8 +295,17 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callees = searcher
-            .get_callees_paginated(EntityId(args.entity_id), &call_domain_relation_options());
+        let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
+            Some(id) => id,
+            None => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "unknown stable symbol ID: {}",
+                    args.entity_id
+                ))]));
+            }
+        };
+        let callees =
+            searcher.get_callees_paginated(entity_id, &call_domain_relation_options());
         let items: Vec<Value> = callees
             .iter()
             .map(|relation| {
@@ -304,7 +313,7 @@ impl McpServerHandler {
                     "caller": relation.caller.to_string(),
                     "callee_id": relation.callee_id.map(|id| id.to_string()),
                     "callee_name": relation.callee_name,
-                    "relation_type": format!("{:?}", relation.relation_type),
+                    "relation_type": relation.relation_type.to_string(),
                     "is_external": relation.is_external,
                     "start_line": relation.span.start_position.row,
                 })
@@ -329,14 +338,23 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callers = searcher
-            .get_callers_paginated(EntityId(args.entity_id), &call_domain_relation_options());
+        let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
+            Some(id) => id,
+            None => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "unknown stable symbol ID: {}",
+                    args.entity_id
+                ))]));
+            }
+        };
+        let callers =
+            searcher.get_callers_paginated(entity_id, &call_domain_relation_options());
         let items: Vec<Value> = callers
             .iter()
             .map(|relation| {
                 json!({
                     "caller": relation.caller.to_string(),
-                    "relation_type": format!("{:?}", relation.relation_type),
+                    "relation_type": relation.relation_type.to_string(),
                     "is_external": relation.is_external,
                 })
             })
@@ -362,6 +380,15 @@ impl McpServerHandler {
                 ))]));
             }
         };
+        let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
+            Some(id) => id,
+            None => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "unknown stable symbol ID: {}",
+                    args.entity_id
+                ))]));
+            }
+        };
         let max_depth = args.max_depth.unwrap_or(3);
         let options = call_domain_relation_options().with_max_depth(max_depth);
         let backward = matches!(
@@ -369,9 +396,9 @@ impl McpServerHandler {
             Some(ref direction) if direction == "backward"
         );
         let result = if backward {
-            searcher.query_backward(EntityId(args.entity_id), &options)
+            searcher.query_backward(entity_id, &options)
         } else {
-            searcher.query_forward(EntityId(args.entity_id), &options)
+            searcher.query_forward(entity_id, &options)
         };
         match result {
             Ok(nodes) => {
@@ -383,7 +410,7 @@ impl McpServerHandler {
                             "function_name": node.function_name,
                             "file_path": node.file_path,
                             "depth": node.depth,
-                            "relation_type": format!("{:?}", node.relation_type),
+                            "relation_type": node.relation_type.to_string(),
                             "call_line": node.call_line,
                         })
                     })
@@ -682,4 +709,18 @@ fn call_domain_relation_options() -> RelationQueryOptions {
     RelationQueryOptions::new()
         .with_relation_domains(vec!["call".to_string()])
         .with_include_external(false)
+}
+
+/// Resolve a stable symbol ID to a runtime entity ID.
+///
+/// Runtime numeric IDs are never accepted: they are allocated per process and
+/// are not reproducible across reindex runs.
+fn resolve_stable_id(
+    searcher: &cce_orchestrator::query::RelationSearcher,
+    stable_id: &str,
+) -> Option<cce_types::EntityId> {
+    searcher
+        .query()
+        .index()
+        .get_entity_id_by_stable_symbol_id(stable_id)
 }

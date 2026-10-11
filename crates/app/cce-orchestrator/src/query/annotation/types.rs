@@ -211,6 +211,23 @@ impl ExpandedUnit {
         self.relation_type.as_ref().is_none_or(|t| t.is_call())
     }
 
+    /// Whether this forward expansion is self-evident from the primary body.
+    /// Only direct, static-method and constructor calls name their target
+    /// literally at the call site, and only when that spelling is actually
+    /// present in the given primary code in call shape. Everything else stays
+    /// ambiguous and must be kept.
+    pub fn is_self_evident_from(&self, primary_code: &str) -> bool {
+        let qualifies = matches!(
+            self.relation_type,
+            Some(
+                cce_types::RelationType::DirectCall
+                    | cce_types::RelationType::StaticMethodCall
+                    | cce_types::RelationType::ConstructorCall
+            )
+        );
+        qualifies && name_evident_in(primary_code, &self.name)
+    }
+
     /// Get content hash for deduplication
     pub fn content_hash(&self) -> u64 {
         // Stable FNV-1a over identity plus body so equal units hash equally
@@ -233,6 +250,72 @@ impl ExpandedUnit {
     pub fn is_same_file(&self, other: &ExpandedUnit) -> bool {
         self.file_path == other.file_path
     }
+}
+
+/// Whether a character continues an identifier (Unicode-aware so partial
+/// matches inside longer names never count as evidence).
+fn is_identifier_char(next: char) -> bool {
+    next.is_alphanumeric() || next == '_'
+}
+
+/// Whether the text right after a bare callee name opens a call: an opening
+/// paren (a gap may sit between) or a path separator. Anything else means the
+/// name is merely mentioned, not called.
+fn call_follows(rest: &str) -> bool {
+    let mut chars = rest.chars();
+    loop {
+        match chars.next() {
+            Some('(') => return true,
+            Some(':') => return chars.next() == Some(':'),
+            Some(next) if next.is_whitespace() => continue,
+            _ => return false,
+        }
+    }
+}
+
+/// Whether a callee spelling is literally evident in primary code in call
+/// shape. The match stays conservative: the occurrence needs a left word
+/// boundary, a qualified spelling must not continue into a longer identifier,
+/// and a bare name must open a call. Anything unverifiable reads as absent so
+/// the edge is kept.
+fn name_evident_in(code: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let qualified = name.contains('.') || name.contains("::");
+    let mut search_from = 0usize;
+    while search_from <= code.len() {
+        let tail = match code.get(search_from..) {
+            Some(tail) => tail,
+            None => return false,
+        };
+        let hit = match tail.find(name) {
+            Some(hit) => hit,
+            None => return false,
+        };
+        let start = search_from + hit;
+        let end = start + name.len();
+        search_from = end;
+        let left_boundary = code
+            .get(..start)
+            .and_then(|head| head.chars().next_back())
+            .is_none_or(|prev| !is_identifier_char(prev));
+        if !left_boundary {
+            continue;
+        }
+        if qualified {
+            let continues_identifier = code
+                .get(end..)
+                .and_then(|rest| rest.chars().next())
+                .is_some_and(is_identifier_char);
+            if !continues_identifier {
+                return true;
+            }
+        } else if call_follows(code.get(end..).unwrap_or_default()) {
+            return true;
+        }
+    }
+    false
 }
 
 /// File information
@@ -276,6 +359,10 @@ pub struct AnnotationMetadata {
     pub annotated_length: usize,
     /// Whether content was truncated
     pub truncated: bool,
+    /// Forward units dropped as directly inferable from the fully rendered
+    /// primary body. Distinguishes no outgoing edge from filtered edges.
+    #[serde(default)]
+    pub omitted_self_evident: usize,
 }
 
 impl Default for AnnotationMetadata {
@@ -289,6 +376,7 @@ impl Default for AnnotationMetadata {
             original_length: 0,
             annotated_length: 0,
             truncated: false,
+            omitted_self_evident: 0,
         }
     }
 }
@@ -346,6 +434,7 @@ impl AnnotatedResult {
                 original_length,
                 annotated_length: original_length,
                 truncated: false,
+                omitted_self_evident: 0,
             },
             original_content: unit.code,
         }
@@ -399,6 +488,42 @@ mod tests {
         assert_eq!(unit.end_line, 3);
         assert_eq!(unit.unit_type, SemanticUnitType::Unknown);
         assert_eq!(unit.origin, ExpansionOrigin::Primary);
+    }
+
+    #[test]
+    fn test_self_evident_matching() {
+        use cce_types::RelationType;
+
+        fn direct(name: &str) -> ExpandedUnit {
+            ExpandedUnit::new(
+                String::new(),
+                "src/a.rs".to_string(),
+                1,
+                1,
+                name.to_string(),
+            )
+            .with_relation_type(RelationType::DirectCall)
+        }
+
+        // Call paren, gap before paren, and path separator all count.
+        assert!(direct("b").is_self_evident_from("b();"));
+        assert!(direct("b").is_self_evident_from("b ();"));
+        assert!(direct("b").is_self_evident_from("a::b();"));
+        // Longer identifiers sharing the spelling do not count.
+        assert!(!direct("b").is_self_evident_from("call_b();"));
+        assert!(!direct("b").is_self_evident_from("abc();"));
+        // Mere mentions without a call shape do not count.
+        assert!(!direct("b").is_self_evident_from("let b = 1;"));
+        assert!(!direct("b").is_self_evident_from("{\"b\": 1}"));
+        assert!(!direct("").is_self_evident_from("b();"));
+        // Qualified spellings match whole and reject continuations.
+        assert!(direct("Foo::bar").is_self_evident_from("Foo::bar();"));
+        assert!(!direct("Foo::bar").is_self_evident_from("XFoo::bar();"));
+        // Non-qualifying types never count, even with a visible call.
+        let method =
+            ExpandedUnit::new(String::new(), "src/a.rs".to_string(), 1, 1, "b".to_string())
+                .with_relation_type(RelationType::InstanceMethodCall);
+        assert!(!method.is_self_evident_from("b();"));
     }
 
     #[test]

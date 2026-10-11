@@ -119,11 +119,19 @@ pub async fn handle_entity_search(
         }
     };
 
+    // When a kind filter is present the database fetch is widened before
+    // filtering so ranking is preserved and the requested limit stays
+    // meaningful instead of filtering an already truncated page.
+    let db_limit = if request.kind_filter.is_some() {
+        request.limit.saturating_mul(5).max(request.limit).max(100)
+    } else {
+        request.limit
+    };
     let results = match cce_storage_metadb_sqlite::repo::EntityRepository::search_fts_at_epoch(
         &conn,
         &request.query,
         project_id,
-        request.limit,
+        db_limit,
         active_epoch,
     ) {
         Ok(records) => records,
@@ -141,6 +149,7 @@ pub async fn handle_entity_search(
         results
             .into_iter()
             .filter(|r| r.kind == *kind_filter)
+            .take(request.limit.max(1) as usize)
             .collect::<Vec<_>>()
     } else {
         results

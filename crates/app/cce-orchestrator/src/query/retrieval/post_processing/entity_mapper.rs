@@ -277,7 +277,8 @@ fn materialize(
             // recall-stage Full state with an empty body.
             result.content_state = ContentState::Reference(DowngradeReason::ChunkMissing);
             if result.start_line == 0 && result.end_line == 0 {
-                result.content = file_level_reference(&result.file_path, DowngradeReason::ChunkMissing);
+                result.content =
+                    file_level_reference(&result.file_path, DowngradeReason::ChunkMissing);
             } else {
                 result.content = reference_content(
                     &result.file_path,
@@ -684,7 +685,11 @@ mod tests {
             results[0].content_state,
             ContentState::Reference(DowngradeReason::OverLimit)
         );
-        assert!(results[0].content.contains("<reference path=\"src/big.rs\" lines=\"1-400\""));
+        assert!(
+            results[0]
+                .content
+                .contains("<reference path=\"src/big.rs\" lines=\"1-400\"")
+        );
         assert!(results[0].content.contains("reason=\"over_limit\""));
         assert_eq!(results[0].start_line, 1);
         assert_eq!(results[0].end_line, 400);
@@ -714,7 +719,11 @@ mod tests {
             results[0].content_state,
             ContentState::Reference(DowngradeReason::FileMissing)
         );
-        assert!(results[0].content.contains("<reference path=\"src/gone.rs\" lines=\"4-10\""));
+        assert!(
+            results[0]
+                .content
+                .contains("<reference path=\"src/gone.rs\" lines=\"4-10\"")
+        );
         assert!(results[0].content.contains("reason=\"file_missing\""));
     }
 
@@ -762,7 +771,11 @@ mod tests {
             results[0].content_state,
             ContentState::Reference(DowngradeReason::FileLevel)
         );
-        assert!(results[0].content.contains("<reference path=\"src/lib.rs\""));
+        assert!(
+            results[0]
+                .content
+                .contains("<reference path=\"src/lib.rs\"")
+        );
     }
 
     #[test]
@@ -784,7 +797,11 @@ mod tests {
             ContentState::Reference(DowngradeReason::ChunkMissing)
         );
         assert!(!results[0].content.is_empty());
-        assert!(results[0].content.contains("<reference path=\"src/lib.rs\""));
+        assert!(
+            results[0]
+                .content
+                .contains("<reference path=\"src/lib.rs\"")
+        );
         assert!((results[0].score - score * 0.8).abs() < f32::EPSILON);
     }
 

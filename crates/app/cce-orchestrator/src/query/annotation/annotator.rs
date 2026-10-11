@@ -75,32 +75,37 @@ impl RelationAnnotator {
         primary_unit.score = input.score;
 
         // 2. Prepare expansion units (dedup + budget cap)
-        let (forward, backward) = if self.config.expansion_enabled {
-            let (forward, backward) =
-                self.prepare_expansion(
-                    input.entity_id,
-                    &primary_unit,
-                    forward,
-                    backward,
-                    &self.config,
-                );
-            // Self-evident edge filter: when the primary renders with its
-            // full body, its outgoing call sites are visible in the primary's
-            // own code, so forward (callee) fragments add no information.
-            // Backward (caller) fragments are kept regardless.
-            let forward = if self.config.omit_self_evident_edges {
+        let (forward, backward, omitted_self_evident) = if self.config.expansion_enabled {
+            // Literally evident callees read straight off the fully rendered
+            // primary body, so they are dropped before dedup and budget
+            // capping and release their slots to ambiguous edges. Backward
+            // units are kept.
+            let (forward, omitted_self_evident) = if self.config.omit_self_evident_edges {
                 let concatenator = StructureConcatenator::new(self.config.clone());
                 if concatenator.primary_renders_fully(&primary_unit).await {
-                    Vec::new()
+                    let before = forward.len();
+                    let kept: Vec<ExpandedUnit> = forward
+                        .into_iter()
+                        .filter(|unit| !unit.is_self_evident_from(&primary_unit.code))
+                        .collect();
+                    let omitted = before.saturating_sub(kept.len());
+                    (kept, omitted)
                 } else {
-                    forward
+                    (forward, 0)
                 }
             } else {
-                forward
+                (forward, 0)
             };
-            (forward, backward)
+            let (forward, backward) = self.prepare_expansion(
+                input.entity_id,
+                &primary_unit,
+                forward,
+                backward,
+                &self.config,
+            );
+            (forward, backward, omitted_self_evident)
         } else {
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), 0)
         };
 
         // 3. Concatenate with structure-preserving markers
@@ -121,6 +126,7 @@ impl RelationAnnotator {
             original_length: input.content.len(),
             annotated_length: annotated_content.len(),
             truncated: self.config.estimate_content_tokens(&annotated_content) >= max_length,
+            omitted_self_evident,
         };
 
         Ok(AnnotatedResult {
@@ -185,11 +191,15 @@ impl RelationAnnotator {
         for (_, (input, mut forward, mut backward)) in top_results {
             if share {
                 if self.config.expansion_include_callers {
-                    backward.retain(|unit| Self::admit_unit(unit, &self.config, &mut seen_entities, &mut seen_hashes));
+                    backward.retain(|unit| {
+                        Self::admit_unit(unit, &self.config, &mut seen_entities, &mut seen_hashes)
+                    });
                 } else {
                     backward.clear();
                 }
-                forward.retain(|unit| Self::admit_unit(unit, &self.config, &mut seen_entities, &mut seen_hashes));
+                forward.retain(|unit| {
+                    Self::admit_unit(unit, &self.config, &mut seen_entities, &mut seen_hashes)
+                });
             }
             futures.push(self.annotate_single(input, forward, backward));
         }
@@ -638,23 +648,197 @@ mod tests {
 
     #[tokio::test]
     async fn test_self_evident_forward_dropped_when_primary_renders_fully() {
-        // The filter defaults to on; re-enable it explicitly because the
-        // shared `expansion_config` helper disables it for legacy tests.
-        // The primary body fits the quota and is fully rendered, so its
-        // callee is self-evident and dropped.
-        let annotator = RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        // A direct call spelled in call shape in fully rendered primary code
+        // is self-evident; backward callers are never affected.
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let direct =
+            unit(2, "b", ExpansionOrigin::Forward).with_relation_type(RelationType::DirectCall);
         let result = annotator
             .annotate_single(
-                input(PRIMARY_CODE, 1),
-                vec![unit(2, "b", ExpansionOrigin::Forward)],
+                input("fn a() {\n    b();\n}", 1),
+                vec![direct],
                 vec![unit(3, "c", ExpansionOrigin::Backward)],
             )
             .await
             .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 0);
         assert_eq!(result.metadata.backward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 1);
         assert!(!result.annotated_content.contains("rel=\"calls\""));
         assert!(result.annotated_content.contains("rel=\"called by\""));
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_keeps_direct_without_literal_evidence() {
+        // The edge claims a call to `b` but the primary only shows a call to
+        // `call_b`: the name never appears in call shape, so the edge stays.
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let direct =
+            unit(2, "b", ExpansionOrigin::Forward).with_relation_type(RelationType::DirectCall);
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), vec![direct], Vec::new())
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 0);
+        assert!(result.annotated_content.contains("fn b()"));
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_drops_static_call_with_evidence() {
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let static_call = unit(2, "Foo::bar", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::StaticMethodCall);
+        let result = annotator
+            .annotate_single(
+                input("fn a() {\n    Foo::bar();\n}", 1),
+                vec![static_call],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 0);
+        assert_eq!(result.metadata.omitted_self_evident, 1);
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_keeps_static_call_without_evidence() {
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let static_call = unit(2, "Foo::bar", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::StaticMethodCall);
+        let result = annotator
+            .annotate_single(
+                input("fn a() {\n    other();\n}", 1),
+                vec![static_call],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 0);
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_drops_constructor_with_evidence() {
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let ctor = unit(2, "Widget", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::ConstructorCall);
+        let result = annotator
+            .annotate_single(
+                input("fn a() {\n    let w = Widget();\n}", 1),
+                vec![ctor],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 0);
+        assert_eq!(result.metadata.omitted_self_evident, 1);
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_keeps_indirect_call() {
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let method = unit(2, "b", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::InstanceMethodCall);
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), vec![method], Vec::new())
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 0);
+        assert!(result.annotated_content.contains("fn b()"));
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_keeps_unclassified_edge() {
+        let annotator =
+            RelationAnnotator::new(expansion_config(4, true).omit_self_evident_edges(true));
+        let result = annotator
+            .annotate_single(
+                input(PRIMARY_CODE, 1),
+                vec![unit(2, "b", ExpansionOrigin::Forward)],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 0);
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_mixed_drops_only_evidenced() {
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(6, true).omit_self_evident_edges(true));
+        let direct = unit(2, "call_b", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::DirectCall);
+        let ghost =
+            unit(3, "ghost", ExpansionOrigin::Forward).with_relation_type(RelationType::DirectCall);
+        let static_call = unit(4, "Foo::make", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::StaticMethodCall);
+        let ctor = unit(5, "Widget", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::ConstructorCall);
+        let method = unit(6, "m", ExpansionOrigin::Forward)
+            .with_relation_type(RelationType::InstanceMethodCall);
+        let unknown = unit(7, "u", ExpansionOrigin::Forward);
+        let result = annotator
+            .annotate_single(
+                input(
+                    "fn a() {\n    call_b();\n    Foo::make();\n    let w = Widget();\n}",
+                    1,
+                ),
+                vec![direct, ghost, static_call, ctor, method, unknown],
+                Vec::new(),
+            )
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 3);
+        assert_eq!(result.metadata.omitted_self_evident, 3);
+        assert!(!result.annotated_content.contains("name=\"call_b\""));
+        assert!(!result.annotated_content.contains("name=\"Foo::make\""));
+        assert!(!result.annotated_content.contains("name=\"Widget\""));
+        assert!(result.annotated_content.contains("fn ghost()"));
+        assert!(result.annotated_content.contains("fn m()"));
+        assert!(result.annotated_content.contains("fn u()"));
+    }
+
+    #[tokio::test]
+    async fn test_self_evident_releases_budget_before_cap() {
+        use cce_types::RelationType;
+
+        let annotator =
+            RelationAnnotator::new(expansion_config(1, true).omit_self_evident_edges(true));
+        let direct = unit_scored(2, "call_b", ExpansionOrigin::Forward, 0.9)
+            .with_relation_type(RelationType::DirectCall);
+        let method = unit_scored(3, "c", ExpansionOrigin::Forward, 0.1)
+            .with_relation_type(RelationType::InstanceMethodCall);
+        let result = annotator
+            .annotate_single(input(PRIMARY_CODE, 1), vec![direct, method], Vec::new())
+            .await
+            .expect("annotation ok");
+        assert_eq!(result.metadata.forward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 1);
+        assert!(result.annotated_content.contains("fn c()"));
+        assert!(!result.annotated_content.contains("fn call_b()"));
     }
 
     #[tokio::test]
@@ -676,35 +860,41 @@ mod tests {
     async fn test_self_evident_filter_kept_when_primary_omitted() {
         // omit_primary_body means the primary's call sites are not visible,
         // so forward expansion must survive.
-        let config = expansion_config(4, true).omit_primary_body(true);
+        use cce_types::RelationType;
+
+        let config = expansion_config(4, true)
+            .omit_self_evident_edges(true)
+            .omit_primary_body(true);
         let annotator = RelationAnnotator::new(config);
+        let direct =
+            unit(2, "b", ExpansionOrigin::Forward).with_relation_type(RelationType::DirectCall);
         let result = annotator
-            .annotate_single(
-                input(PRIMARY_CODE, 1),
-                vec![unit(2, "b", ExpansionOrigin::Forward)],
-                Vec::new(),
-            )
+            .annotate_single(input(PRIMARY_CODE, 1), vec![direct], Vec::new())
             .await
             .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 0);
     }
 
     #[tokio::test]
     async fn test_self_evident_filter_kept_when_primary_downgraded() {
         // An oversized primary degrades to a reference: its code is not in
         // the output, so the callee relation is no longer self-evident.
+        use cce_types::RelationType;
+
         let big = "x".repeat(5000);
-        let config = expansion_config(4, true).with_max_length(1000);
+        let config = expansion_config(4, true)
+            .omit_self_evident_edges(true)
+            .with_max_length(1000);
         let annotator = RelationAnnotator::new(config);
+        let direct =
+            unit(2, "b", ExpansionOrigin::Forward).with_relation_type(RelationType::DirectCall);
         let result = annotator
-            .annotate_single(
-                input(&big, 1),
-                vec![unit(2, "b", ExpansionOrigin::Forward)],
-                Vec::new(),
-            )
+            .annotate_single(input(&big, 1), vec![direct], Vec::new())
             .await
             .expect("annotation ok");
         assert_eq!(result.metadata.forward_nodes, 1);
+        assert_eq!(result.metadata.omitted_self_evident, 0);
     }
 
     #[tokio::test]

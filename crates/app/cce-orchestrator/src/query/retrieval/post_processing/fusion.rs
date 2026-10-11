@@ -611,6 +611,66 @@ mod tests {
     }
 
     #[test]
+    fn test_fuse_single_path_tie_order_survives_rebuild() {
+        fn bm25_hit(id: &str, entity: u64, file: &str, raw: f32) -> SearchResult {
+            SearchResult {
+                id: id.to_string(),
+                entity_ids: vec![EntityId(entity)],
+                segment_id: Some(format!("group_{entity}")),
+                file_path: file.to_string(),
+                start_line: 1,
+                end_line: 3,
+                kind: "method".to_string(),
+                name: "send_static_file".to_string(),
+                score: raw,
+                original_score: raw,
+                vector_score: 0.0,
+                bm25_score: Some(raw),
+                sources: vec!["bm25".to_string()],
+                ..Default::default()
+            }
+        }
+        let config = HybridFusionConfig {
+            vector_weight: 0.5,
+            bm25_weight: 0.5,
+            include_single_path: true,
+            min_score: 0.0,
+            dedup_by_chunk: false,
+            ..HybridFusionConfig::default()
+        };
+        let files = |fused: &[SearchResult]| {
+            fused
+                .iter()
+                .map(|r| r.file_path.clone())
+                .collect::<Vec<_>>()
+        };
+        // Equal raw scores fuse to equal scores; the order must follow content
+        // coordinates even when every identifier is reallocated by a rebuild.
+        let first = fuse_hybrid_results(
+            vec![],
+            vec![
+                bm25_hit("group_111_bm25_0", 111, "src/flask/blueprints.py", 29.381),
+                bm25_hit("group_197_bm25_0", 197, "src/flask/app.py", 29.381),
+            ],
+            &config,
+        );
+        let second = fuse_hybrid_results(
+            vec![],
+            vec![
+                bm25_hit("group_77_bm25_0", 77, "src/flask/app.py", 29.381),
+                bm25_hit("group_224_bm25_0", 224, "src/flask/blueprints.py", 29.381),
+            ],
+            &config,
+        );
+        assert_eq!(first.len(), 2);
+        assert_eq!(
+            files(&first),
+            vec!["src/flask/app.py", "src/flask/blueprints.py"]
+        );
+        assert_eq!(files(&first), files(&second));
+    }
+
+    #[test]
     fn test_fuse_dedup_by_chunk_keeps_best_per_chunk() {
         let mut v1 = make_vector_result("chunk_x", 100, 0.9);
         v1.segment_id = Some("seg".to_string());

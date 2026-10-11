@@ -115,7 +115,9 @@ impl StructureConcatenator {
     ///
     /// Relative paths resolve against the configured workspace root, absolute
     /// paths are checked directly. Without a workspace root the check is
-    /// skipped entirely and nothing is asserted about freshness.
+    /// skipped entirely and nothing is asserted about freshness. The
+    /// self-evident gate reuses this exact path so it always mirrors what the
+    /// renderer will do: it must never second-guess rendering.
     async fn apply_existence_check(&self, segments: &mut [AggregatedSegment]) {
         let Some(root) = self.config.workspace_root.clone() else {
             return;
@@ -288,10 +290,7 @@ impl StructureConcatenator {
             if current_file.is_some() {
                 result.push_str("</file>\n");
             }
-            result.push_str(&format!(
-                "<file path=\"{}\">\n",
-                segment.file_path
-            ));
+            result.push_str(&format!("<file path=\"{}\">\n", segment.file_path));
             *current_file = Some(segment.file_path.clone());
         }
 
@@ -381,17 +380,18 @@ impl StructureConcatenator {
             .unwrap_or_default();
         let open = format!(
             "<unit rel=\"{}\" name=\"{}\" lines=\"{}-{}\">",
-            rel,
-            name,
-            segment.start_line,
-            segment.end_line
+            rel, name, segment.start_line, segment.end_line
         );
         let close = "</unit>";
         let file_tag = format!("<file path=\"{}\">", segment.file_path);
-        TokenEstimator::estimate(&segment.code) + 1
-            + TokenEstimator::estimate(&open) + 1
-            + TokenEstimator::estimate(close) + 1
-            + TokenEstimator::estimate(&file_tag) + 1
+        TokenEstimator::estimate(&segment.code)
+            + 1
+            + TokenEstimator::estimate(&open)
+            + 1
+            + TokenEstimator::estimate(close)
+            + 1
+            + TokenEstimator::estimate(&file_tag)
+            + 1
     }
 
     /// Token cost used for budget selection: same estimate as standalone.
@@ -555,10 +555,14 @@ mod tests {
     fn standalone_cost(code: &str, name: &str, rel: &str, path: &str) -> usize {
         let open = format!("<unit rel=\"{}\" name=\"{}\" lines=\"1-3\">", rel, name);
         let file_tag = format!("<file path=\"{}\">", path);
-        TokenEstimator::estimate(code) + 1
-            + TokenEstimator::estimate(&open) + 1
-            + TokenEstimator::estimate("</unit>") + 1
-            + TokenEstimator::estimate(&file_tag) + 1
+        TokenEstimator::estimate(code)
+            + 1
+            + TokenEstimator::estimate(&open)
+            + 1
+            + TokenEstimator::estimate("</unit>")
+            + 1
+            + TokenEstimator::estimate(&file_tag)
+            + 1
     }
 
     #[tokio::test]
@@ -580,7 +584,11 @@ mod tests {
         let (result, files) = concat.concatenate(&primary, &[], &[]).await;
 
         // The reference tag carries path and range as attributes; no body.
-        assert!(result.contains("<reference path=\"src/missing.rs\" lines=\"1-3\" reason=\"file_missing\""));
+        assert!(
+            result.contains(
+                "<reference path=\"src/missing.rs\" lines=\"1-3\" reason=\"file_missing\""
+            )
+        );
         assert!(!result.contains("fn ghost"));
         assert_eq!(files.len(), 1);
     }
@@ -842,7 +850,8 @@ mod tests {
             + 1
             + TokenEstimator::estimate("<unit rel=\"\" name=\"main\" lines=\"1-1\">")
             + 1
-            + TokenEstimator::estimate("</unit>") + 1;
+            + TokenEstimator::estimate("</unit>")
+            + 1;
         let config = RelationAnnotationConfig {
             max_annotated_length: budget,
             ..RelationAnnotationConfig::new().enable(true)
@@ -874,8 +883,8 @@ mod tests {
             1,
             "main".to_string(),
         );
-        let snippet = expansion_unit("snippet", "src/snip.rs", "fn snippet();", 0.9)
-            .with_excerpt(true);
+        let snippet =
+            expansion_unit("snippet", "src/snip.rs", "fn snippet();", 0.9).with_excerpt(true);
 
         let (result, _) = concat.concatenate(&primary, &[snippet], &[]).await;
 

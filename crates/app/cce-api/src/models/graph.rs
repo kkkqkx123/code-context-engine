@@ -9,7 +9,7 @@ use utoipa::{IntoParams, ToSchema};
 
 /// Maximum length of a stable entity id accepted by graph endpoints.
 ///
-/// Entity ids are structured strings of the form `pkg::Type::fn@file.rs#60`.
+/// Entity ids are stable symbol ids of the form `sym_…`.
 /// Anything above this limit is either pathological input or attacker-supplied.
 pub const MAX_ID_LEN: usize = 512;
 /// Maximum label length; values above this are trimmed.
@@ -388,7 +388,8 @@ pub struct GraphCyclesResponse {
     pub relation_epoch: i64,
     pub level: String,
     pub cycles: Vec<GraphCycle>,
-    /// Cycle count reported, before the `limit` cap.
+    /// Detected count up to one probe past `limit`; a lower bound, not the
+    /// true project total. Equals the reported length unless truncated.
     #[serde(default)]
     pub total_cycles: usize,
     /// Whether more cycles exist than were reported.

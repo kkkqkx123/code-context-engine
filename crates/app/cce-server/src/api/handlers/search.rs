@@ -168,19 +168,20 @@ pub async fn handle_search(
         query_opts = query_opts.with_directory_prefix(prefix);
     }
 
-    // Exclude content types (e.g., test files)
+    // Exclude content types: reject unknown values instead of ignoring them.
     if !request.exclude_content_types.is_empty() {
         for ct in &request.exclude_content_types {
-            let exclude_type = match ct.to_lowercase().as_str() {
-                "test" | "tests" => Some(ExcludableContentType::Test),
-                _ => {
-                    tracing::warn!("Unknown exclude content type: {}", ct);
-                    None
+            match ct.to_lowercase().as_str() {
+                "test" | "tests" => {
+                    query_opts =
+                        query_opts.add_exclude_content_type(ExcludableContentType::Test);
                 }
-            };
-
-            if let Some(exclude_type) = exclude_type {
-                query_opts = query_opts.add_exclude_content_type(exclude_type);
+                _ => {
+                    return SearchApiResponse::Error(ErrorResponse::new(
+                        error_codes::INVALID_INPUT,
+                        format!("Unknown exclude content type: {}", ct),
+                    ));
+                }
             }
         }
     }
@@ -195,22 +196,50 @@ pub async fn handle_search(
         query_opts = query_opts.with_include_patterns(request.include_patterns);
     }
 
-    // Category filters
+    // Category filters: unknown names are rejected so typos stay visible.
     if !request.include_categories.is_empty() {
-        let categories: Vec<cce_types::FileCategory> = request
-            .include_categories
-            .iter()
-            .filter_map(|c| cce_types::FileCategory::from_name(c))
-            .collect();
+        let mut categories = Vec::with_capacity(request.include_categories.len());
+        for raw in &request.include_categories {
+            match cce_types::FileCategory::from_name(&raw.to_lowercase()) {
+                Some(category) => categories.push(category),
+                None => {
+                    return SearchApiResponse::Error(ErrorResponse::new(
+                        error_codes::INVALID_INPUT,
+                        format!("Unknown include category: {}", raw),
+                    ));
+                }
+            }
+        }
         query_opts = query_opts.with_include_categories(categories);
     }
     if !request.exclude_categories.is_empty() {
-        let categories: Vec<cce_types::FileCategory> = request
-            .exclude_categories
-            .iter()
-            .filter_map(|c| cce_types::FileCategory::from_name(c))
-            .collect();
+        let mut categories = Vec::with_capacity(request.exclude_categories.len());
+        for raw in &request.exclude_categories {
+            match cce_types::FileCategory::from_name(&raw.to_lowercase()) {
+                Some(category) => categories.push(category),
+                None => {
+                    return SearchApiResponse::Error(ErrorResponse::new(
+                        error_codes::INVALID_INPUT,
+                        format!("Unknown exclude category: {}", raw),
+                    ));
+                }
+            }
+        }
         query_opts = query_opts.with_exclude_categories(categories);
+    }
+    match request.query_intent.as_deref() {
+        None | Some("") => {}
+        Some(raw) => match parse_query_intent(Some(raw)) {
+            Some(intent) => {
+                query_opts = query_opts.with_query_intent(Some(intent));
+            }
+            None => {
+                return SearchApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_INPUT,
+                    format!("Unknown query intent: {}", raw),
+                ));
+            }
+        },
     }
     // Execute query using engine's search method with project_id
     let result = state.engine.search(project_id, &query_opts).await;
@@ -389,37 +418,69 @@ pub async fn handle_aggregated_search(
         global_config.rerank.max_candidates = max_candidates;
     }
 
-    // Build filters
-    let filters = if request.directory_prefix.is_some() || !request.exclude_content_types.is_empty()
-    {
-        let exclude_types: Vec<ExcludableContentType> = request
-            .exclude_content_types
-            .iter()
-            .filter_map(|ct| match ct.to_lowercase().as_str() {
-                "test" | "tests" => Some(ExcludableContentType::Test),
-                _ => {
-                    tracing::warn!("Unknown exclude content type: {}", ct);
-                    None
-                }
-            })
-            .collect();
-
+    // Build filters: any active filter field materializes the object so
+    // category-only requests are not dropped.
+    let has_filters = request.directory_prefix.is_some()
+        || !request.exclude_content_types.is_empty()
+        || !request.include_categories.is_empty()
+        || !request.exclude_categories.is_empty();
+    let mut exclude_types = Vec::with_capacity(request.exclude_content_types.len());
+    for ct in &request.exclude_content_types {
+        match ct.to_lowercase().as_str() {
+            "test" | "tests" => exclude_types.push(ExcludableContentType::Test),
+            _ => {
+                return SearchApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_INPUT,
+                    format!("Unknown exclude content type: {}", ct),
+                ));
+            }
+        }
+    }
+    let mut include_categories = Vec::with_capacity(request.include_categories.len());
+    for raw in &request.include_categories {
+        match cce_types::FileCategory::from_name(&raw.to_lowercase()) {
+            Some(category) => include_categories.push(category),
+            None => {
+                return SearchApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_INPUT,
+                    format!("Unknown include category: {}", raw),
+                ));
+            }
+        }
+    }
+    let mut exclude_categories = Vec::with_capacity(request.exclude_categories.len());
+    for raw in &request.exclude_categories {
+        match cce_types::FileCategory::from_name(&raw.to_lowercase()) {
+            Some(category) => exclude_categories.push(category),
+            None => {
+                return SearchApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_INPUT,
+                    format!("Unknown exclude category: {}", raw),
+                ));
+            }
+        }
+    }
+    let filters = if has_filters {
         Some(cce_orchestrator::query::FilterOptions {
             directory_prefix: request.directory_prefix,
             exclude_content_types: exclude_types,
-            include_categories: request
-                .include_categories
-                .iter()
-                .filter_map(|c| cce_types::FileCategory::from_name(c))
-                .collect(),
-            exclude_categories: request
-                .exclude_categories
-                .iter()
-                .filter_map(|c| cce_types::FileCategory::from_name(c))
-                .collect(),
+            include_categories,
+            exclude_categories,
         })
     } else {
         None
+    };
+    let aggregated_intent = match request.query_intent.as_deref() {
+        None | Some("") => None,
+        Some(raw) => match parse_query_intent(Some(raw)) {
+            Some(intent) => Some(intent),
+            None => {
+                return SearchApiResponse::Error(ErrorResponse::new(
+                    error_codes::INVALID_INPUT,
+                    format!("Unknown query intent: {}", raw),
+                ));
+            }
+        },
     };
 
     let agg_options = cce_orchestrator::query::AggregatedQueryOptions {
@@ -431,6 +492,7 @@ pub async fn handle_aggregated_search(
         exclude_patterns: request.exclude_patterns,
         include_patterns: request.include_patterns,
         enable_rerank: request.enable_rerank,
+        query_intent: aggregated_intent,
     };
 
     // Build QueryCoordinator per-request from engine components
@@ -522,6 +584,21 @@ pub async fn handle_aggregated_search(
     }
 }
 
+/// Parse an optional query intent label. Empty means auto-detect.
+fn parse_query_intent(raw: Option<&str>) -> Option<cce_orchestrator::query::QueryIntent> {
+    use cce_orchestrator::query::QueryIntent;
+    match raw {
+        None | Some("") => None,
+        Some(label) => match label.to_lowercase().as_str() {
+            "semantic" => Some(QueryIntent::Semantic),
+            "keyword" => Some(QueryIntent::Keyword),
+            "hybrid" => Some(QueryIntent::Hybrid),
+            "entity" => Some(QueryIntent::Entity),
+            _ => None,
+        },
+    }
+}
+
 /// Convert orchestrator result item to API result item
 fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem {
     // Get entity type from kind
@@ -577,6 +654,7 @@ mod tests {
             exclude_categories: vec![],
             enable_rerank: None,
             rerank_max_candidates: None,
+            query_intent: None,
         };
 
         assert_eq!(request.query_type, ""); // will use default

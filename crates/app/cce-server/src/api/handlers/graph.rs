@@ -612,11 +612,18 @@ pub async fn handle_graph_entity_impact(
             format!("max_depth must be within 1-{MAX_IMPACT_DEPTH}"),
         ));
     }
+    let scope = params.scope.to_lowercase();
+    if scope != "entity" && scope != "file" {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "scope must be one of entity, file".to_string(),
+        ));
+    }
     let entity_id = match resolve_symbol_seed(snapshot.index.as_ref(), &params.entity_id) {
         Ok(id) => id,
         Err(e) => return ApiResult::Error(e),
     };
-    let impact = searcher.get_entity_impact(entity_id, params.max_depth, "entity");
+    let impact = searcher.get_entity_impact(entity_id, params.max_depth, &scope);
     let name_of = |id: cce_types::EntityId| {
         snapshot
             .index
@@ -709,8 +716,14 @@ pub async fn handle_graph_cycles(
             .map(|members| GraphCycle { members })
             .collect::<Vec<_>>()
     };
+    // The detector is probed with one extra slot so truncation is observed.
+    // The count is a lower bound up to the probe, not the true project total.
     let truncated = cycles.len() > params.limit;
-    let total_cycles = cycles.len();
+    let total_cycles = if truncated {
+        params.limit + 1
+    } else {
+        cycles.len()
+    };
     let cycles = cycles.into_iter().take(params.limit).collect();
     ApiResult::Success(GraphCyclesResponse {
         success: true,

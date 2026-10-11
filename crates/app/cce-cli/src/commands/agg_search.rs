@@ -108,6 +108,7 @@ impl AggSearchCommand {
             exclude_categories: vec![],
             enable_rerank: None,
             rerank_max_candidates: None,
+            query_intent: None,
         };
 
         if verbose {

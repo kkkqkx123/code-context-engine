@@ -61,6 +61,44 @@ pub struct SearchResult {
     pub content_state: ContentState,
 }
 
+impl SearchResult {
+    /// Stable content-coordinate ordering used to break score ties.
+    ///
+    /// Index-assigned identifiers (entity row ids, segment ids, chunk ids)
+    /// are reallocated on every rebuild, so ties must never resolve on them.
+    /// File path, line range, kind and name survive rebuilds and read in the
+    /// same order the renderer groups units. The chunk id stays only as a
+    /// same-run uniqueness fallback once every stable field compares equal.
+    pub fn cmp_stable(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            &self.file_path,
+            self.start_line,
+            self.end_line,
+            &self.kind,
+            &self.name,
+            &self.id,
+        )
+            .cmp(&(
+                &other.file_path,
+                other.start_line,
+                other.end_line,
+                &other.kind,
+                &other.name,
+                &other.id,
+            ))
+    }
+
+    /// Score-descending ordering with the stable tie-break above, shared by
+    /// every stage that ranks hits so equal scores read identically across
+    /// rebuilds instead of following identifier allocation order.
+    pub fn cmp_score_desc_then_stable(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .score
+            .total_cmp(&self.score)
+            .then_with(|| self.cmp_stable(other))
+    }
+}
+
 impl Default for SearchResult {
     fn default() -> Self {
         Self {
@@ -165,5 +203,50 @@ mod tests {
         assert_eq!(stats.boosted_results, 1);
         assert_eq!(stats.boost_rate, 0.5);
         assert!((stats.avg_boost - 0.16).abs() < 0.001);
+    }
+
+    fn tied_hit(id: &str, entity: u64, file: &str, start: u32) -> SearchResult {
+        SearchResult {
+            id: id.to_string(),
+            entity_ids: vec![EntityId(entity)],
+            segment_id: Some(format!("group_{entity}")),
+            file_path: file.to_string(),
+            start_line: start,
+            end_line: start + 20,
+            kind: "method".to_string(),
+            name: "send_static_file".to_string(),
+            score: 0.6443,
+            original_score: 0.6443,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_stable_tie_break_ignores_rebuild_ids() {
+        // Same content coordinates under reallocated identifiers must compare
+        // equal on the stable prefix; the chunk id only breaks what content
+        // cannot distinguish within one run.
+        let before = tied_hit("group_111_bm25_0", 111, "src/flask/app.py", 392);
+        let after = tied_hit("group_77_bm25_0", 77, "src/flask/app.py", 392);
+        assert_eq!(before.cmp_stable(&after), std::cmp::Ordering::Less);
+        let mut pair = [after.clone(), before.clone()];
+        pair.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
+        assert_eq!(pair[0].id, "group_111_bm25_0");
+        assert_eq!(pair[1].id, "group_77_bm25_0");
+    }
+
+    #[test]
+    fn test_score_desc_then_stable_orders_ties_by_content() {
+        let blueprints = tied_hit("group_111_bm25_0", 111, "src/flask/blueprints.py", 82);
+        let app = tied_hit("group_197_bm25_0", 197, "src/flask/app.py", 392);
+        let higher = SearchResult {
+            score: 0.9,
+            ..tied_hit("group_1_bm25_0", 1, "src/z.rs", 1)
+        };
+        let mut results = [blueprints, higher, app];
+        results.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
+        assert_eq!(results[0].file_path, "src/z.rs");
+        assert_eq!(results[1].file_path, "src/flask/app.py");
+        assert_eq!(results[2].file_path, "src/flask/blueprints.py");
     }
 }

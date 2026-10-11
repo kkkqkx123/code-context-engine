@@ -81,80 +81,35 @@ pub async fn handle_function_detail(
     };
 
     // Get entity from function index (zero-copy read of the shared snapshot)
-    let function_info = snapshot
-        .index
-        .get_function_by_entity_id(entity_id)
-        .map(|entity| {
-            let file_path = snapshot
-                .index
-                .get_file_path_by_entity(entity_id)
-                .unwrap_or_default();
-
-            FunctionInfo {
-                id: id.clone(),
-                name: entity.name.clone(),
-                signature: entity.signature.clone(),
-                parameters: Vec::new(), // Would need to extract from metadata
-                return_type: None,      // Would need to extract from metadata
-                file_path,
-                start_line: entity.span.start_position.row as u32,
-                end_line: entity.span.end_position.row as u32,
-                doc_comment: entity.doc_comment.clone(),
-            }
-        })
-        .unwrap_or_else(|| {
-            // Entity not found in relation index, try SQLite
-            if let Some(client) = state.engine.metadata_store().map(|c| c.as_ref())
-                && let Ok(project) = client.for_project(project_id)
-                && let Ok(numeric_id) = id.parse::<i64>()
-            {
-                use cce_storage_metadb_sqlite::EntityRepository;
-                match project.with_transaction(|tx| EntityRepository::get_by_id(tx, numeric_id)) {
-                    Ok(Some(record)) => FunctionInfo {
-                        id: id.clone(),
-                        name: record.name,
-                        signature: record.signature.unwrap_or_default(),
-                        parameters: Vec::new(),
-                        return_type: None,
-                        file_path: String::new(), // Would need to join with files table
-                        start_line: record.span_start_row.unwrap_or(0) as u32,
-                        end_line: record.span_end_row.unwrap_or(0) as u32,
-                        doc_comment: None,
-                    },
-                    _ => FunctionInfo {
-                        id: id.clone(),
-                        name: "Unknown".to_string(),
-                        signature: String::new(),
-                        parameters: Vec::new(),
-                        return_type: None,
-                        file_path: String::new(),
-                        start_line: 0,
-                        end_line: 0,
-                        doc_comment: None,
-                    },
-                }
-            } else {
-                FunctionInfo {
-                    id: id.clone(),
-                    name: "Unknown".to_string(),
-                    signature: String::new(),
-                    parameters: Vec::new(),
-                    return_type: None,
-                    file_path: String::new(),
-                    start_line: 0,
-                    end_line: 0,
-                    doc_comment: None,
-                }
-            }
-        });
-
-    let response = FunctionDetailResponse {
-        success: true,
-        function: function_info,
-        relation_info: stale_relation_info(&runtime).await,
-    };
-
-    DetailApiResponse::Success(response)
+    if let Some(entity) = snapshot.index.get_function_by_entity_id(entity_id) {
+        let file_path = snapshot
+            .index
+            .get_file_path_by_entity(entity_id)
+            .unwrap_or_default();
+        let function_info = FunctionInfo {
+            id: id.clone(),
+            name: entity.name.clone(),
+            signature: entity.signature.clone(),
+            parameters: Vec::new(),
+            return_type: None,
+            file_path,
+            start_line: entity.span.start_position.row as u32,
+            end_line: entity.span.end_position.row as u32,
+            doc_comment: entity.doc_comment.clone(),
+        };
+        let response = FunctionDetailResponse {
+            success: true,
+            function: function_info,
+            relation_info: stale_relation_info(&runtime).await,
+        };
+        return DetailApiResponse::Success(response);
+    }
+    // Snapshot miss: missing entities are reported as not found instead of a
+    // placeholder success so callers can distinguish absence from data.
+    DetailApiResponse::Error(ErrorResponse::new(
+        error_codes::ENTITY_NOT_FOUND,
+        format!("Unknown symbol seed: {id}"),
+    ))
 }
 
 /// Return the relation capability info as a JSON map when the served

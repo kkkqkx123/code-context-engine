@@ -736,10 +736,11 @@ pub struct RelationAnnotationConfig {
     pub filter_stdlib: bool,
     /// Drop external targets without workspace source during expansion.
     pub filter_external: bool,
-    /// Drop forward (callee) expansion units when the primary body is fully
-    /// rendered: the call site is then visible in the primary's own code, so
-    /// the relation is self-evident and the `rel` label is redundant.
-    /// Backward (caller) expansion is never affected.
+    /// Drop forward (callee) units whose target is literally evident in the
+    /// fully rendered primary body: direct, static-method and constructor
+    /// calls spelled in call shape at the call site. Edges whose name never
+    /// appears there, and every other call shape, stay ambiguous and are
+    /// kept. Backward (caller) expansion is never affected.
     #[serde(default = "default_true")]
     pub omit_self_evident_edges: bool,
     /// Share the dedup state (seen entity IDs and content hashes) across all
@@ -845,8 +846,8 @@ impl RelationAnnotationConfig {
         self
     }
 
-    /// Drop or keep forward (callee) expansion units whose relation is
-    /// already inferable from the fully rendered primary body (builder pattern).
+    /// Drop or keep forward units literally evident in the fully rendered
+    /// primary body (builder pattern).
     pub fn omit_self_evident_edges(mut self, omit: bool) -> Self {
         self.omit_self_evident_edges = omit;
         self

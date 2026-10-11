@@ -706,11 +706,15 @@ impl QueryCoordinator {
         }
 
         let mut merged: Vec<crate::query::types::SearchResult> = dedup.into_values().collect();
-        merged.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // Weighting happens after each sub-query threshold, so the global
+        // threshold is re-applied here to keep weighted scores under the
+        // same contract. A zero weight only demotes, never excludes on its
+        // own; the threshold decides exclusion.
+        let min_score = agg_options.global_config.result.min_score;
+        if min_score > 0.0 {
+            merged.retain(|item| item.score >= min_score);
+        }
+        merged.sort_by(|a, b| a.cmp_score_desc_then_stable(b));
 
         let limit = agg_options.global_config.result.limit;
         if merged.len() > limit {
@@ -754,7 +758,7 @@ impl QueryCoordinator {
             exclude_patterns: agg_options.exclude_patterns.clone(),
             include_patterns: agg_options.include_patterns.clone(),
             with_source: true,
-            query_intent: None, // Auto-detect for sub-queries
+            query_intent: agg_options.query_intent,
             enable_rerank: agg_options.enable_rerank,
         }
     }

@@ -102,7 +102,20 @@ fn apply_filters(
     if let Some(files) = filter.excluded_files {
         options = options.with_excluded_files(files);
     }
+    if let Some(domains) = filter.domains {
+        options = options.with_relation_domains(parse_domains(&domains));
+    }
+    options = options.with_include_external(filter.include_external);
     options
+}
+
+/// Split a comma-separated relation-domain list into trimmed lowercase names.
+fn parse_domains(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
 /// Handle call chain request
@@ -184,7 +197,7 @@ pub async fn handle_call_chain(
                 function_name: node.function_name,
                 file_path: node.file_path,
                 depth: node.depth,
-                relation_type: format!("{:?}", node.relation_type),
+                relation_type: node.relation_type.to_string(),
                 call_line: node.call_line,
             })
             .collect(),
@@ -195,11 +208,17 @@ pub async fn handle_call_chain(
             ));
         }
     };
+    let function_name = searcher
+        .query()
+        .index()
+        .get_function_by_entity_id(entity_id)
+        .map(|entity| entity.name.clone())
+        .unwrap_or_default();
     let response = CallChainResponse {
         success: true,
         relation_epoch: snapshot.relation_epoch,
         function_id: id,
-        function_name: "Unknown".to_string(),
+        function_name,
         direction: params.direction,
         call_chain,
         relation_info: stale_relation_info(&state, project_id).await,
@@ -270,7 +289,7 @@ pub async fn handle_call_path(
                     function_name: node.function_name,
                     file_path: node.file_path,
                     depth: node.depth,
-                    relation_type: format!("{:?}", node.relation_type),
+                    relation_type: node.relation_type.to_string(),
                     call_line: node.call_line,
                 })
                 .collect();

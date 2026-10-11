@@ -106,6 +106,7 @@ async fn search_query(
         exclude_categories: vec![],
         enable_rerank: params.enable_rerank,
         rerank_max_candidates: params.rerank_max_candidates,
+        query_intent: None,
     };
 
     if verbose {

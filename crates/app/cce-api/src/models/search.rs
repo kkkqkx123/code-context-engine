@@ -26,13 +26,13 @@ pub struct SearchRequest {
     pub exclude_patterns: Vec<String>,
     #[serde(default)]
     pub include_patterns: Vec<String>,
-    /// Content types to exclude (e.g., "test", "generated", "vendor")
+    /// Content types to exclude (currently only "test" / "tests" is supported)
     #[serde(default)]
     pub exclude_content_types: Vec<String>,
-    /// Include only specific category values (e.g., ["test", "config"])
+    /// Include only specific category values (e.g., ["code", "config"])
     #[serde(default)]
     pub include_categories: Vec<String>,
-    /// Exclude specific category values (e.g., ["test", "generated"])
+    /// Exclude specific category values (e.g., ["code", "config"])
     #[serde(default)]
     pub exclude_categories: Vec<String>,
     /// Per-request rerank override
@@ -41,6 +41,10 @@ pub struct SearchRequest {
     /// Per-request rerank max candidates override
     #[serde(default)]
     pub rerank_max_candidates: Option<usize>,
+    /// Query intent override ("semantic", "keyword", "hybrid", "entity").
+    /// Empty means auto-detect.
+    #[serde(default)]
+    pub query_intent: Option<String>,
 }
 
 /// Search response shared by single and aggregated search endpoints
@@ -162,6 +166,10 @@ pub struct AggregatedSearchRequest {
     /// Per-request rerank max candidates override
     #[serde(default)]
     pub rerank_max_candidates: Option<usize>,
+    /// Query intent override applied to every sub-query.
+    /// Empty means auto-detect per sub-query text.
+    #[serde(default)]
+    pub query_intent: Option<String>,
 }
 
 fn default_query_type() -> String {
