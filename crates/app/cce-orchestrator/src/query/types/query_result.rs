@@ -39,6 +39,10 @@ pub struct AggregatedQueryOptions {
     pub enable_rerank: Option<bool>,
     /// Query intent override applied to every sub-query. None means auto-detect.
     pub query_intent: Option<super::query_options::QueryIntent>,
+    /// Optional neighbour resolver for engine-side relation expansion,
+    /// forwarded to every sub-query's options (see
+    /// [`super::query_options::QueryOptions::neighbour_resolver`]).
+    pub neighbour_resolver: Option<crate::query::expansion::NeighbourResolver>,
 }
 
 /// Query execution result

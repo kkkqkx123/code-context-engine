@@ -87,10 +87,13 @@ impl Searcher {
             .apply(sorted_results, &options.config)?;
 
         // Step 4: Optional structure-preserving annotation of the top-N
-        // survivors. Runs after ranking so ordering is never touched.
+        // survivors. Runs after ranking so ordering is never touched. With an
+        // injected neighbour resolver the engine pass resolves real
+        // call-domain neighbours and runs the batch annotation entry here;
+        // without one the historical empty-vector semantics are kept.
         if options.config.annotation.enable_annotation {
             return Ok(self
-                .annotate_results(final_results, &options.config.annotation)
+                .annotate_results(final_results, &options.config.annotation, options)
                 .await);
         }
 
@@ -103,12 +106,25 @@ impl Searcher {
     /// body-bearing results are annotated: a reference line already names its
     /// file and range, and re-wrapping it would duplicate the path. Annotation
     /// failures degrade to the unannotated body.
+    ///
+    /// With a [`crate::query::expansion::NeighbourResolver`] attached to the
+    /// query options this resolves real call-domain neighbours and runs the
+    /// batch annotation entry (real-neighbour resolution, cross-hit shared
+    /// dedup and single wrapping all happen here); the caller-side handler
+    /// post-pass is then unnecessary. Without a resolver the historical
+    /// empty-vector single annotation runs unchanged.
     async fn annotate_results(
         &self,
         mut results: Vec<SearchResult>,
         config: &crate::query::annotation::RelationAnnotationConfig,
+        options: &QueryOptions,
     ) -> Vec<SearchResult> {
         use crate::query::annotation::{RelationAnnotator, SearchResultInput};
+
+        if let (Some(resolver), true) = (options.neighbour_resolver.as_ref(), config.expansion_enabled)
+        {
+            return Self::annotate_results_with_resolver(results, resolver, config).await;
+        }
 
         let annotator = RelationAnnotator::new(config.clone());
         let top_n = config.annotation_top_n.min(results.len());
@@ -149,6 +165,18 @@ impl Searcher {
                 }
             }
         }
+        results
+    }
+
+    /// Resolver-injected annotation: resolve real neighbours per hit, then one
+    /// batch annotation pass with cross-hit shared dedup. Expansion counts are
+    /// recorded into each hit's metadata so API converters can expose them.
+    async fn annotate_results_with_resolver(
+        mut results: Vec<SearchResult>,
+        resolver: &crate::query::expansion::NeighbourResolver,
+        config: &crate::query::annotation::RelationAnnotationConfig,
+    ) -> Vec<SearchResult> {
+        crate::query::expansion::annotate_hits_with_resolver(resolver, &mut results, config).await;
         results
     }
 

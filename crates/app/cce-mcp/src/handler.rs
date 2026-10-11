@@ -188,12 +188,15 @@ impl McpServerHandler {
         if let Some(prefix) = args.directory_prefix.clone() {
             options = options.with_directory_prefix(prefix);
         }
+        // Per-request expansion opt-in: inject the neighbour resolver so the
+        // engine pass itself resolves real neighbours and wraps once. MCP
+        // options are not merged with the project config, so there is no
+        // double-annotation risk; the resolver is the single expansion path.
+        if args.expand.unwrap_or(false) {
+            options = options.with_neighbour_resolver(self.build_resolver(args.project_id).await);
+        }
         match self.state.engine.search(args.project_id, &options).await {
-            Ok(mut result) => {
-                if args.expand.unwrap_or(false) {
-                    self.apply_expansion(args.project_id, &mut result.items)
-                        .await;
-                }
+            Ok(result) => {
                 let items: Vec<Value> = result
                     .items
                     .iter()
@@ -695,11 +698,14 @@ impl McpServerHandler {
         )]))
     }
 
-    /// Opt-in relation-expansion post-pass shared by the search tool.
+    /// Build the neighbour resolver for engine-side relation expansion.
     ///
-    /// Resolves real call-graph neighbours for the top-N hits and annotates
-    /// them in place. Failures degrade to unexpanded hits.
-    async fn apply_expansion(&self, project_id: i64, items: &mut [cce_orchestrator::SearchResult]) {
+    /// Returns `None` when the project config or relation searcher is
+    /// unavailable; expansion then silently degrades to unexpanded hits.
+    async fn build_resolver(
+        &self,
+        project_id: i64,
+    ) -> Option<cce_orchestrator::query::expansion::NeighbourResolver> {
         let entry = match self
             .state
             .engine
@@ -710,24 +716,20 @@ impl McpServerHandler {
             Ok(entry) => entry,
             Err(error) => {
                 tracing::warn!(%error, "Expansion requested but project config unavailable; skipping");
-                return;
+                return None;
             }
         };
         let searcher = match self.state.get_relation_searcher(project_id).await {
             Ok(searcher) => searcher,
             Err(error) => {
                 tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
-                return;
+                return None;
             }
         };
-        let project_root = std::path::PathBuf::from(&entry.metadata.root_path);
-        cce_orchestrator::query::expansion::annotate_hits_with_expansion(
-            &searcher,
-            &project_root,
-            items,
-            &entry.config.search.annotation,
-        )
-        .await;
+        Some(cce_orchestrator::query::expansion::NeighbourResolver::new(
+            searcher,
+            std::path::PathBuf::from(&entry.metadata.root_path),
+        ))
     }
 }
 

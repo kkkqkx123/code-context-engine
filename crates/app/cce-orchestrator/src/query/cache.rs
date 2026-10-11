@@ -37,6 +37,9 @@ pub struct CacheKey {
     sources_hash: u64,
     /// Hash of filters
     filters_hash: u64,
+    /// Whether the query carries a neighbour resolver: expanded results must
+    /// never be served to a request without expansion (and vice versa).
+    expansion: bool,
     /// Result limit
     limit: usize,
 }
@@ -86,6 +89,7 @@ impl CacheKey {
             query_hash,
             sources_hash,
             filters_hash,
+            expansion: options.neighbour_resolver.is_some(),
             limit: options.config.result.limit,
         }
     }

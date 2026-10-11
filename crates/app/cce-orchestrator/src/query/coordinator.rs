@@ -760,6 +760,7 @@ impl QueryCoordinator {
             with_source: true,
             query_intent: agg_options.query_intent,
             enable_rerank: agg_options.enable_rerank,
+            neighbour_resolver: agg_options.neighbour_resolver.clone(),
         }
     }
 

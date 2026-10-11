@@ -174,6 +174,13 @@ pub struct QueryOptions {
     /// rerank handler / plugins are available. `Some(true)` forces it on,
     /// `Some(false)` forces it off for this query.
     pub enable_rerank: Option<bool>,
+    /// Optional neighbour resolver for relation expansion.
+    ///
+    /// When set and the annotation config requests expansion, the unified
+    /// searcher's annotation step resolves real call-domain neighbours and
+    /// runs the batch annotation entry inside the engine pass. `None` keeps
+    /// the historical empty-vector annotation semantics unchanged.
+    pub neighbour_resolver: Option<crate::query::expansion::NeighbourResolver>,
 }
 
 impl QueryOptions {
@@ -194,6 +201,7 @@ impl QueryOptions {
             include_patterns: Vec::new(),
             with_source: true,
             enable_rerank: None,
+            neighbour_resolver: None,
         }
     }
 
@@ -224,6 +232,15 @@ impl QueryOptions {
     /// Set search configuration
     pub fn with_config(mut self, config: SearchConfig) -> Self {
         self.config = config;
+        self
+    }
+
+    /// Attach the neighbour resolver for engine-side relation expansion.
+    pub fn with_neighbour_resolver(
+        mut self,
+        resolver: Option<crate::query::expansion::NeighbourResolver>,
+    ) -> Self {
+        self.neighbour_resolver = resolver;
         self
     }
 
@@ -528,6 +545,7 @@ impl QueryConfigBuilder {
             include_patterns: self.include_patterns,
             with_source: self.with_source,
             enable_rerank: self.enable_rerank,
+            neighbour_resolver: None,
         }
     }
 

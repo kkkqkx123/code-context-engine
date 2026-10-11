@@ -151,18 +151,32 @@ pub async fn handle_search(
     query_opts.config.result = project_entry.config.search.result.clone();
     query_opts.config.annotation = project_entry.config.search.annotation.clone();
 
-    // Per-request relation-expansion opt-in. The engine recall pass stays
-    // unannotated so bodies remain raw; the expansion post-pass below wraps
-    // them exactly once with real neighbour units.
-    let expansion_config = if request.expand.unwrap_or(false) {
-        query_opts.config.annotation.enable_annotation = false;
-        let mut cfg = project_entry.config.search.annotation.clone();
-        cfg.enable_annotation = true;
-        cfg.expansion_enabled = true;
-        Some(cfg)
+    // Per-request relation-expansion opt-in. When requested, the neighbour
+    // resolver is injected into the query options so the engine pass itself
+    // resolves real neighbours and runs the batch annotation (single wrap,
+    // cross-hit shared dedup). Without the request the annotation config is
+    // passed through unchanged and default behavior is identical to before.
+    let resolver = if request.expand.unwrap_or(false) {
+        let searcher = match state.get_relation_searcher(project_id).await {
+            Ok(searcher) => Some(searcher),
+            Err(error) => {
+                tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
+                None
+            }
+        };
+        searcher.map(|searcher| {
+            cce_orchestrator::query::expansion::NeighbourResolver::new(
+                searcher,
+                std::path::PathBuf::from(&project_entry.metadata.root_path),
+            )
+        })
     } else {
         None
     };
+    if resolver.is_some() {
+        query_opts.config.annotation.expansion_enabled = true;
+    }
+    query_opts = query_opts.with_neighbour_resolver(resolver);
 
     // Per-request rerank overrides take precedence over the config.
     if let Some(enable_rerank) = request.enable_rerank {
@@ -257,21 +271,14 @@ pub async fn handle_search(
     let result = state.engine.search(project_id, &query_opts).await;
 
     match result {
-        Ok(mut result) => {
-            if let Some(cfg) = expansion_config {
-                apply_expansion_post_pass(
-                    &state,
-                    project_id,
-                    &project_entry,
-                    &cfg,
-                    &mut result.items,
-                )
-                .await;
-            }
+        Ok(result) => {
+            // Stable symbol IDs need the relation snapshot; unavailable
+            // snapshots simply leave the field empty.
+            let relation_searcher = state.get_relation_searcher(project_id).await.ok();
             let items: Vec<SearchResultItem> = result
                 .items
                 .into_iter()
-                .map(convert_orchestrator_result)
+                .map(|item| convert_orchestrator_result(item, relation_searcher.as_deref()))
                 .collect();
 
             let (relation_epoch, relation_stale) = relation_version(&state, project_id).await;
@@ -425,14 +432,23 @@ pub async fn handle_aggregated_search(
     global_config.boost = project_entry.config.search.boost.clone();
     global_config.rerank = project_entry.config.rerank.clone();
     global_config.annotation = project_entry.config.search.annotation.clone();
-    // Per-request expansion opt-in for the merged hits. Sub-query passes stay
-    // unannotated so bodies remain raw; the post-pass below wraps once.
-    let expansion_config = if request.expand.unwrap_or(false) {
-        global_config.annotation.enable_annotation = false;
-        let mut cfg = project_entry.config.search.annotation.clone();
-        cfg.enable_annotation = true;
-        cfg.expansion_enabled = true;
-        Some(cfg)
+    // Per-request expansion opt-in for the merged hits. The resolver is
+    // injected into every sub-query so the engine pass itself resolves real
+    // neighbours and wraps once; without the request nothing changes.
+    let resolver = if request.expand.unwrap_or(false) {
+        match state.get_relation_searcher(project_id).await {
+            Ok(searcher) => {
+                global_config.annotation.expansion_enabled = true;
+                Some(cce_orchestrator::query::expansion::NeighbourResolver::new(
+                    searcher,
+                    std::path::PathBuf::from(&project_entry.metadata.root_path),
+                ))
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
+                None
+            }
+        }
     } else {
         None
     };
@@ -526,6 +542,7 @@ pub async fn handle_aggregated_search(
         include_patterns: request.include_patterns,
         enable_rerank: request.enable_rerank,
         query_intent: aggregated_intent,
+        neighbour_resolver: resolver,
     };
 
     // Build QueryCoordinator per-request from engine components
@@ -591,21 +608,14 @@ pub async fn handle_aggregated_search(
 
     // Execute aggregated search
     match query_coordinator.search_aggregated(&agg_options).await {
-        Ok(mut result) => {
-            if let Some(cfg) = expansion_config {
-                let project_root = std::path::PathBuf::from(&project_entry.metadata.root_path);
-                cce_orchestrator::query::expansion::annotate_hits_with_expansion(
-                    &relation_searcher,
-                    &project_root,
-                    &mut result.items,
-                    &cfg,
-                )
-                .await;
-            }
+        Ok(result) => {
+            // Stable symbol IDs need the relation snapshot; unavailable
+            // snapshots simply leave the field empty.
+            let relation_searcher = state.get_relation_searcher(project_id).await.ok();
             let items: Vec<SearchResultItem> = result
                 .items
                 .into_iter()
-                .map(convert_orchestrator_result)
+                .map(|item| convert_orchestrator_result(item, relation_searcher.as_deref()))
                 .collect();
 
             let (relation_epoch, relation_stale) = relation_version(&state, project_id).await;
@@ -642,37 +652,14 @@ fn parse_query_intent(raw: Option<&str>) -> Option<cce_orchestrator::query::Quer
     }
 }
 
-/// Run the opt-in relation-expansion post-pass over raw recall hits.
+/// Convert orchestrator result item to API result item.
 ///
-/// The engine pass ran unannotated so bodies are still raw here; this resolves
-/// real call-graph neighbours and wraps the top-N hits exactly once. Failures
-/// degrade to unexpanded hits, never to a failed request.
-async fn apply_expansion_post_pass(
-    state: &crate::api::state::AppState,
-    project_id: i64,
-    project_entry: &cce_config::project_registry::ProjectEntry,
-    config: &cce_orchestrator::query::types::RelationAnnotationConfig,
-    items: &mut [OrchestratorResultItem],
-) {
-    let searcher = match state.get_relation_searcher(project_id).await {
-        Ok(searcher) => searcher,
-        Err(error) => {
-            tracing::warn!(%error, "Expansion requested but relation searcher unavailable; skipping");
-            return;
-        }
-    };
-    let project_root = std::path::PathBuf::from(&project_entry.metadata.root_path);
-    cce_orchestrator::query::expansion::annotate_hits_with_expansion(
-        &searcher,
-        &project_root,
-        items,
-        config,
-    )
-    .await;
-}
-
-/// Convert orchestrator result item to API result item
-fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem {
+/// `relation_searcher` is optional: when a relation snapshot is available the
+/// hit's entity IDs are converted to stable symbol IDs for joinable responses.
+fn convert_orchestrator_result(
+    item: OrchestratorResultItem,
+    relation_searcher: Option<&cce_orchestrator::query::RelationSearcher>,
+) -> SearchResultItem {
     // Get entity type from kind
     let entity_type = if item.kind.is_empty() {
         None
@@ -703,6 +690,16 @@ fn convert_orchestrator_result(item: OrchestratorResultItem) -> SearchResultItem
             vec![item.name.clone()]
         },
         entity_ids: item.entity_ids.iter().map(|id| id.0 as i64).collect(),
+        stable_symbol_ids: relation_searcher
+            .map(|searcher| {
+                item.entity_ids
+                    .iter()
+                    .map(|id| {
+                        cce_orchestrator::query::expansion::stable_id_of(searcher, *id)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         score: item.score,
         sources: item.sources,
         content_state,
@@ -770,7 +767,7 @@ mod tests {
             metadata,
             ..Default::default()
         };
-        let converted = convert_orchestrator_result(item);
+        let converted = convert_orchestrator_result(item, None);
         assert!(converted.expanded);
         assert_eq!(converted.expanded_nodes, 3);
         assert_eq!(converted.forward_nodes, 2);
@@ -784,7 +781,7 @@ mod tests {
             content: "fn a() {}".to_string(),
             ..Default::default()
         };
-        let converted = convert_orchestrator_result(item);
+        let converted = convert_orchestrator_result(item, None);
         assert!(!converted.expanded);
         assert_eq!(converted.expanded_nodes, 0);
         assert_eq!(converted.forward_nodes, 0);

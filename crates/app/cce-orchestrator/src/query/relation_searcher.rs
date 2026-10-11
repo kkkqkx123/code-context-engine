@@ -279,6 +279,7 @@ impl PathQueryOptions {
 ///
 /// This is a thin wrapper over `CallChainQuery` as per the architecture
 /// simplification plan (merged `RelationSearcher` + `CallChainQuery`).
+#[derive(Clone)]
 pub struct RelationSearcher {
     query: Arc<CallChainQuery>,
     cache: Arc<RwLock<QueryCache>>,

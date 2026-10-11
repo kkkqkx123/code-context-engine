@@ -26,6 +26,96 @@ use cce_codegraph::index::snapshot_query::{SnapshotEntityQueryOps, SnapshotSymbo
 /// Maximum seeds taken from one hit's line range.
 const MAX_SEEDS: usize = 4;
 
+/// Upper bound for one expansion unit body before windowing. Oversized
+/// bodies are downgraded to a head/tail window excerpt instead of being
+/// delivered whole (where the budget would drop or degrade them entirely).
+const MAX_UNIT_CHARS: usize = 1600;
+/// Head lines kept in a window excerpt (signature + first statements).
+const EXCERPT_HEAD_LINES: usize = 24;
+/// Tail lines kept in a window excerpt.
+const EXCERPT_TAIL_LINES: usize = 4;
+
+/// Downgrade an oversized unit body to a head/tail window excerpt.
+///
+/// Returns `None` when the body fits within [`MAX_UNIT_CHARS`] or is too
+/// short to window meaningfully, so the caller keeps the original text.
+fn window_excerpt(code: &str) -> Option<String> {
+    if code.chars().count() <= MAX_UNIT_CHARS {
+        return None;
+    }
+    let lines: Vec<&str> = code.lines().collect();
+    let total = lines.len();
+    if total <= EXCERPT_HEAD_LINES + EXCERPT_TAIL_LINES + 1 {
+        return None;
+    }
+    let head_end = EXCERPT_HEAD_LINES;
+    let tail_start = total - EXCERPT_TAIL_LINES;
+    let mut out = String::with_capacity(MAX_UNIT_CHARS);
+    out.push_str(&lines[..head_end].join("\n"));
+    out.push_str(&format!(
+        "\n... excerpt: lines {}-{} of {} omitted ...\n",
+        head_end + 1,
+        tail_start,
+        total
+    ));
+    out.push_str(&lines[tail_start..].join("\n"));
+    Some(out)
+}
+
+/// Neighbour resolver injected into the engine search pass.
+///
+/// A concrete (non-dyn) carrier bundling the relation searcher and the
+/// project root the caller already holds. When attached to
+/// [`super::types::QueryOptions`], the unified searcher's annotation step
+/// resolves real call-domain neighbours and runs the batch annotation entry,
+/// so real-neighbour resolution, cross-hit shared dedup and single wrapping
+/// all happen inside the engine pass. When absent, the annotation step keeps
+/// its historical empty-vector semantics and default behavior is unchanged.
+#[derive(Clone)]
+pub struct NeighbourResolver {
+    searcher: std::sync::Arc<RelationSearcher>,
+    project_root: std::path::PathBuf,
+}
+
+impl std::fmt::Debug for NeighbourResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NeighbourResolver")
+            .field("project_root", &self.project_root)
+            .finish_non_exhaustive()
+    }
+}
+
+impl NeighbourResolver {
+    /// Bundle a relation searcher with the project root used for source reads.
+    pub fn new(searcher: std::sync::Arc<RelationSearcher>, project_root: std::path::PathBuf) -> Self {
+        Self {
+            searcher,
+            project_root,
+        }
+    }
+
+    /// Resolve call-domain neighbour units for one hit (see
+    /// [`resolve_expansion_units`]).
+    pub fn resolve(
+        &self,
+        file_path: &str,
+        start_line: u32,
+        end_line: u32,
+        per_direction: usize,
+        include_callers: bool,
+    ) -> (Vec<ExpandedUnit>, Vec<ExpandedUnit>) {
+        resolve_expansion_units(
+            &self.searcher,
+            &self.project_root,
+            file_path,
+            start_line,
+            end_line,
+            per_direction,
+            include_callers,
+        )
+    }
+}
+
 /// Resolve call-domain neighbour units for one search hit.
 ///
 /// `start_line`/`end_line` are one-based presentation lines; the snapshot index
@@ -158,6 +248,9 @@ fn snippet_unit(
     if code.trim().is_empty() {
         return None;
     }
+    // Oversized bodies become window excerpts; the whole-body fallback would
+    // only crowd out the rest of the expansion budget or degrade entirely.
+    let code = window_excerpt(&code).unwrap_or(code);
     Some(
         ExpandedUnit::new(
             code,
@@ -198,10 +291,28 @@ pub async fn annotate_hits_with_expansion(
     items: &mut [super::types::SearchResult],
     config: &RelationAnnotationConfig,
 ) {
+    let resolver = NeighbourResolver::new(
+        std::sync::Arc::new(RelationSearcher::clone(searcher)),
+        project_root.to_path_buf(),
+    );
+    annotate_hits_with_resolver(&resolver, items, config).await;
+}
+
+/// Resolver-injected variant of [`annotate_hits_with_expansion`].
+///
+/// This is the entry the engine's annotation step calls when a
+/// [`NeighbourResolver`] is attached to the query options: identical
+/// semantics, but the searcher and project root come from the injected
+/// resolver instead of being re-resolved by the handler layer.
+pub async fn annotate_hits_with_resolver(
+    resolver: &NeighbourResolver,
+    items: &mut [super::types::SearchResult],
+    config: &RelationAnnotationConfig,
+) {
     let mut config = config.clone();
     config.enable_annotation = true;
     config.expansion_enabled = true;
-    config.workspace_root = Some(project_root.to_path_buf());
+    config.workspace_root = Some(resolver.project_root.clone());
     if config.max_expanded_units == 0 {
         return;
     }
@@ -218,9 +329,7 @@ pub async fn annotate_hits_with_expansion(
         {
             continue;
         }
-        let (forward, backward) = resolve_expansion_units(
-            searcher,
-            project_root,
+        let (forward, backward) = resolver.resolve(
             &item.file_path,
             item.start_line,
             item.end_line,
@@ -399,5 +508,28 @@ mod tests {
         assert!(items[1].metadata.is_empty());
         assert_eq!(items[2].content, "fn a() {}");
         assert!(items[2].metadata.is_empty());
+    }
+
+    #[test]
+    fn test_window_excerpt_keeps_head_and_tail() {
+        // Long enough lines to cross MAX_UNIT_CHARS (60 lines x ~40 chars).
+        let body: String = (0..60)
+            .map(|i| format!("line {i}: {}", "x".repeat(30)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let excerpt = window_excerpt(&body).expect("oversized body must be windowed");
+        assert!(excerpt.starts_with("line 0"));
+        assert!(excerpt.contains("line 59"));
+        assert!(excerpt.contains("excerpt: lines 25-56 of 60 omitted"));
+        // Head and tail content is preserved around the omission marker.
+        assert!(excerpt.contains("line 23"));
+        assert!(excerpt.contains("line 57"));
+    }
+
+    #[test]
+    fn test_window_excerpt_passes_short_body_through() {
+        assert_eq!(window_excerpt("fn a() {}"), None);
+        let short: String = (0..10).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        assert_eq!(window_excerpt(&short), None);
     }
 }

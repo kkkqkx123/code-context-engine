@@ -107,6 +107,10 @@ pub struct SearchResultItem {
     /// multiple entities).
     #[serde(default)]
     pub entity_ids: Vec<i64>,
+    /// Stable symbol IDs for the hit's entities, joinable against the graph
+    /// query interfaces. Empty when no relation snapshot is available.
+    #[serde(default)]
+    pub stable_symbol_ids: Vec<String>,
     /// Unified relevance score (post-fusion).
     pub score: f32,
     /// Retrieval sources that contributed to this result (e.g. "vector", "bm25").
