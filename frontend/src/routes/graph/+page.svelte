@@ -67,6 +67,7 @@
 
 	let pathStart = $state('');
 	let pathEnd = $state('');
+	let pathDepth = $state(10);
 	let subgraphIds = $state('');
 	let egoDepth = $state(2);
 	let egoDirection = $state<GraphDirection>('both');
@@ -164,7 +165,13 @@
 			const start = pathStart.trim();
 			const end = pathEnd.trim();
 			if (!start || !end) return;
-			await graphActions.loadPath(start, end, 10, undefined, filter);
+			await graphActions.loadPath(
+				start,
+				end,
+				clampPositive(pathDepth, 10, 100),
+				undefined,
+				filter,
+			);
 		} else if (seedMode === 'subgraph') {
 			const ids = parseEntityIds(subgraphIds);
 			if (ids.length === 0) return;
@@ -349,6 +356,7 @@
 			bind:seedId
 			bind:pathStart
 			bind:pathEnd
+			bind:pathDepth
 			bind:subgraphIds
 			bind:overviewLimit
 			bind:egoDepth

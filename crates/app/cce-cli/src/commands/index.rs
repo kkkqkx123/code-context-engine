@@ -18,6 +18,7 @@ struct IndexRunParams<'a> {
     path: &'a str,
     extensions: &'a str,
     exclude: &'a str,
+    ignore_patterns: &'a Option<String>,
     gitignore: bool,
     custom_gitignore: &'a Option<String>,
 }
@@ -31,6 +32,7 @@ pub async fn execute(cmd: &IndexCommands, server: &str, verbose: bool) -> Result
             path,
             extensions,
             exclude,
+            ignore_patterns,
             gitignore,
             custom_gitignore,
         } => {
@@ -39,6 +41,7 @@ pub async fn execute(cmd: &IndexCommands, server: &str, verbose: bool) -> Result
                 path,
                 extensions,
                 exclude,
+                ignore_patterns,
                 gitignore: *gitignore,
                 custom_gitignore,
             };
@@ -149,6 +152,16 @@ async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: boo
         .split(',')
         .map(|s| s.trim().to_string())
         .collect();
+    let ignore_list: Vec<String> = params
+        .ignore_patterns
+        .as_ref()
+        .map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let request = IndexRequest {
         project_id: params.project_id,
@@ -156,7 +169,7 @@ async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: boo
         extensions: ext_list,
         exclude_dirs: exclude_list,
         respect_gitignore: params.gitignore,
-        ignore_patterns: Vec::new(),
+        ignore_patterns: ignore_list,
         custom_gitignore: params.custom_gitignore.clone(),
     };
 
@@ -325,6 +338,10 @@ pub enum IndexCommands {
         /// Directories to exclude (comma-separated)
         #[arg(short, long, default_value = "node_modules,target,.git,vendor")]
         exclude: String,
+
+        /// Ignore patterns for files (comma-separated globs)
+        #[arg(long)]
+        ignore_patterns: Option<String>,
 
         /// Respect .gitignore
         #[arg(long, default_value = "true")]

@@ -68,13 +68,16 @@
 
 	let pathFrom = $state('');
 	let pathTo = $state('');
+	let pathDepth = $state(10);
 
 	/** Query the shortest call path between the given function ids. */
 	function runCallPath() {
 		const from = pathFrom.trim();
 		const to = pathTo.trim();
 		if (!from || !to) return;
-		entityActions.loadCallPath(from, to);
+		const depth =
+			Number.isInteger(pathDepth) && pathDepth > 0 ? pathDepth : 10;
+		entityActions.loadCallPath(from, to, depth);
 	}
 
 	function handleChainKeydown(event: KeyboardEvent, id: string) {
@@ -282,6 +285,14 @@
 							placeholder="To function id…"
 							bind:value={pathTo}
 							aria-label="Path end function id"
+						/>
+						<input
+							class="path-input path-depth"
+							type="number"
+							min="1"
+							max="100"
+							bind:value={pathDepth}
+							aria-label="Path maximum search depth"
 						/>
 						<button
 							type="button"
@@ -520,6 +531,11 @@
 	.path-input:focus {
 		outline: none;
 		border-color: var(--black);
+	}
+
+	.path-input.path-depth {
+		min-width: 70px;
+		width: 70px;
 	}
 
 	.path-arrow {

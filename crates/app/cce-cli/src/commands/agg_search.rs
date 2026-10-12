@@ -19,19 +19,19 @@ pub struct AggSearchCommand {
     #[arg(long)]
     pub project_path: Option<String>,
 
-    /// BM25 keyword queries
+    /// BM25 keyword queries (append @weight for a per-query override, e.g. "login flow@1.5")
     #[arg(long = "bm25")]
     pub bm25_queries: Vec<String>,
 
-    /// Vector semantic queries
+    /// Vector semantic queries (append @weight for a per-query override)
     #[arg(long = "vector")]
     pub vector_queries: Vec<String>,
 
-    /// Hybrid queries
+    /// Hybrid queries (append @weight for a per-query override)
     #[arg(long = "hybrid")]
     pub hybrid_queries: Vec<String>,
 
-    /// Summary queries
+    /// Summary queries (append @weight for a per-query override)
     #[arg(long = "summary")]
     pub summary_queries: Vec<String>,
 
@@ -100,6 +100,21 @@ pub struct AggSearchCommand {
     pub expand: Option<bool>,
 }
 
+/// Split a per-query weight suffix of the form `text@weight` from a raw
+/// sub-query value. A trailing segment after the last `@` is treated as a
+/// weight only when it parses to a finite non-negative number and the text
+/// part is non-empty; otherwise the whole value is kept as query text with
+/// the type-level fallback weight.
+fn split_weighted_query(raw: &str, fallback: f32) -> (String, f32) {
+    match raw.rsplit_once('@') {
+        Some((text, weight)) if !text.trim().is_empty() => match weight.trim().parse::<f32>() {
+            Ok(w) if w.is_finite() && w >= 0.0 => (text.trim().to_string(), w),
+            _ => (raw.to_string(), fallback),
+        },
+        _ => (raw.to_string(), fallback),
+    }
+}
+
 impl AggSearchCommand {
     pub async fn execute(&self, client: &ApiClient, verbose: bool) -> Result<()> {
         // Build sub-queries list
@@ -107,37 +122,41 @@ impl AggSearchCommand {
 
         // Add BM25 sub-queries
         for query in &self.bm25_queries {
+            let (text, weight) = split_weighted_query(query, self.bm25_weight);
             sub_queries.push(SubQueryRequest {
-                text: query.clone(),
+                text,
                 query_type: "bm25".to_string(),
-                weight: self.bm25_weight,
+                weight,
             });
         }
 
         // Add Vector sub-queries
         for query in &self.vector_queries {
+            let (text, weight) = split_weighted_query(query, self.vector_weight);
             sub_queries.push(SubQueryRequest {
-                text: query.clone(),
+                text,
                 query_type: "vector".to_string(),
-                weight: self.vector_weight,
+                weight,
             });
         }
 
         // Add Hybrid sub-queries
         for query in &self.hybrid_queries {
+            let (text, weight) = split_weighted_query(query, self.hybrid_weight);
             sub_queries.push(SubQueryRequest {
-                text: query.clone(),
+                text,
                 query_type: "hybrid".to_string(),
-                weight: self.hybrid_weight,
+                weight,
             });
         }
 
         // Add Summary sub-queries
         for query in &self.summary_queries {
+            let (text, weight) = split_weighted_query(query, self.summary_weight);
             sub_queries.push(SubQueryRequest {
-                text: query.clone(),
+                text,
                 query_type: "summary".to_string(),
-                weight: self.summary_weight,
+                weight,
             });
         }
 
@@ -256,4 +275,44 @@ fn print_result_item(index: usize, item: &SearchResultItem) {
     }
 
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weighted_suffix_overrides_fallback() {
+        let (text, weight) = split_weighted_query("login flow@1.5", 1.2);
+        assert_eq!(text, "login flow");
+        assert_eq!(weight, 1.5);
+    }
+
+    #[test]
+    fn plain_query_keeps_fallback_weight() {
+        let (text, weight) = split_weighted_query("login flow", 1.2);
+        assert_eq!(text, "login flow");
+        assert_eq!(weight, 1.2);
+    }
+
+    #[test]
+    fn non_numeric_suffix_stays_query_text() {
+        let (text, weight) = split_weighted_query("user@example.com", 1.0);
+        assert_eq!(text, "user@example.com");
+        assert_eq!(weight, 1.0);
+    }
+
+    #[test]
+    fn invalid_weight_falls_back_to_full_text() {
+        let (text, weight) = split_weighted_query("query@abc", 1.2);
+        assert_eq!(text, "query@abc");
+        assert_eq!(weight, 1.2);
+    }
+
+    #[test]
+    fn negative_weight_falls_back_to_full_text() {
+        let (text, weight) = split_weighted_query("query@-1.0", 1.2);
+        assert_eq!(text, "query@-1.0");
+        assert_eq!(weight, 1.2);
+    }
 }

@@ -15,6 +15,7 @@
 		seedId?: string;
 		pathStart?: string;
 		pathEnd?: string;
+		pathDepth?: number;
 		subgraphIds?: string;
 		overviewLimit?: number;
 		egoDepth?: number;
@@ -41,6 +42,7 @@
 		seedId = $bindable(''),
 		pathStart = $bindable(''),
 		pathEnd = $bindable(''),
+		pathDepth = $bindable(10),
 		subgraphIds = $bindable(''),
 		overviewLimit = $bindable(400),
 		egoDepth = $bindable(2),
@@ -162,6 +164,17 @@
 			onkeydown={handleSeedKeydown}
 			aria-label="Path end entity id"
 		/>
+		<label class="inline-field">
+			<span class="inline-label">Depth</span>
+			<input
+				class="seed-input narrow"
+				type="number"
+				min="1"
+				max="100"
+				bind:value={pathDepth}
+				aria-label="Path maximum search depth"
+			/>
+		</label>
 	{:else if seedMode === 'subgraph'}
 		<input
 			class="seed-input wide-input"

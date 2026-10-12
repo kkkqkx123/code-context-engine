@@ -30,10 +30,8 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             file_path,
             include_entities,
             include_groups,
-            project_id,
         } => {
             execute_compress(
-                *project_id,
                 file_path,
                 *include_entities,
                 *include_groups,
@@ -131,16 +129,18 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             top_n,
             offset,
             term_operator,
+            epoch,
         } => {
-            execute_keyword_search(
-                *project_id,
+            execute_keyword_search(&KeywordSearchParams {
+                project_id: *project_id,
                 query,
-                *top_n,
-                *offset,
-                Some(term_operator.as_str()),
+                top_n: *top_n,
+                offset: *offset,
+                term_operator: Some(term_operator.as_str()),
+                epoch: *epoch,
                 server,
                 verbose,
-            )
+            })
             .await
         }
         ToolCommands::Fold {
@@ -204,8 +204,18 @@ pub(crate) struct FoldBatchCliParams<'a> {
     max_concurrency: Option<usize>,
 }
 
+pub(crate) struct KeywordSearchParams<'a> {
+    project_id: i64,
+    query: &'a str,
+    top_n: usize,
+    offset: usize,
+    term_operator: Option<&'a str>,
+    epoch: Option<i64>,
+    server: &'a str,
+    verbose: bool,
+}
+
 pub async fn execute_compress(
-    _project_id: i64,
     file_path: &str,
     include_entities: bool,
     include_groups: bool,
@@ -498,32 +508,24 @@ pub async fn execute_goto_definition(params: LocationParams, include_body: bool)
     Ok(())
 }
 
-pub async fn execute_keyword_search(
-    project_id: i64,
-    query: &str,
-    top_n: usize,
-    offset: usize,
-    term_operator: Option<&str>,
-    server: &str,
-    verbose: bool,
-) -> Result<()> {
-    let client = ApiClient::new(server)?;
+pub async fn execute_keyword_search(params: &KeywordSearchParams<'_>) -> Result<()> {
+    let client = ApiClient::new(params.server)?;
 
-    let operator = match term_operator.map(str::to_ascii_lowercase).as_deref() {
+    let operator = match params.term_operator.map(str::to_ascii_lowercase).as_deref() {
         Some("and") => KeywordTermOperator::And,
         _ => KeywordTermOperator::Or,
     };
     let request = KeywordSearchRequest {
-        query: query.to_string(),
-        top_n,
-        project_id,
-        epoch: None,
-        offset,
+        query: params.query.to_string(),
+        top_n: params.top_n,
+        project_id: params.project_id,
+        epoch: params.epoch,
+        offset: params.offset,
         term_operator: operator,
     };
 
-    if verbose {
-        println!("Keyword searching: {}", query);
+    if params.verbose {
+        println!("Keyword searching: {}", params.query);
     }
 
     let response: KeywordSearchApiResponse = client
@@ -641,10 +643,6 @@ pub enum ToolCommands {
         /// Include groups in compression
         #[arg(long, default_value_t = false)]
         include_groups: bool,
-
-        /// Project ID
-        #[arg(short = 'P', long)]
-        project_id: i64,
     },
 
     /// Batch compress multiple files
@@ -779,6 +777,10 @@ pub enum ToolCommands {
         /// Term operator combining query terms: or, and
         #[arg(long, default_value = "or")]
         term_operator: String,
+
+        /// Optional index epoch for version-aware filtering (defaults to current)
+        #[arg(long)]
+        epoch: Option<i64>,
     },
 
     /// Fold one file into a skeleton

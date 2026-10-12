@@ -652,7 +652,7 @@ pub enum GraphCommands {
         #[arg(long, default_value = "2")]
         depth: usize,
 
-        /// Direction: forward, backward, or both
+        /// Direction: in, out, or both
         #[arg(long, default_value = "both")]
         direction: String,
 
