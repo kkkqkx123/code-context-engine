@@ -26,7 +26,7 @@ pub async fn execute(server: &str, verbose: bool, format: crate::cli::OutputForm
     let healthy: bool;
     let mut storage_status = None;
 
-    match client.get::<HealthStatus>("/api/health").await {
+    match client.get::<HealthStatus>(cce_api::paths::HEALTH).await {
         Ok(health) => {
             healthy = health.healthy;
 
@@ -52,7 +52,7 @@ pub async fn execute(server: &str, verbose: bool, format: crate::cli::OutputForm
 
             // Also fetch storage status for detailed info
             if let Ok(response) = client
-                .get::<StorageStatusResponse>("/api/storage/status")
+                .get::<StorageStatusResponse>(cce_api::paths::STORAGE_STATUS)
                 .await
             {
                 if response.success {

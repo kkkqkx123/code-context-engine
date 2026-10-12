@@ -7,7 +7,8 @@ use anyhow::Result;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
-    DeadLetterRetryResponse, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
+    DeadLetterAcknowledgeRequest, DeadLetterActionResponse, DeadLetterListResponse,
+    DeadLetterRetryRequest, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
     IndexResponse, ParseRequest, ParseResponse,
 };
 
@@ -50,30 +51,87 @@ pub async fn execute(cmd: &IndexCommands, server: &str, verbose: bool) -> Result
             force,
         } => incremental_index(&client, *project_id, add, remove, *force, verbose).await,
         IndexCommands::Parse { file } => parse_file(&client, file, verbose).await,
-        IndexCommands::RetryDeadLetter { project_id } => {
-            retry_dead_letter(&client, *project_id, verbose).await
+        IndexCommands::RetryDeadLetter { project_id, files } => {
+            retry_dead_letter(&client, *project_id, files.as_deref(), verbose).await
         }
+        IndexCommands::DeadLetters { project_id } => {
+            list_dead_letters(&client, *project_id, verbose).await
+        }
+        IndexCommands::AcknowledgeDeadLetter {
+            project_id,
+            file,
+            module,
+        } => acknowledge_dead_letter(&client, *project_id, file, module.as_deref(), verbose).await,
     }
 }
 
-async fn retry_dead_letter(client: &ApiClient, project_id: i64, verbose: bool) -> Result<()> {
+async fn retry_dead_letter(
+    client: &ApiClient,
+    project_id: i64,
+    files: Option<&str>,
+    verbose: bool,
+) -> Result<()> {
     if verbose {
-        println!(
-            "Running dead-letter truncate-retry for project {}...",
-            project_id
-        );
+        println!("Running dead-letter retry for project {}...", project_id);
     }
 
-    let url = format!("/api/project/{}/dead-letter/retry", project_id);
-    let empty_body = serde_json::json!({});
-    let response: DeadLetterRetryResponse = client.post(&url, &empty_body).await?;
+    let request = DeadLetterRetryRequest {
+        files: files
+            .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+            .unwrap_or_default(),
+    };
+    let response: DeadLetterActionResponse = client
+        .post(
+            &cce_api::paths::project_dead_letters_retry(project_id),
+            &request,
+        )
+        .await?;
 
     if response.success {
         print_success(&response.message);
-        println!(
-            "  retried={} succeeded={} still_failed={}",
-            response.retried, response.succeeded, response.still_failed
-        );
+        println!("  affected={}", response.affected);
+    } else {
+        print_error(&response.message);
+    }
+    Ok(())
+}
+
+async fn list_dead_letters(client: &ApiClient, project_id: i64, verbose: bool) -> Result<()> {
+    if verbose {
+        println!("Listing dead letters for project {}...", project_id);
+    }
+    let response: DeadLetterListResponse = client
+        .get(&cce_api::paths::project_dead_letters(project_id))
+        .await?;
+    println!("  files={}", response.files.len());
+    for file in &response.files {
+        println!("  {} (version {})", file.file_path, file.version);
+    }
+    Ok(())
+}
+
+async fn acknowledge_dead_letter(
+    client: &ApiClient,
+    project_id: i64,
+    file: &str,
+    module: Option<&str>,
+    verbose: bool,
+) -> Result<()> {
+    if verbose {
+        println!("Acknowledging dead letter {}...", file);
+    }
+    let request = DeadLetterAcknowledgeRequest {
+        file_path: file.to_string(),
+        module: module.map(str::to_string),
+    };
+    let response: DeadLetterActionResponse = client
+        .post(
+            &cce_api::paths::project_dead_letters_acknowledge(project_id),
+            &request,
+        )
+        .await?;
+    if response.success {
+        print_success(&response.message);
     } else {
         print_error(&response.message);
     }
@@ -106,7 +164,7 @@ async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: boo
         println!("Indexing directory: {}", params.path);
     }
 
-    let response: IndexResponse = client.post("/api/index", &request).await?;
+    let response: IndexResponse = client.post(cce_api::paths::INDEX, &request).await?;
 
     if response.success {
         println!();
@@ -180,8 +238,9 @@ async fn incremental_index(
         println!("Executing incremental index...");
     }
 
-    let response: IncrementalIndexResponse =
-        client.post("/api/index/incremental", &request).await?;
+    let response: IncrementalIndexResponse = client
+        .post(cce_api::paths::INDEX_INCREMENTAL, &request)
+        .await?;
 
     if response.success {
         print_success("Incremental index completed");
@@ -218,7 +277,7 @@ async fn parse_file(client: &ApiClient, file: &str, verbose: bool) -> Result<()>
         println!("Parsing file: {}", file);
     }
 
-    let response: ParseResponse = client.post("/api/parse", &request).await?;
+    let response: ParseResponse = client.post(cce_api::paths::PARSE, &request).await?;
 
     if response.success {
         print_success(&format!("Parsed {} successfully", response.file_path));
@@ -302,10 +361,33 @@ pub enum IndexCommands {
         file: String,
     },
 
-    /// Run a truncate-retry pass over the Embedding dead letter queue
+    /// Run a retry pass over the dead letter queue (empty files means all)
     RetryDeadLetter {
         /// Project ID
         #[arg(short = 'P', long)]
         project_id: i64,
+        /// Restrict retry to these comma-separated files; empty means all
+        #[arg(short, long)]
+        files: Option<String>,
+    },
+
+    /// List dead-letter files of a project
+    DeadLetters {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+    },
+
+    /// Acknowledge one dead-letter file so it leaves the retry flow
+    AcknowledgeDeadLetter {
+        /// Project ID
+        #[arg(short = 'P', long)]
+        project_id: i64,
+        /// File path to acknowledge
+        #[arg(short, long)]
+        file: String,
+        /// Restrict acknowledgement to one module
+        #[arg(short, long)]
+        module: Option<String>,
     },
 }

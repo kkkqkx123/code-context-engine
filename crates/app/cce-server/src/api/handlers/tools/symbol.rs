@@ -11,12 +11,10 @@
 
 use axum::{Json, extract::State};
 
-use super::to_api_model;
-use cce_orchestrator::{
-    FindReferencesResponse as OrchFindReferencesResponse, FindReferencesTool,
-    GetSymbolsResponse as OrchGetSymbolsResponse, GetSymbolsTool,
-    GotoDefinitionResponse as OrchGotoDefinitionResponse, GotoDefinitionTool,
+use super::{
+    find_refs_result_from_orch, get_symbols_result_from_orch, goto_definition_result_from_orch,
 };
+use cce_orchestrator::{FindReferencesTool, GetSymbolsTool, GotoDefinitionTool};
 
 use crate::api::AppState;
 
@@ -108,25 +106,12 @@ pub async fn handle_find_references(
     let capability_info = runtime.get_capability_info().await;
 
     match tool.find_references(req) {
-        Ok(response) => {
-            let result = match to_api_model::<OrchFindReferencesResponse, _>(response) {
-                Ok(model) => Some(model),
-                Err(e) => {
-                    return Json(cce_api::models::FindReferencesResponse {
-                        success: false,
-                        result: None,
-                        error: Some(format!("Failed to serialize response: {}", e)),
-                        relation_info: Some(capability_info.to_json_map()),
-                    });
-                }
-            };
-            Json(cce_api::models::FindReferencesResponse {
-                success: true,
-                result,
-                error: None,
-                relation_info: Some(capability_info.to_json_map()),
-            })
-        }
+        Ok(response) => Json(cce_api::models::FindReferencesResponse {
+            success: true,
+            result: Some(find_refs_result_from_orch(response)),
+            error: None,
+            relation_info: Some(capability_info.to_json_map()),
+        }),
         Err(e) => Json(cce_api::models::FindReferencesResponse {
             success: false,
             result: None,
@@ -213,25 +198,12 @@ pub async fn handle_get_symbols(
     let capability_info = runtime.get_capability_info().await;
 
     match tool.get_symbols(req) {
-        Ok(response) => {
-            let result = match to_api_model::<OrchGetSymbolsResponse, _>(response) {
-                Ok(model) => Some(model),
-                Err(e) => {
-                    return Json(cce_api::models::GetSymbolsResponse {
-                        success: false,
-                        result: None,
-                        error: Some(format!("Failed to serialize response: {}", e)),
-                        relation_info: Some(capability_info.to_json_map()),
-                    });
-                }
-            };
-            Json(cce_api::models::GetSymbolsResponse {
-                success: true,
-                result,
-                error: None,
-                relation_info: Some(capability_info.to_json_map()),
-            })
-        }
+        Ok(response) => Json(cce_api::models::GetSymbolsResponse {
+            success: true,
+            result: Some(get_symbols_result_from_orch(response)),
+            error: None,
+            relation_info: Some(capability_info.to_json_map()),
+        }),
         Err(e) => Json(cce_api::models::GetSymbolsResponse {
             success: false,
             result: None,
@@ -327,25 +299,12 @@ pub async fn handle_goto_definition(
     let capability_info = runtime.get_capability_info().await;
 
     match tool.goto_definition(req) {
-        Ok(response) => {
-            let result = match to_api_model::<OrchGotoDefinitionResponse, _>(response) {
-                Ok(model) => Some(model),
-                Err(e) => {
-                    return Json(cce_api::models::GotoDefinitionResponse {
-                        success: false,
-                        result: None,
-                        error: Some(format!("Failed to serialize response: {}", e)),
-                        relation_info: Some(capability_info.to_json_map()),
-                    });
-                }
-            };
-            Json(cce_api::models::GotoDefinitionResponse {
-                success: true,
-                result,
-                error: None,
-                relation_info: Some(capability_info.to_json_map()),
-            })
-        }
+        Ok(response) => Json(cce_api::models::GotoDefinitionResponse {
+            success: true,
+            result: Some(goto_definition_result_from_orch(response)),
+            error: None,
+            relation_info: Some(capability_info.to_json_map()),
+        }),
         Err(e) => Json(cce_api::models::GotoDefinitionResponse {
             success: false,
             result: None,

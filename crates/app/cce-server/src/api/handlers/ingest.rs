@@ -22,7 +22,7 @@ use axum::routing::{get, post};
 
 use crate::api::state::AppState;
 
-pub use admission::{AdmissionStatsResponse, TokenAuditEntry, handle_admission_stats};
+pub use admission::handle_admission_stats;
 pub use batch::handle_ingest_batch;
 pub use commit::handle_ingest_commit;
 pub use event::handle_ingest_event;
@@ -33,15 +33,21 @@ pub use staging::{INGEST_STAGING_RETENTION, sweep_expired_staging};
 pub fn ingest_routes(metrics: std::sync::Arc<cce_admission::AdmissionMetrics>) -> Router<AppState> {
     Router::new()
         .route(
-            "/api/project/{id}/ingest/manifest",
+            cce_api::paths::INGEST_MANIFEST_TEMPLATE,
             post(handle_ingest_manifest),
         )
-        .route("/api/project/{id}/ingest/batch", post(handle_ingest_batch))
         .route(
-            "/api/project/{id}/ingest/commit",
+            cce_api::paths::INGEST_BATCH_TEMPLATE,
+            post(handle_ingest_batch),
+        )
+        .route(
+            cce_api::paths::INGEST_COMMIT_TEMPLATE,
             post(handle_ingest_commit),
         )
-        .route("/api/project/{id}/ingest/event", post(handle_ingest_event))
-        .route("/api/admission/stats", get(handle_admission_stats))
+        .route(
+            cce_api::paths::INGEST_EVENT_TEMPLATE,
+            post(handle_ingest_event),
+        )
+        .route(cce_api::paths::ADMISSION_STATS, get(handle_admission_stats))
         .layer(axum::Extension(metrics))
 }

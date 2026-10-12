@@ -189,8 +189,8 @@ pub async fn handle_create_project(
 
 /// Handle update project metadata request
 #[utoipa::path(
-    put, path = "/api/project/{id}", tag = "Project",
-    params(("id" = String, Path, description = "Project id or path")),
+    put, path = "/api/project/{project_id}", tag = "Project",
+    params(("project_id" = String, Path, description = "Project id or path")),
     request_body = UpdateProjectRequest,
     responses(
         (status = 200, body = ProjectDetailResponse, description = "Success"),
@@ -325,8 +325,8 @@ pub async fn handle_update_project(
 
 /// Handle delete project request
 #[utoipa::path(
-    delete, path = "/api/project/{id}", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    delete, path = "/api/project/{project_id}", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = ProjectDeleteResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),

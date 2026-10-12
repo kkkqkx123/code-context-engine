@@ -18,8 +18,8 @@ use cce_config::project_registry::RegistryError;
 
 /// Handle update project config request
 #[utoipa::path(
-    put, path = "/api/project/{id}/config", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    put, path = "/api/project/{project_id}/config", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     request_body = ProjectConfigUpdateRequest,
     responses(
         (status = 200, body = ProjectConfigUpdateResponse, description = "Success"),
@@ -136,8 +136,8 @@ pub async fn handle_update_project_config(
 
 /// Handle read merged project config request
 #[utoipa::path(
-    get, path = "/api/project/{id}/config", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    get, path = "/api/project/{project_id}/config", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = ProjectConfigGetResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),
@@ -190,8 +190,8 @@ pub async fn handle_get_project_config(
 
 /// Handle reload project config request (hot reload)
 #[utoipa::path(
-    post, path = "/api/project/{id}/reload", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/reload", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = ProjectConfigReloadResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),

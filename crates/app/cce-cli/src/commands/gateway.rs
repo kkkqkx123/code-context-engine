@@ -208,6 +208,8 @@ mod tests {
 
 /// Gateway commands for remote hosting
 ///
+/// Local supply branch pushing via ingest entries; regular resource commands
+/// use remote HTTP while this branch scans locally and commits remotely.
 /// Business defaults (extensions, exclude, gitignore, commit, compression,
 /// poll interval) live in `SyncParams::with_defaults`; the variants only
 /// carry what the caller stated explicitly.

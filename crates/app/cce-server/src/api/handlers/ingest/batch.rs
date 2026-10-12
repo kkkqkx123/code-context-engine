@@ -25,8 +25,8 @@ use crate::api::state::AppState;
 /// Batches exceeding the token byte quota are rejected as a whole with
 /// usage details; no partial staging occurs in that case.
 #[utoipa::path(
-    post, path = "/api/project/{id}/ingest/batch", tag = "Ingest",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/ingest/batch", tag = "Ingest",
+    params(("project_id" = i64, Path, description = "Project id")),
     request_body = IngestBatchRequest,
     responses(
         (status = 200, body = IngestBatchResponse, description = "Success"),

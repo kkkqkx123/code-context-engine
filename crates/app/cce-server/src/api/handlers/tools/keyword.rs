@@ -1,13 +1,11 @@
 use axum::{Json, extract::State};
 
-use cce_api::models::{
-    KeywordSearchApiResponse, KeywordSearchRequest, KeywordSearchResult, KeywordTermOperator,
-};
+use cce_api::models::{KeywordSearchApiResponse, KeywordSearchRequest, KeywordTermOperator};
 use cce_orchestrator::KeywordSearchRequest as OrchKeywordSearchRequest;
 use cce_orchestrator::KeywordSearchTool;
 use cce_storage_bm25::TermOperator;
 
-use super::to_api_model;
+use super::keyword_result_from_orch;
 use crate::api::AppState;
 
 #[utoipa::path(
@@ -36,18 +34,11 @@ pub async fn handle_keyword_search(
     };
 
     match tool.search(request).await {
-        Ok(response) => match to_api_model::<_, KeywordSearchResult>(response) {
-            Ok(result) => Json(KeywordSearchApiResponse {
-                success: true,
-                result: Some(result),
-                error: None,
-            }),
-            Err(e) => Json(KeywordSearchApiResponse {
-                success: false,
-                result: None,
-                error: Some(format!("Failed to serialize response: {}", e)),
-            }),
-        },
+        Ok(response) => Json(KeywordSearchApiResponse {
+            success: true,
+            result: Some(keyword_result_from_orch(response)),
+            error: None,
+        }),
         Err(e) => Json(KeywordSearchApiResponse {
             success: false,
             result: None,

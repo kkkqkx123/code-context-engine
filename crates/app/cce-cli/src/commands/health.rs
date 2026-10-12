@@ -8,8 +8,9 @@ use colored::Colorize;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_output, print_success, print_warning};
 use cce_api::models::{
-    Bm25HealthResponse, EmbeddingHealthResponse, HealthStatus, QdrantHealthResponse,
-    RetryQueueClearResponse, RetryQueueProcessResponse, RetryQueueStatusResponse,
+    AdmissionStatsResponse, Bm25HealthResponse, EmbeddingHealthResponse, HealthStatus,
+    QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
+    RetryQueueDeadResponse, RetryQueueProcessResponse, RetryQueueStatusResponse,
 };
 
 /// Health command variants
@@ -28,6 +29,12 @@ pub enum HealthCommand {
     QueueProcess,
     /// Clear retry queue
     QueueClear,
+    /// List dead retry-queue entries
+    DeadList,
+    /// Clear dead retry-queue entries
+    DeadClear,
+    /// Show admission counters and per-token audit
+    AdmissionStats,
 }
 
 /// Execute a health command
@@ -47,6 +54,9 @@ pub async fn execute(
         HealthCommand::QueueStatus => retry_queue_status(&client, verbose).await,
         HealthCommand::QueueProcess => retry_queue_process(&client, verbose).await,
         HealthCommand::QueueClear => retry_queue_clear(&client, verbose).await,
+        HealthCommand::DeadList => retry_queue_dead_list(&client, verbose).await,
+        HealthCommand::DeadClear => retry_queue_dead_clear(&client, verbose).await,
+        HealthCommand::AdmissionStats => admission_stats(&client, verbose).await,
     }
 }
 
@@ -60,7 +70,7 @@ async fn health_check(
         println!("{}", "Fetching unified health status...".cyan());
     }
 
-    match client.get::<HealthStatus>("/api/health").await {
+    match client.get::<HealthStatus>(cce_api::paths::HEALTH).await {
         Ok(response) => {
             if matches!(format, crate::cli::OutputFormat::Json) {
                 print_output(format, &response);
@@ -114,7 +124,7 @@ async fn health_qdrant(client: &ApiClient, verbose: bool) -> Result<()> {
     }
 
     match client
-        .get::<QdrantHealthResponse>("/api/health/qdrant")
+        .get::<QdrantHealthResponse>(cce_api::paths::HEALTH_QDRANT)
         .await
     {
         Ok(response) => {
@@ -153,7 +163,7 @@ async fn health_embedding(client: &ApiClient, verbose: bool) -> Result<()> {
     }
 
     match client
-        .get::<EmbeddingHealthResponse>("/api/health/embedding")
+        .get::<EmbeddingHealthResponse>(cce_api::paths::HEALTH_EMBEDDING)
         .await
     {
         Ok(response) => {
@@ -180,7 +190,10 @@ async fn health_bm25(client: &ApiClient, verbose: bool) -> Result<()> {
         println!("{}", "Fetching BM25 health...".cyan());
     }
 
-    match client.get::<Bm25HealthResponse>("/api/health/bm25").await {
+    match client
+        .get::<Bm25HealthResponse>(cce_api::paths::HEALTH_BM25)
+        .await
+    {
         Ok(response) => {
             println!("{}", "BM25 Health".bold());
             println!("{}", "═".repeat(50));
@@ -206,7 +219,7 @@ async fn retry_queue_status(client: &ApiClient, verbose: bool) -> Result<()> {
     }
 
     match client
-        .get::<RetryQueueStatusResponse>("/api/retry-queue")
+        .get::<RetryQueueStatusResponse>(cce_api::paths::RETRY_QUEUE)
         .await
     {
         Ok(response) => {
@@ -238,7 +251,7 @@ async fn retry_queue_process(client: &ApiClient, verbose: bool) -> Result<()> {
     }
 
     match client
-        .post::<(), RetryQueueProcessResponse>("/api/retry-queue/process", &())
+        .post::<(), RetryQueueProcessResponse>(cce_api::paths::RETRY_QUEUE_PROCESS, &())
         .await
     {
         Ok(response) => {
@@ -262,7 +275,7 @@ async fn retry_queue_clear(client: &ApiClient, verbose: bool) -> Result<()> {
     }
 
     match client
-        .delete::<RetryQueueClearResponse>("/api/retry-queue")
+        .delete::<RetryQueueClearResponse>(cce_api::paths::RETRY_QUEUE)
         .await
     {
         Ok(response) => {
@@ -276,6 +289,64 @@ async fn retry_queue_clear(client: &ApiClient, verbose: bool) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// List dead retry-queue entries
+async fn retry_queue_dead_list(client: &ApiClient, verbose: bool) -> Result<()> {
+    if verbose {
+        println!("{}", "Fetching dead retry queue entries...".cyan());
+    }
+    match client
+        .get::<RetryQueueDeadResponse>(cce_api::paths::RETRY_QUEUE_DEAD)
+        .await
+    {
+        Ok(response) => {
+            println!("dead_count={}", response.dead_count);
+        }
+        Err(e) => {
+            print_error(&format!("Failed to list dead entries: {}", e));
+        }
+    }
+    Ok(())
+}
+
+/// Clear dead retry-queue entries
+async fn retry_queue_dead_clear(client: &ApiClient, verbose: bool) -> Result<()> {
+    if verbose {
+        println!("{}", "Clearing dead retry queue entries...".cyan());
+    }
+    match client
+        .delete::<RetryQueueDeadClearResponse>(cce_api::paths::RETRY_QUEUE_DEAD)
+        .await
+    {
+        Ok(response) => {
+            print_success(&format!("Cleared: {}", response.message));
+        }
+        Err(e) => {
+            print_error(&format!("Failed to clear dead entries: {}", e));
+        }
+    }
+    Ok(())
+}
+
+/// Show admission counters and per-token audit
+async fn admission_stats(client: &ApiClient, verbose: bool) -> Result<()> {
+    if verbose {
+        println!("{}", "Fetching admission stats...".cyan());
+    }
+    match client
+        .get::<AdmissionStatsResponse>(cce_api::paths::ADMISSION_STATS)
+        .await
+    {
+        Ok(response) => {
+            println!("admitted={}", response.global.admitted);
+            println!("tokens={}", response.tokens.len());
+        }
+        Err(e) => {
+            print_error(&format!("Failed to get admission stats: {}", e));
+        }
+    }
     Ok(())
 }
 
@@ -317,4 +388,13 @@ pub enum HealthCommands {
 
     /// Clear retry queue (discard all pending queries)
     QueueClear,
+
+    /// List dead retry-queue entries
+    DeadList,
+
+    /// Clear dead retry-queue entries
+    DeadClear,
+
+    /// Show admission counters and per-token audit
+    AdmissionStats,
 }

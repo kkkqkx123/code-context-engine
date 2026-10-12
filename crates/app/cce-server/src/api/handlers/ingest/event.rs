@@ -24,8 +24,8 @@ use crate::api::state::AppState;
 /// bounds is not split here: the gateway falls back to a full sync batch
 /// instead.
 #[utoipa::path(
-    post, path = "/api/project/{id}/ingest/event", tag = "Ingest",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/ingest/event", tag = "Ingest",
+    params(("project_id" = i64, Path, description = "Project id")),
     request_body = IngestEventRequest,
     responses(
         (status = 200, body = IngestEventResponse, description = "Success"),

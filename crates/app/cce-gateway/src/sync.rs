@@ -6,11 +6,11 @@ use anyhow::Result;
 use base64::Engine as _;
 
 use cce_api::models::{
-    INGEST_CHUNK_BYTES, IngestBatchRequest, IngestBatchResponse, IngestCommitResponse,
-    IngestFileMeta, IngestManifestRequest, IngestManifestResponse, IngestedFile,
-    MAX_INGEST_BATCH_FILES, MAX_INGEST_CHUNKS_PER_BATCH, MAX_INGEST_FILE_BYTES, MissingChunk,
-    total_chunks_for_size,
+    INGEST_CHUNK_BYTES, IngestBatchRequest, IngestCommitResponse, IngestFileMeta,
+    IngestManifestRequest, IngestManifestResponse, IngestedFile, MAX_INGEST_BATCH_FILES,
+    MAX_INGEST_CHUNKS_PER_BATCH, MAX_INGEST_FILE_BYTES, MissingChunk, total_chunks_for_size,
 };
+use cce_api::paths::GATEWAY_BATCH_WIRE_BYTES;
 
 use super::client::GatewayClient;
 use super::params::SyncParams;
@@ -19,14 +19,10 @@ use super::scan::{
     save_cached_entries, scan_local,
 };
 
-/// Wire byte budget per upload batch, kept below the server body bound.
-///
-/// Accounting uses base64 wire length so a batch never exceeds the admission
-/// body limit after transport growth.
-const BATCH_WIRE_BYTES: u64 = 4 * 1024 * 1024;
-
 /// Push one full sync pass: manifest, missing contents, then commit.
 ///
+/// Upload batches account base64 wire length against the shared API wire
+/// budget so a batch never exceeds the admission body limit after growth.
 /// When a scan cache file is configured, the pass loads the previous entries
 /// and scans incrementally so unchanged files skip re-hashing; without a
 /// cache the pass scans everything. The manifest still covers the whole tree
@@ -87,8 +83,8 @@ pub async fn sync_once(
             .collect(),
         manifest_version,
     };
-    let manifest_url = format!("/api/project/{}/ingest/manifest", params.project_id);
-    let manifest_response: IngestManifestResponse = client.post(&manifest_url, &manifest).await?;
+    let manifest_response: IngestManifestResponse =
+        client.post_manifest(params.project_id, &manifest).await?;
     if params.json_progress {
         println!(
             "{}",
@@ -127,8 +123,9 @@ pub async fn sync_once(
         anyhow::bail!("gateway staged {staged} files with {} errors", errors.len());
     }
     if params.commit {
-        let commit_url = format!("/api/project/{}/ingest/commit", params.project_id);
-        let commit: IngestCommitResponse = client.post(&commit_url, &serde_json::json!({})).await?;
+        let commit: IngestCommitResponse = client
+            .post_commit(params.project_id, &serde_json::json!({}))
+            .await?;
         if params.json_progress {
             println!(
                 "{}",
@@ -240,7 +237,7 @@ pub async fn upload_paths(
             });
             if batch.len() >= MAX_INGEST_CHUNKS_PER_BATCH
                 || batch.len() >= MAX_INGEST_BATCH_FILES
-                || batch_bytes >= BATCH_WIRE_BYTES
+                || batch_bytes >= GATEWAY_BATCH_WIRE_BYTES
             {
                 flush_batch(
                     client,
@@ -290,8 +287,7 @@ async fn flush_batch(
         manifest_version,
     };
     *batch_bytes = 0;
-    let url = format!("/api/project/{project_id}/ingest/batch");
-    match client.post::<_, IngestBatchResponse>(&url, &request).await {
+    match client.post_batch(project_id, &request).await {
         Ok(response) => {
             *staged += response.staged;
             errors.extend(response.errors);

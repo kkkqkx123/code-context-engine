@@ -1374,7 +1374,7 @@
         }
       }
     },
-    "/api/project/{id}": {
+    "/api/project/{project_id}": {
       "get": {
         "tags": [
           "Project"
@@ -1383,7 +1383,7 @@
         "operationId": "handle_get_project",
         "parameters": [
           {
-            "name": "id",
+            "name": "project_id",
             "in": "path",
             "description": "Project id",
             "required": true,
@@ -1444,7 +1444,7 @@
         "operationId": "handle_update_project",
         "parameters": [
           {
-            "name": "id",
+            "name": "project_id",
             "in": "path",
             "description": "Project id or path",
             "required": true,
@@ -1514,7 +1514,7 @@
         "operationId": "handle_delete_project",
         "parameters": [
           {
-            "name": "id",
+            "name": "project_id",
             "in": "path",
             "description": "Project id",
             "required": true,
@@ -1531,793 +1531,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProjectDeleteResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/config": {
-      "get": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "Handle read merged project config request",
-        "operationId": "handle_get_project_config",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectConfigGetResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "Handle update project config request",
-        "operationId": "handle_update_project_config",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectConfigUpdateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectConfigUpdateResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/dead-letter/retry": {
-      "post": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "Handle a manual dead-letter truncate-retry request",
-        "operationId": "handle_dead_letter_retry",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeadLetterRetryResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/dead-letters": {
-      "get": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "List the dead-letter files of a project",
-        "operationId": "handle_dead_letter_list",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeadLetterListResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/dead-letters/acknowledge": {
-      "post": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "Acknowledge the dead letter(s) of one file so they leave the retry flow",
-        "operationId": "handle_dead_letter_acknowledge",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeadLetterAcknowledgeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeadLetterActionResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/dead-letters/retry": {
-      "post": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "Run a dead-letter truncate-retry pass restricted to the requested files",
-        "operationId": "handle_dead_letter_files_retry",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeadLetterRetryRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeadLetterActionResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/index": {
-      "post": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "Handle project indexing request",
-        "operationId": "handle_project_index",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectIndexResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/ingest/batch": {
-      "post": {
-        "tags": [
-          "Ingest"
-        ],
-        "summary": "Store pushed file contents under the project mirror without indexing.",
-        "description": "Indexing happens explicitly through the commit entry or incrementally\nthrough the event entry, so large initial syncs can stage in batches.\nBatches exceeding the token byte quota are rejected as a whole with\nusage details; no partial staging occurs in that case.",
-        "operationId": "handle_ingest_batch",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IngestBatchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IngestBatchResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/ingest/commit": {
-      "post": {
-        "tags": [
-          "Ingest"
-        ],
-        "summary": "Run the existing full index pipeline over the staged project mirror.",
-        "operationId": "handle_ingest_commit",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IngestCommitResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/ingest/event": {
-      "post": {
-        "tags": [
-          "Ingest"
-        ],
-        "summary": "Apply gateway-observed changes through the hot-update pipeline.",
-        "description": "Created and modified events carry content and are staged before the\ncoordinator runs; deletions remove the mirrored file and its index rows.\nThe remote host never starts its own filesystem watch in this shape:\nevery change arrives through this entry. Events travel whole and raw,\nso a change that would exceed the entry-count or single-file ingest\nbounds is not split here: the gateway falls back to a full sync batch\ninstead.",
-        "operationId": "handle_ingest_event",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IngestEventRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IngestEventResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/ingest/manifest": {
-      "post": {
-        "tags": [
-          "Ingest"
-        ],
-        "summary": "Compare a gateway manifest against the stored file hashes.",
-        "description": "Fresh files are skipped. For stale files the comparison descends to\nchunk granularity when the request carries a manifest version: chunks\nalready stored under the staging root are not requested again, so an\ninterrupted push resumes without retransmission.",
-        "operationId": "handle_ingest_manifest",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IngestManifestRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IngestManifestResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/project/{id}/reload": {
-      "post": {
-        "tags": [
-          "Project"
-        ],
-        "summary": "Handle reload project config request (hot reload)",
-        "operationId": "handle_reload_project_config",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Project id",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectConfigReloadResponse"
                 }
               }
             }
@@ -2771,6 +1984,319 @@
           },
           "503": {
             "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/config": {
+      "get": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle read merged project config request",
+        "operationId": "handle_get_project_config",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConfigGetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle update project config request",
+        "operationId": "handle_update_project_config",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectConfigUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConfigUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/dead-letters": {
+      "get": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "List the dead-letter files of a project",
+        "operationId": "handle_dead_letter_list",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/dead-letters/acknowledge": {
+      "post": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Acknowledge the dead letter(s) of one file so they leave the retry flow",
+        "operationId": "handle_dead_letter_acknowledge",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeadLetterAcknowledgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/dead-letters/retry": {
+      "post": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Run a dead-letter truncate-retry pass restricted to the requested files",
+        "operationId": "handle_dead_letter_files_retry",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeadLetterRetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
             "content": {
               "application/json": {
                 "schema": {
@@ -4263,6 +3789,354 @@
         }
       }
     },
+    "/api/project/{project_id}/index": {
+      "post": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle project indexing request",
+        "operationId": "handle_project_index",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIndexResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/ingest/batch": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Store pushed file contents under the project mirror without indexing.",
+        "description": "Indexing happens explicitly through the commit entry or incrementally\nthrough the event entry, so large initial syncs can stage in batches.\nBatches exceeding the token byte quota are rejected as a whole with\nusage details; no partial staging occurs in that case.",
+        "operationId": "handle_ingest_batch",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/ingest/commit": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Run the existing full index pipeline over the staged project mirror.",
+        "operationId": "handle_ingest_commit",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestCommitResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/ingest/event": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Apply gateway-observed changes through the hot-update pipeline.",
+        "description": "Created and modified events carry content and are staged before the\ncoordinator runs; deletions remove the mirrored file and its index rows.\nThe remote host never starts its own filesystem watch in this shape:\nevery change arrives through this entry. Events travel whole and raw,\nso a change that would exceed the entry-count or single-file ingest\nbounds is not split here: the gateway falls back to a full sync batch\ninstead.",
+        "operationId": "handle_ingest_event",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestEventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/ingest/manifest": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "summary": "Compare a gateway manifest against the stored file hashes.",
+        "description": "Fresh files are skipped. For stale files the comparison descends to\nchunk granularity when the request carries a manifest version: chunks\nalready stored under the staging root are not requested again, so an\ninterrupted push resumes without retransmission.",
+        "operationId": "handle_ingest_manifest",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestManifestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestManifestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/project/{project_id}/relations/classification/stats": {
       "get": {
         "tags": [
@@ -4412,6 +4286,69 @@
           },
           "503": {
             "description": "Index unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/reload": {
+      "post": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle reload project config request (hot reload)",
+        "operationId": "handle_reload_project_config",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConfigReloadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
             "content": {
               "application/json": {
                 "schema": {
@@ -5193,7 +5130,7 @@
           "Storage"
         ],
         "summary": "Handle storage status request",
-        "description": "Checks all storage components and returns their status.\nUses Qdrant's diagnose() method for comprehensive health assessment.",
+        "description": "Checks all storage components and returns their status.\nUses vector diagnostics for comprehensive health assessment.",
         "operationId": "handle_storage_status",
         "responses": {
           "200": {
@@ -5600,9 +5537,9 @@
   },
   "components": {
     "schemas": {
-      "AdmissionStats": {
+      "AdmissionGlobalStats": {
         "type": "object",
-        "description": "Point-in-time admission counters.",
+        "description": "Global admission counters for the current process.",
         "required": [
           "admitted",
           "auth_rejections",
@@ -5652,7 +5589,7 @@
       "AdmissionStatsResponse": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/AdmissionStats",
+            "$ref": "#/components/schemas/AdmissionGlobalStats",
             "description": "Global in-memory counters."
           },
           {
@@ -5668,7 +5605,7 @@
             }
           }
         ],
-        "description": "Admission counters with per-token persistent audit."
+        "description": "Admission counters with per-token durable audit."
       },
       "AggregatedMetric": {
         "type": "object",
@@ -5793,6 +5730,13 @@
             },
             "description": "Global exclude patterns"
           },
+          "expand": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Per-request relation-expansion opt-in, applied to the merged hits."
+          },
           "include_categories": {
             "type": "array",
             "items": {
@@ -5832,6 +5776,13 @@
               "null"
             ],
             "description": "Project root path (optional if project_id is provided)"
+          },
+          "query_intent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Query intent override applied to every sub-query.\nEmpty means auto-detect per sub-query text."
           },
           "rerank_max_candidates": {
             "type": [
@@ -6757,7 +6708,8 @@
           "full",
           "reference_over_limit",
           "reference_file_missing",
-          "reference_file_level"
+          "reference_file_level",
+          "reference_chunk_missing"
         ]
       },
       "CreateProjectRequest": {
@@ -6814,7 +6766,7 @@
       },
       "DeadLetterAcknowledgeRequest": {
         "type": "object",
-        "description": "Request body of `POST /api/project/{id}/dead-letters/acknowledge`.",
+        "description": "Request body of `POST /api/project/{project_id}/dead-letters/acknowledge`.",
         "required": [
           "file_path"
         ],
@@ -6889,7 +6841,7 @@
       },
       "DeadLetterListResponse": {
         "type": "object",
-        "description": "Response of `GET /api/project/{id}/dead-letters`.",
+        "description": "Response of `GET /api/project/{project_id}/dead-letters`.",
         "required": [
           "project_id",
           "files"
@@ -6953,7 +6905,7 @@
       },
       "DeadLetterRetryRequest": {
         "type": "object",
-        "description": "Request body of `POST /api/project/{id}/dead-letters/retry`.",
+        "description": "Request body of `POST /api/project/{project_id}/dead-letters/retry`.",
         "properties": {
           "files": {
             "type": "array",
@@ -6961,46 +6913,6 @@
               "type": "string"
             },
             "description": "Restrict the retry pass to these file paths; empty means all candidates."
-          }
-        }
-      },
-      "DeadLetterRetryResponse": {
-        "type": "object",
-        "description": "Dead-letter truncate-retry response",
-        "required": [
-          "success",
-          "retried",
-          "succeeded",
-          "still_failed",
-          "truncated_chunks",
-          "message"
-        ],
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "retried": {
-            "type": "integer",
-            "description": "Files re-chunked from disk and re-stored.",
-            "minimum": 0
-          },
-          "still_failed": {
-            "type": "integer",
-            "description": "Files retried that failed again; they stay in the dead letter state.",
-            "minimum": 0
-          },
-          "succeeded": {
-            "type": "integer",
-            "description": "Files whose Embedding module succeeded after the truncate retry.",
-            "minimum": 0
-          },
-          "success": {
-            "type": "boolean"
-          },
-          "truncated_chunks": {
-            "type": "integer",
-            "description": "Chunks truncated during the retry.",
-            "minimum": 0
           }
         }
       },
@@ -7444,6 +7356,13 @@
           "file_id": {
             "type": "integer",
             "format": "int64"
+          },
+          "file_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Project-relative file path resolved from `file_id`. `None` when the\nfile row is missing, so callers without a second lookup stay actionable."
           },
           "id": {
             "type": "integer",
@@ -8246,7 +8165,7 @@
           },
           "total_cycles": {
             "type": "integer",
-            "description": "Cycle count reported, before the `limit` cap.",
+            "description": "Detected count up to one probe past `limit`; a lower bound, not the\ntrue project total. Equals the reported length unless truncated.",
             "minimum": 0
           },
           "truncated": {
@@ -8263,7 +8182,8 @@
           "target",
           "relation",
           "domain",
-          "confidence"
+          "confidence",
+          "edge_id"
         ],
         "properties": {
           "call_context": {
@@ -8272,6 +8192,13 @@
               "null"
             ],
             "description": "How the call site invokes the target (`direct`, `instance_method`, ...),\nwhen the edge carries call context."
+          },
+          "callsite": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Call-site byte span for call-class edges; absent for non-call edges.\nEdge counts are per call site when present, per entity pair otherwise."
           },
           "cfg_condition": {
             "type": [
@@ -8286,6 +8213,10 @@
           "domain": {
             "type": "string",
             "description": "Coarse relation domain derived by the backend (`call`, `dependency`,\n`structural`, `reference`, `template`, `other`); authoritative\nclassification, frontend must not re-derive it from `relation`."
+          },
+          "edge_id": {
+            "type": "string",
+            "description": "Stable edge identity over `(source, target, relation[, callsite])`."
           },
           "is_external": {
             "type": "boolean",
@@ -10294,14 +10225,14 @@
             "items": {
               "type": "string"
             },
-            "description": "Exclude specific category values (e.g., [\"test\", \"generated\"])"
+            "description": "Exclude specific category values (e.g., [\"code\", \"config\"])"
           },
           "exclude_content_types": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Content types to exclude (e.g., \"test\", \"generated\", \"vendor\")"
+            "description": "Content types to exclude (currently only \"test\" / \"tests\" is supported)"
           },
           "exclude_patterns": {
             "type": "array",
@@ -10309,12 +10240,19 @@
               "type": "string"
             }
           },
+          "expand": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Per-request relation-expansion opt-in. When `Some(true)` the server\nresolves call-graph neighbours for the top-N hits and annotates them\ninto `code_chunk`; `None` defers to the project configuration."
+          },
           "include_categories": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Include only specific category values (e.g., [\"test\", \"config\"])"
+            "description": "Include only specific category values (e.g., [\"code\", \"config\"])"
           },
           "include_patterns": {
             "type": "array",
@@ -10350,6 +10288,13 @@
           },
           "query": {
             "type": "string"
+          },
+          "query_intent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Query intent override (\"semantic\", \"keyword\", \"hybrid\", \"entity\").\nEmpty means auto-detect."
           },
           "query_type": {
             "type": "string"
@@ -10430,6 +10375,11 @@
           "score"
         ],
         "properties": {
+          "backward_nodes": {
+            "type": "integer",
+            "description": "Attached caller (backward) units.",
+            "minimum": 0
+          },
           "code_chunk": {
             "type": "string"
           },
@@ -10462,8 +10412,27 @@
               "null"
             ]
           },
+          "expanded": {
+            "type": "boolean",
+            "description": "True when relation expansion attached at least one neighbour unit."
+          },
+          "expanded_nodes": {
+            "type": "integer",
+            "description": "Number of attached expansion units (forward + backward).",
+            "minimum": 0
+          },
           "file_path": {
             "type": "string"
+          },
+          "forward_nodes": {
+            "type": "integer",
+            "description": "Attached callee (forward) units.",
+            "minimum": 0
+          },
+          "omitted_self_evident": {
+            "type": "integer",
+            "description": "Forward units dropped as directly inferable from the rendered body.",
+            "minimum": 0
           },
           "score": {
             "type": "number",
@@ -10476,6 +10445,13 @@
               "type": "string"
             },
             "description": "Retrieval sources that contributed to this result (e.g. \"vector\", \"bm25\")."
+          },
+          "stable_symbol_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Stable symbol IDs for the hit's entities, joinable against the graph\nquery interfaces. Empty when no relation snapshot is available."
           },
           "start_line": {
             "type": "integer",

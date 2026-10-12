@@ -54,7 +54,7 @@ async fn storage_status(client: &ApiClient, verbose: bool) -> Result<()> {
         println!("Fetching storage status...");
     }
 
-    let response: StorageStatusResponse = client.get("/api/storage/status").await?;
+    let response: StorageStatusResponse = client.get(cce_api::paths::STORAGE_STATUS).await?;
 
     if response.success {
         let status = &response.status;
@@ -111,7 +111,7 @@ async fn index_stats(project_id: i64, client: &ApiClient, verbose: bool) -> Resu
         println!("Fetching index statistics...");
     }
 
-    let url = format!("/api/index/stats?project_id={}", project_id);
+    let url = format!("{}?project_id={}", cce_api::paths::INDEX_STATS, project_id);
     let response: IndexStatsResponse = client.get(&url).await?;
 
     if response.success {
@@ -155,7 +155,7 @@ async fn clear_index(
         println!("Clearing index...");
     }
 
-    let url = format!("/api/index?project_id={}", project_id);
+    let url = format!("{}?project_id={}", cce_api::paths::INDEX, project_id);
     let response: ClearIndexResponse = client.delete_with_body(&url, &request).await?;
 
     if response.success {
@@ -183,8 +183,8 @@ async fn delete_file(project_id: i64, client: &ApiClient, path: &str, verbose: b
     }
 
     let url = format!(
-        "/api/index/file/{}?project_id={}",
-        urlencoding::encode(path),
+        "{}?project_id={}",
+        cce_api::paths::INDEX_FILE_TEMPLATE.replace("{path}", &urlencoding::encode(path)),
         project_id
     );
     let response: DeleteFileResponse = client.delete(&url).await?;
@@ -211,7 +211,11 @@ async fn delete_entity(project_id: i64, client: &ApiClient, id: &str, verbose: b
         println!("Deleting entity: {}", id);
     }
 
-    let url = format!("/api/index/entity/{}?project_id={}", id, project_id);
+    let url = format!(
+        "{}?project_id={}",
+        cce_api::paths::INDEX_ENTITY_TEMPLATE.replace("{id}", &urlencoding::encode(id)),
+        project_id
+    );
     let response: DeleteEntityResponse = client.delete(&url).await?;
 
     if response.success {
@@ -262,7 +266,7 @@ async fn batch_delete(
         println!("Executing batch delete...");
     }
 
-    let url = format!("/api/index/batch?project_id={}", project_id);
+    let url = format!("{}?project_id={}", cce_api::paths::INDEX_BATCH, project_id);
     let response: cce_api::models::BatchDeleteResponse =
         client.delete_with_body(&url, &request).await?;
 

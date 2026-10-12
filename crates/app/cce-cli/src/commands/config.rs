@@ -22,7 +22,11 @@ pub async fn execute_reload(server: &str, project_id: i64, verbose: bool) -> Res
         );
     }
 
-    let url = format!("/api/config/reload?project_id={}", project_id);
+    let url = format!(
+        "{}?project_id={}",
+        cce_api::paths::CONFIG_RELOAD,
+        project_id
+    );
     let empty_body = serde_json::json!({});
 
     match client
@@ -61,7 +65,10 @@ pub async fn execute_info(server: &str, verbose: bool) -> Result<()> {
         println!("Fetching configuration info...");
     }
 
-    match client.get::<ConfigInfoResponse>("/api/config").await {
+    match client
+        .get::<ConfigInfoResponse>(cce_api::paths::CONFIG_INFO)
+        .await
+    {
         Ok(response) => {
             println!("  Initialized: {}", response.initialized);
             println!("  Project count: {}", response.project_count);
@@ -91,7 +98,7 @@ pub async fn execute_validate(server: &str, verbose: bool) -> Result<()> {
     }
 
     match client
-        .get::<ConfigValidateResponse>("/api/config/validate")
+        .get::<ConfigValidateResponse>(cce_api::paths::CONFIG_VALIDATE)
         .await
     {
         Ok(response) => {

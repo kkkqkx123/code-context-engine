@@ -216,9 +216,20 @@ async fn get_ego(
     if output.verbose {
         println!("Fetching ego graph: {id}");
     }
+    let base = cce_api::paths::GRAPH_EGO_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{project_id}/graph/ego?entity_id={id}&depth={depth}&direction={direction}&offset={}&limit={}&domains={}&include_external={}",
-        params.offset, params.limit, params.domains, params.include_external
+        "{}?entity_id={}&depth={}&direction={}&offset={}&limit={}&domains={}&include_external={}",
+        base,
+        urlencoding::encode(id),
+        depth,
+        urlencoding::encode(direction),
+        params.offset,
+        params.limit,
+        urlencoding::encode(&params.domains),
+        params.include_external
     );
     let response: GraphSubgraphResponse = client.get(&path).await?;
     if matches!(output.format, crate::cli::OutputFormat::Json) {
@@ -243,9 +254,18 @@ async fn get_path(
     if verbose {
         println!("Finding graph path: {} -> {}", seeds.from, seeds.to);
     }
+    let base = cce_api::paths::GRAPH_PATH_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{project_id}/graph/path?start={}&end={}&max_depth={depth}&domains={}&include_external={}",
-        seeds.from, seeds.to, params.domains, params.include_external
+        "{}?start={}&end={}&max_depth={}&domains={}&include_external={}",
+        base,
+        urlencoding::encode(seeds.from),
+        urlencoding::encode(seeds.to),
+        depth,
+        urlencoding::encode(&params.domains),
+        params.include_external
     );
     let response: GraphPathResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
@@ -280,9 +300,18 @@ async fn get_subgraph(
     if output.verbose {
         println!("Fetching subgraph: {ids}");
     }
+    let base = cce_api::paths::GRAPH_SUBGRAPH_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{project_id}/graph/subgraph?ids={ids}&offset={}&limit={}&domains={}&include_external={}",
-        params.offset, params.limit, params.domains, params.include_external
+        "{}?ids={}&offset={}&limit={}&domains={}&include_external={}",
+        base,
+        urlencoding::encode(ids),
+        params.offset,
+        params.limit,
+        urlencoding::encode(&params.domains),
+        params.include_external
     );
     let response: GraphSubgraphResponse = client.get(&path).await?;
     if matches!(output.format, crate::cli::OutputFormat::Json) {
@@ -305,9 +334,17 @@ async fn get_components(
     if verbose {
         println!("Fetching graph components");
     }
+    let base = cce_api::paths::GRAPH_COMPONENTS_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{project_id}/graph/components?offset={}&limit={}&domains={}&include_external={}",
-        params.offset, params.limit, params.domains, params.include_external
+        "{}?offset={}&limit={}&domains={}&include_external={}",
+        base,
+        params.offset,
+        params.limit,
+        urlencoding::encode(&params.domains),
+        params.include_external
     );
     let response: GraphComponentsResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
@@ -337,9 +374,17 @@ async fn export_graph(
     if output.verbose {
         println!("Exporting graph (limit {})", params.limit);
     }
+    let base = cce_api::paths::GRAPH_EXPORT_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{project_id}/graph/export?limit={}&offset={}&domains={}&include_external={}",
-        params.limit, params.offset, params.domains, params.include_external
+        "{}?limit={}&offset={}&domains={}&include_external={}",
+        base,
+        params.limit,
+        params.offset,
+        urlencoding::encode(&params.domains),
+        params.include_external
     );
     let response: GraphSubgraphResponse = client.get(&path).await?;
     if matches!(output.format, crate::cli::OutputFormat::Json) {
@@ -362,7 +407,11 @@ async fn get_impact(
     if verbose {
         println!("Analyzing impact: {file}");
     }
-    let path = format!("/api/project/{project_id}/graph/impact?file={file}");
+    let base = cce_api::paths::GRAPH_IMPACT_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
+    let path = format!("{}?file={}", base, urlencoding::encode(file));
     let response: GraphImpactResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);
@@ -394,8 +443,15 @@ async fn get_entity_impact(
     if verbose {
         println!("Analyzing entity impact: {entity_id}");
     }
+    let base = cce_api::paths::GRAPH_ENTITY_IMPACT_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{project_id}/graph/entity-impact?entity_id={entity_id}&max_depth={max_depth}"
+        "{}?entity_id={}&max_depth={}",
+        base,
+        urlencoding::encode(entity_id),
+        max_depth
     );
     let response: GraphEntityImpactResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
@@ -428,7 +484,16 @@ async fn get_cycles(
     if verbose {
         println!("Finding {level} dependency cycles");
     }
-    let path = format!("/api/project/{project_id}/graph/cycles?level={level}&limit={limit}");
+    let base = cce_api::paths::GRAPH_CYCLES_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
+    let path = format!(
+        "{}?level={}&limit={}",
+        base,
+        urlencoding::encode(level),
+        limit
+    );
     let response: GraphCyclesResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);
@@ -467,8 +532,17 @@ async fn get_structural(
     if verbose {
         println!("Fetching {kind} relations for {entity_id} ({direction})");
     }
+    let base = cce_api::paths::GRAPH_STRUCTURAL_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{project_id}/graph/structural?entity_id={entity_id}&kind={kind}&direction={direction}&limit={limit}"
+        "{}?entity_id={}&kind={}&direction={}&limit={}",
+        base,
+        urlencoding::encode(entity_id),
+        urlencoding::encode(kind),
+        urlencoding::encode(direction),
+        limit
     );
     let response: GraphStructuralResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
@@ -508,7 +582,11 @@ async fn get_module(
     if verbose {
         println!("Fetching module relations for {file}");
     }
-    let path = format!("/api/project/{project_id}/graph/module?file={file}");
+    let base = cce_api::paths::GRAPH_MODULE_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
+    let path = format!("{}?file={}", base, urlencoding::encode(file));
     let response: GraphModuleResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);

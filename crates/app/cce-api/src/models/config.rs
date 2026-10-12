@@ -54,7 +54,7 @@ pub struct ConfigWarningInfo {
 }
 
 /// Request body for updating project config
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ProjectConfigUpdateRequest {
     /// Project-level configuration (partial config, free-form)
     pub config: serde_json::Value,

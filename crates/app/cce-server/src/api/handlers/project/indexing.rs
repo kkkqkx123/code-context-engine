@@ -9,15 +9,15 @@ use crate::api::response::ApiResult;
 use cce_api::models::error_codes;
 use cce_api::models::{
     DeadLetterAcknowledgeRequest, DeadLetterActionResponse, DeadLetterFileEntry,
-    DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest, DeadLetterRetryResponse,
-    ErrorResponse, ProjectIndexResponse,
+    DeadLetterListResponse, DeadLetterModuleEntry, DeadLetterRetryRequest, ErrorResponse,
+    ProjectIndexResponse,
 };
 use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 /// Handle project indexing request
 #[utoipa::path(
-    post, path = "/api/project/{id}/index", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/index", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = ProjectIndexResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),
@@ -102,44 +102,10 @@ pub async fn handle_project_index(
     })
 }
 
-/// Handle a manual dead-letter truncate-retry request
-#[utoipa::path(
-    post, path = "/api/project/{id}/dead-letter/retry", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
-    responses(
-        (status = 200, body = DeadLetterRetryResponse, description = "Success"),
-        (status = 400, body = ErrorResponse, description = "Invalid request"),
-        (status = 404, body = ErrorResponse, description = "Resource not found"),
-        (status = 500, body = ErrorResponse, description = "Internal error")
-    )
-)]
-pub async fn handle_dead_letter_retry(
-    State(state): State<crate::api::state::AppState>,
-    Path(id): Path<i64>,
-) -> ApiResult<DeadLetterRetryResponse> {
-    match state.engine.retry_dead_letters(id).await {
-        Ok(report) => ApiResult::Success(DeadLetterRetryResponse {
-            success: true,
-            retried: report.retried,
-            succeeded: report.succeeded,
-            still_failed: report.still_failed,
-            truncated_chunks: report.truncated_chunks,
-            message: format!(
-                "dead-letter retry: {} retried, {} succeeded, {} still failed, {} chunks truncated",
-                report.retried, report.succeeded, report.still_failed, report.truncated_chunks
-            ),
-        }),
-        Err(e) => ApiResult::Error(ErrorResponse::new(
-            error_codes::INTERNAL_ERROR,
-            format!("Dead-letter retry failed: {}", e),
-        )),
-    }
-}
-
 /// Run a dead-letter truncate-retry pass restricted to the requested files
 #[utoipa::path(
-    post, path = "/api/project/{id}/dead-letters/retry", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/dead-letters/retry", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     request_body = DeadLetterRetryRequest,
     responses(
         (status = 200, body = DeadLetterActionResponse, description = "Success"),
@@ -174,8 +140,8 @@ pub async fn handle_dead_letter_files_retry(
 
 /// Acknowledge the dead letter(s) of one file so they leave the retry flow
 #[utoipa::path(
-    post, path = "/api/project/{id}/dead-letters/acknowledge", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/dead-letters/acknowledge", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     request_body = DeadLetterAcknowledgeRequest,
     responses(
         (status = 200, body = DeadLetterActionResponse, description = "Success"),
@@ -223,8 +189,8 @@ pub async fn handle_dead_letter_acknowledge(
 
 /// List the dead-letter files of a project
 #[utoipa::path(
-    get, path = "/api/project/{id}/dead-letters", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    get, path = "/api/project/{project_id}/dead-letters", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = DeadLetterListResponse, description = "Success"),
         (status = 404, body = ErrorResponse, description = "Resource not found"),

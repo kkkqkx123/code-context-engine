@@ -19,8 +19,8 @@ use crate::api::state::AppState;
 /// already stored under the staging root are not requested again, so an
 /// interrupted push resumes without retransmission.
 #[utoipa::path(
-    post, path = "/api/project/{id}/ingest/manifest", tag = "Ingest",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/ingest/manifest", tag = "Ingest",
+    params(("project_id" = i64, Path, description = "Project id")),
     request_body = IngestManifestRequest,
     responses(
         (status = 200, body = IngestManifestResponse, description = "Success"),

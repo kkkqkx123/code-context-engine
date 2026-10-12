@@ -6,9 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use base64::Engine as _;
 
-use cce_api::models::{
-    IngestEvent, IngestEventKind, IngestEventRequest, IngestEventResponse, MAX_INGEST_FILE_BYTES,
-};
+use cce_api::models::{IngestEvent, IngestEventKind, IngestEventRequest, MAX_INGEST_FILE_BYTES};
 
 use super::client::GatewayClient;
 use super::health::write_heartbeat;
@@ -194,8 +192,7 @@ pub async fn watch_loop(client: &GatewayClient, params: &SyncParams, verbose: bo
             continue;
         }
         let request = IngestEventRequest { events };
-        let url = format!("/api/project/{}/ingest/event", params.project_id);
-        match client.post::<_, IngestEventResponse>(&url, &request).await {
+        match client.post_event(params.project_id, &request).await {
             Ok(response) => {
                 if !response.errors.is_empty() {
                     for error in &response.errors {

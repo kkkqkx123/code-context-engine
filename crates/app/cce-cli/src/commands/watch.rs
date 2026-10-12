@@ -6,7 +6,9 @@ use anyhow::Result;
 
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
-use cce_api::models::{StartWatchRequest, WatchStatusResponse};
+use cce_api::models::{
+    StartWatchRequest, StartWatchResponse, StopWatchResponse, WatchStatusResponse,
+};
 
 pub async fn execute(cmd: &WatchCommands, server: &str, verbose: bool) -> Result<()> {
     let client = ApiClient::new(server)?;
@@ -46,11 +48,12 @@ async fn start_watch(
         println!("Starting watch on: {}", path);
     }
 
-    let url = format!("/api/project/{}/watch/start", project_id);
-    let response: serde_json::Value = client.post(&url, &request).await?;
+    let response: StartWatchResponse = client
+        .post(&cce_api::paths::watch_start(project_id), &request)
+        .await?;
 
-    if response["success"].as_bool().unwrap_or(false) {
-        print_success(&format!("Watch started on: {}", path));
+    if response.success {
+        print_success(&format!("Watch started on: {}", response.path));
     } else {
         print_error("Failed to start watch");
     }
@@ -63,10 +66,14 @@ async fn stop_watch(client: &ApiClient, project_id: i64, verbose: bool) -> Resul
         println!("Stopping watch...");
     }
 
-    let url = format!("/api/project/{}/watch/stop", project_id);
-    let response: serde_json::Value = client.post(&url, &serde_json::json!({})).await?;
+    let response: StopWatchResponse = client
+        .post(
+            &cce_api::paths::watch_stop(project_id),
+            &serde_json::json!({}),
+        )
+        .await?;
 
-    if response["success"].as_bool().unwrap_or(false) {
+    if response.success {
         print_success("Watch stopped");
     } else {
         print_error("Failed to stop watch");
@@ -80,8 +87,9 @@ async fn watch_status(client: &ApiClient, project_id: i64, verbose: bool) -> Res
         println!("Fetching watch status...");
     }
 
-    let url = format!("/api/project/{}/watch/status", project_id);
-    let response: WatchStatusResponse = client.get(&url).await?;
+    let response: WatchStatusResponse = client
+        .get(&cce_api::paths::watch_status(project_id))
+        .await?;
 
     if response.success {
         let status = &response.status;

@@ -16,8 +16,8 @@ pub enum MetricsFormat {
 
 pub async fn execute(format: MetricsFormat, server: &str, verbose: bool) -> Result<()> {
     let path = match format {
-        MetricsFormat::Prometheus => "/api/metrics",
-        MetricsFormat::Json => "/api/metrics/json",
+        MetricsFormat::Prometheus => cce_api::paths::METRICS,
+        MetricsFormat::Json => cce_api::paths::METRICS_JSON,
     };
 
     if verbose {
@@ -59,7 +59,8 @@ pub async fn execute_history(
     let to = to.unwrap_or(&default_to);
 
     let mut path = format!(
-        "/api/metrics/history?from={}&to={}",
+        "{}?from={}&to={}",
+        cce_api::paths::METRICS_HISTORY,
         urlencoding::encode(from),
         urlencoding::encode(to)
     );
@@ -147,8 +148,10 @@ pub async fn execute_cleanup(
         }
     }
 
-    let response: serde_json::Value = if all {
-        client.delete("/api/metrics/cleanup?all=true").await?
+    let response: cce_api::models::MetricsCleanupResponse = if all {
+        client
+            .delete(&(cce_api::paths::METRICS_CLEANUP.to_string() + "?all=true"))
+            .await?
     } else {
         let before_timestamp = if let Some(before) = before {
             before.to_string()
@@ -157,18 +160,18 @@ pub async fn execute_cleanup(
         };
         client
             .delete(&format!(
-                "/api/metrics/cleanup?before={}",
+                "{}?before={}",
+                cce_api::paths::METRICS_CLEANUP,
                 urlencoding::encode(&before_timestamp)
             ))
             .await?
     };
 
-    if response["success"].as_bool().unwrap_or(false) {
-        if let Some(deleted) = response["deleted_count"].as_u64() {
-            print_success(&format!("Cleaned up {} metrics records", deleted));
-        } else {
-            print_success("Metrics cleanup completed");
-        }
+    if response.success {
+        print_success(&format!(
+            "Cleaned up {} metrics records",
+            response.deleted_count
+        ));
     } else {
         print_error("Failed to clean up metrics");
     }

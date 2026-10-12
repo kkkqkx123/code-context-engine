@@ -11,6 +11,7 @@ use super::handlers;
 use super::middleware::metrics_middleware;
 use super::openapi::openapi_json;
 use super::state::AppState;
+use cce_api::paths as api_paths;
 use cce_metrics::HttpMetrics;
 
 /// Serve the OpenAPI document (debug builds only).
@@ -25,295 +26,303 @@ async fn serve_openapi() -> ([(&'static str, &'static str); 1], String) {
 pub(crate) fn api_routes() -> Router<AppState> {
     let mut router = Router::new()
         // Index operations
-        .route("/api/index", post(handlers::index::handle_index))
+        .route(api_paths::INDEX, post(handlers::index::handle_index))
         .route(
-            "/api/index/incremental",
+            api_paths::INDEX_INCREMENTAL,
             post(handlers::index::handle_incremental),
         )
-        .route("/api/parse", post(handlers::index::handle_parse))
+        .route(api_paths::PARSE, post(handlers::index::handle_parse))
         // Summary generation (temporary, no storage)
-        .route("/api/summary", post(handlers::summary::handle_summary))
+        .route(api_paths::SUMMARY, post(handlers::summary::handle_summary))
         // Storage management
-        .route("/api/index", delete(handlers::storage::handle_clear_index))
         .route(
-            "/api/index/file/{path}",
+            api_paths::INDEX,
+            delete(handlers::storage::handle_clear_index),
+        )
+        .route(
+            api_paths::INDEX_FILE_TEMPLATE,
             delete(handlers::storage::handle_delete_file),
         )
         .route(
-            "/api/index/entity/{id}",
+            api_paths::INDEX_ENTITY_TEMPLATE,
             delete(handlers::storage::handle_delete_entity),
         )
         .route(
-            "/api/index/batch",
+            api_paths::INDEX_BATCH,
             delete(handlers::storage::handle_batch_delete),
         )
         .route(
-            "/api/index/stats",
+            api_paths::INDEX_STATS,
             get(handlers::storage::handle_index_stats),
         )
         .route(
-            "/api/storage/status",
+            api_paths::STORAGE_STATUS,
             get(handlers::storage::handle_storage_status),
         )
         // Project management
         .route(
-            "/api/project",
+            api_paths::PROJECT,
             post(handlers::project::handle_create_project),
         )
-        .route("/api/project", get(handlers::project::handle_list_projects))
         .route(
-            "/api/project/{id}",
+            api_paths::PROJECT,
+            get(handlers::project::handle_list_projects),
+        )
+        .route(
+            api_paths::PROJECT_DETAIL_TEMPLATE,
             get(handlers::project::handle_get_project),
         )
         .route(
-            "/api/project/{id}",
+            api_paths::PROJECT_DETAIL_TEMPLATE,
             put(handlers::project::handle_update_project),
         )
         .route(
-            "/api/project/{id}",
+            api_paths::PROJECT_DETAIL_TEMPLATE,
             delete(handlers::project::handle_delete_project),
         )
         .route(
-            "/api/project/{id}/index",
+            api_paths::PROJECT_INDEX_TEMPLATE,
             post(handlers::project::handle_project_index),
         )
         .route(
-            "/api/project/{id}/dead-letter/retry",
-            post(handlers::project::handle_dead_letter_retry),
-        )
-        .route(
-            "/api/project/{id}/dead-letters",
+            api_paths::PROJECT_DEAD_LETTERS_TEMPLATE,
             get(handlers::project::handle_dead_letter_list),
         )
         .route(
-            "/api/project/{id}/dead-letters/retry",
+            api_paths::PROJECT_DEAD_LETTERS_RETRY_TEMPLATE,
             post(handlers::project::handle_dead_letter_files_retry),
         )
         .route(
-            "/api/project/{id}/dead-letters/acknowledge",
+            api_paths::PROJECT_DEAD_LETTERS_ACK_TEMPLATE,
             post(handlers::project::handle_dead_letter_acknowledge),
         )
         .route(
-            "/api/project/{id}/reload",
+            api_paths::PROJECT_RELOAD_TEMPLATE,
             post(handlers::project::handle_reload_project_config),
         )
         .route(
-            "/api/project/{id}/config",
+            api_paths::PROJECT_CONFIG_TEMPLATE,
             get(handlers::project::handle_get_project_config)
                 .put(handlers::project::handle_update_project_config),
         )
         // Project-scoped entity queries
         .route(
-            "/api/project/{project_id}/function/{id}",
+            api_paths::FUNCTION_DETAIL_TEMPLATE,
             get(handlers::entity::handle_function_detail),
         )
         .route(
-            "/api/project/{project_id}/function/{id}/calls",
+            api_paths::FUNCTION_CALLS_TEMPLATE,
             get(handlers::entity::handle_function_calls),
         )
         .route(
-            "/api/project/{project_id}/function/{id}/callers",
+            api_paths::FUNCTION_CALLERS_TEMPLATE,
             get(handlers::entity::handle_function_callers),
         )
         .route(
-            "/api/project/{project_id}/call-chain/{id}",
+            api_paths::CALL_CHAIN_TEMPLATE,
             get(handlers::entity::handle_call_chain),
         )
         .route(
-            "/api/project/{project_id}/call-path",
+            api_paths::CALL_PATH_TEMPLATE,
             get(handlers::entity::handle_call_path),
         )
         .route(
-            "/api/project/{project_id}/class/{id}/inheritance",
+            api_paths::CLASS_INHERITANCE_TEMPLATE,
             get(handlers::entity::handle_class_inheritance),
         )
         .route(
-            "/api/project/{project_id}/class/{id}/implementations",
+            api_paths::CLASS_IMPLEMENTATIONS_TEMPLATE,
             get(handlers::entity::handle_class_implementations),
         )
         // Classification queries
         .route(
-            "/api/project/{project_id}/relations/classification/stats",
+            api_paths::CLASSIFICATION_STATS_TEMPLATE,
             get(handlers::entity::get_classification_stats),
         )
         .route(
-            "/api/project/{project_id}/relations/classification/{classification}",
+            api_paths::CLASSIFICATION_DETAIL_TEMPLATE,
             get(handlers::entity::get_relations_by_classification),
         )
         // Graph traversal (independent retrieval path)
         .route(
-            "/api/project/{project_id}/graph/ego",
+            api_paths::GRAPH_EGO_TEMPLATE,
             get(handlers::graph::handle_graph_ego),
         )
         .route(
-            "/api/project/{project_id}/graph/path",
+            api_paths::GRAPH_PATH_TEMPLATE,
             get(handlers::graph::handle_graph_path),
         )
         .route(
-            "/api/project/{project_id}/graph/subgraph",
+            api_paths::GRAPH_SUBGRAPH_TEMPLATE,
             get(handlers::graph::handle_graph_subgraph),
         )
         .route(
-            "/api/project/{project_id}/graph/components",
+            api_paths::GRAPH_COMPONENTS_TEMPLATE,
             get(handlers::graph::handle_graph_components),
         )
         .route(
-            "/api/project/{project_id}/graph/export",
+            api_paths::GRAPH_EXPORT_TEMPLATE,
             get(handlers::graph::handle_graph_export),
         )
         .route(
-            "/api/project/{project_id}/graph/impact",
+            api_paths::GRAPH_IMPACT_TEMPLATE,
             get(handlers::graph::handle_graph_impact),
         )
         .route(
-            "/api/project/{project_id}/graph/entity-impact",
+            api_paths::GRAPH_ENTITY_IMPACT_TEMPLATE,
             get(handlers::graph::handle_graph_entity_impact),
         )
         .route(
-            "/api/project/{project_id}/graph/cycles",
+            api_paths::GRAPH_CYCLES_TEMPLATE,
             get(handlers::graph::handle_graph_cycles),
         )
         .route(
-            "/api/project/{project_id}/graph/structural",
+            api_paths::GRAPH_STRUCTURAL_TEMPLATE,
             get(handlers::graph::handle_graph_structural),
         )
         .route(
-            "/api/project/{project_id}/graph/module",
+            api_paths::GRAPH_MODULE_TEMPLATE,
             get(handlers::graph::handle_graph_module),
         )
         // Metrics
-        .route("/api/metrics", get(handlers::metrics::handle_get_metrics))
         .route(
-            "/api/metrics/json",
+            api_paths::METRICS,
+            get(handlers::metrics::handle_get_metrics),
+        )
+        .route(
+            api_paths::METRICS_JSON,
             get(handlers::metrics::handle_get_metrics_json),
         )
         .route(
-            "/api/metrics/history",
+            api_paths::METRICS_HISTORY,
             get(handlers::metrics::handle_get_metrics_history),
         )
         .route(
-            "/api/metrics/cleanup",
+            api_paths::METRICS_CLEANUP,
             delete(handlers::metrics::handle_cleanup_metrics),
         )
         // Watch (hot reload) - project-scoped
         .route(
-            "/api/project/{project_id}/watch/start",
+            api_paths::WATCH_START_TEMPLATE,
             post(handlers::watch::handle_start_watch),
         )
         .route(
-            "/api/project/{project_id}/watch/stop",
+            api_paths::WATCH_STOP_TEMPLATE,
             post(handlers::watch::handle_stop_watch),
         )
         .route(
-            "/api/project/{project_id}/watch/status",
+            api_paths::WATCH_STATUS_TEMPLATE,
             get(handlers::watch::handle_watch_status),
         )
         // Configuration management
         .route(
-            "/api/config/reload",
+            api_paths::CONFIG_RELOAD,
             post(handlers::config::handle_config_reload),
         )
-        .route("/api/config", get(handlers::config::handle_config_info))
         .route(
-            "/api/config/validate",
+            api_paths::CONFIG_INFO,
+            get(handlers::config::handle_config_info),
+        )
+        .route(
+            api_paths::CONFIG_VALIDATE,
             get(handlers::config::handle_config_validate),
         )
         // Qdrant process lifecycle management
         .route(
-            "/api/qdrant/process/status",
+            api_paths::QDRANT_PROCESS_STATUS,
             get(handlers::qdrant_admin::handle_qdrant_process_status),
         )
         .route(
-            "/api/qdrant/process/start",
+            api_paths::QDRANT_PROCESS_START,
             post(handlers::qdrant_admin::handle_qdrant_process_start),
         )
         .route(
-            "/api/qdrant/process/stop",
+            api_paths::QDRANT_PROCESS_STOP,
             post(handlers::qdrant_admin::handle_qdrant_process_stop),
         )
         .route(
-            "/api/qdrant/process/restart",
+            api_paths::QDRANT_PROCESS_RESTART,
             post(handlers::qdrant_admin::handle_qdrant_process_restart),
         )
         // Search
-        .route("/api/search", post(handlers::search::handle_search))
+        .route(api_paths::SEARCH, post(handlers::search::handle_search))
         // Aggregated search (multi-query with parallel retrieval)
         .route(
-            "/api/search/aggregated",
+            api_paths::SEARCH_AGGREGATED,
             post(handlers::search::handle_aggregated_search),
         )
         // Entity search (FTS5)
         .route(
-            "/api/entities/search",
+            api_paths::ENTITY_SEARCH,
             post(handlers::entity_search::handle_entity_search),
         )
         // Tools API
         .route(
-            "/api/tools/compress",
+            api_paths::TOOLS_COMPRESS,
             post(handlers::tools::handle_compress),
         )
         .route(
-            "/api/tools/compress/batch",
+            api_paths::TOOLS_COMPRESS_BATCH,
             post(handlers::tools::handle_compress_batch),
         )
         .route(
-            "/api/tools/diagnose",
+            api_paths::TOOLS_DIAGNOSE,
             post(handlers::tools::handle_diagnose),
         )
-        .route("/api/tools/fold", post(handlers::tools::handle_fold))
+        .route(api_paths::TOOLS_FOLD, post(handlers::tools::handle_fold))
         .route(
-            "/api/tools/fold/batch",
+            api_paths::TOOLS_FOLD_BATCH,
             post(handlers::tools::handle_fold_batch),
         )
         .route(
-            "/api/tools/keyword-search",
+            api_paths::TOOLS_KEYWORD_SEARCH,
             post(handlers::tools::handle_keyword_search),
         )
         .route(
-            "/api/tools/symbols",
+            api_paths::TOOLS_SYMBOLS,
             post(handlers::tools::handle_get_symbols),
         )
         .route(
-            "/api/tools/references",
+            api_paths::TOOLS_REFERENCES,
             post(handlers::tools::handle_find_references),
         )
         .route(
-            "/api/tools/definition",
+            api_paths::TOOLS_DEFINITION,
             post(handlers::tools::handle_goto_definition),
         )
         // Health monitoring
-        .route("/api/health", get(handlers::health::handle_health))
+        .route(api_paths::HEALTH, get(handlers::health::handle_health))
         .route(
-            "/api/health/qdrant",
+            api_paths::HEALTH_QDRANT,
             get(handlers::health::handle_qdrant_health),
         )
         .route(
-            "/api/health/embedding",
+            api_paths::HEALTH_EMBEDDING,
             get(handlers::health::handle_embedding_health),
         )
         .route(
-            "/api/health/bm25",
+            api_paths::HEALTH_BM25,
             get(handlers::health::handle_bm25_health),
         )
         // Retry queue management
         .route(
-            "/api/retry-queue",
+            api_paths::RETRY_QUEUE,
             get(handlers::health::handle_retry_queue_status),
         )
         .route(
-            "/api/retry-queue/dead",
+            api_paths::RETRY_QUEUE_DEAD,
             get(handlers::health::handle_retry_queue_dead_list),
         )
         .route(
-            "/api/retry-queue/dead",
+            api_paths::RETRY_QUEUE_DEAD,
             delete(handlers::health::handle_retry_queue_dead_clear),
         )
         .route(
-            "/api/retry-queue/process",
+            api_paths::RETRY_QUEUE_PROCESS,
             post(handlers::health::handle_retry_queue_process),
         )
         .route(
-            "/api/retry-queue",
+            api_paths::RETRY_QUEUE,
             delete(handlers::health::handle_retry_queue_clear),
         );
 

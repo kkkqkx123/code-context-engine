@@ -13,8 +13,8 @@ use cce_types::language::Language;
 use cce_types::{ImportTable, ParseError};
 use tree_sitter::Tree;
 
-use crate::parser::extractor::create_extractor_with_registry;
 use crate::parser::extractor::create_extractor;
+use crate::parser::extractor::create_extractor_with_registry;
 
 mod common;
 mod dart;
@@ -272,10 +272,7 @@ pub fn extract_reexports_with_registry(
         return Vec::new();
     };
     let mut exports = extractor.extract_exports(tree, source);
-    if exports.is_empty()
-        && registry.is_some()
-        && !matches!(language, Language::Custom(_))
-    {
+    if exports.is_empty() && registry.is_some() && !matches!(language, Language::Custom(_)) {
         if let Some(builtin) = create_extractor(*language) {
             exports = builtin.extract_exports(tree, source);
         }

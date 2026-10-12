@@ -36,7 +36,10 @@ pub async fn execute(
     };
 
     match client
-        .post::<BatchCompressRequest, BatchCompressResponse>("/api/tools/compress/batch", &request)
+        .post::<BatchCompressRequest, BatchCompressResponse>(
+            cce_api::paths::TOOLS_COMPRESS_BATCH,
+            &request,
+        )
         .await
     {
         Ok(response) => {

@@ -16,7 +16,7 @@ pub use config::{
 };
 pub use indexing::{
     handle_dead_letter_acknowledge, handle_dead_letter_files_retry, handle_dead_letter_list,
-    handle_dead_letter_retry, handle_project_index,
+    handle_project_index,
 };
 pub use management::{handle_create_project, handle_delete_project, handle_update_project};
 pub use query::{handle_get_project, handle_list_projects};

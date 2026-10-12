@@ -7,9 +7,14 @@ use anyhow::Result;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success, print_table, truncate};
 use cce_api::models::{
-    CreateProjectRequest, ProjectConfig, ProjectDetailResponse, ProjectListResponse,
-    UpdateProjectRequest,
+    CreateProjectRequest, ProjectConfig, ProjectConfigReloadResponse, ProjectConfigUpdateRequest,
+    ProjectConfigUpdateResponse, ProjectDeleteResponse, ProjectDetailResponse,
+    ProjectIndexResponse, ProjectListResponse, UpdateProjectRequest,
 };
+
+fn project_path(id: &str) -> String {
+    cce_api::paths::PROJECT_DETAIL_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id)
+}
 
 pub async fn execute(cmd: &ProjectCommands, server: &str, verbose: bool) -> Result<()> {
     let client = ApiClient::new(server)?;
@@ -59,7 +64,7 @@ async fn create_project(
         println!("Creating project at: {}", path);
     }
 
-    let response: ProjectDetailResponse = client.post("/api/project", &request).await?;
+    let response: ProjectDetailResponse = client.post(cce_api::paths::PROJECT, &request).await?;
 
     if response.success {
         print_success(&format!("Project created: {}", response.project.name));
@@ -77,7 +82,7 @@ async fn list_projects(client: &ApiClient, verbose: bool) -> Result<()> {
         println!("Fetching project list...");
     }
 
-    let response: ProjectListResponse = client.get("/api/project").await?;
+    let response: ProjectListResponse = client.get(cce_api::paths::PROJECT).await?;
 
     if response.success {
         println!("Projects ({} total):", response.total);
@@ -115,7 +120,7 @@ async fn get_project(client: &ApiClient, id: &str, verbose: bool) -> Result<()> 
         println!("Fetching project: {}", id);
     }
 
-    let path = format!("/api/project/{}", id);
+    let path = project_path(id);
     let response: ProjectDetailResponse = client.get(&path).await?;
 
     if response.success {
@@ -144,7 +149,7 @@ async fn update_project(
         println!("Updating project: {}", id);
     }
 
-    let path = format!("/api/project/{}", id);
+    let path = project_path(id);
     let response: ProjectDetailResponse = client.put(&path, &request).await?;
 
     if response.success {
@@ -163,11 +168,11 @@ async fn delete_project(client: &ApiClient, id: &str, verbose: bool) -> Result<(
         println!("Deleting project: {}", id);
     }
 
-    let path = format!("/api/project/{}", id);
-    let response: serde_json::Value = client.delete(&path).await?;
+    let path = project_path(id);
+    let response: ProjectDeleteResponse = client.delete(&path).await?;
 
-    if response["success"].as_bool().unwrap_or(false) {
-        print_success(&format!("Project {} deleted", id));
+    if response.success {
+        print_success(&format!("Project {} deleted", response.project_id));
     } else {
         print_error("Failed to delete project");
     }
@@ -180,14 +185,14 @@ async fn index_project(client: &ApiClient, id: &str, verbose: bool) -> Result<()
         println!("Indexing project: {}", id);
     }
 
-    let path = format!("/api/project/{}/index", id);
-    let response: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
+    let path =
+        cce_api::paths::PROJECT_INDEX_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id);
+    let response: ProjectIndexResponse = client.post(&path, &serde_json::json!({})).await?;
 
-    if response["success"].as_bool().unwrap_or(false) {
+    if response.success {
         print_success(&format!(
             "Project indexed: {} files, {} entities",
-            response["indexed_files"].as_u64().unwrap_or(0),
-            response["total_entities"].as_u64().unwrap_or(0)
+            response.indexed_files, response.total_entities
         ));
     } else {
         print_error("Failed to index project");
@@ -215,14 +220,16 @@ async fn reload_project_config(client: &ApiClient, id: &str, verbose: bool) -> R
         println!("Reloading project config: {}", id);
     }
 
-    let path = format!("/api/project/{}/reload", id);
-    let response: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
+    let path =
+        cce_api::paths::PROJECT_RELOAD_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id);
+    let response: ProjectConfigReloadResponse = client.post(&path, &serde_json::json!({})).await?;
 
-    if response["success"].as_bool().unwrap_or(false) {
-        print_success(&format!("Project {} configuration reloaded", id));
-        if let Some(message) = response["message"].as_str() {
-            println!("  {}", message);
-        }
+    if response.success {
+        print_success(&format!(
+            "Project {} configuration reloaded",
+            response.project_id
+        ));
+        println!("  {}", response.message);
     } else {
         print_error("Failed to reload project configuration");
     }
@@ -235,14 +242,16 @@ async fn update_project_config(client: &ApiClient, id: &str, verbose: bool) -> R
         println!("Updating project config: {}", id);
     }
 
-    let path = format!("/api/project/{}/config", id);
-    let response: serde_json::Value = client.put(&path, &serde_json::json!({})).await?;
+    let path =
+        cce_api::paths::PROJECT_CONFIG_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id);
+    let request = ProjectConfigUpdateRequest {
+        config: serde_json::json!({}),
+    };
+    let response: ProjectConfigUpdateResponse = client.put(&path, &request).await?;
 
-    if response["success"].as_bool().unwrap_or(false) {
+    if response.success {
         print_success(&format!("Project {} configuration updated", id));
-        if let Some(message) = response["message"].as_str() {
-            println!("  {}", message);
-        }
+        println!("  {}", response.message);
     } else {
         print_error("Failed to update project configuration");
     }

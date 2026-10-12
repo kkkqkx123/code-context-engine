@@ -11,8 +11,8 @@ use crate::api::state::AppState;
 
 /// Run the existing full index pipeline over the staged project mirror.
 #[utoipa::path(
-    post, path = "/api/project/{id}/ingest/commit", tag = "Ingest",
-    params(("id" = i64, Path, description = "Project id")),
+    post, path = "/api/project/{project_id}/ingest/commit", tag = "Ingest",
+    params(("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = IngestCommitResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),

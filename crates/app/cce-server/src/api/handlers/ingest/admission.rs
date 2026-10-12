@@ -3,46 +3,7 @@
 use axum::extract::{Extension, State};
 
 use crate::api::state::AppState;
-
-/// Per-token audit entry for persistent admission observability.
-#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
-pub struct TokenAuditEntry {
-    /// Log-safe token fingerprint.
-    pub fingerprint: String,
-    /// Bound projects as comma separated ids.
-    pub projects: String,
-    /// Configured byte quota, if any.
-    pub quota_bytes: Option<i64>,
-    /// Stored bytes accepted.
-    pub bytes_used: i64,
-    /// Admitted batches.
-    pub admitted: i64,
-    /// Rejections by cause.
-    pub auth_rejections: i64,
-    /// Rejections by cause.
-    pub scope_rejections: i64,
-    /// Rejections by cause.
-    pub rate_rejections: i64,
-    /// Rejections by cause.
-    pub body_rejections: i64,
-    /// Rejections for exceeding the byte quota.
-    pub quota_rejections: i64,
-    /// Last use as seconds since the unix epoch, if any.
-    pub last_used: Option<i64>,
-    /// Last rejection reason, if any.
-    pub last_reject_reason: Option<String>,
-}
-
-/// Admission counters with per-token persistent audit.
-#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
-pub struct AdmissionStatsResponse {
-    /// Global in-memory counters.
-    #[serde(flatten)]
-    pub global: cce_admission::AdmissionStats,
-    /// Per-token durable audit rows.
-    #[serde(default)]
-    pub tokens: Vec<TokenAuditEntry>,
-}
+use cce_api::models::{AdmissionGlobalStats, AdmissionStatsResponse, TokenAuditEntry};
 
 /// Render admission counters with per-token durable audit for rejection
 /// analysis. Usage and last-use time survive restarts through the metadata
@@ -57,7 +18,15 @@ pub async fn handle_admission_stats(
     State(state): State<AppState>,
     Extension(metrics): Extension<std::sync::Arc<cce_admission::AdmissionMetrics>>,
 ) -> axum::Json<AdmissionStatsResponse> {
-    let global = metrics.snapshot();
+    let snapshot = metrics.snapshot();
+    let global = AdmissionGlobalStats {
+        admitted: snapshot.admitted,
+        auth_rejections: snapshot.auth_rejections,
+        scope_rejections: snapshot.scope_rejections,
+        rate_rejections: snapshot.rate_rejections,
+        body_rejections: snapshot.body_rejections,
+        quota_rejections: snapshot.quota_rejections,
+    };
     let mut tokens = Vec::new();
     if let Some(store) = state.engine.metadata_store()
         && let Ok(records) = store.as_ref().with_transaction(|tx| {

@@ -24,16 +24,21 @@ pub async fn execute(cmd: &QdrantCommands, server: &str, verbose: bool) -> Resul
                 println!("Qdrant process action: {}", action_str);
             }
 
-            let url = format!("/api/qdrant/process/{}", action_str);
+            let path = match action_str {
+                "status" => cce_api::paths::QDRANT_PROCESS_STATUS.to_string(),
+                "start" => cce_api::paths::QDRANT_PROCESS_START.to_string(),
+                "stop" => cce_api::paths::QDRANT_PROCESS_STOP.to_string(),
+                _ => cce_api::paths::QDRANT_PROCESS_RESTART.to_string(),
+            };
 
             if action_str == "status" {
-                let response: QdrantProcessStatusResponse = client.get(&url).await?;
+                let response: QdrantProcessStatusResponse = client.get(&path).await?;
                 println!("Qdrant process status:");
                 println!("  Managed: {}", response.managed);
                 println!("  Status:  {}", format_status(&response.status));
             } else {
                 let response: QdrantActionResponse =
-                    client.post(&url, &serde_json::json!({})).await?;
+                    client.post(&path, &serde_json::json!({})).await?;
                 if response.success {
                     print_success(&response.message);
                 } else {

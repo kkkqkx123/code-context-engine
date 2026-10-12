@@ -6,11 +6,11 @@
 
 use axum::Json;
 
-use cce_api::models::{DiagnoseApiResponse, DiagnoseRequest, DiagnoseResult};
+use cce_api::models::{DiagnoseApiResponse, DiagnoseRequest};
 use cce_orchestrator::{AstDiagnosis, DiagnosisRequest};
 use cce_types::language::Language;
 
-use super::to_api_model;
+use super::diagnose_result_from_orch;
 
 /// Handle AST diagnosis
 ///
@@ -42,18 +42,11 @@ pub async fn handle_diagnose(Json(request): Json<DiagnoseRequest>) -> Json<Diagn
     req = req.with_ast(request.include_ast);
 
     match diagnosis.diagnose(req) {
-        Ok(response) => match to_api_model::<_, DiagnoseResult>(response) {
-            Ok(result) => Json(DiagnoseApiResponse {
-                success: true,
-                result: Some(result),
-                error: None,
-            }),
-            Err(e) => Json(DiagnoseApiResponse {
-                success: false,
-                result: None,
-                error: Some(format!("Failed to serialize response: {}", e)),
-            }),
-        },
+        Ok(response) => Json(DiagnoseApiResponse {
+            success: true,
+            result: Some(diagnose_result_from_orch(response)),
+            error: None,
+        }),
         Err(e) => Json(DiagnoseApiResponse {
             success: false,
             result: None,

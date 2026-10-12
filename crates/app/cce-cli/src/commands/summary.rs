@@ -81,7 +81,7 @@ pub async fn execute(options: SummaryOptions) -> Result<()> {
     };
 
     match client
-        .post::<SummaryRequest, SummaryResponse>("/api/summary", &request)
+        .post::<SummaryRequest, SummaryResponse>(cce_api::paths::SUMMARY, &request)
         .await
     {
         Ok(response) => {

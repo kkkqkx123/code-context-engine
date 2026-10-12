@@ -4,11 +4,20 @@
 //! stays a thin adapter over the same capabilities used by the HTTP API and the
 //! CLI. `project_id` is an explicit tool argument for project-scoped tools to
 //! match the engine's per-project lazy-loading model. The stateless `fold`
-//! tool is the exception and carries no `project_id`.
+//! tools are the exception and carry no `project_id`.
+//!
+//! Item shapes reuse the shared API DTO field names so HTTP and MCP callers
+//! observe the same `SearchResultItem`, `KeywordSearchItem`, and fold payloads.
+//! The MCP transport returns tool payloads without the HTTP success envelope.
+//! Covered here: search, keyword search, entity callees/callers, call chain,
+//! project listing, full and incremental indexing, single and batch fold, and
+//! engine health. Graph traversal, storage management, metrics history, watch,
+//! configuration, and ingest entries remain HTTP-only and are not exposed here.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use cce_api::models::KeywordTermOperator;
 use cce_codegraph::index::snapshot_query::SnapshotSymbolQueryOps;
 use cce_orchestrator::query::RelationQueryOptions;
 use cce_orchestrator::query::types::SearchSources;
@@ -68,6 +77,12 @@ pub struct KeywordSearchArgs {
     /// Maximum number of results (default 10).
     #[serde(default)]
     pub top_n: Option<usize>,
+    /// Number of results to skip for pagination (default 0).
+    #[serde(default)]
+    pub offset: Option<usize>,
+    /// Term operator combining query terms: "or" (default) or "and".
+    #[serde(default)]
+    pub term_operator: Option<String>,
 }
 
 /// Arguments identifying an entity by ID.
@@ -86,7 +101,9 @@ pub struct CallChainArgs {
     pub project_id: i64,
     /// Stable symbol ID (for example `sym_…`).
     pub entity_id: String,
-    /// Traversal direction: "forward" (callees, default) or "backward" (callers).
+    /// Traversal direction: "forward"/"down" (callees, default) or
+    /// "backward"/"up" (callers). The HTTP surface uses down/up while MCP
+    /// historically used forward/backward; all four spellings are accepted.
     #[serde(default)]
     pub direction: Option<String>,
     /// Maximum traversal depth (default 3).
@@ -148,6 +165,28 @@ pub struct FoldArgs {
     /// Optional fold mode ("detailed" or "minimal").
     #[serde(default)]
     pub mode: Option<String>,
+}
+
+/// One batch fold entry mirroring the HTTP batch fold item shape.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FoldBatchItemArgs {
+    /// Caller-provided stable identifier echoed in the paired result.
+    pub id: String,
+    /// Raw source text to fold.
+    pub text: String,
+    /// Optional language hint.
+    #[serde(default)]
+    pub language: Option<String>,
+    /// Optional file name hint.
+    #[serde(default)]
+    pub file_name: Option<String>,
+}
+
+/// Arguments for stateless batch file folding (no project context).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FoldBatchArgs {
+    /// Entries to fold.
+    pub items: Vec<FoldBatchItemArgs>,
 }
 
 #[tool_router]
@@ -230,28 +269,44 @@ impl McpServerHandler {
             )]));
         };
         let tool = KeywordSearchTool::new(self.state.engine.fulltext_clone()).with_sqlite(sqlite);
+        let term_operator = match args.term_operator.as_deref().map(str::to_ascii_lowercase) {
+            Some(operator) if operator == "and" => KeywordTermOperator::And,
+            _ => KeywordTermOperator::Or,
+        };
         let request = cce_orchestrator::KeywordSearchRequest {
             query: args.query.clone(),
             top_n: args.top_n.unwrap_or(10),
             project_id: args.project_id,
             epoch: None,
-            offset: 0,
-            term_operator: Default::default(),
+            offset: args.offset.unwrap_or(0),
+            term_operator: match term_operator {
+                KeywordTermOperator::Or => cce_storage_bm25::TermOperator::Or,
+                KeywordTermOperator::And => cce_storage_bm25::TermOperator::And,
+            },
         };
         match tool.search(request).await {
             Ok(response) => {
-                let items: Vec<Value> = response
+                let results: Vec<Value> = response
                     .results
                     .iter()
                     .map(|item| {
+                        let api_item = cce_api::models::KeywordSearchItem {
+                            chunk_id: item.chunk_id.clone(),
+                            score: item.score,
+                            file_path: item.file_path.clone(),
+                            title: item.title.clone(),
+                            snippet: item.snippet.clone(),
+                            start_line: item.start_line,
+                            end_line: item.end_line,
+                        };
                         json!({
-                            "chunk_id": item.chunk_id,
-                            "score": item.score,
-                            "file_path": item.file_path,
-                            "title": item.title,
-                            "snippet": item.snippet,
-                            "start_line": item.start_line,
-                            "end_line": item.end_line,
+                            "chunk_id": api_item.chunk_id,
+                            "score": api_item.score,
+                            "file_path": api_item.file_path,
+                            "title": api_item.title,
+                            "snippet": api_item.snippet,
+                            "start_line": api_item.start_line,
+                            "end_line": api_item.end_line,
                         })
                     })
                     .collect();
@@ -259,7 +314,7 @@ impl McpServerHandler {
                     json!({
                         "query": response.query,
                         "total": response.total,
-                        "items": items,
+                        "results": results,
                     })
                     .to_string(),
                 )]))
@@ -354,7 +409,7 @@ impl McpServerHandler {
     }
 
     #[tool(
-        description = "Traverse the call chain from an entity in one direction (forward = callees, backward = callers)."
+        description = "Traverse the call chain from an entity in one direction (forward/down = callees, backward/up = callers)."
     )]
     async fn call_chain(
         &self,
@@ -380,10 +435,13 @@ impl McpServerHandler {
         };
         let max_depth = args.max_depth.unwrap_or(3);
         let options = call_domain_relation_options().with_max_depth(max_depth);
-        let backward = matches!(
-            args.direction.as_deref().map(str::to_ascii_lowercase),
-            Some(ref direction) if direction == "backward"
-        );
+        let direction = args
+            .direction
+            .as_deref()
+            .unwrap_or("forward")
+            .to_ascii_lowercase();
+        let backward = matches!(direction.as_str(), "backward" | "up" | "callers");
+        let canonical = if backward { "backward" } else { "forward" };
         let result = if backward {
             searcher.query_backward(entity_id, &options)
         } else {
@@ -407,7 +465,7 @@ impl McpServerHandler {
                 Ok(CallToolResult::success(vec![ContentBlock::text(
                     json!({
                         "entity_id": args.entity_id,
-                        "direction": if backward { "backward" } else { "forward" },
+                        "direction": canonical,
                         "max_depth": max_depth,
                         "nodes": items,
                     })
@@ -628,6 +686,46 @@ impl McpServerHandler {
                 "dropped_sections": folded.dropped_sections,
             })
             .to_string(),
+        )]))
+    }
+
+    #[tool(
+        description = "Fold multiple raw source texts into symbol skeletons in one call (stateless, no project_id). Each result echoes its input id."
+    )]
+    async fn fold_batch(
+        &self,
+        Parameters(args): Parameters<FoldBatchArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_enabled("fold_batch")?;
+        use cce_orchestrator::{FileFoldRequest, FileFoldTool};
+        use cce_types::language::Language;
+
+        let mut coordinator = cce_parser::parser::ParseCoordinator::new();
+        let mut results = Vec::with_capacity(args.items.len());
+        for item in &args.items {
+            let mut request = FileFoldRequest::new(item.text.clone());
+            if let Some(name) = item.language.as_deref()
+                && let Some(language) = Language::from_name(name)
+            {
+                request = request.with_language(language);
+            }
+            if let Some(file_name) = item.file_name.clone() {
+                request = request.with_file_name(file_name);
+            }
+            let folded = FileFoldTool::fold(&mut coordinator, request);
+            results.push(json!({
+                "id": item.id,
+                "folded_text": folded.folded_text,
+                "language": folded.language,
+                "structure_known": folded.structure_known,
+                "original_tokens": folded.original_tokens,
+                "folded_tokens": folded.folded_tokens,
+                "kept_sections": folded.kept_sections,
+                "dropped_sections": folded.dropped_sections,
+            }));
+        }
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({ "results": results }).to_string(),
         )]))
     }
 

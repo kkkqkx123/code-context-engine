@@ -8,10 +8,9 @@ use colored::Colorize;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{
-    CompressApiResponse, CompressRequest, DiagnoseApiResponse, DiagnoseRequest,
-    FindReferencesRequest as FindRefsRequest, FindReferencesResponse as FindRefsApiResponse,
-    GetSymbolsRequest as GetSymsRequest, GetSymbolsResponse as GetSymsApiResponse,
-    GotoDefinitionRequest as GotoDefRequest, GotoDefinitionResponse as GotoDefApiResponse,
+    BatchFoldRequest, BatchFoldResponse, CompressApiResponse, CompressRequest, DiagnoseApiResponse,
+    DiagnoseRequest, FindReferencesRequest, FindReferencesResponse, FoldRequest, FoldResponse,
+    GetSymbolsRequest, GetSymbolsResponse, GotoDefinitionRequest, GotoDefinitionResponse,
     KeywordSearchApiResponse, KeywordSearchRequest, KeywordTermOperator,
 };
 
@@ -122,11 +121,30 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             )
             .await
         }
-        ToolCommands::KeyWordSearch {
+        ToolCommands::KeywordSearch {
             query,
             project_id,
             top_n,
         } => execute_keyword_search(*project_id, query, *top_n, None, server, verbose).await,
+        ToolCommands::Fold {
+            text,
+            language,
+            file_name,
+            max_tokens,
+            mode,
+        } => {
+            execute_fold(
+                text,
+                language.as_deref(),
+                file_name.as_deref(),
+                *max_tokens,
+                mode.as_deref(),
+                server,
+                verbose,
+            )
+            .await
+        }
+        ToolCommands::FoldBatch { items } => execute_fold_batch(items, server, verbose).await,
     }
 }
 
@@ -150,7 +168,9 @@ pub async fn execute_compress(
         println!("Compressing code...");
     }
 
-    let response: CompressApiResponse = client.post("/api/tools/compress", &request).await?;
+    let response: CompressApiResponse = client
+        .post(cce_api::paths::TOOLS_COMPRESS, &request)
+        .await?;
 
     match (response.success, response.result) {
         (true, Some(result)) => {
@@ -203,7 +223,9 @@ pub async fn execute_diagnose(
         println!("Diagnosing code...");
     }
 
-    let response: DiagnoseApiResponse = client.post("/api/tools/diagnose", &request).await?;
+    let response: DiagnoseApiResponse = client
+        .post(cce_api::paths::TOOLS_DIAGNOSE, &request)
+        .await?;
 
     if let (true, Some(result)) = (response.success, response.result) {
         if result.diagnostics.is_empty() {
@@ -242,7 +264,7 @@ pub async fn execute_get_symbols(
 ) -> Result<()> {
     let client = ApiClient::new(server)?;
 
-    let request = GetSymsRequest {
+    let request = GetSymbolsRequest {
         project_id,
         paths: paths.to_vec(),
     };
@@ -251,7 +273,7 @@ pub async fn execute_get_symbols(
         println!("Getting symbols...");
     }
 
-    let response: GetSymsApiResponse = client.post("/api/tools/symbols", &request).await?;
+    let response: GetSymbolsResponse = client.post(cce_api::paths::TOOLS_SYMBOLS, &request).await?;
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
@@ -305,7 +327,7 @@ pub async fn execute_find_references(
 ) -> Result<()> {
     let client = ApiClient::new(&params.server)?;
 
-    let request = FindRefsRequest {
+    let request = FindReferencesRequest {
         project_id: params.project_id,
         path: params.path,
         line: params.line,
@@ -320,7 +342,9 @@ pub async fn execute_find_references(
         println!("Finding references...");
     }
 
-    let response: FindRefsApiResponse = client.post("/api/tools/references", &request).await?;
+    let response: FindReferencesResponse = client
+        .post(cce_api::paths::TOOLS_REFERENCES, &request)
+        .await?;
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
@@ -367,7 +391,7 @@ pub async fn execute_find_references(
 pub async fn execute_goto_definition(params: LocationParams, include_body: bool) -> Result<()> {
     let client = ApiClient::new(&params.server)?;
 
-    let request = GotoDefRequest {
+    let request = GotoDefinitionRequest {
         project_id: params.project_id,
         path: params.path,
         line: params.line,
@@ -380,7 +404,9 @@ pub async fn execute_goto_definition(params: LocationParams, include_body: bool)
         println!("Finding definition...");
     }
 
-    let response: GotoDefApiResponse = client.post("/api/tools/definition", &request).await?;
+    let response: GotoDefinitionResponse = client
+        .post(cce_api::paths::TOOLS_DEFINITION, &request)
+        .await?;
 
     if response.success {
         let Some(result) = response.result.as_ref() else {
@@ -437,8 +463,9 @@ pub async fn execute_keyword_search(
         println!("Keyword searching: {}", query);
     }
 
-    let response: KeywordSearchApiResponse =
-        client.post("/api/tools/keyword-search", &request).await?;
+    let response: KeywordSearchApiResponse = client
+        .post(cce_api::paths::TOOLS_KEYWORD_SEARCH, &request)
+        .await?;
 
     if let (true, Some(result)) = (response.success, response.result) {
         print_success(&format!("Found {} results", result.total));
@@ -465,6 +492,68 @@ pub async fn execute_keyword_search(
         print_error(&format!("Keyword search failed: {}", err));
     }
 
+    Ok(())
+}
+
+pub async fn execute_fold(
+    text: &str,
+    language: Option<&str>,
+    file_name: Option<&str>,
+    max_tokens: Option<usize>,
+    mode: Option<&str>,
+    server: &str,
+    verbose: bool,
+) -> Result<()> {
+    let client = ApiClient::new(server)?;
+    let request = FoldRequest {
+        text: text.to_string(),
+        language: language.map(str::to_string),
+        file_name: file_name.map(str::to_string),
+        max_tokens,
+        mode: mode.map(str::to_string),
+    };
+    if verbose {
+        println!("Folding file...");
+    }
+    let response: FoldResponse = client.post(cce_api::paths::TOOLS_FOLD, &request).await?;
+    if response.success {
+        print_success("Fold completed");
+        println!();
+        println!("{}", response.folded_text);
+    } else {
+        print_error("Fold failed");
+    }
+    Ok(())
+}
+
+pub async fn execute_fold_batch(items: &[String], server: &str, verbose: bool) -> Result<()> {
+    let client = ApiClient::new(server)?;
+    let request_items = items
+        .iter()
+        .enumerate()
+        .map(|(index, text)| cce_api::models::BatchFoldItem {
+            id: index.to_string(),
+            text: text.clone(),
+            language: None,
+            file_name: None,
+            max_tokens: None,
+            mode: None,
+        })
+        .collect();
+    let request = BatchFoldRequest {
+        items: request_items,
+        language: None,
+        max_tokens: None,
+        mode: None,
+        max_concurrency: None,
+    };
+    if verbose {
+        println!("Folding {} files...", items.len());
+    }
+    let response: BatchFoldResponse = client
+        .post(cce_api::paths::TOOLS_FOLD_BATCH, &request)
+        .await?;
+    print_success(&format!("Folded {} files", response.results.len()));
     Ok(())
 }
 
@@ -594,7 +683,7 @@ pub enum ToolCommands {
     },
 
     /// Keyword search (BM25-based with raw source snippets)
-    KeyWordSearch {
+    KeywordSearch {
         /// Search query
         #[arg(short, long)]
         query: String,
@@ -606,5 +695,35 @@ pub enum ToolCommands {
         /// Maximum number of results
         #[arg(short, long, default_value = "10")]
         top_n: usize,
+    },
+
+    /// Fold one file into a skeleton
+    Fold {
+        /// Raw file text
+        #[arg(short, long)]
+        text: String,
+
+        /// Language hint
+        #[arg(short, long)]
+        language: Option<String>,
+
+        /// File name hint
+        #[arg(long)]
+        file_name: Option<String>,
+
+        /// Token budget
+        #[arg(long)]
+        max_tokens: Option<usize>,
+
+        /// Fold mode
+        #[arg(long)]
+        mode: Option<String>,
+    },
+
+    /// Fold multiple files in one batch
+    FoldBatch {
+        /// Raw file texts (multiple --items flags)
+        #[arg(short, long = "items")]
+        items: Vec<String>,
     },
 }

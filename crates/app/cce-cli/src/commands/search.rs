@@ -117,7 +117,7 @@ async fn search_query(
         println!("Type: {}", params.query_type);
     }
 
-    let response: SearchResponse = client.post("/api/search", &request).await?;
+    let response: SearchResponse = client.post(cce_api::paths::SEARCH, &request).await?;
 
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);

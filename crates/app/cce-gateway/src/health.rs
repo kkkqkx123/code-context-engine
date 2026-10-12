@@ -1,4 +1,7 @@
-//! Resident health heartbeat for supervisors and health probes.
+//! Resident supply-side liveness heartbeat for supervisors and probes.
+//!
+//! This file records gateway supply progress only and never reflects remote
+//! server health; server health is inspected through the server health entries.
 
 use anyhow::{Context, Result};
 

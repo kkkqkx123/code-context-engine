@@ -3,6 +3,10 @@
 use anyhow::Result;
 
 use cce_api::http::SharedHttpClient;
+use cce_api::models::{
+    IngestBatchRequest, IngestBatchResponse, IngestEventRequest, IngestEventResponse,
+    IngestManifestRequest, IngestManifestResponse,
+};
 
 /// Minimal HTTP client carrying the admission token from the environment.
 #[derive(Debug, Clone)]
@@ -30,5 +34,41 @@ impl GatewayClient {
         body: &T,
     ) -> Result<R> {
         self.inner.post(path, body).await
+    }
+
+    /// Push an ingest manifest for the given project.
+    pub async fn post_manifest(
+        &self,
+        project_id: i64,
+        body: &IngestManifestRequest,
+    ) -> Result<IngestManifestResponse> {
+        self.inner.post_ingest_manifest(project_id, body).await
+    }
+
+    /// Push an ingest batch for the given project.
+    pub async fn post_batch(
+        &self,
+        project_id: i64,
+        body: &IngestBatchRequest,
+    ) -> Result<IngestBatchResponse> {
+        self.inner.post_ingest_batch(project_id, body).await
+    }
+
+    /// Commit a staged ingest for the given project.
+    pub async fn post_commit<R: serde::de::DeserializeOwned>(
+        &self,
+        project_id: i64,
+        body: &serde_json::Value,
+    ) -> Result<R> {
+        self.inner.post_ingest_commit(project_id, body).await
+    }
+
+    /// Push ingest events for the given project.
+    pub async fn post_event(
+        &self,
+        project_id: i64,
+        body: &IngestEventRequest,
+    ) -> Result<IngestEventResponse> {
+        self.inner.post_ingest_event(project_id, body).await
     }
 }

@@ -66,7 +66,12 @@ async fn get_function(
         println!("Fetching function: {}", function_id);
     }
 
-    let path = format!("/api/project/{}/function/{}", project_id, function_id);
+    let path = cce_api::paths::FUNCTION_DETAIL_TEMPLATE
+        .replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        )
+        .replace("{id}", &urlencoding::encode(function_id));
     let response: FunctionDetailResponse = client.get(&path).await?;
 
     if response.success {
@@ -114,7 +119,12 @@ async fn get_function_calls(
         println!("Fetching function calls: {}", function_id);
     }
 
-    let path = format!("/api/project/{}/function/{}/calls", project_id, function_id);
+    let path = cce_api::paths::FUNCTION_CALLS_TEMPLATE
+        .replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        )
+        .replace("{id}", &urlencoding::encode(function_id));
     let response: FunctionCallsResponse = client.get(&path).await?;
 
     if response.success {
@@ -153,10 +163,12 @@ async fn get_function_callers(
         println!("Fetching function callers: {}", function_id);
     }
 
-    let path = format!(
-        "/api/project/{}/function/{}/callers",
-        project_id, function_id
-    );
+    let path = cce_api::paths::FUNCTION_CALLERS_TEMPLATE
+        .replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        )
+        .replace("{id}", &urlencoding::encode(function_id));
     let response: FunctionCallersResponse = client.get(&path).await?;
 
     if response.success {
@@ -199,10 +211,13 @@ async fn get_call_chain(
         );
     }
 
-    let path = format!(
-        "/api/project/{}/call-chain/{}?direction={}",
-        project_id, function_id, direction
-    );
+    let base = cce_api::paths::CALL_CHAIN_TEMPLATE
+        .replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        )
+        .replace("{id}", &urlencoding::encode(function_id));
+    let path = format!("{}?direction={}", base, urlencoding::encode(direction));
     let response: CallChainResponse = client.get(&path).await?;
 
     if response.success {
@@ -252,9 +267,16 @@ async fn get_call_path(
         );
     }
 
+    let base = cce_api::paths::CALL_PATH_TEMPLATE.replace(
+        cce_api::paths::PROJECT_ID_PLACEHOLDER,
+        &project_id.to_string(),
+    );
     let path = format!(
-        "/api/project/{}/call-path?start_id={}&end_id={}&max_depth={}",
-        project_id, from, to, depth
+        "{}?start_id={}&end_id={}&max_depth={}",
+        base,
+        urlencoding::encode(from),
+        urlencoding::encode(to),
+        depth
     );
     let response: CallPathResponse = client.get(&path).await?;
 
@@ -294,7 +316,12 @@ async fn get_class_inheritance(
         println!("Fetching class inheritance: {}", class_id);
     }
 
-    let path = format!("/api/project/{}/class/{}/inheritance", project_id, class_id);
+    let path = cce_api::paths::CLASS_INHERITANCE_TEMPLATE
+        .replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        )
+        .replace("{id}", &urlencoding::encode(class_id));
     let response: ClassInheritanceResponse = client.get(&path).await?;
 
     if response.success {
@@ -345,10 +372,12 @@ async fn get_class_implementations(
         println!("Fetching class implementations: {}", class_id);
     }
 
-    let path = format!(
-        "/api/project/{}/class/{}/implementations",
-        project_id, class_id
-    );
+    let path = cce_api::paths::CLASS_IMPLEMENTATIONS_TEMPLATE
+        .replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        )
+        .replace("{id}", &urlencoding::encode(class_id));
     let response: ClassImplementationsResponse = client.get(&path).await?;
 
     if response.success {
@@ -408,7 +437,8 @@ async fn search_entities(
         println!("Searching entities: {}", query);
     }
 
-    let response: EntitySearchResponse = client.post("/api/entities/search", &request).await?;
+    let response: EntitySearchResponse =
+        client.post(cce_api::paths::ENTITY_SEARCH, &request).await?;
 
     if matches!(format, crate::cli::OutputFormat::Json) {
         print_output(format, &response);

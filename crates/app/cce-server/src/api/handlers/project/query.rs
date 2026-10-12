@@ -62,8 +62,8 @@ pub async fn handle_list_projects(
 
 /// Handle get single project request
 #[utoipa::path(
-    get, path = "/api/project/{id}", tag = "Project",
-    params(("id" = i64, Path, description = "Project id")),
+    get, path = "/api/project/{project_id}", tag = "Project",
+    params(("project_id" = i64, Path, description = "Project id")),
     responses(
         (status = 200, body = ProjectDetailResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),

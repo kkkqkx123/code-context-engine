@@ -1,5 +1,6 @@
 //! API models
 
+mod admission;
 mod config;
 mod entity;
 mod graph;
@@ -15,6 +16,7 @@ mod storage;
 mod tools;
 mod watch;
 
+pub use admission::*;
 pub use config::*;
 pub use entity::*;
 pub use graph::*;

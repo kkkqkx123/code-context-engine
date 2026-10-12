@@ -62,6 +62,6 @@ impl ApiClient {
         &self,
         request: &cce_api::models::AggregatedSearchRequest,
     ) -> Result<cce_api::models::SearchResponse> {
-        self.post("/api/search/aggregated", request).await
+        self.inner.post_aggregated_search(request).await
     }
 }

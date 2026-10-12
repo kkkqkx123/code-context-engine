@@ -37,7 +37,6 @@ use super::handlers;
         handlers::project::management::handle_update_project,
         handlers::project::management::handle_delete_project,
         handlers::project::indexing::handle_project_index,
-        handlers::project::indexing::handle_dead_letter_retry,
         handlers::project::indexing::handle_dead_letter_list,
         handlers::project::indexing::handle_dead_letter_files_retry,
         handlers::project::indexing::handle_dead_letter_acknowledge,
@@ -149,7 +148,6 @@ struct ApiDoc;
         handlers::project::management::handle_update_project,
         handlers::project::management::handle_delete_project,
         handlers::project::indexing::handle_project_index,
-        handlers::project::indexing::handle_dead_letter_retry,
         handlers::project::indexing::handle_dead_letter_list,
         handlers::project::indexing::handle_dead_letter_files_retry,
         handlers::project::indexing::handle_dead_letter_acknowledge,
@@ -283,7 +281,9 @@ mod tests {
     /// annotations stabilize with the admission build; local builds skip
     /// them so the local contract stays free of remote symbols.
     fn annotations_included(rel: &str) -> bool {
-        if rel == "api/handlers/ingest.rs" && !cfg!(feature = "admission") {
+        if !cfg!(feature = "admission")
+            && (rel == "api/handlers/ingest.rs" || rel.starts_with("api/handlers/ingest/"))
+        {
             return false;
         }
         true
@@ -554,10 +554,112 @@ mod tests {
     }
 
     fn first_string_literal(s: &str) -> Option<String> {
-        let start = s.find('"')?;
-        let rest = &s[start + 1..];
-        let end = rest.find('"')?;
-        Some(rest[..end].to_string())
+        if let Some(start) = s.find('"') {
+            let rest = &s[start + 1..];
+            let end = rest.find('"')?;
+            return Some(rest[..end].to_string());
+        }
+        first_api_paths_constant(s)
+    }
+
+    fn first_api_paths_constant(s: &str) -> Option<String> {
+        let marker = if let Some(pos) = s.find("cce_api::paths::") {
+            pos + "cce_api::paths::".len()
+        } else if let Some(pos) = s.find("api_paths::") {
+            pos + "api_paths::".len()
+        } else {
+            return None;
+        };
+        let rest = &s[marker..];
+        let end = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(rest.len());
+        let ident = &rest[..end];
+        Some(api_paths_value(ident)?.to_string())
+    }
+
+    fn api_paths_value(ident: &str) -> Option<&'static str> {
+        Some(match ident {
+            "INDEX" => cce_api::paths::INDEX,
+            "INDEX_INCREMENTAL" => cce_api::paths::INDEX_INCREMENTAL,
+            "PARSE" => cce_api::paths::PARSE,
+            "SUMMARY" => cce_api::paths::SUMMARY,
+            "INDEX_FILE_TEMPLATE" => cce_api::paths::INDEX_FILE_TEMPLATE,
+            "INDEX_ENTITY_TEMPLATE" => cce_api::paths::INDEX_ENTITY_TEMPLATE,
+            "INDEX_BATCH" => cce_api::paths::INDEX_BATCH,
+            "INDEX_STATS" => cce_api::paths::INDEX_STATS,
+            "STORAGE_STATUS" => cce_api::paths::STORAGE_STATUS,
+            "PROJECT" => cce_api::paths::PROJECT,
+            "PROJECT_DETAIL_TEMPLATE" => cce_api::paths::PROJECT_DETAIL_TEMPLATE,
+            "PROJECT_INDEX_TEMPLATE" => cce_api::paths::PROJECT_INDEX_TEMPLATE,
+            "PROJECT_DEAD_LETTERS_TEMPLATE" => cce_api::paths::PROJECT_DEAD_LETTERS_TEMPLATE,
+            "PROJECT_DEAD_LETTERS_RETRY_TEMPLATE" => {
+                cce_api::paths::PROJECT_DEAD_LETTERS_RETRY_TEMPLATE
+            }
+            "PROJECT_DEAD_LETTERS_ACK_TEMPLATE" => {
+                cce_api::paths::PROJECT_DEAD_LETTERS_ACK_TEMPLATE
+            }
+            "PROJECT_RELOAD_TEMPLATE" => cce_api::paths::PROJECT_RELOAD_TEMPLATE,
+            "PROJECT_CONFIG_TEMPLATE" => cce_api::paths::PROJECT_CONFIG_TEMPLATE,
+            "FUNCTION_DETAIL_TEMPLATE" => cce_api::paths::FUNCTION_DETAIL_TEMPLATE,
+            "FUNCTION_CALLS_TEMPLATE" => cce_api::paths::FUNCTION_CALLS_TEMPLATE,
+            "FUNCTION_CALLERS_TEMPLATE" => cce_api::paths::FUNCTION_CALLERS_TEMPLATE,
+            "CALL_CHAIN_TEMPLATE" => cce_api::paths::CALL_CHAIN_TEMPLATE,
+            "CALL_PATH_TEMPLATE" => cce_api::paths::CALL_PATH_TEMPLATE,
+            "CLASS_INHERITANCE_TEMPLATE" => cce_api::paths::CLASS_INHERITANCE_TEMPLATE,
+            "CLASS_IMPLEMENTATIONS_TEMPLATE" => cce_api::paths::CLASS_IMPLEMENTATIONS_TEMPLATE,
+            "CLASSIFICATION_STATS_TEMPLATE" => cce_api::paths::CLASSIFICATION_STATS_TEMPLATE,
+            "CLASSIFICATION_DETAIL_TEMPLATE" => cce_api::paths::CLASSIFICATION_DETAIL_TEMPLATE,
+            "GRAPH_EGO_TEMPLATE" => cce_api::paths::GRAPH_EGO_TEMPLATE,
+            "GRAPH_PATH_TEMPLATE" => cce_api::paths::GRAPH_PATH_TEMPLATE,
+            "GRAPH_SUBGRAPH_TEMPLATE" => cce_api::paths::GRAPH_SUBGRAPH_TEMPLATE,
+            "GRAPH_COMPONENTS_TEMPLATE" => cce_api::paths::GRAPH_COMPONENTS_TEMPLATE,
+            "GRAPH_EXPORT_TEMPLATE" => cce_api::paths::GRAPH_EXPORT_TEMPLATE,
+            "GRAPH_IMPACT_TEMPLATE" => cce_api::paths::GRAPH_IMPACT_TEMPLATE,
+            "GRAPH_ENTITY_IMPACT_TEMPLATE" => cce_api::paths::GRAPH_ENTITY_IMPACT_TEMPLATE,
+            "GRAPH_CYCLES_TEMPLATE" => cce_api::paths::GRAPH_CYCLES_TEMPLATE,
+            "GRAPH_STRUCTURAL_TEMPLATE" => cce_api::paths::GRAPH_STRUCTURAL_TEMPLATE,
+            "GRAPH_MODULE_TEMPLATE" => cce_api::paths::GRAPH_MODULE_TEMPLATE,
+            "METRICS" => cce_api::paths::METRICS,
+            "METRICS_JSON" => cce_api::paths::METRICS_JSON,
+            "METRICS_HISTORY" => cce_api::paths::METRICS_HISTORY,
+            "METRICS_CLEANUP" => cce_api::paths::METRICS_CLEANUP,
+            "WATCH_START_TEMPLATE" => cce_api::paths::WATCH_START_TEMPLATE,
+            "WATCH_STOP_TEMPLATE" => cce_api::paths::WATCH_STOP_TEMPLATE,
+            "WATCH_STATUS_TEMPLATE" => cce_api::paths::WATCH_STATUS_TEMPLATE,
+            "CONFIG_RELOAD" => cce_api::paths::CONFIG_RELOAD,
+            "CONFIG_INFO" => cce_api::paths::CONFIG_INFO,
+            "CONFIG_VALIDATE" => cce_api::paths::CONFIG_VALIDATE,
+            "QDRANT_PROCESS_STATUS" => cce_api::paths::QDRANT_PROCESS_STATUS,
+            "QDRANT_PROCESS_START" => cce_api::paths::QDRANT_PROCESS_START,
+            "QDRANT_PROCESS_STOP" => cce_api::paths::QDRANT_PROCESS_STOP,
+            "QDRANT_PROCESS_RESTART" => cce_api::paths::QDRANT_PROCESS_RESTART,
+            "SEARCH" => cce_api::paths::SEARCH,
+            "SEARCH_AGGREGATED" => cce_api::paths::SEARCH_AGGREGATED,
+            "ENTITY_SEARCH" => cce_api::paths::ENTITY_SEARCH,
+            "TOOLS_COMPRESS" => cce_api::paths::TOOLS_COMPRESS,
+            "TOOLS_COMPRESS_BATCH" => cce_api::paths::TOOLS_COMPRESS_BATCH,
+            "TOOLS_DIAGNOSE" => cce_api::paths::TOOLS_DIAGNOSE,
+            "TOOLS_FOLD" => cce_api::paths::TOOLS_FOLD,
+            "TOOLS_FOLD_BATCH" => cce_api::paths::TOOLS_FOLD_BATCH,
+            "TOOLS_KEYWORD_SEARCH" => cce_api::paths::TOOLS_KEYWORD_SEARCH,
+            "TOOLS_SYMBOLS" => cce_api::paths::TOOLS_SYMBOLS,
+            "TOOLS_REFERENCES" => cce_api::paths::TOOLS_REFERENCES,
+            "TOOLS_DEFINITION" => cce_api::paths::TOOLS_DEFINITION,
+            "HEALTH" => cce_api::paths::HEALTH,
+            "HEALTH_QDRANT" => cce_api::paths::HEALTH_QDRANT,
+            "HEALTH_EMBEDDING" => cce_api::paths::HEALTH_EMBEDDING,
+            "HEALTH_BM25" => cce_api::paths::HEALTH_BM25,
+            "RETRY_QUEUE" => cce_api::paths::RETRY_QUEUE,
+            "RETRY_QUEUE_DEAD" => cce_api::paths::RETRY_QUEUE_DEAD,
+            "RETRY_QUEUE_PROCESS" => cce_api::paths::RETRY_QUEUE_PROCESS,
+            "INGEST_MANIFEST_TEMPLATE" => cce_api::paths::INGEST_MANIFEST_TEMPLATE,
+            "INGEST_BATCH_TEMPLATE" => cce_api::paths::INGEST_BATCH_TEMPLATE,
+            "INGEST_COMMIT_TEMPLATE" => cce_api::paths::INGEST_COMMIT_TEMPLATE,
+            "INGEST_EVENT_TEMPLATE" => cce_api::paths::INGEST_EVENT_TEMPLATE,
+            "ADMISSION_STATS" => cce_api::paths::ADMISSION_STATS,
+            _ => return None,
+        })
     }
 
     fn method_tokens(line: &str) -> Vec<String> {

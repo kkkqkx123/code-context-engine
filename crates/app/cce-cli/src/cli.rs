@@ -299,6 +299,9 @@ impl Cli {
             HealthCommands::QueueStatus => commands::health::HealthCommand::QueueStatus,
             HealthCommands::QueueProcess => commands::health::HealthCommand::QueueProcess,
             HealthCommands::QueueClear => commands::health::HealthCommand::QueueClear,
+            HealthCommands::DeadList => commands::health::HealthCommand::DeadList,
+            HealthCommands::DeadClear => commands::health::HealthCommand::DeadClear,
+            HealthCommands::AdmissionStats => commands::health::HealthCommand::AdmissionStats,
         };
         commands::health::execute(&health_cmd, &self.server, self.verbose, self.format).await
     }

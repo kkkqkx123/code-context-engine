@@ -261,21 +261,6 @@ pub struct FileSummaryItem {
     pub error: Option<String>,
 }
 
-/// Dead-letter truncate-retry response
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct DeadLetterRetryResponse {
-    pub success: bool,
-    /// Files re-chunked from disk and re-stored.
-    pub retried: usize,
-    /// Files whose Embedding module succeeded after the truncate retry.
-    pub succeeded: usize,
-    /// Files retried that failed again; they stay in the dead letter state.
-    pub still_failed: usize,
-    /// Chunks truncated during the retry.
-    pub truncated_chunks: usize,
-    pub message: String,
-}
-
 fn default_true() -> bool {
     true
 }
@@ -313,7 +298,7 @@ pub struct DeadLetterFileEntry {
     pub updated_at: String,
 }
 
-/// Response of `GET /api/project/{id}/dead-letters`.
+/// Response of `GET /api/project/{project_id}/dead-letters`.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DeadLetterListResponse {
     pub project_id: i64,
@@ -329,16 +314,16 @@ pub struct DeadLetterActionResponse {
     pub message: String,
 }
 
-/// Request body of `POST /api/project/{id}/dead-letters/retry`.
-#[derive(Debug, Default, Deserialize, ToSchema)]
+/// Request body of `POST /api/project/{project_id}/dead-letters/retry`.
+#[derive(Debug, Default, Serialize, Deserialize, ToSchema)]
 pub struct DeadLetterRetryRequest {
     /// Restrict the retry pass to these file paths; empty means all candidates.
     #[serde(default)]
     pub files: Vec<String>,
 }
 
-/// Request body of `POST /api/project/{id}/dead-letters/acknowledge`.
-#[derive(Debug, Deserialize, ToSchema)]
+/// Request body of `POST /api/project/{project_id}/dead-letters/acknowledge`.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DeadLetterAcknowledgeRequest {
     /// File path to acknowledge.
     pub file_path: String,

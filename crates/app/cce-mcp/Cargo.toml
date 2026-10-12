@@ -29,6 +29,7 @@ cce-orchestrator = { path = "../cce-orchestrator" }
 cce-parser = { path = "../../parser/cce-parser" }
 cce-codegraph = { path = "../../parser/cce-codegraph" }
 cce-storage-metadb-sqlite = { path = "../../infra/cce-storage-metadb-sqlite" }
+cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
 
 rmcp = { workspace = true, features = [
     "server",

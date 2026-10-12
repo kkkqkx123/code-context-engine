@@ -177,6 +177,54 @@ impl SharedHttpClient {
             .await
             .context("Failed to parse response JSON")
     }
+
+    /// Push an ingest manifest for the given project.
+    pub async fn post_ingest_manifest(
+        &self,
+        project_id: i64,
+        body: &crate::models::IngestManifestRequest,
+    ) -> Result<crate::models::IngestManifestResponse> {
+        self.post(&crate::paths::ingest_manifest(project_id), body)
+            .await
+    }
+
+    /// Push an ingest batch for the given project.
+    pub async fn post_ingest_batch(
+        &self,
+        project_id: i64,
+        body: &crate::models::IngestBatchRequest,
+    ) -> Result<crate::models::IngestBatchResponse> {
+        self.post(&crate::paths::ingest_batch(project_id), body)
+            .await
+    }
+
+    /// Commit a staged ingest for the given project.
+    pub async fn post_ingest_commit<T: serde::Serialize, R: serde::de::DeserializeOwned>(
+        &self,
+        project_id: i64,
+        body: &T,
+    ) -> Result<R> {
+        self.post(&crate::paths::ingest_commit(project_id), body)
+            .await
+    }
+
+    /// Push ingest events for the given project.
+    pub async fn post_ingest_event(
+        &self,
+        project_id: i64,
+        body: &crate::models::IngestEventRequest,
+    ) -> Result<crate::models::IngestEventResponse> {
+        self.post(&crate::paths::ingest_event(project_id), body)
+            .await
+    }
+
+    /// Run an aggregated search across sub queries.
+    pub async fn post_aggregated_search(
+        &self,
+        body: &crate::models::AggregatedSearchRequest,
+    ) -> Result<crate::models::SearchResponse> {
+        self.post(crate::paths::SEARCH_AGGREGATED, body).await
+    }
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 
 pub mod http;
 pub mod models;
+pub mod paths;
 
 /// Read the admission token from the environment.
 ///
