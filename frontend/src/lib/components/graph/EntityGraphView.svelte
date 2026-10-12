@@ -14,7 +14,7 @@
 		type GraphLayoutName,
 	} from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
-	import type { GraphElement } from '$lib/utils/graph-style';
+	import type { GraphElement } from '$lib/utils/graph-elements';
 	import { steppedZoom } from '$lib/utils/graph-viewport';
 
 	interface Props {

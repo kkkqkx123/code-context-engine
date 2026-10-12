@@ -20,8 +20,11 @@ struct SearchQueryParams<'a> {
     exclude_content_types: &'a Option<String>,
     exclude: &'a Option<String>,
     include: &'a Option<String>,
+    include_categories: &'a Option<String>,
+    exclude_categories: &'a Option<String>,
     enable_rerank: Option<bool>,
     rerank_max_candidates: Option<usize>,
+    query_intent: &'a Option<String>,
     expand: Option<bool>,
 }
 pub async fn execute(
@@ -44,8 +47,11 @@ pub async fn execute(
             exclude_content_types,
             exclude,
             include,
+            include_categories,
+            exclude_categories,
             enable_rerank,
             rerank_max_candidates,
+            query_intent,
             expand,
         } => {
             let params = SearchQueryParams {
@@ -59,8 +65,11 @@ pub async fn execute(
                 exclude_content_types,
                 exclude,
                 include,
+                include_categories,
+                exclude_categories,
                 enable_rerank: *enable_rerank,
                 rerank_max_candidates: *rerank_max_candidates,
+                query_intent,
                 expand: *expand,
             };
             search_query(&client, &params, params.project_id, verbose, format).await
@@ -93,6 +102,18 @@ async fn search_query(
         .map(|s| s.split(',').map(|ct| ct.trim().to_string()).collect())
         .unwrap_or_default();
 
+    let include_categories: Vec<String> = params
+        .include_categories
+        .as_ref()
+        .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    let exclude_categories: Vec<String> = params
+        .exclude_categories
+        .as_ref()
+        .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+        .unwrap_or_default();
+
     let request = SearchRequest {
         project_id: Some(project_id),
         project_path: params.project_path.map(|s| s.to_string()),
@@ -104,11 +125,11 @@ async fn search_query(
         exclude_content_types,
         exclude_patterns,
         include_patterns,
-        include_categories: vec![],
-        exclude_categories: vec![],
+        include_categories,
+        exclude_categories,
         enable_rerank: params.enable_rerank,
         rerank_max_candidates: params.rerank_max_candidates,
-        query_intent: None,
+        query_intent: params.query_intent.clone(),
         expand: params.expand,
     };
 
@@ -221,6 +242,14 @@ pub enum SearchCommands {
         #[arg(long)]
         include: Option<String>,
 
+        /// Include only specific category values (comma-separated): code, config, documentation, schema, other
+        #[arg(long)]
+        include_categories: Option<String>,
+
+        /// Exclude specific category values (comma-separated): code, config, documentation, schema, other
+        #[arg(long)]
+        exclude_categories: Option<String>,
+
         /// Force reranking on/off for this query (defaults to config)
         #[arg(long)]
         enable_rerank: Option<bool>,
@@ -228,6 +257,10 @@ pub enum SearchCommands {
         /// Override the maximum number of rerank candidates
         #[arg(long)]
         rerank_max_candidates: Option<usize>,
+
+        /// Query intent override: semantic, keyword, hybrid, entity (empty means auto-detect)
+        #[arg(long)]
+        query_intent: Option<String>,
 
         /// Resolve call-graph neighbours for the top hits
         #[arg(long)]

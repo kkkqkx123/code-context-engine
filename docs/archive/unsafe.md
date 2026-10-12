@@ -43,3 +43,27 @@ This mirrors the existing `SendPtr` opaque-token pattern.
 Auto-generated Rust bindings for the vendored tree-sitter grammar. Follows the standard tree-sitter binding pattern.
 
 **Status:** External — vendored third-party code, not maintained in this repo.
+
+## 4. SIMD Distance Kernels (simvec)
+
+**Files:**
+- `crates/simvec/src/distance/avx2.rs`
+- `crates/simvec/src/distance/avx512.rs`
+- `crates/simvec/src/distance/neon.rs`
+- `crates/simvec/src/distance/kernel.rs`
+
+Hand-written x86-64 (AVX2+FMA, AVX-512F+DQ+VL) and aarch64 (NEON) distance
+kernels. Each kernel entry point carries `#[target_feature]` and is only
+invoked after its runtime probe (`is_x86_feature_detected!` /
+`is_aarch64_feature_detected!`) succeeds; `kernel::selected()` resolves the
+preferred available kernel once per process and every call site dispatches
+through it, so an unsupported instruction stream is unreachable. Slice
+arguments must have equal length; the kernels use unaligned loads
+(`_mm512_loadu_ps`, `vld1q_f32`), pointer-offset prefetch hints, and (on
+aarch64) one inline-asm prefetch (`prfm pldl1keep`, a pure cache hint safe
+on all ARMv8 CPUs). On non-aarch64 hosts the `neon` module compiles to a
+thin safe wrapper over the scalar baseline. Differential tests pin each
+kernel against the naive baseline within `1e-4`.
+
+**Status:** Necessary — direct SIMD intrinsics and inline asm for vector
+distance evaluation (low-level operation).

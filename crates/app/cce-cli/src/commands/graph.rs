@@ -15,6 +15,7 @@ struct GraphQueryParams {
     offset: usize,
     limit: usize,
     domains: String,
+    relation_types: String,
     include_external: bool,
 }
 
@@ -45,6 +46,7 @@ pub async fn execute(
             offset,
             limit,
             domains,
+            relation_types,
             include_external,
             project_id,
         } => {
@@ -52,6 +54,7 @@ pub async fn execute(
                 offset: *offset,
                 limit: *limit,
                 domains: domains.clone(),
+                relation_types: relation_types.clone(),
                 include_external: *include_external,
             };
             let output = OutputParams { verbose, format };
@@ -71,6 +74,7 @@ pub async fn execute(
             to,
             depth,
             domains,
+            relation_types,
             include_external,
             project_id,
         } => {
@@ -78,6 +82,7 @@ pub async fn execute(
                 offset: 0,
                 limit: 0,
                 domains: domains.clone(),
+                relation_types: relation_types.clone(),
                 include_external: *include_external,
             };
             let output = OutputParams { verbose, format };
@@ -96,6 +101,7 @@ pub async fn execute(
             offset,
             limit,
             domains,
+            relation_types,
             include_external,
             project_id,
         } => {
@@ -103,6 +109,7 @@ pub async fn execute(
                 offset: *offset,
                 limit: *limit,
                 domains: domains.clone(),
+                relation_types: relation_types.clone(),
                 include_external: *include_external,
             };
             let output = OutputParams { verbose, format };
@@ -112,6 +119,7 @@ pub async fn execute(
             offset,
             limit,
             domains,
+            relation_types,
             include_external,
             project_id,
         } => {
@@ -119,6 +127,7 @@ pub async fn execute(
                 offset: *offset,
                 limit: *limit,
                 domains: domains.clone(),
+                relation_types: relation_types.clone(),
                 include_external: *include_external,
             };
             get_components(&client, *project_id, &params, verbose, format).await
@@ -127,6 +136,7 @@ pub async fn execute(
             limit,
             offset,
             domains,
+            relation_types,
             include_external,
             project_id,
         } => {
@@ -134,6 +144,7 @@ pub async fn execute(
                 offset: *offset,
                 limit: *limit,
                 domains: domains.clone(),
+                relation_types: relation_types.clone(),
                 include_external: *include_external,
             };
             let output = OutputParams { verbose, format };
@@ -145,8 +156,20 @@ pub async fn execute(
         GraphCommands::EntityImpact {
             entity_id,
             max_depth,
+            scope,
             project_id,
-        } => get_entity_impact(&client, *project_id, entity_id, *max_depth, verbose, format).await,
+        } => {
+            get_entity_impact(
+                &client,
+                *project_id,
+                entity_id,
+                *max_depth,
+                scope,
+                verbose,
+                format,
+            )
+            .await
+        }
         GraphCommands::Cycles {
             level,
             limit,
@@ -221,7 +244,7 @@ async fn get_ego(
         &project_id.to_string(),
     );
     let path = format!(
-        "{}?entity_id={}&depth={}&direction={}&offset={}&limit={}&domains={}&include_external={}",
+        "{}?entity_id={}&depth={}&direction={}&offset={}&limit={}&domains={}&relation_types={}&include_external={}",
         base,
         urlencoding::encode(id),
         depth,
@@ -229,6 +252,7 @@ async fn get_ego(
         params.offset,
         params.limit,
         urlencoding::encode(&params.domains),
+        urlencoding::encode(&params.relation_types),
         params.include_external
     );
     let response: GraphSubgraphResponse = client.get(&path).await?;
@@ -259,12 +283,13 @@ async fn get_path(
         &project_id.to_string(),
     );
     let path = format!(
-        "{}?start={}&end={}&max_depth={}&domains={}&include_external={}",
+        "{}?start={}&end={}&max_depth={}&domains={}&relation_types={}&include_external={}",
         base,
         urlencoding::encode(seeds.from),
         urlencoding::encode(seeds.to),
         depth,
         urlencoding::encode(&params.domains),
+        urlencoding::encode(&params.relation_types),
         params.include_external
     );
     let response: GraphPathResponse = client.get(&path).await?;
@@ -305,12 +330,13 @@ async fn get_subgraph(
         &project_id.to_string(),
     );
     let path = format!(
-        "{}?ids={}&offset={}&limit={}&domains={}&include_external={}",
+        "{}?ids={}&offset={}&limit={}&domains={}&relation_types={}&include_external={}",
         base,
         urlencoding::encode(ids),
         params.offset,
         params.limit,
         urlencoding::encode(&params.domains),
+        urlencoding::encode(&params.relation_types),
         params.include_external
     );
     let response: GraphSubgraphResponse = client.get(&path).await?;
@@ -339,11 +365,12 @@ async fn get_components(
         &project_id.to_string(),
     );
     let path = format!(
-        "{}?offset={}&limit={}&domains={}&include_external={}",
+        "{}?offset={}&limit={}&domains={}&relation_types={}&include_external={}",
         base,
         params.offset,
         params.limit,
         urlencoding::encode(&params.domains),
+        urlencoding::encode(&params.relation_types),
         params.include_external
     );
     let response: GraphComponentsResponse = client.get(&path).await?;
@@ -379,11 +406,12 @@ async fn export_graph(
         &project_id.to_string(),
     );
     let path = format!(
-        "{}?limit={}&offset={}&domains={}&include_external={}",
+        "{}?limit={}&offset={}&domains={}&relation_types={}&include_external={}",
         base,
         params.limit,
         params.offset,
         urlencoding::encode(&params.domains),
+        urlencoding::encode(&params.relation_types),
         params.include_external
     );
     let response: GraphSubgraphResponse = client.get(&path).await?;
@@ -437,6 +465,7 @@ async fn get_entity_impact(
     project_id: i64,
     entity_id: &str,
     max_depth: usize,
+    scope: &str,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
@@ -448,10 +477,11 @@ async fn get_entity_impact(
         &project_id.to_string(),
     );
     let path = format!(
-        "{}?entity_id={}&max_depth={}",
+        "{}?entity_id={}&max_depth={}&scope={}",
         base,
         urlencoding::encode(entity_id),
-        max_depth
+        max_depth,
+        urlencoding::encode(scope)
     );
     let response: GraphEntityImpactResponse = client.get(&path).await?;
     if matches!(format, crate::cli::OutputFormat::Json) {
@@ -638,6 +668,10 @@ pub enum GraphCommands {
         #[arg(long, default_value = "")]
         domains: String,
 
+        /// Comma-separated relation types (e.g. calls,imports,extends)
+        #[arg(long, default_value = "")]
+        relation_types: String,
+
         /// Include external edges
         #[arg(long, default_value = "true")]
         include_external: bool,
@@ -665,6 +699,10 @@ pub enum GraphCommands {
         #[arg(long, default_value = "")]
         domains: String,
 
+        /// Comma-separated relation types
+        #[arg(long, default_value = "")]
+        relation_types: String,
+
         /// Include external edges
         #[arg(long, default_value = "true")]
         include_external: bool,
@@ -691,6 +729,10 @@ pub enum GraphCommands {
         #[arg(long, default_value = "")]
         domains: String,
 
+        /// Comma-separated relation types
+        #[arg(long, default_value = "")]
+        relation_types: String,
+
         /// Include external edges
         #[arg(long, default_value = "true")]
         include_external: bool,
@@ -714,6 +756,10 @@ pub enum GraphCommands {
         #[arg(long, default_value = "")]
         domains: String,
 
+        /// Comma-separated relation types
+        #[arg(long, default_value = "")]
+        relation_types: String,
+
         /// Include external edges
         #[arg(long, default_value = "true")]
         include_external: bool,
@@ -736,6 +782,10 @@ pub enum GraphCommands {
         /// Comma-separated relation domains
         #[arg(long, default_value = "")]
         domains: String,
+
+        /// Comma-separated relation types
+        #[arg(long, default_value = "")]
+        relation_types: String,
 
         /// Include external edges
         #[arg(long, default_value = "true")]
@@ -764,6 +814,10 @@ pub enum GraphCommands {
         /// Maximum dependent depth
         #[arg(long, default_value = "10")]
         max_depth: usize,
+
+        /// Impact scope: entity or file
+        #[arg(long, default_value = "entity")]
+        scope: String,
 
         /// Project ID
         #[arg(long)]

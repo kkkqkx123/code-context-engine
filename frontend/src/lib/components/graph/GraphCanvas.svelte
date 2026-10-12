@@ -83,12 +83,9 @@
 	import { onMount } from 'svelte';
 	import { GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM } from '$lib/utils/graph-viewport';
 	import type { Core, ElementDefinition, StylesheetStyle } from 'cytoscape';
-	import {
-		graphStylesheet,
-		RELATION_DOMAIN_ORDER,
-		type GraphElement,
-		type RelationDomain,
-	} from '$lib/utils/graph-style';
+	import { graphStylesheet } from '$lib/utils/graph-stylesheet';
+	import { RELATION_DOMAIN_ORDER, type RelationDomain } from '$lib/utils/graph-domains';
+	import { type GraphElement } from '$lib/utils/graph-elements';
 
 	// GraphLayoutName and layoutOptions are exported from <script module> above.
 

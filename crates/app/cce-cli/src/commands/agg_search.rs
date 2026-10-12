@@ -15,6 +15,10 @@ pub struct AggSearchCommand {
     #[arg(short, long)]
     pub project_id: Option<i64>,
 
+    /// Project root path (optional if project-id is provided)
+    #[arg(long)]
+    pub project_path: Option<String>,
+
     /// BM25 keyword queries
     #[arg(long = "bm25")]
     pub bm25_queries: Vec<String>,
@@ -22,6 +26,30 @@ pub struct AggSearchCommand {
     /// Vector semantic queries
     #[arg(long = "vector")]
     pub vector_queries: Vec<String>,
+
+    /// Hybrid queries
+    #[arg(long = "hybrid")]
+    pub hybrid_queries: Vec<String>,
+
+    /// Summary queries
+    #[arg(long = "summary")]
+    pub summary_queries: Vec<String>,
+
+    /// Weight applied to BM25 sub-query scores
+    #[arg(long, default_value_t = 1.2)]
+    pub bm25_weight: f32,
+
+    /// Weight applied to vector sub-query scores
+    #[arg(long, default_value_t = 1.0)]
+    pub vector_weight: f32,
+
+    /// Weight applied to hybrid sub-query scores
+    #[arg(long, default_value_t = 1.0)]
+    pub hybrid_weight: f32,
+
+    /// Weight applied to summary sub-query scores
+    #[arg(long, default_value_t = 1.0)]
+    pub summary_weight: f32,
 
     /// Result limit
     #[arg(short, long, default_value_t = 10)]
@@ -47,6 +75,26 @@ pub struct AggSearchCommand {
     #[arg(long)]
     pub include_patterns: Option<String>,
 
+    /// Include only specific category values (comma-separated)
+    #[arg(long)]
+    pub include_categories: Option<String>,
+
+    /// Exclude specific category values (comma-separated)
+    #[arg(long)]
+    pub exclude_categories: Option<String>,
+
+    /// Force reranking on/off for this query (defaults to config)
+    #[arg(long)]
+    pub enable_rerank: Option<bool>,
+
+    /// Override the maximum number of rerank candidates
+    #[arg(long)]
+    pub rerank_max_candidates: Option<usize>,
+
+    /// Query intent override applied to every sub-query (empty means auto-detect)
+    #[arg(long)]
+    pub query_intent: Option<String>,
+
     /// Resolve call-graph neighbours for the merged top hits
     #[arg(long)]
     pub expand: Option<bool>,
@@ -62,7 +110,7 @@ impl AggSearchCommand {
             sub_queries.push(SubQueryRequest {
                 text: query.clone(),
                 query_type: "bm25".to_string(),
-                weight: 1.2, // Higher weight for BM25
+                weight: self.bm25_weight,
             });
         }
 
@@ -71,12 +119,32 @@ impl AggSearchCommand {
             sub_queries.push(SubQueryRequest {
                 text: query.clone(),
                 query_type: "vector".to_string(),
-                weight: 1.0,
+                weight: self.vector_weight,
+            });
+        }
+
+        // Add Hybrid sub-queries
+        for query in &self.hybrid_queries {
+            sub_queries.push(SubQueryRequest {
+                text: query.clone(),
+                query_type: "hybrid".to_string(),
+                weight: self.hybrid_weight,
+            });
+        }
+
+        // Add Summary sub-queries
+        for query in &self.summary_queries {
+            sub_queries.push(SubQueryRequest {
+                text: query.clone(),
+                query_type: "summary".to_string(),
+                weight: self.summary_weight,
             });
         }
 
         if sub_queries.is_empty() {
-            anyhow::bail!("至少需要提供一个子查询 (--bm25 或 --vector)");
+            anyhow::bail!(
+                "at least one sub-query is required (--bm25, --vector, --hybrid or --summary)"
+            );
         }
 
         // Parse filters
@@ -98,9 +166,21 @@ impl AggSearchCommand {
             .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
             .unwrap_or_default();
 
+        let include_categories: Vec<String> = self
+            .include_categories
+            .as_ref()
+            .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let exclude_categories: Vec<String> = self
+            .exclude_categories
+            .as_ref()
+            .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+            .unwrap_or_default();
+
         let request = AggregatedSearchRequest {
             project_id: self.project_id,
-            project_path: None,
+            project_path: self.project_path.clone(),
             sub_queries,
             limit: self.limit,
             min_score: self.min_score,
@@ -108,11 +188,11 @@ impl AggSearchCommand {
             exclude_content_types,
             exclude_patterns,
             include_patterns,
-            include_categories: vec![],
-            exclude_categories: vec![],
-            enable_rerank: None,
-            rerank_max_candidates: None,
-            query_intent: None,
+            include_categories,
+            exclude_categories,
+            enable_rerank: self.enable_rerank,
+            rerank_max_candidates: self.rerank_max_candidates,
+            query_intent: self.query_intent.clone(),
             expand: self.expand,
         };
 

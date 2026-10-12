@@ -9,6 +9,7 @@
 	let query = $state('');
 	let termOperator = $state<'or' | 'and'>('or');
 	let topN = $state(10);
+	let offset = $state(0);
 	let result = $state<KeywordSearchResult | null>(null);
 	let loading = $state(false);
 	let error = $state('');
@@ -25,6 +26,7 @@
 				query: q,
 				term_operator: termOperator,
 				top_n: topN,
+				offset,
 			});
 		} catch (e) {
 			error = errorMessage(e) ?? 'Keyword search failed';
@@ -66,6 +68,10 @@
 				max="100"
 				bind:value={topN}
 			/>
+		</label>
+		<label class="field field-narrow">
+			<span class="field-label">Offset</span>
+			<input class="text-input" type="number" min="0" bind:value={offset} />
 		</label>
 		<Button onclick={handleSearch} disabled={!query.trim() || loading}>
 			{#if loading}Searching...{:else}Search{/if}

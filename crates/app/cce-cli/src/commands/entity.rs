@@ -24,17 +24,79 @@ pub async fn execute(
         EntityCommands::Function { id, project_id } => {
             get_function(&client, *project_id, id, verbose).await
         }
-        EntityCommands::Calls { id, project_id } => {
-            get_function_calls(&client, *project_id, id, verbose).await
+        EntityCommands::Calls {
+            id,
+            project_id,
+            max_depth,
+            offset,
+            limit,
+            exclude_tests,
+            directory_prefix,
+            excluded_files,
+            domains,
+            include_external,
+        } => {
+            let filter = RelationFilterArgs {
+                max_depth: *max_depth,
+                offset: *offset,
+                limit: *limit,
+                exclude_tests: *exclude_tests,
+                directory_prefix: directory_prefix.clone(),
+                excluded_files: excluded_files.clone(),
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            get_function_calls(&client, *project_id, id, &filter, verbose).await
         }
-        EntityCommands::Callers { id, project_id } => {
-            get_function_callers(&client, *project_id, id, verbose).await
+        EntityCommands::Callers {
+            id,
+            project_id,
+            max_depth,
+            offset,
+            limit,
+            exclude_tests,
+            directory_prefix,
+            excluded_files,
+            domains,
+            include_external,
+        } => {
+            let filter = RelationFilterArgs {
+                max_depth: *max_depth,
+                offset: *offset,
+                limit: *limit,
+                exclude_tests: *exclude_tests,
+                directory_prefix: directory_prefix.clone(),
+                excluded_files: excluded_files.clone(),
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            get_function_callers(&client, *project_id, id, &filter, verbose).await
         }
         EntityCommands::CallChain {
             id,
             direction,
+            max_depth,
+            offset,
+            limit,
+            exclude_tests,
+            directory_prefix,
+            excluded_files,
+            domains,
+            include_external,
             project_id,
-        } => get_call_chain(&client, *project_id, id, direction, verbose).await,
+        } => {
+            let filter = RelationFilterArgs {
+                max_depth: *max_depth,
+                offset: *offset,
+                limit: *limit,
+                exclude_tests: *exclude_tests,
+                directory_prefix: directory_prefix.clone(),
+                excluded_files: excluded_files.clone(),
+                domains: domains.clone(),
+                include_external: *include_external,
+            };
+            get_call_chain(&client, *project_id, id, direction, &filter, verbose).await
+        }
         EntityCommands::CallPath {
             from,
             to,
@@ -50,10 +112,67 @@ pub async fn execute(
         EntityCommands::Search {
             query,
             project_id,
+            project_path,
             limit,
             kind,
-        } => search_entities(&client, query, *project_id, *limit, kind, verbose, format).await,
+        } => {
+            let search = EntitySearchParams {
+                query,
+                project_id: *project_id,
+                project_path: project_path.clone(),
+                limit: *limit,
+                kind,
+            };
+            search_entities(&client, &search, verbose, format).await
+        }
     }
+}
+
+struct RelationFilterArgs {
+    max_depth: usize,
+    offset: Option<usize>,
+    limit: usize,
+    exclude_tests: Option<bool>,
+    directory_prefix: Option<String>,
+    excluded_files: Option<String>,
+    domains: Option<String>,
+    include_external: Option<bool>,
+}
+
+struct EntitySearchParams<'a> {
+    query: &'a str,
+    project_id: Option<i64>,
+    project_path: Option<String>,
+    limit: i64,
+    kind: &'a Option<String>,
+}
+
+fn relation_filter_query(filter: &RelationFilterArgs) -> String {
+    let mut parts = vec![
+        format!("max_depth={}", filter.max_depth),
+        format!("limit={}", filter.limit),
+    ];
+    if let Some(offset) = filter.offset {
+        parts.push(format!("offset={offset}"));
+    }
+    if let Some(exclude_tests) = filter.exclude_tests {
+        parts.push(format!("exclude_tests={exclude_tests}"));
+    }
+    if let Some(prefix) = &filter.directory_prefix {
+        parts.push(format!("directory_prefix={}", urlencoding::encode(prefix)));
+    }
+    if let Some(files) = &filter.excluded_files {
+        for file in files.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            parts.push(format!("excluded_files={}", urlencoding::encode(file)));
+        }
+    }
+    if let Some(domains) = &filter.domains {
+        parts.push(format!("domains={}", urlencoding::encode(domains)));
+    }
+    if let Some(include_external) = filter.include_external {
+        parts.push(format!("include_external={include_external}"));
+    }
+    parts.join("&")
 }
 
 async fn get_function(
@@ -113,18 +232,20 @@ async fn get_function_calls(
     client: &ApiClient,
     project_id: i64,
     function_id: &str,
+    filter: &RelationFilterArgs,
     verbose: bool,
 ) -> Result<()> {
     if verbose {
         println!("Fetching function calls: {}", function_id);
     }
 
-    let path = cce_api::paths::FUNCTION_CALLS_TEMPLATE
+    let base = cce_api::paths::FUNCTION_CALLS_TEMPLATE
         .replace(
             cce_api::paths::PROJECT_ID_PLACEHOLDER,
             &project_id.to_string(),
         )
         .replace("{id}", &urlencoding::encode(function_id));
+    let path = format!("{}?{}", base, relation_filter_query(filter));
     let response: FunctionCallsResponse = client.get(&path).await?;
 
     if response.success {
@@ -157,18 +278,20 @@ async fn get_function_callers(
     client: &ApiClient,
     project_id: i64,
     function_id: &str,
+    filter: &RelationFilterArgs,
     verbose: bool,
 ) -> Result<()> {
     if verbose {
         println!("Fetching function callers: {}", function_id);
     }
 
-    let path = cce_api::paths::FUNCTION_CALLERS_TEMPLATE
+    let base = cce_api::paths::FUNCTION_CALLERS_TEMPLATE
         .replace(
             cce_api::paths::PROJECT_ID_PLACEHOLDER,
             &project_id.to_string(),
         )
         .replace("{id}", &urlencoding::encode(function_id));
+    let path = format!("{}?{}", base, relation_filter_query(filter));
     let response: FunctionCallersResponse = client.get(&path).await?;
 
     if response.success {
@@ -202,6 +325,7 @@ async fn get_call_chain(
     project_id: i64,
     function_id: &str,
     direction: &str,
+    filter: &RelationFilterArgs,
     verbose: bool,
 ) -> Result<()> {
     if verbose {
@@ -217,7 +341,12 @@ async fn get_call_chain(
             &project_id.to_string(),
         )
         .replace("{id}", &urlencoding::encode(function_id));
-    let path = format!("{}?direction={}", base, urlencoding::encode(direction));
+    let path = format!(
+        "{}?direction={}&{}",
+        base,
+        urlencoding::encode(direction),
+        relation_filter_query(filter)
+    );
     let response: CallChainResponse = client.get(&path).await?;
 
     if response.success {
@@ -418,23 +547,20 @@ async fn get_class_implementations(
 
 async fn search_entities(
     client: &ApiClient,
-    query: &str,
-    project_id: Option<i64>,
-    limit: i64,
-    kind: &Option<String>,
+    search: &EntitySearchParams<'_>,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
     let request = EntitySearchRequest {
-        query: query.to_string(),
-        project_id,
-        project_path: None,
-        limit,
-        kind_filter: kind.clone(),
+        query: search.query.to_string(),
+        project_id: search.project_id,
+        project_path: search.project_path.clone(),
+        limit: search.limit,
+        kind_filter: search.kind.clone(),
     };
 
     if verbose {
-        println!("Searching entities: {}", query);
+        println!("Searching entities: {}", search.query);
     }
 
     let response: EntitySearchResponse =
@@ -504,6 +630,38 @@ pub enum EntityCommands {
         /// Project ID
         #[arg(long)]
         project_id: i64,
+
+        /// Maximum traversal depth
+        #[arg(long, default_value = "3")]
+        max_depth: usize,
+
+        /// Pagination offset
+        #[arg(long)]
+        offset: Option<usize>,
+
+        /// Pagination limit
+        #[arg(long, default_value = "20")]
+        limit: usize,
+
+        /// Exclude entities located in test files
+        #[arg(long)]
+        exclude_tests: Option<bool>,
+
+        /// Keep only entities under this directory prefix
+        #[arg(long)]
+        directory_prefix: Option<String>,
+
+        /// Exact file paths to exclude (comma-separated)
+        #[arg(long)]
+        excluded_files: Option<String>,
+
+        /// Keep only relations in these coarse domains (comma-separated)
+        #[arg(long)]
+        domains: Option<String>,
+
+        /// Whether relations pointing outside the project are kept
+        #[arg(long)]
+        include_external: Option<bool>,
     },
 
     /// Get function callers
@@ -514,6 +672,38 @@ pub enum EntityCommands {
         /// Project ID
         #[arg(long)]
         project_id: i64,
+
+        /// Maximum traversal depth
+        #[arg(long, default_value = "3")]
+        max_depth: usize,
+
+        /// Pagination offset
+        #[arg(long)]
+        offset: Option<usize>,
+
+        /// Pagination limit
+        #[arg(long, default_value = "20")]
+        limit: usize,
+
+        /// Exclude entities located in test files
+        #[arg(long)]
+        exclude_tests: Option<bool>,
+
+        /// Keep only entities under this directory prefix
+        #[arg(long)]
+        directory_prefix: Option<String>,
+
+        /// Exact file paths to exclude (comma-separated)
+        #[arg(long)]
+        excluded_files: Option<String>,
+
+        /// Keep only relations in these coarse domains (comma-separated)
+        #[arg(long)]
+        domains: Option<String>,
+
+        /// Whether relations pointing outside the project are kept
+        #[arg(long)]
+        include_external: Option<bool>,
     },
 
     /// Get call chain
@@ -524,6 +714,38 @@ pub enum EntityCommands {
         /// Direction: up (callers) or down (callees)
         #[arg(short, long, default_value = "down")]
         direction: String,
+
+        /// Maximum traversal depth
+        #[arg(long, default_value = "3")]
+        max_depth: usize,
+
+        /// Pagination offset
+        #[arg(long)]
+        offset: Option<usize>,
+
+        /// Pagination limit
+        #[arg(long, default_value = "20")]
+        limit: usize,
+
+        /// Exclude entities located in test files
+        #[arg(long)]
+        exclude_tests: Option<bool>,
+
+        /// Keep only entities under this directory prefix
+        #[arg(long)]
+        directory_prefix: Option<String>,
+
+        /// Exact file paths to exclude (comma-separated)
+        #[arg(long)]
+        excluded_files: Option<String>,
+
+        /// Keep only relations in these coarse domains (comma-separated)
+        #[arg(long)]
+        domains: Option<String>,
+
+        /// Whether relations pointing outside the project are kept
+        #[arg(long)]
+        include_external: Option<bool>,
 
         /// Project ID
         #[arg(long)]
@@ -577,6 +799,10 @@ pub enum EntityCommands {
         /// Project ID (optional)
         #[arg(long)]
         project_id: Option<i64>,
+
+        /// Project root path (optional if project-id is provided)
+        #[arg(long)]
+        project_path: Option<String>,
 
         /// Maximum number of results
         #[arg(short, long, default_value = "20")]

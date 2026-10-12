@@ -24,6 +24,18 @@ export type InterfaceRelation = components['schemas']['InterfaceRelation'];
 export type ClassImplementationsResponse =
 	components['schemas']['ClassImplementationsResponse'];
 
+/** Relation listing filter shared by calls, callers and call-chain. */
+export interface RelationFilter {
+	maxDepth?: number;
+	offset?: number;
+	limit?: number;
+	excludeTests?: boolean;
+	directoryPrefix?: string;
+	excludedFiles?: string[];
+	domains?: string;
+	includeExternal?: boolean;
+}
+
 export const entityApi = {
 	// Function details
 	getFunction: (
@@ -37,10 +49,26 @@ export const entityApi = {
 		),
 
 	// Functions called by this function
-	getCalls: (projectId: number, id: string): Promise<FunctionCallsResponse> =>
+	getCalls: (
+		projectId: number,
+		id: string,
+		filter?: RelationFilter,
+	): Promise<FunctionCallsResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/function/{id}/calls', {
-				params: { path: { project_id: projectId, id } },
+				params: {
+					path: { project_id: projectId, id },
+					query: {
+						max_depth: filter?.maxDepth,
+						offset: filter?.offset,
+						limit: filter?.limit,
+						exclude_tests: filter?.excludeTests,
+						directory_prefix: filter?.directoryPrefix,
+						excluded_files: filter?.excludedFiles,
+						domains: filter?.domains,
+						include_external: filter?.includeExternal,
+					},
+				},
 			}),
 		),
 
@@ -48,10 +76,23 @@ export const entityApi = {
 	getCallers: (
 		projectId: number,
 		id: string,
+		filter?: RelationFilter,
 	): Promise<FunctionCallersResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/function/{id}/callers', {
-				params: { path: { project_id: projectId, id } },
+				params: {
+					path: { project_id: projectId, id },
+					query: {
+						max_depth: filter?.maxDepth,
+						offset: filter?.offset,
+						limit: filter?.limit,
+						exclude_tests: filter?.excludeTests,
+						directory_prefix: filter?.directoryPrefix,
+						excluded_files: filter?.excludedFiles,
+						domains: filter?.domains,
+						include_external: filter?.includeExternal,
+					},
+				},
 			}),
 		),
 
@@ -60,12 +101,23 @@ export const entityApi = {
 		projectId: number,
 		id: string,
 		direction: 'up' | 'down' = 'down',
+		filter?: RelationFilter,
 	): Promise<CallChainResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/call-chain/{id}', {
 				params: {
 					path: { project_id: projectId, id },
-					query: { direction },
+					query: {
+						direction,
+						max_depth: filter?.maxDepth,
+						offset: filter?.offset,
+						limit: filter?.limit,
+						exclude_tests: filter?.excludeTests,
+						directory_prefix: filter?.directoryPrefix,
+						excluded_files: filter?.excludedFiles,
+						domains: filter?.domains,
+						include_external: filter?.includeExternal,
+					},
 				},
 			}),
 		),

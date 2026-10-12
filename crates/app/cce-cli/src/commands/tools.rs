@@ -83,6 +83,8 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             column,
             symbol,
             context_lines,
+            include_snippet,
+            include_entity_info,
             project_id,
         } => {
             execute_find_references(
@@ -96,6 +98,8 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
                     verbose,
                 },
                 *context_lines,
+                *include_snippet,
+                *include_entity_info,
             )
             .await
         }
@@ -125,7 +129,20 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             query,
             project_id,
             top_n,
-        } => execute_keyword_search(*project_id, query, *top_n, None, server, verbose).await,
+            offset,
+            term_operator,
+        } => {
+            execute_keyword_search(
+                *project_id,
+                query,
+                *top_n,
+                *offset,
+                Some(term_operator.as_str()),
+                server,
+                verbose,
+            )
+            .await
+        }
         ToolCommands::Fold {
             text,
             language,
@@ -144,8 +161,47 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             )
             .await
         }
-        ToolCommands::FoldBatch { items } => execute_fold_batch(items, server, verbose).await,
+        ToolCommands::FoldBatch {
+            items,
+            languages,
+            file_names,
+            item_max_tokens,
+            item_modes,
+            language,
+            max_tokens,
+            mode,
+            max_concurrency,
+        } => {
+            execute_fold_batch(
+                &FoldBatchCliParams {
+                    items,
+                    languages,
+                    file_names,
+                    item_max_tokens,
+                    item_modes,
+                    language,
+                    max_tokens,
+                    mode,
+                    max_concurrency: *max_concurrency,
+                },
+                server,
+                verbose,
+            )
+            .await
+        }
     }
+}
+
+pub(crate) struct FoldBatchCliParams<'a> {
+    items: &'a [String],
+    languages: &'a [String],
+    file_names: &'a [String],
+    item_max_tokens: &'a [usize],
+    item_modes: &'a [String],
+    language: &'a Option<String>,
+    max_tokens: &'a Option<usize>,
+    mode: &'a Option<String>,
+    max_concurrency: Option<usize>,
 }
 
 pub async fn execute_compress(
@@ -324,6 +380,8 @@ pub async fn execute_get_symbols(
 pub async fn execute_find_references(
     params: LocationParams,
     context_lines: Option<usize>,
+    include_snippet: Option<bool>,
+    include_entity_info: Option<bool>,
 ) -> Result<()> {
     let client = ApiClient::new(&params.server)?;
 
@@ -334,8 +392,8 @@ pub async fn execute_find_references(
         column: params.column,
         symbol: params.symbol,
         context_lines,
-        include_snippet: None,
-        include_entity_info: None,
+        include_snippet,
+        include_entity_info,
     };
 
     if params.verbose {
@@ -444,19 +502,24 @@ pub async fn execute_keyword_search(
     project_id: i64,
     query: &str,
     top_n: usize,
-    _file_paths: Option<&[String]>,
+    offset: usize,
+    term_operator: Option<&str>,
     server: &str,
     verbose: bool,
 ) -> Result<()> {
     let client = ApiClient::new(server)?;
 
+    let operator = match term_operator.map(str::to_ascii_lowercase).as_deref() {
+        Some("and") => KeywordTermOperator::And,
+        _ => KeywordTermOperator::Or,
+    };
     let request = KeywordSearchRequest {
         query: query.to_string(),
         top_n,
         project_id,
         epoch: None,
-        offset: 0,
-        term_operator: KeywordTermOperator::Or,
+        offset,
+        term_operator: operator,
     };
 
     if verbose {
@@ -526,29 +589,34 @@ pub async fn execute_fold(
     Ok(())
 }
 
-pub async fn execute_fold_batch(items: &[String], server: &str, verbose: bool) -> Result<()> {
+pub async fn execute_fold_batch(
+    params: &FoldBatchCliParams<'_>,
+    server: &str,
+    verbose: bool,
+) -> Result<()> {
     let client = ApiClient::new(server)?;
-    let request_items = items
+    let request_items = params
+        .items
         .iter()
         .enumerate()
         .map(|(index, text)| cce_api::models::BatchFoldItem {
             id: index.to_string(),
             text: text.clone(),
-            language: None,
-            file_name: None,
-            max_tokens: None,
-            mode: None,
+            language: params.languages.get(index).cloned(),
+            file_name: params.file_names.get(index).cloned(),
+            max_tokens: params.item_max_tokens.get(index).copied(),
+            mode: params.item_modes.get(index).cloned(),
         })
         .collect();
     let request = BatchFoldRequest {
         items: request_items,
-        language: None,
-        max_tokens: None,
-        mode: None,
-        max_concurrency: None,
+        language: params.language.clone(),
+        max_tokens: *params.max_tokens,
+        mode: params.mode.clone(),
+        max_concurrency: params.max_concurrency,
     };
     if verbose {
-        println!("Folding {} files...", items.len());
+        println!("Folding {} files...", params.items.len());
     }
     let response: BatchFoldResponse = client
         .post(cce_api::paths::TOOLS_FOLD_BATCH, &request)
@@ -650,6 +718,14 @@ pub enum ToolCommands {
         #[arg(long)]
         context_lines: Option<usize>,
 
+        /// Include source snippets in output
+        #[arg(long)]
+        include_snippet: Option<bool>,
+
+        /// Include entity info in output
+        #[arg(long)]
+        include_entity_info: Option<bool>,
+
         /// Project ID
         #[arg(short = 'P', long)]
         project_id: i64,
@@ -695,6 +771,14 @@ pub enum ToolCommands {
         /// Maximum number of results
         #[arg(short, long, default_value = "10")]
         top_n: usize,
+
+        /// Number of results to skip for pagination
+        #[arg(long, default_value = "0")]
+        offset: usize,
+
+        /// Term operator combining query terms: or, and
+        #[arg(long, default_value = "or")]
+        term_operator: String,
     },
 
     /// Fold one file into a skeleton
@@ -725,5 +809,37 @@ pub enum ToolCommands {
         /// Raw file texts (multiple --items flags)
         #[arg(short, long = "items")]
         items: Vec<String>,
+
+        /// Per-item language hints aligned by index with --items
+        #[arg(long)]
+        languages: Vec<String>,
+
+        /// Per-item file name hints aligned by index with --items
+        #[arg(long)]
+        file_names: Vec<String>,
+
+        /// Per-item token budgets aligned by index with --items
+        #[arg(long)]
+        item_max_tokens: Vec<usize>,
+
+        /// Per-item fold modes aligned by index with --items
+        #[arg(long)]
+        item_modes: Vec<String>,
+
+        /// Global language default for items without an explicit hint
+        #[arg(long)]
+        language: Option<String>,
+
+        /// Global token budget default
+        #[arg(long)]
+        max_tokens: Option<usize>,
+
+        /// Global fold mode default
+        #[arg(long)]
+        mode: Option<String>,
+
+        /// Maximum concurrency (reserved for forward compatibility)
+        #[arg(long)]
+        max_concurrency: Option<usize>,
     },
 }

@@ -11,6 +11,7 @@ import {
 	type FunctionCallersResponse,
 	type ClassInheritanceResponse,
 	type ClassImplementationsResponse,
+	type RelationFilter,
 } from '../api/entities';
 import { type CallChainNode } from '../api/search';
 import { currentProjectId } from './project';
@@ -48,7 +49,7 @@ export const entityState = writable<EntityState>({
 
 // Actions
 export const entityActions = {
-	async loadFunction(id: string) {
+	async loadFunction(id: string, filter?: RelationFilter) {
 		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
 
 		try {
@@ -56,8 +57,8 @@ export const entityActions = {
 
 			const [func, calls, callers] = await Promise.all([
 				entityApi.getFunction(projId, id),
-				entityApi.getCalls(projId, id),
-				entityApi.getCallers(projId, id),
+				entityApi.getCalls(projId, id, filter),
+				entityApi.getCallers(projId, id, filter),
 			]);
 
 			entityState.update((s) => ({
@@ -105,11 +106,20 @@ export const entityActions = {
 		}
 	},
 
-	async loadCallChain(id: string, direction: 'up' | 'down' = 'down') {
+	async loadCallChain(
+		id: string,
+		direction: 'up' | 'down' = 'down',
+		filter?: RelationFilter,
+	) {
 		try {
 			const projId = get(currentProjectId);
 
-			const response = await entityApi.getCallChain(projId, id, direction);
+			const response = await entityApi.getCallChain(
+				projId,
+				id,
+				direction,
+				filter,
+			);
 			entityState.update((s) => ({ ...s, callChain: response.call_chain }));
 		} catch (error) {
 			console.error('Failed to load call chain:', error);

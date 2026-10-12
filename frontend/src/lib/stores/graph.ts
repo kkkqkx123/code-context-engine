@@ -10,23 +10,31 @@
 import { writable, get } from 'svelte/store';
 import {
 	graphApi,
+	type EntityImpactOptions,
 	type GraphComponentsResponse,
+	type GraphCyclesResponse,
 	type GraphDirection,
 	type GraphEdge,
+	type GraphFilter,
 	type GraphImpactResponse,
+	type GraphModuleResponse,
 	type GraphNode,
 	type GraphPathResponse,
+	type GraphStructuralResponse,
+	type StructuralOptions,
 } from '../api/graph';
 import { ApiError, type SymbolCandidate } from '../api/client';
 import {
 	edgeDomain,
-	edgeElementId,
 	RELATION_DOMAIN_ORDER,
+	type RelationDomain,
+} from '../utils/graph-domains';
+import {
+	edgeElementId,
 	toElementEdge,
 	toElementNode,
 	type GraphElement,
-	type RelationDomain,
-} from '../utils/graph-style';
+} from '../utils/graph-elements';
 import { currentProjectId } from './project';
 import { errorCodeOf, errorMessage } from '../utils/errors';
 
@@ -224,6 +232,7 @@ export const graphActions = {
 		depth = 2,
 		direction: GraphDirection = 'both',
 		projectId?: number,
+		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
 		const pid = projectId ?? get(currentProjectId);
 		graphState.update((state) => ({
@@ -237,6 +246,7 @@ export const graphActions = {
 				entityId,
 				depth,
 				direction,
+				...filter,
 			});
 			replaceGraph(
 				response.nodes,
@@ -262,6 +272,7 @@ export const graphActions = {
 		entityId: string,
 		depth = 1,
 		direction: GraphDirection = 'both',
+		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
 		const state = get(graphState);
 		if (state.nodes.length >= MAX_RENDERED_NODES) {
@@ -278,6 +289,7 @@ export const graphActions = {
 				entityId,
 				depth,
 				direction,
+				...filter,
 			});
 			return {
 				ok: true,
@@ -301,6 +313,7 @@ export const graphActions = {
 	async loadSubgraph(
 		ids: string[],
 		projectId?: number,
+		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
 		const pid = projectId ?? get(currentProjectId);
 		graphState.update((state) => ({
@@ -310,7 +323,7 @@ export const graphActions = {
 			error: null,
 		}));
 		try {
-			const response = await graphApi.getSubgraph(pid, ids);
+			const response = await graphApi.getSubgraph(pid, ids, filter);
 			replaceGraph(
 				response.nodes,
 				response.edges,
@@ -338,6 +351,7 @@ export const graphActions = {
 		end: string,
 		maxDepth = 10,
 		projectId?: number,
+		filter?: GraphFilter,
 	): Promise<GraphActionResult<GraphPathResponse>> {
 		const pid = projectId ?? get(currentProjectId);
 		graphState.update((state) => ({
@@ -347,7 +361,12 @@ export const graphActions = {
 			error: null,
 		}));
 		try {
-			const response = await graphApi.getPath(pid, { start, end, maxDepth });
+			const response = await graphApi.getPath(pid, {
+				start,
+				end,
+				maxDepth,
+				...filter,
+			});
 			if (response.path_found) {
 				replaceGraph(
 					response.nodes ?? [],
@@ -377,6 +396,7 @@ export const graphActions = {
 	async loadOverview(
 		limit?: number,
 		projectId?: number,
+		filter?: GraphFilter,
 	): Promise<GraphActionResult<number>> {
 		const pid = projectId ?? get(currentProjectId);
 		graphState.update((state) => ({
@@ -386,7 +406,7 @@ export const graphActions = {
 			error: null,
 		}));
 		try {
-			const response = await graphApi.exportGraph(pid, limit);
+			const response = await graphApi.exportGraph(pid, limit, filter);
 			replaceGraph(
 				response.nodes,
 				response.edges,
@@ -410,10 +430,11 @@ export const graphActions = {
 	 */
 	async loadComponents(
 		projectId?: number,
+		filter?: GraphFilter,
 	): Promise<GraphActionResult<GraphComponentsResponse>> {
 		const pid = projectId ?? get(currentProjectId);
 		try {
-			const response = await graphApi.getComponents(pid);
+			const response = await graphApi.getComponents(pid, filter);
 			const communities: Record<string, number> = {};
 			response.components.forEach((component, index) => {
 				for (const nodeId of component) {
@@ -444,6 +465,7 @@ export const graphActions = {
 	 */
 	async loadComponentsIfStale(
 		projectId?: number,
+		filter?: GraphFilter,
 	): Promise<GraphActionResult<GraphComponentsResponse>> {
 		const state = get(graphState);
 		if (state.meta.communitiesEpoch >= state.meta.epoch) {
@@ -456,7 +478,7 @@ export const graphActions = {
 				},
 			};
 		}
-		return graphActions.loadComponents(projectId);
+		return graphActions.loadComponents(projectId, filter);
 	},
 
 	/** Run impact analysis for a changed file and record the result. */
@@ -476,6 +498,80 @@ export const graphActions = {
 					impactTransitive: response.indirect_dependents,
 				},
 			}));
+			return { ok: true, value: response };
+		} catch (error) {
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, error: ge }));
+			return { ok: false, error: ge };
+		}
+	},
+
+	/** Run impact analysis for a changed entity. */
+	async loadEntityImpact(
+		options: EntityImpactOptions,
+		projectId?: number,
+	): Promise<GraphActionResult<number>> {
+		const pid = projectId ?? get(currentProjectId);
+		try {
+			const response = await graphApi.getEntityImpact(pid, options);
+			graphState.update((state) => ({
+				...state,
+				meta: {
+					...state.meta,
+					impactFile: response.changed_entity,
+					impactDirect: response.direct_dependents,
+					impactTransitive: response.indirect_dependents,
+				},
+			}));
+			return { ok: true, value: response.direct_dependents.length };
+		} catch (error) {
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, error: ge }));
+			return { ok: false, error: ge };
+		}
+	},
+
+	/** Fetch dependency cycles at entity or file level. */
+	async loadCycles(
+		level: 'entity' | 'file' = 'entity',
+		limit = 100,
+		projectId?: number,
+	): Promise<GraphActionResult<GraphCyclesResponse>> {
+		const pid = projectId ?? get(currentProjectId);
+		try {
+			const response = await graphApi.getCycles(pid, { level, limit });
+			return { ok: true, value: response };
+		} catch (error) {
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, error: ge }));
+			return { ok: false, error: ge };
+		}
+	},
+
+	/** Fetch typed structural relations rooted at one entity. */
+	async loadStructural(
+		options: StructuralOptions,
+		projectId?: number,
+	): Promise<GraphActionResult<GraphStructuralResponse>> {
+		const pid = projectId ?? get(currentProjectId);
+		try {
+			const response = await graphApi.getStructural(pid, options);
+			return { ok: true, value: response };
+		} catch (error) {
+			const ge = toGraphError(error);
+			graphState.update((state) => ({ ...state, error: ge }));
+			return { ok: false, error: ge };
+		}
+	},
+
+	/** Fetch module-level relations of one file. */
+	async loadModule(
+		file: string,
+		projectId?: number,
+	): Promise<GraphActionResult<GraphModuleResponse>> {
+		const pid = projectId ?? get(currentProjectId);
+		try {
+			const response = await graphApi.getModule(pid, file);
 			return { ok: true, value: response };
 		} catch (error) {
 			const ge = toGraphError(error);

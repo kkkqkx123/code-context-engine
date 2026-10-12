@@ -20,7 +20,6 @@ use std::sync::Arc;
 use cce_api::models::KeywordTermOperator;
 use cce_codegraph::index::snapshot_query::SnapshotSymbolQueryOps;
 use cce_orchestrator::query::RelationQueryOptions;
-use cce_orchestrator::query::types::SearchSources;
 use cce_orchestrator::{IndexOptions, KeywordSearchTool};
 use cce_server_shared::services::search::{SearchService, SharedQueryFields, SingleQuerySpec};
 use cce_server_shared::state::AppState;
@@ -59,9 +58,39 @@ pub struct SearchArgs {
     /// Maximum number of results to return (default 10).
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Retrieval source: vector, bm25, hybrid (default), or summary.
+    #[serde(default)]
+    pub query_type: Option<String>,
+    /// Minimum unified score; results below are dropped.
+    #[serde(default)]
+    pub min_score: Option<f32>,
     /// Optional directory prefix to restrict results (e.g. "src/parser").
     #[serde(default)]
     pub directory_prefix: Option<String>,
+    /// Glob exclude patterns.
+    #[serde(default)]
+    pub exclude_patterns: Option<Vec<String>>,
+    /// Glob include patterns.
+    #[serde(default)]
+    pub include_patterns: Option<Vec<String>>,
+    /// Content types to exclude (currently only test/tests).
+    #[serde(default)]
+    pub exclude_content_types: Option<Vec<String>>,
+    /// File categories to include (code, config, documentation, schema, other).
+    #[serde(default)]
+    pub include_categories: Option<Vec<String>>,
+    /// File categories to exclude.
+    #[serde(default)]
+    pub exclude_categories: Option<Vec<String>>,
+    /// Rerank master switch override.
+    #[serde(default)]
+    pub enable_rerank: Option<bool>,
+    /// Rerank candidate budget override.
+    #[serde(default)]
+    pub rerank_max_candidates: Option<usize>,
+    /// Query intent override: semantic, keyword, hybrid, entity.
+    #[serde(default)]
+    pub query_intent: Option<String>,
     /// Opt-in relation expansion: resolve call-graph neighbours for top hits.
     #[serde(default)]
     pub expand: Option<bool>,
@@ -92,6 +121,12 @@ pub struct EntityArgs {
     pub project_id: i64,
     /// Stable symbol ID (for example `sym_…`).
     pub entity_id: String,
+    /// Pagination offset for callees/callers listing (default 0).
+    #[serde(default)]
+    pub offset: Option<usize>,
+    /// Pagination limit for callees/callers listing.
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 /// Arguments for call-chain traversal.
@@ -109,6 +144,12 @@ pub struct CallChainArgs {
     /// Maximum traversal depth (default 3).
     #[serde(default)]
     pub max_depth: Option<usize>,
+    /// Pagination offset into the chain nodes (default 0).
+    #[serde(default)]
+    pub offset: Option<usize>,
+    /// Pagination limit for chain nodes. Defaults to the full chain.
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 /// Arguments for full indexing.
@@ -180,6 +221,12 @@ pub struct FoldBatchItemArgs {
     /// Optional file name hint.
     #[serde(default)]
     pub file_name: Option<String>,
+    /// Optional token budget for the folded text.
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
+    /// Optional fold mode (detailed or minimal).
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 /// Arguments for stateless batch file folding (no project context).
@@ -187,6 +234,15 @@ pub struct FoldBatchItemArgs {
 pub struct FoldBatchArgs {
     /// Entries to fold.
     pub items: Vec<FoldBatchItemArgs>,
+    /// Global language default for items without an explicit hint.
+    #[serde(default)]
+    pub language: Option<String>,
+    /// Global token budget default.
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
+    /// Global fold mode default.
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[tool_router]
@@ -226,14 +282,74 @@ impl McpServerHandler {
         // the same runtime parameters and expansion behavior. Items reuse the
         // shared API DTO shape instead of a parallel MCP-only mapping.
         let service = SearchService::new(&self.state);
+        let sources = match SearchService::parse_search_sources(
+            args.query_type.as_deref().unwrap_or("hybrid"),
+            "query type",
+        ) {
+            Ok(sources) => sources,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "search failed: {error}"
+                ))]));
+            }
+        };
+        let mut exclude_content_types = Vec::new();
+        for raw in args.exclude_content_types.clone().unwrap_or_default() {
+            match SearchService::parse_exclude_content_type(&raw) {
+                Ok(content_type) => exclude_content_types.push(content_type),
+                Err(error) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                        "search failed: {error}"
+                    ))]));
+                }
+            }
+        }
+        let mut include_categories = Vec::new();
+        for raw in args.include_categories.clone().unwrap_or_default() {
+            match SearchService::parse_file_category(&raw, "include") {
+                Ok(category) => include_categories.push(category),
+                Err(error) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                        "search failed: {error}"
+                    ))]));
+                }
+            }
+        }
+        let mut exclude_categories = Vec::new();
+        for raw in args.exclude_categories.clone().unwrap_or_default() {
+            match SearchService::parse_file_category(&raw, "exclude") {
+                Ok(category) => exclude_categories.push(category),
+                Err(error) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                        "search failed: {error}"
+                    ))]));
+                }
+            }
+        }
+        let query_intent = match SearchService::parse_query_intent(args.query_intent.as_deref()) {
+            Ok(intent) => intent,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "search failed: {error}"
+                ))]));
+            }
+        };
         let spec = SingleQuerySpec {
             query: args.query.clone(),
-            sources: SearchSources::default(),
+            sources,
             fields: SharedQueryFields {
                 limit: args.limit,
+                min_score: args.min_score,
+                enable_rerank: args.enable_rerank,
+                rerank_max_candidates: args.rerank_max_candidates,
                 directory_prefix: args.directory_prefix.clone(),
+                exclude_content_types,
+                include_categories,
+                exclude_categories,
+                exclude_patterns: args.exclude_patterns.clone().unwrap_or_default(),
+                include_patterns: args.include_patterns.clone().unwrap_or_default(),
+                query_intent,
                 expand: args.expand.unwrap_or(false),
-                ..Default::default()
             },
         };
         match service.run_single(args.project_id, spec).await {
@@ -350,7 +466,10 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callees = searcher.get_callees_paginated(entity_id, &call_domain_relation_options());
+        let options = call_domain_relation_options()
+            .with_offset(args.offset.unwrap_or(0))
+            .with_limit(args.limit.unwrap_or(20));
+        let callees = searcher.get_callees_paginated(entity_id, &options);
         let items: Vec<Value> = callees
             .iter()
             .map(|relation| {
@@ -392,7 +511,10 @@ impl McpServerHandler {
                 ))]));
             }
         };
-        let callers = searcher.get_callers_paginated(entity_id, &call_domain_relation_options());
+        let options = call_domain_relation_options()
+            .with_offset(args.offset.unwrap_or(0))
+            .with_limit(args.limit.unwrap_or(20));
+        let callers = searcher.get_callers_paginated(entity_id, &options);
         let items: Vec<Value> = callers
             .iter()
             .map(|relation| {
@@ -434,7 +556,10 @@ impl McpServerHandler {
             }
         };
         let max_depth = args.max_depth.unwrap_or(3);
-        let options = call_domain_relation_options().with_max_depth(max_depth);
+        let options = call_domain_relation_options()
+            .with_max_depth(max_depth)
+            .with_offset(args.offset.unwrap_or(0))
+            .with_limit(args.limit.unwrap_or(usize::MAX));
         let direction = args
             .direction
             .as_deref()
@@ -443,9 +568,9 @@ impl McpServerHandler {
         let backward = matches!(direction.as_str(), "backward" | "up" | "callers");
         let canonical = if backward { "backward" } else { "forward" };
         let result = if backward {
-            searcher.query_backward(entity_id, &options)
+            searcher.query_backward_paginated(entity_id, &options)
         } else {
-            searcher.query_forward(entity_id, &options)
+            searcher.query_forward_paginated(entity_id, &options)
         };
         match result {
             Ok(nodes) => {
@@ -467,6 +592,7 @@ impl McpServerHandler {
                         "entity_id": args.entity_id,
                         "direction": canonical,
                         "max_depth": max_depth,
+                        "offset": args.offset.unwrap_or(0),
                         "nodes": items,
                     })
                     .to_string(),
@@ -697,20 +823,28 @@ impl McpServerHandler {
         Parameters(args): Parameters<FoldBatchArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("fold_batch")?;
-        use cce_orchestrator::{FileFoldRequest, FileFoldTool};
+        use cce_orchestrator::{FileFoldMode, FileFoldRequest, FileFoldTool};
         use cce_types::language::Language;
 
         let mut coordinator = cce_parser::parser::ParseCoordinator::new();
         let mut results = Vec::with_capacity(args.items.len());
         for item in &args.items {
             let mut request = FileFoldRequest::new(item.text.clone());
-            if let Some(name) = item.language.as_deref()
-                && let Some(language) = Language::from_name(name)
+            let language = item.language.as_deref().or(args.language.as_deref());
+            if let Some(name) = language
+                && let Some(parsed) = Language::from_name(name)
             {
-                request = request.with_language(language);
+                request = request.with_language(parsed);
             }
             if let Some(file_name) = item.file_name.clone() {
                 request = request.with_file_name(file_name);
+            }
+            if let Some(max_tokens) = item.max_tokens.or(args.max_tokens) {
+                request = request.with_max_tokens(max_tokens);
+            }
+            let mode = item.mode.as_deref().or(args.mode.as_deref());
+            if mode.is_some() {
+                request = request.with_mode(FileFoldMode::parse(mode));
             }
             let folded = FileFoldTool::fold(&mut coordinator, request);
             results.push(json!({

@@ -10,7 +10,7 @@
 		RELATION_DOMAINS,
 		relationLineStyle,
 		type RelationDomain,
-	} from '$lib/utils/graph-style';
+	} from '$lib/utils/graph-domains';
 
 	interface Props {
 		domains?: RelationDomain[];
