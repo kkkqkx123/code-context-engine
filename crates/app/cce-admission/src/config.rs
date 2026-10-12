@@ -304,4 +304,56 @@ mod tests {
         };
         config.validate().expect_err("short token must fail");
     }
+
+    #[test]
+    fn enabled_config_rejects_duplicate_and_nonpositive_scope() {
+        let duplicate = AdmissionConfig {
+            enabled: true,
+            tokens: vec![
+                TokenEntry {
+                    token: "alpha-token-value-1".to_string(),
+                    projects: vec![1],
+                    quota_bytes: None,
+                },
+                TokenEntry {
+                    token: "alpha-token-value-1".to_string(),
+                    projects: vec![2],
+                    quota_bytes: None,
+                },
+            ],
+            ..AdmissionConfig::default()
+        };
+        duplicate
+            .validate()
+            .expect_err("duplicate token value must fail");
+        let bad_scope = AdmissionConfig {
+            enabled: true,
+            tokens: vec![TokenEntry {
+                token: "alpha-token-value-1".to_string(),
+                projects: vec![0],
+                quota_bytes: None,
+            }],
+            ..AdmissionConfig::default()
+        };
+        bad_scope
+            .validate()
+            .expect_err("non-positive project scope must fail");
+    }
+
+    #[test]
+    fn enabled_config_rejects_empty_public_prefix() {
+        let config = AdmissionConfig {
+            enabled: true,
+            tokens: vec![TokenEntry {
+                token: "alpha-token-value-1".to_string(),
+                projects: vec![1],
+                quota_bytes: None,
+            }],
+            public_path_prefixes: vec![String::new()],
+            ..AdmissionConfig::default()
+        };
+        config
+            .validate()
+            .expect_err("empty public prefix must fail");
+    }
 }

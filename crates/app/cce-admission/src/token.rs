@@ -124,4 +124,22 @@ mod tests {
         assert!(store.authenticate("alpha-token-value-2").is_none());
         assert!(store.authenticate("short").is_none());
     }
+
+    #[test]
+    fn fingerprint_is_stable_short_and_hex() {
+        let hash = hash_token("alpha-token-value-1");
+        let first = fingerprint(&hash);
+        let second = fingerprint(&hash_token("alpha-token-value-1"));
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 8);
+        assert!(first.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(first, fingerprint(&hash_token("alpha-token-value-2")));
+    }
+
+    #[test]
+    fn empty_store_authenticates_nothing() {
+        let store = TokenStore::default();
+        assert!(store.is_empty());
+        assert!(store.authenticate("alpha-token-value-1").is_none());
+    }
 }

@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = BASE_DIR / "fixtures"
 ONCE_CELL_DIR = FIXTURES_DIR / "once_cell"
+FLASK_DIR = FIXTURES_DIR / "flask"
+
+#: Benchmark scale tiers: small is the default smoke fixture, medium is the
+#: first multi-hundred-file tier used for index/edge scaling reads.
+FIXTURES: Dict[str, Tuple[Path, List[str]]] = {
+    "once_cell": (ONCE_CELL_DIR, ["rs", "toml", "md"]),
+    "flask": (FLASK_DIR, ["py"]),
+}
 
 
 class CceApiClient:
@@ -189,7 +197,8 @@ class CceApiClient:
 class TestRunner:
     """Functional test runner using the CCE HTTP API.
 
-    Provides pre-built test scenarios for the once_cell fixture, including:
+    Provides pre-built test scenarios for the configured scale-tier fixture
+    (see FIXTURES), including:
       - TC-INDEX-001  Full index of once_cell project
       - TC-INDEX-002  Index with relations
       - TC-INDEX-003  Incremental re-index (idempotent)
@@ -210,36 +219,48 @@ class TestRunner:
     def once_cell_path() -> Path:
         return ONCE_CELL_DIR
 
-    def setup_once_cell_project(self) -> int:
-        """Create a project for once_cell fixture, return project_id."""
-        root_path = str(self.once_cell_path().resolve())
+    @staticmethod
+    def fixture_path(name: str) -> Tuple[Path, List[str]]:
+        if name not in FIXTURES:
+            raise ValueError(f"unknown fixture {name!r}, expected one of {sorted(FIXTURES)}")
+        return FIXTURES[name]
+
+    def setup_fixture_project(self, fixture: str = "once_cell") -> int:
+        """Create a project for the named scale-tier fixture."""
+        root, extensions = self.fixture_path(fixture)
+        root_path = str(root.resolve())
         result = self.client.create_project(
             root_path=root_path,
-            name="once_cell-bench",
-            extensions=["rs", "toml", "md"],
+            name=f"{fixture}-bench",
+            extensions=extensions,
         )
         project_id = int(result["project"]["id"])
-        logger.info("Created project ID %d for once_cell at %s", project_id, root_path)
+        logger.info("Created project ID %d for %s at %s", project_id, fixture, root_path)
         return project_id
+
+    def setup_once_cell_project(self) -> int:
+        """Create a project for once_cell fixture, return project_id."""
+        return self.setup_fixture_project("once_cell")
 
     # ------------------------------------------------------------------
     # Index test scenarios
     # ------------------------------------------------------------------
 
-    def test_full_index(self, project_id: int) -> Dict[str, Any]:
-        """TC-INDEX-001: Full index of once_cell project.
+    def test_full_index(self, project_id: int, fixture: str = "once_cell") -> Dict[str, Any]:
+        """TC-INDEX-001: Full index of the fixture project.
 
         Expected:
-          - All .rs, .toml, .md files processed (at least 14 files)
+          - All fixture files processed (at least 14 files)
           - Total entities > 50 (structs, functions, traits, etc.)
           - No errors
         """
-        fixture_path = str(self.once_cell_path().resolve())
-        logger.info("TC-INDEX-001: Starting full index of once_cell")
+        root, extensions = self.fixture_path(fixture)
+        fixture_path = str(root.resolve())
+        logger.info("TC-INDEX-001: Starting full index of %s", fixture)
         result = self.client.run_index(
             project_id=project_id,
             path=fixture_path,
-            extensions=["rs", "toml", "md"],
+            extensions=extensions,
             exclude_dirs=[".git", "target"],
         )
         logger.info(
@@ -253,14 +274,15 @@ class TestRunner:
         )
         return result
 
-    def test_index_idempotent(self, project_id: int) -> Dict[str, Any]:
+    def test_index_idempotent(self, project_id: int, fixture: str = "once_cell") -> Dict[str, Any]:
         """TC-INDEX-003: Re-index (should be idempotent, near-zero new entities)."""
-        fixture_path = str(self.once_cell_path().resolve())
+        root, extensions = self.fixture_path(fixture)
+        fixture_path = str(root.resolve())
         logger.info("TC-INDEX-003: Re-indexing (idempotent check)")
         result = self.client.run_index(
             project_id=project_id,
             path=fixture_path,
-            extensions=["rs", "toml", "md"],
+            extensions=extensions,
             exclude_dirs=[".git", "target"],
         )
         logger.info(
@@ -365,8 +387,8 @@ class TestRunner:
     # Run all functional tests
     # ------------------------------------------------------------------
 
-    def run_all_functional_tests(self) -> List[Dict[str, Any]]:
-        """Execute all functional test scenarios against once_cell fixture.
+    def run_all_functional_tests(self, fixture: str = "once_cell") -> List[Dict[str, Any]]:
+        """Execute all functional test scenarios against the named fixture.
 
         Returns a list of result dicts, each containing:
           - name: test case name
@@ -377,7 +399,7 @@ class TestRunner:
         results = []
 
         # Setup
-        project_id = self.setup_once_cell_project()
+        project_id = self.setup_fixture_project(fixture)
         results.append({
             "name": "TC-SETUP-001",
             "passed": True,
@@ -386,7 +408,7 @@ class TestRunner:
         })
 
         # 1. Full index
-        index_result = self.test_full_index(project_id)
+        index_result = self.test_full_index(project_id, fixture)
         index_checks = [
             ("files_indexed", index_result.get("files_indexed", 0) >= 10,
              f"indexed={index_result.get('files_indexed', 0)} >= 10"),
@@ -403,7 +425,7 @@ class TestRunner:
         })
 
         # 2. Idempotent re-index
-        reindex_result = self.test_index_idempotent(project_id)
+        reindex_result = self.test_index_idempotent(project_id, fixture)
         results.append({
             "name": "TC-INDEX-003",
             "passed": len(reindex_result.get("errors", [])) == 0,

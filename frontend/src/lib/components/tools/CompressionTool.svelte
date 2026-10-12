@@ -6,6 +6,8 @@
 	import type { CompressResult } from '$lib/api/tools';
 
 	let filePath = $state('');
+	let includeEntities = $state(false);
+	let includeGroups = $state(false);
 	let result: CompressResult | null = $state(null);
 	let loading = $state(false);
 	let error: string | null = $state(null);
@@ -20,6 +22,8 @@
 		try {
 			result = await toolsApi.compress({
 				file_path: filePath,
+				include_entities: includeEntities || undefined,
+				include_groups: includeGroups || undefined,
 			});
 		} catch (err) {
 			error = errorMessage(err);
@@ -48,6 +52,14 @@
 					/>
 				</div>
 				<div class="tool-actions">
+					<label class="toggle">
+						<input type="checkbox" bind:checked={includeEntities} />
+						<span>Include entities</span>
+					</label>
+					<label class="toggle">
+						<input type="checkbox" bind:checked={includeGroups} />
+						<span>Include groups</span>
+					</label>
 					<Button
 						onclick={handleCompress}
 						disabled={!filePath.trim() || loading}
@@ -143,6 +155,20 @@
 		margin-top: 1rem;
 		display: flex;
 		justify-content: flex-end;
+		align-items: center;
+		gap: 1rem;
+	}
+
+	.toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--gray-600);
+		cursor: pointer;
 	}
 
 	.empty-output {

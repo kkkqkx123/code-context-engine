@@ -77,3 +77,11 @@ harness = false
 [[bench]]
 name = "fusion_cache"
 harness = false
+
+[[bench]]
+name = "layered_chain"
+harness = false
+
+[[bench]]
+name = "hot_update_scope"
+harness = false

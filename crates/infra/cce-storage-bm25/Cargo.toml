@@ -38,3 +38,8 @@ required-features = ["local"]
 name = "bm25_scale"
 harness = false
 required-features = ["local"]
+
+[[bench]]
+name = "bm25_cache"
+harness = false
+required-features = ["local"]

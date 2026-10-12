@@ -15,7 +15,7 @@ class ServiceManager:
     """Manages the CCE server process lifecycle.
 
     Responsibilities:
-    - Background startup of CCE server (port 9001 per benches/config.toml)
+    - Background startup of CCE server (port 9001 per e2e/config.toml)
     - Health check via HTTP port polling
     - Graceful shutdown on exit
 
@@ -26,7 +26,7 @@ class ServiceManager:
     CCE_PORT = 9001
     CCE_HEALTH_ENDPOINT = "/api/health"
 
-    def __init__(self, cce_bin: str = "bin/cce.exe", config_path: str = "benches/config.toml"):
+    def __init__(self, cce_bin: str = "e2e/bin/cce", config_path: str = "e2e/config.toml"):
         self.cce_bin = Path(cce_bin)
         self.config_path = Path(config_path)
         self.cce_proc: Optional[subprocess.Popen] = None

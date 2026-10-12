@@ -230,7 +230,7 @@ pub enum GatewayCommands {
         extensions: Option<String>,
 
         /// Directories to exclude (comma-separated)
-        #[arg(short, long)]
+        #[arg(short = 'x', long)]
         exclude: Option<String>,
 
         /// Respect .gitignore; --gitignore=false forces them off
@@ -286,7 +286,7 @@ pub enum GatewayCommands {
         extensions: Option<String>,
 
         /// Directories to exclude (comma-separated)
-        #[arg(short, long)]
+        #[arg(short = 'x', long)]
         exclude: Option<String>,
 
         /// Respect .gitignore; --gitignore=false forces them off

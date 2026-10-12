@@ -96,4 +96,50 @@ mod tests {
         assert!(is_public_path("/api/health/qdrant", &prefixes));
         assert!(!is_public_path("/api/search", &prefixes));
     }
+
+    #[test]
+    fn path_extraction_strips_query_and_rejects_non_numeric() {
+        assert_eq!(
+            project_id_from_path("/api/project/12/index?verbose=true"),
+            Some(12)
+        );
+        assert_eq!(project_id_from_path("/api/project/abc/index"), None);
+        assert_eq!(project_id_from_path("/api/project/7/ingest/batch"), Some(7));
+        assert_eq!(project_id_from_path("/api/admission/stats"), None);
+    }
+
+    #[test]
+    fn scope_binding_covers_only_listed_projects() {
+        let context = AdmissionContext::new("fp".to_string(), vec![3, 7], None);
+        assert!(context.allows_project(3));
+        assert!(!context.allows_project(4));
+        let empty = AdmissionContext::new("fp".to_string(), Vec::new(), None);
+        assert!(!empty.allows_project(3));
+    }
+
+    #[test]
+    fn admission_required_off_loopback() {
+        assert!(!requires_admission("127.0.0.1"));
+        assert!(!requires_admission("localhost"));
+        assert!(requires_admission("0.0.0.0"));
+        assert!(requires_admission("example.com"));
+    }
+
+    #[test]
+    fn path_extraction_handles_trailing_slash_and_collection_routes() {
+        assert_eq!(project_id_from_path("/api/project/12/"), Some(12));
+        assert_eq!(project_id_from_path("/api/project/12"), Some(12));
+        assert_eq!(project_id_from_path("/api/project/"), None);
+        assert_eq!(project_id_from_path("/api/project"), None);
+        assert_eq!(project_id_from_path("/other/project/12/index"), None);
+        assert_eq!(project_id_from_path(""), None);
+    }
+
+    #[test]
+    fn public_path_rejects_partial_prefix_segments() {
+        let prefixes = vec!["/api/health".to_string()];
+        assert!(!is_public_path("/api/healthz", &prefixes));
+        assert!(!is_public_path("/api/search", &prefixes));
+        assert!(is_public_path("/api/health", &prefixes));
+    }
 }

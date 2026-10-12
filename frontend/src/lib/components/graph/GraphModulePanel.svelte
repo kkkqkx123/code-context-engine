@@ -37,10 +37,15 @@
 	</div>
 	{#if error}
 		<p class="panel-error">{error}</p>
+	{:else if loading && data === null}
+		<p class="panel-empty">Loading module relations…</p>
 	{:else if data !== null}
+		{#if loading}
+			<p class="panel-empty">Refreshing module relations…</p>
+		{/if}
 		<p class="communities-hint">
-			File <span class="mono">{data.file}</span> — exports, caller files and
-			outgoing module edges.
+			File <span class="mono">{data.file}</span> — exports, caller files and outgoing
+			module edges.
 		</p>
 		<div class="module-groups">
 			<div class="module-group">
@@ -65,7 +70,9 @@
 				{/if}
 			</div>
 			<div class="module-group">
-				<h5 class="subsection-title">Caller files ({data.caller_files.length})</h5>
+				<h5 class="subsection-title">
+					Caller files ({data.caller_files.length})
+				</h5>
 				{#if data.caller_files.length === 0}
 					<p class="panel-empty">No caller files target this file.</p>
 				{:else}
@@ -94,7 +101,9 @@
 						{#each data.imports as edge, index (index)}
 							<li class="module-edge-item">
 								<span class="mono">{edge.target}</span>
-								<span class="relation-meta">{edge.relation} · {edge.domain}</span>
+								<span class="relation-meta"
+									>{edge.relation} · {edge.domain}</span
+								>
 							</li>
 						{/each}
 					</ul>

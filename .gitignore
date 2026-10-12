@@ -54,6 +54,9 @@ test_output/
 # Per-crate benchmark trend files (local only)
 crates/**/benches/results/
 
+# E2E local outputs (committed examples under e2e/results/ are format references only)
+e2e/results/
+
 # Binary executables
 bin/cce
 bin/cce-cli

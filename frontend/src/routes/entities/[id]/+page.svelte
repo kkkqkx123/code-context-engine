@@ -21,9 +21,32 @@
 	let entityId = $derived(page.params.id);
 	let currentTab = $state('details');
 
+	// Relation traversal filter shared by calls, callers and call-chain.
+	// Every field maps 1:1 onto the request-layer RelationFilter.
+	let filterMaxDepth = $state<number | null>(null);
+	let filterLimit = $state<number | null>(null);
+	let filterExcludeTests = $state(false);
+	let filterDirectoryPrefix = $state('');
+	let filterDomains = $state('');
+	let filterIncludeExternal = $state<'default' | 'on' | 'off'>('default');
+
+	function relationFilter() {
+		return {
+			maxDepth: filterMaxDepth ?? undefined,
+			limit: filterLimit ?? undefined,
+			excludeTests: filterExcludeTests || undefined,
+			directoryPrefix: filterDirectoryPrefix.trim() || undefined,
+			domains: filterDomains.trim() || undefined,
+			includeExternal:
+				filterIncludeExternal === 'default'
+					? undefined
+					: filterIncludeExternal === 'on',
+		};
+	}
+
 	async function loadEntity() {
 		if (!entityId) return;
-		await entityActions.loadFunction(entityId);
+		await entityActions.loadFunction(entityId, relationFilter());
 		if (!get(entityState).currentEntity) {
 			await entityActions.loadClass(entityId);
 		}
@@ -62,7 +85,7 @@
 
 	function loadCallChain(direction: 'up' | 'down') {
 		if (entityId) {
-			entityActions.loadCallChain(entityId, direction);
+			entityActions.loadCallChain(entityId, direction, relationFilter());
 		}
 	}
 
@@ -75,8 +98,7 @@
 		const from = pathFrom.trim();
 		const to = pathTo.trim();
 		if (!from || !to) return;
-		const depth =
-			Number.isInteger(pathDepth) && pathDepth > 0 ? pathDepth : 10;
+		const depth = Number.isInteger(pathDepth) && pathDepth > 0 ? pathDepth : 10;
 		entityActions.loadCallPath(from, to, depth);
 	}
 
@@ -124,6 +146,78 @@
 				title="Entity Details"
 				subtitle="Viewing entity: {$entityState.currentEntity.name}"
 			/>
+
+			<!-- Relation traversal filter: every control maps onto RelationFilter -->
+			<div class="relation-filter" aria-label="Relation filter">
+				<label class="filter-field">
+					<span>Max depth</span>
+					<input
+						type="number"
+						min="1"
+						max="50"
+						value={filterMaxDepth ?? ''}
+						oninput={(e) => {
+							const n = Number((e.target as HTMLInputElement).value);
+							filterMaxDepth = Number.isInteger(n) && n > 0 ? n : null;
+						}}
+						aria-label="Maximum traversal depth"
+					/>
+				</label>
+				<label class="filter-field">
+					<span>Limit</span>
+					<input
+						type="number"
+						min="1"
+						max="1000"
+						value={filterLimit ?? ''}
+						oninput={(e) => {
+							const n = Number((e.target as HTMLInputElement).value);
+							filterLimit = Number.isInteger(n) && n > 0 ? n : null;
+						}}
+						aria-label="Result limit"
+					/>
+				</label>
+				<label class="filter-field">
+					<span>Directory prefix</span>
+					<input
+						type="text"
+						bind:value={filterDirectoryPrefix}
+						placeholder="e.g., src/"
+						aria-label="Directory prefix"
+					/>
+				</label>
+				<label class="filter-field">
+					<span>Domains</span>
+					<input
+						type="text"
+						bind:value={filterDomains}
+						placeholder="e.g., call"
+						aria-label="Relation domains"
+					/>
+				</label>
+				<label class="filter-check">
+					<input type="checkbox" bind:checked={filterExcludeTests} />
+					<span>Exclude tests</span>
+				</label>
+				<label class="filter-field">
+					<span>External</span>
+					<select
+						bind:value={filterIncludeExternal}
+						aria-label="Include external edges"
+					>
+						<option value="default">Default</option>
+						<option value="on">Include</option>
+						<option value="off">Exclude</option>
+					</select>
+				</label>
+				<button
+					type="button"
+					class="graph-action-btn"
+					onclick={() => void loadEntity()}
+				>
+					Apply
+				</button>
+			</div>
 
 			<!-- Tab Navigation -->
 			<div class="tab-navigation">
@@ -407,6 +501,50 @@
 		background: var(--black);
 		color: var(--white);
 		border-color: var(--black);
+	}
+
+	.relation-filter {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		align-items: end;
+		margin-bottom: 1.5rem;
+		padding: 0.75rem;
+		border: 1px solid var(--gray-200);
+		background: var(--gray-50);
+	}
+
+	.filter-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--gray-600);
+	}
+
+	.filter-field input,
+	.filter-field select {
+		height: 30px;
+		padding: 0 0.5rem;
+		border: 1px solid var(--gray-300);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+		min-width: 110px;
+	}
+
+	.filter-check {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--gray-600);
+		height: 30px;
 	}
 
 	.call-chain-list {

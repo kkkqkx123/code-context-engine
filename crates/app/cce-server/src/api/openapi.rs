@@ -563,13 +563,10 @@ mod tests {
     }
 
     fn first_api_paths_constant(s: &str) -> Option<String> {
-        let marker = if let Some(pos) = s.find("cce_api::paths::") {
-            pos + "cce_api::paths::".len()
-        } else if let Some(pos) = s.find("api_paths::") {
-            pos + "api_paths::".len()
-        } else {
-            return None;
-        };
+        let marker = s
+            .find("cce_api::paths::")
+            .map(|pos| pos + "cce_api::paths::".len())
+            .or_else(|| s.find("api_paths::").map(|pos| pos + "api_paths::".len()))?;
         let rest = &s[marker..];
         let end = rest
             .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))

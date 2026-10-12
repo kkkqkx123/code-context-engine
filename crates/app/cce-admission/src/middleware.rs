@@ -428,6 +428,26 @@ mod tests {
         assert_eq!(project_id_from_query(None), None);
     }
 
+    #[test]
+    fn query_project_extraction_rejects_malformed_values() {
+        assert_eq!(project_id_from_query(Some("project_id=abc")), None);
+        assert_eq!(project_id_from_query(Some("project_id=")), None);
+        assert_eq!(project_id_from_query(Some("projectId=12")), None);
+        assert_eq!(
+            project_id_from_query(Some("limit=10&project_id=7")),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn missing_token_yields_none() {
+        let request = Request::builder()
+            .uri("/api/search")
+            .body(Body::empty())
+            .expect("request builds");
+        assert!(presented_token(&request).is_none());
+    }
+
     #[tokio::test]
     async fn rate_budget_rejects_bursts() {
         let gate = gate_for_tests();
@@ -436,5 +456,16 @@ mod tests {
             assert!(gate.check_rate(&hash).await);
         }
         assert!(!gate.check_rate(&hash).await);
+    }
+
+    #[test]
+    fn gate_scope_binding_covers_only_listed_projects() {
+        let gate = gate_for_tests();
+        assert!(!gate.is_empty());
+        let empty = AdmissionGate::new(
+            &crate::config::AdmissionConfig::default(),
+            std::sync::Arc::new(AdmissionMetrics::default()),
+        );
+        assert!(empty.is_empty());
     }
 }

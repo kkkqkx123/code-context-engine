@@ -306,3 +306,150 @@ impl Cli {
         commands::health::execute(&health_cmd, &self.server, self.verbose, self.format).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn global_project_id_reaches_status_command() {
+        let cli = Cli::try_parse_from(["cce-cli", "-P", "7", "status"])
+            .expect("status with global project id parses");
+        assert_eq!(cli.project_id, Some(7));
+        assert!(matches!(cli.command, Commands::Status));
+    }
+
+    #[test]
+    fn output_format_flag_selects_json() {
+        let cli = Cli::try_parse_from(["cce-cli", "--format", "json", "status"])
+            .expect("json format parses");
+        assert!(matches!(cli.format, OutputFormat::Json));
+    }
+
+    #[test]
+    fn explicit_server_overrides_default() {
+        let cli = Cli::try_parse_from(["cce-cli", "--server", "http://10.0.0.2:9000", "status"])
+            .expect("server override parses");
+        assert_eq!(cli.server, "http://10.0.0.2:9000");
+    }
+
+    fn parse(args: &[&str]) -> Cli {
+        let mut full = vec!["cce-cli"];
+        full.extend(args);
+        Cli::try_parse_from(full).expect("command parses")
+    }
+
+    #[test]
+    fn every_command_group_parses_minimal_args() {
+        assert!(matches!(
+            parse(&["index", "run", "-P", "1", "--path", "/tmp"]).command,
+            Commands::Index(_)
+        ));
+        assert!(matches!(
+            parse(&["index", "parse", "--file", "/tmp/a.rs"]).command,
+            Commands::Index(_)
+        ));
+        assert!(matches!(
+            parse(&["search", "query", "-P", "1", "--query", "fold"]).command,
+            Commands::Search(_)
+        ));
+        assert!(matches!(
+            parse(&["agg-search", "--bm25", "fold"]).command,
+            Commands::AggSearch(_)
+        ));
+        assert!(matches!(
+            parse(&["project", "list"]).command,
+            Commands::Project(_)
+        ));
+        assert!(matches!(
+            parse(&["project", "create", "--path", "/tmp"]).command,
+            Commands::Project(_)
+        ));
+        assert!(matches!(
+            parse(&["entity", "function", "sym_x", "--project-id", "1"]).command,
+            Commands::Entity(_)
+        ));
+        assert!(matches!(
+            parse(&["graph", "ego", "sym_x", "--project-id", "1"]).command,
+            Commands::Graph(_)
+        ));
+        assert!(matches!(
+            parse(&["watch", "status", "-P", "1"]).command,
+            Commands::Watch(_)
+        ));
+        assert!(matches!(
+            parse(&["storage", "status"]).command,
+            Commands::Storage(_)
+        ));
+        assert!(matches!(
+            parse(&["storage", "stats", "-P", "1"]).command,
+            Commands::Storage(_)
+        ));
+        assert!(matches!(
+            parse(&["tools", "compress", "--file-path", "/tmp/a.rs"]).command,
+            Commands::Tools(_)
+        ));
+        assert!(matches!(
+            parse(&["summary", "generate", "--file-paths", "/tmp/a.rs"]).command,
+            Commands::Summary(_)
+        ));
+        assert!(matches!(
+            parse(&["config", "info"]).command,
+            Commands::Config(_)
+        ));
+        assert!(matches!(
+            parse(&["qdrant", "process", "status"]).command,
+            Commands::Qdrant(_)
+        ));
+        assert!(matches!(
+            parse(&["metrics", "json"]).command,
+            Commands::Metrics(_)
+        ));
+        assert!(matches!(
+            parse(&["health", "check"]).command,
+            Commands::Health(_)
+        ));
+        assert!(matches!(
+            parse(&["gateway", "sync", "-P", "1", "--path", "/tmp"]).command,
+            Commands::Gateway(_)
+        ));
+        assert!(matches!(
+            parse(&["gateway", "watch", "-P", "1", "--path", "/tmp"]).command,
+            Commands::Gateway(_)
+        ));
+        assert!(matches!(parse(&["mcp", "stdio"]).command, Commands::Mcp(_)));
+        assert!(matches!(parse(&["mcp", "http"]).command, Commands::Mcp(_)));
+        assert!(matches!(parse(&["status"]).command, Commands::Status));
+    }
+
+    #[test]
+    fn gateway_sync_no_commit_maps_to_staging_only() {
+        let cli = parse(&[
+            "gateway",
+            "sync",
+            "-P",
+            "1",
+            "--path",
+            "/tmp",
+            "--no-commit",
+        ]);
+        match cli.command {
+            Commands::Gateway(commands::gateway::GatewayCommands::Sync { no_commit, .. }) => {
+                assert!(no_commit)
+            }
+            _ => panic!("gateway sync must parse"),
+        }
+    }
+
+    #[test]
+    fn search_query_type_defaults_to_hybrid() {
+        let cli = parse(&["search", "query", "-P", "1", "--query", "fold"]);
+        match cli.command {
+            Commands::Search(commands::search::SearchCommands::Query { query_type, .. }) => {
+                assert_eq!(query_type, "hybrid")
+            }
+            _ => panic!("search query must parse"),
+        }
+    }
+}

@@ -19,7 +19,13 @@ pub async fn handle_keyword_search(
     State(state): State<AppState>,
     Json(request): Json<KeywordSearchRequest>,
 ) -> Json<KeywordSearchApiResponse> {
-    let tool = KeywordSearchTool::new(state.engine.fulltext_clone());
+    // The relation store supplies chunk metadata and raw source snippets for
+    // BM25 hits; without it the tool cannot enrich results, so attach the
+    // engine's metadata store before searching.
+    let mut tool = KeywordSearchTool::new(state.engine.fulltext_clone());
+    if let Some(sqlite) = state.engine.metadata_store_clone() {
+        tool = tool.with_sqlite(sqlite);
+    }
 
     let request = OrchKeywordSearchRequest {
         query: request.query,

@@ -84,6 +84,10 @@ name = "parse_nl_chunk"
 harness = false
 
 [[bench]]
+name = "chunk_summary"
+harness = false
+
+[[bench]]
 name = "inline_embedded"
 harness = false
 

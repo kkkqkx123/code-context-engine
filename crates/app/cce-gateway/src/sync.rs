@@ -344,4 +344,22 @@ mod tests {
         assert!(compressed);
         assert!(encoded.len() < repetitive.len());
     }
+
+    #[test]
+    fn compression_keeps_incompressible_and_empty_bytes_raw() {
+        let mut randomish = Vec::with_capacity(2048);
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        for _ in 0..2048 {
+            state = state
+                .wrapping_mul(0x1000_0000_01b3)
+                .wrapping_add(0xcbf2_9ce4_8422_2325);
+            randomish.push((state >> 33) as u8);
+        }
+        let (kept, compressed) = maybe_compress(&randomish, true);
+        assert!(!compressed);
+        assert_eq!(kept, randomish);
+        let (empty, compressed) = maybe_compress(&[], true);
+        assert!(!compressed);
+        assert!(empty.is_empty());
+    }
 }

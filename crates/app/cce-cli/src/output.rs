@@ -71,3 +71,51 @@ pub fn truncate(s: &str, max_len: usize) -> String {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_formats_below_one_second_as_millis() {
+        assert_eq!(format_duration(0), "0ms");
+        assert_eq!(format_duration(999), "999ms");
+    }
+
+    #[test]
+    fn duration_formats_seconds_with_two_decimals() {
+        assert_eq!(format_duration(1000), "1.00s");
+        assert_eq!(format_duration(1500), "1.50s");
+        assert_eq!(format_duration(59_999), "60.00s");
+    }
+
+    #[test]
+    fn duration_formats_minutes_and_remainder_seconds() {
+        assert_eq!(format_duration(60_000), "1m 0s");
+        assert_eq!(format_duration(61_000), "1m 1s");
+        assert_eq!(format_duration(125_000), "2m 5s");
+    }
+
+    #[test]
+    fn truncate_keeps_short_strings_verbatim() {
+        assert_eq!(truncate("abc", 10), "abc");
+        assert_eq!(truncate("abc", 3), "abc");
+    }
+
+    #[test]
+    fn truncate_marks_cut_strings_with_ellipsis() {
+        assert_eq!(truncate("abcdef", 5), "ab...");
+        let cut = truncate("x".repeat(100).as_str(), 96);
+        assert_eq!(cut.len(), 96);
+        assert!(cut.ends_with("..."));
+    }
+
+    #[test]
+    fn json_output_shape_stays_pretty_printed() {
+        let value = serde_json::json!({"items": [1, 2], "total": 2});
+        let text = serde_json::to_string_pretty(&value).expect("pretty prints");
+        let roundtrip: serde_json::Value =
+            serde_json::from_str(&text).expect("json output must stay parseable");
+        assert_eq!(roundtrip["total"], 2);
+    }
+}

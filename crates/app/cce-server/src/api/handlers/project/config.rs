@@ -48,6 +48,23 @@ pub async fn handle_update_project_config(
         }
     };
 
+    // `update_config` mutates the in-memory entry, so the project must be
+    // resident first: loading also surfaces a genuine not-found as 404
+    // instead of silently reporting a cache miss as a missing project.
+    if let Err(e) = registry.get_or_load(project_id).await {
+        let (code, message) = match &e {
+            RegistryError::ProjectNotFound(id) => (
+                error_codes::ENTITY_NOT_FOUND,
+                format!("Project {} not found", id),
+            ),
+            other => (
+                error_codes::STORAGE_ERROR,
+                format!("Failed to load project: {}", other),
+            ),
+        };
+        return ApiResult::Error(ErrorResponse::new(code, message));
+    }
+
     // 1. Update configuration
     if let Err(e) = registry.update_config(project_id, config).await {
         // Log the error with context

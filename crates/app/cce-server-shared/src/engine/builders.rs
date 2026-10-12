@@ -302,26 +302,36 @@ mod tests {
         assert_eq!(result.reranked_candidates[0].id, "cand-2");
     }
 
-    /// Candidate limiting happens before the provider call: only the
-    /// top-scored candidate reaches the mock.
+    /// The handler is a pass-through with timeout and metrics: candidate
+    /// clipping is owned by the suite providers (`limit_candidates`), so the
+    /// handler forwards the full candidate set and the configured budget
+    /// unchanged. This locks that seam so clipping never silently moves
+    /// into (or out of) the CCE boundary.
     #[tokio::test]
-    async fn test_mock_rerank_limits_candidates_before_provider() {
-        use cce_llm_client::RerankRuntimeConfig as ServiceRerankConfig;
+    async fn test_mock_rerank_forwards_full_candidate_set_to_provider() {
         use cce_llm_client::services::rerank::{DelegatingRerankProvider, RerankRequestHandler};
         use llm_rerank::mock::MockRerankProvider;
 
-        let provider = Arc::new(DelegatingRerankProvider::new(MockRerankProvider::by_score()));
-        let handler = RerankRequestHandler::new(provider);
+        let mock = MockRerankProvider::by_score();
+        let provider = Arc::new(DelegatingRerankProvider::new(mock));
+        let handler = RerankRequestHandler::new(provider.clone());
 
         let mut request = single_candidate_request("cand-1", 0.9, "cand-2", 0.1);
-        request.config = ServiceRerankConfig {
+        request.config = cce_llm::RerankRuntimeConfig {
             max_candidates: 1,
-            ..ServiceRerankConfig::default()
+            ..cce_llm::RerankRuntimeConfig::default()
         };
 
         let result = handler.rerank(&request).await.expect("rerank must succeed");
 
-        assert_eq!(result.reranked_candidates.len(), 1);
+        // Both candidates reach the provider: the suite providers apply the
+        // budget themselves, so a mock sees the untouched request.
+        assert_eq!(result.reranked_candidates.len(), 2);
+        assert_eq!(
+            provider.inner().recorded_candidate_counts(),
+            vec![2],
+            "handler must forward every candidate to the provider"
+        );
         assert_eq!(result.reranked_candidates[0].id, "cand-1");
     }
 

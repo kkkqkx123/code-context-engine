@@ -216,7 +216,7 @@ function syncUrl(state: SearchState) {
 	);
 }
 
-function buildCommonFilterFields(state: SearchState) {
+export function buildCommonFilterFields(state: SearchState) {
 	return {
 		min_score: state.filters.min_score || undefined,
 		directory_prefix: state.filters.directory_prefix || undefined,

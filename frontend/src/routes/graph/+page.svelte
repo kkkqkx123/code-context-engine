@@ -219,7 +219,7 @@
 
 	/** Double click on a node pulls in its immediate neighborhood. */
 	async function handleNodeActivate(nodeId: string) {
-		await graphActions.expand(nodeId, 1, egoDirection);
+		await graphActions.expand(nodeId, 1, egoDirection, serverFilter());
 		cy?.layout(layoutOptions(layout)).run();
 	}
 

@@ -577,21 +577,23 @@ impl CanonicalRelationSnapshot {
     ///
     /// The snapshot is normalized (sorted) and hashed through the fixed-order
     /// component payload, so the output is byte-identical to
-    /// [`fingerprint_from_components`] hashing the same components.
+    /// [`fingerprint_from_components`] hashing the same components. Both
+    /// entry points share one implementation: the volatile runtime
+    /// `callee_symbol` is excluded here too, otherwise a snapshot read back
+    /// from storage (where that field is not persisted) never reproduces the
+    /// fingerprint stored at publish time.
     pub fn fingerprint(&self) -> String {
-        let mut normalized = self.clone();
-        normalized.normalize();
         fingerprint_from_components(&FingerprintComponents {
-            schema_version: normalized.schema_version,
-            parser_version: normalized.parser_version,
-            resolver_version: normalized.resolver_version,
-            path_normalization_version: normalized.path_normalization_version,
-            config_fingerprint: &normalized.config_fingerprint,
-            base_relation_epoch: normalized.base_relation_epoch,
-            files: &normalized.files,
-            entities: &normalized.entities,
-            relations: &normalized.relations,
-            dependencies: &normalized.dependencies,
+            schema_version: self.schema_version,
+            parser_version: self.parser_version,
+            resolver_version: self.resolver_version,
+            path_normalization_version: self.path_normalization_version,
+            config_fingerprint: &self.config_fingerprint,
+            base_relation_epoch: self.base_relation_epoch,
+            files: &self.files,
+            entities: &self.entities,
+            relations: &self.relations,
+            dependencies: &self.dependencies,
         })
     }
 }

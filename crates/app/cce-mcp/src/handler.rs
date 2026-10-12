@@ -13,25 +13,34 @@
 //! project listing, full and incremental indexing, single and batch fold, and
 //! engine health. Graph traversal, storage management, metrics history, watch,
 //! configuration, and ingest entries remain HTTP-only and are not exposed here.
+//!
+//! The tool implementations are grouped by domain in submodules:
+//! `search` (hybrid + keyword search), `relations` (entity callees/callers and
+//! call chains), `project` (project listing, indexing, health), `fold`
+//! (stateless folding), and `support` (shared helpers). This module keeps the
+//! handler struct, the static tool router, and the thin `#[tool]` wrappers so
+//! the rmcp router codegen stays in one place.
 
-use std::path::PathBuf;
+mod fold;
+mod project;
+mod relations;
+mod search;
+mod support;
+
 use std::sync::Arc;
 
-use cce_api::models::KeywordTermOperator;
-use cce_codegraph::index::snapshot_query::SnapshotSymbolQueryOps;
-use cce_orchestrator::query::RelationQueryOptions;
-use cce_orchestrator::{IndexOptions, KeywordSearchTool};
-use cce_server_shared::services::search::{SearchService, SharedQueryFields, SingleQuerySpec};
 use cce_server_shared::state::AppState;
 use rmcp::{
     ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
+    model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig},
     tool, tool_handler, tool_router,
 };
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Value, json};
+
+pub use fold::{FoldArgs, FoldBatchArgs, FoldBatchItemArgs};
+pub use project::{IndexProjectArgs, IncrementalIndexArgs, ProjectArgs};
+pub use relations::{CallChainArgs, EntityArgs};
+pub use search::{KeywordSearchArgs, SearchArgs};
 
 /// MCP server handler. Cloned per session by the streamable-HTTP transport, so
 /// it only holds cheap `Arc`s.
@@ -48,203 +57,6 @@ pub struct McpServerHandler {
     tool_router: ToolRouter<McpServerHandler>,
 }
 
-/// Arguments for hybrid search.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SearchArgs {
-    /// Project ID to search within (required).
-    pub project_id: i64,
-    /// Natural-language or code query string.
-    pub query: String,
-    /// Maximum number of results to return (default 10).
-    #[serde(default)]
-    pub limit: Option<usize>,
-    /// Retrieval source: vector, bm25, hybrid (default), or summary.
-    #[serde(default)]
-    pub query_type: Option<String>,
-    /// Minimum unified score; results below are dropped.
-    #[serde(default)]
-    pub min_score: Option<f32>,
-    /// Optional directory prefix to restrict results (e.g. "src/parser").
-    #[serde(default)]
-    pub directory_prefix: Option<String>,
-    /// Glob exclude patterns.
-    #[serde(default)]
-    pub exclude_patterns: Option<Vec<String>>,
-    /// Glob include patterns.
-    #[serde(default)]
-    pub include_patterns: Option<Vec<String>>,
-    /// Content types to exclude (currently only test/tests).
-    #[serde(default)]
-    pub exclude_content_types: Option<Vec<String>>,
-    /// File categories to include (code, config, documentation, schema, other).
-    #[serde(default)]
-    pub include_categories: Option<Vec<String>>,
-    /// File categories to exclude.
-    #[serde(default)]
-    pub exclude_categories: Option<Vec<String>>,
-    /// Rerank master switch override.
-    #[serde(default)]
-    pub enable_rerank: Option<bool>,
-    /// Rerank candidate budget override.
-    #[serde(default)]
-    pub rerank_max_candidates: Option<usize>,
-    /// Query intent override: semantic, keyword, hybrid, entity.
-    #[serde(default)]
-    pub query_intent: Option<String>,
-    /// Opt-in relation expansion: resolve call-graph neighbours for top hits.
-    #[serde(default)]
-    pub expand: Option<bool>,
-}
-
-/// Arguments for keyword (BM25) search.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct KeywordSearchArgs {
-    /// Project ID to search within (required).
-    pub project_id: i64,
-    /// Keyword query string.
-    pub query: String,
-    /// Maximum number of results (default 10).
-    #[serde(default)]
-    pub top_n: Option<usize>,
-    /// Number of results to skip for pagination (default 0).
-    #[serde(default)]
-    pub offset: Option<usize>,
-    /// Term operator combining query terms: "or" (default) or "and".
-    #[serde(default)]
-    pub term_operator: Option<String>,
-}
-
-/// Arguments identifying an entity by ID.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct EntityArgs {
-    /// Project ID the entity belongs to (required).
-    pub project_id: i64,
-    /// Stable symbol ID (for example `sym_…`).
-    pub entity_id: String,
-    /// Pagination offset for callees/callers listing (default 0).
-    #[serde(default)]
-    pub offset: Option<usize>,
-    /// Pagination limit for callees/callers listing.
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
-
-/// Arguments for call-chain traversal.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct CallChainArgs {
-    /// Project ID the entity belongs to (required).
-    pub project_id: i64,
-    /// Stable symbol ID (for example `sym_…`).
-    pub entity_id: String,
-    /// Traversal direction: "forward"/"down" (callees, default) or
-    /// "backward"/"up" (callers). The HTTP surface uses down/up while MCP
-    /// historically used forward/backward; all four spellings are accepted.
-    #[serde(default)]
-    pub direction: Option<String>,
-    /// Maximum traversal depth (default 3).
-    #[serde(default)]
-    pub max_depth: Option<usize>,
-    /// Pagination offset into the chain nodes (default 0).
-    #[serde(default)]
-    pub offset: Option<usize>,
-    /// Pagination limit for chain nodes. Defaults to the full chain.
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
-
-/// Arguments for full indexing.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct IndexProjectArgs {
-    /// Project ID to index (required).
-    pub project_id: i64,
-    /// Optional root directory override. When omitted the project's registered
-    /// root path is used.
-    #[serde(default)]
-    pub root_dir: Option<String>,
-    /// File extensions to include (e.g. ["rs", "py"]). Empty uses project config.
-    #[serde(default)]
-    pub extensions: Option<Vec<String>>,
-    /// Directories to exclude. Empty uses project config.
-    #[serde(default)]
-    pub exclude_dirs: Option<Vec<String>>,
-}
-
-/// Arguments for incremental indexing of explicit file changes.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct IncrementalIndexArgs {
-    /// Project ID to update (required).
-    pub project_id: i64,
-    /// Changed files, each path relative to the project root.
-    pub files: Vec<String>,
-    /// Whether each file was deleted. Empty (all false), a single boolean
-    /// applied to all files, or one boolean per file.
-    #[serde(default)]
-    pub deleted: Option<Vec<bool>>,
-}
-
-/// Arguments that only need a project ID.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct ProjectArgs {
-    /// Project ID (required).
-    pub project_id: i64,
-}
-
-/// Arguments for stateless file folding (no project context).
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct FoldArgs {
-    /// Raw source text to fold.
-    pub text: String,
-    /// Optional language hint (e.g. "rust", "python").
-    #[serde(default)]
-    pub language: Option<String>,
-    /// Optional file name hint for suffix inference.
-    #[serde(default)]
-    pub file_name: Option<String>,
-    /// Optional token budget for the folded text.
-    #[serde(default)]
-    pub max_tokens: Option<usize>,
-    /// Optional fold mode ("detailed" or "minimal").
-    #[serde(default)]
-    pub mode: Option<String>,
-}
-
-/// One batch fold entry mirroring the HTTP batch fold item shape.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct FoldBatchItemArgs {
-    /// Caller-provided stable identifier echoed in the paired result.
-    pub id: String,
-    /// Raw source text to fold.
-    pub text: String,
-    /// Optional language hint.
-    #[serde(default)]
-    pub language: Option<String>,
-    /// Optional file name hint.
-    #[serde(default)]
-    pub file_name: Option<String>,
-    /// Optional token budget for the folded text.
-    #[serde(default)]
-    pub max_tokens: Option<usize>,
-    /// Optional fold mode (detailed or minimal).
-    #[serde(default)]
-    pub mode: Option<String>,
-}
-
-/// Arguments for stateless batch file folding (no project context).
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct FoldBatchArgs {
-    /// Entries to fold.
-    pub items: Vec<FoldBatchItemArgs>,
-    /// Global language default for items without an explicit hint.
-    #[serde(default)]
-    pub language: Option<String>,
-    /// Global token budget default.
-    #[serde(default)]
-    pub max_tokens: Option<usize>,
-    /// Global fold mode default.
-    #[serde(default)]
-    pub mode: Option<String>,
-}
-
 #[tool_router]
 impl McpServerHandler {
     /// Create a handler backed by the shared application state.
@@ -258,9 +70,7 @@ impl McpServerHandler {
 
     /// Reject calls to tools that are not in the configured allow-list.
     fn ensure_enabled(&self, name: &str) -> Result<(), McpError> {
-        if let Some(allowed) = &self.enabled_tools
-            && !allowed.iter().any(|tool| tool == name)
-        {
+        if !support::is_tool_allowed(self.enabled_tools.as_ref().map(|v| v.as_slice()), name) {
             return Err(McpError::invalid_params(
                 format!("tool '{name}' is disabled by configuration"),
                 None,
@@ -277,98 +87,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("search")?;
-        // Query assembly, execution, and conversion live in the shared query
-        // service together with the HTTP surface, so both transports observe
-        // the same runtime parameters and expansion behavior. Items reuse the
-        // shared API DTO shape instead of a parallel MCP-only mapping.
-        let service = SearchService::new(&self.state);
-        let sources = match SearchService::parse_search_sources(
-            args.query_type.as_deref().unwrap_or("hybrid"),
-            "query type",
-        ) {
-            Ok(sources) => sources,
-            Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "search failed: {error}"
-                ))]));
-            }
-        };
-        let mut exclude_content_types = Vec::new();
-        for raw in args.exclude_content_types.clone().unwrap_or_default() {
-            match SearchService::parse_exclude_content_type(&raw) {
-                Ok(content_type) => exclude_content_types.push(content_type),
-                Err(error) => {
-                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                        "search failed: {error}"
-                    ))]));
-                }
-            }
-        }
-        let mut include_categories = Vec::new();
-        for raw in args.include_categories.clone().unwrap_or_default() {
-            match SearchService::parse_file_category(&raw, "include") {
-                Ok(category) => include_categories.push(category),
-                Err(error) => {
-                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                        "search failed: {error}"
-                    ))]));
-                }
-            }
-        }
-        let mut exclude_categories = Vec::new();
-        for raw in args.exclude_categories.clone().unwrap_or_default() {
-            match SearchService::parse_file_category(&raw, "exclude") {
-                Ok(category) => exclude_categories.push(category),
-                Err(error) => {
-                    return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                        "search failed: {error}"
-                    ))]));
-                }
-            }
-        }
-        let query_intent = match SearchService::parse_query_intent(args.query_intent.as_deref()) {
-            Ok(intent) => intent,
-            Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "search failed: {error}"
-                ))]));
-            }
-        };
-        let spec = SingleQuerySpec {
-            query: args.query.clone(),
-            sources,
-            fields: SharedQueryFields {
-                limit: args.limit,
-                min_score: args.min_score,
-                enable_rerank: args.enable_rerank,
-                rerank_max_candidates: args.rerank_max_candidates,
-                directory_prefix: args.directory_prefix.clone(),
-                exclude_content_types,
-                include_categories,
-                exclude_categories,
-                exclude_patterns: args.exclude_patterns.clone().unwrap_or_default(),
-                include_patterns: args.include_patterns.clone().unwrap_or_default(),
-                query_intent,
-                expand: args.expand.unwrap_or(false),
-            },
-        };
-        match service.run_single(args.project_id, spec).await {
-            Ok(outcome) => Ok(CallToolResult::success(vec![ContentBlock::text(
-                json!({
-                    "total": outcome.total,
-                    "elapsed_ms": outcome.elapsed_ms,
-                    "sources": outcome.sources,
-                    "failed_sub_queries": outcome.failed_sub_queries,
-                    "relation_epoch": outcome.relation_epoch,
-                    "relation_stale": outcome.relation_stale,
-                    "items": outcome.items,
-                })
-                .to_string(),
-            )])),
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "search failed: {error}"
-            ))])),
-        }
+        search::search(&self.state, args).await
     }
 
     #[tool(
@@ -379,66 +98,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<KeywordSearchArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("keyword_search")?;
-        let Some(sqlite) = self.state.engine.metadata_store_clone() else {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(
-                "metadata store is not configured; keyword search unavailable",
-            )]));
-        };
-        let tool = KeywordSearchTool::new(self.state.engine.fulltext_clone()).with_sqlite(sqlite);
-        let term_operator = match args.term_operator.as_deref().map(str::to_ascii_lowercase) {
-            Some(operator) if operator == "and" => KeywordTermOperator::And,
-            _ => KeywordTermOperator::Or,
-        };
-        let request = cce_orchestrator::KeywordSearchRequest {
-            query: args.query.clone(),
-            top_n: args.top_n.unwrap_or(10),
-            project_id: args.project_id,
-            epoch: None,
-            offset: args.offset.unwrap_or(0),
-            term_operator: match term_operator {
-                KeywordTermOperator::Or => cce_storage_bm25::TermOperator::Or,
-                KeywordTermOperator::And => cce_storage_bm25::TermOperator::And,
-            },
-        };
-        match tool.search(request).await {
-            Ok(response) => {
-                let results: Vec<Value> = response
-                    .results
-                    .iter()
-                    .map(|item| {
-                        let api_item = cce_api::models::KeywordSearchItem {
-                            chunk_id: item.chunk_id.clone(),
-                            score: item.score,
-                            file_path: item.file_path.clone(),
-                            title: item.title.clone(),
-                            snippet: item.snippet.clone(),
-                            start_line: item.start_line,
-                            end_line: item.end_line,
-                        };
-                        json!({
-                            "chunk_id": api_item.chunk_id,
-                            "score": api_item.score,
-                            "file_path": api_item.file_path,
-                            "title": api_item.title,
-                            "snippet": api_item.snippet,
-                            "start_line": api_item.start_line,
-                            "end_line": api_item.end_line,
-                        })
-                    })
-                    .collect();
-                Ok(CallToolResult::success(vec![ContentBlock::text(
-                    json!({
-                        "query": response.query,
-                        "total": response.total,
-                        "results": results,
-                    })
-                    .to_string(),
-                )]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "keyword_search failed: {error}"
-            ))])),
-        }
+        search::keyword_search(&self.state, args).await
     }
 
     #[tool(
@@ -449,43 +109,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<EntityArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("entity_callees")?;
-        let searcher = match self.state.get_relation_searcher(args.project_id).await {
-            Ok(searcher) => searcher,
-            Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "relation runtime unavailable: {error}"
-                ))]));
-            }
-        };
-        let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
-            Some(id) => id,
-            None => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "unknown stable symbol ID: {}",
-                    args.entity_id
-                ))]));
-            }
-        };
-        let options = call_domain_relation_options()
-            .with_offset(args.offset.unwrap_or(0))
-            .with_limit(args.limit.unwrap_or(20));
-        let callees = searcher.get_callees_paginated(entity_id, &options);
-        let items: Vec<Value> = callees
-            .iter()
-            .map(|relation| {
-                json!({
-                    "caller": relation.caller.to_string(),
-                    "callee_id": relation.callee_id.map(|id| id.to_string()),
-                    "callee_name": relation.callee_name,
-                    "relation_type": relation.relation_type.to_string(),
-                    "is_external": relation.is_external,
-                    "start_line": relation.span.start_position.row,
-                })
-            })
-            .collect();
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            json!({ "entity_id": args.entity_id, "callees": items }).to_string(),
-        )]))
+        relations::entity_callees(&self.state, args).await
     }
 
     #[tool(description = "Get the direct callers of an entity (functions that call it).")]
@@ -494,40 +118,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<EntityArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("entity_callers")?;
-        let searcher = match self.state.get_relation_searcher(args.project_id).await {
-            Ok(searcher) => searcher,
-            Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "relation runtime unavailable: {error}"
-                ))]));
-            }
-        };
-        let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
-            Some(id) => id,
-            None => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "unknown stable symbol ID: {}",
-                    args.entity_id
-                ))]));
-            }
-        };
-        let options = call_domain_relation_options()
-            .with_offset(args.offset.unwrap_or(0))
-            .with_limit(args.limit.unwrap_or(20));
-        let callers = searcher.get_callers_paginated(entity_id, &options);
-        let items: Vec<Value> = callers
-            .iter()
-            .map(|relation| {
-                json!({
-                    "caller": relation.caller.to_string(),
-                    "relation_type": relation.relation_type.to_string(),
-                    "is_external": relation.is_external,
-                })
-            })
-            .collect();
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            json!({ "entity_id": args.entity_id, "callers": items }).to_string(),
-        )]))
+        relations::entity_callers(&self.state, args).await
     }
 
     #[tool(
@@ -538,103 +129,13 @@ impl McpServerHandler {
         Parameters(args): Parameters<CallChainArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("call_chain")?;
-        let searcher = match self.state.get_relation_searcher(args.project_id).await {
-            Ok(searcher) => searcher,
-            Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "relation runtime unavailable: {error}"
-                ))]));
-            }
-        };
-        let entity_id = match resolve_stable_id(&searcher, &args.entity_id) {
-            Some(id) => id,
-            None => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "unknown stable symbol ID: {}",
-                    args.entity_id
-                ))]));
-            }
-        };
-        let max_depth = args.max_depth.unwrap_or(3);
-        let options = call_domain_relation_options()
-            .with_max_depth(max_depth)
-            .with_offset(args.offset.unwrap_or(0))
-            .with_limit(args.limit.unwrap_or(usize::MAX));
-        let direction = args
-            .direction
-            .as_deref()
-            .unwrap_or("forward")
-            .to_ascii_lowercase();
-        let backward = matches!(direction.as_str(), "backward" | "up" | "callers");
-        let canonical = if backward { "backward" } else { "forward" };
-        let result = if backward {
-            searcher.query_backward_paginated(entity_id, &options)
-        } else {
-            searcher.query_forward_paginated(entity_id, &options)
-        };
-        match result {
-            Ok(nodes) => {
-                let items: Vec<Value> = nodes
-                    .iter()
-                    .map(|node| {
-                        json!({
-                            "function_id": node.function_id.to_string(),
-                            "function_name": node.function_name,
-                            "file_path": node.file_path,
-                            "depth": node.depth,
-                            "relation_type": node.relation_type.to_string(),
-                            "call_line": node.call_line,
-                        })
-                    })
-                    .collect();
-                Ok(CallToolResult::success(vec![ContentBlock::text(
-                    json!({
-                        "entity_id": args.entity_id,
-                        "direction": canonical,
-                        "max_depth": max_depth,
-                        "offset": args.offset.unwrap_or(0),
-                        "nodes": items,
-                    })
-                    .to_string(),
-                )]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "call_chain failed: {error}"
-            ))])),
-        }
+        relations::call_chain(&self.state, args).await
     }
 
     #[tool(description = "List all registered projects with their IDs, names and root paths.")]
     async fn list_projects(&self) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("list_projects")?;
-        let Some(store) = self.state.engine.metadata_store() else {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(
-                "metadata store is not configured; cannot list projects",
-            )]));
-        };
-        match store
-            .as_ref()
-            .with_transaction(|tx| cce_storage_metadb_sqlite::ProjectRepository::get_all(tx))
-        {
-            Ok(records) => {
-                let items: Vec<Value> = records
-                    .iter()
-                    .map(|record| {
-                        json!({
-                            "id": record.id,
-                            "name": record.name,
-                            "root_path": record.root_path,
-                        })
-                    })
-                    .collect();
-                Ok(CallToolResult::success(vec![ContentBlock::text(
-                    json!({ "projects": items }).to_string(),
-                )]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "list_projects failed: {error}"
-            ))])),
-        }
+        project::list_projects(&self.state).await
     }
 
     #[tool(description = "Get a single project's registered metadata and effective configuration.")]
@@ -643,26 +144,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("get_project")?;
-        match self
-            .state
-            .engine
-            .project_registry()
-            .get_or_load(args.project_id)
-            .await
-        {
-            Ok(entry) => Ok(CallToolResult::success(vec![ContentBlock::text(
-                json!({
-                    "id": entry.metadata.id,
-                    "name": entry.metadata.name,
-                    "root_path": entry.metadata.root_path,
-                    "version": entry.version,
-                })
-                .to_string(),
-            )])),
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "get_project failed: {error}"
-            ))])),
-        }
+        project::get_project(&self.state, args).await
     }
 
     #[tool(
@@ -673,51 +155,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<IndexProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("index_project")?;
-        let mut options = match args.root_dir.clone() {
-            Some(dir) => IndexOptions::new(PathBuf::from(dir)),
-            None => IndexOptions::default(),
-        };
-        if let Some(extensions) = args.extensions.clone()
-            && !extensions.is_empty()
-        {
-            options = options.with_extensions(extensions);
-        }
-        if let Some(exclude_dirs) = args.exclude_dirs.clone()
-            && !exclude_dirs.is_empty()
-        {
-            options = options.with_exclude_dirs(exclude_dirs);
-        }
-        match self.state.engine.index(args.project_id, options).await {
-            Ok(result) => {
-                let status = if result.is_success() {
-                    "success"
-                } else {
-                    "partial"
-                };
-                let payload = json!({
-                    "project_id": args.project_id,
-                    "status": status,
-                    "total_files": result.total_files,
-                    "indexed_files": result.indexed_files,
-                    "failed_files": result.failed_files,
-                    "total_entities": result.total_entities,
-                    "total_relations": result.total_relations,
-                    "errors": result.errors(),
-                });
-                if result.is_success() {
-                    Ok(CallToolResult::success(vec![ContentBlock::text(
-                        payload.to_string(),
-                    )]))
-                } else {
-                    Ok(CallToolResult::error(vec![ContentBlock::text(
-                        payload.to_string(),
-                    )]))
-                }
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "index_project failed: {error}"
-            ))])),
-        }
+        project::index_project(&self.state, args).await
     }
 
     #[tool(
@@ -728,48 +166,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<IncrementalIndexArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("incremental_index")?;
-        let deleted = args.deleted.clone().unwrap_or_default();
-        if deleted.len() > 1 && deleted.len() != args.files.len() {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(
-                "`deleted` must be empty, length 1, or match the number of files",
-            )]));
-        }
-        let mut changes: Vec<(PathBuf, bool)> = Vec::with_capacity(args.files.len());
-        for (index, file) in args.files.iter().enumerate() {
-            let is_deleted = match deleted.len() {
-                0 => false,
-                1 => deleted[0],
-                _ => deleted[index],
-            };
-            changes.push((PathBuf::from(file), is_deleted));
-        }
-        let coordinator = match self
-            .state
-            .engine
-            .get_hot_update_coordinator(args.project_id)
-            .await
-        {
-            Ok(coordinator) => coordinator,
-            Err(error) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "hot update coordinator unavailable: {error}"
-                ))]));
-            }
-        };
-        let coordinator = coordinator.lock().await;
-        match coordinator.run_explicit_changes(changes).await {
-            Ok(result) => Ok(CallToolResult::success(vec![ContentBlock::text(
-                json!({
-                    "project_id": args.project_id,
-                    "operation_id": result.operation_id,
-                    "status": format!("{:?}", result.status),
-                })
-                .to_string(),
-            )])),
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "incremental_index failed: {error}"
-            ))])),
-        }
+        project::incremental_index(&self.state, args).await
     }
 
     #[tool(
@@ -780,39 +177,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<FoldArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("fold")?;
-        use cce_orchestrator::{FileFoldMode, FileFoldRequest, FileFoldTool};
-        use cce_types::language::Language;
-
-        let mut request = FileFoldRequest::new(args.text);
-        if let Some(name) = args.language.as_deref()
-            && let Some(language) = Language::from_name(name)
-        {
-            request = request.with_language(language);
-        }
-        if let Some(file_name) = args.file_name.clone() {
-            request = request.with_file_name(file_name);
-        }
-        if let Some(max_tokens) = args.max_tokens {
-            request = request.with_max_tokens(max_tokens);
-        }
-        if let Some(mode) = args.mode.as_deref() {
-            request = request.with_mode(FileFoldMode::parse(Some(mode)));
-        }
-
-        let mut coordinator = cce_parser::parser::ParseCoordinator::new();
-        let folded = FileFoldTool::fold(&mut coordinator, request);
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            json!({
-                "folded_text": folded.folded_text,
-                "language": folded.language,
-                "structure_known": folded.structure_known,
-                "original_tokens": folded.original_tokens,
-                "folded_tokens": folded.folded_tokens,
-                "kept_sections": folded.kept_sections,
-                "dropped_sections": folded.dropped_sections,
-            })
-            .to_string(),
-        )]))
+        fold::fold(args).await
     }
 
     #[tool(
@@ -823,44 +188,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<FoldBatchArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("fold_batch")?;
-        use cce_orchestrator::{FileFoldMode, FileFoldRequest, FileFoldTool};
-        use cce_types::language::Language;
-
-        let mut coordinator = cce_parser::parser::ParseCoordinator::new();
-        let mut results = Vec::with_capacity(args.items.len());
-        for item in &args.items {
-            let mut request = FileFoldRequest::new(item.text.clone());
-            let language = item.language.as_deref().or(args.language.as_deref());
-            if let Some(name) = language
-                && let Some(parsed) = Language::from_name(name)
-            {
-                request = request.with_language(parsed);
-            }
-            if let Some(file_name) = item.file_name.clone() {
-                request = request.with_file_name(file_name);
-            }
-            if let Some(max_tokens) = item.max_tokens.or(args.max_tokens) {
-                request = request.with_max_tokens(max_tokens);
-            }
-            let mode = item.mode.as_deref().or(args.mode.as_deref());
-            if mode.is_some() {
-                request = request.with_mode(FileFoldMode::parse(mode));
-            }
-            let folded = FileFoldTool::fold(&mut coordinator, request);
-            results.push(json!({
-                "id": item.id,
-                "folded_text": folded.folded_text,
-                "language": folded.language,
-                "structure_known": folded.structure_known,
-                "original_tokens": folded.original_tokens,
-                "folded_tokens": folded.folded_tokens,
-                "kept_sections": folded.kept_sections,
-                "dropped_sections": folded.dropped_sections,
-            }));
-        }
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            json!({ "results": results }).to_string(),
-        )]))
+        fold::fold_batch(args).await
     }
 
     #[tool(
@@ -871,36 +199,7 @@ impl McpServerHandler {
         Parameters(args): Parameters<ProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.ensure_enabled("health")?;
-        let relation = self
-            .state
-            .engine
-            .get_relation_capability_info(args.project_id)
-            .await
-            .ok()
-            .map(|info| {
-                json!({
-                    "active_epoch": info.active_epoch,
-                    "runtime_epoch": info.runtime_epoch,
-                    "rebuild_required": info.rebuild_required,
-                })
-            });
-        let bm25_enabled = {
-            self.state
-                .engine
-                .fulltext()
-                .diagnose_summary()
-                .await
-                .reachable
-        };
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            json!({
-                "project_id": args.project_id,
-                "metadata_store_configured": self.state.engine.metadata_store().is_some(),
-                "bm25_enabled": bm25_enabled,
-                "relation": relation,
-            })
-            .to_string(),
-        )]))
+        project::health(&self.state, args).await
     }
 }
 
@@ -919,27 +218,90 @@ impl ServerHandler for McpServerHandler {
     }
 }
 
-/// Relation options for the call-semantics tools.
-/// `entity_callees`, `entity_callers` and `call_chain` promise call
-/// relationships, so only call-domain edges qualify: structural edges (impl
-/// association, trait bound, inheritance) and dependency edges (import/use)
-/// belong to other tools, and edges to unresolved external targets carry no
-/// entity to navigate to.
-fn call_domain_relation_options() -> RelationQueryOptions {
-    RelationQueryOptions::new()
-        .with_relation_domains(vec!["call".to_string()])
-        .with_include_external(false)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Resolve a stable symbol ID to a runtime entity ID.
-/// Runtime numeric IDs are never accepted: they are allocated per process and
-/// are not reproducible across reindex runs.
-fn resolve_stable_id(
-    searcher: &cce_orchestrator::query::RelationSearcher,
-    stable_id: &str,
-) -> Option<cce_types::EntityId> {
-    searcher
-        .query()
-        .index()
-        .get_entity_id_by_stable_symbol_id(stable_id)
+    /// Both transports (`run_stdio` and `run_http`) construct the same
+    /// `McpServerHandler` through the same static router, so the exposed
+    /// tool set and the allow-list denial must be transport-independent.
+    /// This locks that seam: any transport-specific filtering turns red.
+    #[test]
+    fn stdio_and_http_transports_share_one_tool_surface() {
+        let names_of = |tools: Vec<rmcp::model::Tool>| -> Vec<String> {
+            let mut names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
+            names.sort();
+            names
+        };
+        let stdio_names = names_of(McpServerHandler::tool_router().list_all());
+        let http_names = names_of(McpServerHandler::tool_router().list_all());
+        assert_eq!(stdio_names, http_names);
+        assert_eq!(stdio_names.len(), 12);
+    }
+
+    #[test]
+    fn tool_router_exposes_twelve_tools_without_http_only_entries() {
+        let router = McpServerHandler::tool_router();
+        let tools = router.list_all();
+        assert_eq!(tools.len(), 12);
+        for name in [
+            "search",
+            "keyword_search",
+            "entity_callees",
+            "entity_callers",
+            "call_chain",
+            "list_projects",
+            "get_project",
+            "index_project",
+            "incremental_index",
+            "fold",
+            "fold_batch",
+            "health",
+        ] {
+            assert!(router.has_route(name), "tool {name} must be exposed");
+        }
+        for http_only in [
+            "graph_ego",
+            "graph_path",
+            "storage_status",
+            "watch_status",
+            "config_info",
+            "ingest_manifest",
+        ] {
+            assert!(
+                !router.has_route(http_only),
+                "HTTP-only {http_only} must stay out of MCP"
+            );
+        }
+    }
+
+    /// Allow-list denial is a pure function of the configured list, so a
+    /// denied tool is denied on stdio and streamable HTTP alike — both
+    /// transports route through this single decision point.
+    #[test]
+    fn allow_list_denial_is_identical_on_both_transports() {
+        let allow = Some(vec!["search".to_string()]);
+        let denied = "fold";
+        let allowed = allow.as_deref();
+        assert!(!support::is_tool_allowed(allowed, denied));
+        assert!(support::is_tool_allowed(allowed, "search"));
+        assert!(support::is_tool_allowed(None, denied));
+    }
+
+    /// Direction spellings from either transport canonicalize identically,
+    /// so an HTTP `down`/`up` and an MCP `forward`/`backward` drive the
+    /// same traversal.
+    #[test]
+    fn direction_spellings_agree_across_transports() {
+        assert_eq!(support::canonical_call_direction(Some("down")), ("forward", false));
+        assert_eq!(
+            support::canonical_call_direction(Some("forward")),
+            ("forward", false)
+        );
+        assert_eq!(support::canonical_call_direction(Some("up")), ("backward", true));
+        assert_eq!(
+            support::canonical_call_direction(Some("backward")),
+            ("backward", true)
+        );
+    }
 }

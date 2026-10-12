@@ -197,10 +197,17 @@ impl CompressionRetrieval {
             )));
         }
 
-        // Use FileProcessor to process the file
+        // Use FileProcessor to process the file. The root is the file's
+        // parent directory, not the file itself: passing the file as its
+        // own root relativizes to an empty path and language detection
+        // then sees no extension.
+        let scan_root = canonical_path
+            .parent()
+            .unwrap_or(canonical_path.as_path())
+            .to_path_buf();
         let file_entry = self
             .file_processor
-            .process_file(&canonical_path, &canonical_path)
+            .process_file(&canonical_path, &scan_root)
             .map_err(|e| {
                 CompressionError::FileNotReadable(format!("Failed to process file: {}", e))
             })?;

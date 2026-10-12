@@ -222,4 +222,45 @@ mod tests {
         assert_eq!(SyncParams::adaptive_interval_for(50_000, 5, true), 30);
         assert_eq!(SyncParams::adaptive_interval_for(50_000, 60, true), 60);
     }
+
+    #[test]
+    fn overrides_replace_defaults_and_none_keeps_shared_values() {
+        let mut params = SyncParams::with_defaults(3, "/srv/repo");
+        params.apply_overrides(SyncParamOverrides {
+            extensions: Some("rs,py".to_string()),
+            exclude: None,
+            gitignore: Some(false),
+            commit: Some(false),
+            compress: Some(true),
+            interval_secs: Some(11),
+            cache_file: None,
+            adaptive_interval: Some(true),
+            health_file: Some(std::path::PathBuf::from("/tmp/h.json")),
+            json_progress: true,
+        });
+        assert_eq!(params.extensions, "rs,py");
+        assert_eq!(params.exclude, "node_modules,target,.git,vendor");
+        assert!(!params.gitignore);
+        assert!(!params.commit);
+        assert!(params.compress);
+        assert_eq!(params.interval_secs, 11);
+        assert!(params.cache_file.is_none());
+        assert!(params.adaptive_interval);
+        assert_eq!(
+            params.health_file,
+            Some(std::path::PathBuf::from("/tmp/h.json"))
+        );
+        assert!(params.json_progress);
+    }
+
+    #[test]
+    fn effective_interval_applies_floor_before_adaptation() {
+        let mut params = SyncParams::with_defaults(3, "/srv/repo");
+        params.interval_secs = 2;
+        params.min_interval_secs = 7;
+        params.adaptive_interval = false;
+        assert_eq!(params.effective_interval(50_000), 7);
+        params.adaptive_interval = true;
+        assert_eq!(params.effective_interval(50_000), 30);
+    }
 }

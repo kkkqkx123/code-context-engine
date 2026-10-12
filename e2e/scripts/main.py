@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 """
-CCE End-to-End Test & Benchmark Runner — once_cell Fixture
+CCE End-to-End Test & Benchmark Runner — scale-tier fixtures
 
 Usage:
     # Run functional tests only
-    python benches/scripts/main.py functional
+    python e2e/scripts/main.py functional --fixture once_cell
 
     # Run performance benchmarks (default: 5 iterations)
-    python benches/scripts/main.py benchmark --iterations 5
+    python e2e/scripts/main.py benchmark --fixture flask --iterations 5
 
     # Run both
-    python benches/scripts/main.py all --iterations 3
+    python e2e/scripts/main.py all --fixture once_cell --iterations 3
 
     # Skip service management (connect to already-running services)
-    python benches/scripts/main.py functional --no-service-mgmt
+    python e2e/scripts/main.py functional --no-service-mgmt
 
     # Run functional tests with a specific server URL
-    python benches/scripts/main.py functional --server-url http://localhost:9001
+    python e2e/scripts/main.py functional --server-url http://localhost:9001
 
 Environment:
     CCE_LLM_API_KEY_SILICONFLOW    Required for SiliconFlow LLM API
-    QDRANT_PATH                     Optional: path to Qdrant executable
 """
 
 import argparse
@@ -42,17 +41,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 RESULTS_DIR = BASE_DIR / "results"
 SCRIPTS_DIR = BASE_DIR / "scripts"
 
-CCE_BIN = BASE_DIR / "bin" / "cce.exe"
+CCE_BIN = BASE_DIR / "bin" / "cce"
 CONFIG_PATH = BASE_DIR / "config.toml"
 DEFAULT_SERVER_URL = "http://127.0.0.1:9001"
 DEFAULT_PROJECT = "once_cell"
 
 # Persistent data directories that need cleanup between E2E runs
 #
-# IMPORTANT: The .env file (benches/bin/.env) overrides the config file's
+# IMPORTANT: The .env file (e2e/bin/.env) overrides the config file's
 # database path via CCE_DB_SQLITE_PATH=./data/cce.db. The cleanup must use
 # the effective path, which is what the CCE binary actually creates.
-SQLITE_DB_PATH = Path("data/cce.db")
+SQLITE_DB_PATH = BASE_DIR / "data" / "cce.db"
 QDRANT_DATA_DIR = BASE_DIR / "data" / "qdrant"
 
 
@@ -65,7 +64,7 @@ def _cleanup_databases():
     - Without cleanup, tests fail with 'Project already exists at this path'
 
     The effective SQLite path is determined by .env (CCE_DB_SQLITE_PATH),
-    which overrides the config file setting. See benches/bin/.env.
+    which overrides the config file setting. See e2e/bin/.env.
     """
     import shutil
 
@@ -106,8 +105,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--project",
-        default=DEFAULT_PROJECT,
-        help=f"Target project name for result scoping (default: {DEFAULT_PROJECT})",
+        default=None,
+        help="Result scope name (default: same as --fixture)",
+    )
+    parser.add_argument(
+        "--fixture",
+        default="once_cell",
+        choices=["once_cell", "flask"],
+        help="Scale tier: once_cell (~27 files) or flask (~235 files)",
     )
     parser.add_argument(
         "--iterations",
@@ -137,15 +142,16 @@ def run_functional_tests(
     client: CceApiClient,
     analyzer: ResultsAnalyzer,
     project_name: str,
+    fixture: str = "once_cell",
 ) -> bool:
     logger.info("=" * 60)
-    logger.info("Starting functional tests against %s fixture", project_name)
+    logger.info("Starting functional tests against %s fixture", fixture)
     logger.info("=" * 60)
 
     runner = TestRunner(client)
 
     start = time.time()
-    test_results = runner.run_all_functional_tests()
+    test_results = runner.run_all_functional_tests(fixture)
     elapsed = time.time() - start
 
     passed = sum(1 for r in test_results if r.get("passed", False))
@@ -172,6 +178,7 @@ def run_benchmarks(
     analyzer: ResultsAnalyzer,
     project_name: str,
     iterations: int = 5,
+    fixture: str = "once_cell",
 ):
     from test_runner import TestRunner
 
@@ -186,10 +193,10 @@ def run_benchmarks(
         logger.info("--- Benchmark iteration %d/%d ---", i + 1, iterations)
 
         metrics_before = collector.snapshot()
-        project_id = runner.setup_once_cell_project()
+        project_id = runner.setup_fixture_project(fixture)
 
         idx_start = time.time()
-        index_result = runner.test_full_index(project_id)
+        index_result = runner.test_full_index(project_id, fixture)
         idx_elapsed = (time.time() - idx_start) * 1000
 
         search_start = time.time()
@@ -251,7 +258,7 @@ def main():
     # Clean up persistent data from previous runs
     _cleanup_databases()
 
-    project_name = args.project
+    project_name = args.project or args.fixture
     results_dir = RESULTS_DIR
 
     # Validate API key
@@ -292,12 +299,13 @@ def main():
 
     try:
         if args.mode in ("functional", "all"):
-            func_ok = run_functional_tests(client, analyzer, project_name)
+            func_ok = run_functional_tests(client, analyzer, project_name, args.fixture)
 
         if args.mode in ("benchmark", "all"):
             bench_path = run_benchmarks(
                 client, collector, analyzer, project_name,
                 iterations=args.iterations,
+                fixture=args.fixture,
             )
 
         # Generate combined final report

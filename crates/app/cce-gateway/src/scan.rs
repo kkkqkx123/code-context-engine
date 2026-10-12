@@ -270,6 +270,48 @@ mod tests {
     }
 
     #[test]
+    fn manifest_version_changes_with_content_hash() {
+        let file = |hash: &str| ScannedFile {
+            absolute: PathBuf::from("/tmp/src/main.rs"),
+            size: 12,
+            modified_secs: 0,
+            content_hash: Some(hash.to_string()),
+        };
+        let mut before_files = HashMap::new();
+        before_files.insert("src/main.rs".to_string(), file("aaa"));
+        let before = ScanSnapshot {
+            files: before_files,
+            skipped_oversize: 0,
+            skipped_binary: 0,
+        };
+        let mut after_files = HashMap::new();
+        after_files.insert("src/main.rs".to_string(), file("bbb"));
+        let after = ScanSnapshot {
+            files: after_files,
+            skipped_oversize: 0,
+            skipped_binary: 0,
+        };
+        assert_ne!(
+            manifest_version_for_snapshot(&before),
+            manifest_version_for_snapshot(&after)
+        );
+        assert_eq!(
+            manifest_version_for_snapshot(&before),
+            manifest_version_for_snapshot(&before)
+        );
+    }
+
+    #[test]
+    fn scan_cache_missing_and_corrupt_fall_back_to_empty() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let missing = dir.path().join("no-such-cache.json");
+        assert!(load_cached_entries(&missing).is_empty());
+        let corrupt = dir.path().join("corrupt.json");
+        std::fs::write(&corrupt, b"{not-json").expect("write corrupt");
+        assert!(load_cached_entries(&corrupt).is_empty());
+    }
+
+    #[test]
     fn baseline_matches_by_hash_when_present() {
         let file = ScannedFile {
             absolute: PathBuf::from("/tmp/a.rs"),
@@ -311,6 +353,18 @@ mod tests {
             content_hash: None,
         };
         assert!(!fingerprints_match(&changed, &file));
+    }
+
+    #[tokio::test]
+    async fn extension_filter_keeps_only_wanted_suffixes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("keep.rs"), "fn a() {}").expect("write rs");
+        std::fs::write(dir.path().join("skip.md"), "# docs").expect("write md");
+        let mut params = SyncParams::with_defaults(7, dir.path().to_string_lossy().to_string());
+        params.extensions = "rs".to_string();
+        let outcome = scan_local(&params, None).await.expect("scan");
+        assert!(outcome.snapshot.files.contains_key("keep.rs"));
+        assert!(!outcome.snapshot.files.contains_key("skip.md"));
     }
 
     #[tokio::test]

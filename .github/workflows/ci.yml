@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo clippy --all-targets --all-features
+      - run: cargo fmt --check
+      - run: cargo test -p cce-server --test http_contract --test http_storage_search --test http_entity_graph
+      - run: cargo test -p cce-server --features admission --test http_ingest_admission
+      - run: cargo test -p cce-admission -p cce-cli -p cce-mcp -p cce-gateway --lib
+      - run: cargo test -p cce-gateway --test sync_chain
+
+  rust-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p cce-e2e-tests --test e2e
+      - run: cargo test -p cce-e2e-tests --test regression
+
+  admission-features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p cce-server --features admission --lib
+
+  bench-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo bench --no-run -p cce-orchestrator -p cce-parser
+      - run: cargo bench --no-run -p cce-storage-bm25 --features local
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run contract:check
+      - run: npm test
+      - run: npm run baseline
+      - run: npm run check
+      - run: npm run lint

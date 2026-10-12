@@ -121,12 +121,25 @@ impl super::CodeContextEngine {
             )
             .map_err(|e| EngineError::Config(e.to_string()))?;
 
-        let coordinator = Arc::new(Mutex::new(
-            HotUpdateCoordinator::new(
-                project_entry.config.orchestrator.hot_update.clone(),
-                project_id,
-            )
-            .map_err(|e| EngineError::Config(e.to_string()))?
+        // A file-watch-capable coordinator is the only construction that can
+        // serve the HTTP watch/start endpoint: the plain constructor stays in
+        // PeriodicScan mode and `start_watch` rejects it outright. Choose the
+        // constructor from the project's file-watch policy so the two modes
+        // differ by configuration, not by missing wiring.
+        let hot_update_config = project_entry.config.orchestrator.hot_update.clone();
+        let mut coordinator = if project_entry
+            .config
+            .orchestrator
+            .hot_update
+            .file_watch
+            .enabled
+        {
+            HotUpdateCoordinator::with_file_watch(hot_update_config, project_id)
+        } else {
+            HotUpdateCoordinator::new(hot_update_config, project_id)
+        }
+        .map_err(|e| EngineError::Config(e.to_string()))?;
+        coordinator = coordinator
             .with_project_registry(self.project_registry.clone())
             .with_metadata_store(metadata_store)
             .with_checkpoint_manager(checkpoint_manager)
@@ -141,8 +154,8 @@ impl super::CodeContextEngine {
             .with_heartbeat_interval(std::time::Duration::from_secs(
                 project_entry.config.orchestrator.heartbeat_interval_secs,
             ))
-            .with_license_config(project_entry.config.license_header.clone()),
-        ));
+            .with_license_config(project_entry.config.license_header.clone());
+        let coordinator = Arc::new(Mutex::new(coordinator));
 
         // Double-check: another task may have inserted while we were building
         if let Some(existing) = self.hot_update_cache.get(project_id).await {

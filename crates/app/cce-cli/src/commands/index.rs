@@ -336,7 +336,7 @@ pub enum IndexCommands {
         extensions: String,
 
         /// Directories to exclude (comma-separated)
-        #[arg(short, long, default_value = "node_modules,target,.git,vendor")]
+        #[arg(short = 'x', long, default_value = "node_modules,target,.git,vendor")]
         exclude: String,
 
         /// Ignore patterns for files (comma-separated globs)

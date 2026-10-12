@@ -110,4 +110,19 @@ mod tests {
         assert_eq!(parsed.version, 0);
         assert!(parsed.last_full_scan.is_none());
     }
+
+    #[test]
+    fn health_file_roundtrips_through_disk() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("nested").join("health.json");
+        let params = SyncParams::with_defaults(4, "/srv/repo");
+        let record = health_record(&params, 7, "2026-02-02T00:00:00Z", None);
+        write_health_file(&path, &record).expect("health writes with parent creation");
+        let raw = std::fs::read_to_string(&path).expect("health readable");
+        let parsed: GatewayHealth = serde_json::from_str(&raw).expect("health parses");
+        assert_eq!(parsed.version, GATEWAY_HEALTH_VERSION);
+        assert_eq!(parsed.project_id, 4);
+        assert_eq!(parsed.baseline_files, 7);
+        assert!(parsed.last_sync.is_some());
+    }
 }

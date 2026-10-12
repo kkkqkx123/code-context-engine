@@ -240,6 +240,21 @@ impl<'a> FileProcessor<'a> {
             }
         }
 
+        // 4. Add exports. The extractor fills `function_id` with
+        // ParsedFile-local ids, while the entity index is keyed by the
+        // global ids assigned above: carrying the local id across would
+        // silently point at a foreign entity (or none), which only shows
+        // up as a derived placeholder key in the published snapshot.
+        let exports: Vec<ExportInfo> = exports
+            .into_iter()
+            .filter_map(|export| {
+                remap.get(&export.function_id).map(|global_id| ExportInfo {
+                    function_id: *global_id,
+                    ..export
+                })
+            })
+            .collect();
+
         self.index
             .entity_id_remaps
             .write()
@@ -249,7 +264,6 @@ impl<'a> FileProcessor<'a> {
         self.index
             .add_import_table(normalized_path.clone(), imports);
 
-        // 4. Add exports
         if !exports.is_empty() {
             self.index.add_exports(normalized_path, exports);
         }

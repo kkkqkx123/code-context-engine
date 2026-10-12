@@ -8,9 +8,13 @@
 		text: string;
 		language: string;
 		fileName: string;
+		maxTokens: number | null;
+		mode: string;
 	}
 
-	let items = $state<DraftItem[]>([{ text: '', language: '', fileName: '' }]);
+	let items = $state<DraftItem[]>([
+		{ text: '', language: '', fileName: '', maxTokens: null, mode: '' },
+	]);
 	let globalLanguage = $state('');
 	let globalMaxTokens = $state<number | null>(null);
 	let globalMode = $state('');
@@ -19,7 +23,10 @@
 	let error = $state('');
 
 	function addItem() {
-		items = [...items, { text: '', language: '', fileName: '' }];
+		items = [
+			...items,
+			{ text: '', language: '', fileName: '', maxTokens: null, mode: '' },
+		];
 	}
 
 	function removeItem(index: number) {
@@ -33,6 +40,8 @@
 				text: item.text,
 				language: item.language.trim() || undefined,
 				file_name: item.fileName.trim() || undefined,
+				max_tokens: item.maxTokens ?? undefined,
+				mode: item.mode.trim() || undefined,
 			}))
 			.filter((item) => item.text.trim());
 		if (payload.length === 0) return;
@@ -128,6 +137,28 @@
 						type="text"
 						bind:value={item.fileName}
 						placeholder="e.g., main.py"
+					/>
+				</label>
+				<label class="field">
+					<span class="field-label">Max tokens (optional)</span>
+					<input
+						class="text-input"
+						type="number"
+						min="1"
+						value={item.maxTokens ?? ''}
+						oninput={(e) => {
+							const n = Number((e.target as HTMLInputElement).value);
+							item.maxTokens = Number.isInteger(n) && n > 0 ? n : null;
+						}}
+					/>
+				</label>
+				<label class="field">
+					<span class="field-label">Mode (optional)</span>
+					<input
+						class="text-input"
+						type="text"
+						bind:value={item.mode}
+						placeholder="detailed or minimal"
 					/>
 				</label>
 			</div>

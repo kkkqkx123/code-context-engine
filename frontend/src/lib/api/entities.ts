@@ -23,6 +23,8 @@ export type ClassInheritanceResponse =
 export type InterfaceRelation = components['schemas']['InterfaceRelation'];
 export type ClassImplementationsResponse =
 	components['schemas']['ClassImplementationsResponse'];
+export type ClassificationStatsResponse =
+	components['schemas']['ClassificationStatsResponse'];
 
 /** Relation listing filter shared by calls, callers and call-chain. */
 export interface RelationFilter {
@@ -158,5 +160,33 @@ export const entityApi = {
 			client.GET('/api/project/{project_id}/class/{id}/implementations', {
 				params: { path: { project_id: projectId, id } },
 			}),
+		),
+
+	// Counts of resolved relations grouped by external call classification
+	getClassificationStats: (
+		projectId: number,
+	): Promise<ClassificationStatsResponse> =>
+		call(
+			client.GET('/api/project/{project_id}/relations/classification/stats', {
+				params: { path: { project_id: projectId } },
+			}),
+		),
+
+	// Relations in one external call classification category
+	getRelationsByClassification: (
+		projectId: number,
+		classification: string,
+		limit?: number,
+	): Promise<unknown[]> =>
+		call(
+			client.GET(
+				'/api/project/{project_id}/relations/classification/{classification}',
+				{
+					params: {
+						path: { project_id: projectId, classification },
+						query: { limit },
+					},
+				},
+			),
 		),
 };
