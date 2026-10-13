@@ -16,7 +16,9 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use cce_storage_common::metadb::{RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus};
+use cce_storage_common::metadb::{
+    CheckpointRecord, CheckpointStatus, RelationStorage, WorkUnitCheckpointRecord, WorkUnitStatus,
+};
 use cce_storage_metadb_sqlite::repo::{
     CheckpointRepository, ChunkRepository, EntityRepository, FileRepository,
 };
@@ -55,7 +57,7 @@ fn make_entities(n: usize) -> Vec<EntityRecord> {
             id: i as i64,
             name: format!("fn_{i:06}"),
             kind: "function".to_string(),
-            file_id: (i % 1000) as i64,
+            file_id: ((i % 1000) + 1) as i64,
             signature: None,
             span_start_row: Some(0),
             span_end_row: Some(1),
@@ -204,7 +206,33 @@ fn setup_client() -> SqliteClient {
                     "bench".to_string(),
                     "/tmp/bench".to_string(),
                 ),
-            )
+            )?;
+            CheckpointRepository::create_checkpoint(
+                tx,
+                PROJECT_ID,
+                &CheckpointRecord {
+                    id: None,
+                    project_id: PROJECT_ID,
+                    operation_id: "bench-op".to_string(),
+                    operation_type: "index".to_string(),
+                    root_dir: "/tmp/bench".to_string(),
+                    total_files: 1000,
+                    batch_size: 100,
+                    current_batch_index: 0,
+                    current_phase: "index".to_string(),
+                    file_list_hash: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    last_error: None,
+                    failure_count: 0,
+                    status: CheckpointStatus::InProgress,
+                    active_flag: true,
+                    priority: 0,
+                    last_heartbeat: None,
+                    failed_at: None,
+                },
+            )?;
+            Ok(())
         })
         .expect("seed project");
     client

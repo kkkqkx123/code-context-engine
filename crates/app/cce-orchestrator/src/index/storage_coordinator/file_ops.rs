@@ -7,7 +7,7 @@ use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_storage_common::FulltextStorage;
 use cce_storage_common::VectorStorage;
 use cce_storage_metadb_sqlite::{
-    ChunkRepository, EntityDetailMappingRepository, FileSummaryRepository,
+    ChunkRepository, FileSummaryRepository,
 };
 use cce_types::path::normalize_project_path;
 
@@ -18,6 +18,19 @@ use super::StorageCoordinator;
 impl StorageCoordinator {
     /// Delete a file from all storage backends
     pub async fn remove_file(&self, file_path: &std::path::Path) -> Result<(), OrchestratorError> {
+        // Inside a hot operation the deletion is registered against the
+        // candidate generation (override + own-row cleanup); the published
+        // generation remains untouched until manifest activation and the
+        // parent data is reclaimed by generation GC.
+        if self
+            .candidate_operation
+            .lock()
+            .ok()
+            .and_then(|state| state.clone())
+            .is_some()
+        {
+            return self.register_deleted_file(file_path).await;
+        }
         let file_id = normalize_project_path(&file_path.to_string_lossy());
         let mut backend_errors: Vec<String> = Vec::new();
 
@@ -93,72 +106,6 @@ impl StorageCoordinator {
                 ),
             ))
         }
-    }
-
-    /// Hot update: store new data first, then remove old data for a file.
-    ///
-    /// This write-then-delete order ensures that if the write fails, the
-    /// previously queryable generation remains intact (fix for
-    /// delete-then-write consistency issue).
-    pub async fn hot_update_file(
-        &self,
-        file_path: &std::path::Path,
-        chunks: &[ChunkedResult],
-    ) -> Result<(), OrchestratorError> {
-        let file_path_str = normalize_project_path(&file_path.to_string_lossy());
-
-        // Step 1: Store new data first (write-before-delete)
-        if !chunks.is_empty() {
-            self.store_vectors_batched(chunks, 32, 0).await?;
-            self.store_bm25(chunks).await?;
-        }
-
-        // Step 2: Remove old data after successful write
-        if let Some(ref vector) = self.vector {
-            self.ensure_project_group_id()?;
-            vector
-                .delete_by_file_path_scoped(&file_path_str, &self.project_group_id, None)
-                .await?;
-        }
-
-        if let Some(ref bm25) = self.fulltext {
-            bm25.delete_by_file_path_scoped(
-                &bm25.configured_index_name(),
-                &file_path_str,
-                self.project_id,
-            )
-            .await?;
-        }
-
-        // Step 3: Remove old entity detail mappings (scope to current epoch)
-        if let Some(client) = self.metadata_store.as_deref() {
-            let file_id_opt = client
-                .with_transaction(|tx| {
-                    use rusqlite::{OptionalExtension, params};
-                    tx.query_row(
-                        "SELECT id FROM files WHERE path = ?1 AND project_id = ?2 AND epoch = ?3",
-                        params![&file_path_str, self.project_id, self.epoch()],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .optional()
-                    .map_err(|e| cce_types::StorageError::Sqlite(e.to_string()))
-                })
-                .map_err(OrchestratorError::Storage)?;
-
-            if let Some(file_id_num) = file_id_opt {
-                client
-                    .with_transaction(|tx| {
-                        EntityDetailMappingRepository::delete_by_file_id_at_epoch(
-                            tx,
-                            file_id_num,
-                            self.epoch(),
-                        )?;
-                        Ok(())
-                    })
-                    .map_err(OrchestratorError::Storage)?;
-            }
-        }
-        Ok(())
     }
 
     /// Hot update: delete old vectors and store new vectors for a file

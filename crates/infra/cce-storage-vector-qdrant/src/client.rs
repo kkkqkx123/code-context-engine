@@ -545,7 +545,7 @@ impl QdrantClient {
         file_path: &str,
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
         self.check_circuit_breaker().await?;
 
         let start = Instant::now();
@@ -558,7 +558,7 @@ impl QdrantClient {
         self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, 1, result.is_ok());
+            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
         }
 
         result
@@ -570,7 +570,7 @@ impl QdrantClient {
         file_path: &str,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
         self.check_circuit_breaker().await?;
 
         let start = Instant::now();
@@ -581,7 +581,7 @@ impl QdrantClient {
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
         self.record_circuit_outcome(&result).await;
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, 1, result.is_ok());
+            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
         }
         result
     }
@@ -591,7 +591,7 @@ impl QdrantClient {
         &self,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
         self.check_circuit_breaker().await?;
 
         let start = Instant::now();
@@ -599,7 +599,7 @@ impl QdrantClient {
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
         self.record_circuit_outcome(&result).await;
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, 1, result.is_ok());
+            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
         }
         result
     }
@@ -610,7 +610,7 @@ impl QdrantClient {
     }
 
     /// Delete all points for a given group (project namespace)
-    pub async fn delete_by_group(&self, group_id: &str) -> Result<(), QdrantError> {
+    pub async fn delete_by_group(&self, group_id: &str) -> Result<usize, QdrantError> {
         self.check_circuit_breaker().await?;
 
         debug!(
@@ -626,11 +626,15 @@ impl QdrantClient {
         self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, 0, result.is_ok());
+            metrics.record_delete(
+                latency_ms,
+                result.as_ref().map_or(0, |&c| c),
+                result.is_ok(),
+            );
         }
 
         match &result {
-            Ok(_) => info!(group_id = %group_id, "All points for group deleted"),
+            Ok(deleted) => info!(group_id = %group_id, deleted, "All points for group deleted"),
             Err(e) => warn!(group_id = %group_id, error = %e, "Group deletion failed"),
         }
 
@@ -674,7 +678,7 @@ impl QdrantClient {
         file_paths: &[&str],
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
         self.check_circuit_breaker().await?;
 
         let start = Instant::now();
@@ -687,7 +691,32 @@ impl QdrantClient {
         self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, file_paths.len(), result.is_ok());
+            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
+        }
+
+        result
+    }
+
+    /// Delete points of several files inside a group and epoch in one batch.
+    pub async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        file_paths: &[&str],
+        group_id: &str,
+        epoch: i64,
+    ) -> Result<usize, QdrantError> {
+        self.check_circuit_breaker().await?;
+
+        let start = Instant::now();
+        let result = self
+            .point_ops
+            .delete_by_file_paths_scoped_epoch(file_paths, group_id, epoch)
+            .await;
+        let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        self.record_circuit_outcome(&result).await;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
         }
 
         result

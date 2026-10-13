@@ -102,7 +102,11 @@ impl ProjectIndexMaintenanceService {
         // 1. Vector: delete_by_group only
         if let Some(client) = &self.vector {
             match client.delete_by_group(&group_id).await {
-                Ok(()) => result.push("vector", true, "Group points deleted".to_string()),
+                Ok(deleted) => result.push(
+                    "vector",
+                    true,
+                    format!("Group points deleted ({deleted})"),
+                ),
                 Err(e) => result.push("vector", false, format!("Failed to delete group: {}", e)),
             }
         } else {

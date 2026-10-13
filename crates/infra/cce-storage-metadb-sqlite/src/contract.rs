@@ -207,9 +207,8 @@ impl RelationStorage for SqliteClient {
             return Ok(0);
         }
         self.with_transaction(|tx| {
-            let mut count = 0usize;
-            for file in files {
-                tx.execute(
+            let mut stmt = tx
+                .prepare(
                     "INSERT INTO files (path, language, category, last_modified, created_at, \
                      project_id, content_hash, epoch, batch_id)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)
@@ -217,17 +216,20 @@ impl RelationStorage for SqliteClient {
                         language = excluded.language, category = excluded.category,
                         last_modified = excluded.last_modified,
                         content_hash = excluded.content_hash",
-                    rusqlite::params![
-                        file.path,
-                        file.language,
-                        file.category,
-                        file.last_modified,
-                        file.created_at,
-                        project_id,
-                        file.content_hash,
-                        epoch,
-                    ],
                 )
+                .map_err(|error| StorageError::insert("files", error.to_string()))?;
+            let mut count = 0usize;
+            for file in files {
+                stmt.execute(rusqlite::params![
+                    file.path,
+                    file.language,
+                    file.category,
+                    file.last_modified,
+                    file.created_at,
+                    project_id,
+                    file.content_hash,
+                    epoch,
+                ])
                 .map_err(|error| StorageError::insert("files", error.to_string()))?;
                 count += 1;
             }
@@ -264,9 +266,8 @@ impl RelationStorage for SqliteClient {
             return Ok(0);
         }
         self.with_transaction(|tx| {
-            let mut count = 0usize;
-            for entity in entities {
-                tx.execute(
+            let mut stmt = tx
+                .prepare(
                     "INSERT INTO entities (name, kind, file_id, signature, span_start_row, \
                      span_end_row, span_start_column, span_end_column, span_start_byte, \
                      span_end_byte, scoped_name, overload_discriminator, depth, parent_id, metadata, parameters_json, \
@@ -283,6 +284,11 @@ impl RelationStorage for SqliteClient {
                         metadata = excluded.metadata, parameters_json = excluded.parameters_json,
                         return_type = excluded.return_type, doc_comment = excluded.doc_comment,
                         modifiers_json = excluded.modifiers_json, batch_id = excluded.batch_id",
+                )
+                .map_err(|error| StorageError::insert("entities", error.to_string()))?;
+            let mut count = 0usize;
+            for entity in entities {
+                stmt.execute(
                     rusqlite::params![
                         entity.name,
                         entity.kind,
@@ -349,9 +355,8 @@ impl RelationStorage for SqliteClient {
             return Ok(0);
         }
         self.with_transaction(|tx| {
-            let mut count = 0usize;
-            for chunk in chunks {
-                tx.execute(
+            let mut stmt = tx
+                .prepare(
                     "INSERT INTO chunks (chunk_id, file_path, content, start_line, end_line, \
                      entity_ids, entity_names, entity_kinds, group_title, chunk_type, test_status, test_source, created_at, \
                      updated_at, project_id, epoch, batch_id, path, bm25_keywords, segment_id, truncated)
@@ -367,6 +372,11 @@ impl RelationStorage for SqliteClient {
                         batch_id = excluded.batch_id, path = excluded.path,
                         bm25_keywords = excluded.bm25_keywords, segment_id = excluded.segment_id,
                         truncated = excluded.truncated",
+                )
+                .map_err(|error| StorageError::insert("chunks", error.to_string()))?;
+            let mut count = 0usize;
+            for chunk in chunks {
+                stmt.execute(
                     rusqlite::params![
                         chunk.chunk_id,
                         chunk.file_path,

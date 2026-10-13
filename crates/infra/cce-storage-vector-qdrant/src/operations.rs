@@ -461,7 +461,7 @@ impl PointOperations {
         file_path: &str,
         group_id: Option<&str>,
         point_type: Option<PointKind>,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
         let mut must = vec![json!({
             "key": "file_path",
             "match": { "value": file_path }
@@ -489,7 +489,7 @@ impl PointOperations {
         file_path: &str,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
         self.delete_by_filter(json!({
             "must": [
                 { "key": "file_path", "match": { "value": file_path } },
@@ -504,7 +504,7 @@ impl PointOperations {
         &self,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
         self.delete_by_filter(json!({
             "must": [
                 { "key": "group_id", "match": { "value": group_id } },
@@ -514,7 +514,7 @@ impl PointOperations {
         .await
     }
 
-    pub async fn delete_by_group(&self, group_id: &str) -> Result<(), QdrantError> {
+    pub async fn delete_by_group(&self, group_id: &str) -> Result<usize, QdrantError> {
         let filter = json!({
             "must": [{
                 "key": "group_id",
@@ -607,7 +607,10 @@ impl PointOperations {
         file_paths: &[&str],
         group_id: Option<&str>,
         point_type: Option<PointKind>,
-    ) -> Result<(), QdrantError> {
+    ) -> Result<usize, QdrantError> {
+        if file_paths.is_empty() {
+            return Ok(0);
+        }
         let should = file_paths
             .iter()
             .map(|fp| {
@@ -631,6 +634,33 @@ impl PointOperations {
                 }
 
                 json!({ "must": must })
+            })
+            .collect::<Vec<_>>();
+
+        self.delete_by_filter(json!({
+            "should": should,
+            "min_should": 1
+        }))
+        .await
+    }
+
+    pub async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        file_paths: &[&str],
+        group_id: &str,
+        epoch: i64,
+    ) -> Result<usize, QdrantError> {
+        if file_paths.is_empty() {
+            return Ok(0);
+        }
+        let should = file_paths
+            .iter()
+            .map(|fp| {
+                json!({ "must": [
+                    { "key": "file_path", "match": { "value": fp } },
+                    { "key": "group_id", "match": { "value": group_id } },
+                    { "key": "epoch", "match": { "value": epoch } },
+                ]})
             })
             .collect::<Vec<_>>();
 
@@ -727,7 +757,14 @@ impl PointOperations {
     ///
     /// Transport errors and 5xx/408/429 responses are retried; other 4xx is a
     /// deterministic request or collection error and fails fast.
-    pub async fn delete_by_filter(&self, filter: serde_json::Value) -> Result<(), QdrantError> {
+    ///
+    /// Returns the number of removed points. A pre-delete exact count probes
+    /// the filter first: zero-hit filters skip the delete round-trip entirely.
+    pub async fn delete_by_filter(&self, filter: serde_json::Value) -> Result<usize, QdrantError> {
+        let matched = self.count_by_filter(&filter).await?;
+        if matched == 0 {
+            return Ok(0);
+        }
         let url = format!(
             "{}/collections/{}/points/delete",
             self.base_url, self.collection_name
@@ -742,7 +779,7 @@ impl PointOperations {
         loop {
             attempt += 1;
             match self.try_delete(&url, &body).await {
-                Ok(()) => return Ok(()),
+                Ok(()) => return Ok(matched),
                 Err(AttemptError::Fatal(error)) => return Err(error),
                 Err(AttemptError::Transient(error)) => {
                     match transient_backoff(
@@ -767,6 +804,37 @@ impl PointOperations {
                 }
             }
         }
+    }
+
+    async fn count_by_filter(&self, filter: &serde_json::Value) -> Result<usize, QdrantError> {
+        let url = format!(
+            "{}/collections/{}/points/count",
+            self.base_url, self.collection_name
+        );
+        let body = json!({
+            "filter": filter,
+            "exact": true
+        });
+        let response = self
+            .http_client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| QdrantError::request(e.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = read_error_body(response).await;
+            return Err(QdrantError::api(format!(
+                "Failed to count points for delete filter: {} - {}",
+                status, error_text
+            )));
+        }
+        let resp_json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| QdrantError::request(format!("Failed to parse count response: {}", e)))?;
+        parse_count(&resp_json, "Count points for delete filter")
     }
 
     async fn try_delete(&self, url: &str, body: &serde_json::Value) -> Result<(), AttemptError> {

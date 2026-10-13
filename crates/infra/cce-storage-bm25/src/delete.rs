@@ -150,6 +150,74 @@ pub fn delete_documents_by_file_path_and_project(
     Ok(doc_ids.len())
 }
 
+/// Delete only summary documents of a file within a project.
+///
+/// Chunk documents share the same `file_path`/`project_id` fields as summary
+/// documents, so the generic per-file delete would clear both. Summary
+/// documents are identified by the `::summary::` segment in their document
+/// ID (`{project}::{epoch}::summary::{path}`); only those IDs are removed.
+pub fn delete_summary_documents_by_file_path_and_project(
+    manager: &IndexManager,
+    schema: &IndexSchema,
+    file_path: &str,
+    project_id: i64,
+) -> Result<usize, Bm25Error> {
+    let reader = manager.reader()?;
+    let searcher = reader.searcher();
+
+    let normalized = normalize_project_path(file_path);
+    let file_path_term = Term::from_field_text(schema.file_path, &normalized);
+    let project_id_term = Term::from_field_text(schema.project_id, &project_id.to_string());
+
+    let query = tantivy::query::BooleanQuery::new(vec![
+        (
+            Occur::Must,
+            Box::new(tantivy::query::TermQuery::new(
+                file_path_term,
+                tantivy::schema::IndexRecordOption::Basic,
+            )),
+        ),
+        (
+            Occur::Must,
+            Box::new(tantivy::query::TermQuery::new(
+                project_id_term,
+                tantivy::schema::IndexRecordOption::Basic,
+            )),
+        ),
+    ]);
+
+    let top_docs = searcher.search(&query, &DocSetCollector)?;
+
+    if top_docs.is_empty() {
+        return Ok(0);
+    }
+
+    let mut doc_ids = Vec::new();
+    for doc_address in &top_docs {
+        let doc: tantivy::schema::TantivyDocument = searcher.doc(*doc_address)?;
+        if let Some(value) = doc.get_first(schema.document_id) {
+            let id = value.as_str().unwrap_or_default().to_string();
+            if id.contains("::summary::") {
+                doc_ids.push(id);
+            }
+        }
+    }
+
+    if doc_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let mut writer = manager.writer()?;
+    for doc_id in &doc_ids {
+        let term = Term::from_field_text(schema.document_id, doc_id);
+        writer.delete_term(term);
+    }
+    writer.commit()?;
+    manager.reload_reader()?;
+
+    Ok(doc_ids.len())
+}
+
 /// Delete documents matching a file path, project and data epoch.
 pub fn delete_documents_by_file_path_project_epoch(
     manager: &IndexManager,

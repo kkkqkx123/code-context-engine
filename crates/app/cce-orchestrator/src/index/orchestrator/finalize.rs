@@ -45,13 +45,17 @@ impl IndexOrchestrator {
     /// Wire up relation enhancement for NL document export.
     ///
     /// Called automatically by `finalize_index()` after relation data is fully resolved.
+    /// Holds a detached deep copy of the builder index: the builder maps are
+    /// cleared in place on the next full-index run, so a shallow share would
+    /// let the enhancer's visible content be emptied out from under it.
     fn setup_export_relation_enhancement(&self) {
         if let Some(ref exporter) = self.nl_exporter {
             if exporter.config().enable_relation_enhancement {
-                if let Some(relation_index) = self.get_relation_index() {
+                if let Some(ref builder) = self.relation_builder {
+                    let owned = builder.index().detached_clone();
                     let enhancer_config = crate::export::RelationEnhancerConfig::default();
                     tracing::info!("Setting up relation enhancement for NL document export");
-                    exporter.set_relation_enhancement(Arc::new(relation_index), enhancer_config);
+                    exporter.set_relation_enhancement(Arc::new(owned), enhancer_config);
                 }
             }
         }

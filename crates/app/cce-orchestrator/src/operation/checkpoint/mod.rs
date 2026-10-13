@@ -607,6 +607,40 @@ impl CheckpointManager {
         Ok(id)
     }
 
+    /// Insert a batch of work unit checkpoints in a single transaction.
+    ///
+    /// Microbatch loops accumulate their Running records and flush once
+    /// instead of paying one transaction per microbatch.
+    pub async fn insert_work_units(
+        &self,
+        records: &[WorkUnitCheckpointRecord],
+    ) -> Result<(), StorageError> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        for record in records {
+            if record.project_id != self.project_id {
+                return Err(StorageError::validation(format!(
+                    "project_id mismatch: expected {} got {}",
+                    self.project_id, record.project_id
+                )));
+            }
+        }
+        let mut conn = self.db.write_connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
+
+        for record in records {
+            CheckpointRepository::insert_work_unit(&tx, record)?;
+        }
+
+        tx.commit()
+            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
+
+        Ok(())
+    }
+
     /// Update work unit status
     pub async fn update_work_unit_status(
         &self,
@@ -628,6 +662,43 @@ impl CheckpointManager {
             work_unit_hash,
             status,
         )?;
+
+        tx.commit()
+            .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Mark a batch of work units as committed in a single transaction.
+    ///
+    /// The caller accumulates one hash per successfully persisted microbatch
+    /// and flushes once at the end of the stage instead of updating per
+    /// microbatch.
+    pub async fn update_work_unit_statuses(
+        &self,
+        operation_id: &str,
+        stage: &str,
+        work_unit_hashes: &[String],
+        status: WorkUnitStatus,
+    ) -> Result<(), StorageError> {
+        if work_unit_hashes.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.db.write_connection()?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| StorageError::sqlite(format!("Failed to create transaction: {}", e)))?;
+
+        for hash in work_unit_hashes {
+            CheckpointRepository::update_work_unit_status(
+                &tx,
+                self.project_id,
+                operation_id,
+                stage,
+                hash,
+                status,
+            )?;
+        }
 
         tx.commit()
             .map_err(|e| StorageError::sqlite(format!("Failed to commit transaction: {}", e)))?;

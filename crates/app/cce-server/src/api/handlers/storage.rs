@@ -126,7 +126,7 @@ pub async fn handle_delete_file(
     let group_id = resolve_group_id(&state, project_id).await;
 
     // Step 1: Remove from vector store
-    let vectors_deleted = 0;
+    let mut vectors_deleted = 0usize;
     {
         let vector = state.engine.vector();
         if let Some(ref gid) = group_id {
@@ -134,8 +134,9 @@ pub async fn handle_delete_file(
                 .delete_by_file_path_scoped(&file_path, gid, None)
                 .await;
             match result {
-                Ok(()) => {
-                    tracing::info!(file = %file_path, %project_id, "Deleted vectors from vector store");
+                Ok(deleted) => {
+                    vectors_deleted = deleted;
+                    tracing::info!(file = %file_path, %project_id, deleted, "Deleted vectors from vector store");
                 }
                 Err(e) => {
                     tracing::error!(file = %file_path, error = %e, "Failed to delete vectors from vector store");
@@ -154,12 +155,11 @@ pub async fn handle_delete_file(
         let client = state.engine.fulltext_clone();
         let result = client
             .delete_by_file_path_scoped(&client.configured_index_name(), &file_path, project_id)
-            .await
-            .map(|_| ());
+            .await;
         match result {
-            Ok(()) => {
-                tracing::info!(file = %file_path, %project_id, "Deleted documents from BM25");
-                1
+            Ok(deleted) => {
+                tracing::info!(file = %file_path, %project_id, deleted, "Deleted documents from BM25");
+                deleted
             }
             Err(e) => {
                 tracing::error!(file = %file_path, error = %e, "Failed to delete from BM25");
@@ -298,7 +298,7 @@ pub async fn handle_delete_entity(
     };
 
     // Step 2: Remove from vector store
-    let mut vectors_deleted = 0;
+    let mut vectors_deleted = 0usize;
     {
         let vector = state.engine.vector();
         if let Some(ref file_path) = entity_file_path {
@@ -306,24 +306,23 @@ pub async fn handle_delete_entity(
                 let result = vector
                     .delete_by_file_path_scoped(file_path, gid, None)
                     .await;
-                if result.is_ok() {
-                    vectors_deleted = 1;
+                if let Ok(deleted) = result {
+                    vectors_deleted = deleted;
                 }
             }
         }
     }
 
     // Step 3: Remove from BM25
-    let mut bm25_deleted = 0;
+    let mut bm25_deleted = 0usize;
     {
         if let Some(ref file_path) = entity_file_path {
             let client = state.engine.fulltext_clone();
             let result = client
                 .delete_by_file_path_scoped(&client.configured_index_name(), file_path, project_id)
-                .await
-                .map(|_| ());
-            if result.is_ok() {
-                bm25_deleted = 1;
+                .await;
+            if let Ok(deleted) = result {
+                bm25_deleted = deleted;
             }
         }
     }
@@ -420,32 +419,31 @@ pub async fn handle_batch_delete(
 
     let group_id = resolve_group_id(&state, project_id).await;
 
-    // Delete files
-    for file_path in &request.file_paths {
-        // Delete from vector store
-        {
-            let vector = state.engine.vector();
-            if let Some(ref gid) = group_id {
-                let result = vector
-                    .delete_by_file_path_scoped(file_path, gid, None)
-                    .await;
-                if let Err(e) = result {
-                    errors.push(format!(
-                        "Failed to delete file {} from vector store: {}",
-                        file_path, e
-                    ));
-                    continue;
-                }
+    // Batch vector delete: one native batch for all files instead of one
+    // HTTP round-trip per file.
+    if !request.file_paths.is_empty()
+        && let Some(ref gid) = group_id
+    {
+        let vector = state.engine.vector();
+        let paths: Vec<&str> = request.file_paths.iter().map(String::as_str).collect();
+        if let Err(e) = vector.delete_by_file_paths_scoped(&paths, gid, None).await {
+            for file_path in &request.file_paths {
+                errors.push(format!(
+                    "Failed to delete file {} from vector store: {}",
+                    file_path, e
+                ));
             }
         }
+    }
 
+    // Delete files
+    for file_path in &request.file_paths {
         // Delete from BM25
         {
             let client = state.engine.fulltext_clone();
             let result = client
                 .delete_by_file_path_scoped(&client.configured_index_name(), file_path, project_id)
-                .await
-                .map(|_| ());
+                .await;
             if let Err(e) = result {
                 errors.push(format!(
                     "Failed to delete file {} from BM25: {}",
@@ -501,8 +499,7 @@ pub async fn handle_batch_delete(
                 let client = state.engine.fulltext_clone();
                 let result = client
                     .delete_by_file_path_scoped(&client.configured_index_name(), fp, project_id)
-                    .await
-                    .map(|_| ());
+                    .await;
                 if let Err(e) = result {
                     errors.push(format!(
                         "Failed to delete entity {} from BM25: {}",

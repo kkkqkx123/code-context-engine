@@ -130,32 +130,8 @@ impl RelationSnapshotIndex {
     }
 
     /// Version of the source `RelationIndex` at snapshot creation time.
-    ///
-    /// Useful for staleness detection: if the source index's current version
-    /// is greater than this value, the snapshot is stale and a new snapshot
-    /// should be created.
     pub fn version(&self) -> u64 {
         self.version
-    }
-
-    /// Check whether this snapshot is stale relative to a source index.
-    ///
-    /// Returns `true` if the source index's current version is greater than
-    /// the version recorded at snapshot creation time, indicating that the
-    /// source has been mutated since the snapshot was taken.
-    pub fn is_stale(&self, source_version: u64) -> bool {
-        source_version > self.version
-    }
-
-    /// Create a fresh snapshot from a stale one by deep-copying the source.
-    ///
-    /// This is the safe fallback for CoW: when the source has been mutated
-    /// since the snapshot was taken, a full deep copy is required because
-    /// the snapshot's shared maps may contain stale data. For better
-    /// performance on small mutations, consider using `LayeredSnapshotIndex`
-    /// with an explicit `SnapshotDelta`.
-    pub fn cow_from_stale(source: &RelationIndex) -> Self {
-        Self::from_index(source)
     }
 
     /// External-call classification counts, computed once per snapshot.

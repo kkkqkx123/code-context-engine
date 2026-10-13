@@ -67,7 +67,7 @@ pub use file_index::{ExportIndexOps, FileIndexOps, FileLevelOps, ImportIndexOps}
 pub use cce_parser_core::{LocalCall, LocalCallResolver, LocalCallResolverConfig};
 pub use relation_query::{FrontendQueryOps, HierarchyQueryOps, RelationQueryOps};
 pub use resolver::RelationResolver;
-pub use snapshot_generation::{CoWSnapshotGuard, SnapshotGeneration};
+pub use snapshot_generation::SnapshotGeneration;
 pub use snapshot_index::{FileScopedSnapshot, LayeredSnapshotIndex, RelationSnapshotIndex};
 pub use snapshot_query::{
     SnapshotEntityQueryOps, SnapshotFileQueryOps, SnapshotFrontendQueryOps,

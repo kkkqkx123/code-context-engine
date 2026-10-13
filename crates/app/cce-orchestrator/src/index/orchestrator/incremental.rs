@@ -45,6 +45,11 @@ impl IndexOrchestrator {
     /// one failed, and failures are aggregated instead of short-circuiting.
     /// A retry therefore converges (completed stages are idempotent) instead
     /// of leaving residue behind the failure point while skipping the rest.
+    ///
+    /// The generic storage removal already covers summary data: the vector
+    /// delete is untyped (all `PointKind`s including summaries), the BM25
+    /// delete removes every document of the file, and `DELETE FROM files`
+    /// cascades to `file_summaries`. No separate summary call is made.
     pub async fn remove_file(&self, file_path: &std::path::Path) -> Result<(), OrchestratorError> {
         // Remove from relation index first
         if let Some(ref builder) = self.relation_builder {
@@ -52,34 +57,24 @@ impl IndexOrchestrator {
             builder.index().remove_file(&file_id);
         }
 
-        let mut backend_errors: Vec<String> = Vec::new();
-
-        // Remove from storage backends
+        // Remove from storage backends (vectors, BM25, SQLite incl. summaries)
         if let Err(error) = self.storage.remove_file(file_path).await {
-            backend_errors.push(format!("storage: {error}"));
-        }
-
-        // Remove from summary index
-        if let Err(error) = self.storage.remove_file_from_summary(file_path).await {
-            backend_errors.push(format!("summary: {error}"));
+            // State tracking is in-memory and infallible: always clean it so a
+            // retry observes no stale state for this file.
+            self.state_tracker.remove_state(file_path).await;
+            return Err(OrchestratorError::index(
+                "remove_file",
+                format!(
+                    "partial failure removing {} (completed stages are safe to retry): storage: {error}",
+                    file_path.display(),
+                ),
+            ));
         }
 
         // State tracking is in-memory and infallible: always clean it so a
         // retry observes no stale state for this file.
         self.state_tracker.remove_state(file_path).await;
-
-        if backend_errors.is_empty() {
-            Ok(())
-        } else {
-            Err(OrchestratorError::index(
-                "remove_file",
-                format!(
-                    "partial failure removing {} (completed stages are safe to retry): {}",
-                    file_path.display(),
-                    backend_errors.join("; ")
-                ),
-            ))
-        }
+        Ok(())
     }
 }
 

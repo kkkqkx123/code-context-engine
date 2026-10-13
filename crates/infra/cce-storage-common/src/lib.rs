@@ -479,7 +479,7 @@ pub trait VectorStorage: Clone + Send + Sync + 'static {
         file_path: &str,
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send;
 
     /// Delete one file's points inside a group and epoch.
     fn delete_by_file_path_scoped_epoch(
@@ -487,37 +487,62 @@ pub trait VectorStorage: Clone + Send + Sync + 'static {
         file_path: &str,
         group_id: &str,
         epoch: i64,
-    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send;
 
     /// Delete all points of a group and epoch.
     fn delete_by_group_epoch(
         &self,
         group_id: &str,
         epoch: i64,
-    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send;
 
     /// Delete all points of a group.
     fn delete_by_group(
         &self,
         group_id: &str,
-    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send;
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send;
 
     /// Delete several files' points inside a group.
     ///
     /// Backends may serve this as one native batch or as sequential single
-    /// deletes; the visible result must match sequential deletes.
+    /// deletes; the visible result must match sequential deletes. Returns the
+    /// total number of removed points.
     fn delete_by_file_paths_scoped(
         &self,
         file_paths: &[&str],
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> impl Future<Output = Result<(), cce_types::StorageError>> + Send {
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send {
         async move {
+            let mut total = 0usize;
             for path in file_paths {
-                self.delete_by_file_path_scoped(path, group_id, point_type)
+                total += self
+                    .delete_by_file_path_scoped(path, group_id, point_type)
                     .await?;
             }
-            Ok(())
+            Ok(total)
+        }
+    }
+
+    /// Delete several files' points inside a group and epoch in one batch.
+    ///
+    /// Backends may serve this as one native batch or as sequential single
+    /// deletes; the visible result must match sequential deletes. Returns the
+    /// total number of removed points.
+    fn delete_by_file_paths_scoped_epoch(
+        &self,
+        file_paths: &[&str],
+        group_id: &str,
+        epoch: i64,
+    ) -> impl Future<Output = Result<usize, cce_types::StorageError>> + Send {
+        async move {
+            let mut total = 0usize;
+            for path in file_paths {
+                total += self
+                    .delete_by_file_path_scoped_epoch(path, group_id, epoch)
+                    .await?;
+            }
+            Ok(total)
         }
     }
 

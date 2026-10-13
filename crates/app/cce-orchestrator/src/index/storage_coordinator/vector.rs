@@ -1,11 +1,8 @@
 //! Embedding/vector write path.
 //!
 //! Produces Qdrant points, SQLite chunk records and entity detail mappings
-//! from embedding-path chunks, with per-microbatch checkpointing.
+//! from embedding-path chunks, with checkpoints flushed in batches.
 
-use std::sync::Arc;
-
-use crate::CheckpointManager;
 use cce_llm::LlmError;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_common::{Payload, VectorPoint, VectorStorage};
@@ -144,8 +141,6 @@ impl StorageCoordinator {
         self.ensure_project_group_id()?;
 
         let mut total_stored = 0;
-        let total_chunks = embedding_chunks.len();
-        let num_batches = total_chunks.div_ceil(batch_size);
 
         let wk_cm = self.checkpoint_manager.clone();
         let wk_op = self.operation_id.clone();
@@ -155,54 +150,65 @@ impl StorageCoordinator {
         // generator's deferred-retry semantics: retries do not add load while
         // other batches are still embedding, and the inter-batch delay acts as
         // natural backoff.
-        type DeferredBatch<'a> = (
-            &'a [&'a ChunkedResult],
-            Option<(Arc<CheckpointManager>, String, String)>,
-        );
+        type DeferredBatch<'a> = (&'a [&'a ChunkedResult], Option<String>);
         let mut deferred_retries: Vec<DeferredBatch<'_>> = Vec::new();
         let mut deferred_retry_after_ms: u64 = 0;
         let mut deferred_reason: Option<String> = None;
         let mut deferred_failures: usize = 0;
 
-        for (batch_idx, batch) in embedding_chunks.chunks(batch_size).enumerate() {
-            // Work unit checkpoint: skip if this microbatch is already committed
-            let wu_state: Option<(Arc<CheckpointManager>, String, String)> =
-                if let (Some(cm), Some(op_id)) = (&wk_cm, &wk_op) {
-                    let hash = compute_work_unit_hash(batch);
-                    match cm
-                        .get_work_unit_by_hash(op_id, "embedding_generation", &hash)
-                        .await
-                    {
-                        Ok(Some(record)) if record.status == WorkUnitStatus::Committed => {
-                            total_stored += batch.len();
-                            continue;
-                        }
-                        _ => {
-                            let record = WorkUnitCheckpointRecord {
-                                id: None,
-                                project_id: self.project_id,
-                                operation_id: op_id.clone(),
-                                stage: "embedding_generation".to_string(),
-                                target_epoch: self.epoch(),
-                                work_unit_hash: hash.clone(),
-                                status: WorkUnitStatus::Running,
-                                item_count: batch.len() as u32,
-                                created_at: chrono::Utc::now().to_rfc3339(),
-                                updated_at: chrono::Utc::now().to_rfc3339(),
-                            };
-                            if let Err(e) = cm.insert_work_unit(&record).await {
-                                tracing::warn!(
-                                    error = %e,
-                                    "Failed to insert embedding work unit checkpoint"
-                                );
-                            }
-                            Some((cm.clone(), op_id.clone(), hash))
-                        }
+        // Checkpoint pre-pass: skip already-committed microbatches and stage
+        // the pending Running records for a single batched insert instead of
+        // one transaction per microbatch. A missing record replays exactly
+        // like a Running one, so the deferred insert never skips work.
+        let mut pending_batches: Vec<(&[&ChunkedResult], Option<String>)> = Vec::new();
+        if let (Some(cm), Some(op_id)) = (wk_cm.clone(), wk_op.clone()) {
+            let mut running = Vec::new();
+            for batch in embedding_chunks.chunks(batch_size) {
+                let hash = compute_work_unit_hash(batch);
+                match cm
+                    .get_work_unit_by_hash(&op_id, "embedding_generation", &hash)
+                    .await
+                {
+                    Ok(Some(record)) if record.status == WorkUnitStatus::Committed => {
+                        total_stored += batch.len();
                     }
-                } else {
-                    None
-                };
+                    _ => {
+                        running.push(WorkUnitCheckpointRecord {
+                            id: None,
+                            project_id: self.project_id,
+                            operation_id: op_id.clone(),
+                            stage: "embedding_generation".to_string(),
+                            target_epoch: self.epoch(),
+                            work_unit_hash: hash.clone(),
+                            status: WorkUnitStatus::Running,
+                            item_count: batch.len() as u32,
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                            updated_at: chrono::Utc::now().to_rfc3339(),
+                        });
+                        pending_batches.push((batch, Some(hash)));
+                    }
+                }
+            }
+            if let Err(e) = cm.insert_work_units(&running).await {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to insert embedding work unit checkpoints"
+                );
+            }
+        } else {
+            for batch in embedding_chunks.chunks(batch_size) {
+                pending_batches.push((batch, None));
+            }
+        }
+        let pending_count = pending_batches.len();
+        let mut committed_hashes: Vec<String> = Vec::new();
 
+        // Entity ID map is epoch-scoped and immutable for this pass: load it
+        // once instead of once per microbatch (each load is a full-table
+        // scan plus JSON parse that grows linearly with the microbatch count).
+        let source_entity_ids = self.load_source_entity_ids()?;
+
+        for (batch_idx, (batch, hash)) in pending_batches.iter().enumerate() {
             // Prepare texts for this batch
             let texts: Vec<&str> = batch.iter().map(|c| c.text.as_str()).collect();
 
@@ -226,18 +232,21 @@ impl StorageCoordinator {
                         error = %err,
                         "Embedding batch failed transiently, deferring retry to batch end"
                     );
-                    deferred_retries.push((batch, wu_state));
+                    deferred_retries.push((*batch, hash.clone()));
                     continue;
                 }
                 Err(e) => return Err(e.into()),
             };
 
             total_stored += self
-                .persist_embedding_batch(batch, &embeddings, &wu_state, vector)
+                .persist_embedding_batch(batch, &embeddings, vector, &source_entity_ids)
                 .await?;
+            if let Some(hash) = hash {
+                committed_hashes.push(hash.clone());
+            }
 
             // Sleep between batches to avoid rate limits (skip last batch)
-            if batch_delay_ms > 0 && batch_idx < num_batches - 1 {
+            if batch_delay_ms > 0 && batch_idx + 1 < pending_count {
                 tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay_ms)).await;
             }
         }
@@ -254,22 +263,22 @@ impl StorageCoordinator {
             if backoff_ms > 0 {
                 tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
             }
-            for (batch, wu_state) in deferred_retries {
+            for (batch, hash) in deferred_retries {
                 let texts: Vec<&str> = batch.iter().map(|c| c.text.as_str()).collect();
                 match embedder.embed(&texts).await {
                     Ok(embeddings) => {
                         total_stored += self
-                            .persist_embedding_batch(batch, &embeddings, &wu_state, vector)
+                            .persist_embedding_batch(batch, &embeddings, vector, &source_entity_ids)
                             .await?;
+                        if let Some(hash) = hash {
+                            committed_hashes.push(hash);
+                        }
                     }
                     Err(err) if is_retryable_llm_error(&err) => {
                         // Record the failure: the work unit stays Running
                         // (uncommitted) so a resume replays exactly this unit,
                         // but the caller must not treat the pass as complete.
-                        let work_unit_hash = wu_state
-                            .as_ref()
-                            .map(|(_, _, hash)| hash.as_str())
-                            .unwrap_or("<none>");
+                        let work_unit_hash = hash.as_deref().unwrap_or("<none>");
                         tracing::warn!(
                             work_unit_hash,
                             error = %err,
@@ -279,6 +288,28 @@ impl StorageCoordinator {
                     }
                     Err(e) => return Err(e.into()),
                 }
+            }
+        }
+
+        // Flush the Committed markers for every successfully persisted
+        // microbatch in one transaction. Units are marked only after their
+        // data is durable, so a crash before this point replays them.
+        if let (Some(cm), Some(op_id)) = (&wk_cm, &wk_op)
+            && !committed_hashes.is_empty()
+        {
+            if let Err(e) = cm
+                .update_work_unit_statuses(
+                    op_id,
+                    "embedding_generation",
+                    &committed_hashes,
+                    WorkUnitStatus::Committed,
+                )
+                .await
+            {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to update embedding work unit checkpoints to committed"
+                );
             }
         }
 
@@ -301,26 +332,27 @@ impl StorageCoordinator {
         Ok(total_stored)
     }
 
-    /// Persist already-generated embeddings for one batch: builds Qdrant
-    /// points and SQLite records, stores them, and commits the work unit
-    /// checkpoint.
+    /// Persist already-generated embeddings for one batch: builds vector
+    /// points and SQLite records and stores them. The caller batches the
+    /// work unit checkpoint writes; a batch is marked Committed only after
+    /// this returns Ok.
     ///
-    /// The three writes are ordered but not atomic: when a later write
-    /// fails, earlier Qdrant points may already exist without SQLite links.
-    /// Such orphans are invisible to entity-linked queries and converge on
-    /// resume: point IDs are deterministic, so replaying the uncommitted
+    /// The vector write and the SQLite write are ordered but not atomic: when
+    /// a later write fails, earlier points may already exist without SQLite
+    /// links. Such orphans are invisible to entity-linked queries and converge
+    /// on resume: point IDs are deterministic, so replaying the uncommitted
     /// work unit overwrites them and completes the missing links instead
     /// of duplicating data.
     async fn persist_embedding_batch(
         &self,
         batch: &[&ChunkedResult],
         embeddings: &cce_llm::EmbeddingResult,
-        wu_state: &Option<(Arc<CheckpointManager>, String, String)>,
         vector: &crate::index::vector_store::VectorStore,
+        source_entity_ids: &std::collections::HashMap<(String, i64), i64>,
     ) -> Result<usize, OrchestratorError> {
         // Build vector points and chunk records for this batch
         let (points, chunk_records, entity_mappings) = self
-            .build_storage_data(batch, &embeddings.embeddings)
+            .build_storage_data(batch, &embeddings.embeddings, source_entity_ids)
             .await?;
 
         let mut stored = 0;
@@ -331,32 +363,9 @@ impl StorageCoordinator {
             stored = points.len();
         }
 
-        // Store chunk records
-        if !chunk_records.is_empty() {
-            self.store_chunk_records(&chunk_records)?;
-        }
-
-        // Store entity mappings
-        if !entity_mappings.is_empty() {
-            self.store_entity_mappings(&entity_mappings)?;
-        }
-
-        // Mark work unit as committed after successful processing
-        if let Some((cm, op_id, hash)) = wu_state {
-            if let Err(e) = cm
-                .update_work_unit_status(
-                    op_id,
-                    "embedding_generation",
-                    hash,
-                    WorkUnitStatus::Committed,
-                )
-                .await
-            {
-                tracing::warn!(
-                    error = %e,
-                    "Failed to update embedding work unit checkpoint to committed"
-                );
-            }
+        // Store chunk records and entity mappings in one transaction.
+        if !chunk_records.is_empty() || !entity_mappings.is_empty() {
+            self.store_chunks_and_mappings(&chunk_records, &entity_mappings)?;
         }
 
         Ok(stored)
@@ -367,6 +376,7 @@ impl StorageCoordinator {
         &self,
         chunks: &[&ChunkedResult],
         dense_embeddings: &[Vec<f32>],
+        source_entity_ids: &std::collections::HashMap<(String, i64), i64>,
     ) -> Result<(Vec<VectorPoint>, Vec<ChunkRecord>, Vec<EntityDetailMapping>), OrchestratorError>
     {
         // A plugin or custom embedder may return a mismatched vector count;
@@ -389,7 +399,6 @@ impl StorageCoordinator {
         let group_id = self.project_group_id.clone();
         let epoch = self.epoch();
         let batch_id = self.batch_id();
-        let source_entity_ids = self.load_source_entity_ids()?;
 
         for (chunk, dense_vec) in chunks.iter().zip(dense_embeddings.iter()) {
             let content_entity_ids: Vec<i64> = chunk
@@ -537,24 +546,6 @@ impl StorageCoordinator {
         Ok(result)
     }
 
-    /// Store entity detail mappings in SQLite
-    pub(crate) fn store_entity_mappings(
-        &self,
-        mappings: &[EntityDetailMapping],
-    ) -> Result<(), OrchestratorError> {
-        if let Some(client) = self.metadata_store.as_deref() {
-            let result = client.with_transaction(|tx| {
-                for mapping in mappings {
-                    EntityDetailMappingRepository::upsert(tx, mapping)?;
-                }
-                Ok(())
-            });
-
-            result.map_err(OrchestratorError::Storage)?;
-        }
-        Ok(())
-    }
-
     /// Store chunk records in SQLite
     pub(crate) fn store_chunk_records(
         &self,
@@ -562,6 +553,32 @@ impl StorageCoordinator {
     ) -> Result<(), OrchestratorError> {
         if let Some(client) = self.metadata_store.as_deref() {
             let result = client.with_transaction(|tx| ChunkRepository::insert_batch(tx, chunks));
+
+            result.map_err(OrchestratorError::Storage)?;
+        }
+        Ok(())
+    }
+
+    /// Store chunk records and entity mappings in a single transaction.
+    ///
+    /// The embedding and BM25 persist paths write both tables per
+    /// microbatch; sharing one transaction halves the per-microbatch
+    /// transaction count.
+    pub(crate) fn store_chunks_and_mappings(
+        &self,
+        chunks: &[ChunkRecord],
+        mappings: &[EntityDetailMapping],
+    ) -> Result<(), OrchestratorError> {
+        if let Some(client) = self.metadata_store.as_deref() {
+            let result = client.with_transaction(|tx| {
+                if !chunks.is_empty() {
+                    ChunkRepository::insert_batch(tx, chunks)?;
+                }
+                for mapping in mappings {
+                    EntityDetailMappingRepository::upsert(tx, mapping)?;
+                }
+                Ok(())
+            });
 
             result.map_err(OrchestratorError::Storage)?;
         }
@@ -779,7 +796,7 @@ mod tests {
         let embeddings: [Vec<f32>; 0] = [];
 
         let err = storage
-            .build_storage_data(&chunks, &embeddings)
+            .build_storage_data(&chunks, &embeddings, &std::collections::HashMap::new())
             .await
             .expect_err("mismatched vector count must fail instead of truncating");
         assert!(
@@ -816,7 +833,7 @@ mod tests {
         let embeddings = [vec![0.25_f32, 0.75_f32]];
 
         let (points, _, mappings) = storage
-            .build_storage_data(&chunks, &embeddings)
+            .build_storage_data(&chunks, &embeddings, &std::collections::HashMap::new())
             .await
             .expect("build storage data");
 
@@ -858,7 +875,7 @@ mod tests {
         let embeddings = [vec![0.25_f32, 0.75_f32]];
 
         let (points, _, _) = storage
-            .build_storage_data(&chunks, &embeddings)
+            .build_storage_data(&chunks, &embeddings, &std::collections::HashMap::new())
             .await
             .expect("build storage data");
 
@@ -888,7 +905,7 @@ mod tests {
         let embeddings = [vec![0.3_f32, 0.7_f32]];
 
         let (points, _, _) = storage
-            .build_storage_data(&chunks, &embeddings)
+            .build_storage_data(&chunks, &embeddings, &std::collections::HashMap::new())
             .await
             .expect("build storage data");
 
@@ -918,7 +935,7 @@ mod tests {
         let embeddings = [vec![0.3_f32, 0.7_f32]];
 
         let (points, _, _) = storage
-            .build_storage_data(&chunks, &embeddings)
+            .build_storage_data(&chunks, &embeddings, &std::collections::HashMap::new())
             .await
             .expect("build storage data");
 

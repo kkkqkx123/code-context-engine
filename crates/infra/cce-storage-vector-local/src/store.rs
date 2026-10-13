@@ -193,11 +193,12 @@ impl LocalVectorStore {
         if has { Some(sim) } else { None }
     }
 
-    fn delete_with_filter(&self, filter: &SimFilter) -> Result<(), StorageError> {
-        self.engine
+    fn delete_with_filter(&self, filter: &SimFilter) -> Result<usize, StorageError> {
+        let deleted = self
+            .engine
             .delete_by_filter(&self.collection, filter)
             .map_err(map_simvec_error)?;
-        Ok(())
+        Ok(deleted as usize)
     }
 }
 
@@ -472,7 +473,7 @@ impl VectorStorage for LocalVectorStore {
         file_path: &str,
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<usize, StorageError> {
         let normalized = cce_types::normalize_project_path(file_path);
         let mut filter = SimFilter::new()
             .must(FilterCondition::match_value("group_id", group_id))
@@ -488,7 +489,7 @@ impl VectorStorage for LocalVectorStore {
         tokio::task::spawn_blocking(move || {
             engine
                 .delete_by_filter(&collection, &filter)
-                .map(|_| ())
+                .map(|deleted| deleted as usize)
                 .map_err(map_simvec_error)
         })
         .await
@@ -500,7 +501,7 @@ impl VectorStorage for LocalVectorStore {
         file_path: &str,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), StorageError> {
+    ) -> Result<usize, StorageError> {
         let normalized = cce_types::normalize_project_path(file_path);
         let filter = SimFilter::new()
             .must(FilterCondition::match_value("group_id", group_id))
@@ -509,14 +510,14 @@ impl VectorStorage for LocalVectorStore {
         self.delete_with_filter(&filter)
     }
 
-    async fn delete_by_group_epoch(&self, group_id: &str, epoch: i64) -> Result<(), StorageError> {
+    async fn delete_by_group_epoch(&self, group_id: &str, epoch: i64) -> Result<usize, StorageError> {
         let filter = SimFilter::new()
             .must(FilterCondition::match_value("group_id", group_id))
             .must(FilterCondition::match_value("epoch", epoch.to_string()));
         self.delete_with_filter(&filter)
     }
 
-    async fn delete_by_group(&self, group_id: &str) -> Result<(), StorageError> {
+    async fn delete_by_group(&self, group_id: &str) -> Result<usize, StorageError> {
         let filter = SimFilter::new().must(FilterCondition::match_value("group_id", group_id));
         self.delete_with_filter(&filter)
     }

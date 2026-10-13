@@ -253,7 +253,7 @@ impl VectorStorage for VectorStore {
         file_path: &str,
         group_id: &str,
         point_type: Option<PointKind>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<usize, StorageError> {
         match self {
             Self::Local(store) => {
                 VectorStorage::delete_by_file_path_scoped(
@@ -281,7 +281,7 @@ impl VectorStorage for VectorStore {
         file_path: &str,
         group_id: &str,
         epoch: i64,
-    ) -> Result<(), StorageError> {
+    ) -> Result<usize, StorageError> {
         match self {
             Self::Local(store) => {
                 VectorStorage::delete_by_file_path_scoped_epoch(
@@ -304,7 +304,7 @@ impl VectorStorage for VectorStore {
         }
     }
 
-    async fn delete_by_group_epoch(&self, group_id: &str, epoch: i64) -> Result<(), StorageError> {
+    async fn delete_by_group_epoch(&self, group_id: &str, epoch: i64) -> Result<usize, StorageError> {
         match self {
             Self::Local(store) => {
                 VectorStorage::delete_by_group_epoch(store.as_ref(), group_id, epoch).await
@@ -315,10 +315,66 @@ impl VectorStorage for VectorStore {
         }
     }
 
-    async fn delete_by_group(&self, group_id: &str) -> Result<(), StorageError> {
+    async fn delete_by_group(&self, group_id: &str) -> Result<usize, StorageError> {
         match self {
             Self::Local(store) => VectorStorage::delete_by_group(store.as_ref(), group_id).await,
             Self::Qdrant(client) => VectorStorage::delete_by_group(client.as_ref(), group_id).await,
+        }
+    }
+
+    async fn delete_by_file_paths_scoped(
+        &self,
+        file_paths: &[&str],
+        group_id: &str,
+        point_type: Option<PointKind>,
+    ) -> Result<usize, StorageError> {
+        match self {
+            Self::Local(store) => {
+                VectorStorage::delete_by_file_paths_scoped(
+                    store.as_ref(),
+                    file_paths,
+                    group_id,
+                    point_type,
+                )
+                .await
+            }
+            Self::Qdrant(client) => {
+                VectorStorage::delete_by_file_paths_scoped(
+                    client.as_ref(),
+                    file_paths,
+                    group_id,
+                    point_type,
+                )
+                .await
+            }
+        }
+    }
+
+    async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        file_paths: &[&str],
+        group_id: &str,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        match self {
+            Self::Local(store) => {
+                VectorStorage::delete_by_file_paths_scoped_epoch(
+                    store.as_ref(),
+                    file_paths,
+                    group_id,
+                    epoch,
+                )
+                .await
+            }
+            Self::Qdrant(client) => {
+                VectorStorage::delete_by_file_paths_scoped_epoch(
+                    client.as_ref(),
+                    file_paths,
+                    group_id,
+                    epoch,
+                )
+                .await
+            }
         }
     }
 

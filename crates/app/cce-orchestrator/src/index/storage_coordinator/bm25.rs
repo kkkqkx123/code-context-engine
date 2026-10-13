@@ -1,9 +1,7 @@
 //! BM25 full-text write path.
 
 use cce_storage_common::FulltextStorage;
-use std::sync::Arc;
 
-use crate::CheckpointManager;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 use cce_storage_common::FulltextDocument;
 use cce_storage_metadb_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
@@ -46,78 +44,125 @@ impl StorageCoordinator {
         let wk_cm = self.checkpoint_manager.clone();
         let wk_op = self.operation_id.clone();
 
+        // Build one payload per microbatch, skipping already-committed ones.
+        // Running markers are staged for a single batched insert; resume
+        // replays every microbatch without a Committed marker.
+        struct PendingBatch {
+            documents: Vec<FulltextDocument>,
+            entity_mappings: Vec<EntityDetailMapping>,
+            chunk_records: Vec<ChunkRecord>,
+            hash: Option<String>,
+        }
+        let tracking = wk_cm.is_some() && wk_op.is_some();
+        let mut running = Vec::new();
+        let mut pending: Vec<PendingBatch> = Vec::new();
+        // Entity ID map is epoch-scoped and immutable for this pass: load it
+        // once instead of once per microbatch.
+        let source_entity_ids = self.load_source_entity_ids()?;
         for batch in bm25_chunks.chunks(batch_size) {
-            // Work unit checkpoint: skip if this microbatch is already committed
-            let wu_state: Option<(Arc<CheckpointManager>, String, String)> =
-                if let (Some(cm), Some(op_id)) = (&wk_cm, &wk_op) {
-                    let hash = compute_work_unit_hash(batch);
-                    match cm.get_work_unit_by_hash(op_id, "bm25_commit", &hash).await {
-                        Ok(Some(record)) if record.status == WorkUnitStatus::Committed => {
-                            continue;
-                        }
-                        _ => {
-                            let record = WorkUnitCheckpointRecord {
-                                id: None,
-                                project_id: self.project_id,
-                                operation_id: op_id.clone(),
-                                stage: "bm25_commit".to_string(),
-                                target_epoch: self.epoch(),
-                                work_unit_hash: hash.clone(),
-                                status: WorkUnitStatus::Running,
-                                item_count: batch.len() as u32,
-                                created_at: chrono::Utc::now().to_rfc3339(),
-                                updated_at: chrono::Utc::now().to_rfc3339(),
-                            };
-                            if let Err(e) = cm.insert_work_unit(&record).await {
-                                tracing::warn!(
-                                    error = %e,
-                                    "Failed to insert BM25 work unit checkpoint"
-                                );
-                            }
-                            Some((cm.clone(), op_id.clone(), hash))
-                        }
+            let hash = if tracking {
+                Some(compute_work_unit_hash(batch))
+            } else {
+                None
+            };
+            if let (Some(hash), Some(cm), Some(op_id)) =
+                (hash.as_ref(), wk_cm.as_ref(), wk_op.as_ref())
+            {
+                match cm.get_work_unit_by_hash(op_id, "bm25_commit", hash).await {
+                    Ok(Some(record)) if record.status == WorkUnitStatus::Committed => {
+                        continue;
                     }
-                } else {
-                    None
-                };
+                    _ => {}
+                }
+            }
 
             let documents = build_bm25_documents(batch, self.project_id, self.epoch());
-            let entity_mappings = self.build_bm25_entity_mappings(batch, &documents)?;
-
-            if !documents.is_empty() {
-                bm25.batch_index(&bm25.configured_index_name(), &documents)
-                    .await?;
-            }
-
-            if !entity_mappings.is_empty() {
-                self.store_entity_mappings(&entity_mappings)?;
-            }
+            let entity_mappings =
+                self.build_bm25_entity_mappings(batch, &documents, &source_entity_ids)?;
 
             // Persist BM25 chunk records so SQLite enrichment can resolve raw
-            // code, line numbers and entity IDs for BM25-only hits. Previously
-            // BM25 chunks were only stored in the tantivy index, so the SQLite
-            // enrichment lookup keyed by the BM25 chunk_id always missed and
-            // BM25 results were returned with empty content and line 0.
-            let bm25_records: Result<Vec<ChunkRecord>, OrchestratorError> = batch
+            // code, line numbers and entity IDs for BM25-only hits.
+            let chunk_records: Result<Vec<ChunkRecord>, OrchestratorError> = batch
                 .iter()
                 .filter(|chunk| !chunk.text.is_empty())
                 .map(|chunk| {
                     build_chunk_record(chunk, self.project_id, self.epoch(), self.batch_id())
                 })
                 .collect();
-            self.store_chunk_records(&bm25_records?)?;
-
-            // Mark work unit as committed after successful processing
-            if let Some((ref cm, ref op_id, ref hash)) = wu_state {
-                if let Err(e) = cm
-                    .update_work_unit_status(op_id, "bm25_commit", hash, WorkUnitStatus::Committed)
-                    .await
-                {
+            if let (Some(hash), Some(op_id)) = (hash.as_ref(), wk_op.as_ref()) {
+                running.push(WorkUnitCheckpointRecord {
+                    id: None,
+                    project_id: self.project_id,
+                    operation_id: op_id.clone(),
+                    stage: "bm25_commit".to_string(),
+                    target_epoch: self.epoch(),
+                    work_unit_hash: hash.clone(),
+                    status: WorkUnitStatus::Running,
+                    item_count: batch.len() as u32,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                });
+            }
+            pending.push(PendingBatch {
+                documents,
+                entity_mappings,
+                chunk_records: chunk_records?,
+                hash,
+            });
+        }
+        if tracking {
+            if let (Some(cm), _) = (wk_cm.as_ref(), wk_op.as_ref()) {
+                if let Err(e) = cm.insert_work_units(&running).await {
                     tracing::warn!(
                         error = %e,
-                        "Failed to update BM25 work unit checkpoint to committed"
+                        "Failed to insert BM25 work unit checkpoints"
                     );
                 }
+            }
+        }
+
+        // Single commit for the whole call instead of one commit per
+        // microbatch: visibility advances only after every payload is built,
+        // and Committed markers flush only after the commit is durable, so a
+        // crash anywhere replays the uncommitted microbatches.
+        let mut all_documents: Vec<FulltextDocument> = Vec::new();
+        let mut all_mappings: Vec<EntityDetailMapping> = Vec::new();
+        let mut all_records: Vec<ChunkRecord> = Vec::new();
+        let mut committed_hashes: Vec<String> = Vec::new();
+        for item in pending {
+            all_documents.extend(item.documents);
+            all_mappings.extend(item.entity_mappings);
+            all_records.extend(item.chunk_records);
+            if let Some(hash) = item.hash {
+                committed_hashes.push(hash);
+            }
+        }
+
+        if !all_documents.is_empty() {
+            bm25.batch_index(&bm25.configured_index_name(), &all_documents)
+                .await?;
+        }
+
+        if !all_records.is_empty() || !all_mappings.is_empty() {
+            self.store_chunks_and_mappings(&all_records, &all_mappings)?;
+        }
+
+        if let (Some(cm), Some(op_id)) = (&wk_cm, &wk_op)
+            && !committed_hashes.is_empty()
+        {
+            if let Err(e) = cm
+                .update_work_unit_statuses(
+                    op_id,
+                    "bm25_commit",
+                    &committed_hashes,
+                    WorkUnitStatus::Committed,
+                )
+                .await
+            {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to update BM25 work unit checkpoints to committed"
+                );
             }
         }
 
@@ -133,6 +178,7 @@ impl StorageCoordinator {
         &self,
         chunks: &[&ChunkedResult],
         documents: &[FulltextDocument],
+        source_entity_ids: &std::collections::HashMap<(String, i64), i64>,
     ) -> Result<Vec<EntityDetailMapping>, OrchestratorError> {
         // Build a map from chunk_id to document_id to avoid zip-order alignment issues.
         // This is necessary because build_bm25_documents may filter out chunks with
@@ -141,8 +187,6 @@ impl StorageCoordinator {
             .iter()
             .map(|d| (d.fields.get("chunk_id").map_or("", |s| s.as_str()), d))
             .collect();
-
-        let source_entity_ids = self.load_source_entity_ids()?;
 
         // Use a map to aggregate multiple BM25 docs per entity
         let mut entity_detail_map: std::collections::HashMap<i64, EntityDetailMapping> =

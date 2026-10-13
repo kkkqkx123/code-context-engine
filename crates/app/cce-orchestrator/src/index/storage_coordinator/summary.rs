@@ -380,9 +380,11 @@ impl StorageCoordinator {
                 .await?;
         }
 
-        // Step 2: Remove summary from BM25 index
+        // Step 2: Remove only this file's summary documents from BM25.
+        // Chunk documents share the same file_path/project_id fields, so the
+        // generic per-file delete would clear them as well.
         if let Some(ref bm25) = self.fulltext {
-            bm25.delete_by_file_path_scoped(
+            bm25.delete_summaries_by_file_path_scoped(
                 &bm25.configured_index_name(),
                 &file_id,
                 self.project_id,

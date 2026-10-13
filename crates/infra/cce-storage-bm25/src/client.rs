@@ -21,6 +21,7 @@ use crate::{
     IndexManager, IndexSchema, batch_add_documents, delete_document,
     delete_documents_by_file_path_and_project, delete_documents_by_file_path_project_epoch,
     delete_documents_by_project, delete_documents_by_project_epoch,
+    delete_summary_documents_by_file_path_and_project,
 };
 
 /// Total attempts (first try plus retries) for a transiently failing batch write.
@@ -304,9 +305,10 @@ impl Bm25Client {
         let start_time = Instant::now();
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
         let result = delete_documents_by_file_path_project_epoch(
             &manager_guard,
-            &self.schema,
+            schema,
             file_path,
             project_id,
             epoch,
@@ -330,14 +332,43 @@ impl Bm25Client {
         let start_time = Instant::now();
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
         let result =
-            delete_documents_by_project_epoch(&manager_guard, &self.schema, project_id, epoch);
+            delete_documents_by_project_epoch(&manager_guard, schema, project_id, epoch);
         let elapsed = start_time.elapsed().as_secs_f64() * 1000.0;
         if let Some(metrics) = &self.metrics {
             let count = result.as_ref().map_or(0, |&c| c);
             metrics.record_delete(elapsed, count, result.is_ok());
         }
         result
+    }
+
+    /// Delete only summary documents of one file within one project.
+    pub async fn delete_summaries_by_file_path_scoped(
+        &self,
+        index_name: &str,
+        file_path: &str,
+        project_id: i64,
+    ) -> Result<usize, Bm25Error> {
+        self.validate_index_name(index_name)?;
+        let start_time = Instant::now();
+
+        let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
+        let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
+        let count = delete_summary_documents_by_file_path_and_project(
+            &manager_guard,
+            schema,
+            file_path,
+            project_id,
+        )?;
+
+        let elapsed = start_time.elapsed().as_secs_f64() * 1000.0;
+        if let Some(metrics) = &self.metrics {
+            metrics.record_delete(elapsed, count, true);
+        }
+
+        Ok(count)
     }
 
     /// Run a keyword retrieval against the local index.
@@ -367,6 +398,7 @@ impl Bm25Client {
         let start_time = Instant::now();
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
         let reader = manager_guard.reader()?;
         let searcher = reader.searcher();
         let query = tantivy::query::BooleanQuery::new(vec![
@@ -374,14 +406,14 @@ impl Bm25Client {
             (
                 tantivy::query::Occur::Must,
                 Box::new(tantivy::query::TermQuery::new(
-                    tantivy::Term::from_field_text(self.schema.project_id, &project_id.to_string()),
+                    tantivy::Term::from_field_text(schema.project_id, &project_id.to_string()),
                     tantivy::schema::IndexRecordOption::Basic,
                 )),
             ),
             (
                 tantivy::query::Occur::Must,
                 Box::new(tantivy::query::TermQuery::new(
-                    tantivy::Term::from_field_i64(self.schema.epoch, epoch),
+                    tantivy::Term::from_field_i64(schema.epoch, epoch),
                     tantivy::schema::IndexRecordOption::Basic,
                 )),
             ),
@@ -391,19 +423,19 @@ impl Bm25Client {
         for address in addresses {
             let document: tantivy::schema::TantivyDocument = searcher.doc(address)?;
             let Some(document_id) = document
-                .get_first(self.schema.document_id)
+                .get_first(schema.document_id)
                 .and_then(|value| value.as_str().map(ToString::to_string))
             else {
                 continue;
             };
             let mut result = FulltextDocument::new(document_id.to_string());
             for (field, target) in [
-                (self.schema.title, "title"),
-                (self.schema.chunk_id, "chunk_id"),
-                (self.schema.file_path, "file_path"),
-                (self.schema.segment_id, "segment_id"),
-                (self.schema.test, "test"),
-                (self.schema.category, "category"),
+                (schema.title, "title"),
+                (schema.chunk_id, "chunk_id"),
+                (schema.file_path, "file_path"),
+                (schema.segment_id, "segment_id"),
+                (schema.test, "test"),
+                (schema.category, "category"),
             ] {
                 if let Some(value) = document
                     .get_first(field)
@@ -413,7 +445,7 @@ impl Bm25Client {
                 }
             }
             let entity_ids: Vec<String> = document
-                .get_all(self.schema.entity_id)
+                .get_all(schema.entity_id)
                 .filter_map(|value| value.as_str().map(ToString::to_string))
                 .collect();
             if !entity_ids.is_empty() {
@@ -477,10 +509,11 @@ impl Bm25Client {
 
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
         let reader = manager_guard.reader()?;
         let searcher = reader.searcher();
 
-        let term = tantivy::Term::from_field_text(self.schema.project_id, &project_id.to_string());
+        let term = tantivy::Term::from_field_text(schema.project_id, &project_id.to_string());
         let query = TermQuery::new(term, IndexRecordOption::Basic);
         let count = searcher.search(&query, &Count)?;
         Ok(count)
@@ -490,10 +523,11 @@ impl Bm25Client {
     pub async fn epochs_by_project(&self, project_id: i64) -> Result<Vec<i64>, Bm25Error> {
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
         let reader = manager_guard.reader()?;
         let searcher = reader.searcher();
         let query = tantivy::query::TermQuery::new(
-            tantivy::Term::from_field_text(self.schema.project_id, &project_id.to_string()),
+            tantivy::Term::from_field_text(schema.project_id, &project_id.to_string()),
             tantivy::schema::IndexRecordOption::Basic,
         );
         let addresses = searcher.search(&query, &DocSetCollector)?;
@@ -501,7 +535,7 @@ impl Bm25Client {
         for address in addresses {
             let document: tantivy::schema::TantivyDocument = searcher.doc(address)?;
             if let Some(epoch) = document
-                .get_first(self.schema.epoch)
+                .get_first(schema.epoch)
                 .and_then(|value| value.as_i64())
             {
                 epochs.insert(epoch);

@@ -1,18 +1,19 @@
 //! T-8 — codegraph snapshot publish-cost benchmark (covers P-7).
 //!
 //! Verifies the design claim that relation-snapshot cost should scale with the
-//! *size of the change*, not the *size of the project*. Three publish forms are
+//! *size of the change*, not the *size of the project*. Two publish forms are
 //! compared across project scales (1k / 10k / 100k entities):
 //!
 //! * `from_index_shared` — O(1) `Arc` clone (zero-copy publish).
 //! * `from_index` / `detached_clone` — O(N) full deep copy (the regression path).
-//! * `selective_cow_copy(affected)` — O(affected) copy-on-write over a *fixed*
-//!   small change set (1 / 10 / 100 files), which must stay flat as the project
-//!   grows.
+//!
+//! The former per-impact-set copy-on-write primitive was removed: it had no
+//! production callers (the hot-update path uses sparse candidates plus delta
+//! publish), so its micro-benchmark numbers characterized no production
+//! regression path.
 //!
 //! Run: `cargo run -p cce-codegraph --bench snapshot_cost`
 
-use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use cce_codegraph::index::{IndexBuilder, RelationIndex, RelationSnapshotIndex};
@@ -145,24 +146,6 @@ fn main() {
         }
         let full_ms = t.elapsed().as_secs_f64() * 1000.0 / 5.0;
         println!("{:<10} {:<22} {:>12.3}", "", "from_index(ON)", full_ms);
-
-        // O(affected) selective COW publish with a FIXED small change set.
-        for affected in [1usize, 10, 100] {
-            let set: HashSet<String> = (0..affected)
-                .map(|i| format!("src/mod_{i:05}.rs"))
-                .collect();
-            let t = Instant::now();
-            for _ in 0..20 {
-                let _ = index.selective_cow_copy(&set);
-            }
-            let sel_ms = t.elapsed().as_secs_f64() * 1000.0 / 20.0;
-            println!(
-                "{:<10} {:<22} {:>12.3}",
-                "",
-                format!("selective_cow({affected}f)"),
-                sel_ms
-            );
-        }
 
         // Suppress unused warnings for the helper signature.
         let _ = file_count;

@@ -2,23 +2,22 @@
 //!
 //! P-5 flags that relation finalization replays the *entire* parsed relation
 //! set from the operation spool even when only a handful of files changed in an
-//! incremental update. This bench isolates the finalize cost and contrasts two
-//! strategies at project scale (1k / 10k / 100k entities):
+//! incremental update. This bench isolates the finalize cost at project scale
+//! (1k / 10k / 100k entities):
 //!
 //!   * full replay  — rebuild the `RelationIndex` from scratch (the current
 //!     cost; O(N) in the number of entities).
-//!   * incremental resume — keep the prior snapshot and replay only the
-//!     changed files via `selective_cow_copy` (O(affected); the proposed fix).
 //!
-//! The full/incremental ratio is the headline number: for a small change set
-//! it should be orders of magnitude, which is exactly what the resume design
-//! buys. Memory materialization (`detached_clone`) during finalize is also
-//! timed, since a full rebuild pays it on every run while a resume skips it.
+//! The production incremental path is sparse candidates plus delta publish,
+//! not a per-impact-set copy primitive: the former copy benchmark
+//! characterized no production regression path and was removed.
+//!
+//! Memory materialization (`detached_clone`) during finalize is also timed,
+//! since a full rebuild pays it on every run.
 //!
 //! Run: `cargo run -p cce-codegraph --bench finalize_relation`
 //! Baseline numbers are appended to `benches/results/finalize_relation.tsv`.
 
-use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -182,27 +181,6 @@ fn main() {
         );
         if let Some(f) = out.as_mut() {
             let _ = writeln!(f, "{entities}\tmemory_materialize\t{file_count}\t{clone_ms:.2}");
-        }
-
-        // Incremental resume: replay only the changed files onto the snapshot
-        // (O(affected) — the proposed fix). Fixed small change sets.
-        for changed in [1usize, 10, 100] {
-            let set: HashSet<String> = (0..changed)
-                .map(|i| format!("src/mod_{i:05}.rs"))
-                .collect();
-            let inc_ms = bench_ms(10, || {
-                let _ = index.selective_cow_copy(&set);
-            });
-            let ratio = full_ms / inc_ms.max(0.001);
-            println!(
-                "{:<16} {:<22} {:>12.2}  (full/incremental = {ratio:.1}x)",
-                entities,
-                format!("incremental({changed}f)"),
-                inc_ms
-            );
-            if let Some(f) = out.as_mut() {
-                let _ = writeln!(f, "{entities}\tincremental\t{changed}\t{inc_ms:.2}");
-            }
         }
         drop(index);
     }

@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 use smallvec::SmallVec;
 
-use super::snapshot_generation::{CoWSnapshotGuard, SnapshotGeneration};
+use super::snapshot_generation::SnapshotGeneration;
 use super::stores::FileRecord;
 use super::stores::diagnostics::RelationDiagnostics;
 
@@ -60,8 +60,6 @@ pub use edge_set::{
     FileRelationRecord, QualityReport, RelationEdgeIdentity, RelationEdgeKind, RelationEdgeSet,
     relation_identity,
 };
-
-mod snapshot;
 
 #[cfg(test)]
 mod tests;
@@ -290,13 +288,6 @@ impl RelationIndex {
         self.generation.advance();
     }
 
-    /// Whether any zero-copy snapshot is currently sharing this index's maps.
-    ///
-    /// When true, mutating methods should copy affected maps before writing.
-    pub fn has_active_readers(&self) -> bool {
-        self.generation.active_readers() > 0
-    }
-
     /// Create a compact, immutable snapshot of this index.
     ///
     /// Converts all `DashMap`/`RwLock` structures into plain `HashMap`s in a
@@ -305,18 +296,6 @@ impl RelationIndex {
     /// source after this call do not affect the returned value.
     pub fn take_compact_snapshot(&self) -> super::compact::CompactRelationIndex {
         super::compact::CompactRelationIndex::from_relation_index(self)
-    }
-
-    /// Create a CoW-aware snapshot: zero-copy, with active-reader tracking.
-    ///
-    /// The returned snapshot shares the source maps (O(1)) and holds a guard
-    /// that increments the source's reader count. While the guard is alive,
-    /// `source.has_active_readers()` returns true, and mutations will
-    /// automatically copy affected maps before writing.
-    pub fn cow_snapshot(&self) -> (RelationSnapshotIndex, CoWSnapshotGuard) {
-        let snapshot = RelationSnapshotIndex::from_index_shared(self);
-        let guard = CoWSnapshotGuard::new(Arc::clone(&self.generation));
-        (snapshot, guard)
     }
 
     /// Attach a metrics sink for observability.
