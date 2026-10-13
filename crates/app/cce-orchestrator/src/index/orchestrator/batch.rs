@@ -170,9 +170,6 @@ impl IndexOrchestrator {
             ctx.total_degraded += batch_result.degraded_files;
             ctx.total_entities += batch_result.entity_count;
             if let Some(spool) = ctx.relation_spool.as_mut() {
-                let builder = self.relation_builder.as_ref().ok_or_else(|| {
-                    OrchestratorError::index("relation_build", "relation builder is unavailable")
-                })?;
                 for parsed in &batch_result.parsed_files {
                     // Build-config files are injected later as synthetic `Module`
                     // nodes with `config -> dependency` edges. Their document-pipeline
@@ -190,7 +187,7 @@ impl IndexOrchestrator {
                             format!("Failed to store relation input: {error}"),
                         )
                     })?;
-                    builder.add_file_symbols(parsed, spool.project_symbols());
+                    self.append_spool_symbols(spool, parsed);
                 }
             }
 

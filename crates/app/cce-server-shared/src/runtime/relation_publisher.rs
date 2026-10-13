@@ -410,12 +410,11 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             self.runtime.report_failure(error.clone()).await;
             return Err(StorageError::Validation(error));
         }
-        // this path keeps a deep copy on purpose. `index` is the
-        // long-lived builder index of the full-index orchestrator: it is
-        // cleared (`builder.clear()`) and rebuilt on the next index run, so a
-        // zero-copy share would corrupt the published snapshot. The
-        // SQLite cold-start/compaction paths use `from_index_shared` instead.
-        let snapshot_index = Arc::new(RelationSnapshotIndex::from_index(index));
+        // Shared handover: `index` is the round-local terminal builder's
+        // graph, retired at publish and never mutated afterwards, so its maps
+        // are shared zero-copy into the runtime projection. No deep copy is
+        // taken here; the snapshot owns the retired graph.
+        let snapshot_index = Arc::new(RelationSnapshotIndex::from_index_shared(index));
 
         let epoch = match self
             .writer

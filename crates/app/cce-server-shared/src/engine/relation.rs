@@ -228,54 +228,97 @@ impl super::CodeContextEngine {
         Ok(())
     }
 
-    /// Publish the current complete relation graph through the unified path.
+    /// Republish the current durable relation state through the unified path.
+    ///
+    /// The round-local full-index builder no longer exists after publish, so
+    /// this path never reads a builder graph (which would be empty). It
+    /// reloads the active epoch from storage (base plus deltas merged) or
+    /// from the process-local runtime and republishes it as a new full epoch
+    /// with shared ownership. Deletions themselves flow through the
+    /// hot-update delta path; this helper only compacts the durable state
+    /// when a full republish is explicitly required.
     pub async fn publish_relation_snapshot_from_orchestrator(
         &self,
         project_id: i64,
     ) -> Result<(), EngineError> {
-        let orchestrator = self.get_orchestrator(project_id).await?;
-        let graph = {
-            let orch = orchestrator.lock().await;
-            orch.get_relation_builder()
-                .map(|builder| (builder.index().clone(), builder.config_fingerprint()))
+        let sqlite = self
+            .metadata_store
+            .as_ref()
+            .map(|database| database.for_project(project_id))
+            .transpose()
+            .map_err(|e| EngineError::Config(format!("Failed to open project database: {e}")))?
+            .ok_or_else(|| {
+                EngineError::Config(
+                    "SQLite database not initialized for relation publishing".to_string(),
+                )
+            })?;
+        let active_epoch = {
+            let conn = sqlite
+                .read_connection()
+                .map_err(|e| EngineError::Config(format!("Failed to open read connection: {e}")))?;
+            match cce_storage_metadb_sqlite::ProjectIndexManifestRepository::get_active(
+                &conn,
+                project_id,
+            )
+            .map_err(|e| EngineError::Config(format!("Failed to read active manifest: {e}")))?
+            {
+                Some(manifest) => manifest.relation_epoch,
+                None => sqlite
+                    .project_meta_get_int_optional(project_id, "active_relation_epoch")
+                    .map_err(|e| EngineError::Config(e.to_string()))?
+                    .unwrap_or(0),
+            }
         };
-
-        match graph {
-            Some((index, config_fingerprint)) => {
-                let snapshot = match index.to_canonical_snapshot(config_fingerprint) {
-                    Ok(snapshot) => snapshot,
-                    Err(error) => {
-                        self.report_relation_failure(project_id, error.clone())
-                            .await?;
-                        return Err(EngineError::Config(error));
-                    }
-                };
-                let publisher = self.get_relation_snapshot_publisher(project_id).await?;
-                if let Err(error) = publisher
-                    .publish(
-                        project_id,
-                        &format!(
-                            "maintenance-{}",
-                            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-                        ),
-                        snapshot,
-                        &index,
-                    )
-                    .await
-                {
-                    self.report_relation_failure(project_id, error.to_string())
-                        .await?;
-                    return Err(EngineError::Index(error.into()));
-                }
-                Ok(())
-            }
-            None => {
-                let message = "cannot construct a complete relation candidate without an active relation builder; full rebuild required";
-                self.report_relation_failure(project_id, message.to_string())
-                    .await?;
-                Err(EngineError::Config(message.to_string()))
-            }
+        if active_epoch <= 0 {
+            let message =
+                "cannot republish relation state without an active epoch; full rebuild required";
+            self.report_relation_failure(project_id, message.to_string())
+                .await?;
+            return Err(EngineError::Config(message.to_string()));
         }
+        let index = cce_codegraph::index::snapshot_loader::RelationSnapshotLoader::load(
+            &SqliteSnapshotStore::new((*sqlite).clone()),
+            project_id,
+            active_epoch,
+        )
+        .map_err(|e| EngineError::Config(format!("Failed to load active epoch: {e}")))?;
+        let config_fingerprint = sqlite
+            .with_transaction(|tx| {
+                cce_storage_metadb_sqlite::repo::RelationSnapshotRepository::get_manifest(
+                    tx,
+                    project_id,
+                    active_epoch,
+                )
+            })
+            .map_err(|e| EngineError::Config(format!("cannot read manifest: {e}")))?
+            .map(|manifest| manifest.config_fingerprint)
+            .unwrap_or_else(|| "maintenance-republish".to_string());
+        let snapshot = match index.to_canonical_snapshot(config_fingerprint) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.report_relation_failure(project_id, error.clone())
+                    .await?;
+                return Err(EngineError::Config(error));
+            }
+        };
+        let publisher = self.get_relation_snapshot_publisher(project_id).await?;
+        if let Err(error) = publisher
+            .publish(
+                project_id,
+                &format!(
+                    "maintenance-{}",
+                    chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+                ),
+                snapshot,
+                &index,
+            )
+            .await
+        {
+            self.report_relation_failure(project_id, error.to_string())
+                .await?;
+            return Err(EngineError::Index(error.into()));
+        }
+        Ok(())
     }
 
     /// Publish an HTTP incremental relation operation through the same complete

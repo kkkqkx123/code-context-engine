@@ -1145,6 +1145,7 @@ impl RelationIndex {
     /// Clear all indexes
     pub fn clear(&self) {
         self.function_index.clear();
+        self.name_index.clear();
         self.entity_file_index.clear();
         self.resolved_relation_index.clear();
         self.reverse_callee_index.clear();

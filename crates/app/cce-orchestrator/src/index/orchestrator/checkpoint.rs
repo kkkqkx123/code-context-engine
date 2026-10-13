@@ -285,6 +285,9 @@ impl IndexOrchestrator {
     ///
     /// The completed portion of a resumed operation must take part in the final
     /// graph, but must not recreate the old all-files in-memory cache.
+    /// Rehydration writes only to the round-local spool (and its symbol
+    /// table), never to a builder graph; the terminal builder is constructed
+    /// later and replays the spool.
     pub(super) async fn replay_recovered_relations(
         &self,
         file_indexer: &FileIndexer,
@@ -297,9 +300,6 @@ impl IndexOrchestrator {
                 "checkpoint_recovery",
                 "relation recovery requires the checkpoint manager that supplied the recovered operation",
             )
-        })?;
-        let builder = self.relation_builder.as_ref().ok_or_else(|| {
-            OrchestratorError::index("relation_build", "relation builder is unavailable")
         })?;
         let spool = relation_spool.ok_or_else(|| {
             OrchestratorError::index("relation_build_spool", "relation spool is unavailable")
@@ -366,7 +366,7 @@ impl IndexOrchestrator {
                         format!("Failed to store recovered relation input: {error}"),
                     )
                 })?;
-                builder.add_file_symbols(&envelope.parsed_file, spool.project_symbols());
+                self.append_spool_symbols(spool, &envelope.parsed_file);
             }
         }
         Ok(())

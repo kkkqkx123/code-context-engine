@@ -245,7 +245,7 @@ impl LayeredSnapshotIndex {
     /// Copies every map (including `symbol_key_to_entity` /
     /// `stable_id_to_entity`, which `apply_delta`'s export-diff resolution
     /// reads) into a fresh `RelationIndex` and replays the delta chain.
-    pub(crate) fn materialize_merged_index(&self) -> RelationIndex {
+    pub fn materialize_merged_index(&self) -> RelationIndex {
         let base = &self.base;
         let merged = RelationIndex::new();
         for entry in base.function_index.iter() {

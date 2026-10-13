@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 use crate::export::NlDocumentExporter;
 use cce_codegraph::IndexBuilder;
+use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_config::modules::summary::SummaryGenerationStrategy as SummaryStrategy;
 use cce_config::{
     AstToNlConfig, BatchConfig, NestProcessorConfig, RelationConfig, SummaryConfig,
@@ -79,7 +80,12 @@ pub struct IndexOrchestrator {
     file_processor: FileProcessor,
     storage: StorageCoordinator,
     project_id: i64,
-    relation_builder: Option<IndexBuilder>,
+    /// Last published full-index snapshot (read-only shared product).
+    ///
+    /// The full-index builder is per-round local and retired at publish, so
+    /// the orchestrator retains no builder graph. Query and debug reads go
+    /// through this snapshot instead of a long-lived builder.
+    last_published_snapshot: Option<Arc<LayeredSnapshotIndex>>,
     project_fingerprint: Option<String>,
     summary_generator: Box<dyn SummaryGenerator>,
     /// Stored summary config (for deferred ModelEnhancedGenerator creation)
@@ -134,7 +140,7 @@ impl IndexOrchestrator {
             file_processor: FileProcessor::default().with_project_id(project_id),
             storage: StorageCoordinator::new(project_id)?,
             project_id,
-            relation_builder: None,
+            last_published_snapshot: None,
             project_fingerprint: None,
             summary_generator: Box::new(RuleBasedGenerator::default()),
             summary_config: None,
@@ -592,13 +598,8 @@ impl IndexOrchestrator {
         }
 
         let mut relation_spool = if options.build_relations {
-            let builder = self.relation_builder.as_ref().ok_or_else(|| {
-                OrchestratorError::index(
-                    "relation_build",
-                    "relation builder was not initialized for a relation-enabled index",
-                )
-            })?;
-            let symbols = builder.create_project_symbol_table(&options.root_dir);
+            let transient = self.create_relation_builder()?;
+            let symbols = transient.create_project_symbol_table(&options.root_dir);
             Some(
                 RelationBuildSpool::new(self.project_id, &options.root_dir, symbols).map_err(
                     |error| {
@@ -790,7 +791,11 @@ impl IndexOrchestrator {
         Ok(result)
     }
 
-    /// Initialize the relation builder based on project relation policies.
+    /// Initialize the relation build configuration based on project relation policies.
+    ///
+    /// Only the build-config parser is cached. The relation builder itself is
+    /// per-round local (see `create_relation_builder`) and retired at publish,
+    /// so no long-lived builder graph is retained across runs.
     async fn init_relation_builder_async(
         &mut self,
         options: &IndexOptions,
@@ -816,13 +821,22 @@ impl IndexOrchestrator {
         self.finish_init_relation_builder(parser)
     }
 
-    fn finish_init_relation_builder(
-        &mut self,
-        parser: cce_codegraph::BuildConfigParser,
-    ) -> Result<(), OrchestratorError> {
+    /// Assemble a fresh per-round relation builder from cached configuration.
+    ///
+    /// Configuration, plugin registration, metrics, and build-system scan
+    /// wiring are reused; only the target is a round-local variable instead of
+    /// a resident member. The returned builder is owned by the caller and
+    /// retired at publish, never cleared and reused.
+    fn create_relation_builder(&self) -> Result<IndexBuilder, OrchestratorError> {
+        let parser = self.cached_build_config.as_ref().ok_or_else(|| {
+            OrchestratorError::index(
+                "relation_build_config",
+                "build config not initialized; init_relation_builder must succeed before finalize",
+            )
+        })?;
         let params = self.relation_config.to_builder_params();
         let mut builder = IndexBuilder::new();
-        builder.auto_load_dependencies(&parser);
+        builder.auto_load_dependencies(parser);
         builder.set_filter_stdlib_calls(params.filter_stdlib_calls);
         let mut builder = if let Some(ref registry) = self.metrics_registry {
             let relation_metrics = RelationMetrics::new(registry, self.project_id);
@@ -837,8 +851,6 @@ impl IndexOrchestrator {
         );
         builder.set_symbol_extract_enabled(params.symbol_extract_enabled);
         builder.with_plugin_symbols_enabled(params.plugin_symbols_enabled);
-        // The registry is attached when either plugin-facing capability
-        // is enabled; individual capabilities filter by their own guard.
         let use_plugin_registry = params.plugin_symbols_enabled || params.symbol_extract_enabled;
         let builder = if use_plugin_registry {
             if let Some(registry) = &self.plugin_registry {
@@ -849,7 +861,36 @@ impl IndexOrchestrator {
         } else {
             builder
         };
-        self.relation_builder = Some(builder);
+        Ok(builder)
+    }
+
+    /// Append one parsed file's symbols to the spool's project symbol table.
+    ///
+    /// This mutates only the spool-owned symbol table, never a builder graph,
+    /// so batch and recovery phases stay decoupled from the terminal builder.
+    fn append_spool_symbols(
+        &self,
+        spool: &RelationBuildSpool,
+        parsed: &cce_types::ParsedFile,
+    ) {
+        let mut symbol_builder = cce_codegraph::SymbolTableBuilder::new(
+            spool.project_symbols().root_path.clone(),
+        );
+        symbol_builder.with_metrics(self.relation_metrics());
+        symbol_builder.add_file_to_project(parsed, spool.project_symbols());
+    }
+
+    /// Relation metrics sink for spool symbol accumulation, if configured.
+    fn relation_metrics(&self) -> Option<Arc<RelationMetrics>> {
+        self.metrics_registry
+            .as_ref()
+            .map(|registry| RelationMetrics::new(registry, self.project_id))
+    }
+
+    fn finish_init_relation_builder(
+        &mut self,
+        parser: cce_codegraph::BuildConfigParser,
+    ) -> Result<(), OrchestratorError> {
         self.cached_build_config = Some(parser);
 
         // Query-only config fields have no effect on the constructed graph.

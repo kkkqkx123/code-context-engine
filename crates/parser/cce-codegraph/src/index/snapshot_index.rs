@@ -72,10 +72,11 @@ impl RelationSnapshotIndex {
     /// Create a snapshot index from a mutable `RelationIndex`.
     ///
     /// This deep-copies the whole index and is only required when the source
-    /// index stays alive and keeps being mutated after publication (the
-    /// full-index builder is cleared on the next run). Cold-start and
-    /// compaction paths own their index exclusively and should use
-    /// [`Self::from_index_shared`] instead.
+    /// stays alive and keeps being mutated after publication. The full-index
+    /// path no longer uses it: the terminal builder is round-local and
+    /// retired at publish, so publication shares via
+    /// [`Self::from_index_shared`]. Cold-start and compaction paths own their
+    /// index exclusively and also use shared handover.
     pub fn from_index(index: &RelationIndex) -> Self {
         let index = index.detached_clone();
         Self::from_index_shared(&index)
@@ -97,9 +98,9 @@ impl RelationSnapshotIndex {
     /// The snapshot shares the underlying maps with `index` instead of
     /// deep-copying them. The caller must guarantee that `index` is never
     /// mutated while the returned snapshot (or anything derived from it) is
-    /// alive. This is the contract of the process-internal base cache used by
-    /// hot updates: the cache is the canonical owner and only
-    /// hands out read-only shallow clones or deep-copied working copies.
+    /// alive. The full-index path upholds this by retiring the round-local
+    /// builder at publish; hot-update base cache upholds it as the canonical
+    /// owner handing out read-only views.
     pub fn from_index_shared(index: &RelationIndex) -> Self {
         let query_optimized = Arc::new(QueryOptimizedIndex::from_relation_index(index));
         let transitive_deps = Arc::new(TransitiveFileDeps::from_relation_index(index, 10));

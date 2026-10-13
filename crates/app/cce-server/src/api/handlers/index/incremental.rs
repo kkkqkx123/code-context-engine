@@ -8,7 +8,6 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use std::path::PathBuf;
 
 use cce_api::models::{ErrorResponse, IncrementalIndexRequest, IncrementalIndexResponse};
-use cce_codegraph::index::entity_index::EntityIndexOps;
 use cce_storage_common::VectorStorage;
 
 /// Handle an explicit incremental index request.
@@ -57,16 +56,20 @@ pub async fn handle_incremental(
         Err(error) => errors.push(format!("failed to initialize hot update: {error}")),
     }
 
-    // Report authoritative post-run totals: entity count from the relation
-    // index, vector count from the project-scoped vector collection. The
+    // Report authoritative post-run totals: entity count from the published
+    // snapshot, vector count from the project-scoped vector collection. The
     // operation result is the authoritative success/failure record; processors
     // may reparse dependent files as part of relation propagation, so
     // request-level counts would understate the actual index state.
     if errors.is_empty() {
         if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
             let orchestrator = orchestrator.lock().await;
-            if let Some(builder) = orchestrator.get_relation_builder() {
-                total_entities = builder.index().function_count();
+            if let Some(snapshot) = orchestrator.get_published_relation_snapshot() {
+                total_entities = snapshot.function_count();
+            } else if let Ok(runtime) = state.engine.get_relation_runtime(project_id).await
+                && let Some(snapshot) = runtime.get_snapshot().await
+            {
+                total_entities = snapshot.entity_count();
             }
         }
         let group_id = crate::api::handlers::storage::resolve_group_id(&state, project_id).await;

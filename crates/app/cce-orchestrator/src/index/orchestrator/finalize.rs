@@ -10,10 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::export::NlDocumentExporter;
-use cce_codegraph::{
-    ThreadSafeIndex,
-    index::{RelationIndexView, RelationQueryOps},
-};
+use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndexView};
 
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
@@ -22,13 +19,12 @@ use crate::index_state::{ModuleType, ModuleUpdateState};
 impl IndexOrchestrator {
     /// Finalize index after batch processing completes.
     ///
-    /// Returns the resolved relation count. Relation enhancement for NL
-    /// document export is wired in `build_and_publish_relations` from the
-    /// publisher's shared product, not from a second builder deep copy.
+    /// Returns the resolved relation count from the last published snapshot.
+    /// The terminal builder is retired at publish, so no builder graph is
+    /// consulted here.
     pub(super) fn finalize_index(&self) -> usize {
-        if let Some(ref builder) = self.relation_builder {
-            tracing::info!("Finalizing relation index...");
-            let count = builder.index().resolved_relation_count();
+        if let Some(ref snapshot) = self.last_published_snapshot {
+            let count = snapshot.resolved_relation_count();
             tracing::info!("Relation index finalized with {} relations", count);
             count
         } else {
@@ -39,8 +35,7 @@ impl IndexOrchestrator {
     /// Share the published snapshot with the NL exporter.
     ///
     /// The snapshot is the publisher's product and is independent of the
-    /// builder's lifetime, so a later `builder.clear()` cannot empty the
-    /// enhancer's visible content.
+    /// retired builder's lifetime.
     fn share_published_snapshot_with_exporter(
         &self,
         snapshot: &Arc<cce_codegraph::index::LayeredSnapshotIndex>,
@@ -54,9 +49,25 @@ impl IndexOrchestrator {
         }
     }
 
-    /// Get the relation index (thread-safe)
-    pub fn get_relation_index(&self) -> Option<ThreadSafeIndex> {
-        self.relation_builder.as_ref().map(|b| b.index().clone())
+    /// Get the last published full-index snapshot (read-only shared product).
+    ///
+    /// Replaces the former long-lived builder read path. Callers must treat
+    /// the snapshot as immutable; no mutable builder access exists anymore.
+    pub fn get_published_relation_snapshot(&self) -> Option<Arc<LayeredSnapshotIndex>> {
+        self.last_published_snapshot.as_ref().map(Arc::clone)
+    }
+
+    /// Get a materialized relation index from the last published snapshot.
+    ///
+    /// Test and debug only: materializes the merged (base + deltas) view into
+    /// an owned `RelationIndex` so existing query assertions keep working
+    /// without touching the retired builder. Production paths must use
+    /// `get_published_relation_snapshot` directly to avoid the O(project)
+    /// copy.
+    pub fn get_relation_index(&self) -> Option<cce_codegraph::ThreadSafeIndex> {
+        self.last_published_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.materialize_merged_index())
     }
 
     /// Get a reference to the NL document exporter, if configured
@@ -69,19 +80,18 @@ impl IndexOrchestrator {
     ///
     /// Parsed relation inputs are replayed from the operation-local spool so
     /// peak memory remains bounded by one parsed file plus the final relation
-    /// index.
+    /// index. The builder is round-local: constructed fresh per run, handed
+    /// over to the publisher via shared ownership, and retired afterwards.
+    /// No clearing or reuse occurs across runs.
     pub(super) async fn build_and_publish_relations(
-        &self,
+        &mut self,
         ctx: &mut FullIndexContext,
     ) -> Result<(), OrchestratorError> {
-        let builder = self.relation_builder.as_ref().ok_or_else(|| {
-            OrchestratorError::index("relation_build", "relation builder is unavailable")
-        })?;
+        let builder = self.create_relation_builder()?;
         let spool = ctx.relation_spool.as_mut().ok_or_else(|| {
             OrchestratorError::index("relation_build_spool", "relation spool is unavailable")
         })?;
         let relation_build_started = Instant::now();
-        builder.clear();
 
         // Inject synthetic config file nodes (e.g. Cargo.toml, package.json)
         // so the relation graph contains `config_file -> dependency` edges and
@@ -135,7 +145,7 @@ impl IndexOrchestrator {
                     );
                     continue;
                 }
-                builder.add_file_symbols(synthetic, spool.project_symbols());
+                self.append_spool_symbols(spool, synthetic);
                 injected += 1;
             }
             if injected > 0 {
@@ -187,7 +197,7 @@ impl IndexOrchestrator {
             let registered = cached_files.len();
             record_pass(t0.elapsed(), total_bytes);
             if let Some(parser) = &self.cached_build_config {
-                Self::inject_governance_edges(builder, parser);
+                Self::inject_governance_edges(&builder, parser);
             }
             let t1 = Instant::now();
             for parsed in &cached_files {
@@ -218,7 +228,7 @@ impl IndexOrchestrator {
                 })?;
             record_pass(t0.elapsed(), total_bytes);
             if let Some(parser) = &self.cached_build_config {
-                Self::inject_governance_edges(builder, parser);
+                Self::inject_governance_edges(&builder, parser);
             }
             let t1 = Instant::now();
             let resolved = spool
@@ -272,10 +282,15 @@ impl IndexOrchestrator {
                     {
                         Ok(publication) => {
                             ctx.published_relation_epoch = Some(publication.relation_epoch);
+                            // Retain the shared product for read-only queries; the
+                            // round-local builder is retired here (dropped) and
+                            // never touched again, so the shared maps are
+                            // effectively immutable.
+                            self.last_published_snapshot =
+                                Some(Arc::clone(&publication.snapshot));
                             // Share the publisher's product with export
-                            // enhancement instead of taking a second builder
-                            // deep copy. The snapshot is independent of the
-                            // builder lifetime.
+                            // enhancement. The snapshot is independent of the
+                            // retired builder lifetime.
                             self.share_published_snapshot_with_exporter(&publication.snapshot);
                             // the relation phase is only marked complete
                             // (and files successful) AFTER the snapshot was

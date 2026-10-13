@@ -342,7 +342,7 @@ mod tests {
     }
 
     fn publish_layered(index: &cce_codegraph::index::RelationIndex) -> Arc<LayeredSnapshotIndex> {
-        let base = Arc::new(RelationSnapshotIndex::from_index(index));
+        let base = Arc::new(RelationSnapshotIndex::from_index_shared(index));
         Arc::new(LayeredSnapshotIndex::new(base))
     }
 
@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn enhancer_shares_published_snapshot_across_builder_clear_and_republish() {
+    fn enhancer_shares_published_snapshot_across_builder_retire_and_republish() {
         let builder_index = cce_codegraph::index::RelationIndex::new();
         builder_index.add_function_with_path(
             EntityId(1),
@@ -377,10 +377,12 @@ mod tests {
             "export enhancement must see the published call edge"
         );
 
-        builder_index.clear();
+        // Round-local builder is retired (dropped), never cleared and reused.
+        // The shared snapshot owns the maps, so retirement must not empty it.
+        drop(builder_index);
         assert!(
             related_names(&enhancer, "caller", "src/a.rs").contains(&"callee".to_string()),
-            "clearing the builder for the next full run must not empty shared enhancement"
+            "retiring the round-local builder must not empty shared enhancement"
         );
 
         let next_index = cce_codegraph::index::RelationIndex::new();
@@ -430,15 +432,19 @@ mod tests {
             ))),
             RelationEnhancerConfig::default(),
         );
-        let shared =
-            RelationEnhancer::new(publish_layered(&index), RelationEnhancerConfig::default());
+        let deep = RelationEnhancer::new(
+            Arc::new(LayeredSnapshotIndex::new(Arc::new(
+                RelationSnapshotIndex::from_index(&index),
+            ))),
+            RelationEnhancerConfig::default(),
+        );
         assert_eq!(
             related_names(&live, "caller", "src/a.rs"),
-            related_names(&shared, "caller", "src/a.rs"),
+            related_names(&deep, "caller", "src/a.rs"),
         );
         assert_eq!(
             related_names(&live, "callee", "src/a.rs"),
-            related_names(&shared, "callee", "src/a.rs"),
+            related_names(&deep, "callee", "src/a.rs"),
         );
     }
 }

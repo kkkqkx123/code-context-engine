@@ -20,9 +20,9 @@ use cce_api::models::{
     IndexStatsResponse, QdrantProcessInfo, QdrantProcessStatus, StorageComponentStatus,
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
-use cce_codegraph::index::entity_index::EntityIndexOps;
-use cce_codegraph::index::file_index::FileLevelOps;
-use cce_codegraph::index::relation_query::RelationQueryOps;
+use cce_codegraph::index::{
+    SnapshotEntityQueryOps, SnapshotFileQueryOps,
+};
 use cce_storage_common::{FulltextStorage, VectorStorage};
 
 // ============================================================================
@@ -172,26 +172,32 @@ pub async fn handle_delete_file(
         }
     };
 
-    // Step 3: Remove relations from relation index
+    // Step 3: Remove relations via the hot-update incremental path.
+    // The full-index builder is round-local and retired at publish, so no
+    // direct builder mutation occurs here. Deletions publish a delta over the
+    // base cache; the shared snapshot stays immutable.
     let relations_deleted;
     {
-        if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-            let mut orchestrator = orchestrator.lock().await;
-            relations_deleted = orchestrator.clear_relations_for_file(&file_path);
-            tracing::info!(file = %file_path, relations = relations_deleted, "Deleted relations");
+        let estimate = estimate_file_relation_count(&state, project_id, &file_path).await;
+        if let Ok(coordinator) = state.engine.get_hot_update_coordinator(project_id).await {
+            let coordinator = coordinator.lock().await;
+            if let Err(error) = coordinator
+                .run_explicit_changes(vec![(std::path::PathBuf::from(&file_path), true)])
+                .await
+            {
+                tracing::warn!(
+                    project_id,
+                    file = %file_path,
+                    error = %error,
+                    "Failed to publish relation delta after file deletion"
+                );
+                relations_deleted = 0;
+            } else {
+                relations_deleted = estimate;
+                tracing::info!(file = %file_path, relations = relations_deleted, "Deleted relations via delta");
+            }
         } else {
             relations_deleted = 0;
-        }
-        if let Err(e) = state
-            .engine
-            .publish_relation_snapshot_from_orchestrator(project_id)
-            .await
-        {
-            tracing::warn!(
-                project_id,
-                error = %e,
-                "Failed to publish relation snapshot after file deletion"
-            );
         }
     }
 
@@ -281,21 +287,9 @@ pub async fn handle_delete_entity(
 
     let group_id = resolve_group_id(&state, project_id).await;
 
-    // Step 1: Get entity info from relation index to find file path
-    let entity_file_path = {
-        if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-            let orchestrator = orchestrator.lock().await;
-            if let Some(builder) = orchestrator.get_relation_builder() {
-                builder
-                    .index()
-                    .get_file_path_by_entity(cce_types::EntityId(entity_id))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
+    // Step 1: Get entity file path from the published snapshot (read-only).
+    let entity_file_path =
+        resolve_entity_file_path(&state, project_id, cce_types::EntityId(entity_id)).await;
 
     // Step 2: Remove from vector store
     let mut vectors_deleted = 0usize;
@@ -327,34 +321,28 @@ pub async fn handle_delete_entity(
         }
     }
 
-    // Step 4: Remove relations involving this entity
+    // Step 4: Remove relations via the hot-update incremental path.
     let mut relations_deleted = 0;
     {
-        if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-            let mut orchestrator = orchestrator.lock().await;
-            if let Some(ref builder) = orchestrator.get_relation_builder_mut() {
-                let index = builder.index();
-
-                if let Some(ref file_path) = entity_file_path {
-                    index.remove_file(file_path);
-                    relations_deleted = 1;
-                } else {
-                    tracing::warn!(
-                        entity_id = entity_id,
-                        "Cannot delete entity without file path"
-                    );
+        if let Some(ref file_path) = entity_file_path {
+            if let Ok(coordinator) = state.engine.get_hot_update_coordinator(project_id).await {
+                let coordinator = coordinator.lock().await;
+                match coordinator
+                    .run_explicit_changes(vec![(std::path::PathBuf::from(file_path), true)])
+                    .await
+                {
+                    Ok(_) => relations_deleted = 1,
+                    Err(error) => tracing::warn!(
+                        project_id,
+                        error = %error,
+                        "Failed to publish relation delta after entity deletion"
+                    ),
                 }
             }
-        }
-        if let Err(e) = state
-            .engine
-            .publish_relation_snapshot_from_orchestrator(project_id)
-            .await
-        {
+        } else {
             tracing::warn!(
-                project_id,
-                error = %e,
-                "Failed to publish relation snapshot after entity deletion"
+                entity_id = entity_id,
+                "Cannot delete entity without file path"
             );
         }
     }
@@ -453,32 +441,19 @@ pub async fn handle_batch_delete(
             }
         }
 
-        {
-            if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-                let mut orchestrator = orchestrator.lock().await;
-                let _ = orchestrator.clear_relations_for_file(file_path);
-            }
-        }
-
         files_deleted += 1;
     }
 
     // Delete entities
+    let mut delta_files: Vec<std::path::PathBuf> = request
+        .file_paths
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
     for entity_id in &request.entity_ids {
         let eid = cce_types::EntityId(*entity_id);
 
-        let file_path = {
-            if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-                let orchestrator = orchestrator.lock().await;
-                if let Some(builder) = orchestrator.get_relation_builder() {
-                    builder.index().get_file_path_by_entity(eid)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
+        let file_path = resolve_entity_file_path(&state, project_id, eid).await;
 
         if let Some(ref fp) = file_path {
             {
@@ -510,34 +485,30 @@ pub async fn handle_batch_delete(
             }
         }
 
-        {
-            if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-                let mut orchestrator = orchestrator.lock().await;
-                if let Some(ref builder) = orchestrator.get_relation_builder_mut() {
-                    let index = builder.index();
-                    if let Some(file_path) = index.get_file_path_by_entity(eid) {
-                        index.remove_file(&file_path);
-                    } else {
-                        tracing::warn!(
-                            entity_id = entity_id,
-                            "Cannot delete entity without file path in batch"
-                        );
-                    }
-                }
-            }
+        if let Some(ref fp) = file_path {
+            delta_files.push(std::path::PathBuf::from(fp));
+        } else {
+            tracing::warn!(
+                entity_id = entity_id,
+                "Cannot delete entity without file path in batch"
+            );
         }
 
         entities_deleted += 1;
     }
 
-    // Publish relation snapshot after all deletions
-    if !request.file_paths.is_empty() || !request.entity_ids.is_empty() {
-        if let Err(e) = state
-            .engine
-            .publish_relation_snapshot_from_orchestrator(project_id)
-            .await
-        {
-            errors.push(format!("Failed to publish relation snapshot: {}", e));
+    // Publish relation deletions as one incremental delta. No builder is
+    // touched; the delta flows through the base cache and runtime.
+    if !delta_files.is_empty() {
+        let changes: Vec<(std::path::PathBuf, bool)> =
+            delta_files.into_iter().map(|path| (path, true)).collect();
+        if let Ok(coordinator) = state.engine.get_hot_update_coordinator(project_id).await {
+            let coordinator = coordinator.lock().await;
+            if let Err(error) = coordinator.run_explicit_changes(changes).await {
+                errors.push(format!("Failed to publish relation delta: {error}"));
+            }
+        } else {
+            errors.push("Hot-update coordinator unavailable for relation delta".to_string());
         }
     }
 
@@ -574,20 +545,8 @@ pub async fn handle_index_stats(
     let start = std::time::Instant::now();
     let project_id = query.project_id;
 
-    // Get statistics from relation index
-    let (total_entities, total_relations) = {
-        if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
-            let orchestrator = orchestrator.lock().await;
-            if let Some(builder) = orchestrator.get_relation_builder() {
-                let index = builder.index();
-                (index.function_count(), index.resolved_relation_count())
-            } else {
-                (0, 0)
-            }
-        } else {
-            (0, 0)
-        }
-    };
+    // Get statistics from the published relation snapshot (read-only).
+    let (total_entities, total_relations) = read_published_relation_counts(&state, project_id).await;
 
     // Resolve vector group ID
     let group_id = resolve_group_id(&state, project_id).await;
@@ -769,4 +728,78 @@ pub(crate) async fn resolve_group_id(
             None
         }
     }
+}
+
+/// Read entity/relation counts from the published snapshot or runtime.
+///
+/// Prefers the orchestrator's last published snapshot, falling back to the
+/// process-local relation runtime. Returns zeros when neither is available.
+async fn read_published_relation_counts(
+    state: &crate::api::state::AppState,
+    project_id: i64,
+) -> (usize, usize) {
+    if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
+        let orchestrator = orchestrator.lock().await;
+        if let Some(snapshot) = orchestrator.get_published_relation_snapshot() {
+            return (
+                snapshot.function_count(),
+                snapshot.resolved_relation_count(),
+            );
+        }
+    }
+    if let Ok(runtime) = state.engine.get_relation_runtime(project_id).await {
+        if let Some(snapshot) = runtime.get_snapshot().await {
+            return (snapshot.entity_count(), snapshot.relation_count());
+        }
+    }
+    (0, 0)
+}
+
+/// Resolve an entity's file path through the published snapshot or runtime.
+async fn resolve_entity_file_path(
+    state: &crate::api::state::AppState,
+    project_id: i64,
+    entity_id: cce_types::EntityId,
+) -> Option<String> {
+    if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
+        let orchestrator = orchestrator.lock().await;
+        if let Some(snapshot) = orchestrator.get_published_relation_snapshot()
+            && let Some(path) = snapshot.get_file_path_by_entity(entity_id)
+        {
+            return Some(path);
+        }
+    }
+    if let Ok(runtime) = state.engine.get_relation_runtime(project_id).await {
+        if let Some(snapshot) = runtime.get_snapshot().await {
+            return snapshot.index.get_file_path_by_entity(entity_id);
+        }
+    }
+    None
+}
+
+/// Estimate a file's relation count from the published snapshot for delete responses.
+async fn estimate_file_relation_count(
+    state: &crate::api::state::AppState,
+    project_id: i64,
+    file_path: &str,
+) -> usize {
+    if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
+        let orchestrator = orchestrator.lock().await;
+        if let Some(snapshot) = orchestrator.get_published_relation_snapshot() {
+            let relations = snapshot.get_resolved_relations_by_file(file_path);
+            if !relations.is_empty() {
+                return relations.iter().map(|(_, edges)| edges.len()).sum();
+            }
+            return 0;
+        }
+    }
+    if let Ok(runtime) = state.engine.get_relation_runtime(project_id).await {
+        if let Some(snapshot) = runtime.get_snapshot().await {
+            let relations = snapshot.index.get_resolved_relations_by_file(file_path);
+            if !relations.is_empty() {
+                return relations.iter().map(|(_, edges)| edges.len()).sum();
+            }
+        }
+    }
+    0
 }
