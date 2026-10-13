@@ -20,3 +20,8 @@ parking_lot = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "local_vector_store"
+harness = false

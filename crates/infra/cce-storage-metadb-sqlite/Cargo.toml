@@ -25,6 +25,7 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
 
 [[bench]]
 name = "metadata_read"
@@ -32,4 +33,8 @@ harness = false
 
 [[bench]]
 name = "storage_txn"
+harness = false
+
+[[bench]]
+name = "metadb_write_amplification"
 harness = false

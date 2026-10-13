@@ -28,6 +28,7 @@ aho-corasick = "1.1"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
 
 [[bench]]
 name = "bm25_query"
@@ -41,5 +42,10 @@ required-features = ["local"]
 
 [[bench]]
 name = "bm25_cache"
+harness = false
+required-features = ["local"]
+
+[[bench]]
+name = "bm25_write"
 harness = false
 required-features = ["local"]

@@ -51,6 +51,7 @@ cce-parser-core = { path = "../cce-parser-core" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
 cce-parser = { path = "../cce-parser" }
 cce-parser-core = { path = "../cce-parser-core" }
 cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
@@ -61,4 +62,12 @@ harness = false
 
 [[bench]]
 name = "final_replay"
+harness = false
+
+[[bench]]
+name = "snapshot_cost"
+harness = false
+
+[[bench]]
+name = "finalize_relation"
 harness = false

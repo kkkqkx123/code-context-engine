@@ -38,6 +38,7 @@ members = [
     "crates/app/cce-e2e-tests",
     "crates/app/cce-cli",
     "crates/app/cce-gateway",
+    "crates/app/cce-bench-kit",
     "crates/app/cce-plugin-sdk",
     # vendored
     "crates/tree-sitter-svelte",
@@ -144,6 +145,9 @@ deadpool-postgres = { version = "0.14", features = ["serde"] }
 
 # Async trait support
 async-trait = "0.1"
+
+# Benchmarking framework (used by all T-1..T-10 performance benchmarks)
+criterion = "0.5"
 
 # Full-text search
 jieba-rs = "0.10"

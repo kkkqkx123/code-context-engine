@@ -24,5 +24,11 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
+futures = { workspace = true }
 llm-embedding = { path = "../llm-suite/crates/llm-embedding", features = ["mock"] }
 llm-rerank = { path = "../llm-suite/crates/llm-rerank", features = ["mock"] }
+
+[[bench]]
+name = "embedding_scheduling"
+harness = false

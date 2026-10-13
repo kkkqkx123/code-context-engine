@@ -20,6 +20,10 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
+rayon = { workspace = true }
+num_cpus = { workspace = true }
+cce-bench-kit = { path = "../../app/cce-bench-kit" }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[bench]]
@@ -28,4 +32,8 @@ harness = false
 
 [[bench]]
 name = "poll_rates"
+harness = false
+
+[[bench]]
+name = "scan_parallel"
 harness = false

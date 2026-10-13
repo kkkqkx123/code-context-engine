@@ -55,8 +55,18 @@ rusqlite = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
+cce-bench-kit = { path = "../cce-bench-kit" }
 tracing-subscriber = { workspace = true }
 llm-embedding = { path = "../../infra/llm-suite/crates/llm-embedding", features = ["mock"] }
+
+[[bench]]
+name = "chunker_concurrency"
+harness = false
+
+[[bench]]
+name = "index_pipeline_stages"
+harness = false
 
 [[bench]]
 name = "hot_update_scaling"
