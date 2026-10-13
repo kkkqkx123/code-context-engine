@@ -19,6 +19,10 @@ pub struct EmbeddingConfig {
     #[serde(default = "default_max_item_tokens")]
     pub max_item_tokens: usize,
 
+    /// Maximum embedding batches in flight at once
+    #[serde(default = "default_max_concurrency")]
+    pub max_concurrency: usize,
+
     /// Vector dimension (if known)
     #[serde(default)]
     pub vector_dimension: Option<usize>,
@@ -33,12 +37,17 @@ fn default_max_item_tokens() -> usize {
     8192
 }
 
+fn default_max_concurrency() -> usize {
+    16
+}
+
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
             model: String::new(),
             max_batch_tokens: default_max_batch_tokens(),
             max_item_tokens: default_max_item_tokens(),
+            max_concurrency: default_max_concurrency(),
             vector_dimension: None,
         }
     }
@@ -53,6 +62,7 @@ mod tests {
         let config = EmbeddingConfig::default();
         assert_eq!(config.max_batch_tokens, 8192);
         assert_eq!(config.max_item_tokens, 8192);
+        assert_eq!(config.max_concurrency, 16);
         assert!(config.vector_dimension.is_none());
     }
 }

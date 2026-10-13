@@ -927,7 +927,7 @@ mod tests {
                 ChunkPath::Bm25,
             )]))
         }
-        let mut chunker = chunker_with(vec![(
+        let chunker = chunker_with(vec![(
             ChunkMockPlugin::with_id("chunker", 100).chunk_fn(plugin_chunks),
             None,
         )]);
@@ -963,7 +963,7 @@ mod tests {
                 ChunkPath::Bm25,
             )]))
         }
-        let mut chunker = chunker_with(vec![
+        let chunker = chunker_with(vec![
             (
                 ChunkMockPlugin::with_id("decline", 100).chunk_fn(decline),
                 None,
@@ -990,7 +990,7 @@ mod tests {
         ) -> Result<Option<Vec<ChunkedResult>>, PluginError> {
             Ok(None)
         }
-        let mut chunker = chunker_with(vec![(
+        let chunker = chunker_with(vec![(
             ChunkMockPlugin::with_id("decline", 100).chunk_fn(decline),
             None,
         )]);
@@ -1014,7 +1014,7 @@ mod tests {
         ) -> Result<Option<Vec<ChunkedResult>>, PluginError> {
             Err(PluginError::ExecutionFailed("broken".to_string()))
         }
-        let mut chunker = chunker_with(vec![(
+        let chunker = chunker_with(vec![(
             ChunkMockPlugin::with_id("broken", 100).chunk_fn(fail),
             None,
         )]);
@@ -1042,7 +1042,7 @@ mod tests {
                 ChunkPath::Bm25,
             )]))
         }
-        let mut chunker = chunker_with(vec![(
+        let chunker = chunker_with(vec![(
             ChunkMockPlugin::with_id("py-only", 100).chunk_fn(plugin_chunks),
             Some(vec!["*.py"]),
         )]);
@@ -1073,7 +1073,7 @@ mod tests {
                 ChunkPath::Bm25,
             )]))
         }
-        let mut chunker = chunker_with(vec![(
+        let chunker = chunker_with(vec![(
             ChunkMockPlugin::with_id("below", -1).chunk_fn(below_chunks),
             None,
         )]);

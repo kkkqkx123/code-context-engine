@@ -47,7 +47,7 @@ impl FileProcessor {
             coordinator: Arc::new(Mutex::new(ParseCoordinator::new())),
             pre_processor: Arc::new(PreprocessingPipeline::new()),
             converter: Arc::new(AstToNlConverter::with_config(config)),
-            chunker: Arc::new(Mutex::new(GroupChunker::new(config.chunking.clone()))),
+            chunker: Arc::new(GroupChunker::new(config.chunking.clone())),
             doc_pipeline: Arc::new(PipelineRouter::new()),
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             chunking_config: config.chunking.clone(),
@@ -73,7 +73,7 @@ impl FileProcessor {
             coordinator: Arc::new(Mutex::new(ParseCoordinator::new())),
             pre_processor: Arc::new(PreprocessingPipeline::with_config(pre_config)),
             converter: Arc::new(AstToNlConverter::with_config(&config)),
-            chunker: Arc::new(Mutex::new(GroupChunker::new(config.chunking.clone()))),
+            chunker: Arc::new(GroupChunker::new(config.chunking.clone())),
             doc_pipeline: Arc::new(PipelineRouter::new()),
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             pipeline_fingerprint: cce_utils::hash::hash_serializable(&config),
@@ -98,9 +98,7 @@ impl FileProcessor {
             coordinator: Arc::new(Mutex::new(ParseCoordinator::new())),
             pre_processor: Arc::new(PreprocessingPipeline::with_config(pre_config)),
             converter: Arc::new(AstToNlConverter::with_config(ast_to_nl_config)),
-            chunker: Arc::new(Mutex::new(GroupChunker::new(
-                ast_to_nl_config.chunking.clone(),
-            ))),
+            chunker: Arc::new(GroupChunker::new(ast_to_nl_config.chunking.clone())),
             doc_pipeline: Arc::new(PipelineRouter::new()),
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             chunking_config: ast_to_nl_config.chunking.clone(),
@@ -126,7 +124,7 @@ impl FileProcessor {
             coordinator: Arc::new(Mutex::new(ParseCoordinator::new())),
             pre_processor: Arc::new(PreprocessingPipeline::new()),
             converter: Arc::new(AstToNlConverter::with_config(&config)),
-            chunker: Arc::new(Mutex::new(GroupChunker::new(config.chunking.clone()))),
+            chunker: Arc::new(GroupChunker::new(config.chunking.clone())),
             doc_pipeline: Arc::new(PipelineRouter::new()),
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             pipeline_fingerprint: cce_utils::hash::hash_serializable(&config),
@@ -186,10 +184,10 @@ impl FileProcessor {
             AstToNlConverter::with_config(&config).with_plugin_registry(plugin_registry.clone()),
         );
 
-        self.chunker = Arc::new(Mutex::new(
+        self.chunker = Arc::new(
             GroupChunker::new(config.chunking.clone())
                 .with_plugin_registry(plugin_registry.clone()),
-        ));
+        );
 
         self.plugin_registry = Some(plugin_registry);
 

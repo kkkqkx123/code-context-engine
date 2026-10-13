@@ -87,12 +87,11 @@ pub struct ChunkCacheStats {
 }
 
 /// File processor for handling different file types
-#[derive(Clone)]
 pub struct FileProcessor {
     pub(crate) coordinator: Arc<Mutex<ParseCoordinator>>,
     pub(crate) pre_processor: Arc<PreprocessingPipeline>,
     pub(crate) converter: Arc<AstToNlConverter>,
-    pub(crate) chunker: Arc<Mutex<GroupChunker>>,
+    pub(crate) chunker: Arc<GroupChunker>,
     /// Document processing pipeline for non-code files
     pub(crate) doc_pipeline: Arc<PipelineRouter>,
     /// LRU cache for chunk results to avoid duplicate processing
@@ -129,6 +128,38 @@ pub struct FileProcessor {
 impl Default for FileProcessor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for FileProcessor {
+    fn clone(&self) -> Self {
+        let coordinator = self
+            .coordinator
+            .lock()
+            .unwrap_or_else(|poison| {
+                tracing::warn!("Parser coordinator mutex was poisoned; recovering guard");
+                poison.into_inner()
+            })
+            .clone();
+        Self {
+            coordinator: Arc::new(Mutex::new(coordinator)),
+            pre_processor: Arc::clone(&self.pre_processor),
+            converter: Arc::clone(&self.converter),
+            chunker: Arc::clone(&self.chunker),
+            doc_pipeline: Arc::clone(&self.doc_pipeline),
+            chunk_cache: Arc::clone(&self.chunk_cache),
+            chunking_config: self.chunking_config.clone(),
+            document_chunking_config: self.document_chunking_config.clone(),
+            pipeline_fingerprint: self.pipeline_fingerprint.clone(),
+            plugin_registry: self.plugin_registry.clone(),
+            parser_metrics: self.parser_metrics.clone(),
+            grouper_metrics: self.grouper_metrics.clone(),
+            converter_metrics: self.converter_metrics.clone(),
+            chunker_metrics: self.chunker_metrics.clone(),
+            file_processing_metrics: self.file_processing_metrics.clone(),
+            project_id: self.project_id,
+            license_header: self.license_header.clone(),
+        }
     }
 }
 

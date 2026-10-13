@@ -59,7 +59,7 @@ fn process_file(
     };
     let conversions =
         converter.convert_entity_groups(&processing.groups, path, Some(&req), None, None);
-    let mut chunker = GroupChunker::new(chunk_config.clone());
+    let chunker = GroupChunker::new(chunk_config.clone());
     let mut chunks = 0;
     for (group, conversion) in processing.groups.iter().zip(conversions.iter()) {
         if let Some(header) = conversion.header_conversion.as_ref() {

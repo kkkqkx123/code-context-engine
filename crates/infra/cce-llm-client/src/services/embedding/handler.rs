@@ -5,6 +5,7 @@ use crate::suite::{embedding_resilience, full_endpoint_url, map_embedding_error,
 use cce_config::global::ResolvedEmbeddingConfig;
 use cce_llm::{EmbeddingResult, LlmError};
 use cce_utils::token_estimation::estimate_tokens;
+use futures::stream::{self, StreamExt};
 use llm_client::Resilience;
 use llm_embedding::EmbeddingProvider;
 
@@ -182,22 +183,53 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
         }
 
         let batches = self.create_batches(texts, config)?;
+        if batches.is_empty() {
+            return Ok(EmbeddingResult::default());
+        }
+
+        let concurrency = config.max_concurrency.max(1).min(batches.len());
+        if concurrency <= 1 || batches.len() == 1 {
+            let mut all_embeddings = Vec::new();
+            let mut total_prompt_tokens = 0u64;
+            let mut total_tokens = 0u64;
+            for batch in &batches {
+                let owned: Vec<String> = batch.iter().map(|text| (*text).to_string()).collect();
+                let result = self.inner.embed_batch(owned).await?;
+                all_embeddings.extend(result.embeddings);
+                total_prompt_tokens += result.prompt_tokens;
+                total_tokens += result.total_tokens;
+            }
+            return Ok(EmbeddingResult {
+                embeddings: all_embeddings,
+                prompt_tokens: total_prompt_tokens,
+                total_tokens,
+            });
+        }
+
+        let owned_batches: Vec<(usize, Vec<String>)> = batches
+            .iter()
+            .enumerate()
+            .map(|(idx, batch)| (idx, batch.iter().map(|text| (*text).to_string()).collect()))
+            .collect();
+        let transport = &self.inner;
+        let mut ordered: Vec<(usize, Result<EmbeddingResult, LlmError>)> =
+            stream::iter(owned_batches.into_iter().map(|(idx, owned)| async move {
+                let result = transport.embed_batch(owned).await;
+                (idx, result)
+            }))
+            .buffer_unordered(concurrency)
+            .collect()
+            .await;
+        ordered.sort_by_key(|(idx, _)| *idx);
 
         let mut all_embeddings = Vec::new();
         let mut total_prompt_tokens = 0u64;
         let mut total_tokens = 0u64;
-
-        let mut idx = 0;
-        while idx < batches.len() {
-            let batch: Vec<String> = batches[idx]
-                .iter()
-                .map(|text| (*text).to_string())
-                .collect();
-            let result = self.inner.embed_batch(batch).await?;
+        for (_, result) in ordered {
+            let result = result?;
             all_embeddings.extend(result.embeddings);
             total_prompt_tokens += result.prompt_tokens;
             total_tokens += result.total_tokens;
-            idx += 1;
         }
 
         Ok(EmbeddingResult {
@@ -410,5 +442,85 @@ mod tests {
             .await
             .expect_err("single attempt surfaces the limit");
         assert!(matches!(error, LlmError::RateLimitExceeded(1200)));
+    }
+
+    #[tokio::test]
+    async fn concurrent_batches_preserve_input_order() {
+        let mock = MockEmbeddingProvider::new("mock", 8);
+        let transport = SuiteEmbeddingTransport::for_testing(mock);
+        let handler = EmbeddingRequestHandler::new(transport);
+        let config = EmbeddingConfig {
+            max_batch_tokens: 10,
+            max_item_tokens: 1000,
+            max_concurrency: 4,
+            ..Default::default()
+        };
+        let texts = [
+            "alpha distinct content one",
+            "beta distinct content two",
+            "gamma distinct content three",
+            "delta distinct content four",
+            "epsilon distinct content five",
+            "zeta distinct content six",
+        ];
+        let refs: Vec<&str> = texts.iter().copied().collect();
+        let batches = handler
+            .create_batches(&refs, &config)
+            .expect("batches form");
+        assert!(batches.len() > 1, "test needs multiple batches");
+
+        let result = handler
+            .embed(&refs, &config)
+            .await
+            .expect("concurrent embed succeeds");
+        assert_eq!(result.embeddings.len(), texts.len());
+
+        for (idx, text) in texts.iter().enumerate() {
+            let single = handler
+                .transport()
+                .embed_batch(vec![(*text).to_string()])
+                .await
+                .expect("single probe succeeds");
+            assert_eq!(
+                result.embeddings[idx], single.embeddings[0],
+                "position {idx} must carry its own text vector"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_batches_surface_first_ordered_error() {
+        let mock = MockEmbeddingProvider::with_steps(vec![
+            MockEmbeddingStep::Respond,
+            MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::Timeout),
+            MockEmbeddingStep::Respond,
+        ]);
+        let transport = SuiteEmbeddingTransport::for_testing(mock);
+        let handler = EmbeddingRequestHandler::new(transport);
+        let config = EmbeddingConfig {
+            max_batch_tokens: 10,
+            max_item_tokens: 1000,
+            max_concurrency: 4,
+            ..Default::default()
+        };
+        let texts = [
+            "alpha distinct content one",
+            "beta distinct content two",
+            "gamma distinct content three",
+            "delta distinct content four",
+            "epsilon distinct content five",
+            "zeta distinct content six",
+        ];
+        let refs: Vec<&str> = texts.iter().copied().collect();
+        let batches = handler
+            .create_batches(&refs, &config)
+            .expect("batches form");
+        assert!(batches.len() > 1, "test needs multiple batches");
+
+        let error = handler
+            .embed(&refs, &config)
+            .await
+            .expect_err("one failing batch fails the whole call");
+        assert!(matches!(error, LlmError::Timeout(_)));
     }
 }

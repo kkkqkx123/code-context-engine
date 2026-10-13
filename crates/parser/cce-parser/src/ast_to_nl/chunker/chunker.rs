@@ -128,7 +128,6 @@ pub struct GroupChunker {
     estimator: TokenEstimator,
     splitter: TextSplitter,
     overlap_manager: OverlapManager,
-    tracker: GroupTracker,
     /// Plugin registry for the `Chunk` override capability.
     plugin_registry: Option<std::sync::Arc<crate::plugin::PluginRegistry>>,
 }
@@ -141,7 +140,6 @@ impl GroupChunker {
             estimator: TokenEstimator::default(),
             splitter: TextSplitter::new(config.clone()),
             overlap_manager: OverlapManager::new(config.clone()),
-            tracker: GroupTracker::new(),
             plugin_registry: None,
         }
     }
@@ -165,12 +163,13 @@ impl GroupChunker {
     /// Each path uses its own text and limits, producing separate chunks with
     /// path-specific `chunk_id` format: `{groupId}_{path}_{index}`.
     pub fn chunk_group(
-        &mut self,
+        &self,
         group: &EntityGroup,
         conversion: &ConversionResult,
         file_path: &str,
     ) -> Result<ChunkOutput, ParseError> {
-        self.tracker.record_group(group);
+        let mut tracker = GroupTracker::new();
+        tracker.record_group(group);
 
         let bm25_text = conversion.bm25_text.clone().unwrap_or_default();
         let embedding_text = conversion.embedding_text.clone().unwrap_or_default();
@@ -193,7 +192,7 @@ impl GroupChunker {
                 path: ChunkPath::Bm25,
                 strategy: SplitStrategy::for_bm25_group_type(group.group_type),
                 nl_boundaries: None,
-                tracker: &self.tracker,
+                tracker: &tracker,
                 header_mode: None,
             };
             all_chunks.absorb(chunk_single_path(input)?);
@@ -217,7 +216,7 @@ impl GroupChunker {
                 path: ChunkPath::Embedding,
                 strategy: SplitStrategy::for_group_type(group.group_type),
                 nl_boundaries: None,
-                tracker: &self.tracker,
+                tracker: &tracker,
                 header_mode: None,
             };
             all_chunks.absorb(chunk_single_path(input)?);
@@ -229,7 +228,7 @@ impl GroupChunker {
                 .apply_overlap(&mut all_chunks.chunks[bm25_count..], ChunkPath::Embedding);
         }
 
-        add_relations(&self.tracker, &mut all_chunks.chunks);
+        add_relations(&tracker, &mut all_chunks.chunks);
 
         Ok(all_chunks)
     }
@@ -241,7 +240,7 @@ impl GroupChunker {
     /// - Header (group overview) is included only in the first chunk for context
     /// - Members are grouped by token budget to avoid oversized chunks
     pub fn chunk_group_with_conversions(
-        &mut self,
+        &self,
         group: &EntityGroup,
         group_conversions: &crate::ast_to_nl::converter::GroupConversions,
         file_path: &str,
@@ -251,18 +250,14 @@ impl GroupChunker {
             estimator: &self.estimator,
             splitter: &self.splitter,
         };
+        let mut tracker = GroupTracker::new();
         crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
             &infra,
-            &mut self.tracker,
+            &mut tracker,
             group,
             group_conversions,
             file_path,
         )
-    }
-
-    /// Reset chunker state (for new file)
-    pub fn reset(&mut self) {
-        self.tracker.reset();
     }
 
     /// Batch process groups
@@ -273,12 +268,10 @@ impl GroupChunker {
     /// After chunking all groups, performs a cross-group merge pass to combine
     /// small chunks with adjacent ones, producing more uniformly sized output.
     pub fn chunk_groups(
-        &mut self,
+        &self,
         group_conversions: &[crate::ast_to_nl::converter::GroupConversions],
         file_path: &str,
     ) -> Result<ChunkOutput, ParseError> {
-        self.tracker.reset();
-
         // Plugin `Chunk` override: the first matching plugin replaces the
         // built-in chunker entirely. The returned chunks must follow the
         // standard `ChunkedResult` shape.
@@ -322,10 +315,16 @@ impl GroupChunker {
 
     /// Chunk groups with the built-in chunker (merge + overlap passes).
     fn chunk_groups_builtin(
-        &mut self,
+        &self,
         group_conversions: &[crate::ast_to_nl::converter::GroupConversions],
         file_path: &str,
     ) -> Result<ChunkOutput, ParseError> {
+        let infra = ChunkInfrastructure {
+            config: &self.config,
+            estimator: &self.estimator,
+            splitter: &self.splitter,
+        };
+        let mut tracker = GroupTracker::new();
         let mut all_chunks = ChunkOutput::default();
         let groups: Vec<EntityGroup> = group_conversions
             .iter()
@@ -336,11 +335,17 @@ impl GroupChunker {
         // qualification must not depend on the accidental processing order
         // of sibling groups. Registration alone creates no relations.
         for group in &groups {
-            self.tracker.register_identity(group);
+            tracker.register_identity(group);
         }
 
         for gc in group_conversions {
-            let chunks = self.chunk_group_with_conversions(&gc.group, gc, file_path)?;
+            let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
+                &infra,
+                &mut tracker,
+                &gc.group,
+                gc,
+                file_path,
+            )?;
             all_chunks.absorb(chunks);
         }
 
@@ -427,11 +432,6 @@ impl GroupChunker {
             }
         }
         None
-    }
-
-    /// Get tracker reference
-    pub fn tracker(&self) -> &GroupTracker {
-        &self.tracker
     }
 
     /// Get config

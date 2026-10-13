@@ -1,7 +1,7 @@
 use super::*;
 use crate::error::OrchestratorError;
 use cce_config::ChunkingConfig;
-use cce_parser::ast_to_nl::chunker::{ChunkOutput, ChunkedResult};
+use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_parser::summary::FileCategory;
 use cce_scanner::{FileContentPayload, FileEntry};
 use cce_types::{ContentRoute, LanguageInfo, OutputMode, ParsedFile};
@@ -248,17 +248,10 @@ impl FileProcessor {
 
         // Step 3: Chunk the conversion results
         let chunker_start = std::time::Instant::now();
-        let chunk_result = (|| -> Result<ChunkOutput, OrchestratorError> {
-            let mut chunker = self.chunker.lock().map_err(|e| {
-                OrchestratorError::index(
-                    "chunk_groups",
-                    format!("Failed to acquire chunker lock: {}", e),
-                )
-            })?;
-            chunker
-                .chunk_groups(&group_conversions, &parsed.path)
-                .map_err(OrchestratorError::Parse)
-        })();
+        let chunk_result = self
+            .chunker
+            .chunk_groups(&group_conversions, &parsed.path)
+            .map_err(OrchestratorError::Parse);
         let chunker_latency = chunker_start.elapsed().as_secs_f64() * 1000.0;
         let chunks = match chunk_result {
             Ok(c) => {

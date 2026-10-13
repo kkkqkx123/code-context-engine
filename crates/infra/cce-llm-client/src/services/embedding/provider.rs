@@ -58,6 +58,7 @@ impl OpenAICompatibleProvider<llm_embedding::OpenAICompatibleProvider> {
             model: resolved.model.clone(),
             max_batch_tokens: resolved.max_batch_tokens,
             max_item_tokens: resolved.max_item_tokens,
+            max_concurrency: 16,
             vector_dimension: Some(resolved.vector_dimension),
         };
 
@@ -84,6 +85,7 @@ impl<P: SuiteEmbeddingProvider> OpenAICompatibleProvider<P> {
             model: model.into(),
             max_batch_tokens: 8192,
             max_item_tokens: 2048,
+            max_concurrency: 16,
             vector_dimension: Some(dimension),
         };
         Self {

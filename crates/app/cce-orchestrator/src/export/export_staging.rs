@@ -214,7 +214,7 @@ pub async fn extract_chunks_from_parse_result(
     let group_conversions =
         converter.convert_entity_groups(&processing_result.groups, &file_path.to_string_lossy());
 
-    let mut chunker = chunker.lock().await;
+    let chunker = chunker.lock().await;
     let chunks = chunker
         .chunk_groups(&group_conversions, &file_path.to_string_lossy())?
         .chunks;

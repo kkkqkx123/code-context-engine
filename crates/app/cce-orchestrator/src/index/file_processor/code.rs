@@ -74,18 +74,11 @@ impl FileProcessor {
 
         // Step 4: Chunk the conversion results
         let chunker_start = std::time::Instant::now();
-        let chunk_result = (|| -> Result<Vec<ChunkedResult>, OrchestratorError> {
-            let mut chunker = self.chunker.lock().map_err(|e| {
-                OrchestratorError::index(
-                    "chunk_groups",
-                    format!("Failed to acquire chunker lock: {}", e),
-                )
-            })?;
-            chunker
-                .chunk_groups(&group_conversions, &parsed.path)
-                .map(|output| output.chunks)
-                .map_err(OrchestratorError::Parse)
-        })();
+        let chunk_result = self
+            .chunker
+            .chunk_groups(&group_conversions, &parsed.path)
+            .map(|output| output.chunks)
+            .map_err(OrchestratorError::Parse);
         let chunker_latency = chunker_start.elapsed().as_secs_f64() * 1000.0;
         let chunks = match chunk_result {
             Ok(c) => {
@@ -216,17 +209,10 @@ impl FileProcessor {
 
         // Step 4: Chunk the conversion results
         let chunker_start = std::time::Instant::now();
-        let chunk_result = match self.chunker.lock().map_err(|e| {
-            OrchestratorError::index(
-                "chunk_groups",
-                format!("Failed to acquire chunker lock: {}", e),
-            )
-        }) {
-            Ok(mut chunker) => chunker
-                .chunk_groups(&group_conversions, &parsed.path)
-                .map_err(OrchestratorError::Parse),
-            Err(e) => Err(e),
-        };
+        let chunk_result = self
+            .chunker
+            .chunk_groups(&group_conversions, &parsed.path)
+            .map_err(OrchestratorError::Parse);
         let chunker_latency = chunker_start.elapsed().as_secs_f64() * 1000.0;
         let chunk_output = match chunk_result {
             Ok(output) => {
