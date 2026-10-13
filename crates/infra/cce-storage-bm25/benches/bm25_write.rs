@@ -8,18 +8,36 @@
 //!
 //! Requires the `local` (tantivy) feature:
 //! `cargo bench -p cce-storage-bm25 --features local --bench bm25_write`
+//!
+//! Measured scenarios are appended to `benches/results/bm25_write.tsv`.
+//!
+//! `CCE_BENCH_BM25_DOCS` overrides the document count (default 20_000); the
+//! archived baseline was collected at 2_000 because the full scale did not
+//! complete inside the sandbox, so reduced-scale reruns stay comparable.
 
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use cce_storage_bm25::{Bm25Retrieval, IndexManager, batch_add_documents};
 use cce_storage_common::{FulltextSearchOptions, TermOperator};
-use cce_types::FileCategory;
 use tempfile::TempDir;
 
 const N_DOCS: usize = 20_000;
 const PROJECT_ID: i64 = 1;
+
+/// Document count for this run: `CCE_BENCH_BM25_DOCS` when set, else the
+/// full-scale default.
+fn n_docs() -> usize {
+    std::env::var("CCE_BENCH_BM25_DOCS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n: &usize| *n > 0)
+        .unwrap_or(N_DOCS)
+}
 
 fn make_docs(n: usize) -> Vec<(String, HashMap<String, String>)> {
     (0..n)
@@ -42,7 +60,7 @@ fn make_docs(n: usize) -> Vec<(String, HashMap<String, String>)> {
 
 fn docs() -> &'static Vec<(String, HashMap<String, String>)> {
     static D: OnceLock<Vec<(String, HashMap<String, String>)>> = OnceLock::new();
-    D.get_or_init(|| make_docs(N_DOCS))
+    D.get_or_init(|| make_docs(n_docs()))
 }
 
 fn opts() -> FulltextSearchOptions {
@@ -84,9 +102,10 @@ fn write_with_freq(dir: &TempDir, per_commit: usize) -> (f64, usize, IndexManage
 fn query_jitter(manager: &IndexManager, schema: &cce_storage_bm25::IndexSchema) -> (f64, f64) {
     let retrieval = Bm25Retrieval::new();
     let o = opts();
+    let total = n_docs();
     let mut samples = Vec::with_capacity(200);
     for i in 0..200 {
-        let q = format!("fn_{}", (i * 37) % N_DOCS);
+        let q = format!("fn_{}", (i * 37) % total);
         let t = Instant::now();
         let _ = retrieval.search(manager, schema, &q, &o);
         samples.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -97,14 +116,47 @@ fn query_jitter(manager: &IndexManager, schema: &cce_storage_bm25::IndexSchema) 
     (p50, p99)
 }
 
+/// Append one measured scenario to the results file next to this bench.
+fn record_row(
+    out: &mut Option<std::fs::File>,
+    scenario: &str,
+    total_ms: f64,
+    commits: usize,
+    docs_per_sec: f64,
+    p50_ms: Option<f64>,
+    p99_ms: Option<f64>,
+) {
+    if let Some(f) = out.as_mut() {
+        let _ = writeln!(
+            f,
+            "{scenario}\t{total_ms:.1}\t{commits}\t{docs_per_sec:.0}\t{}\t{}",
+            p50_ms.map_or_else(String::new, |v| format!("{v:.2}")),
+            p99_ms.map_or_else(String::new, |v| format!("{v:.2}")),
+        );
+    }
+}
+
 fn main() {
-    println!("bm25_write benchmark ({N_DOCS} docs, local/tantivy)");
+    let n = n_docs();
+    println!("bm25_write benchmark ({n} docs, local/tantivy)");
     println!("{:<22} {:>12} {:>10} {:>12}", "scenario", "total_ms", "commits", "docs/s");
+
+    let mut out = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/bm25_write.tsv"))
+        .ok();
+    if let Some(f) = out.as_mut() {
+        let _ = writeln!(
+            f,
+            "# scenario\ttotal_ms\tcommits\tdocs_per_sec\tp50_ms\tp99_ms"
+        );
+    }
 
     for per_commit in [1usize, 10, 50] {
         let dir = TempDir::new().expect("tempdir");
         let (ms, commits, manager, schema) = write_with_freq(&dir, per_commit);
-        let dps = (N_DOCS as f64) / (ms / 1000.0);
+        let dps = (n as f64) / (ms / 1000.0);
         println!(
             "{:<22} {:>12.1} {:>10} {:>12.0}",
             format!("bulk commit x{per_commit}"),
@@ -116,6 +168,15 @@ fn main() {
         // Query jitter after a fresh index at this commit frequency.
         let (p50, p99) = query_jitter(&manager, &schema);
         println!("    query p50 {p50:7.2} ms  p99 {p99:7.2} ms");
+        record_row(
+            &mut out,
+            &format!("bulk commit x{per_commit}"),
+            ms,
+            commits,
+            dps,
+            Some(p50),
+            Some(p99),
+        );
     }
 
     // Incremental high-frequency delete: per-file commit vs merged commit.
@@ -127,7 +188,7 @@ fn main() {
         batch_add_documents(&manager, &schema, docs().clone()).expect("seed");
         manager.reload_reader().expect("reload");
         let t = Instant::now();
-        for i in 0..N_DOCS {
+        for i in 0..n {
             let fp = format!("src/mod_{i:06}.rs");
             cce_storage_bm25::delete_documents_by_file_path_and_project(&manager, &schema, &fp, PROJECT_ID)
                 .expect("delete file");
@@ -138,8 +199,17 @@ fn main() {
         "{:<22} {:>12.1} {:>10} {:>12.0}",
         "delete per-file",
         per_file_ms,
-        N_DOCS,
-        (N_DOCS as f64) / (per_file_ms / 1000.0)
+        n,
+        (n as f64) / (per_file_ms / 1000.0)
+    );
+    record_row(
+        &mut out,
+        "delete per-file",
+        per_file_ms,
+        n,
+        (n as f64) / (per_file_ms / 1000.0),
+        None,
+        None,
     );
 
     let dir = TempDir::new().expect("tempdir");
@@ -158,27 +228,41 @@ fn main() {
         "delete merged",
         merged_ms,
         1,
-        (N_DOCS as f64) / (merged_ms / 1000.0)
+        (n as f64) / (merged_ms / 1000.0)
+    );
+    record_row(
+        &mut out,
+        "delete merged",
+        merged_ms,
+        1,
+        (n as f64) / (merged_ms / 1000.0),
+        None,
+        None,
     );
 
-    // Criterion timing for the bulk write at the two extremes.
-    let mut criterion = criterion::Criterion::default()
-        .sample_size(10)
-        .measurement_time(Duration::from_secs(20))
-        .warm_up_time(Duration::from_secs(3));
-    criterion.bench_function("bulk_commit_x1", |b| {
-        b.iter(|| {
-            let dir = TempDir::new().expect("tempdir");
-            let (ms, _, _, _) = write_with_freq(&dir, 1);
-            criterion::black_box(ms);
-        })
-    });
-    criterion.bench_function("bulk_commit_x50", |b| {
-        b.iter(|| {
-            let dir = TempDir::new().expect("tempdir");
-            let (ms, _, _, _) = write_with_freq(&dir, 50);
-            criterion::black_box(ms);
-        })
-    });
-    criterion.final_summary();
+    // Criterion timing for the bulk write at the two extremes. Opt-in via
+    // `CCE_BENCH_BM25_CRITERION=1`: a single commit-x1 iteration already
+    // exceeds the criterion measurement budget at any scale, so the default
+    // run records the manually timed scenarios only.
+    if std::env::var("CCE_BENCH_BM25_CRITERION").is_ok() {
+        let mut criterion = criterion::Criterion::default()
+            .sample_size(10)
+            .measurement_time(Duration::from_secs(20))
+            .warm_up_time(Duration::from_secs(3));
+        criterion.bench_function("bulk_commit_x1", |b| {
+            b.iter(|| {
+                let dir = TempDir::new().expect("tempdir");
+                let (ms, _, _, _) = write_with_freq(&dir, 1);
+                criterion::black_box(ms);
+            })
+        });
+        criterion.bench_function("bulk_commit_x50", |b| {
+            b.iter(|| {
+                let dir = TempDir::new().expect("tempdir");
+                let (ms, _, _, _) = write_with_freq(&dir, 50);
+                criterion::black_box(ms);
+            })
+        });
+        criterion.final_summary();
+    }
 }

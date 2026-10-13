@@ -6,9 +6,7 @@
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_storage_common::FulltextStorage;
 use cce_storage_common::VectorStorage;
-use cce_storage_metadb_sqlite::{
-    ChunkRepository, FileSummaryRepository,
-};
+use cce_storage_metadb_sqlite::ChunkRepository;
 use cce_types::path::normalize_project_path;
 
 use crate::error::OrchestratorError;
@@ -22,13 +20,7 @@ impl StorageCoordinator {
         // candidate generation (override + own-row cleanup); the published
         // generation remains untouched until manifest activation and the
         // parent data is reclaimed by generation GC.
-        if self
-            .candidate_operation
-            .lock()
-            .ok()
-            .and_then(|state| state.clone())
-            .is_some()
-        {
+        if self.has_hot_update_candidate()? {
             return self.register_deleted_file(file_path).await;
         }
         let file_id = normalize_project_path(&file_path.to_string_lossy());
@@ -108,69 +100,6 @@ impl StorageCoordinator {
         }
     }
 
-    /// Hot update: delete old vectors and store new vectors for a file
-    pub async fn hot_update_vectors_file(
-        &self,
-        file_path: &std::path::Path,
-        chunks: &[ChunkedResult],
-    ) -> Result<(), OrchestratorError> {
-        let file_path_str = normalize_project_path(&file_path.to_string_lossy());
-
-        // Candidate-epoch scoped cleanup before the write: the published
-        // generation is never addressed, so a failed store leaves previously
-        // queryable data intact. This matches the prepare_hot_update_embedding
-        // ordering and avoids the legacy unscoped delete-then-write hole.
-        if let Some(ref vector) = self.vector {
-            self.ensure_project_group_id()?;
-            vector
-                .delete_by_file_path_scoped_epoch(
-                    &file_path_str,
-                    &self.project_group_id,
-                    self.epoch(),
-                )
-                .await?;
-        }
-
-        // Step 2: Clear old vector references (scope to current epoch)
-        if let Some(client) = self.metadata_store.as_deref() {
-            let file_id_opt = client
-                .with_transaction(|tx| {
-                    use rusqlite::{OptionalExtension, params};
-                    tx.query_row(
-                        "SELECT id FROM files WHERE path = ?1 AND project_id = ?2 AND epoch = ?3",
-                        params![&file_path_str, self.project_id, self.epoch()],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .optional()
-                    .map_err(|e| cce_types::StorageError::Sqlite(e.to_string()))
-                })
-                .map_err(OrchestratorError::Storage)?;
-
-            if let Some(file_id_num) = file_id_opt {
-                client
-                    .with_transaction(|tx| {
-                        FileSummaryRepository::clear_qdrant_point_id_at_epoch(
-                            tx,
-                            file_id_num,
-                            self.epoch(),
-                        )?;
-                        Ok(())
-                    })
-                    .map_err(OrchestratorError::Storage)?;
-            }
-        }
-
-        // Step 3: Store new vectors (skip if empty)
-        if chunks.is_empty() {
-            return Ok(());
-        }
-
-        // Store new vectors and entity mappings (use batch processing with default settings)
-        self.store_vectors_batched(chunks, 32, 0).await?;
-
-        Ok(())
-    }
-
     /// Hot update: delete old BM25 documents and store new ones for a file
     pub async fn hot_update_bm25_file(
         &self,
@@ -201,13 +130,7 @@ impl StorageCoordinator {
         // candidate generation (override + own-row cleanup); the published
         // generation remains untouched until manifest activation and the
         // parent data is reclaimed by generation GC.
-        if self
-            .candidate_operation
-            .lock()
-            .ok()
-            .and_then(|state| state.clone())
-            .is_some()
-        {
+        if self.has_hot_update_candidate()? {
             return self.register_deleted_file(file_path).await;
         }
 
@@ -247,13 +170,7 @@ impl StorageCoordinator {
     ) -> Result<(), OrchestratorError> {
         let file_id = normalize_project_path(&file_path.to_string_lossy());
 
-        if self
-            .candidate_operation
-            .lock()
-            .ok()
-            .and_then(|state| state.clone())
-            .is_some()
-        {
+        if self.has_hot_update_candidate()? {
             return self.register_deleted_file(file_path).await;
         }
 

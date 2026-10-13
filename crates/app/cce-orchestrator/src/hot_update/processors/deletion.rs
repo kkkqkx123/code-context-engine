@@ -43,12 +43,57 @@ pub async fn remove_file_from_storage(
 /// Process deleted files from a batch result and collect failures.
 ///
 /// Returns the count of successfully processed deletions.
+///
+/// Inside a hot-update candidate every module converges on the same
+/// candidate-scoped registration, so the whole operation's deletions are
+/// registered in one batch: a single vector filter delete for all files plus
+/// one transaction for the row cleanup and overrides, instead of one
+/// round-trip set per file per module. Outside a candidate — or when the
+/// batch registration fails — the per-file, per-module path runs so failures
+/// stay attributable and the published-generation semantics are preserved.
 pub async fn process_deletions(
     storage: &StorageCoordinator,
     batch_result: &crate::hot_update::BatchChangeResult,
     module_name: &str,
     failed_modules: &mut Vec<ModuleFailure>,
 ) -> usize {
+    let deleted_paths: Vec<&Path> = batch_result
+        .file_changes
+        .iter()
+        .filter(|file_change| file_change.change_type == FileChangeType::Deleted)
+        .map(|file_change| file_change.path.as_path())
+        .collect();
+    if deleted_paths.is_empty() {
+        return 0;
+    }
+
+    let in_candidate = match storage.has_hot_update_candidate() {
+        Ok(in_candidate) => in_candidate,
+        Err(error) => {
+            failed_modules.push(ModuleFailure {
+                file_path: String::new(),
+                module_name: module_name.to_string(),
+                error: error.to_string(),
+                retry_count: 0,
+                next_retry_time: None,
+            });
+            return 0;
+        }
+    };
+    if in_candidate {
+        match storage.register_deleted_files(&deleted_paths).await {
+            Ok(()) => return deleted_paths.len(),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    files = deleted_paths.len(),
+                    module = module_name,
+                    "Batched candidate deletion failed; retrying per file"
+                );
+            }
+        }
+    }
+
     let mut processed = 0;
 
     for file_change in &batch_result.file_changes {

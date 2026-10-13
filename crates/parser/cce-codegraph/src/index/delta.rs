@@ -180,8 +180,6 @@ impl RelationDeltaOps for RelationIndex {
         import_export_diff::apply_import_diffs(self, &delta.import_diffs);
         import_export_diff::apply_export_diffs(self, &delta.export_diffs);
         import_export_diff::apply_dependency_diffs(self, &delta.dependency_diffs);
-
-        self.bump_version();
     }
 }
 

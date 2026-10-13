@@ -8,6 +8,22 @@ use crate::error::OrchestratorError;
 use super::super::StorageCoordinator;
 
 impl StorageCoordinator {
+    /// Whether a hot-update candidate generation is currently prepared.
+    ///
+    /// Deletion and preparation paths branch on this: inside a candidate the
+    /// work is scoped to the candidate epoch, outside it the operations
+    /// address the published generation. A poisoned lock means the candidate
+    /// state is unknown, so the error surfaces instead of silently falling
+    /// back to the published-generation path.
+    pub(crate) fn has_hot_update_candidate(&self) -> Result<bool, OrchestratorError> {
+        self.candidate_operation
+            .lock()
+            .map_err(|_| {
+                OrchestratorError::index("hot_update_candidate", "candidate state lock poisoned")
+            })
+            .map(|state| state.is_some())
+    }
+
     /// Prepare an isolated data generation for a hot-update operation.
     ///
     /// Zero-copy: instead of cloning the active generation, the candidate
@@ -92,15 +108,6 @@ impl StorageCoordinator {
             let candidate_epoch = active_epoch.saturating_add(1).max(1);
             self.epoch.store(candidate_epoch, Ordering::Release);
             self.candidate_relation_epoch.store(0, Ordering::Release);
-            self.prepared_files
-                .lock()
-                .map_err(|_| {
-                    OrchestratorError::index(
-                        "hot_update_candidate",
-                        "prepared file state lock poisoned",
-                    )
-                })?
-                .clear();
 
             // Compaction guard: if the active generation itself inherited its
             // data, adopting on top of it would push the chain to depth 3.
@@ -354,15 +361,6 @@ impl StorageCoordinator {
         }
         self.epoch.store(manifest.data_epoch, Ordering::Release);
         self.candidate_relation_epoch.store(0, Ordering::Release);
-        {
-            let mut prepared = self.prepared_files.lock().map_err(|_| {
-                OrchestratorError::index(
-                    "hot_update_candidate",
-                    "prepared file state lock poisoned",
-                )
-            })?;
-            prepared.clear();
-        }
         Ok(Some(manifest.data_epoch))
     }
 
@@ -388,14 +386,6 @@ impl StorageCoordinator {
                 OrchestratorError::index("hot_update_candidate", "candidate state lock poisoned")
             })?;
             *current = None;
-            drop(current);
-            let mut prepared = self.prepared_files.lock().map_err(|_| {
-                OrchestratorError::index(
-                    "hot_update_candidate",
-                    "prepared file state lock poisoned",
-                )
-            })?;
-            prepared.clear();
         }
         result
     }
@@ -423,11 +413,6 @@ impl StorageCoordinator {
             OrchestratorError::index("hot_update_candidate", "candidate state lock poisoned")
         })?;
         *current = None;
-        drop(current);
-        let mut prepared = self.prepared_files.lock().map_err(|_| {
-            OrchestratorError::index("hot_update_candidate", "prepared file state lock poisoned")
-        })?;
-        prepared.clear();
         Ok(())
     }
 }

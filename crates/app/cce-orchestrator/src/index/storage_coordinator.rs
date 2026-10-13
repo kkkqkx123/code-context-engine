@@ -21,7 +21,6 @@
 //! - `file_ops`: cross-backend file removal and hot updates
 //! - `checkpoint`: checkpoint queries
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -76,8 +75,6 @@ pub struct StorageCoordinator {
     candidate_operation: Arc<StdMutex<Option<String>>>,
     /// Relation epoch produced by the current hot-update candidate.
     candidate_relation_epoch: Arc<AtomicI64>,
-    /// Files whose candidate generation has already been cleared for this operation.
-    prepared_files: Arc<StdMutex<HashSet<String>>>,
     /// Index-quality counters for silent-loss surfaces that do not fail the batch.
     quality_metrics: Option<Arc<IndexQualityMetrics>>,
     /// Wall-clock deadline for one `store_vectors_batched` pass, in seconds.
@@ -109,7 +106,6 @@ impl StorageCoordinator {
             operation_id: None,
             candidate_operation: Arc::new(StdMutex::new(None)),
             candidate_relation_epoch: Arc::new(AtomicI64::new(0)),
-            prepared_files: Arc::new(StdMutex::new(HashSet::new())),
             quality_metrics: None,
             embedding_stage_timeout_secs: 0,
         })

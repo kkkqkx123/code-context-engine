@@ -250,7 +250,14 @@ impl NlDocumentUpdateProcessor {
             Ok(index) => {
                 let exporter = self.exporter().await;
                 let enhancer_config = crate::export::RelationEnhancerConfig::default();
-                exporter.set_relation_enhancement(Arc::new(index), enhancer_config);
+                // The loaded index is owned by this refresh and never mutated
+                // afterwards, so its maps can be shared into the snapshot
+                // without a deep copy.
+                let snapshot = Arc::new(
+                    cce_codegraph::index::RelationSnapshotIndex::from_index_shared(&index),
+                );
+                let layered = Arc::new(cce_codegraph::index::LayeredSnapshotIndex::new(snapshot));
+                exporter.set_relation_enhancement(layered, enhancer_config);
                 *cache = Some(epoch);
                 tracing::info!(
                     project_id = self.project_id,

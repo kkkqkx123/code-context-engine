@@ -358,13 +358,7 @@ impl StorageCoordinator {
     ) -> Result<(), OrchestratorError> {
         let file_id = cce_types::path::normalize_project_path(&file_path.to_string_lossy());
 
-        if self
-            .candidate_operation
-            .lock()
-            .ok()
-            .and_then(|state| state.clone())
-            .is_some()
-        {
+        if self.has_hot_update_candidate()? {
             return self.register_deleted_file(file_path).await;
         }
 

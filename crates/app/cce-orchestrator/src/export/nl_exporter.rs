@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use cce_codegraph::index::RelationIndex;
+use cce_codegraph::index::LayeredSnapshotIndex;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
 
 use super::aggregator::FileAggregator;
@@ -79,7 +79,7 @@ impl NlDocumentExporter {
     /// Create an exporter with relation enhancement
     pub fn with_relation_enhancement(
         config: ExportConfig,
-        relation_index: Arc<RelationIndex>,
+        relation_index: Arc<LayeredSnapshotIndex>,
         enhancer_config: RelationEnhancerConfig,
     ) -> Self {
         let project_root = config.project_root.clone();
@@ -111,11 +111,13 @@ impl NlDocumentExporter {
 
     /// Set relation enhancement after construction
     ///
-    /// This allows wiring up relation enhancement when the `RelationIndex`
-    /// becomes available (e.g. after a full index completes).
+    /// This allows wiring up relation enhancement when the published
+    /// relation snapshot becomes available (e.g. after a full index
+    /// completes). The caller shares the publisher's product; no deep
+    /// copy is taken here.
     pub fn set_relation_enhancement(
         &self,
-        relation_index: Arc<RelationIndex>,
+        relation_index: Arc<LayeredSnapshotIndex>,
         enhancer_config: RelationEnhancerConfig,
     ) {
         *self

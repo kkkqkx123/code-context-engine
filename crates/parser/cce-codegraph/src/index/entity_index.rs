@@ -79,7 +79,6 @@ pub trait EntityIndexOps {
 impl EntityIndexOps for RelationIndex {
     fn add_function(&self, entity_id: EntityId, entity: Entity) {
         self.insert_function(entity_id, entity);
-        self.bump_version();
     }
 
     fn add_function_with_path(&self, entity_id: EntityId, entity: Entity, file_path: String) {

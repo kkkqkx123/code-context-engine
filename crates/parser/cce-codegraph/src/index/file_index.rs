@@ -33,7 +33,6 @@ impl FileIndexOps for RelationIndex {
             .entry(file_id.clone())
             .or_default()
             .info = file;
-        self.bump_version();
     }
 
     fn get_file(&self, file_id: &str) -> Option<FileInfo> {
@@ -76,7 +75,6 @@ impl ImportIndexOps for RelationIndex {
             .entry(file_id.clone())
             .or_default()
             .imports = import_table;
-        self.bump_version();
     }
 
     fn get_import_table(&self, file_id: &str) -> Option<ImportTable> {
@@ -119,7 +117,6 @@ impl ExportIndexOps for RelationIndex {
             .entry(file_id.clone())
             .or_default()
             .exports = exports.into();
-        self.bump_version();
     }
 
     fn add_export(&self, file_id: &str, export: ExportInfo) {
@@ -129,7 +126,6 @@ impl ExportIndexOps for RelationIndex {
             .or_default()
             .exports
             .push(export);
-        self.bump_version();
     }
 
     fn get_exports(&self, file_id: &str) -> Option<Vec<ExportInfo>> {
@@ -295,8 +291,6 @@ impl FileLevelOps for RelationIndex {
         // 7. Drop the per-file entity-ID remap so it cannot accumulate stale
         //    parsed-local -> global mappings.
         self.entity_id_remaps.write().remove(file_id);
-
-        self.bump_version();
     }
 
     fn update_file(&self, file_id: &str) {

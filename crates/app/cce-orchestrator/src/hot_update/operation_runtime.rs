@@ -913,7 +913,7 @@ impl HotUpdateOperationRuntime {
             if *is_deletion {
                 // Deletions are recorded with the project-relative path, the
                 // same keying used by parse results and the `files` table.
-                // Storage removal (`prepare_hot_update_file`,
+                // Storage removal (`register_deleted_file`,
                 // `commit_file_hashes`) matches rows on this exact string; an
                 // absolute path would silently miss and leave the deleted
                 // file behind in the next generation.

@@ -41,7 +41,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 use smallvec::SmallVec;
 
-use super::snapshot_generation::SnapshotGeneration;
 use super::stores::FileRecord;
 use super::stores::diagnostics::RelationDiagnostics;
 
@@ -195,11 +194,6 @@ pub struct RelationIndex {
     /// In-memory derived, rebuilt via `add_function_with_path` / `remove_function`.
     /// SmallVec inline capacity of 8 covers typical 3-10 entities per file.
     pub(super) file_entities_by_start: super::FileEntitiesByStart,
-
-    /// Shared generation counter for snapshot CoW tracking.
-    /// Incremented on every mutation; snapshots record the generation at
-    /// creation time so callers can detect stale snapshots.
-    pub(super) generation: Arc<SnapshotGeneration>,
 }
 
 impl Clone for RelationIndex {
@@ -222,7 +216,6 @@ impl Clone for RelationIndex {
             diagnostics: Arc::clone(&self.diagnostics),
             file_symbol_keys: Arc::clone(&self.file_symbol_keys),
             file_entities_by_start: Arc::clone(&self.file_entities_by_start),
-            generation: Arc::clone(&self.generation),
         }
     }
 }
@@ -258,17 +251,7 @@ impl RelationIndex {
             diagnostics: Arc::new(RelationDiagnostics::new()),
             file_symbol_keys: Arc::new(RwLock::new(HashMap::new())),
             file_entities_by_start: Arc::new(RwLock::new(HashMap::new())),
-            generation: Arc::new(SnapshotGeneration::new()),
         }
-    }
-
-    /// Current mutation version of this index.
-    ///
-    /// Starts at 0 and increments on every mutating operation. Snapshots
-    /// record the version at creation time so callers can detect stale
-    /// snapshots and decide whether to re-snapshot.
-    pub fn version(&self) -> u64 {
-        self.generation.current()
     }
 
     /// Access the unified file records map.
@@ -277,15 +260,6 @@ impl RelationIndex {
     /// stores file info, imports, and exports in a single per-file entry.
     pub fn file_records(&self) -> &RwLock<HashMap<String, FileRecord>> {
         &self.file_records
-    }
-
-    /// Bump the version counter after a mutation.
-    ///
-    /// Called from all public mutating entry points. The increment is
-    /// monotonic but not guaranteed to be exactly +1 under concurrent
-    /// access (relaxed ordering is sufficient for staleness detection).
-    pub(super) fn bump_version(&self) {
-        self.generation.advance();
     }
 
     /// Create a compact, immutable snapshot of this index.
@@ -568,7 +542,6 @@ impl RelationIndex {
             diagnostics,
             file_symbol_keys: cloned_symbols.file_symbol_keys,
             file_entities_by_start: cloned_entities.file_entities_by_start,
-            generation: Arc::new(SnapshotGeneration::new()),
         }
     }
 
@@ -675,7 +648,6 @@ impl RelationIndex {
             diagnostics,
             file_symbol_keys,
             file_entities_by_start,
-            generation: Arc::new(SnapshotGeneration::new()),
         }
     }
 
@@ -785,8 +757,6 @@ impl RelationIndex {
         if let Some(callee_id) = callee {
             self.track_reverse_caller(callee_id, caller);
         }
-
-        self.bump_version();
     }
 
     /// Add multiple resolved relations
@@ -811,7 +781,6 @@ impl RelationIndex {
         let inserted = set.insert(relation);
         drop(set);
         if inserted {
-            self.bump_version();
             self.track_file_caller(callee_id, file_path);
         }
     }
@@ -971,7 +940,6 @@ impl RelationIndex {
                     }
                     map.insert(span_key.clone(), entity_id);
                     drop(map);
-                    self.bump_version();
                     self.entity_to_symbol_key
                         .write()
                         .insert(entity_id, span_key.clone());
@@ -990,7 +958,6 @@ impl RelationIndex {
             }
             map.insert(key.clone(), entity_id);
         }
-        self.bump_version();
         self.entity_to_symbol_key
             .write()
             .insert(entity_id, key.clone());

@@ -1164,4 +1164,194 @@ mod tests {
             0
         );
     }
+
+    /// The prepared-statement batch upserts must behave exactly like the
+    /// row-by-row form they replaced: empty input writes nothing, a batch
+    /// writes every row once, and a conflicting replay updates the row in
+    /// place instead of duplicating it.
+    #[tokio::test]
+    async fn batch_upserts_handle_empty_input_and_conflicts() {
+        use crate::repo::{EntityRepository, FileRepository};
+
+        let client = SqliteClient::in_memory().expect("in-memory client");
+        RelationStorage::ensure_project(&client, 1, "/repo")
+            .await
+            .expect("ensure project");
+
+        // Empty input: zero count, no rows, no error.
+        assert_eq!(
+            RelationStorage::files_upsert(&client, 1, 3, &[])
+                .await
+                .expect("empty files batch"),
+            0
+        );
+        assert_eq!(
+            RelationStorage::entities_upsert(&client, &[])
+                .await
+                .expect("empty entities batch"),
+            0
+        );
+        assert_eq!(
+            RelationStorage::chunks_upsert(&client, &[])
+                .await
+                .expect("empty chunks batch"),
+            0
+        );
+
+        let file_v1 = FileRecord {
+            id: 0,
+            path: "a.rs".to_string(),
+            language: "rust".to_string(),
+            category: 4,
+            last_modified: 1,
+            created_at: 1,
+            project_id: 1,
+            content_hash: Some("hash-1".to_string()),
+        };
+        assert_eq!(
+            RelationStorage::files_upsert(&client, 1, 3, &[file_v1.clone()])
+                .await
+                .expect("insert file"),
+            1
+        );
+        // Conflict replay with changed payload: one row, updated content.
+        let file_v2 = FileRecord {
+            language: "rust-2024".to_string(),
+            content_hash: Some("hash-2".to_string()),
+            ..file_v1.clone()
+        };
+        assert_eq!(
+            RelationStorage::files_upsert(&client, 1, 3, &[file_v2])
+                .await
+                .expect("update file"),
+            1
+        );
+
+        // Read connections are scoped per read: the in-memory client cannot
+        // serve a write while a read connection is held.
+        let stored_file = {
+            let conn = client.read_connection().expect("read connection");
+            let stored = FileRepository::get_by_path_and_project_at_epoch(&conn, "a.rs", 1, 3)
+                .expect("file read")
+                .expect("file row present");
+            assert_eq!(stored.language, "rust-2024");
+            assert_eq!(stored.content_hash.as_deref(), Some("hash-2"));
+            stored
+        };
+
+        let entity_v1 = EntityRecord {
+            id: 0,
+            name: "fn_a".to_string(),
+            kind: "function".to_string(),
+            file_id: stored_file.id,
+            signature: Some("fn a() {}".to_string()),
+            span_start_row: Some(0),
+            span_end_row: Some(1),
+            span_start_column: Some(0),
+            span_end_column: Some(0),
+            span_start_byte: Some(0),
+            span_end_byte: Some(1),
+            scoped_name: Some("fn_a".to_string()),
+            overload_discriminator: String::new(),
+            depth: Some(0),
+            parent_id: None,
+            metadata: None,
+            parameters_json: None,
+            return_type: None,
+            doc_comment: None,
+            modifiers_json: None,
+            project_id: 1,
+            epoch: 3,
+            batch_id: 0,
+            rank: 0.0,
+        };
+        assert_eq!(
+            RelationStorage::entities_upsert(&client, &[entity_v1.clone()])
+                .await
+                .expect("insert entity"),
+            1
+        );
+        // Same natural key (project, epoch, file, scoped_name, kind,
+        // discriminator) with a changed payload updates in place.
+        let entity_v2 = EntityRecord {
+            signature: Some("fn a(x: u32) {}".to_string()),
+            ..entity_v1.clone()
+        };
+        assert_eq!(
+            RelationStorage::entities_upsert(&client, &[entity_v2])
+                .await
+                .expect("update entity"),
+            1
+        );
+        assert_eq!(
+            RelationStorage::entities_count(&client, 1, 3)
+                .await
+                .expect("entity count"),
+            1,
+            "a conflicting replay must not duplicate the row"
+        );
+        let stored_entities = {
+            let conn = client.read_connection().expect("read connection");
+            EntityRepository::get_by_project_and_epoch_with_file_path(&conn, 1, 3)
+                .expect("entity read")
+        };
+        assert_eq!(stored_entities.len(), 1);
+        assert_eq!(stored_entities[0].1, "a.rs");
+        assert_eq!(
+            stored_entities[0].0.signature.as_deref(),
+            Some("fn a(x: u32) {}")
+        );
+
+        let chunk_v1 = ChunkRecord {
+            chunk_id: "c1".to_string(),
+            file_path: "a.rs".to_string(),
+            content: "fn a() {}".to_string(),
+            start_line: 1,
+            end_line: 1,
+            entity_ids: "[]".to_string(),
+            entity_names: "[]".to_string(),
+            entity_kinds: "[]".to_string(),
+            group_title: String::new(),
+            chunk_type: "code".to_string(),
+            test_status: 0,
+            test_source: 0,
+            created_at: 1,
+            updated_at: 1,
+            project_id: Some(1),
+            epoch: 3,
+            batch_id: 0,
+            path: "emb".to_string(),
+            bm25_keywords: String::new(),
+            segment_id: String::new(),
+            truncated: 0,
+        };
+        assert_eq!(
+            RelationStorage::chunks_upsert(&client, &[chunk_v1.clone()])
+                .await
+                .expect("insert chunk"),
+            1
+        );
+        let chunk_v2 = ChunkRecord {
+            content: "fn a(x: u32) {}".to_string(),
+            ..chunk_v1.clone()
+        };
+        assert_eq!(
+            RelationStorage::chunks_upsert(&client, &[chunk_v2])
+                .await
+                .expect("update chunk"),
+            1
+        );
+        assert_eq!(
+            RelationStorage::chunks_count(&client, 1, 3)
+                .await
+                .expect("chunk count"),
+            1,
+            "a conflicting replay must not duplicate the row"
+        );
+        let readback = RelationStorage::chunks_by_ids(&client, 1, &["c1".to_string()], &[3])
+            .await
+            .expect("readback");
+        assert_eq!(readback.len(), 1);
+        assert_eq!(readback[0].content, "fn a(x: u32) {}");
+    }
 }

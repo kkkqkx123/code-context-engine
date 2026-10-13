@@ -5,7 +5,9 @@
 
 use std::sync::Arc;
 
-use cce_codegraph::index::{EntityIndexOps, RelationIndex, RelationQueryOps};
+use cce_codegraph::index::{
+    LayeredSnapshotIndex, SnapshotEntityQueryOps, SnapshotRelationQueryOps,
+};
 use cce_types::{ExternalCallType, RelationType, Span};
 
 use super::aggregator::FileNlDocument;
@@ -23,17 +25,20 @@ struct RelationInfo {
 /// Relation enhancer
 ///
 /// Enhances exported documents with code relationship information
-/// from the relation index.
+/// from the published relation snapshot. Holds the publisher's shared
+/// product (`LayeredSnapshotIndex`) instead of a private deep copy from
+/// the builder, so the builder can be cleared and rebuilt without
+/// emptying the enhancer's visible content.
 pub struct RelationEnhancer {
-    /// Relation index (read-only reference)
-    relation_index: Arc<RelationIndex>,
+    /// Published relation snapshot (read-only shared reference)
+    relation_index: Arc<LayeredSnapshotIndex>,
     /// Configuration
     config: RelationEnhancerConfig,
 }
 
 impl RelationEnhancer {
     /// Create a new relation enhancer
-    pub fn new(relation_index: Arc<RelationIndex>, config: RelationEnhancerConfig) -> Self {
+    pub fn new(relation_index: Arc<LayeredSnapshotIndex>, config: RelationEnhancerConfig) -> Self {
         Self {
             relation_index,
             config,
@@ -207,11 +212,11 @@ impl RelationEnhancer {
 
         for entity_id in filtered_ids {
             // Get resolved relations for this function
-            if let Some(relations_ref) = self
+            if let Some(caller_relations) = self
                 .relation_index
                 .get_resolved_relations_by_caller(entity_id)
             {
-                for r in relations_ref.value() {
+                for r in &caller_relations {
                     // Filter stdlib relations if configured
                     if !self.config.include_stdlib
                         && matches!(
@@ -270,7 +275,7 @@ impl RelationEnhancer {
                     let caller_file_path = self.relation_index.get_file_path_by_entity(caller_id);
 
                     relations.push(RelationInfo {
-                        name: caller.value().name.clone(),
+                        name: caller.name.clone(),
                         relation_type: "called by".to_string(),
                         file_path: caller_file_path,
                         span: None,
@@ -284,5 +289,156 @@ impl RelationEnhancer {
         } else {
             Some(relations)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cce_codegraph::index::RelationSnapshotIndex;
+    use cce_codegraph::index::entity_index::EntityIndexOps;
+    use cce_types::relation::CallContext;
+    use cce_types::{Entity, EntityId, EntityKind, ResolvedRelation, Span};
+
+    fn test_entity(id: u64, name: &str) -> Entity {
+        Entity {
+            id: EntityId(id),
+            kind: EntityKind::Function,
+            name: name.to_string(),
+            signature: String::new(),
+            parameters: Vec::new(),
+            return_type: None,
+            span: Span::default(),
+            depth: 0,
+            parent: None,
+            children: Vec::new(),
+            doc_comment: None,
+            modifiers: Vec::new(),
+            attributes: Default::default(),
+            metadata: Default::default(),
+            is_stdlib: false,
+            stdlib_category: None,
+            subtype: None,
+        }
+    }
+
+    fn test_edge(caller: u64, callee: u64, callee_name: &str) -> ResolvedRelation {
+        ResolvedRelation {
+            caller: EntityId(caller),
+            callee_id: Some(EntityId(callee)),
+            callee_name: callee_name.to_string(),
+            relation_type: RelationType::DirectCall,
+            span: Span::default(),
+            is_external: false,
+            external_type: None,
+            callee_symbol: None,
+            stdlib_category: None,
+            owner_type: None,
+            call_context: CallContext::Direct,
+            overload_signature: None,
+            call_frequency: 1,
+            cfg_condition: None,
+        }
+    }
+
+    fn publish_layered(index: &cce_codegraph::index::RelationIndex) -> Arc<LayeredSnapshotIndex> {
+        let base = Arc::new(RelationSnapshotIndex::from_index(index));
+        Arc::new(LayeredSnapshotIndex::new(base))
+    }
+
+    fn related_names(enhancer: &RelationEnhancer, name: &str, file: &str) -> Vec<String> {
+        enhancer
+            .related_for_entity(name, file)
+            .into_iter()
+            .map(|related| related.name)
+            .collect()
+    }
+
+    #[test]
+    fn enhancer_shares_published_snapshot_across_builder_clear_and_republish() {
+        let builder_index = cce_codegraph::index::RelationIndex::new();
+        builder_index.add_function_with_path(
+            EntityId(1),
+            test_entity(1, "caller"),
+            "src/a.rs".to_string(),
+        );
+        builder_index.add_function_with_path(
+            EntityId(2),
+            test_entity(2, "callee"),
+            "src/a.rs".to_string(),
+        );
+        builder_index.add_resolved_relation(test_edge(1, 2, "callee"));
+
+        let published = publish_layered(&builder_index);
+        let enhancer =
+            RelationEnhancer::new(Arc::clone(&published), RelationEnhancerConfig::default());
+        assert!(
+            related_names(&enhancer, "caller", "src/a.rs").contains(&"callee".to_string()),
+            "export enhancement must see the published call edge"
+        );
+
+        builder_index.clear();
+        assert!(
+            related_names(&enhancer, "caller", "src/a.rs").contains(&"callee".to_string()),
+            "clearing the builder for the next full run must not empty shared enhancement"
+        );
+
+        let next_index = cce_codegraph::index::RelationIndex::new();
+        next_index.add_function_with_path(
+            EntityId(1),
+            test_entity(1, "caller"),
+            "src/a.rs".to_string(),
+        );
+        next_index.add_function_with_path(
+            EntityId(3),
+            test_entity(3, "other"),
+            "src/a.rs".to_string(),
+        );
+        next_index.add_resolved_relation(test_edge(1, 3, "other"));
+
+        let republished = publish_layered(&next_index);
+        let rewired = RelationEnhancer::new(republished, RelationEnhancerConfig::default());
+        let names = related_names(&rewired, "caller", "src/a.rs");
+        assert!(
+            names.contains(&"other".to_string()),
+            "rewired enhancement must reflect the new full run"
+        );
+        assert!(
+            !names.contains(&"callee".to_string()),
+            "rewired enhancement must not retain the previous run's edge"
+        );
+    }
+
+    #[test]
+    fn snapshot_enhancement_matches_live_index_queries() {
+        let index = cce_codegraph::index::RelationIndex::new();
+        index.add_function_with_path(
+            EntityId(1),
+            test_entity(1, "caller"),
+            "src/a.rs".to_string(),
+        );
+        index.add_function_with_path(
+            EntityId(2),
+            test_entity(2, "callee"),
+            "src/a.rs".to_string(),
+        );
+        index.add_resolved_relation(test_edge(1, 2, "callee"));
+
+        let live = RelationEnhancer::new(
+            Arc::new(LayeredSnapshotIndex::new(Arc::new(
+                RelationSnapshotIndex::from_index_shared(&index),
+            ))),
+            RelationEnhancerConfig::default(),
+        );
+        let shared =
+            RelationEnhancer::new(publish_layered(&index), RelationEnhancerConfig::default());
+        assert_eq!(
+            related_names(&live, "caller", "src/a.rs"),
+            related_names(&shared, "caller", "src/a.rs"),
+        );
+        assert_eq!(
+            related_names(&live, "callee", "src/a.rs"),
+            related_names(&shared, "callee", "src/a.rs"),
+        );
     }
 }

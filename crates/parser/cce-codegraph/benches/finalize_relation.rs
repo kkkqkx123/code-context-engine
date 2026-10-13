@@ -12,8 +12,9 @@
 //! not a per-impact-set copy primitive: the former copy benchmark
 //! characterized no production regression path and was removed.
 //!
-//! Memory materialization (`detached_clone`) during finalize is also timed,
-//! since a full rebuild pays it on every run.
+//! Memory materialization (`detached_clone`) during finalize is also timed.
+//! A full rebuild pays it once per run for publication; export enhancement
+//! shares the publisher's product instead of taking a second deep copy.
 //!
 //! Run: `cargo run -p cce-codegraph --bench finalize_relation`
 //! Baseline numbers are appended to `benches/results/finalize_relation.tsv`.
@@ -23,7 +24,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use cce_codegraph::index::{IndexBuilder, RelationIndex, RelationSnapshotIndex};
+use cce_codegraph::index::{IndexBuilder, RelationIndex};
 use cce_types::entity::ParseStatus;
 use cce_types::relation::CallContext;
 use cce_types::{
@@ -138,17 +139,13 @@ fn bench_ms(iters: usize, mut f: impl FnMut()) -> f64 {
 
 fn main() {
     println!("finalize_relation benchmark (relation finalize / P-5 full-replay cost)");
-    println!(
-        "{:<16} {:<22} {:>12}",
-        "entities", "strategy", "ms"
-    );
+    println!("{:<16} {:<22} {:>12}", "entities", "strategy", "ms");
 
     let mut out = OpenOptions::new()
         .create(true)
         .append(true)
         .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("benches/results/finalize_relation.tsv"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/finalize_relation.tsv"),
         )
         .ok();
     if let Some(f) = out.as_mut() {
@@ -180,7 +177,10 @@ fn main() {
             entities, "memory_materialize", clone_ms
         );
         if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "{entities}\tmemory_materialize\t{file_count}\t{clone_ms:.2}");
+            let _ = writeln!(
+                f,
+                "{entities}\tmemory_materialize\t{file_count}\t{clone_ms:.2}"
+            );
         }
         drop(index);
     }

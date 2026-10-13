@@ -268,19 +268,77 @@ async fn run_contract_suite(store: &impl VectorStorage, tag: &str) {
     assert_eq!(hits[0].id, "doc-1");
 
     // Scoped file delete then group delete, counts follow along.
-    store
+    let removed = store
         .delete_by_file_path_scoped("src/a.rs", &group, None)
         .await
         .expect("delete file");
+    assert_eq!(removed, 1, "exactly one point of src/a.rs is in the group");
     assert_eq!(store.count_points_by_group(&group).await.expect("count"), 2);
-    for cleanup in [&group, &other, &generation, &types, &docs, &orthogonal] {
-        store.delete_by_group(cleanup).await.expect("delete group");
+    for (cleanup, expected) in [
+        (&group, 2),
+        (&other, 1),
+        (&generation, 2),
+        (&types, 2),
+        (&docs, 3),
+        (&orthogonal, 2),
+    ] {
+        let removed = store.delete_by_group(cleanup).await.expect("delete group");
+        assert_eq!(
+            removed, expected,
+            "group {cleanup} must report the removed count"
+        );
         assert_eq!(
             store.count_points_by_group(cleanup).await.expect("count"),
             0,
             "group {cleanup} must be empty after delete"
         );
     }
+
+    // Epoch-scoped and batch deletes report exact removed counts, leave
+    // out-of-scope points untouched, and treat a zero match as a no-op.
+    let scope = format!("{tag}-delete-scope");
+    store
+        .upsert_points(&[
+            code_point("sc-a1", vec![1.0, 0.0, 0.0, 0.0], "src/one.rs", &scope, 3),
+            code_point("sc-a2", vec![1.0, 0.0, 0.0, 0.0], "src/one.rs", &scope, 4),
+            code_point("sc-b1", vec![1.0, 0.0, 0.0, 0.0], "src/two.rs", &scope, 3),
+            code_point("sc-c1", vec![1.0, 0.0, 0.0, 0.0], "src/three.rs", &scope, 3),
+        ])
+        .await
+        .expect("upsert delete scope");
+    let removed = store
+        .delete_by_file_path_scoped("src/missing.rs", &scope, None)
+        .await
+        .expect("zero-match delete");
+    assert_eq!(removed, 0);
+    assert_eq!(
+        store.count_points_by_group(&scope).await.expect("count"),
+        4,
+        "a zero-match delete must not remove anything"
+    );
+    let removed = store
+        .delete_by_file_path_scoped_epoch("src/one.rs", &scope, 3)
+        .await
+        .expect("epoch delete");
+    assert_eq!(removed, 1, "only the epoch-3 point of src/one.rs matches");
+    assert_eq!(store.count_points_by_group(&scope).await.expect("count"), 3);
+    let removed = store
+        .delete_by_file_paths_scoped(&["src/two.rs", "src/three.rs"], &scope, None)
+        .await
+        .expect("batch delete");
+    assert_eq!(removed, 2, "one point per listed file");
+    assert_eq!(store.count_points_by_group(&scope).await.expect("count"), 1);
+    let removed = store
+        .delete_by_file_paths_scoped_epoch(&["src/one.rs"], &scope, 4)
+        .await
+        .expect("batch epoch delete");
+    assert_eq!(removed, 1);
+    assert_eq!(store.count_points_by_group(&scope).await.expect("count"), 0);
+    let removed = store
+        .delete_by_file_paths_scoped_epoch(&[], &scope, 4)
+        .await
+        .expect("empty batch epoch delete");
+    assert_eq!(removed, 0, "an empty path list is a no-op");
 
     // Dimension mismatches are rejected, never stored silently.
     let bad = format!("{tag}-bad");

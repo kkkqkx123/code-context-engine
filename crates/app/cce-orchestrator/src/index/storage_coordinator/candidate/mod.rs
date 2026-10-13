@@ -120,20 +120,43 @@ mod tests {
             .await
             .expect("candidate should be prepared");
 
-        // A replaced file gets a `replaced` override; a later deletion of a
-        // prepared file upgrades it to `deleted`.
-        storage
-            .prepare_hot_update_file(Path::new("src/changed.rs"))
-            .await
-            .expect("prepare should register replaced");
+        // A deleted file inside the candidate registers a `deleted` override;
+        // a repeat registration is idempotent.
         storage
             .register_deleted_file(Path::new("src/changed.rs"))
             .await
-            .expect("deletion should upgrade to deleted");
+            .expect("deletion should register deleted");
+        storage
+            .register_deleted_file(Path::new("src/changed.rs"))
+            .await
+            .expect("repeat deletion stays idempotent");
         storage
             .register_deleted_file(Path::new("src/gone.rs"))
             .await
             .expect("pure deletion registers deleted");
+
+        // The batch form registers every file in one pass and must refuse to
+        // run without a candidate, where no candidate epoch exists to scope
+        // the external delete to.
+        storage
+            .register_deleted_files(&[Path::new("src/batch_a.rs"), Path::new("src/batch_b.rs")])
+            .await
+            .expect("batch deletion should register deleted");
+        let standalone = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let without_candidate = StorageCoordinator::new(1)
+            .expect("valid project ID")
+            .with_metadata_store(standalone)
+            .with_epoch(1);
+        let error = without_candidate
+            .register_deleted_files(&[Path::new("src/orphan.rs")])
+            .await
+            .expect_err("batch deletion without a candidate must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("requires a prepared hot-update candidate"),
+            "unexpected error: {error}"
+        );
 
         let conn = client.read_connection().expect("connection should open");
         let overrides = GenerationOverrideRepository::list_for_generation(&conn, 1, 2)
@@ -141,6 +164,14 @@ mod tests {
         assert_eq!(
             overrides,
             vec![
+                GenerationOverride {
+                    file_path: "src/batch_a.rs".to_string(),
+                    disposition: OverrideDisposition::Deleted,
+                },
+                GenerationOverride {
+                    file_path: "src/batch_b.rs".to_string(),
+                    disposition: OverrideDisposition::Deleted,
+                },
                 GenerationOverride {
                     file_path: "src/changed.rs".to_string(),
                     disposition: OverrideDisposition::Deleted,

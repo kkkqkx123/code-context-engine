@@ -1035,4 +1035,127 @@ mod tests {
             "full-root-a"
         );
     }
+
+    /// The batch work-unit interfaces must cover empty input, project
+    /// scoping, and the bulk Running-to-Committed transition.
+    #[tokio::test]
+    async fn work_unit_batch_interfaces_cover_empty_scoping_and_commit() {
+        let db = Arc::new(SqliteClient::in_memory().expect("in-memory database"));
+        let manager = CheckpointManager::new_for_project(1, db);
+        let operation_id = "op-work-unit-batch";
+        let stage = "embedding_generation";
+
+        manager
+            .create_checkpoint(CreateCheckpointParams {
+                operation_id,
+                operation_type: OperationKind::FullIndex,
+                root_dir: "/project",
+                total_files: 3,
+                batch_size: 3,
+                file_list_hash: "",
+            })
+            .await
+            .expect("checkpoint created");
+
+        // Empty input is a no-op on both interfaces.
+        manager
+            .insert_work_units(&[])
+            .await
+            .expect("empty batch insert must succeed");
+        manager
+            .update_work_unit_statuses(operation_id, stage, &[], WorkUnitStatus::Committed)
+            .await
+            .expect("empty batch status update must succeed");
+
+        let records: Vec<WorkUnitCheckpointRecord> = (0..3)
+            .map(|i| WorkUnitCheckpointRecord {
+                id: None,
+                project_id: 1,
+                operation_id: operation_id.to_string(),
+                stage: stage.to_string(),
+                target_epoch: 1,
+                work_unit_hash: format!("wu-{i}"),
+                status: WorkUnitStatus::Running,
+                item_count: 1,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            })
+            .collect();
+
+        manager
+            .insert_work_units(&records)
+            .await
+            .expect("batch insert");
+        let listed = manager
+            .get_work_units(operation_id, stage)
+            .await
+            .expect("list work units");
+        assert_eq!(listed.len(), 3, "every staged record must be written");
+        assert!(
+            listed
+                .iter()
+                .all(|record| record.status == WorkUnitStatus::Running)
+        );
+
+        // A record scoped to another project is rejected before any row of
+        // the batch is written, so a rejected batch leaves no partial state.
+        let mut foreign = records[0].clone();
+        foreign.project_id = 2;
+        foreign.work_unit_hash = "wu-foreign".to_string();
+        let rejected_batch = vec![records[0].clone(), foreign];
+        let error = manager
+            .insert_work_units(&rejected_batch)
+            .await
+            .expect_err("a foreign-project record must fail the whole batch");
+        assert!(
+            error.to_string().contains("project_id mismatch"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            manager
+                .get_work_units(operation_id, stage)
+                .await
+                .expect("list work units")
+                .len(),
+            3,
+            "a rejected batch must not write any row"
+        );
+
+        // The bulk status update flips every hash in one transaction.
+        let hashes: Vec<String> = records
+            .iter()
+            .map(|record| record.work_unit_hash.clone())
+            .collect();
+        manager
+            .update_work_unit_statuses(operation_id, stage, &hashes, WorkUnitStatus::Committed)
+            .await
+            .expect("batch status update");
+        let listed = manager
+            .get_work_units(operation_id, stage)
+            .await
+            .expect("list work units");
+        assert_eq!(listed.len(), 3);
+        assert!(
+            listed
+                .iter()
+                .all(|record| record.status == WorkUnitStatus::Committed)
+        );
+
+        // A committed hash resolves through the point lookup.
+        let committed = manager
+            .get_work_unit_by_hash(operation_id, stage, &hashes[0])
+            .await
+            .expect("hash lookup")
+            .expect("record exists");
+        assert_eq!(committed.status, WorkUnitStatus::Committed);
+
+        // Re-inserting an already-written hash violates the uniqueness
+        // contract, so a resumed run must not double-write it.
+        let mut replay = records[0].clone();
+        replay.status = WorkUnitStatus::Running;
+        assert!(
+            manager.insert_work_units(&[replay]).await.is_err(),
+            "duplicate work unit hash must be rejected"
+        );
+    }
 }

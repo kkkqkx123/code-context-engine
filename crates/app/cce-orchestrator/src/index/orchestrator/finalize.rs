@@ -22,41 +22,34 @@ use crate::index_state::{ModuleType, ModuleUpdateState};
 impl IndexOrchestrator {
     /// Finalize index after batch processing completes.
     ///
-    /// Performs post-processing steps that depend on complete data:
-    /// 1. Resolve relation counts (requires all files to be indexed)
-    /// 2. Wire up relation enhancement for NL document export
+    /// Returns the resolved relation count. Relation enhancement for NL
+    /// document export is wired in `build_and_publish_relations` from the
+    /// publisher's shared product, not from a second builder deep copy.
     pub(super) fn finalize_index(&self) -> usize {
-        // Step 1: Finalize relation index (must happen after all files are added)
-        let total_relations = if let Some(ref builder) = self.relation_builder {
+        if let Some(ref builder) = self.relation_builder {
             tracing::info!("Finalizing relation index...");
             let count = builder.index().resolved_relation_count();
             tracing::info!("Relation index finalized with {} relations", count);
             count
         } else {
             0
-        };
-
-        // Step 2: Set up relation enhancement for export (requires relation index to be final)
-        self.setup_export_relation_enhancement();
-
-        total_relations
+        }
     }
 
-    /// Wire up relation enhancement for NL document export.
+    /// Share the published snapshot with the NL exporter.
     ///
-    /// Called automatically by `finalize_index()` after relation data is fully resolved.
-    /// Holds a detached deep copy of the builder index: the builder maps are
-    /// cleared in place on the next full-index run, so a shallow share would
-    /// let the enhancer's visible content be emptied out from under it.
-    fn setup_export_relation_enhancement(&self) {
+    /// The snapshot is the publisher's product and is independent of the
+    /// builder's lifetime, so a later `builder.clear()` cannot empty the
+    /// enhancer's visible content.
+    fn share_published_snapshot_with_exporter(
+        &self,
+        snapshot: &Arc<cce_codegraph::index::LayeredSnapshotIndex>,
+    ) {
         if let Some(ref exporter) = self.nl_exporter {
             if exporter.config().enable_relation_enhancement {
-                if let Some(ref builder) = self.relation_builder {
-                    let owned = builder.index().detached_clone();
-                    let enhancer_config = crate::export::RelationEnhancerConfig::default();
-                    tracing::info!("Setting up relation enhancement for NL document export");
-                    exporter.set_relation_enhancement(Arc::new(owned), enhancer_config);
-                }
+                let enhancer_config = crate::export::RelationEnhancerConfig::default();
+                tracing::info!("Sharing published relation snapshot with NL document export");
+                exporter.set_relation_enhancement(Arc::clone(snapshot), enhancer_config);
             }
         }
     }
@@ -279,6 +272,11 @@ impl IndexOrchestrator {
                     {
                         Ok(publication) => {
                             ctx.published_relation_epoch = Some(publication.relation_epoch);
+                            // Share the publisher's product with export
+                            // enhancement instead of taking a second builder
+                            // deep copy. The snapshot is independent of the
+                            // builder lifetime.
+                            self.share_published_snapshot_with_exporter(&publication.snapshot);
                             // the relation phase is only marked complete
                             // (and files successful) AFTER the snapshot was
                             // actually built and published. The previous

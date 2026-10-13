@@ -6,12 +6,19 @@
 use async_trait::async_trait;
 use cce_codegraph::index::{LayeredSnapshotIndex, RelationIndex};
 use cce_types::{CanonicalRelationSnapshot, SnapshotDelta, StorageError};
+use std::sync::Arc;
 
 /// Result returned after a complete relation snapshot is made active.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct RelationPublication {
     /// Newly active canonical relation epoch.
     pub relation_epoch: i64,
+    /// Queryable projection of the published state shared with export
+    /// enhancement. Full publishes carry the new base with an empty delta
+    /// chain; delta publishes carry the base plus the accumulated chain.
+    /// Sharing this product lets the exporter hold published state instead
+    /// of taking a second deep copy from the builder.
+    pub snapshot: Arc<LayeredSnapshotIndex>,
 }
 
 /// Publishes a complete canonical relation snapshot.

@@ -59,9 +59,6 @@ pub struct RelationSnapshotIndex {
     pub(super) file_entities_by_start: super::FileEntitiesByStart,
     /// Grouped diagnostics shared with the source `RelationIndex`.
     pub(super) diagnostics: Arc<RelationDiagnostics>,
-    /// Version of the source `RelationIndex` at snapshot creation time.
-    /// Used for staleness detection and CoW snapshot creation.
-    pub(super) version: u64,
     pub(super) query_optimized: Arc<QueryOptimizedIndex>,
     pub(super) transitive_deps: Arc<TransitiveFileDeps>,
     /// Lazily computed external-call classification counts.
@@ -122,16 +119,10 @@ impl RelationSnapshotIndex {
             file_symbol_keys: Arc::clone(&index.file_symbol_keys),
             file_entities_by_start: Arc::clone(&index.file_entities_by_start),
             diagnostics: Arc::clone(&index.diagnostics),
-            version: index.version(),
             query_optimized,
             transitive_deps,
             classification_stats_cache: Arc::new(RwLock::new(None)),
         }
-    }
-
-    /// Version of the source `RelationIndex` at snapshot creation time.
-    pub fn version(&self) -> u64 {
-        self.version
     }
 
     /// External-call classification counts, computed once per snapshot.

@@ -352,7 +352,7 @@ impl ServerRelationSnapshotPublisher {
         let snapshot_index = Arc::new(RelationSnapshotIndex::from_index_shared(&full_index));
         self.runtime
             .publish_snapshot(
-                snapshot_index,
+                Arc::clone(&snapshot_index),
                 epoch,
                 integrity,
                 Some(format!("{operation_id}-compaction")),
@@ -367,6 +367,7 @@ impl ServerRelationSnapshotPublisher {
 
         Ok(RelationPublication {
             relation_epoch: epoch,
+            snapshot: Arc::new(LayeredSnapshotIndex::new(snapshot_index)),
         })
     }
 }
@@ -447,7 +448,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             }
             self.runtime
                 .publish_snapshot(
-                    snapshot_index,
+                    Arc::clone(&snapshot_index),
                     epoch,
                     integrity,
                     Some(operation_id.to_string()),
@@ -457,6 +458,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
 
         Ok(RelationPublication {
             relation_epoch: epoch,
+            snapshot: Arc::new(LayeredSnapshotIndex::new(snapshot_index)),
         })
     }
 
@@ -590,7 +592,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
             }
             self.runtime
                 .publish_layered_snapshot(
-                    layered,
+                    Arc::clone(&layered),
                     epoch,
                     SnapshotIntegrity::Full,
                     Some(operation_id.to_string()),
@@ -600,6 +602,7 @@ impl RelationSnapshotPublisher for ServerRelationSnapshotPublisher {
 
         Ok(RelationPublication {
             relation_epoch: epoch,
+            snapshot: layered,
         })
     }
 
