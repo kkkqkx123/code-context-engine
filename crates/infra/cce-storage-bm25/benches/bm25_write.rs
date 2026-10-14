@@ -67,10 +67,7 @@ fn opts() -> FulltextSearchOptions {
     FulltextSearchOptions {
         limit: 10,
         offset: 0,
-        field_weights: HashMap::from([
-            ("title".to_string(), 2.0),
-            ("content".to_string(), 1.0),
-        ]),
+        field_weights: HashMap::from([("title".to_string(), 2.0), ("content".to_string(), 1.0)]),
         project_id: PROJECT_ID,
         epochs: vec![1],
         excluded_files: None,
@@ -84,7 +81,10 @@ fn opts() -> FulltextSearchOptions {
 /// Write `docs` committing once per `per_commit` documents. Returns the total
 /// wall time, the number of commits issued, and the live manager/schema so the
 /// caller can query on the same index.
-fn write_with_freq(dir: &TempDir, per_commit: usize) -> (f64, usize, IndexManager, cce_storage_bm25::IndexSchema) {
+fn write_with_freq(
+    dir: &TempDir,
+    per_commit: usize,
+) -> (f64, usize, IndexManager, cce_storage_bm25::IndexSchema) {
     let manager = IndexManager::create(dir.path()).expect("create index");
     let schema = manager.schema().clone();
     let docs = docs();
@@ -139,7 +139,10 @@ fn record_row(
 fn main() {
     let n = n_docs();
     println!("bm25_write benchmark ({n} docs, local/tantivy)");
-    println!("{:<22} {:>12} {:>10} {:>12}", "scenario", "total_ms", "commits", "docs/s");
+    println!(
+        "{:<22} {:>12} {:>10} {:>12}",
+        "scenario", "total_ms", "commits", "docs/s"
+    );
 
     let mut out = OpenOptions::new()
         .create(true)
@@ -190,8 +193,10 @@ fn main() {
         let t = Instant::now();
         for i in 0..n {
             let fp = format!("src/mod_{i:06}.rs");
-            cce_storage_bm25::delete_documents_by_file_path_and_project(&manager, &schema, &fp, PROJECT_ID)
-                .expect("delete file");
+            cce_storage_bm25::delete_documents_by_file_path_and_project(
+                &manager, &schema, &fp, PROJECT_ID,
+            )
+            .expect("delete file");
         }
         per_file_ms = t.elapsed().as_secs_f64() * 1000.0;
     }
@@ -220,7 +225,8 @@ fn main() {
         batch_add_documents(&manager, &schema, docs().clone()).expect("seed");
         manager.reload_reader().expect("reload");
         let t = Instant::now();
-        cce_storage_bm25::delete_documents_by_project(&manager, &schema, PROJECT_ID).expect("delete project");
+        cce_storage_bm25::delete_documents_by_project(&manager, &schema, PROJECT_ID)
+            .expect("delete project");
         merged_ms = t.elapsed().as_secs_f64() * 1000.0;
     }
     println!(

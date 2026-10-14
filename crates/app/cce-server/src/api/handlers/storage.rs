@@ -20,9 +20,7 @@ use cce_api::models::{
     IndexStatsResponse, QdrantProcessInfo, QdrantProcessStatus, StorageComponentStatus,
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
-use cce_codegraph::index::{
-    SnapshotEntityQueryOps, SnapshotFileQueryOps,
-};
+use cce_codegraph::index::{SnapshotEntityQueryOps, SnapshotFileQueryOps};
 use cce_storage_common::{FulltextStorage, VectorStorage};
 
 // ============================================================================
@@ -546,7 +544,8 @@ pub async fn handle_index_stats(
     let project_id = query.project_id;
 
     // Get statistics from the published relation snapshot (read-only).
-    let (total_entities, total_relations) = read_published_relation_counts(&state, project_id).await;
+    let (total_entities, total_relations) =
+        read_published_relation_counts(&state, project_id).await;
 
     // Resolve vector group ID
     let group_id = resolve_group_id(&state, project_id).await;

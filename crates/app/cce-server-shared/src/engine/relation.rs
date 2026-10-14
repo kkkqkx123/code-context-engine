@@ -257,8 +257,7 @@ impl super::CodeContextEngine {
                 .read_connection()
                 .map_err(|e| EngineError::Config(format!("Failed to open read connection: {e}")))?;
             match cce_storage_metadb_sqlite::ProjectIndexManifestRepository::get_active(
-                &conn,
-                project_id,
+                &conn, project_id,
             )
             .map_err(|e| EngineError::Config(format!("Failed to read active manifest: {e}")))?
             {

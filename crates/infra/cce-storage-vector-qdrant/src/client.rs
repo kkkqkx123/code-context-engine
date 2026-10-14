@@ -558,7 +558,11 @@ impl QdrantClient {
         self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
+            metrics.record_delete(
+                latency_ms,
+                result.as_ref().map_or(0, |&c| c),
+                result.is_ok(),
+            );
         }
 
         result
@@ -581,7 +585,11 @@ impl QdrantClient {
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
         self.record_circuit_outcome(&result).await;
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
+            metrics.record_delete(
+                latency_ms,
+                result.as_ref().map_or(0, |&c| c),
+                result.is_ok(),
+            );
         }
         result
     }
@@ -599,7 +607,11 @@ impl QdrantClient {
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
         self.record_circuit_outcome(&result).await;
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
+            metrics.record_delete(
+                latency_ms,
+                result.as_ref().map_or(0, |&c| c),
+                result.is_ok(),
+            );
         }
         result
     }
@@ -691,7 +703,11 @@ impl QdrantClient {
         self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
+            metrics.record_delete(
+                latency_ms,
+                result.as_ref().map_or(0, |&c| c),
+                result.is_ok(),
+            );
         }
 
         result
@@ -716,7 +732,11 @@ impl QdrantClient {
         self.record_circuit_outcome(&result).await;
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_delete(latency_ms, result.as_ref().map_or(0, |&c| c), result.is_ok());
+            metrics.record_delete(
+                latency_ms,
+                result.as_ref().map_or(0, |&c| c),
+                result.is_ok(),
+            );
         }
 
         result

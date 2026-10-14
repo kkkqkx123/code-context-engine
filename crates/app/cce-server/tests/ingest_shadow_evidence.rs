@@ -1,36 +1,22 @@
-//! Evidence for the ingest-commit cutover decision.
+//! Commit routes through the incremental path after the baseline lands.
 //!
-//! The ingest-commit entry runs a full index unconditionally. This test drives
-//! the real handler over a small project and then measures, with the same code
-//! the handler's `CCE_INGEST_COMMIT_SHADOW` path calls, the change set the
-//! hot-update incremental path would process. It pins down the two facts the
-//! cutover decision turns on: an incremental re-commit carries a small delta
-//! against a whole-project rebuild, and the full baseline is correctly
-//! established by a commit so that delta is measurable at all.
-//!
-//! Run:
-//!   CCE_INGEST_COMMIT_SHADOW=1 RUST_LOG=info cargo test -p cce-server \
-//!     --features admission --test ingest_shadow_evidence -- --nocapture
-//! to also observe the in-handler `ingest commit shadow change-set
-//! measurement` logs.
+//! The first commit still runs a full index to establish the baseline. Later
+//! commits run one hot-update operation, so a one-file edit only reprocesses
+//! that file and an untouched tree reprocesses nothing.
 #![cfg(feature = "admission")]
 
 mod common;
 
-use std::sync::Arc;
-
 use axum::Json;
 use axum::extract::{Path, State};
 use cce_api::models::CreateProjectRequest;
-use cce_orchestrator::IndexOptions;
-use cce_orchestrator::hot_update::measure_index_change_set;
 use cce_server::api::handlers::ingest;
 use cce_server::api::response::ApiResult;
 
 const FILE_COUNT: usize = 10;
 
 /// Create a project over `root` indexing `rs` sources, so the commit
-/// handler's full index and this test's measurement scan the same set.
+/// handler's full index and the incremental path scan the same set.
 async fn create_rust_project(state: &cce_server::api::state::AppState, root: &str) -> i64 {
     let request = CreateProjectRequest {
         name: Some("shadow-evidence".to_string()),
@@ -62,8 +48,23 @@ async fn commit(state: &cce_server::api::state::AppState, id: i64) -> usize {
     }
 }
 
+async fn stored_files(state: &cce_server::api::state::AppState, id: i64) -> usize {
+    let coordinator = state
+        .engine
+        .get_hot_update_coordinator(id)
+        .await
+        .expect("hot-update coordinator builds");
+    coordinator
+        .lock()
+        .await
+        .change_detection_stats()
+        .await
+        .expect("change-detection stats read")
+        .stored_files
+}
+
 #[tokio::test]
-async fn commit_reindexes_whole_project_for_a_one_file_change_set() {
+async fn commit_applies_one_file_delta_incrementally() {
     let _ = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .try_init();
@@ -80,60 +81,29 @@ async fn commit_reindexes_whole_project_for_a_one_file_change_set() {
     }
     let id = create_rust_project(&env.state, &root.path().to_string_lossy()).await;
 
-    let registry = env
-        .state
-        .engine
-        .metadata_store_clone()
-        .expect("engine must hold a metadata store");
-    // File hashes and the active generation manifest live in the per-project
-    // database, the same store the index pipeline reads, so the measurement
-    // must be scoped to the project rather than the registry database.
-    let project_store = registry
-        .as_ref()
-        .for_project(id)
-        .expect("per-project store opens");
-    let options = IndexOptions::new(root.path()).with_extensions(vec!["rs".to_string()]);
-
-    assert_eq!(commit(&env.state, id).await, FILE_COUNT);
-
-    // A commit publishes the full baseline: nothing is left for the
-    // incremental path to reprocess immediately afterwards.
-    let baseline = measure_index_change_set(Arc::clone(&project_store), &options, id)
-        .await
-        .expect("baseline change-set measurement");
     assert_eq!(
-        baseline.total_changes(),
-        0,
-        "just-committed project has no delta"
+        commit(&env.state, id).await,
+        FILE_COUNT,
+        "first commit establishes the full baseline"
     );
-    assert_eq!(baseline.unchanged.len(), FILE_COUNT);
+    assert_eq!(stored_files(&env.state, id).await, FILE_COUNT);
 
-    // One edit out of ten files is the delta an incremental re-commit carries.
     std::fs::write(
         root.path().join("src/mod_3.rs"),
         "pub fn mod_3() -> i64 {\n    3000\n}\n",
     )
     .expect("edit one file");
-    let after_edit = measure_index_change_set(Arc::clone(&project_store), &options, id)
-        .await
-        .expect("post-edit change-set measurement");
-    assert_eq!(after_edit.modified.len(), 1, "exactly one file is modified");
-    assert_eq!(after_edit.unchanged.len(), FILE_COUNT - 1);
-    assert_eq!(after_edit.total_changes(), 1);
-    let ratio_permille = (after_edit.total_changes() * 1000) / FILE_COUNT;
     assert_eq!(
-        ratio_permille, 100,
-        "a one-file edit on a ten-file project is a 100 permille change set"
+        commit(&env.state, id).await,
+        1,
+        "a one-file edit reprocesses one file instead of the whole project"
     );
+    assert_eq!(stored_files(&env.state, id).await, FILE_COUNT);
 
-    // The commit entry re-indexes the whole project for that one-file delta.
-    assert_eq!(commit(&env.state, id).await, FILE_COUNT);
-
-    // The re-commit then re-establishes the baseline, so the incremental path
-    // stays in sync with what was just rewritten in full.
-    let after_commit = measure_index_change_set(Arc::clone(&project_store), &options, id)
-        .await
-        .expect("post-commit change-set measurement");
-    assert_eq!(after_commit.total_changes(), 0);
-    assert_eq!(after_commit.unchanged.len(), FILE_COUNT);
+    assert_eq!(
+        commit(&env.state, id).await,
+        0,
+        "an untouched tree reprocesses nothing"
+    );
+    assert_eq!(stored_files(&env.state, id).await, FILE_COUNT);
 }

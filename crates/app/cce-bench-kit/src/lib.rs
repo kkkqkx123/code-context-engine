@@ -121,7 +121,9 @@ fn pick_language<'a>(state: u64, dist: &'a [(&'a str, f64)]) -> &'a str {
 pub fn gen_content(file_index: usize, language: &str) -> String {
     let fn_count = 8 + (file_index % 12);
     let mut out = String::with_capacity(256 + fn_count * 64);
-    out.push_str(&format!("// synthetic benchmark file {file_index} ({language})\n"));
+    out.push_str(&format!(
+        "// synthetic benchmark file {file_index} ({language})\n"
+    ));
     match language {
         "python" => {
             out.push_str("from typing import List\n\n");
@@ -142,18 +144,14 @@ pub fn gen_content(file_index: usize, language: &str) -> String {
         "go" => {
             out.push_str("package main\n\n");
             for i in 0..fn_count {
-                out.push_str(&format!(
-                    "func fn_{i:05}(a int) int {{ return a + {i} }}\n"
-                ));
+                out.push_str(&format!("func fn_{i:05}(a int) int {{ return a + {i} }}\n"));
             }
         }
         _ => {
             // Rust / C / C++ / fallback: valid Rust function stubs.
             out.push_str("pub struct Ctx;\n\n");
             for i in 0..fn_count {
-                out.push_str(&format!(
-                    "pub fn fn_{i:05}(a: i32) -> i32 {{ a + {i} }}\n"
-                ));
+                out.push_str(&format!("pub fn fn_{i:05}(a: i32) -> i32 {{ a + {i} }}\n"));
             }
         }
     }

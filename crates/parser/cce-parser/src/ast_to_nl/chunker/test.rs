@@ -79,7 +79,7 @@ mod tests {
             max_bm25_words: 200,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let group = create_small_group();
         let conv = create_conversion(
             "hello function prints hello message",
@@ -104,7 +104,7 @@ mod tests {
             max_bm25_words: 10,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let group = create_small_group();
         let long_text = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".to_string();
         let conv = create_conversion(&long_text, "Short embedding text.");
@@ -123,7 +123,7 @@ mod tests {
             max_bm25_words: 200,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
 
         let header_entity = GroupedEntity {
             id: EntityId(1),
@@ -211,7 +211,7 @@ mod tests {
             max_bm25_words: 200,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let group = create_small_group();
         let conv = create_conversion(
             "hello function prints hello message to console",
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn test_chunk_empty_text_produces_no_chunks() {
         let config = ChunkingConfig::default();
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let group = create_small_group();
         let conv = ConversionResult {
             entity_id: EntityId(1),
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn test_chunk_group_without_header_produces_no_chunks() {
         let config = ChunkingConfig::default();
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let group = EntityGroup {
             group_id: CompactString::from("group_empty"),
             group_type: GroupType::Standalone,
@@ -299,7 +299,7 @@ mod tests {
             max_bm25_words: 200,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let group = create_small_group();
         let conv = create_conversion("hello function prints hello", "Outputs a greeting.");
         let result = chunker
@@ -385,7 +385,7 @@ mod tests {
             max_tokens: 512,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
 
         let group_convs = vec![
             GroupConversions {
@@ -434,7 +434,7 @@ mod tests {
             max_bm25_words: 150,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
 
         let group_convs = vec![
             GroupConversions {
@@ -477,7 +477,7 @@ mod tests {
             max_tokens: 512,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
 
         let group_convs = vec![
             GroupConversions {
@@ -515,7 +515,7 @@ mod tests {
             max_tokens: 512,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
 
         // TokenEstimator uses latin_factor=0.25, so tokens ≈ chars * 0.25.
         // To get token_count >= 150, need >= 600 chars.
@@ -558,7 +558,7 @@ mod tests {
             max_bm25_words: 150,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
 
         let group_convs = vec![
             GroupConversions {
@@ -601,7 +601,7 @@ mod tests {
             max_tokens: 512,
             ..Default::default()
         };
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
 
         let group_convs = vec![
             GroupConversions {
@@ -715,7 +715,7 @@ mod tests {
         let group = create_test_group("Short text");
         let conversion = create_test_conversion("Short text");
 
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let chunks = chunker
             .chunk_group(&group, &conversion, "test.rs")
             .expect("chunk")
@@ -734,7 +734,7 @@ mod tests {
         let group = create_test_group(text);
         let conversion = create_test_conversion(text);
 
-        let mut chunker = GroupChunker::new(config);
+        let chunker = GroupChunker::new(config);
         let chunks = chunker
             .chunk_group(&group, &conversion, "test.rs")
             .expect("chunk")
@@ -807,7 +807,7 @@ mod tests {
 
     #[test]
     fn test_chunk_groups_empty() {
-        let mut chunker = GroupChunker::new(ChunkingConfig::default());
+        let chunker = GroupChunker::new(ChunkingConfig::default());
         let chunks = chunker.chunk_groups(&[], "test.rs").expect("chunk").chunks;
         assert!(chunks.is_empty());
     }

@@ -355,6 +355,31 @@ impl HotUpdateCoordinator {
         self.operation.lock().await.set_scan_root_path(project_root);
     }
 
+    /// Align the resident detector with the commit file universe.
+    ///
+    /// The universe is compared first so an unchanged commit keeps the
+    /// incremental reuse state instead of forcing a full re-hash.
+    pub async fn sync_scan_universe(&mut self, scan_options: cce_scanner::ScanOptions) {
+        let root = std::path::PathBuf::from(scan_options.root_path.clone());
+        let mut runtime = self.operation.lock().await;
+        if runtime.scan_options() != scan_options {
+            runtime.set_scan_options(scan_options);
+        }
+        if runtime.watch_root().is_none() {
+            runtime.set_watch_root(root);
+        }
+    }
+
+    /// Run one commit-driven incremental operation through stored processors.
+    ///
+    /// Callers sync the scan universe first; an empty change set completes
+    /// without publishing a new generation.
+    pub async fn run_commit_update(&self) -> Result<OperationResult> {
+        let runtime = self.operation.lock().await;
+        let mut ctx = runtime.begin_operation(OperationType::HotUpdate).await?;
+        runtime.run_with_stored_processors(&mut ctx).await
+    }
+
     // ==================== Mode Switch Methods ====================
     // ==================== Mode Switch Methods ====================
 

@@ -181,7 +181,11 @@ pub async fn incremental_index(
         };
         changes.push((PathBuf::from(file), is_deleted));
     }
-    let coordinator = match state.engine.get_hot_update_coordinator(args.project_id).await {
+    let coordinator = match state
+        .engine
+        .get_hot_update_coordinator(args.project_id)
+        .await
+    {
         Ok(coordinator) => coordinator,
         Err(error) => {
             return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
@@ -222,14 +226,7 @@ pub async fn health(
                 "rebuild_required": info.rebuild_required,
             })
         });
-    let bm25_enabled = {
-        state
-            .engine
-            .fulltext()
-            .diagnose_summary()
-            .await
-            .reachable
-    };
+    let bm25_enabled = { state.engine.fulltext().diagnose_summary().await.reachable };
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({
             "project_id": args.project_id,

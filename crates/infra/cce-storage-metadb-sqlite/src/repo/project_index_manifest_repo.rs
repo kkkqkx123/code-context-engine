@@ -235,7 +235,7 @@ impl ProjectIndexManifestRepository {
             // epoch from becoming visible before the data generation.
             RelationSnapshotRepository::activate(tx, project_id, relation_epoch)?;
         }
-        let building =
+        let mut building =
             Self::begin_building(tx, project_id, data_epoch, operation_id, input_fingerprint)?;
         if building.state == ProjectIndexManifestState::Active {
             if building.relation_epoch == relation_epoch {
@@ -245,6 +245,48 @@ impl ProjectIndexManifestRepository {
                 "operation {operation_id} is already active at relation epoch {}",
                 building.relation_epoch
             )));
+        }
+        // Relation-only republication reuses the active data generation under a
+        // new operation id. A fresh building row starts parent-free, which
+        // would orphan the inherited file rows; carry the active parent link
+        // forward when the data epoch is unchanged.
+        if building.parent_data_epoch.is_none() {
+            let active_parent: Option<Option<i64>> = tx
+                .query_row(
+                    "SELECT parent_data_epoch FROM project_index_manifests
+                     WHERE project_id = ?1 AND state = 'active'
+                     ORDER BY publication_epoch DESC LIMIT 1",
+                    params![project_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| StorageError::Query(error.to_string()))?
+                .flatten();
+            if let Some(parent) = active_parent.flatten()
+                && parent > 0
+            {
+                let active_epoch: Option<i64> = tx
+                    .query_row(
+                        "SELECT data_epoch FROM project_index_manifests
+                         WHERE project_id = ?1 AND state = 'active'
+                         ORDER BY publication_epoch DESC LIMIT 1",
+                        params![project_id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|error| StorageError::Query(error.to_string()))?
+                    .flatten();
+                if active_epoch == Some(data_epoch) {
+                    tx.execute(
+                        "UPDATE project_index_manifests
+                         SET parent_data_epoch = ?1
+                         WHERE project_id = ?2 AND publication_epoch = ?3",
+                        params![parent, project_id, building.publication_epoch],
+                    )
+                    .map_err(|error| StorageError::Transaction(error.to_string()))?;
+                    building.parent_data_epoch = Some(parent);
+                }
+            }
         }
         let changed = tx
             .execute(
@@ -967,6 +1009,37 @@ mod tests {
                 .expect("building manifest should reload")
                 .expect("building manifest should exist");
         assert_eq!(building.parent_data_epoch, None);
+    }
+
+    #[test]
+    fn reactivation_of_same_data_epoch_preserves_parent_link() {
+        let client = crate::SqliteClient::in_memory().expect("in-memory database should open");
+        client
+            .with_transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO projects (id, name, root_path, config_file_path, created_at, updated_at)
+                     VALUES (1, 'test', '/tmp/test', '.cce/config.json', 1, 1)",
+                    [],
+                )
+                .map_err(|error| StorageError::insert("projects", error.to_string()))?;
+                ProjectIndexManifestRepository::activate(tx, 1, 1, 0, "full-1", None)?;
+                ProjectIndexManifestRepository::begin_building(tx, 1, 2, "hot-1", None)?;
+                ProjectIndexManifestRepository::set_parent_data_epoch(tx, 1, "hot-1", Some(1))?;
+                ProjectIndexManifestRepository::activate(tx, 1, 2, 0, "hot-1", None)?;
+                ProjectIndexManifestRepository::activate(tx, 1, 2, 0, "relation-compaction", None)?;
+                Ok(())
+            })
+            .expect("same-epoch republication should succeed");
+        let conn = client.write_connection().expect("connection should open");
+        let active = ProjectIndexManifestRepository::get_active(&conn, 1)
+            .expect("active manifest should load")
+            .expect("active manifest should exist");
+        assert_eq!(active.data_epoch, 2);
+        assert_eq!(
+            active.parent_data_epoch,
+            Some(1),
+            "relation-only republication must not orphan inherited file rows"
+        );
     }
 
     #[test]

@@ -265,7 +265,11 @@ fn main() {
     let rps = rows as f64 / t.elapsed().as_secs_f64();
     println!("row_by_row        : {rows} rows in {ms:8.1} ms -> {rps:12.0} rows/s");
     let _ = out.as_mut().map(|f| {
-        let _ = writeln!(f, "row_by_row\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}", 3.0 / t.elapsed().as_secs_f64());
+        let _ = writeln!(
+            f,
+            "row_by_row\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}",
+            3.0 / t.elapsed().as_secs_f64()
+        );
     });
 
     let client = setup_client();
@@ -275,7 +279,11 @@ fn main() {
     let rps = rows as f64 / t.elapsed().as_secs_f64();
     println!("batch_prepared   : {rows} rows in {ms:8.1} ms -> {rps:12.0} rows/s");
     let _ = out.as_mut().map(|f| {
-        let _ = writeln!(f, "batch_prepared\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}", 3.0 / t.elapsed().as_secs_f64());
+        let _ = writeln!(
+            f,
+            "batch_prepared\t{rows}\t{rps:.0}\t3\t{:.0}\t{ms:.1}",
+            3.0 / t.elapsed().as_secs_f64()
+        );
     });
 
     // --- checkpoint per-unit vs merged ---

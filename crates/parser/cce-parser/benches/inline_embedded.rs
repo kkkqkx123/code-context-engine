@@ -192,7 +192,7 @@ fn main() {
             None,
         );
         let chunk_ms = bench_ms(3, || {
-            let mut chunker = GroupChunker::new(chunk_config.clone());
+            let chunker = GroupChunker::new(chunk_config.clone());
             for (group, conversion) in processing.groups.iter().zip(conversions.iter()) {
                 if let Some(header) = conversion.header_conversion.as_ref() {
                     let _ = chunker.chunk_group(group, header, "src/grow.rs");

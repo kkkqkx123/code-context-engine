@@ -19,10 +19,10 @@
 //! Run: `cargo run -p cce-llm-client --bench embedding_scheduling`
 //! Baseline numbers are appended to `benches/results/embedding_scheduling.tsv`.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use std::io::Write;
 
 use cce_llm_client::services::embedding::handler::SuiteEmbeddingTransport;
 use futures::stream::{self, StreamExt};
@@ -61,9 +61,15 @@ fn make_batches() -> Vec<Vec<String>> {
 }
 
 /// Serial schedule: each `embed_batch` awaits the previous one.
-async fn run_serial(transport: &SuiteEmbeddingTransport<MockEmbeddingProvider>, batches: &[Vec<String>]) {
+async fn run_serial(
+    transport: &SuiteEmbeddingTransport<MockEmbeddingProvider>,
+    batches: &[Vec<String>],
+) {
     for batch in batches {
-        transport.embed_batch(batch.clone()).await.expect("embed_batch");
+        transport
+            .embed_batch(batch.clone())
+            .await
+            .expect("embed_batch");
     }
 }
 

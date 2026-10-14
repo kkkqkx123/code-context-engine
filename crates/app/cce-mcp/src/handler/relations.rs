@@ -207,12 +207,27 @@ mod tests {
     #[test]
     fn call_direction_canonicalizes_all_spellings() {
         assert_eq!(canonical_call_direction(None), ("forward", false));
-        assert_eq!(canonical_call_direction(Some("forward")), ("forward", false));
+        assert_eq!(
+            canonical_call_direction(Some("forward")),
+            ("forward", false)
+        );
         assert_eq!(canonical_call_direction(Some("down")), ("forward", false));
-        assert_eq!(canonical_call_direction(Some("backward")), ("backward", true));
+        assert_eq!(
+            canonical_call_direction(Some("backward")),
+            ("backward", true)
+        );
         assert_eq!(canonical_call_direction(Some("up")), ("backward", true));
-        assert_eq!(canonical_call_direction(Some("callers")), ("backward", true));
-        assert_eq!(canonical_call_direction(Some("FORWARD")), ("forward", false));
-        assert_eq!(canonical_call_direction(Some("sideways")), ("forward", false));
+        assert_eq!(
+            canonical_call_direction(Some("callers")),
+            ("backward", true)
+        );
+        assert_eq!(
+            canonical_call_direction(Some("FORWARD")),
+            ("forward", false)
+        );
+        assert_eq!(
+            canonical_call_direction(Some("sideways")),
+            ("forward", false)
+        );
     }
 }

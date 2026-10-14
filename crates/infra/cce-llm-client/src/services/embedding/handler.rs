@@ -463,7 +463,7 @@ mod tests {
             "epsilon distinct content five",
             "zeta distinct content six",
         ];
-        let refs: Vec<&str> = texts.iter().copied().collect();
+        let refs: Vec<&str> = texts.to_vec();
         let batches = handler
             .create_batches(&refs, &config)
             .expect("batches form");
@@ -511,7 +511,7 @@ mod tests {
             "epsilon distinct content five",
             "zeta distinct content six",
         ];
-        let refs: Vec<&str> = texts.iter().copied().collect();
+        let refs: Vec<&str> = texts.to_vec();
         let batches = handler
             .create_batches(&refs, &config)
             .expect("batches form");

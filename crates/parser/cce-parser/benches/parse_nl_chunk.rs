@@ -155,7 +155,7 @@ fn main() {
             both_conv.convert_entity_groups(groups, path, Some(&both_req), None, None);
         let config = ChunkingConfig::default();
         let chunk_ms = bench_ms(3, || {
-            let mut chunker = GroupChunker::new(config.clone());
+            let chunker = GroupChunker::new(config.clone());
             for (g, gc) in groups.iter().zip(conversions.iter()) {
                 if let Some(header) = gc.header_conversion.as_ref() {
                     let _ = chunker.chunk_group(g, header, path);

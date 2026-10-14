@@ -11,10 +11,10 @@
 //! Run: `cargo run -p cce-orchestrator --bench index_pipeline_stages`
 //! Baseline numbers are appended to `benches/results/index_pipeline_stages.tsv`.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::io::Write;
 
 use cce_bench_kit::{DEFAULT_LANG_DIST, ProjectSize, SyntheticProject};
 use cce_orchestrator::index::{IndexOptions, IndexOrchestrator};
@@ -117,11 +117,7 @@ fn main() {
         SIZE
     );
     if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "{}\t{indexed}\t{ms:.1}\t{rate:.1}\t0",
-            SIZE.label()
-        );
+        let _ = writeln!(f, "{}\t{indexed}\t{ms:.1}\t{rate:.1}\t0", SIZE.label());
     }
 
     // Criterion timing for the end-to-end pass (modest sampling to bound cost).

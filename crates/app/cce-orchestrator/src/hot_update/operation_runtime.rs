@@ -303,6 +303,19 @@ impl HotUpdateOperationRuntime {
             .set_root_path(&project_root.to_string_lossy());
     }
 
+    /// Replace the scan universe selecting the indexed file set.
+    ///
+    /// The detector clears its incremental reuse state, so callers syncing
+    /// an unchanged universe should compare first and skip the call.
+    pub fn set_scan_options(&mut self, scan_options: cce_scanner::ScanOptions) {
+        self.change_detector.set_scan_options(scan_options);
+    }
+
+    /// Current scan universe of the change detector.
+    pub fn scan_options(&self) -> cce_scanner::ScanOptions {
+        self.change_detector.scan_options().clone()
+    }
+
     /// Check if there are file changes (without updating).
     pub async fn check_changes(&self) -> bool {
         self.change_detector.check_changes().await

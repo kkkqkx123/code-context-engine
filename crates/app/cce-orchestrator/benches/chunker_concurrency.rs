@@ -13,10 +13,10 @@
 //! Run: `cargo run -p cce-orchestrator --bench chunker_concurrency`
 //! Baseline numbers are appended to `benches/results/chunker_concurrency.tsv`.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::io::Write;
 
 use cce_bench_kit::{DEFAULT_LANG_DIST, ProjectSize, SyntheticProject};
 use cce_orchestrator::index::FileProcessor;
@@ -49,10 +49,15 @@ fn fixture() -> Fixture {
         .map(|f| {
             let abs = root.join(&f.path);
             let meta = std::fs::metadata(&abs).expect("stat materialized file");
-            FileEntry::new(abs, f.path.clone(), meta.len(), meta.modified().expect("mtime").into())
-                .with_language_info(cce_types::language::LanguageInfo::detect_from_path(
-                    &f.path.to_string_lossy(),
-                ))
+            FileEntry::new(
+                abs,
+                f.path.clone(),
+                meta.len(),
+                meta.modified().expect("mtime").into(),
+            )
+            .with_language_info(cce_types::language::LanguageInfo::detect_from_path(
+                &f.path.to_string_lossy(),
+            ))
         })
         .collect();
     Fixture { entries }
@@ -130,8 +135,8 @@ fn main() {
     // One warm-up so tree-sitter grammars and query caches are steady-state.
     rt.block_on(run_bounded(&fp, entries, 8));
 
-    let scenarios: &[( &str, usize)] = &[("serial", 1), ("bounded_k8", 8), ("unbounded", 64)];
-    let mut timings: Vec<( &str, usize, f64)> = Vec::new();
+    let scenarios: &[(&str, usize)] = &[("serial", 1), ("bounded_k8", 8), ("unbounded", 64)];
+    let mut timings: Vec<(&str, usize, f64)> = Vec::new();
     for (name, k) in scenarios {
         let ms = match *name {
             "serial" => {

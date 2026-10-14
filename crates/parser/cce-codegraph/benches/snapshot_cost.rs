@@ -121,10 +121,7 @@ fn build_index(entity_count: usize) -> RelationIndex {
 
 fn main() {
     println!("snapshot_cost benchmark (codegraph relation snapshot publish cost)");
-    println!(
-        "{:<10} {:<22} {:>12}",
-        "entities", "publish_form", "ms"
-    );
+    println!("{:<10} {:<22} {:>12}", "entities", "publish_form", "ms");
 
     for entities in [1_000usize, 10_000, 100_000] {
         // Build (once) and keep alive for the duration of the run.
@@ -137,7 +134,10 @@ fn main() {
             let _ = RelationSnapshotIndex::from_index_shared(&index);
         }
         let shared_ms = t.elapsed().as_secs_f64() * 1000.0 / 20.0;
-        println!("{:<10} {:<22} {:>12.3}", entities, "from_index_shared(O1)", shared_ms);
+        println!(
+            "{:<10} {:<22} {:>12.3}",
+            entities, "from_index_shared(O1)", shared_ms
+        );
 
         // O(N) full deep clone publish.
         let t = Instant::now();

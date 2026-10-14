@@ -410,25 +410,6 @@ impl ChangeDetector {
     }
 }
 
-/// Measure, read-only, the change set the incremental path would process for a
-/// project against its active epoch.
-///
-/// Builds a throwaway detector whose scan options match a full index run over
-/// `options`, so the reported added/modified/removed/unchanged counts describe
-/// the same file universe the full index would touch. Nothing is written: this
-/// exists so the ingest-commit entry can gather, in shadow, the
-/// changed-versus-total evidence for deciding whether that entry should route to
-/// the hot-update incremental path instead of a full rebuild.
-pub async fn measure_index_change_set(
-    db: Arc<SqliteClient>,
-    options: &crate::IndexOptions,
-    project_id: i64,
-) -> Result<CacheUpdateResult, HotUpdateError> {
-    let mut detector = ChangeDetector::new(db, options.to_scan_options());
-    detector.set_project_id(project_id);
-    detector.scan_and_detect().await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -836,57 +817,6 @@ mod tests {
         );
         assert_eq!(result.modified, vec![PathBuf::from("changed.rs")]);
         assert_eq!(result.unchanged, vec![PathBuf::from("mod.rs")]);
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[tokio::test]
-    async fn test_measure_index_change_set_matches_direct_detector() {
-        // The shadow measurement builds its own detector from `IndexOptions`;
-        // it must classify identically to a detector configured directly with
-        // the equivalent scan options over the same store.
-        let tmp = std::env::temp_dir().join(format!("cce_test_shadow_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        std::fs::write(tmp.join("mod.rs"), "fn kept() {}").unwrap();
-        std::fs::write(tmp.join("new.rs"), "fn new() {}").unwrap();
-
-        let db = Arc::new(SqliteClient::in_memory().unwrap());
-        let options = crate::IndexOptions::new(&tmp).with_extensions(vec!["rs".to_string()]);
-
-        {
-            let conn = db.write_connection().unwrap();
-            let tx = conn.unchecked_transaction().unwrap();
-            tx.execute(
-                "INSERT OR IGNORE INTO projects (id, name, root_path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)",
-                rusqlite::params![1, "test", &tmp.to_string_lossy().to_string(), 0],
-            )
-            .unwrap();
-            let mut scanner = FSScanner::new();
-            let scanned = scanner.scan(&options.to_scan_options()).unwrap();
-            let mod_hash = scanned
-                .iter()
-                .find(|e| e.path.ends_with("mod.rs"))
-                .unwrap()
-                .content_hash
-                .clone()
-                .expect("file must be hashed");
-            FileRepository::insert_hash_for_epoch(&tx, &PathBuf::from("mod.rs"), &mod_hash, 1, 0)
-                .unwrap();
-            tx.commit().unwrap();
-        }
-
-        let mut direct = ChangeDetector::new(db.clone(), options.to_scan_options());
-        direct.set_project_id(1);
-        let expected = direct.scan_and_detect().await.unwrap();
-
-        let shadow = measure_index_change_set(db, &options, 1).await.unwrap();
-
-        assert_eq!(shadow.added, expected.added);
-        assert_eq!(shadow.modified, expected.modified);
-        assert_eq!(shadow.unchanged, expected.unchanged);
-        assert_eq!(shadow.removed, expected.removed);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

@@ -27,9 +27,11 @@ const DIM: usize = 128;
 const MICROBATCH: usize = 1000;
 
 fn make_point(i: usize) -> VectorPoint {
-    let vec: Vec<f32> = (0..DIM).map(|d| ((i as f32 + d as f32) * 0.001).sin()).collect();
+    let vec: Vec<f32> = (0..DIM)
+        .map(|d| ((i as f32 + d as f32) * 0.001).sin())
+        .collect();
     let payload = Payload::new(format!("src/mod_{i:06}.rs"))
-        .with_group_id(format!("proj-1"))
+        .with_group_id("proj-1".to_string())
         .with_epoch(1)
         .with_type(PointKind::Chunk)
         .with_category(FileCategory::Code);
@@ -46,7 +48,8 @@ fn open_store(dir: &TempDir) -> LocalVectorStore {
         .with_data_dir(dir.path().to_string_lossy().into_owned());
     let store = LocalVectorStore::open_at(dir.path(), &config).expect("open store");
     let rt = tokio::runtime::Runtime::new().expect("rt");
-    rt.block_on(store.ensure_collection()).expect("ensure collection");
+    rt.block_on(store.ensure_collection())
+        .expect("ensure collection");
     store
 }
 
@@ -123,7 +126,9 @@ fn main() {
         rt.block_on(async {
             for _ in 0..200 {
                 let st = Instant::now();
-                let _ = store_r.search_dense(DenseSearchQuery::new(q.clone(), 10)).await;
+                let _ = store_r
+                    .search_dense(DenseSearchQuery::new(q.clone(), 10))
+                    .await;
                 read_samples.push(st.elapsed().as_secs_f64() * 1000.0);
             }
         });

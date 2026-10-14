@@ -37,7 +37,7 @@ use cce_plugin_runtime::default_timeout_for;
 use cce_types::error::common;
 
 /// Scan options for file system scanning
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ScanOptions {
     /// Root path to scan
     pub root_path: String,

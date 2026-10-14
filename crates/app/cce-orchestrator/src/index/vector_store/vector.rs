@@ -304,7 +304,11 @@ impl VectorStorage for VectorStore {
         }
     }
 
-    async fn delete_by_group_epoch(&self, group_id: &str, epoch: i64) -> Result<usize, StorageError> {
+    async fn delete_by_group_epoch(
+        &self,
+        group_id: &str,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
         match self {
             Self::Local(store) => {
                 VectorStorage::delete_by_group_epoch(store.as_ref(), group_id, epoch).await

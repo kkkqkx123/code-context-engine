@@ -15,8 +15,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use cce_api::models::SearchRequest;
 use cce_server::api::handlers::search;
 use cce_server::api::state::AppState;
@@ -83,9 +83,7 @@ fn main() {
             let done = run_concurrent(state.clone(), project_id, k).await;
             let ms = t.elapsed().as_secs_f64() * 1000.0;
             let rate = done as f64 / (ms / 1000.0);
-            println!(
-                "concurrency={k:<3} : {done} searches in {ms:8.1} ms -> {rate:8.1} req/s"
-            );
+            println!("concurrency={k:<3} : {done} searches in {ms:8.1} ms -> {rate:8.1} req/s");
             if let Some(f) = out.as_mut() {
                 let _ = writeln!(f, "{k}\t{done}\t{ms:.1}\t{rate:.1}");
             }

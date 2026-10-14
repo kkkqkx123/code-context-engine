@@ -37,23 +37,26 @@ fn harness() -> &'static Harness {
         let dir = std::env::temp_dir().join(format!("cce_scan_bench_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mk temp");
-        let proj = cce_bench_kit::SyntheticProject::generate(ProjectSize::Medium, cce_bench_kit::DEFAULT_LANG_DIST);
+        let proj = cce_bench_kit::SyntheticProject::generate(
+            ProjectSize::Medium,
+            cce_bench_kit::DEFAULT_LANG_DIST,
+        );
         proj.materialize(&dir).expect("materialize");
 
         // Collect (path, metadata) once; both strategies hash this exact set.
         let mut paths = Vec::new();
-        collect(&dir, &dir, &mut paths);
+        collect(&dir, &mut paths);
         Harness { root: dir, paths }
     })
 }
 
-fn collect(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, std::fs::Metadata)>) {
+fn collect(dir: &Path, out: &mut Vec<(PathBuf, std::fs::Metadata)>) {
     for entry in fs::read_dir(dir).expect("read_dir") {
         let entry = entry.expect("entry");
         let path = entry.path();
         let md = fs::metadata(&path).expect("metadata");
         if md.is_dir() {
-            collect(root, &path, out);
+            collect(&path, out);
         } else if md.is_file() {
             out.push((path, md));
         }
@@ -76,9 +79,7 @@ fn scan_opts(root: &Path, heavy_filter: bool) -> ScanOptions {
         // Standing in for a plugin FileFilter decision: a large pattern set
         // forces the per-file matcher to do real work on every entry.
         opts.respect_gitignore = true;
-        opts.exclude_patterns = (0..200)
-            .map(|i| format!("**/scratch_{i}/**"))
-            .collect();
+        opts.exclude_patterns = (0..200).map(|i| format!("**/scratch_{i}/**")).collect();
         opts.gitignore_patterns = (0..200).map(|i| format!("build_{i}/")).collect();
     }
     opts

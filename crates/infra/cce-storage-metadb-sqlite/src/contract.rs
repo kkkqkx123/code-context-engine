@@ -1199,7 +1199,7 @@ mod tests {
             content_hash: Some("hash-1".to_string()),
         };
         assert_eq!(
-            RelationStorage::files_upsert(&client, 1, 3, &[file_v1.clone()])
+            RelationStorage::files_upsert(&client, 1, 3, std::slice::from_ref(&file_v1))
                 .await
                 .expect("insert file"),
             1
@@ -1256,7 +1256,7 @@ mod tests {
             rank: 0.0,
         };
         assert_eq!(
-            RelationStorage::entities_upsert(&client, &[entity_v1.clone()])
+            RelationStorage::entities_upsert(&client, std::slice::from_ref(&entity_v1))
                 .await
                 .expect("insert entity"),
             1
@@ -1316,7 +1316,7 @@ mod tests {
             truncated: 0,
         };
         assert_eq!(
-            RelationStorage::chunks_upsert(&client, &[chunk_v1.clone()])
+            RelationStorage::chunks_upsert(&client, std::slice::from_ref(&chunk_v1))
                 .await
                 .expect("insert chunk"),
             1

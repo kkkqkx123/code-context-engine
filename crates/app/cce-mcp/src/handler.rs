@@ -38,7 +38,7 @@ use rmcp::{
 };
 
 pub use fold::{FoldArgs, FoldBatchArgs, FoldBatchItemArgs};
-pub use project::{IndexProjectArgs, IncrementalIndexArgs, ProjectArgs};
+pub use project::{IncrementalIndexArgs, IndexProjectArgs, ProjectArgs};
 pub use relations::{CallChainArgs, EntityArgs};
 pub use search::{KeywordSearchArgs, SearchArgs};
 
@@ -293,12 +293,18 @@ mod tests {
     /// same traversal.
     #[test]
     fn direction_spellings_agree_across_transports() {
-        assert_eq!(support::canonical_call_direction(Some("down")), ("forward", false));
+        assert_eq!(
+            support::canonical_call_direction(Some("down")),
+            ("forward", false)
+        );
         assert_eq!(
             support::canonical_call_direction(Some("forward")),
             ("forward", false)
         );
-        assert_eq!(support::canonical_call_direction(Some("up")), ("backward", true));
+        assert_eq!(
+            support::canonical_call_direction(Some("up")),
+            ("backward", true)
+        );
         assert_eq!(
             support::canonical_call_direction(Some("backward")),
             ("backward", true)

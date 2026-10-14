@@ -286,8 +286,7 @@ impl IndexOrchestrator {
                             // round-local builder is retired here (dropped) and
                             // never touched again, so the shared maps are
                             // effectively immutable.
-                            self.last_published_snapshot =
-                                Some(Arc::clone(&publication.snapshot));
+                            self.last_published_snapshot = Some(Arc::clone(&publication.snapshot));
                             // Share the publisher's product with export
                             // enhancement. The snapshot is independent of the
                             // retired builder lifetime.

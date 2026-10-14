@@ -69,7 +69,11 @@ impl VectorStorage for QdrantClient {
             .map_err(StorageError::from)
     }
 
-    async fn delete_by_group_epoch(&self, group_id: &str, epoch: i64) -> Result<usize, StorageError> {
+    async fn delete_by_group_epoch(
+        &self,
+        group_id: &str,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
         self.delete_by_group_epoch(group_id, epoch)
             .await
             .map_err(StorageError::from)
