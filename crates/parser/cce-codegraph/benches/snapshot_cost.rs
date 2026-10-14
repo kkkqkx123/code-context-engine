@@ -1,19 +1,26 @@
 //! T-8 — codegraph snapshot publish-cost benchmark (covers P-7).
 //!
-//! Verifies the design claim that relation-snapshot cost should scale with the
-//! *size of the change*, not the *size of the project*. Two publish forms are
-//! compared across project scales (1k / 10k / 100k entities):
+//! Compares two publish forms across project scales (1k / 10k / 100k
+//! entities). Both rebuild the derived query/dependency indexes per publish,
+//! so both grow with project size; they differ in map handover:
 //!
-//! * `from_index_shared` — O(1) `Arc` clone (zero-copy publish).
-//! * `from_index` / `detached_clone` — O(N) full deep copy (the regression path).
+//! * `from_index_shared` — shares the source maps by `Arc` clone (no entry
+//!   copy) and is the production publish path.
+//! * `from_index` — deep-copies every map first (`detached_clone`), then
+//!   publishes the copy (the regression path).
 //!
 //! The former per-impact-set copy-on-write primitive was removed: it had no
 //! production callers (the hot-update path uses sparse candidates plus delta
 //! publish), so its micro-benchmark numbers characterized no production
 //! regression path.
 //!
-//! Run: `cargo run -p cce-codegraph --bench snapshot_cost`
+//! Run: `cargo bench -p cce-codegraph --bench snapshot_cost`
+//!
+//! Manual timings are appended to `benches/results/snapshot_cost.tsv`.
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cce_codegraph::index::{IndexBuilder, RelationIndex, RelationSnapshotIndex};
@@ -123,6 +130,15 @@ fn main() {
     println!("snapshot_cost benchmark (codegraph relation snapshot publish cost)");
     println!("{:<10} {:<22} {:>12}", "entities", "publish_form", "ms");
 
+    let mut out = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/snapshot_cost.tsv"))
+        .ok();
+    if let Some(f) = out.as_mut() {
+        let _ = writeln!(f, "# entities\tpublish_form\tms");
+    }
+
     for entities in [1_000usize, 10_000, 100_000] {
         // Build (once) and keep alive for the duration of the run.
         let index = build_index(entities);
@@ -138,6 +154,9 @@ fn main() {
             "{:<10} {:<22} {:>12.3}",
             entities, "from_index_shared(O1)", shared_ms
         );
+        if let Some(f) = out.as_mut() {
+            let _ = writeln!(f, "{entities}\tfrom_index_shared\t{shared_ms:.3}");
+        }
 
         // O(N) full deep clone publish.
         let t = Instant::now();
@@ -146,6 +165,9 @@ fn main() {
         }
         let full_ms = t.elapsed().as_secs_f64() * 1000.0 / 5.0;
         println!("{:<10} {:<22} {:>12.3}", "", "from_index(ON)", full_ms);
+        if let Some(f) = out.as_mut() {
+            let _ = writeln!(f, "{entities}\tfrom_index\t{full_ms:.3}");
+        }
 
         // Suppress unused warnings for the helper signature.
         let _ = file_count;

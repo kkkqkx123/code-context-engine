@@ -1,16 +1,20 @@
 //! T-3 — chunker concurrency benchmark (covers P-2).
 //!
-//! P-2 flags that `FileProcessor` serializes the chunking stage behind a single
-//! global `Arc<Mutex<GroupChunker>>` (and a shared `ParseCoordinator`). This
-//! bench drives the *real* `FileProcessor::process_file_complete` from many
-//! concurrent clones (which share the same internal chunker/parser mutexes)
-//! and measures wall time at increasing concurrency.
+//! The full-index hot path is lock-free: `FileProcessor` shares its
+//! `GroupChunker` by reference and each worker owns its parse coordinator,
+//! so concurrent files do not serialize on a chunker mutex. The remaining
+//! ceiling is executor governance: parse, grouping, conversion and chunking
+//! are blocking CPU work, so the production path reads on the async workers
+//! and runs the CPU stage on the blocking pool
+//! (`FileProcessor::process_entry_blocking`, mirroring
+//! `process_batch_with_mode`). This bench drives that same entry point from
+//! many concurrent clones and measures wall time at increasing concurrency.
 //!
-//! If the global chunker mutex dominates, ramping concurrency from k=1 to the
-//! file count should yield little or no throughput gain — exactly the symptom
-//! P-2 describes and the proposed per-worker chunker pool is meant to remove.
+//! The bounded scenario uses the host's logical CPU count; the unbounded
+//! scenario pins 64 as an oversubscription guard — throughput parity between
+//! the two means adding threads past the core count buys nothing.
 //!
-//! Run: `cargo run -p cce-orchestrator --bench chunker_concurrency`
+//! Run: `cargo bench -p cce-orchestrator --bench chunker_concurrency`
 //! Baseline numbers are appended to `benches/results/chunker_concurrency.tsv`.
 
 use std::io::Write;
@@ -63,13 +67,23 @@ fn fixture() -> Fixture {
     Fixture { entries }
 }
 
-/// Sequential pass: one `FileProcessor` processes every file in order.
+/// Bounded concurrency for this host: the logical CPU count. CPU-bound
+/// parse/chunk work scales with cores and merely flattens past them.
+fn blocking_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(8)
+        .max(1)
+}
+
+/// Sequential pass: files are processed one at a time through the same
+/// production entry point (async read, blocking-pool CPU stage).
 async fn run_serial(fp: &FileProcessor, entries: &[FileEntry]) {
-    let mut fp = fp.clone();
     for entry in entries {
-        fp.process_file_complete(entry, OutputMode::Both)
+        fp.clone()
+            .process_entry_blocking(entry.clone(), OutputMode::Both)
             .await
-            .expect("process_file_complete");
+            .expect("process_entry_blocking");
     }
 }
 
@@ -78,11 +92,11 @@ async fn run_unbounded(fp: &FileProcessor, entries: &[FileEntry]) {
     let mut set = tokio::task::JoinSet::new();
     for entry in entries {
         let e = entry.clone();
-        let mut fp = fp.clone();
+        let fp = fp.clone();
         set.spawn(async move {
-            fp.process_file_complete(&e, OutputMode::Both)
+            fp.process_entry_blocking(e, OutputMode::Both)
                 .await
-                .expect("process_file_complete")
+                .expect("process_entry_blocking")
         });
     }
     while let Some(res) = set.join_next().await {
@@ -96,13 +110,13 @@ async fn run_bounded(fp: &FileProcessor, entries: &[FileEntry], concurrency: usi
     let mut set = tokio::task::JoinSet::new();
     for entry in entries {
         let e = entry.clone();
-        let mut fp = fp.clone();
+        let fp = fp.clone();
         let sem = sem.clone();
         set.spawn(async move {
             let _permit = sem.acquire().await.expect("semaphore");
-            fp.process_file_complete(&e, OutputMode::Both)
+            fp.process_entry_blocking(e, OutputMode::Both)
                 .await
-                .expect("process_file_complete")
+                .expect("process_entry_blocking")
         });
     }
     while let Some(res) = set.join_next().await {
@@ -114,8 +128,9 @@ fn main() {
     let fixture = fixture();
     let entries = &fixture.entries;
     let fp = FileProcessor::default();
+    let bounded = blocking_concurrency();
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(8)
+        .worker_threads(bounded)
         .enable_all()
         .build()
         .expect("runtime");
@@ -133,12 +148,13 @@ fn main() {
     }
 
     // One warm-up so tree-sitter grammars and query caches are steady-state.
-    rt.block_on(run_bounded(&fp, entries, 8));
+    rt.block_on(run_bounded(&fp, entries, bounded));
 
-    let scenarios: &[(&str, usize)] = &[("serial", 1), ("bounded_k8", 8), ("unbounded", 64)];
+    let scenarios: Vec<(&str, usize)> =
+        vec![("serial", 1), ("bounded", bounded), ("unbounded", 64)];
     let mut timings: Vec<(&str, usize, f64)> = Vec::new();
     for (name, k) in scenarios {
-        let ms = match *name {
+        let ms = match name {
             "serial" => {
                 let t = Instant::now();
                 rt.block_on(run_serial(&fp, entries));
@@ -151,26 +167,33 @@ fn main() {
             }
             _ => {
                 let t = Instant::now();
-                rt.block_on(run_bounded(&fp, entries, *k));
+                rt.block_on(run_bounded(&fp, entries, k));
                 t.elapsed().as_secs_f64() * 1000.0
             }
         };
         let rate = N as f64 / (ms / 1000.0);
         println!("{name:<12} (k={k:<3}) : {N} files in {ms:8.1} ms -> {rate:8.1} files/s");
-        timings.push((name, *k, ms));
+        timings.push((name, k, ms));
         if let Some(f) = out.as_mut() {
             let _ = writeln!(f, "{name}\t{k}\t{N}\t{ms:.1}\t{rate:.1}");
         }
     }
 
-    // Relative speedup of unbounded vs serial highlights the chunker-mutex
-    // contention: a value near 1.0x means concurrency buys almost nothing.
+    // Relative speedup of parallel over serial tracks executor governance:
+    // a value near 1.0x means concurrency buys almost nothing.
     if let (Some(serial), Some(unbounded)) = (
         timings.iter().find(|(n, _, _)| *n == "serial"),
         timings.iter().find(|(n, _, _)| *n == "unbounded"),
     ) {
         let speedup = serial.2 / unbounded.2;
         println!("unbounded/serial speedup: {speedup:.2}x (1.0x = no concurrency benefit)");
+    }
+    if let (Some(serial), Some(bounded_row)) = (
+        timings.iter().find(|(n, _, _)| *n == "serial"),
+        timings.iter().find(|(n, _, _)| *n == "bounded"),
+    ) {
+        let speedup = serial.2 / bounded_row.2;
+        println!("bounded(k={bounded})/serial speedup: {speedup:.2}x");
     }
 
     // Criterion timing for the unbounded scenario (smaller N to bound cost).

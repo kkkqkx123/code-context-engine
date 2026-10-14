@@ -460,6 +460,38 @@ impl FileProcessor {
         }
     }
 
+    /// Fresh-file pipeline with the CPU stage offloaded to the blocking pool.
+    ///
+    /// Async file IO stays on the workers; parse, grouping, conversion and
+    /// chunking run under `spawn_blocking` so CPU-bound files cannot starve
+    /// the workers serving progress reporting, checkpoints and storage IO.
+    /// Takes ownership so the CPU stage can move into the blocking closure;
+    /// callers that reuse a processor must clone first, as the batch loop
+    /// already does per file. The returned flag mirrors the batch loop's
+    /// lossy-decode check.
+    pub async fn process_entry_blocking(
+        mut self,
+        file_entry: FileEntry,
+        output_mode: OutputMode,
+    ) -> Result<(CompleteFileProcessResult, bool), OrchestratorError> {
+        let (content, route) = Self::read_and_route(&file_entry).await?;
+        let content_lossy = content.contains('\u{FFFD}');
+        let blocking = if route.is_document() {
+            tokio::task::spawn_blocking(move || {
+                self.process_document_file_complete_sync(&file_entry, &content, output_mode)
+            })
+            .await
+        } else {
+            tokio::task::spawn_blocking(move || {
+                self.process_code_file_with_mode_sync(&file_entry, &content, output_mode)
+            })
+            .await
+        };
+        let complete = blocking
+            .map_err(|join| OrchestratorError::index("file_task_join", join.to_string()))??;
+        Ok((complete, content_lossy))
+    }
+
     /// Build the chunk cache key for a file (project, path, mode, source hash).
     ///
     /// `mode_label` is part of the key: entries generated under different

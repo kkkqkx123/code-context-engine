@@ -19,7 +19,7 @@ use crate::hot_update::Result;
 pub async fn rebuild_from_config(
     exporter: &Arc<tokio::sync::RwLock<Arc<NlDocumentExporter>>>,
     ast_converter: &Arc<tokio::sync::RwLock<Arc<AstToNlConverter>>>,
-    chunker: &tokio::sync::Mutex<GroupChunker>,
+    chunker: &Arc<tokio::sync::RwLock<Arc<GroupChunker>>>,
     ast_to_nl_config: &Arc<tokio::sync::RwLock<AstToNlConfig>>,
     relation_epoch_cache: &tokio::sync::Mutex<Option<i64>>,
     config_path: &Path,
@@ -37,7 +37,7 @@ pub async fn rebuild_from_config(
 
     if let Ok(config) = Settings::ast_to_nl() {
         *ast_converter.write().await = Arc::new(AstToNlConverter::with_config(&config));
-        *chunker.lock().await = GroupChunker::new(config.chunking.clone());
+        *chunker.write().await = Arc::new(GroupChunker::new(config.chunking.clone()));
         *ast_to_nl_config.write().await = config;
     }
 

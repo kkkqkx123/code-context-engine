@@ -144,10 +144,21 @@ impl FileProcessor {
         content: &str,
         output_mode: OutputMode,
     ) -> Result<CompleteFileProcessResult, OrchestratorError> {
+        self.process_code_file_complete_sync(file_entry, content, output_mode)
+    }
+
+    /// Synchronous code pipeline shared by the async wrapper above and the
+    /// blocking-pool entry point below. The whole body is CPU-bound with no
+    /// awaits, so batch processing runs it under `spawn_blocking` instead of
+    /// occupying an async worker thread.
+    pub(crate) fn process_code_file_complete_sync(
+        &mut self,
+        file_entry: &FileEntry,
+        content: &str,
+        output_mode: OutputMode,
+    ) -> Result<CompleteFileProcessResult, OrchestratorError> {
         let file_start = std::time::Instant::now();
-        let result = self
-            .process_code_file_complete_inner(file_entry, content, output_mode)
-            .await;
+        let result = self.process_code_file_complete_inner(file_entry, content, output_mode);
         let file_latency = file_start.elapsed().as_secs_f64() * 1000.0;
         if let Some(ref metrics) = self.file_processing_metrics {
             metrics.record_file(file_latency, result.is_ok());
@@ -155,7 +166,7 @@ impl FileProcessor {
         result
     }
 
-    async fn process_code_file_complete_inner(
+    fn process_code_file_complete_inner(
         &mut self,
         file_entry: &FileEntry,
         content: &str,
@@ -278,7 +289,20 @@ impl FileProcessor {
         content: &str,
         output_mode: OutputMode,
     ) -> Result<CompleteFileProcessResult, OrchestratorError> {
-        self.process_code_file_complete(file_entry, content, output_mode)
-            .await
+        self.process_code_file_with_mode_sync(file_entry, content, output_mode)
+    }
+
+    /// Synchronous variant of [`Self::process_code_file_with_mode`].
+    ///
+    /// The caller must run this off the async workers (for example under
+    /// `tokio::task::spawn_blocking`): parse, grouping, conversion and
+    /// chunking are all blocking CPU work.
+    pub fn process_code_file_with_mode_sync(
+        &mut self,
+        file_entry: &FileEntry,
+        content: &str,
+        output_mode: OutputMode,
+    ) -> Result<CompleteFileProcessResult, OrchestratorError> {
+        self.process_code_file_complete_sync(file_entry, content, output_mode)
     }
 }

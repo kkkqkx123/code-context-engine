@@ -69,8 +69,11 @@ pub struct NlDocumentUpdateProcessor {
     converter: PresentationConverter,
     /// AST-to-NL converter for enriching groups before export (swappable on config reload)
     ast_converter: Arc<tokio::sync::RwLock<Arc<AstToNlConverter>>>,
-    /// Chunker for splitting large texts (uses async mutex for thread safety)
-    chunker: Arc<Mutex<GroupChunker>>,
+    /// Chunker for splitting large texts. The chunker is immutable after
+    /// construction and shared by reference, exactly like the full-index
+    /// path: no lock is held while chunking. The outer cell only exists so
+    /// configuration reload can swap the instance.
+    chunker: Arc<tokio::sync::RwLock<Arc<GroupChunker>>>,
     /// Grouper producing the entity groups rendered by this processor.
     ///
     /// Hot-update parse results carry no pre-computed groups — the parse stage
@@ -127,7 +130,9 @@ impl NlDocumentUpdateProcessor {
             ast_converter: Arc::new(tokio::sync::RwLock::new(Arc::new(
                 AstToNlConverter::with_config(config),
             ))),
-            chunker: Arc::new(Mutex::new(GroupChunker::new(config.chunking.clone()))),
+            chunker: Arc::new(tokio::sync::RwLock::new(Arc::new(GroupChunker::new(
+                config.chunking.clone(),
+            )))),
             grouper: PreprocessingPipeline::with_config(NestProcessorConfig::default()),
             enabled: true,
             checkpoint_manager: None,

@@ -20,7 +20,6 @@ use super::checkpoint::persist_parsed_checkpoint;
 use super::{FullIndexContext, IndexOrchestrator};
 use crate::error::OrchestratorError;
 
-use crate::index::FileProcessor;
 use crate::index::options::IndexOptions;
 use crate::index_state::{IndexPhase, ModuleType, ModuleUpdateState, TrackerFailure};
 
@@ -732,35 +731,16 @@ impl IndexOrchestrator {
                             .await
                             .map_err(|error| (path_str.clone(), error))?
                     } else {
-                        // Shared read-and-route: verified read (reusing the
-                        // scan-phase fingerprint) plus the document/code
-                        // decision, identical to the other entry points.
-                        let (content, route) = FileProcessor::read_and_route(&file_entry_clone)
+                        // Fresh files run the read on the workers and the
+                        // CPU-bound parse/group/convert/chunk stage on the
+                        // blocking pool, so CPU-heavy batches cannot starve
+                        // progress reporting, checkpoints and storage IO.
+                        let (complete, lossy) = processor
+                            .process_entry_blocking(file_entry_clone.clone(), output_mode)
                             .await
                             .map_err(|error| (path_str.clone(), error))?;
-                        // Non-strict decoding of a mis-detected encoding
-                        // yields U+FFFD replacement characters: the file
-                        // parses "fine" but the indexed text is lossy.
-                        content_lossy = content.contains('\u{FFFD}');
-                        if route.is_document() {
-                            processor
-                                .process_document_file_complete(
-                                    &file_entry_clone,
-                                    &content,
-                                    output_mode,
-                                )
-                                .await
-                                .map_err(|error| (path_str.clone(), error))?
-                        } else {
-                            processor
-                                .process_code_file_with_mode(
-                                    &file_entry_clone,
-                                    &content,
-                                    output_mode,
-                                )
-                                .await
-                                .map_err(|error| (path_str.clone(), error))?
-                        }
+                        content_lossy = lossy;
+                        complete
                     };
 
                     persist_parsed_checkpoint(

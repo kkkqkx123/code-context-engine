@@ -4,6 +4,7 @@
 //! including file filtering, storage options, and performance tuning.
 
 use cce_config::Settings;
+use cce_config::modules::BatchConfig;
 use cce_types::error::ConfigError;
 use std::path::PathBuf;
 
@@ -17,6 +18,9 @@ pub struct IndexOptions {
     /// Directories to exclude
     pub exclude_dirs: Vec<String>,
     /// Maximum concurrent file processing
+    ///
+    /// Defaults to the host's logical CPU count; CPU-bound parse/chunk work
+    /// scales with cores and merely flattens past them.
     pub max_concurrency: usize,
     /// Store in vector database
     pub store_vectors: bool,
@@ -48,7 +52,7 @@ impl Default for IndexOptions {
             root_dir: PathBuf::from("."),
             extensions: config.extensions,
             exclude_dirs: config.exclude_dirs,
-            max_concurrency: 10,
+            max_concurrency: BatchConfig::default_file_concurrency(),
             store_vectors: config.store_vectors,
             store_bm25: config.store_bm25,
             store_summaries: config.store_summaries,

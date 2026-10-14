@@ -5,6 +5,7 @@
 //! `abort_operation` so a failed hot update never leaves new documents behind.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use cce_parser::ast_to_nl::chunker::{ChunkedResult, GroupChunker};
 use cce_parser::grouper::types::ProcessingResult;
@@ -195,7 +196,7 @@ pub fn stage_deleted_file(
 /// 3. Chunk the conversion results (ChunkedResult[])
 pub async fn extract_chunks_from_parse_result(
     converter: &PresentationConverter,
-    chunker: &tokio::sync::Mutex<GroupChunker>,
+    chunker: &Arc<tokio::sync::RwLock<Arc<GroupChunker>>>,
     file_path: &std::path::Path,
     parsed_file: &ParsedFile,
     processing_result: Option<&ProcessingResult>,
@@ -214,7 +215,10 @@ pub async fn extract_chunks_from_parse_result(
     let group_conversions =
         converter.convert_entity_groups(&processing_result.groups, &file_path.to_string_lossy());
 
-    let chunker = chunker.lock().await;
+    // Snapshot the shared chunker and release the cell before doing CPU
+    // work: chunking never mutates the instance, so no lock is held across
+    // the computation.
+    let chunker = chunker.read().await.clone();
     let chunks = chunker
         .chunk_groups(&group_conversions, &file_path.to_string_lossy())?
         .chunks;

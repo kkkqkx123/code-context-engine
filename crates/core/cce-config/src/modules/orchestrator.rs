@@ -110,9 +110,9 @@ pub struct BatchConfig {
     pub parse_concurrency: usize,
     /// Maximum concurrent file processing tasks
     /// Includes entity grouping and NL conversion.
-    /// The default stays below the parse-stage sweet spot on purpose:
-    /// production overlaps disk IO and embedding waits, so raising this
-    /// toward 8-12 only helps CPU-bound parse-heavy workloads.
+    /// CPU-bound parse/chunk work scales with the host's logical CPUs and
+    /// merely flattens past them, so the default tracks the machine via
+    /// [`BatchConfig::default_file_concurrency`] instead of a fixed constant.
     pub process_concurrency: usize,
     /// Number of chunks to accumulate before storing
     /// Controls memory during chunking phase
@@ -133,12 +133,26 @@ impl Default for BatchConfig {
         Self {
             scan_batch_size: 100,
             parse_concurrency: 10,
-            process_concurrency: 5,
+            process_concurrency: Self::default_file_concurrency(),
             store_batch_size: 50,
             embedding_batch_size: 32,
             embedding_batch_delay_ms: 100,
             embedding_stage_timeout_secs: 0,
         }
+    }
+}
+
+impl BatchConfig {
+    /// Default file-processing concurrency derived from the host's logical
+    /// CPU count. CPU-bound parse/chunk work scales with cores and merely
+    /// flattens past them, so the default tracks the machine instead of a
+    /// fixed constant. The fallback covers containers where the count is
+    /// unavailable.
+    pub fn default_file_concurrency() -> usize {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(8)
+            .max(1)
     }
 }
 

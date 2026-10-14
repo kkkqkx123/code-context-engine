@@ -87,6 +87,20 @@ impl FileProcessor {
         content: &str,
         output_mode: OutputMode,
     ) -> Result<CompleteFileProcessResult, OrchestratorError> {
+        self.process_document_file_complete_sync(file_entry, content, output_mode)
+    }
+
+    /// Synchronous variant of [`Self::process_document_file_complete`].
+    ///
+    /// The caller must run this off the async workers (for example under
+    /// `tokio::task::spawn_blocking`): the document pipeline is blocking
+    /// CPU work.
+    pub fn process_document_file_complete_sync(
+        &mut self,
+        file_entry: &FileEntry,
+        content: &str,
+        output_mode: OutputMode,
+    ) -> Result<CompleteFileProcessResult, OrchestratorError> {
         let file_path = file_entry.relative_path.to_string_lossy();
 
         // Use document-specific chunking config if available, otherwise default
@@ -176,10 +190,13 @@ impl FileProcessor {
     ) -> Result<Vec<ChunkedResult>, OrchestratorError> {
         let cache_key = self.chunk_cache_key(path, source, output_mode_label(output_mode));
 
-        // Check cache
+        // Probe under a read lock so concurrent files sharing the cache do
+        // not serialize on an exclusive lock for what is usually a hit check.
+        // `peek` leaves recency untouched; the backfill below records the
+        // entry as most-recent.
         {
-            let mut cache = self.chunk_cache.write().await;
-            if let Some(cached) = cache.get(&cache_key) {
+            let cache = self.chunk_cache.read().await;
+            if let Some(cached) = cache.peek(&cache_key) {
                 return Ok(cached.0.clone());
             }
         }
@@ -216,10 +233,13 @@ impl FileProcessor {
     ) -> Result<(Vec<ChunkedResult>, usize), OrchestratorError> {
         let cache_key = self.chunk_cache_key(&parsed.path, &parsed.source, "ast");
 
-        // Check cache
+        // Probe under a read lock so concurrent files sharing the cache do
+        // not serialize on an exclusive lock for what is usually a hit check.
+        // A lost race here only repeats deterministic work: the backfill
+        // below overwrites the same key with an identical value.
         {
-            let mut cache = self.chunk_cache.write().await;
-            if let Some(cached) = cache.get(&cache_key) {
+            let cache = self.chunk_cache.read().await;
+            if let Some(cached) = cache.peek(&cache_key) {
                 return Ok(cached.clone());
             }
         }
