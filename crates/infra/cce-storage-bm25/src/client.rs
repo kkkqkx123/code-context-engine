@@ -18,10 +18,9 @@ use cce_storage_common::{FulltextDocument, FulltextHit, FulltextSearchOptions};
 
 use crate::{Bm25Config, Bm25Error};
 use crate::{
-    IndexManager, IndexSchema, batch_add_documents, delete_document,
-    delete_documents_by_file_path_and_project, delete_documents_by_file_path_project_epoch,
-    delete_documents_by_project, delete_documents_by_project_epoch,
-    delete_summary_documents_by_file_path_and_project,
+    IndexManager, batch_add_documents, delete_document, delete_documents_by_file_path_and_project,
+    delete_documents_by_file_path_project_epoch, delete_documents_by_project,
+    delete_documents_by_project_epoch, delete_summary_documents_by_file_path_and_project,
 };
 
 /// Total attempts (first try plus retries) for a transiently failing batch write.
@@ -37,7 +36,6 @@ const BATCH_RETRY_JITTER_RATIO: f64 = 0.3;
 pub struct Bm25Client {
     config: Bm25Config,
     index_manager: Option<Arc<RwLock<IndexManager>>>,
-    schema: IndexSchema,
     metrics: Option<Arc<dyn Bm25Metrics>>,
 }
 
@@ -47,7 +45,6 @@ impl Bm25Client {
         Self {
             config,
             index_manager: None,
-            schema: IndexSchema::new(),
             metrics: None,
         }
     }
@@ -133,11 +130,6 @@ impl Bm25Client {
     /// Get the index manager for retrieval operations
     pub fn index_manager(&self) -> Option<&Arc<RwLock<IndexManager>>> {
         self.index_manager.as_ref()
-    }
-
-    /// Get the index schema
-    pub fn schema(&self) -> &IndexSchema {
-        &self.schema
     }
 
     /// Validate index name matches configuration
@@ -333,8 +325,7 @@ impl Bm25Client {
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
         let manager_guard = manager.read().await;
         let schema = manager_guard.schema();
-        let result =
-            delete_documents_by_project_epoch(&manager_guard, schema, project_id, epoch);
+        let result = delete_documents_by_project_epoch(&manager_guard, schema, project_id, epoch);
         let elapsed = start_time.elapsed().as_secs_f64() * 1000.0;
         if let Some(metrics) = &self.metrics {
             let count = result.as_ref().map_or(0, |&c| c);
@@ -626,7 +617,6 @@ impl Clone for Bm25Client {
         Self {
             config: self.config.clone(),
             index_manager: self.index_manager.clone(),
-            schema: self.schema.clone(),
             metrics: self.metrics.clone(),
         }
     }

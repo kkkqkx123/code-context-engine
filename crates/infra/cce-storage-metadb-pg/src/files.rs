@@ -315,26 +315,6 @@ impl PostgresClient {
         .await
     }
 
-    pub(crate) async fn chunks_delete_by_file(
-        &self,
-        project_id: i64,
-        file_path: &str,
-    ) -> Result<usize, StorageError> {
-        let file_path = file_path.to_string();
-        self.run(async move {
-            let client = self.pooled().await?;
-            let removed = client
-                .execute(
-                    "DELETE FROM chunks WHERE project_id = $1 AND file_path = $2",
-                    &[&project_id, &file_path],
-                )
-                .await
-                .map_err(classify_pg)?;
-            Ok(removed as usize)
-        })
-        .await
-    }
-
     pub(crate) async fn chunks_delete_by_project_epoch(
         &self,
         project_id: i64,

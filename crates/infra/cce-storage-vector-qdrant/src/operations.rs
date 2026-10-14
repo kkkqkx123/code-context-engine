@@ -462,9 +462,10 @@ impl PointOperations {
         group_id: Option<&str>,
         point_type: Option<PointKind>,
     ) -> Result<usize, QdrantError> {
+        let normalized = cce_types::normalize_project_path(file_path);
         let mut must = vec![json!({
             "key": "file_path",
-            "match": { "value": file_path }
+            "match": { "value": normalized }
         })];
 
         if let Some(group_id) = group_id {
@@ -490,9 +491,10 @@ impl PointOperations {
         group_id: &str,
         epoch: i64,
     ) -> Result<usize, QdrantError> {
+        let normalized = cce_types::normalize_project_path(file_path);
         self.delete_by_filter(json!({
             "must": [
-                { "key": "file_path", "match": { "value": file_path } },
+                { "key": "file_path", "match": { "value": normalized } },
                 { "key": "group_id", "match": { "value": group_id } },
                 { "key": "epoch", "match": { "value": epoch } }
             ]
@@ -614,9 +616,10 @@ impl PointOperations {
         let should = file_paths
             .iter()
             .map(|fp| {
+                let normalized = cce_types::normalize_project_path(fp);
                 let mut must = vec![json!({
                     "key": "file_path",
-                    "match": { "value": fp }
+                    "match": { "value": normalized }
                 })];
 
                 if let Some(group_id) = group_id {
@@ -656,8 +659,9 @@ impl PointOperations {
         let should = file_paths
             .iter()
             .map(|fp| {
+                let normalized = cce_types::normalize_project_path(fp);
                 json!({ "must": [
-                    { "key": "file_path", "match": { "value": fp } },
+                    { "key": "file_path", "match": { "value": normalized } },
                     { "key": "group_id", "match": { "value": group_id } },
                     { "key": "epoch", "match": { "value": epoch } },
                 ]})
@@ -1000,6 +1004,7 @@ impl Clone for CollectionOperations {
 mod tests {
     use super::*;
     use cce_types::{FileCategory, PointKind, TestSource};
+    use std::sync::{Arc, Mutex};
 
     /// In-process Qdrant stand-in that answers every request with `body`.
     async fn spawn_mock_url(body: &'static str) -> String {
@@ -1110,5 +1115,101 @@ mod tests {
         assert!(json["payload"].get("entity_ids").is_none());
         assert!(json["payload"].get("segment_id").is_none());
         assert!(json["payload"].get("epoch").is_none());
+    }
+
+    /// In-process Qdrant stand-in that answers the delete pre-count with
+    /// `count` and captures the body of the subsequent delete request so the
+    /// test can inspect the filter that was actually sent.
+    async fn spawn_delete_capture_mock(
+        count: usize,
+        captured: Arc<Mutex<Option<String>>>,
+    ) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock qdrant port");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(accepted) => accepted,
+                    Err(_) => break,
+                };
+                let captured = Arc::clone(&captured);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 8192];
+                    let n = socket.read(&mut buf).await.unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+                    let body = if request.contains("/points/delete") {
+                        if let Some(split) = request.find("\r\n\r\n") {
+                            *captured.lock().expect("capture lock") =
+                                Some(request[split + 4..].to_string());
+                        }
+                        r#"{"result":{"operation_id":1,"status":"ok"}}"#.to_string()
+                    } else {
+                        serde_json::json!({ "result": { "count": count } }).to_string()
+                    };
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: application/json\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn delete_by_file_path_scoped_sends_normalized_filter_path() {
+        let captured = Arc::new(Mutex::new(None));
+        let base_url = spawn_delete_capture_mock(1, Arc::clone(&captured)).await;
+        let ops = PointOperations::new(Client::new(), "test".to_string(), base_url);
+
+        let deleted = ops
+            .delete_by_file_path_scoped("./src\\lib.rs", Some("group_1"), None)
+            .await
+            .expect("delete should succeed");
+        assert_eq!(deleted, 1, "matched count is echoed on success");
+
+        let body = captured
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("delete request body captured");
+        let parsed: serde_json::Value =
+            serde_json::from_str(body.trim()).expect("delete body is json");
+        let value = &parsed["filter"]["must"][0]["match"]["value"];
+        assert_eq!(
+            value, "src/lib.rs",
+            "qdrant delete filter must carry the normalized path, not the raw input"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_by_file_paths_scoped_normalizes_each_filter_path() {
+        let captured = Arc::new(Mutex::new(None));
+        let base_url = spawn_delete_capture_mock(2, Arc::clone(&captured)).await;
+        let ops = PointOperations::new(Client::new(), "test".to_string(), base_url);
+
+        let deleted = ops
+            .delete_by_file_paths_scoped(&["./src/a.rs", "src\\lib.rs"], Some("group_1"), None)
+            .await
+            .expect("batch delete should succeed");
+        assert_eq!(deleted, 2);
+
+        let body = captured
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("delete request body captured");
+        let parsed: serde_json::Value =
+            serde_json::from_str(body.trim()).expect("delete body is json");
+        let value = &parsed["filter"]["should"][0]["must"][0]["match"]["value"];
+        assert_eq!(
+            value, "src/a.rs",
+            "qdrant batch delete filter must carry the normalized path, not the raw input"
+        );
     }
 }

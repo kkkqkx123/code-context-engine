@@ -297,14 +297,6 @@ impl RelationStorage for RelationStore {
         dispatch_relation!(self, chunks_by_ids(project_id, chunk_ids, epochs))
     }
 
-    async fn chunks_delete_by_file(
-        &self,
-        project_id: i64,
-        file_path: &str,
-    ) -> Result<usize, StorageError> {
-        dispatch_relation!(self, chunks_delete_by_file(project_id, file_path))
-    }
-
     async fn chunks_delete_by_project_epoch(
         &self,
         project_id: i64,

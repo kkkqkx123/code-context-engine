@@ -141,40 +141,6 @@ impl RelationUpdateProcessor {
         format!("{:x}", hasher.finalize())
     }
 
-    /// Incremental symbol fingerprint for small change sets.
-    ///
-    /// For small batches (<10 files) the fingerprint is computed only over
-    /// the changed + added files directly, avoiding the dependency-closure
-    /// traversal cost. For larger batches the full scoped fingerprint is
-    /// used. `previous_fingerprint` is retained for API symmetry with the
-    /// design doc but the current implementation recomputes from the index
-    /// to guarantee correctness; a future delta-hash optimization could
-    /// reuse it.
-    #[allow(dead_code)]
-    pub(crate) fn incremental_symbol_fingerprint<V: RelationIndexView>(
-        index: &V,
-        previous_fingerprint: &str,
-        changed_files: &HashSet<String>,
-        added_files: &HashSet<String>,
-        removed_files: &HashSet<String>,
-    ) -> String {
-        let changed_count = changed_files.len() + added_files.len() + removed_files.len();
-        if changed_count < 10 {
-            let mut combined: HashSet<String> = HashSet::new();
-            combined.extend(changed_files.iter().cloned());
-            combined.extend(added_files.iter().cloned());
-            return Self::stable_symbol_fingerprint(index, &combined);
-        }
-        let _ = previous_fingerprint;
-        let mut all: HashSet<String> = HashSet::new();
-        all.extend(changed_files.iter().cloned());
-        all.extend(added_files.iter().cloned());
-        // Generic V does not expose `all_files`; the caller should pass the
-        // scoped set for large batches. We fallback to the combined set to
-        // keep the API usable without requiring a full project scan.
-        Self::stable_symbol_fingerprint(index, &all)
-    }
-
     /// Files whose symbols the candidate resolution could consult, bounded
     /// by the dependency graph: the replaced set plus its transitive
     /// dependents and dependencies in both the old and the new graph.

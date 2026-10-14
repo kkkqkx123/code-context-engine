@@ -19,8 +19,7 @@ use super::stores::diagnostics::RelationDiagnostics;
 use crate::dependency_graph::FileDependencyGraph;
 use crate::index::core::{RelationEdgeSet, RelationIndex, SymbolKey};
 use crate::index::view::{RelationIndexView, active_file_set, fingerprint_in_files_from_maps};
-use crate::types::ExportInfo;
-use cce_types::{Entity, EntityId, ExternalCallType, ImportTable, ResolvedRelation};
+use cce_types::{Entity, EntityId, ExternalCallType};
 use dashmap::DashMap;
 
 mod query_optimized;
@@ -280,61 +279,6 @@ impl LayeredSnapshotIndex {
         )))
     }
 
-    /// Files whose entity or relation content was modified by the delta chain.
-    ///
-    /// Returns the union of:
-    /// - Files added or removed by any delta
-    /// - Files whose entities were added or removed by any delta
-    /// - Files whose relations or imports/exports were diffed by any delta
-    ///
-    /// Useful for file-scoped snapshot creation: only these files need to be
-    /// re-queried when building a file-scoped view.
-    pub fn files_affected_by_deltas(&self) -> HashSet<String> {
-        let mut affected = HashSet::new();
-        for d in &self.deltas {
-            for f in &d.removed_files {
-                affected.insert(f.clone());
-            }
-            for f in &d.added_files {
-                affected.insert(f.path.clone());
-            }
-            for e in &d.added_entities {
-                affected.insert(e.file_path.clone());
-            }
-            for diff in &d.import_diffs {
-                affected.insert(diff.file_path.clone());
-            }
-            for diff in &d.export_diffs {
-                affected.insert(diff.file_path.clone());
-            }
-            for diff in &d.file_relation_diffs {
-                affected.insert(diff.file_path.clone());
-            }
-            for diff in &d.dependency_diffs {
-                affected.insert(diff.source_file.clone());
-                affected.extend(diff.added_dependencies.iter().cloned());
-            }
-        }
-        affected
-    }
-
-    /// Create a file-scoped snapshot that only includes data for the specified files.
-    ///
-    /// This is useful for incremental processing where you only need to
-    /// snapshot certain files. The returned `LayeredSnapshotIndex` shares
-    /// the same base and deltas but can be filtered at query time.
-    ///
-    /// Note: This creates a filtered view, not a new snapshot. The base
-    /// and deltas are still shared. For a truly independent file-scoped
-    /// snapshot, use `materialize_merged_index()` and then create a new
-    /// snapshot from the materialized index.
-    pub fn file_scoped(&self, files: &HashSet<String>) -> FileScopedSnapshot<'_> {
-        FileScopedSnapshot {
-            layered: self,
-            files: files.clone(),
-        }
-    }
-
     /// Number of entities visible through this layer.
     pub fn function_count(&self) -> usize {
         let mut count = self.base.function_count() as i64;
@@ -431,86 +375,5 @@ impl LayeredSnapshotIndex {
     /// Get quality report for the merged view.
     pub fn quality_report(&self) -> crate::index::core::QualityReport {
         self.base.quality_report()
-    }
-}
-
-/// A file-scoped view over a `LayeredSnapshotIndex`.
-///
-/// Created by `LayeredSnapshotIndex::file_scoped()`, this struct provides
-/// the same query surface as `RelationIndexView` but filters results to
-/// only include data for the specified files. Useful for incremental
-/// processing where you only need to snapshot certain files.
-pub struct FileScopedSnapshot<'a> {
-    layered: &'a LayeredSnapshotIndex,
-    files: HashSet<String>,
-}
-
-impl<'a> FileScopedSnapshot<'a> {
-    /// The set of files this snapshot is scoped to.
-    pub fn scoped_files(&self) -> &HashSet<String> {
-        &self.files
-    }
-
-    /// Check if a file is in scope.
-    pub fn contains_file(&self, path: &str) -> bool {
-        self.files.contains(path)
-    }
-
-    /// Get entities for a specific file.
-    pub fn entities_of_file(&self, path: &str) -> Vec<cce_types::Entity> {
-        if self.files.contains(path) {
-            self.layered.entities_of_file(path)
-        } else {
-            Vec::new()
-        }
-    }
-
-    /// Get relations for a specific file.
-    pub fn file_relations_of(&self, path: &str) -> Vec<ResolvedRelation> {
-        if self.files.contains(path) {
-            self.layered.file_relations_of(path)
-        } else {
-            Vec::new()
-        }
-    }
-
-    /// Get imports for a specific file.
-    pub fn imports_of(&self, path: &str) -> Option<ImportTable> {
-        if self.files.contains(path) {
-            self.layered.imports_of(path)
-        } else {
-            None
-        }
-    }
-
-    /// Get exports for a specific file.
-    pub fn exports_of(&self, path: &str) -> Option<Vec<ExportInfo>> {
-        if self.files.contains(path) {
-            self.layered.exports_of(path)
-        } else {
-            None
-        }
-    }
-
-    /// Get all entities across scoped files.
-    pub fn entities_by_file(&self) -> HashMap<String, Vec<cce_types::Entity>> {
-        let mut result = HashMap::new();
-        for path in &self.files {
-            let entities = self.layered.entities_of_file(path);
-            if !entities.is_empty() {
-                result.insert(path.clone(), entities);
-            }
-        }
-        result
-    }
-
-    /// Iterate over all scoped files and their entities.
-    pub fn for_each_file_entity<F: FnMut(&str, &[cce_types::Entity])>(&self, mut f: F) {
-        for path in &self.files {
-            let entities = self.layered.entities_of_file(path);
-            if !entities.is_empty() {
-                f(path, &entities);
-            }
-        }
     }
 }

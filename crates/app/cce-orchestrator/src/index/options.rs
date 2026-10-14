@@ -122,6 +122,31 @@ impl IndexOptions {
         self.custom_gitignore_path = Some(path.into());
         self
     }
+
+    /// Build the scanner options selecting the same file universe as a full
+    /// index run over these options.
+    ///
+    /// This is the single source of truth for the index file universe; the
+    /// full-index pipeline and shadow change measurement derive from it.
+    pub fn to_scan_options(&self) -> cce_scanner::ScanOptions {
+        let include_patterns: Vec<String> = self
+            .extensions
+            .iter()
+            .map(|ext| format!("*.{ext}"))
+            .collect();
+
+        cce_scanner::ScanOptions {
+            root_path: self.root_dir.to_string_lossy().to_string(),
+            include_patterns,
+            exclude_patterns: self.exclude_dirs.clone(),
+            follow_symlinks: false,
+            respect_gitignore: self.respect_gitignore,
+            gitignore_patterns: self.additional_ignore_patterns.clone(),
+            gitignore_path: self.custom_gitignore_path.clone(),
+            max_content_size: None,
+            max_file_size: None,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -209,61 +209,6 @@ async fn test_concurrent_reparse_allocates_unique_global_ids() {
     );
 }
 
-#[test]
-fn test_clear() {
-    let index = RelationIndex::new();
-
-    // Add some data
-    index
-        .function_index
-        .insert(EntityId(1), create_test_function_entity(1, "func_a"));
-    let relation = ResolvedRelation {
-        caller: EntityId(1),
-        callee_id: Some(EntityId(2)),
-        callee_name: "func_b".to_string(),
-        relation_type: RelationType::DirectCall,
-        span: Span::default(),
-        is_external: false,
-        external_type: None,
-        callee_symbol: None,
-        stdlib_category: None,
-        owner_type: None,
-        call_context: cce_types::relation::CallContext::Direct,
-        overload_signature: None,
-        call_frequency: 1,
-        cfg_condition: None,
-    };
-    index.add_resolved_relation(relation);
-
-    // Clear
-    index.clear();
-
-    // Verify all indexes are empty
-    assert_eq!(index.function_index.len(), 0);
-    assert_eq!(index.resolved_relation_index.len(), 0);
-
-    // Verify SymbolKey maps are cleared
-    assert_eq!(index.symbol_key_to_entity.read().len(), 0);
-    assert_eq!(index.entity_to_symbol_key.read().len(), 0);
-
-    // Verify conflict diagnostics are reset
-    assert_eq!(
-        index
-            .diagnostics
-            .symbol_key_conflict_count
-            .load(Ordering::Relaxed),
-        0
-    );
-    assert!(
-        index
-            .diagnostics
-            .symbol_key_conflict_samples
-            .lock()
-            .expect("samples lock")
-            .is_empty()
-    );
-}
-
 /// A conflicting registration is rejected first-wins and recorded once;
 /// re-registering the winning entity is idempotent and does not inflate
 /// the diagnostic counter.
@@ -418,7 +363,7 @@ fn snapshot_carries_conflict_metadata_without_affecting_fingerprint() {
     assert_eq!(snapshot.build_metadata.symbol_key_conflict_samples.len(), 1);
 
     let fingerprint_before = index.compute_fingerprint();
-    index.clear();
+    let index = RelationIndex::new();
     index.register_symbol_key("a.rs", "dup", &first, EntityId(1));
     let fingerprint_after = index.compute_fingerprint();
     assert_eq!(

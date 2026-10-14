@@ -217,13 +217,6 @@ pub trait RelationStorage: Clone + Send + Sync + 'static {
         epochs: &[i64],
     ) -> impl Future<Output = Result<Vec<ChunkRecord>, StorageError>> + Send;
 
-    /// Delete chunk rows of one file.
-    fn chunks_delete_by_file(
-        &self,
-        project_id: i64,
-        file_path: &str,
-    ) -> impl Future<Output = Result<usize, StorageError>> + Send;
-
     /// Delete chunk rows of one project and epoch.
     fn chunks_delete_by_project_epoch(
         &self,

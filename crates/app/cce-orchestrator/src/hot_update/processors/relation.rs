@@ -14,8 +14,5 @@ pub mod external_packages;
 pub mod file_identifier;
 pub mod relation_processor;
 
-#[cfg(test)]
-mod tests;
-
 pub use external_packages::ExternalPackageData;
 pub use relation_processor::RelationUpdateProcessor;

@@ -1107,24 +1107,6 @@ fn test_frontend_component_queries() {
 }
 
 // ============================================================
-// 12. RelationIndex Clear and Reset
-// ============================================================
-
-#[test]
-fn test_relation_index_clear() {
-    let index = build_test_index();
-
-    assert_eq!(index.function_count(), 3);
-    assert_eq!(index.resolved_relation_count(), 2);
-
-    index.clear();
-
-    assert_eq!(index.function_count(), 0);
-    assert_eq!(index.resolved_relation_count(), 0);
-    assert_eq!(index.file_count(), 0);
-}
-
-// ============================================================
 // 13. Error Types
 // ============================================================
 

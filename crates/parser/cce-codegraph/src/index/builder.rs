@@ -635,11 +635,6 @@ impl IndexBuilder {
             && self.index.file_count() == 0
     }
 
-    /// Clear all indexes
-    pub fn clear(&self) {
-        self.index.clear();
-    }
-
     // ========== ParsedFile Operations (New Architecture) ==========
 
     /// Create an initially empty project symbol table for a streamed build.

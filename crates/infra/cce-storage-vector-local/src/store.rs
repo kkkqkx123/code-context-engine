@@ -300,6 +300,15 @@ pub fn map_simvec_error(err: VectorSearchError) -> StorageError {
     }
 }
 
+/// Normalize each path and build payload values for a batched `match_any`
+/// delete filter, so one filter matches points of any of the given files.
+fn normalized_path_values(file_paths: &[&str]) -> Vec<serde_json::Value> {
+    file_paths
+        .iter()
+        .map(|path| serde_json::Value::String(cce_types::normalize_project_path(path)))
+        .collect()
+}
+
 impl VectorStorage for LocalVectorStore {
     fn backend_name(&self) -> &'static str {
         "local"
@@ -510,7 +519,59 @@ impl VectorStorage for LocalVectorStore {
         self.delete_with_filter(&filter)
     }
 
-    async fn delete_by_group_epoch(&self, group_id: &str, epoch: i64) -> Result<usize, StorageError> {
+    async fn delete_by_file_paths_scoped(
+        &self,
+        file_paths: &[&str],
+        group_id: &str,
+        point_type: Option<PointKind>,
+    ) -> Result<usize, StorageError> {
+        if file_paths.is_empty() {
+            return Ok(0);
+        }
+        let file_any = normalized_path_values(file_paths);
+        let mut filter = SimFilter::new()
+            .must(FilterCondition::match_value("group_id", group_id))
+            .must(FilterCondition::match_any("file_path", file_any));
+        if let Some(kind) = point_type {
+            filter = filter.must(FilterCondition::match_value(
+                "type",
+                kind.as_u8().to_string(),
+            ));
+        }
+        let engine = Arc::clone(&self.engine);
+        let collection = self.collection.clone();
+        tokio::task::spawn_blocking(move || {
+            engine
+                .delete_by_filter(&collection, &filter)
+                .map(|deleted| deleted as usize)
+                .map_err(map_simvec_error)
+        })
+        .await
+        .map_err(|e| StorageError::query(format!("local batch delete join failed: {e}")))?
+    }
+
+    async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        file_paths: &[&str],
+        group_id: &str,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
+        if file_paths.is_empty() {
+            return Ok(0);
+        }
+        let file_any = normalized_path_values(file_paths);
+        let filter = SimFilter::new()
+            .must(FilterCondition::match_value("group_id", group_id))
+            .must(FilterCondition::match_any("file_path", file_any))
+            .must(FilterCondition::match_value("epoch", epoch.to_string()));
+        self.delete_with_filter(&filter)
+    }
+
+    async fn delete_by_group_epoch(
+        &self,
+        group_id: &str,
+        epoch: i64,
+    ) -> Result<usize, StorageError> {
         let filter = SimFilter::new()
             .must(FilterCondition::match_value("group_id", group_id))
             .must(FilterCondition::match_value("epoch", epoch.to_string()));
@@ -684,6 +745,55 @@ mod tests {
 
         store.delete_by_group("g1").await.expect("delete group");
         assert_eq!(store.count_all_points().await.expect("count all"), 0);
+    }
+
+    #[tokio::test]
+    async fn batch_delete_by_file_paths_matches_sequential() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LocalVectorStore::open_at(dir.path(), &test_config(2)).expect("open store");
+        store.ensure_collection().await.expect("ensure collection");
+
+        let points = vec![
+            point("a1", vec![1.0, 0.0], "src/a.rs", "g1", 1),
+            point("b1", vec![0.9, 0.1], "src/b.rs", "g1", 1),
+            point("c1", vec![0.8, 0.2], "src/c.rs", "g1", 1),
+        ];
+        store.upsert_points(&points).await.expect("upsert");
+        assert_eq!(store.count_all_points().await.expect("count"), 3);
+
+        // One batch call removes two files; the second input is non-normalized
+        // to confirm the batch filter normalizes like the single-file path.
+        let deleted = store
+            .delete_by_file_paths_scoped(&["src/a.rs", "./src/b.rs"], "g1", None)
+            .await
+            .expect("batch delete");
+        assert_eq!(deleted, 2, "two single-point files are removed");
+
+        assert_eq!(
+            store.count_all_points().await.expect("count after"),
+            1,
+            "only the untouched file remains"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_delete_by_file_paths_epoch_targets_only_that_epoch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LocalVectorStore::open_at(dir.path(), &test_config(2)).expect("open store");
+        store.ensure_collection().await.expect("ensure collection");
+
+        let points = vec![
+            point("cur", vec![1.0, 0.0], "src/a.rs", "g1", 5),
+            point("old", vec![1.0, 0.0], "src/a.rs", "g1", 4),
+        ];
+        store.upsert_points(&points).await.expect("upsert");
+
+        let deleted = store
+            .delete_by_file_paths_scoped_epoch(&["src/a.rs"], "g1", 5)
+            .await
+            .expect("epoch batch delete");
+        assert_eq!(deleted, 1, "only the current-epoch point is removed");
+        assert_eq!(store.count_all_points().await.expect("count"), 1);
     }
 
     #[tokio::test]

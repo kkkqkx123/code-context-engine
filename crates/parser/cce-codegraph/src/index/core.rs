@@ -1141,39 +1141,4 @@ impl RelationIndex {
     ) -> Option<HashMap<EntityId, EntityId>> {
         self.entity_id_remaps.read().get(normalized_path).cloned()
     }
-
-    /// Clear all indexes
-    pub fn clear(&self) {
-        self.function_index.clear();
-        self.name_index.clear();
-        self.entity_file_index.clear();
-        self.resolved_relation_index.clear();
-        self.reverse_callee_index.clear();
-        self.file_relation_index.clear();
-        self.file_callers_by_callee.clear();
-        self.file_records.write().clear();
-        self.symbol_key_to_entity.write().clear();
-        self.entity_to_symbol_key.write().clear();
-        self.stable_id_to_entity.write().clear();
-        self.entity_id_remaps.write().clear();
-        self.entity_id_counter.store(0, Ordering::Relaxed);
-        self.diagnostics
-            .symbol_key_conflict_count
-            .store(0, Ordering::Relaxed);
-        if let Ok(mut guard) = self.diagnostics.symbol_key_conflict_samples.lock() {
-            guard.clear();
-        }
-        self.diagnostics
-            .entity_derived_key_count
-            .store(0, Ordering::Relaxed);
-        self.diagnostics
-            .relation_derived_key_count
-            .store(0, Ordering::Relaxed);
-        self.diagnostics
-            .delta_export_unresolved_count
-            .store(0, Ordering::Relaxed);
-        self.file_symbol_keys.write().clear();
-        self.file_entities_by_start.write().clear();
-        self.dependency_graph.clear();
-    }
 }

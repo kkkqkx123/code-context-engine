@@ -868,14 +868,9 @@ impl IndexOrchestrator {
     ///
     /// This mutates only the spool-owned symbol table, never a builder graph,
     /// so batch and recovery phases stay decoupled from the terminal builder.
-    fn append_spool_symbols(
-        &self,
-        spool: &RelationBuildSpool,
-        parsed: &cce_types::ParsedFile,
-    ) {
-        let mut symbol_builder = cce_codegraph::SymbolTableBuilder::new(
-            spool.project_symbols().root_path.clone(),
-        );
+    fn append_spool_symbols(&self, spool: &RelationBuildSpool, parsed: &cce_types::ParsedFile) {
+        let mut symbol_builder =
+            cce_codegraph::SymbolTableBuilder::new(spool.project_symbols().root_path.clone());
         symbol_builder.with_metrics(self.relation_metrics());
         symbol_builder.add_file_to_project(parsed, spool.project_symbols());
     }
@@ -965,23 +960,7 @@ impl IndexOrchestrator {
 
     /// Build scan options from index options
     fn build_scan_options(&self, options: &IndexOptions) -> ScanOptions {
-        let include_patterns: Vec<String> = options
-            .extensions
-            .iter()
-            .map(|ext| format!("*.{}", ext))
-            .collect();
-
-        ScanOptions {
-            root_path: options.root_dir.to_string_lossy().to_string(),
-            include_patterns,
-            exclude_patterns: options.exclude_dirs.clone(),
-            follow_symlinks: false,
-            respect_gitignore: options.respect_gitignore,
-            gitignore_patterns: options.additional_ignore_patterns.clone(),
-            gitignore_path: options.custom_gitignore_path.clone(),
-            max_content_size: None,
-            max_file_size: None,
-        }
+        options.to_scan_options()
     }
 
     /// Get the state tracker for querying index state

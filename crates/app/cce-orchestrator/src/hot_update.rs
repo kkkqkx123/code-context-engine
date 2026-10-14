@@ -50,7 +50,7 @@ pub use self::change::{
     BatchChangeResult, EntityChange, EntityChangeType, FileChange, FileChangeType,
     ParseResultWithChanges,
 };
-pub use self::change_detector::CacheUpdateResult;
+pub use self::change_detector::{CacheUpdateResult, measure_index_change_set};
 pub use self::config::{ConfigReloadManager, ConfigVersion, ConfigVersionRegistry};
 pub use self::coordinator::HotUpdateCoordinator;
 pub use self::debounce::{DebounceConfig, DebounceConfigBuilder, GlobalDebounce};

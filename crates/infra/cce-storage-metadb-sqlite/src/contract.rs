@@ -434,16 +434,6 @@ impl RelationStorage for SqliteClient {
         Ok(out)
     }
 
-    async fn chunks_delete_by_file(
-        &self,
-        project_id: i64,
-        file_path: &str,
-    ) -> Result<usize, StorageError> {
-        self.with_transaction(|tx| {
-            crate::repo::ChunkRepository::delete_by_file_path(tx, file_path, project_id)
-        })
-    }
-
     async fn chunks_delete_by_project_epoch(
         &self,
         project_id: i64,
