@@ -18,9 +18,8 @@
 //! The scratch index lives under `target/bench-vector/` (a real filesystem)
 //! rather than the system temp dir, which is tmpfs here and turns index bytes
 //! straight into RAM pressure. A production-microbatch probe (32 points per
-//! upsert, the orchestrator default) additionally runs at 5k vectors,
-//! quantifying the fsync-per-point amplification the 1000-point microbatch
-//! hides.
+//! upsert, the orchestrator default) additionally runs at 5k vectors, showing
+//! the per-batch cost the 1000-point microbatch amortizes away.
 //!
 //! Run: `cargo bench -p cce-storage-vector-local --bench local_vector_store`
 //!
@@ -30,8 +29,8 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use cce_storage_common::{DenseSearchQuery, Payload, VectorPoint, VectorStorage};
@@ -52,17 +51,20 @@ const PROD_PROBE_VECTORS: usize = 5_000;
 /// triple the tier's write cost for no added signal.
 const WRITER_MICROBATCHES: usize = 1;
 
+/// Concurrent upsert writers in the concurrency phase. The actual task count
+/// is capped by the number of available microbatches, so the small tiers run
+/// with fewer active writers instead of spawning idle tasks.
+const WRITER_TASKS: usize = 8;
+
 /// Read samples taken while the background writer is publishing.
 const READ_SAMPLES: usize = 100;
 
 /// Collection sizes swept per run. Override on bigger hardware with
 /// `CCE_BENCH_VECTOR_SCALES=10000,50000,100000`.
 ///
-/// The defaults are deliberately small: the engine performs one fsync per
-/// point (payload page write plus tracker save), so on a rotational disk the
-/// sweep is fsync-bound at roughly 60 points/s and a 10k tier alone costs
-/// ~3 minutes. The sweep only needs a range wide enough to expose growth, and
-/// 5x is enough once the dominant cost is measured rather than guessed.
+/// The defaults are deliberately small: every shape under study (batch-latency
+/// growth, read jitter, concurrency) shows up well before 10k, and each tier
+/// costs a full write pass on a mechanical disk.
 fn scales() -> Vec<usize> {
     match std::env::var("CCE_BENCH_VECTOR_SCALES") {
         Ok(raw) => {
@@ -95,6 +97,23 @@ fn make_point(i: usize) -> VectorPoint {
 
 fn make_points(n: usize) -> Vec<VectorPoint> {
     (0..n).map(make_point).collect()
+}
+
+/// Open the results TSV for appending, creating `benches/results` on demand.
+///
+/// The directory is not part of the worktree, so a first run used to lose every
+/// measurement: `open(...).ok()` failed silently and each row was guarded by
+/// `if let Some(f)`. Failing loudly is the point — a bench that cannot record
+/// its own output is broken.
+fn results_tsv(name: &str) -> std::fs::File {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results");
+    std::fs::create_dir_all(&dir).expect("create benches/results");
+    let path = dir.join(name);
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
 }
 
 /// Owned scratch directory under the crate's `target/` tree, removed on drop.
@@ -142,19 +161,11 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().expect("rt");
     println!("local_vector_store benchmark (dim={DIM}, microbatch={MICROBATCH})");
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/local_vector_store.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(
-            f,
-            "# scenario\tvectors\ttotal_ms\tpts_per_sec\tbatch_p50_ms\tbatch_p99_ms"
-        );
-    }
+    let mut out = results_tsv("local_vector_store.tsv");
+    let _ = writeln!(
+        out,
+        "# scenario\tvectors\ttotal_ms\tpts_per_sec\tbatch_p50_ms\tbatch_p99_ms"
+    );
 
     for target in scales() {
         let dir = ScratchDir::new(&format!("tier{target}"));
@@ -179,33 +190,46 @@ fn main() {
         println!(
             "upsert {target:>7} seq : {total_ms:9.1} ms  {dps:11.0} pts/s  batch p50 {p50:7.2} p99 {p99:7.2} ms"
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "upsert_seq\t{target}\t{total_ms:.1}\t{dps:.0}\t{p50:.2}\t{p99:.2}");
-        }
+        let _ = writeln!(
+            out,
+            "upsert_seq\t{target}\t{total_ms:.1}\t{dps:.0}\t{p50:.2}\t{p99:.2}"
+        );
 
-        // Concurrent upsert: split the index range across fixed tasks. Tasks
-        // share one `Arc` point set and clone only their own microbatches, so
-        // the phase costs one extra collection rather than a full duplicate of
-        // the point set (the old `make_points` re-materialization doubled peak
-        // bench memory at every tier).
+        // Concurrent upsert: the *same* 1000-point microbatches as the
+        // sequential phase, handed round-robin to a fixed number of tasks.
+        // The transaction count therefore matches the sequential phase
+        // exactly, so the only variable is how many writers are in flight.
+        //
+        // An equal point-range split (the previous shape) quietly changed two
+        // variables: at these scales it yields 250..1250-point batches, and a
+        // batch carries one WAL fsync, so the phase reported the fsync
+        // amplification of smaller batches rather than any concurrency effect.
+        // `apply_txn` holds the store write lock across its WAL fsync, so the
+        // expected outcome is no scale-out; this phase exists to pin that
+        // number down and to keep it honest if that ever changes.
         let dir2 = ScratchDir::new(&format!("tier{target}conc"));
         let store2 = open_store(&dir2);
-        let tasks = 8;
-        let per_task = target.div_ceil(tasks);
+        let chunks: Vec<Vec<VectorPoint>> = points
+            .chunks(MICROBATCH)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+        // Spawning idle tasks only adds scheduler noise, so the task count
+        // tracks the available work at the small tiers.
+        let tasks = WRITER_TASKS.min(chunks.len()).max(1);
         let t = Instant::now();
         rt.block_on(async {
             let mut set = tokio::task::JoinSet::new();
             for task in 0..tasks {
-                let start = task * per_task;
-                let end = (start + per_task).min(target);
-                if start >= end {
-                    break;
-                }
                 let s = store2.clone();
-                let pts = points.clone();
+                let owned: Vec<Vec<VectorPoint>> = chunks
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| i % tasks == task)
+                    .map(|(_, c)| c.clone())
+                    .collect();
                 set.spawn(async move {
-                    for chunk in pts[start..end].chunks(MICROBATCH) {
-                        s.upsert_points(chunk).await.expect("upsert");
+                    for chunk in owned {
+                        s.upsert_points(&chunk).await.expect("upsert");
                     }
                 });
             }
@@ -214,16 +238,15 @@ fn main() {
         let conc_ms = t.elapsed().as_secs_f64() * 1000.0;
         let cdps = (target as f64) / (conc_ms / 1000.0);
         println!(
-            "upsert {target:>7} conc: {conc_ms:9.1} ms  {cdps:11.0} pts/s  (speedup {:.2}x)",
+            "upsert {target:>7} conc: {conc_ms:9.1} ms  {cdps:11.0} pts/s  (speedup {:.2}x, {tasks}/{WRITER_TASKS} tasks, {} txns)",
+            total_ms / conc_ms,
+            chunks.len(),
+        );
+        let _ = writeln!(
+            out,
+            "upsert_conc\t{target}\t{conc_ms:.1}\t{cdps:.0}\t{:.2}\t-",
             total_ms / conc_ms
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "upsert_conc\t{target}\t{conc_ms:.1}\t{cdps:.0}\t{:.2}\t-",
-                total_ms / conc_ms
-            );
-        }
 
         // Read latency while not writing: a single representative query.
         let q = vec![0.0f32; DIM];
@@ -269,10 +292,11 @@ fn main() {
         let rp50 = read_samples[read_samples.len() / 2];
         let rp99 = read_samples[read_samples.len() * 99 / 100];
         println!("    read during write : p50 {rp50:7.2} ms  p99 {rp99:7.2} ms");
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(f, "read_idle\t{target}\t{read_ms:.2}\t-\t-\t-");
-            let _ = writeln!(f, "read_during_write\t{target}\t-\t-\t{rp50:.2}\t{rp99:.2}");
-        }
+        let _ = writeln!(out, "read_idle\t{target}\t{read_ms:.2}\t-\t-\t-");
+        let _ = writeln!(
+            out,
+            "read_during_write\t{target}\t-\t-\t{rp50:.2}\t{rp99:.2}"
+        );
     }
 
     // Production-microbatch probe. The orchestrator's default upsert size is 32
@@ -299,17 +323,15 @@ fn main() {
         println!(
             "upsert {PROD_PROBE_VECTORS:>7} prodbatch({PROD_MICROBATCH}): {total_ms:9.1} ms  {dps:11.0} pts/s  batch p50 {p50:7.2} p99 {p99:7.2} ms"
         );
-        if let Some(f) = out.as_mut() {
-            let _ = writeln!(
-                f,
-                "upsert_seq_prodbatch\t{PROD_PROBE_VECTORS}\t{total_ms:.1}\t{dps:.0}\t{p50:.2}\t{p99:.2}"
-            );
-        }
+        let _ = writeln!(
+            out,
+            "upsert_seq_prodbatch\t{PROD_PROBE_VECTORS}\t{total_ms:.1}\t{dps:.0}\t{p50:.2}\t{p99:.2}"
+        );
     }
 
     // No criterion section here: the sweep above already records per-batch
     // p50/p99 for every tier, and criterion's minimum sample count (10) would
-    // cost six minutes on the fsync-bound write path for a duplicate number.
+    // multiply the write cost for a duplicate number.
 
     let _ = rt;
 }

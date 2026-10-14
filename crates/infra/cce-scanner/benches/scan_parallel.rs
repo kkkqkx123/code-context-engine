@@ -28,6 +28,23 @@ use cce_bench_kit::ProjectSize;
 use cce_scanner::FileProcessor;
 use cce_scanner::{FSScanner, ScanOptions};
 
+/// Open the results TSV for appending, creating `benches/results` on demand.
+///
+/// The directory is not part of the worktree, so a first run used to lose every
+/// measurement: `open(...).ok()` failed silently and each row was guarded by
+/// `if let Some(f)`. Failing loudly is the point — a bench that cannot record
+/// its own output is broken.
+fn results_tsv(name: &str) -> std::fs::File {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results");
+    fs::create_dir_all(&dir).expect("create benches/results");
+    let path = dir.join(name);
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
+}
+
 struct Harness {
     root: PathBuf,
     paths: Vec<(PathBuf, std::fs::Metadata)>,
@@ -96,16 +113,11 @@ fn main() {
     );
 
     // --- 1. single-thread vs bounded concurrency hashing ---
-    let mut out = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/scan_parallel.tsv"),
-        )
-        .ok();
-    if let Some(f) = out.as_mut() {
-        let _ = writeln!(f, "# scenario\tthreads\tfiles\tms\tfiles_per_sec\tspeedup");
-    }
+    let mut out = results_tsv("scan_parallel.tsv");
+    let _ = writeln!(
+        out,
+        "# scenario\tthreads\tfiles\tms\tfiles_per_sec\tspeedup"
+    );
 
     let fp = Arc::new(FileProcessor::new());
     let t = Instant::now();
@@ -116,10 +128,11 @@ fn main() {
     }
     let single_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("single_thread hash : {hashed} files in {single_ms:8.1} ms");
-    if let Some(f) = out.as_mut() {
-        let rate = hashed as f64 / (single_ms / 1000.0);
-        let _ = writeln!(f, "single_thread\t1\t{hashed}\t{single_ms:.1}\t{rate:.1}\t1.00");
-    }
+    let rate = hashed as f64 / (single_ms / 1000.0);
+    let _ = writeln!(
+        out,
+        "single_thread\t1\t{hashed}\t{single_ms:.1}\t{rate:.1}\t1.00"
+    );
 
     for threads in [2usize, 4, 8, num_cpus::get()] {
         let fp = Arc::new(FileProcessor::new());
@@ -140,13 +153,11 @@ fn main() {
         println!(
             "bounded({threads:>2}t) hash : {hashed} files in {ms:8.1} ms  (speedup {speedup:5.2}x)"
         );
-        if let Some(f) = out.as_mut() {
-            let rate = hashed as f64 / (ms / 1000.0);
-            let _ = writeln!(
-                f,
-                "bounded\t{threads}\t{hashed}\t{ms:.1}\t{rate:.1}\t{speedup:.2}"
-            );
-        }
+        let rate = hashed as f64 / (ms / 1000.0);
+        let _ = writeln!(
+            out,
+            "bounded\t{threads}\t{hashed}\t{ms:.1}\t{rate:.1}\t{speedup:.2}"
+        );
     }
 
     // --- 2. per-file filter-decision overhead (plugin FFI proxy) ---
@@ -163,13 +174,19 @@ fn main() {
         heavy_filter_ms - no_filter_ms,
         h.paths.len()
     );
-    if let Some(f) = out.as_mut() {
-        let n = h.paths.len();
-        let delta = heavy_filter_ms - no_filter_ms;
-        let _ = writeln!(f, "filter_empty\t0\t{n}\t{no_filter_ms:.1}\t{:.1}\t-", n as f64 / (no_filter_ms / 1000.0));
-        let _ = writeln!(f, "filter_heavy\t0\t{n}\t{heavy_filter_ms:.1}\t{:.1}\t-", n as f64 / (heavy_filter_ms / 1000.0));
-        let _ = writeln!(f, "# filter delta_ms {delta:.1} over {n} files");
-    }
+    let n = h.paths.len();
+    let delta = heavy_filter_ms - no_filter_ms;
+    let _ = writeln!(
+        out,
+        "filter_empty\t0\t{n}\t{no_filter_ms:.1}\t{:.1}\t-",
+        n as f64 / (no_filter_ms / 1000.0)
+    );
+    let _ = writeln!(
+        out,
+        "filter_heavy\t0\t{n}\t{heavy_filter_ms:.1}\t{:.1}\t-",
+        n as f64 / (heavy_filter_ms / 1000.0)
+    );
+    let _ = writeln!(out, "# filter delta_ms {delta:.1} over {n} files");
     println!(
         "NOTE: replace the heavy-pattern branch with a registered Lua/native \
          FileFilter plugin (cce_plugin_runtime) to measure true FFI overhead."

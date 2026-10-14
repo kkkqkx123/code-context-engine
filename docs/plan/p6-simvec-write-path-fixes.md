@@ -137,3 +137,14 @@ WAL，put 幂等，内存态收敛到崩溃前状态。tracker/bitmask 过期只
 手动验证（机械盘口径）：重跑 T-6 基准 2k/5k/10k 三档，预期每点成本与批大小无关地
 下降（fsync 归零后只受 WAL group-commit 限制），批 p50 从 18 s 级降到毫秒级，读
 尾延迟回到毫秒级；`strace -c -e trace=fsync,rename` 确认每点 fsync 次数归零。
+
+## 四、执行记录与后续
+
+本轮实际验证结果：串行吞吐 2k/5k/10k 分别 37222/38440/28985 pts/s（对照修复前
+55/51/56），批 p50 从 18 s 级降到 24.8~33.5 ms，读尾 p99 从 18 s 级降到
+15.4~21.9 ms，`strace` 每点 fsync 归零（每事务约 1.4 次）。验证同时暴露出两处
+收尾（`max_points` 前移、meta.bin 按容量保存）与 bench 的 TSV 落盘缺陷，均已修复。
+
+**仍未解决**：并发写零收益（10k 档 8 写入者 0.86×）与 WAL group-commit 从未成组。
+设计方案、完整基线与可判定门槛见
+`docs/plan/p6-simvec-concurrency-and-wal-design.md`。

@@ -67,3 +67,35 @@ kernel against the naive baseline within `1e-4`.
 
 **Status:** Necessary — direct SIMD intrinsics and inline asm for vector
 distance evaluation (low-level operation).
+
+## 5. Memory-Mapped Files and Byte Reinterpretation (simvec)
+
+**Files:**
+- `crates/simvec/src/storage/directory.rs` (`keys.bin` / `payloads.bin` views)
+- `crates/simvec/src/storage/vectors.rs` (dense `vectors.bin` segments)
+- `crates/simvec/src/storage/quant.rs` (quantized `quant.bin` segments)
+- `crates/simvec/src/storage/payload_store/pages.rs` (payload data pages)
+- `crates/simvec/src/storage/compaction.rs` (volume space probe)
+- `crates/simvec/src/index/hnsw.rs`, `crates/simvec/src/index.rs` (test-only mmap helpers)
+
+`memmap2::Mmap::map` / `MmapOptions` are unsafe by contract: the caller
+guarantees the file is not truncated by another process while mapped. Every
+collection file is sized up front (`set_len` on create/grow, `replace_from`
+swaps in a complete temp file via rename) and never shortened in place, so the
+mapped range stays backed for the lifetime of the mapping. Readers hold the
+mapping behind an `ArcSwap` published only after the file is complete.
+
+`vectors.rs` reinterprets an `&[f32]` slice as `&[u8]` (and back) for the
+positional `pwrite` of one dense column. `f32` has a fully defined bit pattern
+(all bit values are valid), alignment is unchanged, and the length is derived
+from the same slice, so the cast cannot produce out-of-bounds access or
+misaligned reads.
+
+`compaction.rs` calls `libc::statvfs` on the collection directory to learn how
+many bytes the volume still has free before compaction writes its temp files;
+`statvfs` is zero-initialised before the call and its result is only read when
+the call returns 0. A failure is treated as "unknown", which lets compaction
+proceed and surface the real I/O error instead of refusing on a probe failure.
+
+**Status:** Necessary — mmap and raw byte views are the storage engine's
+I/O substrate, and `statvfs` is the only portable free-space query.
