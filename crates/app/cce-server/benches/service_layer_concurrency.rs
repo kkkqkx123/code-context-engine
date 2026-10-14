@@ -60,7 +60,11 @@ fn main() {
         .build()
         .expect("runtime");
 
-    rt.block_on(async {
+    // Setup plus the manually timed K sweep run inside the runtime; the
+    // criterion section below must run outside `block_on`, otherwise its
+    // inner `block_on` panics with "Cannot start a runtime from within a
+    // runtime".
+    let (state, project_id) = rt.block_on(async {
         // Build engine + index the standard fixture (one-time setup).
         let (env, _root, project_id) = common::seeded_project().await;
         let state = env.state.clone();
@@ -89,16 +93,18 @@ fn main() {
             }
         }
 
-        // Criterion timing for the mid-range concurrency level.
-        let mut criterion = criterion::Criterion::default()
-            .sample_size(10)
-            .measurement_time(Duration::from_secs(10))
-            .warm_up_time(Duration::from_secs(3));
-        criterion.bench_function("concurrent_16", |b| {
-            b.iter(|| {
-                rt.block_on(run_concurrent(state.clone(), project_id, 16));
-            })
-        });
-        criterion.final_summary();
+        (state, project_id)
     });
+
+    // Criterion timing for the mid-range concurrency level.
+    let mut criterion = criterion::Criterion::default()
+        .sample_size(10)
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(3));
+    criterion.bench_function("concurrent_16", |b| {
+        b.iter(|| {
+            rt.block_on(run_concurrent(state.clone(), project_id, 16));
+        })
+    });
+    criterion.final_summary();
 }

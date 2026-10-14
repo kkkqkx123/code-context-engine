@@ -121,13 +121,18 @@ fn main() {
     }
 
     // Criterion timing for the end-to-end pass (modest sampling to bound cost).
+    // Each iteration gets a fresh in-memory metadata store: reusing the
+    // warmed-up store would re-index the same 500 files into ever-growing
+    // tables, so the timing would measure accumulation rather than
+    // steady-state indexing cost.
     let mut criterion = criterion::Criterion::default()
         .sample_size(10)
         .measurement_time(Duration::from_secs(8))
         .warm_up_time(Duration::from_secs(2));
     criterion.bench_function("end_to_end_small", |b| {
         b.iter(|| {
-            let _ = rt.block_on(run_once(&root, metadata.clone()));
+            let fresh = make_metadata();
+            let _ = rt.block_on(run_once(&root, fresh));
         })
     });
     criterion.final_summary();

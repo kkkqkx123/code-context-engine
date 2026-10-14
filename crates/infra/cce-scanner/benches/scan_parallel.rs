@@ -18,6 +18,8 @@
 //! Run: `cargo run -p cce-scanner --bench scan_parallel`
 
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -94,6 +96,17 @@ fn main() {
     );
 
     // --- 1. single-thread vs bounded concurrency hashing ---
+    let mut out = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/results/scan_parallel.tsv"),
+        )
+        .ok();
+    if let Some(f) = out.as_mut() {
+        let _ = writeln!(f, "# scenario\tthreads\tfiles\tms\tfiles_per_sec\tspeedup");
+    }
+
     let fp = Arc::new(FileProcessor::new());
     let t = Instant::now();
     let mut hashed = 0usize;
@@ -103,6 +116,10 @@ fn main() {
     }
     let single_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("single_thread hash : {hashed} files in {single_ms:8.1} ms");
+    if let Some(f) = out.as_mut() {
+        let rate = hashed as f64 / (single_ms / 1000.0);
+        let _ = writeln!(f, "single_thread\t1\t{hashed}\t{single_ms:.1}\t{rate:.1}\t1.00");
+    }
 
     for threads in [2usize, 4, 8, num_cpus::get()] {
         let fp = Arc::new(FileProcessor::new());
@@ -123,6 +140,13 @@ fn main() {
         println!(
             "bounded({threads:>2}t) hash : {hashed} files in {ms:8.1} ms  (speedup {speedup:5.2}x)"
         );
+        if let Some(f) = out.as_mut() {
+            let rate = hashed as f64 / (ms / 1000.0);
+            let _ = writeln!(
+                f,
+                "bounded\t{threads}\t{hashed}\t{ms:.1}\t{rate:.1}\t{speedup:.2}"
+            );
+        }
     }
 
     // --- 2. per-file filter-decision overhead (plugin FFI proxy) ---
@@ -139,6 +163,13 @@ fn main() {
         heavy_filter_ms - no_filter_ms,
         h.paths.len()
     );
+    if let Some(f) = out.as_mut() {
+        let n = h.paths.len();
+        let delta = heavy_filter_ms - no_filter_ms;
+        let _ = writeln!(f, "filter_empty\t0\t{n}\t{no_filter_ms:.1}\t{:.1}\t-", n as f64 / (no_filter_ms / 1000.0));
+        let _ = writeln!(f, "filter_heavy\t0\t{n}\t{heavy_filter_ms:.1}\t{:.1}\t-", n as f64 / (heavy_filter_ms / 1000.0));
+        let _ = writeln!(f, "# filter delta_ms {delta:.1} over {n} files");
+    }
     println!(
         "NOTE: replace the heavy-pattern branch with a registered Lua/native \
          FileFilter plugin (cce_plugin_runtime) to measure true FFI overhead."

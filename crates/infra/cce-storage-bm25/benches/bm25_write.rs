@@ -154,6 +154,9 @@ fn main() {
             f,
             "# scenario\ttotal_ms\tcommits\tdocs_per_sec\tp50_ms\tp99_ms"
         );
+        // The document count varies per run (`CCE_BENCH_BM25_DOCS`, default
+        // 20_000); rows below are meaningless without it, so record it.
+        let _ = writeln!(f, "# docs {n}");
     }
 
     for per_commit in [1usize, 10, 50] {
