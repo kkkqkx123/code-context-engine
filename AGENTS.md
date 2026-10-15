@@ -34,7 +34,7 @@ The project supports a plugin system: Lua scripts (mlua) and native dynamic libr
 
 ## Workspace Layout
 
-All source crates live under `crates/`. Vendored third-party crates (tantivy, tree-sitter-svelte, tree-sitter-vue) are also present but are not described here.
+All source crates live under `crates/`. Vendored third-party crates (tantivy, tree-sitter grammars under `crates/tree-sitter/`) are also present but are not described here.
 
 ### core — Domain types, configuration, and shared abstractions
 Crates: cce-types, cce-config, cce-utils, cce-metrics, cce-text, cce-plugin, cce-llm

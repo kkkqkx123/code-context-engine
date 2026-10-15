@@ -10,3 +10,15 @@
 [submodule "crates/infra/llm-suite"]
 	path = crates/infra/llm-suite
 	url = https://github.com/kkkqkx123/llm-suite.git
+[submodule "crates/tree-sitter/tree-sitter-svelte"]
+	path = crates/tree-sitter/tree-sitter-svelte
+	url = https://github.com/kkkqkx123/tree-sitter-svelte.git
+[submodule "crates/tree-sitter/tree-sitter-vue"]
+	path = crates/tree-sitter/tree-sitter-vue
+	url = https://github.com/kkkqkx123/tree-sitter-vue.git
+[submodule "crates/tree-sitter/tree-sitter-c"]
+	path = crates/tree-sitter/tree-sitter-c
+	url = https://github.com/kkkqkx123/tree-sitter-c.git
+[submodule "crates/tree-sitter/tree-sitter-cpp"]
+	path = crates/tree-sitter/tree-sitter-cpp
+	url = https://github.com/kkkqkx123/tree-sitter-cpp.git
