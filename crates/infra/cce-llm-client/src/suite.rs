@@ -59,18 +59,16 @@ impl GatewayMetricsSink {
 impl llm_client::TokenUsageSink for GatewayMetricsSink {
     fn record_token_usage(
         &self,
-        prompt_tokens: u64,
-        completion_tokens: u64,
-        _total_cost: Option<f64>,
+        usage: &llm_types::llm::TokenUsageStats,
         model: Option<&str>,
     ) {
         let model = model.unwrap_or("unknown");
         self.registry
             .counter("llm_gateway_tokens_prompt_total", &[("model", model)])
-            .add(prompt_tokens);
+            .add(usage.prompt_tokens as u64);
         self.registry
             .counter("llm_gateway_tokens_completion_total", &[("model", model)])
-            .add(completion_tokens);
+            .add(usage.completion_tokens as u64);
     }
 }
 
@@ -346,6 +344,7 @@ pub fn chat_profile(
         query_params: metadata_from_params(&connection.extra_params),
         stream_options: None,
         context_window_size: None,
+        prompt_caching: None,
         proxy: connection.proxy_url.clone(),
         no_proxy: no_proxy_for(&connection.no_proxy),
         circuit_breaker: circuit_breaker_config(&connection.circuit_breaker),
