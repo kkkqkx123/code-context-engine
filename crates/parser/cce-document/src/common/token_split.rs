@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use cce_config::modules::ChunkingConfig;
 use cce_types::ChunkPath;
+use cce_utils::text::floor_char_boundary;
 use cce_utils::token_estimation::TokenEstimator;
 
 #[derive(Debug, Clone)]
@@ -179,11 +180,4 @@ fn find_bm25_split_point(text: &str, start: usize, max_words: usize) -> usize {
     }
 
     text.len()
-}
-
-fn floor_char_boundary(text: &str, mut position: usize) -> usize {
-    while position > 0 && !text.is_char_boundary(position) {
-        position -= 1;
-    }
-    position
 }

@@ -25,6 +25,7 @@ cce-config = { path = "../../core/cce-config" }
 cce-mcp = { path = "../cce-mcp" }
 cce-scanner = { path = "../../infra/cce-scanner" }
 cce-types = { path = "../../core/cce-types" }
+cce-utils = { path = "../../core/cce-utils" }
 cce-gateway = { path = "../cce-gateway" }
 base64 = "0.22"
 tokio-util = "0.7"

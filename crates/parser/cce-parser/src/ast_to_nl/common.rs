@@ -11,7 +11,7 @@ pub mod utils;
 
 // Re-export main types
 pub use normalizer::NameNormalizer;
-pub use utils::{clean_comment_content, create_standalone_group, safe_utf8_boundary};
+pub use utils::{clean_comment_content, create_standalone_group};
 
 // Re-export template types
 pub use templates::{GroupTemplateBase, TemplateHelpers};

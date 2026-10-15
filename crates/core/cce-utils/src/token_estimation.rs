@@ -54,10 +54,10 @@ pub fn truncate_to_token_budget(text: &str, max_tokens: usize) -> TruncationResu
 
     let mut current = text.to_string();
     while estimator.estimate_text(&current) > max_tokens {
-        let mut target = current.len() * TRUNCATE_RATIO_NUM / TRUNCATE_RATIO_DEN;
-        while !current.is_char_boundary(target) {
-            target -= 1;
-        }
+        let target = crate::text::floor_char_boundary(
+            &current,
+            current.len() * TRUNCATE_RATIO_NUM / TRUNCATE_RATIO_DEN,
+        );
         if target < MIN_TRUNCATED_LEN {
             break;
         }
@@ -77,6 +77,7 @@ pub fn truncate_to_token_budget(text: &str, max_tokens: usize) -> TruncationResu
 
     if estimator.estimate_text(&current) > max_tokens {
         let split = estimator.find_split_point(&current, max_tokens);
+        let split = crate::text::floor_char_boundary(&current, split);
         tracing::info!(
             from_bytes = current.len(),
             to_bytes = split,

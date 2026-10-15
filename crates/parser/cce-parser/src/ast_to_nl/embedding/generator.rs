@@ -195,7 +195,7 @@ impl EmbeddingGenerator {
         }
         let byte_pos = TokenEstimator::default().find_split_point(doc, FILE_DOC_SUMMARY_TOKENS);
         let split_point = find_trim_point(doc, byte_pos);
-        doc[..split_point].trim_end().to_string()
+        doc.get(..split_point).unwrap_or("").trim_end().to_string()
     }
 
     /// Truncate summary to word limit

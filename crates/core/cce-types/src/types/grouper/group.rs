@@ -726,15 +726,22 @@ impl EntityGroup {
             return "";
         }
 
-        self.combined_source_lazy
-            .get_or_init(|| Arc::from(&file_source[span.start_byte..span.end_byte]))
+        self.combined_source_lazy.get_or_init(|| {
+            Arc::from(
+                file_source
+                    .get(span.start_byte..span.end_byte)
+                    .unwrap_or(""),
+            )
+        })
     }
 
     pub fn preload_combined_source(&mut self, file_source: &str) {
         if self.combined_source.is_none() {
             let span = &self.span;
             if span.start_byte < span.end_byte && span.end_byte <= file_source.len() {
-                let source_segment = &file_source[span.start_byte..span.end_byte];
+                let source_segment = file_source
+                    .get(span.start_byte..span.end_byte)
+                    .unwrap_or("");
                 self.combined_source = Some(Arc::from(source_segment));
             }
         }
@@ -774,7 +781,9 @@ impl EntityGroup {
             return true;
         }
 
-        let source_segment = &file_source[span.start_byte..span.end_byte];
+        let source_segment = file_source
+            .get(span.start_byte..span.end_byte)
+            .unwrap_or("");
         self.combined_source = Some(Arc::from(source_segment));
 
         tracing::debug!(

@@ -76,7 +76,6 @@ pub use chunker::{
 pub use common::NameNormalizer;
 pub use common::TemplateHelpers;
 pub use common::clean_comment_content;
-pub use common::safe_utf8_boundary;
 
 // Re-export from bm25
 pub use bm25::{Bm25Generator, KeywordExtractor};

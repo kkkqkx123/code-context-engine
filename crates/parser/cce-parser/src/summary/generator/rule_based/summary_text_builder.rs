@@ -308,14 +308,12 @@ impl super::RuleBasedGenerator {
         if estimated_tokens > max_summary_length {
             let split_point = TokenEstimator::default().find_split_point(text, max_summary_length);
             if split_point > 3 {
-                let truncate_at = split_point.saturating_sub(3);
-                let safe_point = text
-                    .char_indices()
-                    .take_while(|(idx, _)| *idx < truncate_at)
-                    .last()
-                    .map(|(idx, ch)| idx + ch.len_utf8())
-                    .unwrap_or(truncate_at);
-                format!("{}...", &text[..safe_point])
+                let truncate_at =
+                    cce_utils::floor_char_boundary(text, split_point.saturating_sub(3));
+                match text.get(..truncate_at) {
+                    Some(prefix) => format!("{prefix}..."),
+                    None => text.to_string(),
+                }
             } else {
                 text.to_string()
             }

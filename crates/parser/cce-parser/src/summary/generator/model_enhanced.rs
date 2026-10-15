@@ -559,7 +559,7 @@ Folded code representation:
             let content_budget = self.config.max_summary_length.saturating_sub(1);
             let split_point =
                 TokenEstimator::default().find_split_point(&summary.summary_text, content_budget);
-            summary.summary_text.truncate(split_point);
+            cce_utils::truncate_string_to_byte_len(&mut summary.summary_text, split_point);
             summary.summary_text.push_str("...");
         }
 

@@ -47,10 +47,11 @@ pub fn create_span_from_capture(capture: &Capture) -> Span {
 /// The extracted substring, or empty string if positions are invalid
 pub fn extract_text_from_source(source: &str, start: usize, end: usize) -> String {
     if end <= source.len() && start < end {
-        source[start..end].to_string()
-    } else {
-        String::new()
+        if let Some(s) = source.get(start..end) {
+            return s.to_string();
+        }
     }
+    String::new()
 }
 
 /// Find the smallest span interval containing a position.
@@ -113,7 +114,10 @@ pub fn extract_text_without_comments(
         collect_comment_ranges(tree.root_node(), start, end, &mut comment_ranges);
 
         if comment_ranges.is_empty() {
-            return normalize_whitespace(&source[start..end]);
+            return source
+                .get(start..end)
+                .map(normalize_whitespace)
+                .unwrap_or_default();
         }
 
         comment_ranges.sort_by_key(|(range_start, _)| *range_start);
@@ -124,13 +128,17 @@ pub fn extract_text_without_comments(
         for (comment_start, comment_end) in comment_ranges {
             let segment_end = comment_start.min(end);
             if cursor < segment_end {
-                cleaned.push_str(&source[cursor..segment_end]);
+                if let Some(segment) = source.get(cursor..segment_end) {
+                    cleaned.push_str(segment);
+                }
             }
             cursor = cursor.max(comment_end.min(end));
         }
 
         if cursor < end {
-            cleaned.push_str(&source[cursor..end]);
+            if let Some(tail) = source.get(cursor..end) {
+                cleaned.push_str(tail);
+            }
         }
 
         normalize_whitespace(&cleaned)

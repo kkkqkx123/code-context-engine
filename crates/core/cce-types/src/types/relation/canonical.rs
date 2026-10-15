@@ -442,24 +442,15 @@ pub const MAX_PERSISTED_TYPE_LEN: usize = 256;
 
 /// Truncate an owner type for persistence, keeping the leading qualifier.
 pub fn canonical_owner_type(owner: &Option<String>) -> Option<String> {
-    owner.as_ref().map(|value| {
-        if value.len() > MAX_PERSISTED_TYPE_LEN {
-            value[..MAX_PERSISTED_TYPE_LEN].to_string()
-        } else {
-            value.clone()
-        }
-    })
+    owner
+        .as_ref()
+        .map(|value| cce_utils::truncate_to_byte_len(value, MAX_PERSISTED_TYPE_LEN).to_string())
 }
 
 /// Copy a call context for persistence, truncating embedded type names.
 pub fn canonical_call_context(context: &super::CallContext) -> super::CallContext {
-    let truncate = |value: &str| {
-        if value.len() > MAX_PERSISTED_TYPE_LEN {
-            value[..MAX_PERSISTED_TYPE_LEN].to_string()
-        } else {
-            value.to_string()
-        }
-    };
+    let truncate =
+        |value: &str| cce_utils::truncate_to_byte_len(value, MAX_PERSISTED_TYPE_LEN).to_string();
     match context {
         super::CallContext::Direct => super::CallContext::Direct,
         super::CallContext::InstanceMethod { receiver_type } => {

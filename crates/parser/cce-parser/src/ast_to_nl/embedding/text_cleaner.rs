@@ -6,19 +6,31 @@
 //! and qualified paths are retrieval anchors. Rewriting those tokens as prose
 //! creates malformed text and makes implementation strategies indistinguishable.
 
-use cce_utils::text::normalize_whitespace_preserving_newlines;
+use cce_utils::text::{floor_char_boundary, normalize_whitespace_preserving_newlines};
 use cce_utils::token_estimation::{TokenEstimator, estimate_tokens};
 
 /// Find the nearest trim point before `max_byte`.
 /// Searches backward for sentence/clause/word boundaries within an 80-char window.
+/// `max_byte` may come from token-budget arithmetic and is never assumed to be
+/// a char boundary; both ends are aligned down before slicing so multi-byte
+/// chars (`¡`, CJK, emoji) cannot panic the slice.
 pub(crate) fn find_trim_point(text: &str, max_byte: usize) -> usize {
-    let search_start = max_byte.saturating_sub(80);
-    let search_area = &text[search_start..max_byte.min(text.len())];
+    if text.is_empty() {
+        return 0;
+    }
+    let max_byte = floor_char_boundary(text, max_byte);
+    if max_byte == 0 {
+        return 0;
+    }
+    let search_start = floor_char_boundary(text, max_byte.saturating_sub(80));
+    let Some(search_area) = text.get(search_start..max_byte) else {
+        return max_byte;
+    };
 
     for pattern in &[". ", ".\n", "。", "；", "; ", ", ", " "] {
         if let Some(pos) = search_area.rfind(pattern) {
-            let abs_pos = search_start + pos + pattern.len();
-            if abs_pos < text.len() {
+            let abs_pos = floor_char_boundary(text, search_start + pos + pattern.len());
+            if abs_pos > search_start && abs_pos < text.len() {
                 return abs_pos;
             }
         }
@@ -117,7 +129,11 @@ impl EmbeddingTextCleaner {
         let max_doc = (total as f64 * max_ratio) as usize;
         let byte_pos = TokenEstimator::default().find_split_point(docstring, max_doc.max(1));
         let split_point = find_trim_point(docstring, byte_pos);
-        let trimmed_doc = &docstring[..split_point];
+        let trimmed_doc = docstring.get(..split_point).unwrap_or(
+            docstring
+                .get(..floor_char_boundary(docstring, split_point))
+                .unwrap_or(""),
+        );
         let code = code.trim_start();
         if code.is_empty() {
             trimmed_doc.to_string()
@@ -135,11 +151,16 @@ impl EmbeddingTextCleaner {
     ) -> (&'a str, &'a str) {
         if let Some(&first_boundary) = entity_end_lines.first() {
             let lines: Vec<&str> = text.lines().collect();
+            if lines.is_empty() {
+                return ("", text);
+            }
             let boundary_idx = first_boundary.min(lines.len().saturating_sub(1));
             let doc_part = lines[..=boundary_idx].join("\n");
             if let Some(pos) = text.find(&doc_part) {
                 let end = pos + doc_part.len();
-                return (&text[..end], &text[end..]);
+                if let (Some(head), Some(tail)) = (text.get(..end), text.get(end..)) {
+                    return (head, tail);
+                }
             }
         }
         ("", text)
@@ -240,5 +261,48 @@ mod tests {
 
         assert_eq!(cleaner.clean("Vec<  T  >"), "Vec< T >");
         assert_eq!(cleaner.clean("&  mut  T"), "& mut T");
+    }
+
+    #[test]
+    fn test_find_trim_point_inside_inverted_exclamation() {
+        let mut text = "a".repeat(548);
+        text.push('¡');
+        text.push_str(&"b".repeat(100));
+        assert_eq!(text.len(), 650);
+        // 549 sits inside '¡' (bytes 548..550); the 80-byte window start
+        // used to panic here.
+        let point = find_trim_point(&text, 629);
+        assert!(text.is_char_boundary(point));
+        assert!(point <= 629);
+        assert!(!text[..point].is_empty());
+    }
+
+    #[test]
+    fn test_find_trim_point_never_splits_multibyte() {
+        let text = format!(
+            "word ¡hola{} 世界{} 🌍 end. tail",
+            "x".repeat(90),
+            "y".repeat(90)
+        );
+        for max_byte in 0..=(text.len() + 80) {
+            let point = find_trim_point(&text, max_byte);
+            assert!(text.is_char_boundary(point));
+            assert!(point <= max_byte.min(text.len()));
+            let _ = &text[..point];
+        }
+    }
+
+    #[test]
+    fn test_trim_docstring_with_multibyte_never_panics() {
+        let cleaner = EmbeddingTextCleaner::new().with_docstring_ratio(0.1);
+        let mut doc = String::from("Doc ¡hola mundo. ");
+        doc.push_str(&"detalle ".repeat(200));
+        doc.push_str("世界 🌍. ");
+        doc.push_str(&"fn body(); ".repeat(200));
+        let cleaned = cleaner.clean(&doc);
+        let lines: Vec<String> = cleaned.lines().map(str::to_string).collect();
+        let end_lines = if lines.len() > 2 { vec![1] } else { vec![0] };
+        let trimmed = cleaner.clean_with_boundaries(&cleaned, &end_lines);
+        assert!(!trimmed.is_empty());
     }
 }

@@ -758,11 +758,7 @@ mod tests {
             while s.len() < len {
                 s.push_str(alphabets[self.range(alphabets.len())]);
             }
-            let mut cut = len;
-            while !s.is_char_boundary(cut) {
-                cut -= 1;
-            }
-            s.truncate(cut);
+            cce_utils::truncate_string_to_byte_len(&mut s, len);
             s
         }
     }

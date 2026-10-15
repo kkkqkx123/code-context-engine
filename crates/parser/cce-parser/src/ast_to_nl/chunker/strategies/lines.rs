@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use cce_config::modules::ChunkingConfig;
+use cce_utils::text::{ceil_char_boundary, floor_char_boundary};
 
 use super::super::boundary::{ChunkBoundary, SplitReason, cost};
 use super::super::result::ChunkPath;
@@ -142,17 +143,12 @@ pub fn force_split_line(
         let target_pos = (current_pos + max_chars).min(line.len());
 
         let end_pos = if target_pos < line.len() {
-            let mut pos = target_pos;
-            while pos > current_pos && !line.is_char_boundary(pos) {
-                pos -= 1;
+            let floored = floor_char_boundary(line, target_pos);
+            if floored > current_pos {
+                floored
+            } else {
+                ceil_char_boundary(line, target_pos)
             }
-            if pos == current_pos {
-                pos = target_pos;
-                while pos < line.len() && !line.is_char_boundary(pos) {
-                    pos += 1;
-                }
-            }
-            pos
         } else {
             target_pos
         };

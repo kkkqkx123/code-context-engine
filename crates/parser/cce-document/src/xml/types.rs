@@ -221,7 +221,7 @@ impl XmlNode {
                 if let Some(ref text) = self.text {
                     let trimmed = text.trim();
                     if trimmed.len() > 100 {
-                        format!("{}...", &trimmed[..100])
+                        format!("{}...", cce_utils::truncate_to_byte_len(trimmed, 100))
                     } else {
                         trimmed.to_string()
                     }

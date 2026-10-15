@@ -11,8 +11,9 @@ pub use file::{
 
 pub mod text;
 pub use text::{
-    is_blank, normalize_code_fragment, normalize_whitespace,
-    normalize_whitespace_preserving_newlines, remove_quotes, split_camel_case,
+    ceil_char_boundary, floor_char_boundary, is_blank, normalize_code_fragment,
+    normalize_whitespace, normalize_whitespace_preserving_newlines, remove_quotes,
+    split_camel_case, truncate_string_to_byte_len, truncate_to_byte_len,
 };
 
 pub mod comment_cleaner;

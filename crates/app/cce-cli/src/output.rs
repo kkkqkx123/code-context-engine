@@ -68,7 +68,8 @@ pub fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let end = cce_utils::floor_char_boundary(s, max_len.saturating_sub(3));
+        format!("{}...", &s[..end])
     }
 }
 
@@ -117,5 +118,18 @@ mod tests {
         let roundtrip: serde_json::Value =
             serde_json::from_str(&text).expect("json output must stay parseable");
         assert_eq!(roundtrip["total"], 2);
+    }
+
+    #[test]
+    fn truncate_never_splits_multibyte_char() {
+        let text = format!("{}¡{}世界🌍", "a".repeat(10), "b".repeat(10));
+        for max_len in 0..=(text.len() + 5) {
+            let cut = truncate(&text, max_len);
+            assert!(!cut.is_empty());
+            if text.len() > max_len {
+                assert!(cut.ends_with("..."));
+            }
+        }
+        assert_eq!(truncate("a¡bcdef", 5), "a...");
     }
 }

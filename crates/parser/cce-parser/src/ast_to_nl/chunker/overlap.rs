@@ -2,6 +2,7 @@
 //!
 //! Manages overlap regions between adjacent chunks.
 
+use cce_utils::text::floor_char_boundary;
 use cce_utils::token_estimation::TokenEstimator;
 
 use super::config::ChunkingConfig;
@@ -78,7 +79,7 @@ impl OverlapManager {
                     .map(|w| w.len() + 1) // +1 for the space
                     .sum::<usize>()
                     .min(text.len());
-                Self::safe_boundary(text, word_end)
+                floor_char_boundary(text, word_end)
             }
             ChunkPath::Embedding => {
                 let max_chars = self.config.overlap_tokens * 4; // ~4 chars per token
@@ -102,11 +103,11 @@ impl OverlapManager {
         }
 
         // Find sentence boundary near target_byte
-        let search_start = Self::safe_boundary(text, target_byte.saturating_sub(50));
-        let search_end = Self::safe_boundary(text, (target_byte + 100).min(text.len()));
+        let search_start = floor_char_boundary(text, target_byte.saturating_sub(50));
+        let search_end = floor_char_boundary(text, (target_byte + 100).min(text.len()));
 
         if let Some(pos) = self.find_sentence_boundary(&text[search_start..search_end]) {
-            let end = Self::safe_boundary(text, search_start + pos);
+            let end = floor_char_boundary(text, search_start + pos);
             return OverlapInfo {
                 text: text[..end].to_string(),
                 start_byte: 0,
@@ -115,7 +116,7 @@ impl OverlapManager {
         }
 
         // Fallback to safe character boundary
-        let end = Self::safe_boundary(text, target_byte);
+        let end = floor_char_boundary(text, target_byte);
         OverlapInfo {
             text: text[..end].to_string(),
             start_byte: 0,
@@ -153,7 +154,7 @@ impl OverlapManager {
                     .map(|w| w.len() + 1) // +1 for the space
                     .sum::<usize>()
                     .min(text.len());
-                Self::safe_boundary(text, byte_pos)
+                floor_char_boundary(text, byte_pos)
             }
             ChunkPath::Embedding => {
                 let max_chars = self.config.overlap_tokens * 4; // ~4 chars per token
@@ -169,12 +170,12 @@ impl OverlapManager {
         };
 
         // Find sentence boundary near target_byte
-        let search_start = Self::safe_boundary(text, target_byte.saturating_sub(50));
-        let search_end = Self::safe_boundary(text, (target_byte + 100).min(text.len()));
+        let search_start = floor_char_boundary(text, target_byte.saturating_sub(50));
+        let search_end = floor_char_boundary(text, (target_byte + 100).min(text.len()));
 
         if search_start < search_end && search_end <= text.len() {
             if let Some(pos) = self.find_sentence_boundary(&text[search_start..search_end]) {
-                let start = Self::safe_boundary(text, search_start + pos);
+                let start = floor_char_boundary(text, search_start + pos);
                 if start < text.len() {
                     return OverlapInfo {
                         text: text[start..].to_string(),
@@ -186,28 +187,12 @@ impl OverlapManager {
         }
 
         // Fallback: start at the computed position
-        let start = Self::safe_boundary(text, target_byte);
+        let start = floor_char_boundary(text, target_byte);
         OverlapInfo {
             text: text[start..].to_string(),
             start_byte: start,
             end_byte: text.len(),
         }
-    }
-
-    /// Find safe UTF-8 character boundary
-    fn safe_boundary(text: &str, pos: usize) -> usize {
-        if pos >= text.len() {
-            return text.len();
-        }
-        if text.is_char_boundary(pos) {
-            return pos;
-        }
-        // Move backward to find safe boundary
-        let mut p = pos;
-        while p > 0 && !text.is_char_boundary(p) {
-            p -= 1;
-        }
-        p
     }
 
     /// Find sentence boundary position

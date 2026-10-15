@@ -82,7 +82,7 @@ impl DocSummarizer {
             .map(|n| {
                 let text = n.content.trim().replace('\n', " ");
                 if text.len() > 200 {
-                    format!("{}…", &text[..200])
+                    format!("{}…", cce_utils::truncate_to_byte_len(&text, 200))
                 } else {
                     text
                 }

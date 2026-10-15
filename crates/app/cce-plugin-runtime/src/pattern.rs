@@ -131,7 +131,7 @@ pub fn compute_span(content: &str, start_byte: usize, end_byte: usize) -> Span {
 
 /// Compute the (row, column) position of `byte` in `content`.
 fn position_at(content: &str, byte: usize) -> Position {
-    let byte = byte.min(content.len());
+    let byte = cce_utils::floor_char_boundary(content, byte);
     let prefix = &content[..byte];
     let row = prefix.bytes().filter(|&b| b == b'\n').count();
     let line_start = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);

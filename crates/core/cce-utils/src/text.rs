@@ -60,6 +60,50 @@ pub fn normalize_whitespace_preserving_newlines(text: &str) -> String {
         .to_string()
 }
 
+/// Move a byte index down to the nearest UTF-8 char boundary.
+///
+/// Rust `str` slicing panics when an index lands inside a multi-byte char
+/// (`¡`, CJK, emoji). Any byte arithmetic (`len * ratio`, `pos - window`,
+/// `max - 3`, fixed caps like `[..256]`) can produce such an index, so every
+/// computed index must pass through here before slicing. Out-of-range input
+/// is clamped to `text.len()`.
+pub fn floor_char_boundary(text: &str, position: usize) -> usize {
+    let mut position = position.min(text.len());
+    while position > 0 && !text.is_char_boundary(position) {
+        position -= 1;
+    }
+    position
+}
+
+/// Move a byte index up to the nearest UTF-8 char boundary.
+///
+/// Complement to [`floor_char_boundary`] for split loops that must make
+/// forward progress (a floored cut equal to the chunk start would stall).
+/// Out-of-range input is clamped to `text.len()`.
+pub fn ceil_char_boundary(text: &str, position: usize) -> usize {
+    let mut position = position.min(text.len());
+    while position < text.len() && !text.is_char_boundary(position) {
+        position += 1;
+    }
+    position
+}
+
+/// Truncate `text` to at most `max_bytes` bytes without splitting a char.
+///
+/// Returns the longest char-boundary-aligned prefix within the budget.
+pub fn truncate_to_byte_len(text: &str, max_bytes: usize) -> &str {
+    &text[..floor_char_boundary(text, max_bytes)]
+}
+
+/// Truncate a `String` in place without splitting a char.
+///
+/// Centralizes the `floor` + `String::truncate` pair so callers never
+/// pass a raw computed index to `truncate` directly.
+pub fn truncate_string_to_byte_len(text: &mut String, max_bytes: usize) {
+    let boundary = floor_char_boundary(text, max_bytes);
+    text.truncate(boundary);
+}
+
 /// Check if text is empty or contains only whitespace
 ///
 /// # Example
@@ -315,5 +359,32 @@ mod tests {
         assert!(is_blank("\n\t"));
         assert!(!is_blank("hello"));
         assert!(!is_blank(" a "));
+    }
+
+    #[test]
+    fn test_floor_char_boundary_never_splits_multibyte() {
+        let text = format!("{}¡{}世界🌍", "a".repeat(10), "b".repeat(10));
+        for i in 0..=text.len() {
+            let floored = floor_char_boundary(&text, i);
+            assert!(text.is_char_boundary(floored));
+            assert!(floored <= i.min(text.len()));
+            assert_eq!(&text[..floored], truncate_to_byte_len(&text, i));
+        }
+        // '¡' is 2 bytes: flooring the middle byte steps back one.
+        let inverted = "a¡b";
+        assert_eq!(floor_char_boundary(inverted, 2), 1);
+        assert_eq!(truncate_to_byte_len(inverted, 2), "a");
+        // Out-of-range input clamps instead of panicking.
+        assert_eq!(floor_char_boundary(inverted, 100), inverted.len());
+    }
+
+    #[test]
+    fn test_ceil_moves_forward_to_boundary() {
+        let inverted = "a¡b";
+        assert_eq!(ceil_char_boundary(inverted, 2), 3);
+        assert_eq!(ceil_char_boundary(inverted, 100), inverted.len());
+        let mut owned = inverted.to_string();
+        truncate_string_to_byte_len(&mut owned, 2);
+        assert_eq!(owned, "a");
     }
 }

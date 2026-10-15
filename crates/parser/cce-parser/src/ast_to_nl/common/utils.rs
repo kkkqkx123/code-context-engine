@@ -443,43 +443,6 @@ fn is_link_definition(line: &str) -> bool {
     line.starts_with('[') && line.contains("]:")
 }
 
-/// Find safe UTF-8 character boundary position
-///
-/// This function ensures that byte positions used for string slicing are at valid
-/// UTF-8 character boundaries, preventing panics from invalid UTF-8 sequences.
-///
-/// # Arguments
-///
-/// * `text` - The text to check
-/// * `pos` - The desired byte position
-///
-/// # Returns
-///
-/// A safe byte position that is a valid UTF-8 character boundary
-///
-/// # Examples
-///
-/// ```
-/// use cce_parser::ast_to_nl::safe_utf8_boundary;
-///
-/// let text = "Hello é";
-/// let safe_pos = safe_utf8_boundary(text, 7); // Returns 6 (before the second byte of 'é')
-/// ```
-pub fn safe_utf8_boundary(text: &str, pos: usize) -> usize {
-    if pos >= text.len() {
-        return text.len();
-    }
-    if text.is_char_boundary(pos) {
-        return pos;
-    }
-    // Move backward to find safe boundary
-    let mut p = pos;
-    while p > 0 && !text.is_char_boundary(p) {
-        p -= 1;
-    }
-    p
-}
-
 /// Create a standalone entity group from a single entity
 ///
 /// This function is used by both EmbeddingGenerator and Bm25Generator
@@ -524,39 +487,6 @@ mod tests {
 
     use super::*;
     use cce_types::entity::{EntityId, EntityKind};
-
-    #[test]
-    fn test_safe_utf8_boundary_ascii() {
-        let text = "Hello World";
-        assert_eq!(safe_utf8_boundary(text, 0), 0);
-        assert_eq!(safe_utf8_boundary(text, 5), 5);
-        assert_eq!(safe_utf8_boundary(text, 11), 11);
-        assert_eq!(safe_utf8_boundary(text, 20), 11); // Beyond end
-    }
-
-    #[test]
-    fn test_safe_utf8_boundary_unicode() {
-        let text = "Hello 世界";
-        // First CJK glyph starts at byte 6, second at byte 9
-        assert_eq!(safe_utf8_boundary(text, 0), 0);
-        assert_eq!(safe_utf8_boundary(text, 5), 5); // After 'o'
-        assert_eq!(safe_utf8_boundary(text, 6), 6); // At first CJK glyph
-        assert_eq!(safe_utf8_boundary(text, 7), 6); // Between the first glyph's bytes, moves back
-        assert_eq!(safe_utf8_boundary(text, 8), 6); // Between the first glyph's bytes, moves back
-        assert_eq!(safe_utf8_boundary(text, 9), 9); // At second CJK glyph
-        assert_eq!(safe_utf8_boundary(text, 10), 9); // Between the second glyph's bytes, moves back
-    }
-
-    #[test]
-    fn test_safe_utf8_boundary_emoji() {
-        let text = "Hello 🌍";
-        // Emoji is 4 bytes starting at position 6
-        assert_eq!(safe_utf8_boundary(text, 6), 6);
-        assert_eq!(safe_utf8_boundary(text, 7), 6); // Middle of emoji
-        assert_eq!(safe_utf8_boundary(text, 8), 6); // Middle of emoji
-        assert_eq!(safe_utf8_boundary(text, 9), 6); // Middle of emoji
-        assert_eq!(safe_utf8_boundary(text, 10), 10); // After emoji
-    }
 
     #[test]
     fn test_create_standalone_group() {

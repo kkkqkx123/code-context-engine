@@ -194,7 +194,7 @@ fn clean_python_docstring(text: &str) -> String {
         .iter()
         .map(|line| {
             if line.len() >= min_indent {
-                &line[min_indent..]
+                line.get(min_indent..).unwrap_or(line)
             } else {
                 line
             }
