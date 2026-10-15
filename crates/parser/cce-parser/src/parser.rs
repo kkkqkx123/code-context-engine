@@ -39,6 +39,7 @@ pub mod stages;
 
 // Internal implementation modules (crate-only access)
 pub(crate) mod comment_processor;
+pub(crate) mod cpp_interop_guard;
 pub(crate) mod embedded_types;
 pub(crate) mod helpers;
 pub(crate) mod language_detector;

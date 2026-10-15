@@ -95,7 +95,7 @@ mod tests {
         let info = detector
             .detect("include/header.h")
             .expect("Failed to detect");
-        assert_eq!(info.language, Language::C);
+        assert_eq!(info.language, Language::Cpp);
         assert_eq!(info.file_type, FileType::Header);
     }
 

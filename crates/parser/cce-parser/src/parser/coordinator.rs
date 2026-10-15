@@ -421,6 +421,51 @@ def add(a, b):
     }
 
     #[test]
+    fn test_coordinator_c_header_interop_guard_does_not_degrade_parse() {
+        let mut coordinator = ParseCoordinator::new();
+        let code = r#"
+#ifndef _foo_h_
+#define _foo_h_
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct foo_t
+{
+    int a;
+};
+
+int foo_create(struct foo_t* foo);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* !_foo_h_ */
+"#;
+
+        let (parsed, has_syntax_errors) = coordinator
+            .parse_detailed("include/foo.h", code)
+            .expect("C header should parse");
+
+        assert!(
+            !has_syntax_errors,
+            "the C++ interop guard must not corrupt the conditional nesting"
+        );
+
+        let names: Vec<&str> = parsed.entities.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            names.contains(&"foo_create"),
+            "guard-scoped declarations stay reachable: {names:?}"
+        );
+        assert!(
+            names.contains(&"foo_t"),
+            "guard-scoped structs stay reachable: {names:?}"
+        );
+    }
+
+    #[test]
     fn test_coordinator_parse_rust_utils_fixture() {
         let mut coordinator = ParseCoordinator::new();
         let code = r#"

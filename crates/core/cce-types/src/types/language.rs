@@ -621,7 +621,13 @@ pub fn builtin_language_for_extension(ext: &str) -> Option<(Language, FileType)>
     match ext {
         // C family
         "c" => Some((Language::C, FileType::Source)),
-        "h" => Some((Language::C, FileType::Header)),
+        // A `.h` file is C or C++ with no reliable way to tell from the name,
+        // and projects mix both kinds of header against the same `.c`/`.cpp`
+        // sources. The C++ grammar covers the shared node types as a superset
+        // and its query scheme already includes every C pattern, so routing
+        // headers there avoids misreading C++ headers (class/method parsed as
+        // free function) at no cost to C headers.
+        "h" => Some((Language::Cpp, FileType::Header)),
         "cpp" | "cc" | "cxx" => Some((Language::Cpp, FileType::Source)),
         "hpp" | "hxx" => Some((Language::Cpp, FileType::Header)),
         "cs" => Some((Language::CSharp, FileType::Source)),

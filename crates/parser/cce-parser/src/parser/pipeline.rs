@@ -4,9 +4,11 @@
 
 use crate::parser::components::Components;
 use crate::parser::context::ParseContext;
+use crate::parser::cpp_interop_guard;
 use crate::parser::extractor::MacroBodyExtractor;
 use crate::parser::stages;
 use cce_types::ParseError;
+use std::borrow::Cow;
 
 /// Execute the full parsing pipeline on the given context.
 ///
@@ -65,9 +67,18 @@ fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Resul
         return Err(ParseError::unsupported_language(language.to_string()));
     }
 
+    // The C/C++ grammars mis-nest the preprocessor conditionals that wrap
+    // `extern "C" { ... }`, so parse a shadow copy with those two brace
+    // lines blanked. The shadow is byte-length preserving, so all spans
+    // taken from its tree index into the original source unchanged.
+    let parse_source = match cpp_interop_guard::shadow_for_parse(context.source(), &language) {
+        Some(shadow) => shadow,
+        None => Cow::Borrowed(context.source()),
+    };
+
     let (tree, _) = components
         .ast_parser
-        .parse_with_tree(context.source(), &language)?;
+        .parse_with_tree(&parse_source, &language)?;
 
     // Syntax errors produce a partial tree that is still consumed downstream;
     // entities inside ERROR regions are silently lost, so surface the fact
