@@ -295,7 +295,7 @@ impl IndexOrchestrator {
                     // guarantees across epochs. Bm25-only runs produce no
                     // Embedding-path chunks, so every chunk of the batch is
                     // persisted here.
-                    let all_chunks: Vec<_> = batch_result.chunks.iter().cloned().collect();
+                    let all_chunks: Vec<_> = batch_result.chunks.to_vec();
                     if let Err(e) = self
                         .storage
                         .persist_chunks_without_vectors(&all_chunks.iter().collect::<Vec<_>>())
