@@ -19,8 +19,9 @@ use cce_storage_common::{FulltextDocument, FulltextHit, FulltextSearchOptions};
 use crate::{Bm25Config, Bm25Error};
 use crate::{
     IndexManager, batch_add_documents, delete_document, delete_documents_by_file_path_and_project,
-    delete_documents_by_file_path_project_epoch, delete_documents_by_project,
-    delete_documents_by_project_epoch, delete_summary_documents_by_file_path_and_project,
+    delete_documents_by_file_path_project_epoch, delete_documents_by_file_paths_project_epoch,
+    delete_documents_by_project, delete_documents_by_project_epoch,
+    delete_summary_documents_by_file_path_and_project,
 };
 
 /// Total attempts (first try plus retries) for a transiently failing batch write.
@@ -302,6 +303,39 @@ impl Bm25Client {
             &manager_guard,
             schema,
             file_path,
+            project_id,
+            epoch,
+        );
+        let elapsed = start_time.elapsed().as_secs_f64() * 1000.0;
+        if let Some(metrics) = &self.metrics {
+            let count = result.as_ref().map_or(0, |&c| c);
+            metrics.record_delete(elapsed, count, result.is_ok());
+        }
+        result
+    }
+
+    /// Delete documents for several files in one data epoch, sharing a
+    /// single index search and commit instead of one per file.
+    pub async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        index_name: &str,
+        file_paths: &[&str],
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, Bm25Error> {
+        self.validate_index_name(index_name)?;
+        if file_paths.is_empty() {
+            return Ok(0);
+        }
+        let start_time = Instant::now();
+        let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
+        let manager_guard = manager.read().await;
+        let schema = manager_guard.schema();
+        let owned: Vec<String> = file_paths.iter().map(|path| (*path).to_string()).collect();
+        let result = delete_documents_by_file_paths_project_epoch(
+            &manager_guard,
+            schema,
+            &owned,
             project_id,
             epoch,
         );

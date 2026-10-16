@@ -19,12 +19,10 @@ impl StorageCoordinator {
             .await
     }
 
-    /// Batch form of [`Self::delete_candidate_epoch_external_data`]: the
-    /// vector branch issues one filter delete covering every path, so an
-    /// operation-wide deletion costs a single remote round-trip instead of
-    /// one per file. The fulltext branch keeps per-file deletes because the
-    /// contract exposes no batch-by-paths form and the embedded engine is
-    /// in-process.
+    /// Batch form of [`Self::delete_candidate_epoch_external_data`]: both
+    /// branches issue one batch delete covering every path, so an
+    /// operation-wide deletion costs a single round-trip (vector) or a
+    /// single index search + commit (fulltext) instead of one per file.
     async fn delete_candidate_epoch_external_data_batch(
         &self,
         paths: &[&str],
@@ -40,15 +38,13 @@ impl StorageCoordinator {
                 .await?;
         }
         if let Some(bm25) = &self.fulltext {
-            for path in paths {
-                bm25.delete_by_file_path_scoped_epoch(
-                    &bm25.configured_index_name(),
-                    path,
-                    self.project_id,
-                    epoch,
-                )
-                .await?;
-            }
+            bm25.delete_by_file_paths_scoped_epoch(
+                &bm25.configured_index_name(),
+                paths,
+                self.project_id,
+                epoch,
+            )
+            .await?;
         }
         Ok(())
     }

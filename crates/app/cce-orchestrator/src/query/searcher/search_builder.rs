@@ -33,6 +33,7 @@ pub struct SearcherBuilder {
     enable_summary_boost: bool,
     scope: ProjectScope,
     search_metrics: Option<Arc<SearchMetrics>>,
+    cache: Option<crate::query::cache::QueryCache>,
 }
 
 impl SearcherBuilder {
@@ -54,6 +55,7 @@ impl SearcherBuilder {
             enable_summary_boost: false,
             scope,
             search_metrics: None,
+            cache: None,
         }
     }
 
@@ -117,6 +119,17 @@ impl SearcherBuilder {
         self
     }
 
+    /// Attach a shared query result cache.
+    ///
+    /// Clones share the underlying store, so one project-wide instance makes
+    /// every request's cache lookups observe each other's inserts. Without
+    /// this the searcher falls back to a private cache, which is equivalent
+    /// to no cache at all for a per-request searcher.
+    pub fn with_shared_cache(mut self, cache: crate::query::cache::QueryCache) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
     /// Build the Searcher instance
     pub fn build(self) -> Searcher {
         // Vector backend (local or Qdrant) is shared by dense retrieval and
@@ -155,6 +168,9 @@ impl SearcherBuilder {
             summary_boost,
             scope: self.scope,
             search_metrics: self.search_metrics,
+            cache: self
+                .cache
+                .unwrap_or_else(|| crate::query::cache::QueryCache::new(Default::default())),
         }
     }
 }

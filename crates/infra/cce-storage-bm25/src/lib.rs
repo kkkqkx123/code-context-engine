@@ -35,8 +35,9 @@ pub use config::{Bm25AlgorithmConfig, Bm25Config, IndexManagerConfig};
 #[cfg(feature = "local")]
 pub use delete::{
     delete_document, delete_documents_by_file_path, delete_documents_by_file_path_and_project,
-    delete_documents_by_file_path_project_epoch, delete_documents_by_project,
-    delete_documents_by_project_epoch, delete_summary_documents_by_file_path_and_project,
+    delete_documents_by_file_path_project_epoch, delete_documents_by_file_paths_project_epoch,
+    delete_documents_by_project, delete_documents_by_project_epoch,
+    delete_summary_documents_by_file_path_and_project,
 };
 #[cfg(feature = "remote")]
 pub use elasticsearch::{ElasticsearchClient, ElasticsearchConfig};

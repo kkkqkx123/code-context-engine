@@ -226,22 +226,41 @@ pub fn delete_documents_by_file_path_project_epoch(
     project_id: i64,
     epoch: i64,
 ) -> Result<usize, Bm25Error> {
+    delete_documents_by_file_paths_project_epoch(
+        manager,
+        schema,
+        std::slice::from_ref(&file_path.to_string()),
+        project_id,
+        epoch,
+    )
+}
+
+/// Delete documents matching any of the given file paths within one project
+/// and data epoch.
+///
+/// The batch shares one search, one writer, and one commit+reload: the
+/// per-file form repeats that whole cycle per path, and the commit (an fsync
+/// plus a segment merge) dominates the cost when files are deleted in bulk.
+/// The result equals the sum of the per-file deletes.
+pub fn delete_documents_by_file_paths_project_epoch(
+    manager: &IndexManager,
+    schema: &IndexSchema,
+    file_paths: &[String],
+    project_id: i64,
+    epoch: i64,
+) -> Result<usize, Bm25Error> {
+    if file_paths.is_empty() {
+        return Ok(0);
+    }
     let reader = manager.reader()?;
     let searcher = reader.searcher();
-    let query = tantivy::query::BooleanQuery::new(vec![
-        (
-            Occur::Must,
-            Box::new(tantivy::query::TermQuery::new(
-                Term::from_field_text(schema.file_path, &normalize_project_path(file_path)),
-                tantivy::schema::IndexRecordOption::Basic,
-            )),
-        ),
+    let mut clauses = vec![
         (
             Occur::Must,
             Box::new(tantivy::query::TermQuery::new(
                 Term::from_field_text(schema.project_id, &project_id.to_string()),
                 tantivy::schema::IndexRecordOption::Basic,
-            )),
+            )) as Box<dyn tantivy::query::Query>,
         ),
         (
             Occur::Must,
@@ -250,7 +269,28 @@ pub fn delete_documents_by_file_path_project_epoch(
                 tantivy::schema::IndexRecordOption::Basic,
             )),
         ),
-    ]);
+    ];
+    // Match any of the paths: a Should group over the path terms, required
+    // as a whole by the surrounding Must clauses.
+    let path_terms: Vec<Box<dyn tantivy::query::Query>> = file_paths
+        .iter()
+        .map(|path| {
+            Box::new(tantivy::query::TermQuery::new(
+                Term::from_field_text(schema.file_path, &normalize_project_path(path)),
+                tantivy::schema::IndexRecordOption::Basic,
+            )) as Box<dyn tantivy::query::Query>
+        })
+        .collect();
+    clauses.push((
+        Occur::Must,
+        Box::new(tantivy::query::BooleanQuery::new(
+            path_terms
+                .into_iter()
+                .map(|term| (Occur::Should, term))
+                .collect(),
+        )),
+    ));
+    let query = tantivy::query::BooleanQuery::new(clauses);
     let docs = searcher.search(&query, &DocSetCollector)?;
     let mut ids = Vec::with_capacity(docs.len());
     for address in docs {
@@ -318,4 +358,109 @@ pub fn delete_documents_by_project_epoch(
     writer.commit()?;
     manager.reload_reader()?;
     Ok(ids.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::batch_add_documents;
+    use std::collections::HashMap;
+
+    const PROJECT_ID: i64 = 1;
+    const EPOCH: i64 = 1;
+
+    fn seed(manager: &IndexManager, schema: &IndexSchema, files: usize) {
+        let docs: Vec<(String, HashMap<String, String>)> = (0..files)
+            .map(|i| {
+                let mut fields = HashMap::new();
+                fields.insert("title".to_string(), format!("doc {i}"));
+                fields.insert("content".to_string(), format!("body {i}"));
+                fields.insert("file_path".to_string(), format!("src/mod_{i:06}.rs"));
+                fields.insert("project_id".to_string(), PROJECT_ID.to_string());
+                fields.insert("epoch".to_string(), EPOCH.to_string());
+                (format!("doc_{i}"), fields)
+            })
+            .collect();
+        batch_add_documents(manager, schema, docs).expect("seed");
+        manager.reload_reader().expect("reload");
+    }
+
+    fn remaining(manager: &IndexManager, schema: &IndexSchema) -> usize {
+        let reader = manager.reader().expect("reader");
+        let searcher = reader.searcher();
+        let query = tantivy::query::TermQuery::new(
+            Term::from_field_text(schema.project_id, &PROJECT_ID.to_string()),
+            tantivy::schema::IndexRecordOption::Basic,
+        );
+        searcher
+            .search(&query, &DocSetCollector)
+            .expect("count")
+            .len()
+    }
+
+    /// The batched delete must remove exactly the same documents as the
+    /// per-file loop it replaces.
+    #[test]
+    fn batch_delete_matches_per_file_delete() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = IndexManager::create(dir.path()).expect("create");
+        let schema = manager.schema().clone();
+        seed(&manager, &schema, 10);
+
+        let paths: Vec<String> = (0..5).map(|i| format!("src/mod_{i:06}.rs")).collect();
+        let deleted = delete_documents_by_file_paths_project_epoch(
+            &manager, &schema, &paths, PROJECT_ID, EPOCH,
+        )
+        .expect("batch delete");
+        assert_eq!(deleted, 5);
+        assert_eq!(remaining(&manager, &schema), 5);
+    }
+
+    /// A batch that covers every file must empty the project's epoch.
+    #[test]
+    fn batch_delete_all_files_clears_epoch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = IndexManager::create(dir.path()).expect("create");
+        let schema = manager.schema().clone();
+        seed(&manager, &schema, 8);
+
+        let paths: Vec<String> = (0..8).map(|i| format!("src/mod_{i:06}.rs")).collect();
+        let deleted = delete_documents_by_file_paths_project_epoch(
+            &manager, &schema, &paths, PROJECT_ID, EPOCH,
+        )
+        .expect("batch delete");
+        assert_eq!(deleted, 8);
+        assert_eq!(remaining(&manager, &schema), 0);
+    }
+
+    /// An empty batch is a no-op, and paths outside the epoch/project are
+    /// never touched.
+    #[test]
+    fn batch_delete_empty_and_foreign_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manager = IndexManager::create(dir.path()).expect("create");
+        let schema = manager.schema().clone();
+        seed(&manager, &schema, 4);
+
+        assert_eq!(
+            delete_documents_by_file_paths_project_epoch(&manager, &schema, &[], PROJECT_ID, EPOCH)
+                .expect("empty batch"),
+            0
+        );
+        assert_eq!(remaining(&manager, &schema), 4);
+
+        // Same path, wrong epoch: nothing matches.
+        assert_eq!(
+            delete_documents_by_file_paths_project_epoch(
+                &manager,
+                &schema,
+                &["src/mod_000000.rs".to_string()],
+                PROJECT_ID,
+                999,
+            )
+            .expect("wrong epoch"),
+            0
+        );
+        assert_eq!(remaining(&manager, &schema), 4);
+    }
 }

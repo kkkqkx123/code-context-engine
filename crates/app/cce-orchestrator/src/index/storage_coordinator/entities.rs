@@ -156,13 +156,21 @@ impl StorageCoordinator {
                     EntityRepository::delete_by_file_id_at_epoch(tx, file_id, epoch)?;
 
                     let scoped_names = parsed.resolve_all_scoped_names();
-                    let mut inserted = Vec::with_capacity(parsed.entities.len());
                     // The symbol key aligns with the relation side:
                     // (project, epoch, file, scoped_name, kind,
                     // overload_discriminator). Overloads and cfg-gated
                     // duplicates share the name but carry distinct
                     // discriminators, so no suffix mangling is needed. The
                     // source entity link stays exact via `__source_entity_id`.
+                    //
+                    // Records are collected first and written with one
+                    // `insert_batch` (a single prepared statement reused for
+                    // every row) instead of one prepared INSERT per entity:
+                    // the per-entity prepare dominated entity persistence on
+                    // wide files. Parent links are resolved afterwards
+                    // against the returned row ids.
+                    let mut records = Vec::with_capacity(parsed.entities.len());
+                    let mut sources = Vec::with_capacity(parsed.entities.len());
                     for entity in &parsed.entities {
                         // resolve against the once-built map instead of
                         // rebuilding the id -> entity lookup per entity.
@@ -237,15 +245,19 @@ impl StorageCoordinator {
                             batch_id,
                             rank: 0.0,
                         };
-                        let db_id = EntityRepository::insert(tx, &record)?;
-                        inserted.push((entity.id, db_id, entity.parent));
+                        sources.push((entity.id, entity.parent));
+                        records.push(record);
                     }
-
-                    let source_to_db: std::collections::HashMap<_, _> = inserted
+                    let db_ids = EntityRepository::insert_batch(tx, &records)?;
+                    let source_to_db: std::collections::HashMap<_, _> = sources
                         .iter()
-                        .map(|(source_id, db_id, _)| (*source_id, *db_id))
+                        .copied()
+                        .zip(db_ids.iter().copied())
+                        .map(|((source_id, _), db_id)| (source_id, db_id))
                         .collect();
-                    for (_source_id, db_id, parent_source_id) in inserted {
+                    for ((_source_id, parent_source_id), db_id) in
+                        sources.into_iter().zip(db_ids.into_iter())
+                    {
                         let Some(parent_source_id) = parent_source_id else {
                             continue;
                         };

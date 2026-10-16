@@ -174,6 +174,29 @@ pub trait FulltextStorage: Clone + Send + Sync + 'static {
         epoch: i64,
     ) -> impl Future<Output = Result<usize, FulltextError>> + Send;
 
+    /// Delete several files' documents in one data epoch in one batch.
+    ///
+    /// Backends may serve this as one native batch or as sequential single
+    /// deletes; the visible result must match sequential deletes. Returns
+    /// the total number of removed documents.
+    fn delete_by_file_paths_scoped_epoch(
+        &self,
+        index_name: &str,
+        file_paths: &[&str],
+        project_id: i64,
+        epoch: i64,
+    ) -> impl Future<Output = Result<usize, FulltextError>> + Send {
+        async move {
+            let mut total = 0usize;
+            for path in file_paths {
+                total += self
+                    .delete_by_file_path_scoped_epoch(index_name, path, project_id, epoch)
+                    .await?;
+            }
+            Ok(total)
+        }
+    }
+
     /// Delete all documents for one project and data epoch.
     fn delete_by_project_epoch(
         &self,

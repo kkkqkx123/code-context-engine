@@ -511,6 +511,12 @@ impl super::CodeContextEngine {
             builder = builder.with_plugin_registry(registry);
         }
 
+        // Share one query result cache across requests for this project.
+        // The searcher is cached, so a private cache here would
+        // still serve repeats, but the engine-level instance also covers
+        // the QueryCoordinator path and survives searcher recreation.
+        let builder = builder.with_shared_cache(self.get_query_cache(project_id).await);
+
         let searcher = Arc::new(Mutex::new(builder.build()));
 
         // Double-check: another task may have inserted while we were building

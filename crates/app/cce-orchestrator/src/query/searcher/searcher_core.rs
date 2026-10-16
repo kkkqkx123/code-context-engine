@@ -69,6 +69,9 @@ pub struct Searcher {
     pub(crate) glob_filter: Arc<GlobFilter>,
     /// Optional search metrics collector
     pub(crate) search_metrics: Option<Arc<SearchMetrics>>,
+    /// Shared query result cache. Clones share the underlying store,
+    /// so every searcher handed the same instance populates one cache.
+    pub(crate) cache: crate::query::cache::QueryCache,
 }
 
 /// Expand multi-entity results into single-entity results for entity-level fusion.
@@ -164,6 +167,24 @@ impl Searcher {
         }
         let start = std::time::Instant::now();
 
+        // Shared query cache: identical concurrent queries must not
+        // each run the embedding pipeline and queue behind the shared LLM
+        // rate limiter. Keys embed the epoch view, so a republication
+        // naturally produces fresh keys.
+        if let Some(mut cached) = self.cache.get_result_for_view(options, query_filter).await {
+            cached.from_cache = true;
+            if let Some(metrics) = &self.search_metrics {
+                metrics.record_search(
+                    start.elapsed().as_secs_f64() * 1000.0,
+                    SearchType::from_label(options.execution_strategy().query_type_label()),
+                );
+            }
+            return Ok(cached);
+        }
+        // Keep the pre-rewrite options for the cache store: the key must
+        // match what the next identical request will look up.
+        let cache_options = options;
+
         // Apply query rewriting (QueryRewrite capability) before strategy
         // determination. Plugins chain by priority; on failure the previous
         // query text is kept.
@@ -196,7 +217,7 @@ impl Searcher {
             );
         }
 
-        Ok(QueryResult {
+        let result = QueryResult {
             total: results.len(),
             items: results,
             elapsed_ms,
@@ -204,7 +225,11 @@ impl Searcher {
             sub_queries_count: 1, // Single query by default
             failed_sub_queries: Vec::new(),
             from_cache: false,
-        })
+        };
+        self.cache
+            .put_result_for_view(cache_options, query_filter, result.clone())
+            .await;
+        Ok(result)
     }
 
     /// Execute the complete search flow, dispatching per strategy.

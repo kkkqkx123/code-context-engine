@@ -59,6 +59,19 @@ impl FulltextStorage for Bm25Client {
             .await
     }
 
+    async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        index_name: &str,
+        file_paths: &[&str],
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, FulltextError> {
+        Bm25Client::delete_by_file_paths_scoped_epoch(
+            self, index_name, file_paths, project_id, epoch,
+        )
+        .await
+    }
+
     async fn delete_by_project_epoch(
         &self,
         index_name: &str,
@@ -165,6 +178,19 @@ impl FulltextStorage for crate::ElasticsearchClient {
     ) -> Result<usize, FulltextError> {
         crate::ElasticsearchClient::delete_by_file_path_scoped_epoch(
             self, index_name, file_path, project_id, epoch,
+        )
+        .await
+    }
+
+    async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        index_name: &str,
+        file_paths: &[&str],
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, FulltextError> {
+        crate::ElasticsearchClient::delete_by_file_paths_scoped_epoch(
+            self, index_name, file_paths, project_id, epoch,
         )
         .await
     }

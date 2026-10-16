@@ -283,6 +283,18 @@ impl QueryCoordinator {
         self.metrics.as_ref()
     }
 
+    /// Replace the query cache with a shared instance.
+    ///
+    /// `QueryCache` clones share the underlying store, so handing every
+    /// per-request coordinator the same clone makes them populate one cache
+    /// instead of one throwaway cache each. A per-request cache always
+    /// starts empty, so identical concurrent queries each re-run embedding
+    /// and all queue behind the shared LLM rate limiter.
+    pub fn with_shared_cache(mut self, cache: QueryCache) -> Self {
+        self.cache = cache;
+        self
+    }
+
     /// Attach the local relation database for FTS5 entity search.
     ///
     /// Local-only port: FTS5 entity search runs inside the embedded branch.

@@ -454,7 +454,12 @@ impl<'a> SearchService<'a> {
         .with_metrics(cce_metrics::QueryMetrics::new(
             self.state.engine.metrics_registry(),
             project_id,
-        )))
+        ))
+        // The cache MUST be shared across requests: a fresh coordinator per
+        // request with a fresh cache always starts empty, so identical
+        // queries re-run the embedding pipeline and queue behind the shared
+        // LLM rate limiter. The clone shares the underlying store.
+        .with_shared_cache(self.state.engine.get_query_cache(project_id).await))
     }
 
     /// Convert orchestrator hits to API items, stamping stable symbol IDs

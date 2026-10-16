@@ -20,6 +20,7 @@ use cce_orchestrator::OperationCoordinator;
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::index::IndexOrchestrator;
 use cce_orchestrator::index::{FulltextStore, RelationStore, VectorStore};
+use cce_orchestrator::query::cache::{CacheConfig, QueryCache};
 use cce_orchestrator::query::retry_queue::RetryQueue;
 use cce_orchestrator::query::searcher::Searcher;
 use cce_plugin::PluginRegistry;
@@ -75,6 +76,11 @@ pub struct CodeContextEngine {
     /// Project-specific Searcher cache (lazy-loaded per project)
     searcher_cache: ProjectCache<Mutex<Searcher>>,
 
+    /// Per-project shared query result cache. Injected into every
+    /// searcher and query coordinator so identical queries across requests
+    /// populate one cache instead of one throwaway cache per request.
+    query_result_cache: ProjectCache<QueryCache>,
+
     /// Project registry for multi-project support
     project_registry: Arc<ProjectRegistry>,
 
@@ -119,6 +125,28 @@ impl CodeContextEngine {
     /// Create a new engine builder
     pub fn builder() -> EngineBuilder {
         EngineBuilder::new()
+    }
+
+    /// Get (or lazily create) the shared query result cache for a project.
+    ///
+    /// The returned clone shares the underlying store with every other
+    /// caller, so per-request searchers and query coordinators populate one
+    /// cache instead of one throwaway cache each.
+    pub async fn get_query_cache(&self, project_id: i64) -> QueryCache {
+        self.query_result_cache
+            .get_or_insert_with(project_id, || {
+                Arc::new(QueryCache::new(CacheConfig::default()))
+            })
+            .await
+            .as_ref()
+            .clone()
+    }
+
+    /// Drop the shared query cache for a project (deletion / full reindex).
+    /// Cache keys already embed the epoch view, so this is memory hygiene,
+    /// not a correctness requirement.
+    pub async fn invalidate_query_cache(&self, project_id: i64) {
+        self.query_result_cache.remove(project_id).await;
     }
 
     /// Create engine from an already-initialized AppConfig
@@ -267,6 +295,7 @@ impl CodeContextEngine {
             orchestrator_cache: ProjectCache::new(),
             plugin_registry_cache: ProjectCache::new(),
             searcher_cache: ProjectCache::new(),
+            query_result_cache: ProjectCache::new(),
             project_registry,
             hot_update_cache: ProjectCache::new(),
             operation_coordinator_cache: ProjectCache::new(),

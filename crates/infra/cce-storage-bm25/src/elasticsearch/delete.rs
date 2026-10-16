@@ -104,6 +104,33 @@ impl ElasticsearchClient {
         .await
     }
 
+    /// Delete documents for several files in one data epoch with a single
+    /// delete-by-query (one `terms` clause over the normalized paths).
+    pub async fn delete_by_file_paths_scoped_epoch(
+        &self,
+        index_name: &str,
+        file_paths: &[&str],
+        project_id: i64,
+        epoch: i64,
+    ) -> Result<usize, Bm25Error> {
+        self.validate_index_name(index_name)?;
+        if file_paths.is_empty() {
+            return Ok(0);
+        }
+        let normalized: Vec<String> = file_paths
+            .iter()
+            .map(|path| normalize_project_path(path))
+            .collect();
+        self.delete_by_query(&json!({
+            "bool": { "filter": [
+                { "terms": { "file_path": normalized } },
+                { "term": { "project_id": project_id.to_string() } },
+                { "term": { "epoch": epoch } },
+            ]}
+        }))
+        .await
+    }
+
     /// Delete all documents for one project and data epoch.
     pub async fn delete_by_project_epoch(
         &self,

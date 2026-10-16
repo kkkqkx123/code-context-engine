@@ -461,9 +461,14 @@ impl super::CodeContextEngine {
             )));
         }
 
-        // Get project-specific searcher
+        // Get project-specific searcher.
+        //
+        // Clone the searcher out of the mutex and release it before the
+        // await: `Searcher` holds Arc-backed handles, so the clone is cheap
+        // and concurrent queries no longer serialize on the project-wide
+        // searcher mutex for the whole (embedding-bound) search duration.
         let searcher = self.get_searcher(project_id).await?;
-        let searcher = searcher.lock().await;
+        let searcher = searcher.lock().await.clone();
         searcher.search(options).await.map_err(EngineError::Query)
     }
 }

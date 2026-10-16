@@ -384,6 +384,11 @@ pub async fn handle_delete_project(
         );
     }
 
+    // Drop the per-project shared caches so a recreated project with the
+    // same ID never inherits entries from the deleted one.
+    state.invalidate_relation_searcher(id).await;
+    state.engine.invalidate_query_cache(id).await;
+
     ApiResult::Success(ProjectDeleteResponse {
         success: true,
         message: "Project deleted successfully".to_string(),
