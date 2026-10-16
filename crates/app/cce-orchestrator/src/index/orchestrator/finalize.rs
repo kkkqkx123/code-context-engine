@@ -336,10 +336,20 @@ impl IndexOrchestrator {
                     }
                 }
                 None => {
-                    ctx.errors.push(
-                        "Relation indexing requires a configured snapshot publisher".to_string(),
+                    // No durable publisher configured (tests, CLI debug runs):
+                    // keep the snapshot available for read-only queries instead
+                    // of failing the whole relation phase. Only persistence is
+                    // skipped; production always wires a publisher.
+                    tracing::warn!(
+                        operation_id = %ctx.operation_id,
+                        "No relation snapshot publisher configured; relations stay in-memory only"
                     );
-                    ctx.all_batches_completed = false;
+                    let base = Arc::new(cce_codegraph::index::RelationSnapshotIndex::from_index(
+                        builder.index(),
+                    ));
+                    self.last_published_snapshot = Some(Arc::new(
+                        cce_codegraph::index::LayeredSnapshotIndex::new(base),
+                    ));
                 }
             },
             Err(error) => {

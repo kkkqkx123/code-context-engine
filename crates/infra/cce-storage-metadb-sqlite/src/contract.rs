@@ -362,7 +362,7 @@ impl RelationStorage for SqliteClient {
                      updated_at, project_id, epoch, batch_id, path, bm25_keywords, segment_id, truncated)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
                      ?16, ?17, ?18, ?19, ?20, ?21)
-                     ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
+                     ON CONFLICT(project_id, epoch, file_path, chunk_id) DO UPDATE SET
                         file_path = excluded.file_path, content = excluded.content,
                         start_line = excluded.start_line, end_line = excluded.end_line,
                         entity_ids = excluded.entity_ids, entity_names = excluded.entity_names,

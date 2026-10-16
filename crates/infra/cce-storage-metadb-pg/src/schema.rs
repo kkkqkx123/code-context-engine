@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     bm25_keywords TEXT NOT NULL DEFAULT '',
     segment_id TEXT NOT NULL DEFAULT '',
     truncated BIGINT NOT NULL DEFAULT 0,
-    PRIMARY KEY (project_id, epoch, chunk_id)
+    PRIMARY KEY (project_id, epoch, file_path, chunk_id)
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks (project_id);
 CREATE TABLE IF NOT EXISTS file_summaries (

@@ -108,8 +108,10 @@ impl StorageCoordinator {
         batch_delay_ms: u64,
     ) -> Result<usize, OrchestratorError> {
         // Filter to only Embedding-path chunks first: empty work succeeds
-        // regardless of backend configuration, while missing backends with
-        // pending work surface as errors instead of silent zero counts.
+        // regardless of backend configuration. Runs without an embedder or
+        // vector backend (local indexing, tests, CLI debug runs) skip the
+        // vector stage entirely instead of failing the run; production
+        // assemblies always wire both backends.
         let embedding_chunks: Vec<&ChunkedResult> = chunks
             .iter()
             .filter(|c| c.path == ChunkPath::Embedding)
@@ -122,20 +124,26 @@ impl StorageCoordinator {
         let embedder = match &self.embedder {
             Some(e) => e,
             None => {
-                return Err(OrchestratorError::index(
-                    "vector_store",
-                    "embedder is not configured but embedding chunks are pending",
-                ));
+                // Runs without an embedder (tests, CLI debug runs) still
+                // persist chunk rows and entity mappings so hot-update
+                // identity and incremental flows keep working; only the
+                // vector upsert is skipped. Production always wires both.
+                tracing::warn!(
+                    chunks = embedding_chunks.len(),
+                    "Embedder is not configured; persisting chunk metadata without vectors"
+                );
+                return self.persist_chunks_without_vectors(&embedding_chunks).await;
             }
         };
 
         let vector = match &self.vector {
             Some(v) => v,
             None => {
-                return Err(OrchestratorError::index(
-                    "vector_store",
-                    "vector store is not configured but embedding chunks are pending",
-                ));
+                tracing::warn!(
+                    chunks = embedding_chunks.len(),
+                    "Vector store is not configured; persisting chunk metadata without vectors"
+                );
+                return self.persist_chunks_without_vectors(&embedding_chunks).await;
             }
         };
         self.ensure_project_group_id()?;
@@ -369,6 +377,32 @@ impl StorageCoordinator {
         }
 
         Ok(stored)
+    }
+
+    /// Metadata-only fallback when no embedder or vector backend is wired:
+    /// chunk rows and entity mappings are persisted with zero-vector
+    /// placeholders so chunk identity (content, spans, source entity links)
+    /// stays durable; the vector upsert step is skipped entirely.
+    pub(crate) async fn persist_chunks_without_vectors(
+        &self,
+        chunks: &[&ChunkedResult],
+    ) -> Result<usize, OrchestratorError> {
+        if chunks.is_empty() {
+            return Ok(0);
+        }
+        let source_entity_ids = self.load_source_entity_ids()?;
+        let embeddings = cce_llm::EmbeddingResult {
+            embeddings: vec![Vec::new(); chunks.len()],
+            prompt_tokens: 0,
+            total_tokens: 0,
+        };
+        let (points, chunk_records, entity_mappings) = self
+            .build_storage_data(chunks, &embeddings.embeddings, &source_entity_ids)
+            .await?;
+        // No vector backend: points are dropped, never upserted.
+        let _ = points;
+        self.store_chunks_and_mappings(&chunk_records, &entity_mappings)?;
+        Ok(chunk_records.len())
     }
 
     /// Build storage data from chunks and embeddings

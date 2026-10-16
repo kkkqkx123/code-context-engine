@@ -594,6 +594,23 @@ impl EntityExtractor {
         // Extract language-specific metadata from captures
         metadata::extract_metadata(mat, &mut entity, language, source, tree);
 
+        // Go method declarations carry the receiver as a dedicated capture
+        // (`entity.method.receiver`); the composed signature joins only the
+        // `.signature.` roles and omits it. Record the receiver type here so
+        // type-member indexing can bind methods to their struct/interface.
+        if language == &Language::Go && entity.kind == EntityKind::Method {
+            if let Some(recv) = mat
+                .captures
+                .iter()
+                .find(|c| c.name == "entity.method.receiver")
+            {
+                let raw = utils::extract_text_from_source(source, recv.start_byte, recv.end_byte);
+                if let Some(rt) = post_processing::receiver_from_capture(raw.trim()) {
+                    entity.set_metadata("receiver_type", rt);
+                }
+            }
+        }
+
         // Post-processing stages
         post_processing::extract_modifiers(mat, &mut entity, language);
         if language == &Language::Rust {

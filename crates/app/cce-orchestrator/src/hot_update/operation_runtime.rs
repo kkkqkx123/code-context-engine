@@ -646,20 +646,33 @@ impl HotUpdateOperationRuntime {
                         }
                         Err(e) => {
                             processor_failed = true;
-                            all_failures.push(ModuleFailure {
-                                file_path: String::new(),
-                                module_name: processor.name().to_string(),
-                                error: format!(
-                                    "Processor {} failed without per-file detail: {e}",
-                                    processor.name()
-                                ),
-                                retry_count: 0,
-                                next_retry_time: None,
-                            });
+                            // A processor-level error carries no per-file
+                            // attribution: broadcast the failure to every
+                            // file in the operation so per-file module
+                            // status, resume bookkeeping, and the operation's
+                            // failed_count all reflect the affected files.
+                            for file_path in &all_file_paths {
+                                all_failures.push(ModuleFailure {
+                                    file_path: file_path.clone(),
+                                    module_name: processor.name().to_string(),
+                                    error: format!(
+                                        "Processor {} failed without per-file detail: {e}",
+                                        processor.name()
+                                    ),
+                                    retry_count: 0,
+                                    next_retry_time: None,
+                                });
+                                if let Some(modules) = file_module_status.get_mut(file_path) {
+                                    if let Some(status) = modules.get_mut(&processor_name) {
+                                        *status = false;
+                                    }
+                                }
+                            }
                             tracing::error!(
                                 processor = processor.name(),
                                 error = %e,
-                                "Processor failed without per-file detail; recorded once for manual triage"
+                                files = all_file_paths.len(),
+                                "Processor failed without per-file detail; failure attributed to all operation files"
                             );
                         }
                     }

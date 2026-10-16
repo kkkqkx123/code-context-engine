@@ -531,8 +531,11 @@ impl IndexOrchestrator {
 
         // Apply per-run summary embedding policy to the storage coordinator.
         // Export-only runs (embed_summaries=false) keep generating summary text
-        // but skip writing summary vectors to Qdrant.
-        self.storage.set_embed_summaries(options.embed_summaries);
+        // but skip writing summary vectors to Qdrant. Summary vectors also have
+        // no destination when vector storage is disabled for the run, so the
+        // embedding step is tied to store_vectors.
+        self.storage
+            .set_embed_summaries(options.embed_summaries && options.store_vectors);
 
         // Bound the embedding stage so a wedged provider cannot hang the batch
         // loop past its checkpoint-resume window (0 keeps auto-derivation).

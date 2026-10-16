@@ -54,7 +54,7 @@ impl ChunkRepository {
                 segment_id,
                 truncated
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
-             ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
+             ON CONFLICT(project_id, epoch, file_path, chunk_id) DO UPDATE SET
                 file_path = excluded.file_path,
                 content = excluded.content,
                 start_line = excluded.start_line,
@@ -121,7 +121,7 @@ impl ChunkRepository {
                 segment_id,
                 truncated
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
-             ON CONFLICT(project_id, epoch, chunk_id) DO UPDATE SET
+             ON CONFLICT(project_id, epoch, file_path, chunk_id) DO UPDATE SET
                 file_path = excluded.file_path,
                 content = excluded.content,
                 start_line = excluded.start_line,
@@ -507,7 +507,7 @@ mod tests {
                 bm25_keywords TEXT NOT NULL DEFAULT '',
                 segment_id TEXT NOT NULL DEFAULT '',
                 truncated INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (project_id, epoch, chunk_id)
+                PRIMARY KEY (project_id, epoch, file_path, chunk_id)
             )",
             [],
         )

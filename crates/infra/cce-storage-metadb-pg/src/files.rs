@@ -230,7 +230,7 @@ impl PostgresClient {
                      truncated) \
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
                      $16, $17, $18, $19, $20, $21) \
-                     ON CONFLICT (project_id, epoch, chunk_id) DO UPDATE SET \
+                     ON CONFLICT (project_id, epoch, file_path, chunk_id) DO UPDATE SET \
                         file_path = EXCLUDED.file_path, content = EXCLUDED.content, \
                         start_line = EXCLUDED.start_line, end_line = EXCLUDED.end_line, \
                         entity_ids = EXCLUDED.entity_ids, entity_names = EXCLUDED.entity_names, \

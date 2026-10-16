@@ -57,11 +57,7 @@ impl GatewayMetricsSink {
 }
 
 impl llm_client::TokenUsageSink for GatewayMetricsSink {
-    fn record_token_usage(
-        &self,
-        usage: &llm_types::llm::TokenUsageStats,
-        model: Option<&str>,
-    ) {
+    fn record_token_usage(&self, usage: &llm_types::llm::TokenUsageStats, model: Option<&str>) {
         let model = model.unwrap_or("unknown");
         self.registry
             .counter("llm_gateway_tokens_prompt_total", &[("model", model)])

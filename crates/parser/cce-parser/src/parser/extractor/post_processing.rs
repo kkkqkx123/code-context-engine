@@ -30,4 +30,5 @@ pub use impl_metadata::extract_impl_block_metadata;
 pub use import_binding::drop_js_require_bound_variables;
 pub use modifier_extractor::extract_modifiers;
 pub use receiver_extractor::extract_receiver_for_entities;
+pub use receiver_extractor::receiver_from_capture;
 pub use stdlib_classifier::mark_stdlib;

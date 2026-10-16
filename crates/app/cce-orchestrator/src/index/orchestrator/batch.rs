@@ -288,6 +288,30 @@ impl IndexOrchestrator {
                             }
                         }
                     }
+                } else {
+                    // Vector storage disabled for this run: chunk rows and
+                    // entity mappings are still persisted (metadata only) so
+                    // downstream incremental flows keep their identity
+                    // guarantees across epochs. Bm25-only runs produce no
+                    // Embedding-path chunks, so every chunk of the batch is
+                    // persisted here.
+                    let all_chunks: Vec<_> = batch_result.chunks.iter().cloned().collect();
+                    if let Err(e) = self
+                        .storage
+                        .persist_chunks_without_vectors(&all_chunks.iter().collect::<Vec<_>>())
+                        .await
+                    {
+                        embedding_store_ok = false;
+                        tracing::error!(
+                            error = %e,
+                            "Failed to persist chunk metadata for batch {}",
+                            batch_num
+                        );
+                        ctx.errors.push(format!(
+                            "Chunk metadata persistence failed for batch {}: {}",
+                            batch_num, e
+                        ));
+                    }
                 }
 
                 if options.store_bm25 {

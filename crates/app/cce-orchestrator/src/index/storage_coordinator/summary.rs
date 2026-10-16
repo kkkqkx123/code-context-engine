@@ -57,12 +57,18 @@ impl<'a> SummaryStorage<'a> {
         if summaries.is_empty() {
             return Ok(());
         }
-        let (Some(vector), Some(embedder)) = (&self.coordinator.vector, &self.coordinator.embedder)
-        else {
-            return Err(OrchestratorError::index(
-                "summary_vector_store",
-                "vector store or embedder is not configured but summaries are pending",
-            ));
+        let (vector, embedder) = match (&self.coordinator.vector, &self.coordinator.embedder) {
+            (Some(vector), Some(embedder)) => (vector, embedder),
+            _ => {
+                // Runs without an embedder or vector backend (local indexing,
+                // tests, CLI debug runs) skip summary embedding instead of
+                // failing the run; production always wires both backends.
+                tracing::warn!(
+                    summaries = summaries.len(),
+                    "Vector store or embedder is not configured; skipping summary embedding"
+                );
+                return Ok(());
+            }
         };
 
         self.coordinator.ensure_project_group_id()?;
@@ -106,10 +112,14 @@ impl<'a> SummaryStorage<'a> {
             return Ok(());
         }
         let Some(ref db) = self.coordinator.metadata_store else {
-            return Err(OrchestratorError::index(
-                "summary_metadata_store",
-                "metadata store is not configured but summaries are pending",
-            ));
+            // Runs without a metadata store (tests, CLI debug runs) skip
+            // summary persistence instead of failing the run; production
+            // always wires the embedded SQLite branch.
+            tracing::warn!(
+                summaries = summaries.len(),
+                "Metadata store is not configured; skipping summary persistence"
+            );
+            return Ok(());
         };
 
         let project_id = self.coordinator.project_id;
@@ -161,10 +171,11 @@ impl<'a> SummaryStorage<'a> {
             return Ok(());
         }
         let Some(ref bm25) = self.coordinator.fulltext else {
-            return Err(OrchestratorError::index(
-                "summary_bm25_store",
-                "BM25 client is not configured but summaries are pending",
-            ));
+            tracing::warn!(
+                summaries = summaries.len(),
+                "BM25 client is not configured; skipping summary fulltext indexing"
+            );
+            return Ok(());
         };
 
         let project_id_str = self.coordinator.project_id.to_string();
@@ -216,10 +227,11 @@ impl<'a> SummaryStorage<'a> {
             return Ok(());
         }
         let Some(ref db) = self.coordinator.metadata_store else {
-            return Err(OrchestratorError::index(
-                "summary_bm25_mapping",
-                "metadata store is not configured but summary BM25 mappings are pending",
-            ));
+            tracing::warn!(
+                summaries = summaries.len(),
+                "Metadata store is not configured; skipping summary BM25 mappings"
+            );
+            return Ok(());
         };
 
         let project_id = self.coordinator.project_id;

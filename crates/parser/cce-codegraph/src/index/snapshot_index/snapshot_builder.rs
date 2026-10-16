@@ -284,6 +284,10 @@ impl LayeredSnapshotIndex {
         for delta in &self.deltas {
             merged.apply_delta(delta);
         }
+        // Reverse lookups (`get_callers_by_callee_*`) walk the reverse callee
+        // index, which copy-only reconstruction leaves empty; rebuild it from
+        // the merged forward relations.
+        merged.rebuild_reverse_callee_index();
         merged
     }
 

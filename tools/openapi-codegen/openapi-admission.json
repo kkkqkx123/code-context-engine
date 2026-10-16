@@ -3931,7 +3931,8 @@
         "tags": [
           "Ingest"
         ],
-        "summary": "Run the existing full index pipeline over the staged project mirror.",
+        "summary": "Apply staged project files through the hot-update incremental path.",
+        "description": "The first commit for a project still runs the full index to establish the\nbaseline. Later commits sync the resident detector with the commit file\nuniverse and run one incremental operation, so a one-file change only\nreparses and re-embeds that file instead of the whole project.",
         "operationId": "handle_ingest_commit",
         "parameters": [
           {

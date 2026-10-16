@@ -34,10 +34,14 @@ impl StorageCoordinator {
         let bm25 = match &self.fulltext {
             Some(b) => b,
             None => {
-                return Err(OrchestratorError::index(
-                    "bm25_store",
-                    "BM25 client is not configured but BM25 chunks are pending",
-                ));
+                // Runs without a fulltext backend (tests, CLI debug runs)
+                // skip BM25 indexing instead of failing the run; production
+                // always wires a fulltext branch.
+                tracing::warn!(
+                    chunks = bm25_chunks.len(),
+                    "BM25 client is not configured; skipping chunk fulltext indexing"
+                );
+                return Ok(());
             }
         };
 

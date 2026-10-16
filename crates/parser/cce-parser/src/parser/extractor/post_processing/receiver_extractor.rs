@@ -50,6 +50,23 @@ pub fn extract_receiver_type(entity: &mut Entity) {
     }
 }
 
+/// Extract the receiver type from the raw `@entity.method.receiver` capture
+/// text, e.g. `(p Person)` or `(*s pkg.Type)`.
+///
+/// The composed Go method signature joins only `.signature.` roles and omits
+/// the receiver capture, so the signature heuristic above never sees it; the
+/// capture text is the authoritative source for receiver binding.
+pub fn receiver_from_capture(raw: &str) -> Option<String> {
+    let inner = raw.trim().strip_prefix('(')?.trim_end().strip_suffix(')')?;
+    let inside = inner.trim();
+    if inside.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = inside.split_whitespace().collect();
+    let type_part = if parts.len() == 1 { parts[0] } else { parts[1] };
+    Some(normalize_receiver(type_part))
+}
+
 pub fn extract_receiver_for_entities(entities: &mut [Entity], language: &Language) {
     // The signature heuristic only understands Go method receivers.
     // Running it elsewhere misrecords the first parameter as a receiver.
@@ -157,5 +174,14 @@ mod tests {
         };
         extract_receiver_for_entities(std::slice::from_mut(&mut g), &Language::Go);
         assert_eq!(g.metadata.get("receiver_type").unwrap(), "MyStruct");
+    }
+
+    #[test]
+    fn from_capture_text() {
+        assert_eq!(receiver_from_capture("(p Person)").unwrap(), "Person");
+        assert_eq!(receiver_from_capture("(s *MyStruct)").unwrap(), "MyStruct");
+        assert_eq!(receiver_from_capture("(s pkg.Foo)").unwrap(), "Foo");
+        assert_eq!(receiver_from_capture("()"), None);
+        assert_eq!(receiver_from_capture("Person"), None);
     }
 }
