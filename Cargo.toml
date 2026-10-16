@@ -189,10 +189,7 @@ uuid = { version = "1.0", features = ["v4", "v5"] }
 # version, otherwise the patch silently disengages and the crates.io build is
 # used instead (it lacks `IndexSettings.bm25_params`).
 tantivy = "0.27"
-# NOTE: the vendored svelte fork renamed its package to "tree-sitter-svelte-ng";
-# keep the workspace-facing name "tree-sitter-svelte" via a package rename so
-# downstream crates keep importing it as `tree_sitter_svelte`.
-tree-sitter-svelte = { path = "crates/tree-sitter/tree-sitter-svelte", package = "tree-sitter-svelte-ng" }
+tree-sitter-svelte = { path = "crates/tree-sitter/tree-sitter-svelte" }
 tree-sitter-vue = { path = "crates/tree-sitter/tree-sitter-vue" }
 cce-circuit-breaker = { path = "crates/infra/cce-circuit-breaker" }
 cce-storage-common = { path = "crates/infra/cce-storage-common" }
