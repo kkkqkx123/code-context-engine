@@ -133,6 +133,8 @@ impl FileProcessor {
             dropped_blank_segments: 0,
             document_degraded,
             has_syntax_errors: false,
+            syntax_diagnostics: Vec::new(),
+            syntax_diagnostic_tag: None,
         })
     }
 
@@ -359,6 +361,8 @@ impl FileProcessor {
             dropped_blank_segments,
             document_degraded: false,
             has_syntax_errors: false,
+            syntax_diagnostics: Vec::new(),
+            syntax_diagnostic_tag: None,
         })
     }
 }

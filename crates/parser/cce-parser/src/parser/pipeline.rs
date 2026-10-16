@@ -71,7 +71,9 @@ fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Resul
     // `extern "C" { ... }`, so parse a shadow copy with those two brace
     // lines blanked. The shadow is byte-length preserving, so all spans
     // taken from its tree index into the original source unchanged.
-    let parse_source = match cpp_interop_guard::shadow_for_parse(context.source(), &language) {
+    let shadow = cpp_interop_guard::shadow_for_parse(context.source(), &language);
+    let had_guard_pair = shadow.is_some();
+    let parse_source = match shadow {
         Some(shadow) => shadow,
         None => Cow::Borrowed(context.source()),
     };
@@ -83,7 +85,8 @@ fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Resul
     // Syntax errors produce a partial tree that is still consumed downstream;
     // entities inside ERROR regions are silently lost, so surface the fact
     // that this file's index result is degraded.
-    if tree.root_node().has_error() {
+    let has_syntax_errors = tree.root_node().has_error();
+    if has_syntax_errors {
         context.has_syntax_errors = true;
         tracing::warn!(
             file = %context.file_path(),
@@ -91,6 +94,15 @@ fn ast_parsing(context: &mut ParseContext, components: &mut Components) -> Resul
             "Parsed with syntax errors; extracted entities may be incomplete"
         );
     }
+
+    // Read-only diagnostics for tooling; never used to repair the AST or
+    // to suppress the degraded status computed above.
+    context.syntax_diagnostics = crate::parser::diagnostics::collect_syntax_diagnostics(&tree);
+    context.syntax_diagnostic_tag = crate::parser::diagnostics::coarse_tag_for_c_cpp(
+        context.source(),
+        had_guard_pair,
+        has_syntax_errors,
+    );
 
     context.tree = Some(tree);
     Ok(())

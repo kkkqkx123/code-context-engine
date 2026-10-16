@@ -147,6 +147,13 @@ pub struct ParseContext {
     /// Entities inside error regions may be missing, so index results
     /// for this file are partial even though parsing succeeded.
     pub has_syntax_errors: bool,
+
+    /// Read-only syntax diagnostics collected from the parsed tree.
+    /// This is observational only and does not change entity extraction.
+    pub syntax_diagnostics: Vec<crate::parser::diagnostics::SyntaxDiagnostic>,
+
+    /// Coarse triage tag for degraded parses, intended for reporting only.
+    pub syntax_diagnostic_tag: Option<&'static str>,
 }
 
 impl ParseContext {
@@ -168,6 +175,8 @@ impl ParseContext {
             local_symbols: std::collections::HashMap::new(),
             import_table: None,
             has_syntax_errors: false,
+            syntax_diagnostics: Vec::new(),
+            syntax_diagnostic_tag: None,
         }
     }
 

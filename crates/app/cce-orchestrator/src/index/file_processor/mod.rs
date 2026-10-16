@@ -75,6 +75,11 @@ pub struct CompleteFileProcessResult {
     /// Entities inside error regions may be missing, so the file counts
     /// as degraded even when entities and chunks are non-empty.
     pub has_syntax_errors: bool,
+    /// Read-only ERROR / missing-token spans collected during parsing.
+    /// Observational only: never used to change entities or degraded counts.
+    pub syntax_diagnostics: Vec<cce_parser::parser::diagnostics::SyntaxDiagnostic>,
+    /// Coarse triage tag for degraded parses (for aggregated reporting).
+    pub syntax_diagnostic_tag: Option<String>,
 }
 
 /// Chunk cache statistics

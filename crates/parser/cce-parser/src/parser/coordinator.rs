@@ -18,6 +18,7 @@
 
 use crate::parser::components::Components;
 use crate::parser::context::ParseContext;
+use crate::parser::diagnostics::ParseDiagnostics;
 use crate::parser::embedded_types::EmbeddedParseConfig;
 use crate::parser::helpers;
 use crate::parser::pipeline;
@@ -145,6 +146,19 @@ impl ParseCoordinator {
         file_path: &str,
         content: &str,
     ) -> Result<(ParsedFile, bool), ParseError> {
+        let (parsed, diagnostics) = self.parse_detailed_with_diagnostics(file_path, content)?;
+        Ok((parsed, diagnostics.has_syntax_errors))
+    }
+
+    /// Parse a file and return the parsed result plus read-only diagnostics.
+    ///
+    /// The diagnostics are observational: they do not change entity extraction
+    /// and are not persisted with the parsed file.
+    pub fn parse_detailed_with_diagnostics(
+        &mut self,
+        file_path: &str,
+        content: &str,
+    ) -> Result<(ParsedFile, ParseDiagnostics), ParseError> {
         let start = std::time::Instant::now();
 
         // Create context
@@ -163,10 +177,13 @@ impl ParseCoordinator {
 
         match result {
             Ok(()) => {
-                // Build result
-                let has_syntax_errors = context.has_syntax_errors;
+                let diagnostics = ParseDiagnostics {
+                    has_syntax_errors: context.has_syntax_errors,
+                    syntax_error_spans: std::mem::take(&mut context.syntax_diagnostics),
+                    coarse_tag: context.syntax_diagnostic_tag,
+                };
                 let parsed = self.build_result(context, start)?;
-                Ok((parsed, has_syntax_errors))
+                Ok((parsed, diagnostics))
             }
             Err(e) => Err(e),
         }
@@ -193,6 +210,21 @@ impl ParseCoordinator {
         content: &str,
         language_info: &LanguageInfo,
     ) -> Result<(ParsedFile, bool), ParseError> {
+        let (parsed, diagnostics) = self.parse_with_language_info_detailed_with_diagnostics(
+            file_path,
+            content,
+            language_info,
+        )?;
+        Ok((parsed, diagnostics.has_syntax_errors))
+    }
+
+    /// Parse with pre-detected language info and return read-only diagnostics.
+    pub fn parse_with_language_info_detailed_with_diagnostics(
+        &mut self,
+        file_path: &str,
+        content: &str,
+        language_info: &LanguageInfo,
+    ) -> Result<(ParsedFile, ParseDiagnostics), ParseError> {
         let start = std::time::Instant::now();
 
         // Create context with pre-detected language
@@ -212,10 +244,13 @@ impl ParseCoordinator {
 
         match result {
             Ok(()) => {
-                // Build result
-                let has_syntax_errors = context.has_syntax_errors;
+                let diagnostics = ParseDiagnostics {
+                    has_syntax_errors: context.has_syntax_errors,
+                    syntax_error_spans: std::mem::take(&mut context.syntax_diagnostics),
+                    coarse_tag: context.syntax_diagnostic_tag,
+                };
                 let parsed = self.build_result(context, start)?;
-                Ok((parsed, has_syntax_errors))
+                Ok((parsed, diagnostics))
             }
             Err(e) => Err(e),
         }

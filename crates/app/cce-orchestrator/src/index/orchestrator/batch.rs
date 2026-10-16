@@ -863,6 +863,7 @@ impl IndexOrchestrator {
                     } else if process_result.has_syntax_errors {
                         tracing::warn!(
                             file = %pf.path,
+                            syntax_tag = ?process_result.syntax_diagnostic_tag,
                             "Parsed with syntax errors; entities inside error regions may be missing"
                         );
                         batch_result.degraded_files += 1;

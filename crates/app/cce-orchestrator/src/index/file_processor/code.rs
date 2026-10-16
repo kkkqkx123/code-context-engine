@@ -181,16 +181,23 @@ impl FileProcessor {
         })?;
 
         // Step 1: Parse file with pre-detected language info
-        let (parsed, has_syntax_errors) = {
+        let (parsed, has_syntax_errors, syntax_diagnostics, syntax_diagnostic_tag) = {
             let mut coordinator = self.coordinator.lock().map_err(|_| {
                 OrchestratorError::index("parse", "parser coordinator lock poisoned")
             })?;
-            coordinator.parse_with_language_info_detailed(
-                &file_entry.relative_path.to_string_lossy(),
-                content,
-                language_info,
+            let (parsed, diagnostics) = coordinator
+                .parse_with_language_info_detailed_with_diagnostics(
+                    &file_entry.relative_path.to_string_lossy(),
+                    content,
+                    language_info,
+                )?;
+            (
+                parsed,
+                diagnostics.has_syntax_errors,
+                diagnostics.syntax_error_spans,
+                diagnostics.coarse_tag.map(str::to_string),
             )
-        }?;
+        };
 
         // Step 2: Pre-process entities
         let grouper_start = std::time::Instant::now();
@@ -276,6 +283,8 @@ impl FileProcessor {
             dropped_blank_segments,
             document_degraded: false,
             has_syntax_errors,
+            syntax_diagnostics,
+            syntax_diagnostic_tag,
         })
     }
 
