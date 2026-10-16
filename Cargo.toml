@@ -27,6 +27,8 @@ members = [
     "crates/infra/cce-scanner",
     # local vector engine (git submodule: https://github.com/kkkqkx123/simvec)
     "crates/simvec",
+    # encoding detection (git remote: https://github.com/kkkqkx123/encoding-guess)
+    "crates/encoding-guess",
     # app
     "crates/app/cce-api",
     "crates/app/cce-admission",

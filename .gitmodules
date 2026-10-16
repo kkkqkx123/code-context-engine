@@ -22,3 +22,6 @@
 [submodule "crates/tree-sitter/tree-sitter-cpp"]
 	path = crates/tree-sitter/tree-sitter-cpp
 	url = https://github.com/kkkqkx123/tree-sitter-cpp.git
+[submodule "crates/encoding-guess"]
+	path = crates/encoding-guess
+	url = https://github.com/kkkqkx123/encoding-guess
