@@ -84,6 +84,7 @@ binary_check_size = 8192            # 二进制文件检查大小（字节）
 max_hash_file_size = 10485760       # 最大哈希文件大小（字节，默认 10MB）
 default_max_content_size = 1048576  # 默认最大内容大小（字节，默认 1MB）
 max_file_size = 512000              # 最大文件大小（字节，默认 500KB）
+# parallelism = 0                   # 扫描并行度上限：省略=机器可用并行度；0/1=单线程；>1=固定线程池
 ```
 
 ### 扫描策略建议

@@ -117,6 +117,7 @@ fn query_jitter(manager: &IndexManager, schema: &cce_storage_bm25::IndexSchema) 
 }
 
 /// Append one measured scenario to the results file next to this bench.
+#[allow(clippy::too_many_arguments)]
 fn record_row(
     out: &mut Option<std::fs::File>,
     scenario: &str,
@@ -125,14 +126,34 @@ fn record_row(
     docs_per_sec: f64,
     p50_ms: Option<f64>,
     p99_ms: Option<f64>,
+    segments: usize,
 ) {
     if let Some(f) = out.as_mut() {
         let _ = writeln!(
             f,
-            "{scenario}\t{total_ms:.1}\t{commits}\t{docs_per_sec:.0}\t{}\t{}",
+            "{scenario}\t{total_ms:.1}\t{commits}\t{docs_per_sec:.0}\t{}\t{}\t{segments}",
             p50_ms.map_or_else(String::new, |v| format!("{v:.2}")),
             p99_ms.map_or_else(String::new, |v| format!("{v:.2}")),
         );
+    }
+}
+
+/// Wait until background segment merging stops shrinking the index, so the
+/// recorded count reflects the settled state rather than the peak right after
+/// the last commit. Bounded so a stuck merge cannot hang the bench.
+fn settled_segment_count(manager: &IndexManager) -> usize {
+    let mut last = manager.segment_count().expect("segment count");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        std::thread::sleep(Duration::from_millis(100));
+        let current = manager.segment_count().expect("segment count");
+        if current >= last {
+            return current;
+        }
+        if Instant::now() >= deadline {
+            return current;
+        }
+        last = current;
     }
 }
 
@@ -140,8 +161,8 @@ fn main() {
     let n = n_docs();
     println!("bm25_write benchmark ({n} docs, local/tantivy)");
     println!(
-        "{:<22} {:>12} {:>10} {:>12}",
-        "scenario", "total_ms", "commits", "docs/s"
+        "{:<22} {:>12} {:>10} {:>12} {:>10}",
+        "scenario", "total_ms", "commits", "docs/s", "segments"
     );
 
     let mut out = OpenOptions::new()
@@ -152,7 +173,7 @@ fn main() {
     if let Some(f) = out.as_mut() {
         let _ = writeln!(
             f,
-            "# scenario\ttotal_ms\tcommits\tdocs_per_sec\tp50_ms\tp99_ms"
+            "# scenario\ttotal_ms\tcommits\tdocs_per_sec\tp50_ms\tp99_ms\tsegments"
         );
         // The document count varies per run (`CCE_BENCH_BM25_DOCS`, default
         // 20_000); rows below are meaningless without it, so record it.
@@ -163,12 +184,14 @@ fn main() {
         let dir = TempDir::new().expect("tempdir");
         let (ms, commits, manager, schema) = write_with_freq(&dir, per_commit);
         let dps = (n as f64) / (ms / 1000.0);
+        let segments = settled_segment_count(&manager);
         println!(
-            "{:<22} {:>12.1} {:>10} {:>12.0}",
+            "{:<22} {:>12.1} {:>10} {:>12.0} {:>10}",
             format!("bulk commit x{per_commit}"),
             ms,
             commits,
-            dps
+            dps,
+            segments
         );
 
         // Query jitter after a fresh index at this commit frequency.
@@ -182,12 +205,13 @@ fn main() {
             dps,
             Some(p50),
             Some(p99),
+            segments,
         );
     }
 
     // Incremental high-frequency delete: per-file commit vs merged commit.
     let dir = TempDir::new().expect("tempdir");
-    let per_file_ms;
+    let (per_file_ms, per_file_segments);
     {
         let manager = IndexManager::create(dir.path()).expect("create index");
         let schema = manager.schema().clone();
@@ -202,13 +226,15 @@ fn main() {
             .expect("delete file");
         }
         per_file_ms = t.elapsed().as_secs_f64() * 1000.0;
+        per_file_segments = settled_segment_count(&manager);
     }
     println!(
-        "{:<22} {:>12.1} {:>10} {:>12.0}",
+        "{:<22} {:>12.1} {:>10} {:>12.0} {:>10}",
         "delete per-file",
         per_file_ms,
         n,
-        (n as f64) / (per_file_ms / 1000.0)
+        (n as f64) / (per_file_ms / 1000.0),
+        per_file_segments
     );
     record_row(
         &mut out,
@@ -218,10 +244,11 @@ fn main() {
         (n as f64) / (per_file_ms / 1000.0),
         None,
         None,
+        per_file_segments,
     );
 
     let dir = TempDir::new().expect("tempdir");
-    let merged_ms;
+    let (merged_ms, merged_segments);
     {
         let manager = IndexManager::create(dir.path()).expect("create index");
         let schema = manager.schema().clone();
@@ -231,13 +258,15 @@ fn main() {
         cce_storage_bm25::delete_documents_by_project(&manager, &schema, PROJECT_ID)
             .expect("delete project");
         merged_ms = t.elapsed().as_secs_f64() * 1000.0;
+        merged_segments = settled_segment_count(&manager);
     }
     println!(
-        "{:<22} {:>12.1} {:>10} {:>12.0}",
+        "{:<22} {:>12.1} {:>10} {:>12.0} {:>10}",
         "delete merged",
         merged_ms,
         1,
-        (n as f64) / (merged_ms / 1000.0)
+        (n as f64) / (merged_ms / 1000.0),
+        merged_segments
     );
     record_row(
         &mut out,
@@ -247,6 +276,7 @@ fn main() {
         (n as f64) / (merged_ms / 1000.0),
         None,
         None,
+        merged_segments,
     );
 
     // Criterion timing for the bulk write at the two extremes. Opt-in via

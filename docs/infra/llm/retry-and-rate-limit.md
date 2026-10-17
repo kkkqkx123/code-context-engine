@@ -183,11 +183,13 @@ embedding 侧（`crates/cce_orchestrator/src/index/storage_coordinator/vector.rs
 | ---- | ------ | ---- | ---- |
 | `max_retries` | 5 | `[llm.providers.*]` | 重试预算（chat / embedding / rerank 共用同一执行器） |
 | `retry_delay_ms` | 1000 | `[llm.providers.*]` | 退避初值（指数退避，429 时取 retry-after 下限） |
-| `rate_limit` | 60 | `[llm.providers.*]` | 每分钟最大请求数；0 = 不限速；上限 10000（校验） |
+| `rate_limit` | 600 | `[llm.providers.*]` | 每分钟最大请求数；0 = 不限速；上限 10000（校验） |
 | `embedding_batch_delay_ms` | 100 | `[orchestrator]` | embedding 批间固定节流（主动限速的另一道防线） |
 | `no_proxy` | [] | `[llm.providers.*]` | 绕过代理的主机列表 |
 
 三条调用路径（chat 经网关，embedding / rerank 经注入的共享弹性栈）共用同一重试执行器、同一按上游共享的熔断器与限流器；429 等待至少覆盖服务端 `retry-after`。
+
+`rate_limit` 同时决定 token bucket 的突发容量（`burst = ceil(rate_limit / 60)`），因此过低的值会把正常的短时并发也串行化。默认 600/分（10 rps，burst 10）使交互式查询不至于彼此排队，同时仍是一道安全网：上游更严格时以 429 自适应窗口兜底。请按上游文档给出的额度设置，本地无限制服务设为 0。
 
 熔断器配置（位于 `[llm.providers.<id>.circuit_breaker]`）：
 

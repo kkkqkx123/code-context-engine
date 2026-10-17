@@ -93,6 +93,7 @@ fn scan_opts(root: &Path, heavy_filter: bool) -> ScanOptions {
         gitignore_path: None,
         max_content_size: Some(1 << 20),
         max_file_size: Some(1 << 22),
+        parallelism: None,
     };
     if heavy_filter {
         // Standing in for a plugin FileFilter decision: a large pattern set
@@ -159,6 +160,47 @@ fn main() {
             "bounded\t{threads}\t{hashed}\t{ms:.1}\t{rate:.1}\t{speedup:.2}"
         );
     }
+
+    // --- 1b. walker-level scan: serial vs global pool (product path) ---
+    // The hashing comparison above drives the processor directly; this drives
+    // the real `FSScanner` walk so the integrated parallel file pass (which
+    // M4 added) is measured, including the serial fallback the parallelism
+    // config selects.
+    let serial_opts = ScanOptions {
+        parallelism: Some(1),
+        ..scan_opts(&h.root, false)
+    };
+    let t = Instant::now();
+    let serial_entries = FSScanner::new().scan(&serial_opts).expect("serial scan");
+    let serial_scan_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    let default_opts = scan_opts(&h.root, false);
+    let t = Instant::now();
+    let parallel_entries = FSScanner::new().scan(&default_opts).expect("parallel scan");
+    let parallel_scan_ms = t.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(serial_entries.len(), parallel_entries.len());
+    let pool_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    println!(
+        "walker scan         : serial {serial_scan_ms:8.1} ms vs pool {parallel_scan_ms:8.1} ms \
+         ({} files, speedup {:.2}x)",
+        serial_entries.len(),
+        serial_scan_ms / parallel_scan_ms
+    );
+    let _ = writeln!(
+        out,
+        "walker_scan\t1\t{}\t{serial_scan_ms:.1}\t{:.1}\t1.00",
+        serial_entries.len(),
+        serial_entries.len() as f64 / (serial_scan_ms / 1000.0)
+    );
+    let _ = writeln!(
+        out,
+        "walker_scan\t{pool_threads}\t{}\t{parallel_scan_ms:.1}\t{:.1}\t{:.2}",
+        parallel_entries.len(),
+        parallel_entries.len() as f64 / (parallel_scan_ms / 1000.0),
+        serial_scan_ms / parallel_scan_ms
+    );
 
     // --- 2. per-file filter-decision overhead (plugin FFI proxy) ---
     let t = Instant::now();

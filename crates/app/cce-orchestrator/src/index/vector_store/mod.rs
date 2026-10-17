@@ -9,4 +9,4 @@ mod vector;
 
 pub use fulltext::{FulltextDiagnostics, FulltextStore};
 pub use relation::{RelationDiagnostics, RelationStore};
-pub use vector::{VectorDiagnostics, VectorStore};
+pub use vector::{VectorBatchWriter, VectorDiagnostics, VectorStore};

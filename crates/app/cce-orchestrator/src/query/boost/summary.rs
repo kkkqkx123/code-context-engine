@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::index::vector_store::VectorStore;
+use crate::query::CachedEmbedder;
 use crate::query::boost::{BoostAggregationConfig, BoostContribution};
 use crate::query::error::{QueryError, Result};
 use crate::query::types::{SearchConfig, SearchResult};
@@ -24,14 +25,14 @@ use cce_types::error::common::HttpError;
 #[derive(Clone)]
 pub struct SummaryBoost {
     vector: VectorStore,
-    embedder: Arc<OpenAICompatibleProvider>,
+    embedder: Arc<CachedEmbedder<OpenAICompatibleProvider>>,
     project_group_id: String,
 }
 
 impl SummaryBoost {
     pub fn new(
         vector: VectorStore,
-        embedder: Arc<OpenAICompatibleProvider>,
+        embedder: Arc<CachedEmbedder<OpenAICompatibleProvider>>,
         project_group_id: String,
     ) -> Self {
         Self {

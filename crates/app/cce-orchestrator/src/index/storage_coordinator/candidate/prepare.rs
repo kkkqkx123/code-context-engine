@@ -49,23 +49,25 @@ impl StorageCoordinator {
         Ok(())
     }
 
-    /// Remove one file's BM25 data only from the candidate generation before
-    /// re-indexing it.
+    /// Remove several files' BM25 data from the candidate generation before
+    /// re-indexing them.
     ///
-    /// Module-scoped: it clears only the BM25 chunk rows of the candidate
-    /// plus its candidate-epoch documents; the `replaced` override hides the
-    /// parent documents. Recovery may re-run this for the same file (the
-    /// epoch-scoped delete and the override upsert are idempotent).
-    pub async fn prepare_hot_update_bm25(
-        &self,
-        file_path: &std::path::Path,
-    ) -> Result<(), OrchestratorError> {
-        let path = normalize_project_path(&file_path.to_string_lossy());
+    /// Module-scoped: it clears only the BM25 chunk rows of the candidate plus
+    /// its candidate-epoch documents; the `replaced` override hides the parent
+    /// documents. The whole path set shares one fulltext search+commit and one
+    /// metadata transaction, so a multi-file rewrite does not pay a commit per
+    /// file. Recovery may re-run this for the same files (the epoch-scoped
+    /// delete and the override upsert are idempotent).
+    pub async fn prepare_hot_update_bm25(&self, paths: &[String]) -> Result<(), OrchestratorError> {
+        if paths.is_empty() {
+            return Ok(());
+        }
         let epoch = self.epoch();
         if let Some(bm25) = &self.fulltext {
-            bm25.delete_by_file_path_scoped_epoch(
+            let raw: Vec<&str> = paths.iter().map(String::as_str).collect();
+            bm25.delete_by_file_paths_scoped_epoch(
                 &bm25.configured_index_name(),
-                &path,
+                &raw,
                 self.project_id,
                 epoch,
             )
@@ -74,18 +76,22 @@ impl StorageCoordinator {
         if let Some(client) = self.metadata_store.as_ref().map(|store| store.as_ref()) {
             client
                 .with_transaction(|tx| {
-                    tx.execute(
-                        "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3 AND path = 'nl'",
-                        rusqlite::params![self.project_id, epoch, path],
-                    )
-                    .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
-                    GenerationOverrideRepository::upsert(
-                        tx,
-                        self.project_id,
-                        epoch,
-                        &path,
-                        OverrideDisposition::Replaced,
-                    )
+                    for path in paths {
+                        let normalized = normalize_project_path(path);
+                        tx.execute(
+                            "DELETE FROM chunks WHERE project_id = ?1 AND epoch = ?2 AND file_path = ?3 AND path = 'nl'",
+                            rusqlite::params![self.project_id, epoch, normalized],
+                        )
+                        .map_err(|error| cce_types::StorageError::delete("chunks", error.to_string()))?;
+                        GenerationOverrideRepository::upsert(
+                            tx,
+                            self.project_id,
+                            epoch,
+                            &normalized,
+                            OverrideDisposition::Replaced,
+                        )?;
+                    }
+                    Ok(())
                 })
                 .map_err(OrchestratorError::Storage)?;
         }

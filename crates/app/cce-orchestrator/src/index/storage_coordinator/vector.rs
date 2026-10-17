@@ -5,7 +5,7 @@
 
 use cce_llm::LlmError;
 use cce_parser::ast_to_nl::chunker::{ChunkPath, ChunkedResult};
-use cce_storage_common::{Payload, VectorPoint, VectorStorage};
+use cce_storage_common::{Payload, VectorPoint};
 use cce_storage_metadb_sqlite::types::{WorkUnitCheckpointRecord, WorkUnitStatus};
 use cce_storage_metadb_sqlite::{
     ChunkRecord, ChunkRepository, EntityDetailMapping, EntityDetailMappingRepository,
@@ -16,6 +16,7 @@ use cce_types::ast_to_nl::FileCategory;
 use cce_types::error::common::ErrorClassify;
 
 use crate::error::OrchestratorError;
+use crate::index::vector_store::VectorBatchWriter;
 
 use super::StorageCoordinator;
 use super::mapping::{
@@ -148,6 +149,12 @@ impl StorageCoordinator {
         };
         self.ensure_project_group_id()?;
 
+        // Accumulate points across embedding microbatches and write them in
+        // larger batches: the embedded backend pays a fixed WAL/fsync/publish
+        // cost per upsert call, so the microbatch-sized writes would dominate.
+        // The writer is flushed before work units are marked committed below.
+        let mut vector_writer = VectorBatchWriter::new(vector.clone());
+
         let mut total_stored = 0;
 
         let wk_cm = self.checkpoint_manager.clone();
@@ -247,7 +254,7 @@ impl StorageCoordinator {
             };
 
             total_stored += self
-                .persist_embedding_batch(batch, &embeddings, vector, &source_entity_ids)
+                .persist_embedding_batch(batch, &embeddings, &mut vector_writer, &source_entity_ids)
                 .await?;
             if let Some(hash) = hash {
                 committed_hashes.push(hash.clone());
@@ -276,7 +283,12 @@ impl StorageCoordinator {
                 match embedder.embed(&texts).await {
                     Ok(embeddings) => {
                         total_stored += self
-                            .persist_embedding_batch(batch, &embeddings, vector, &source_entity_ids)
+                            .persist_embedding_batch(
+                                batch,
+                                &embeddings,
+                                &mut vector_writer,
+                                &source_entity_ids,
+                            )
                             .await?;
                         if let Some(hash) = hash {
                             committed_hashes.push(hash);
@@ -298,6 +310,11 @@ impl StorageCoordinator {
                 }
             }
         }
+
+        // Flush every buffered point to the backend before marking any work
+        // unit committed: a batch is marked Committed only once its data is
+        // durable, so a crash before this point replays the uncommitted units.
+        vector_writer.flush().await?;
 
         // Flush the Committed markers for every successfully persisted
         // microbatch in one transaction. Units are marked only after their
@@ -355,7 +372,7 @@ impl StorageCoordinator {
         &self,
         batch: &[&ChunkedResult],
         embeddings: &cce_llm::EmbeddingResult,
-        vector: &crate::index::vector_store::VectorStore,
+        writer: &mut VectorBatchWriter,
         source_entity_ids: &std::collections::HashMap<(String, i64), i64>,
     ) -> Result<usize, OrchestratorError> {
         // Build vector points and chunk records for this batch
@@ -365,10 +382,11 @@ impl StorageCoordinator {
 
         let mut stored = 0;
 
-        // Store to vector backend (local or Qdrant via enum dispatch)
+        // Buffer into the batched vector writer (local or Qdrant via enum
+        // dispatch); the caller flushes before committing work units.
         if !points.is_empty() {
-            vector.upsert_points(&points).await?;
             stored = points.len();
+            writer.push(points).await?;
         }
 
         // Store chunk records and entity mappings in one transaction.
@@ -708,6 +726,10 @@ impl StorageCoordinator {
         };
         self.ensure_project_group_id()?;
 
+        // Batch the refreshed vectors across microbatches the same way the
+        // main write path does, then flush before returning.
+        let mut vector_writer = VectorBatchWriter::new(vector.clone());
+
         let mut stored = 0;
         let mut deferred: Vec<&[(ChunkRecord, u8)]> = Vec::new();
         for batch in records.chunks(batch_size.max(1)) {
@@ -739,7 +761,7 @@ impl StorageCoordinator {
             let points =
                 build_reembed_points(batch.iter().zip(vectors.iter()), &self.project_group_id);
             stored += points.len();
-            vector.upsert_points(&points).await?;
+            vector_writer.push(points).await?;
         }
         for batch in deferred {
             let texts: Vec<&str> = batch.iter().map(|(r, _)| r.content.as_str()).collect();
@@ -758,8 +780,9 @@ impl StorageCoordinator {
             let points =
                 build_reembed_points(batch.iter().zip(vectors.iter()), &self.project_group_id);
             stored += points.len();
-            vector.upsert_points(&points).await?;
+            vector_writer.push(points).await?;
         }
+        vector_writer.flush().await?;
         Ok(stored)
     }
 }

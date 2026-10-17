@@ -81,6 +81,10 @@ pub struct CodeContextEngine {
     /// populate one cache instead of one throwaway cache per request.
     query_result_cache: ProjectCache<QueryCache>,
 
+    /// Configuration for the shared query result cache, resolved from the
+    /// global `[cache]` section at startup.
+    query_cache_config: CacheConfig,
+
     /// Project registry for multi-project support
     project_registry: Arc<ProjectRegistry>,
 
@@ -135,7 +139,7 @@ impl CodeContextEngine {
     pub async fn get_query_cache(&self, project_id: i64) -> QueryCache {
         self.query_result_cache
             .get_or_insert_with(project_id, || {
-                Arc::new(QueryCache::new(CacheConfig::default()))
+                Arc::new(QueryCache::new(self.query_cache_config.clone()))
             })
             .await
             .as_ref()
@@ -174,6 +178,10 @@ impl CodeContextEngine {
     async fn init_components(mut config: AppConfig) -> Result<Self, EngineError> {
         // Resolve configuration dependencies (auto-enable required features)
         config.resolve_dependencies();
+
+        // Resolve the shared query result cache configuration once; each
+        // project's cache is created lazily from this value.
+        let query_cache_config = CacheConfig::from(&config.cache);
 
         // Create global metrics registry with the configured label allowlist.
         let metrics_registry = Arc::new(MetricsRegistry::with_label_config(
@@ -296,6 +304,7 @@ impl CodeContextEngine {
             plugin_registry_cache: ProjectCache::new(),
             searcher_cache: ProjectCache::new(),
             query_result_cache: ProjectCache::new(),
+            query_cache_config,
             project_registry,
             hot_update_cache: ProjectCache::new(),
             operation_coordinator_cache: ProjectCache::new(),

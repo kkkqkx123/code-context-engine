@@ -8,7 +8,7 @@ use tantivy::collector::DocSetCollector;
 use tantivy::query::Occur;
 use tantivy::schema::Value;
 
-use crate::manager::IndexManager;
+use crate::manager::{IndexManager, commit_or_rollback};
 use crate::schema::IndexSchema;
 
 /// Delete a document from the index
@@ -20,7 +20,7 @@ pub fn delete_document(
     let mut writer = manager.writer()?;
     let term = Term::from_field_text(schema.document_id, document_id);
     writer.delete_term(term);
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
     Ok(())
 }
@@ -35,7 +35,7 @@ pub fn delete_documents_by_file_path(
     let mut writer = manager.writer()?;
     let term = Term::from_field_text(schema.file_path, &normalized);
     let count = writer.delete_term(term) as usize;
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
     Ok(count)
 }
@@ -78,7 +78,7 @@ pub fn delete_documents_by_project(
         let term = Term::from_field_text(schema.document_id, doc_id);
         writer.delete_term(term);
     }
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
 
     tracing::debug!(
@@ -144,7 +144,7 @@ pub fn delete_documents_by_file_path_and_project(
         let term = Term::from_field_text(schema.document_id, doc_id);
         writer.delete_term(term);
     }
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
 
     Ok(doc_ids.len())
@@ -212,7 +212,7 @@ pub fn delete_summary_documents_by_file_path_and_project(
         let term = Term::from_field_text(schema.document_id, doc_id);
         writer.delete_term(term);
     }
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
 
     Ok(doc_ids.len())
@@ -308,7 +308,7 @@ pub fn delete_documents_by_file_paths_project_epoch(
     for document_id in &ids {
         writer.delete_term(Term::from_field_text(schema.document_id, document_id));
     }
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
     Ok(ids.len())
 }
@@ -355,7 +355,7 @@ pub fn delete_documents_by_project_epoch(
     for document_id in &ids {
         writer.delete_term(Term::from_field_text(schema.document_id, document_id));
     }
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
     Ok(ids.len())
 }

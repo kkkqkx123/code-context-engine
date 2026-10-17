@@ -289,7 +289,7 @@ api_keys = ["${LLM_API_KEY_OPENAI}"]      # API 密钥
 timeout_secs = 30                         # 请求超时（秒）
 max_retries = 3                           # 最大重试次数
 retry_delay_ms = 1000                     # 重试延迟（毫秒）
-rate_limit = 60                           # 每分钟最大请求数（0 = 不限速，同上游共享）
+rate_limit = 600                          # 每分钟最大请求数（0 = 不限速，同上游共享；burst = ceil(rate/60)）
 # proxy_url = "http://127.0.0.1:7890"     # 该提供者的出站代理；模型可用同名配置覆盖
 # no_proxy = ["localhost"]                # 绕过代理的主机列表
 

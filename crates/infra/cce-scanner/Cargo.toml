@@ -16,6 +16,7 @@ serde = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
+rayon = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

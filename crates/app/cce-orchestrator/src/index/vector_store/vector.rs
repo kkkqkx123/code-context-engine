@@ -414,3 +414,51 @@ impl VectorStorage for VectorStore {
         }
     }
 }
+
+/// Points accumulated before a batched backend write is forced.
+///
+/// The embedded backend pays a fixed cost (WAL append + fsync + index publish)
+/// per `upsert_points` call. The indexing loop calls it once per embedding
+/// microbatch (order of tens of points), so that fixed cost dominates write
+/// throughput. Accumulating points across calls and writing them in batches of
+/// at least this many amortizes the fixed cost while bounding buffer memory.
+const VECTOR_WRITE_BATCH: usize = 512;
+
+/// Accumulates points across calls and writes them to the backend in batches.
+///
+/// Durability contract: [`push`](Self::push) may leave points buffered.
+/// Callers must call [`flush`](Self::flush) before marking a checkpoint/work
+/// unit committed or publishing an epoch, so buffered points are never lost
+/// across a crash boundary.
+pub struct VectorBatchWriter {
+    store: VectorStore,
+    pending: Vec<VectorPoint>,
+}
+
+impl VectorBatchWriter {
+    /// Create a writer over `store`.
+    pub fn new(store: VectorStore) -> Self {
+        Self {
+            store,
+            pending: Vec::with_capacity(VECTOR_WRITE_BATCH),
+        }
+    }
+
+    /// Buffer `points`, writing a batched upsert once the threshold is reached.
+    pub async fn push(&mut self, points: Vec<VectorPoint>) -> Result<(), StorageError> {
+        self.pending.extend(points);
+        if self.pending.len() >= VECTOR_WRITE_BATCH {
+            self.flush().await?;
+        }
+        Ok(())
+    }
+
+    /// Write every buffered point now. A no-op when nothing is pending.
+    pub async fn flush(&mut self) -> Result<(), StorageError> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let batch = std::mem::replace(&mut self.pending, Vec::with_capacity(VECTOR_WRITE_BATCH));
+        self.store.upsert_points(&batch).await
+    }
+}

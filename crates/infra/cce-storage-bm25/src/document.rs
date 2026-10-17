@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::Bm25Error;
 
-use crate::manager::IndexManager;
+use crate::manager::{IndexManager, commit_or_rollback, rollback_writer};
 use crate::schema::IndexSchema;
 
 /// Add a document to the index
@@ -16,8 +16,11 @@ pub fn add_document(
 ) -> Result<(), Bm25Error> {
     let mut writer = manager.writer()?;
     let doc = schema.to_document(document_id, fields);
-    writer.add_document(doc)?;
-    writer.commit()?;
+    if let Err(error) = writer.add_document(doc) {
+        rollback_writer(&mut writer);
+        return Err(Bm25Error::from(error));
+    }
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
     Ok(())
 }
@@ -35,8 +38,11 @@ pub fn update_document(
     writer.delete_term(term);
 
     let doc = schema.to_document(document_id, fields);
-    writer.add_document(doc)?;
-    writer.commit()?;
+    if let Err(error) = writer.add_document(doc) {
+        rollback_writer(&mut writer);
+        return Err(Bm25Error::from(error));
+    }
+    commit_or_rollback(&mut writer)?;
     manager.reload_reader()?;
     Ok(())
 }

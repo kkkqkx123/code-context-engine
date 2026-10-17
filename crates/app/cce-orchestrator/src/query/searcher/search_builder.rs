@@ -136,10 +136,12 @@ impl SearcherBuilder {
         // summary boost; VectorStore is cheap to clone (holds Arc inside).
         let vector = self.vector.clone();
 
-        // Memoize query embeddings: dense retrieval and summary boost embed
-        // the same query text within one search flow; the shared wrapper
-        // collapses those into a single remote call.
-        let _embedder = Arc::new(crate::query::cached_embedder::CachedEmbedder::new(
+        // Memoize query embeddings: dense retrieval, summary recall and
+        // summary boost embed the same query text within one search flow; the
+        // shared wrapper collapses those into a single remote call. One
+        // instance is handed to both the searcher and the summary boost so
+        // they observe the same cache.
+        let embedder = Arc::new(crate::query::cached_embedder::CachedEmbedder::new(
             self.embedder.clone(),
         ));
 
@@ -147,7 +149,7 @@ impl SearcherBuilder {
         let summary_boost = if self.enable_summary_boost {
             Some(Arc::new(SummaryBoost::new(
                 vector.clone(),
-                self.embedder.clone(),
+                embedder.clone(),
                 self.scope.project_group_id().to_string(),
             )))
         } else {
@@ -156,7 +158,7 @@ impl SearcherBuilder {
 
         Searcher {
             vector,
-            embedder: self.embedder.clone(),
+            embedder,
             fulltext: self.fulltext,
             relation: self.relation,
             reranker: Arc::new(LlmReranker::new(self.rerank_handler)),

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 
 use async_trait::async_trait;
+use cce_parser::ast_to_nl::chunker::ChunkedResult;
 
 use crate::hot_update::ParseResultWithChanges;
 use crate::hot_update::error::{HotUpdateError, Result};
@@ -30,6 +31,18 @@ const RECHUNK_PAGE_SIZE: i64 = 128;
 /// `project_meta` key persisting the AST-to-NL pipeline fingerprint that
 /// produced the currently stored BM25 documents.
 const BM25_RECHUNK_KEY: &str = "chunking_fingerprint_bm25";
+
+/// A changed file whose BM25 documents are ready to commit.
+///
+/// The chunking pass builds one of these per file; the storage batch commit
+/// then writes every file's documents in a single Tantivy commit and the
+/// processor persists the module fingerprints on success.
+struct PreparedFile {
+    file_path: std::path::PathBuf,
+    parsed_file: cce_types::ParsedFile,
+    module_fp: String,
+    chunks: Vec<ChunkedResult>,
+}
 
 impl Bm25UpdateProcessor {
     /// Create a new BM25 update processor
@@ -58,93 +71,60 @@ impl Bm25UpdateProcessor {
         self.enabled.store(enabled, AtomicOrdering::Relaxed);
     }
 
-    /// Process a single file for BM25 update
-    async fn process_file(
+    /// Generate the BM25 chunks for one changed file.
+    ///
+    /// Returns `Ok(None)` when the stored BM25 documents already match the
+    /// current chunking inputs (module progress marker matches), in which case
+    /// the file needs no index write. On success returns the module input
+    /// fingerprint that must be persisted after the batch commit.
+    async fn generate_chunks(
         &self,
-        ctx: &crate::operation::OperationContext,
-        parse_result: ParseResultWithChanges,
-    ) -> Result<()> {
+        parse_result: &ParseResultWithChanges,
+    ) -> Result<Option<(String, Vec<ChunkedResult>)>> {
         let content_hash =
             cce_utils::hash::calculate_hash(parse_result.parsed_file.source.as_bytes());
 
         // Generate chunks and compute the module input fingerprint (chunking
         // configuration + content) in one lock scope. Files whose BM25
         // documents already exist for the current inputs are skipped.
-        let (chunks, module_fp) = {
-            let mut file_processor = self.context.file_processor.lock().await;
-            let module_fp = crate::hot_update::progress::module_input_fingerprint(
-                &file_processor.chunking_fingerprint(),
-                &content_hash,
-            );
-            if parse_result
-                .module_progress
-                .get(crate::hot_update::progress::MODULE_BM25)
-                == Some(&module_fp)
-            {
-                return Ok(());
-            }
+        let mut file_processor = self.context.file_processor.lock().await;
+        let module_fp = crate::hot_update::progress::module_input_fingerprint(
+            &file_processor.chunking_fingerprint(),
+            &content_hash,
+        );
+        if parse_result
+            .module_progress
+            .get(crate::hot_update::progress::MODULE_BM25)
+            == Some(&module_fp)
+        {
+            return Ok(None);
+        }
 
-            // Branch on the explicit route marker carried by the parse result:
-            // document placeholders go through the document pipeline, code
-            // files through the AST pipeline.
-            let chunks = if parse_result.content_route.is_document() {
-                file_processor
-                    .process_document_chunks(
-                        &parse_result.parsed_file.path,
-                        &parse_result.parsed_file.source,
-                        cce_types::OutputMode::Both,
-                    )
-                    .await
-            } else {
-                file_processor
-                    .process_parsed_file(&parse_result.parsed_file)
-                    .await
-                    .map(|(chunks, _)| chunks)
-            }
-            .map_err(|e| {
-                HotUpdateError::bm25(format!(
-                    "Failed to process file {:?}: {}",
-                    parse_result.file_path, e
-                ))
-            })?;
-            (chunks, module_fp)
-        };
+        // Branch on the explicit route marker carried by the parse result:
+        // document placeholders go through the document pipeline, code
+        // files through the AST pipeline.
+        let chunks = if parse_result.content_route.is_document() {
+            file_processor
+                .process_document_chunks(
+                    &parse_result.parsed_file.path,
+                    &parse_result.parsed_file.source,
+                    cce_types::OutputMode::Both,
+                )
+                .await
+        } else {
+            file_processor
+                .process_parsed_file(&parse_result.parsed_file)
+                .await
+                .map(|(chunks, _)| chunks)
+        }
+        .map_err(|e| {
+            HotUpdateError::bm25(format!(
+                "Failed to process file {:?}: {}",
+                parse_result.file_path, e
+            ))
+        })?;
 
-        // Storage operations happen after the file_processor lock is released
-        // - allows concurrent processing
-        self.context
-            .storage
-            .prepare_hot_update_bm25(&parse_result.file_path)
-            .await
-            .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
-        self.context
-            .storage
-            .store_parsed_files(std::slice::from_ref(&parse_result.parsed_file))
-            .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
-
-        self.context
-            .storage
-            .hot_update_bm25_file(&parse_result.file_path, &chunks)
-            .await
-            .map_err(|e| {
-                HotUpdateError::bm25(format!(
-                    "Failed to update BM25 index for {:?}: {}",
-                    parse_result.file_path, e
-                ))
-            })?;
-        self.count_indexed_file();
-
-        crate::hot_update::progress::persist_module_progress(
-            &self.context.checkpoint_manager,
-            ctx,
-            &parse_result.file_path,
-            crate::hot_update::progress::MODULE_BM25,
-            &module_fp,
-        )
-        .await
-        .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
-
-        Ok(())
+        Ok(Some((module_fp, chunks)))
     }
 
     /// Re-index every unchanged file from disk when the AST-to-NL pipeline
@@ -222,6 +202,10 @@ impl Bm25UpdateProcessor {
             }
             offset += page.len() as i64;
 
+            // Rebuild the page's chunks first, then commit them together:
+            // per-file commits would pay one Tantivy commit per rebuilt file.
+            let mut page_paths: Vec<std::path::PathBuf> = Vec::new();
+            let mut page_chunks: Vec<ChunkedResult> = Vec::new();
             for file in page {
                 // Files changed by this operation are handled by the normal
                 // flow below; sweeping them here would rewrite stale content
@@ -253,16 +237,15 @@ impl Bm25UpdateProcessor {
                 if chunks.is_empty() {
                     continue;
                 }
-                let path = std::path::PathBuf::from(&file.path);
-                storage
-                    .prepare_hot_update_bm25(&path)
-                    .await
-                    .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
-                storage
-                    .hot_update_bm25_file(&path, &chunks)
-                    .await
-                    .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
+                page_paths.push(std::path::PathBuf::from(&file.path));
+                page_chunks.extend(chunks);
                 rebuilt += 1;
+            }
+            if !page_paths.is_empty() {
+                storage
+                    .hot_update_bm25_paths(&page_paths, &page_chunks)
+                    .await
+                    .map_err(|e| HotUpdateError::bm25(e.to_string()))?;
             }
         }
 
@@ -394,10 +377,18 @@ impl UpdateProcessor for Bm25UpdateProcessor {
             tracing::error!(error = %e, "Chunking-drift BM25 regeneration failed");
         }
 
-        // Process modified/added files
+        // Chunk modified/added files. Chunking is sequential (the file
+        // processor lock is shared); the storage writes are batched below.
+        let mut prepared: Vec<PreparedFile> = Vec::new();
         for parse_result in &batch_result.parse_results {
-            match self.process_file(ctx, parse_result.clone()).await {
-                Ok(_) => {
+            match self.generate_chunks(parse_result).await {
+                Ok(Some((module_fp, chunks))) => prepared.push(PreparedFile {
+                    file_path: parse_result.file_path.clone(),
+                    parsed_file: parse_result.parsed_file.clone(),
+                    module_fp,
+                    chunks,
+                }),
+                Ok(None) => {
                     processed_count += 1;
                     success_files.push(parse_result.file_path.to_string_lossy().to_string());
                 }
@@ -412,8 +403,67 @@ impl UpdateProcessor for Bm25UpdateProcessor {
                     tracing::warn!(
                         file = %parse_result.file_path.display(),
                         error = %e,
-                        "Failed to update BM25 index"
+                        "Failed to generate BM25 chunks"
                     );
+                }
+            }
+        }
+
+        // Write every changed file's BM25 documents in one Tantivy commit
+        // instead of one commit per file.
+        if !prepared.is_empty() {
+            let parsed_refs: Vec<&cce_types::ParsedFile> =
+                prepared.iter().map(|file| &file.parsed_file).collect();
+            let all_chunks: Vec<ChunkedResult> = prepared
+                .iter()
+                .flat_map(|file| file.chunks.iter().cloned())
+                .collect();
+
+            match self
+                .context
+                .storage
+                .hot_update_bm25_files(&parsed_refs, &all_chunks)
+                .await
+            {
+                Ok(()) => {
+                    for file in &prepared {
+                        self.count_indexed_file();
+                        processed_count += 1;
+                        success_files.push(file.file_path.to_string_lossy().to_string());
+                        if let Err(e) = crate::hot_update::progress::persist_module_progress(
+                            &self.context.checkpoint_manager,
+                            ctx,
+                            &file.file_path,
+                            crate::hot_update::progress::MODULE_BM25,
+                            &file.module_fp,
+                        )
+                        .await
+                        {
+                            failed_modules.push(ModuleFailure {
+                                file_path: file.file_path.to_string_lossy().to_string(),
+                                module_name: "bm25".to_string(),
+                                error: e.to_string(),
+                                retry_count: 0,
+                                next_retry_time: None,
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        files = prepared.len(),
+                        "Failed to update BM25 index for the batch"
+                    );
+                    for file in &prepared {
+                        failed_modules.push(ModuleFailure {
+                            file_path: file.file_path.to_string_lossy().to_string(),
+                            module_name: "bm25".to_string(),
+                            error: e.to_string(),
+                            retry_count: 0,
+                            next_retry_time: None,
+                        });
+                    }
                 }
             }
         }

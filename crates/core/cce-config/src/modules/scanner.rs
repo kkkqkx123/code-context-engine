@@ -33,6 +33,12 @@ pub struct ScannerConfig {
     /// Whether `FileFilter` plugins can make inclusion/exclusion decisions
     /// during scanning. Default off for performance and trust.
     pub plugin_filter_enabled: bool,
+    /// Upper bound on scan worker parallelism.
+    ///
+    /// Unset (the default) uses the host's available parallelism through the
+    /// global rayon pool. `0` or `1` disables parallel scanning entirely;
+    /// a value greater than one builds a dedicated pool of that many threads.
+    pub parallelism: Option<usize>,
 }
 
 impl ScannerConfig {
@@ -66,6 +72,7 @@ impl Default for ScannerConfig {
             default_max_content_size: 1024 * 1024, // 1MB
             max_file_size: Some(500 * 1024),       // 500KB
             plugin_filter_enabled: false,
+            parallelism: None,
         }
     }
 }
@@ -81,5 +88,6 @@ mod tests {
         assert!(config.respect_gitignore);
         assert_eq!(config.binary_check_size, 8192);
         assert!(config.max_file_size.is_some());
+        assert!(config.parallelism.is_none());
     }
 }

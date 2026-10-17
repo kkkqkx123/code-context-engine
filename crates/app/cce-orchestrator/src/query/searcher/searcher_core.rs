@@ -25,7 +25,9 @@ use cce_config::project_registry::ProjectScope;
 
 use crate::index::vector_store::VectorStore;
 use crate::index::vector_store::{FulltextStore, RelationStore};
+use crate::query::CachedEmbedder;
 use crate::query::boost::{SummaryBoost, apply_boosts};
+use crate::query::cache::CacheKey;
 use crate::query::error::QueryError;
 use crate::query::error::Result;
 use crate::query::filter::QueryFilter;
@@ -46,7 +48,7 @@ use super::search_builder::SearcherBuilder;
 pub struct Searcher {
     /// Vector backend used by DenseRetrieval strategy
     pub(crate) vector: VectorStore,
-    pub(crate) embedder: Arc<OpenAICompatibleProvider>,
+    pub(crate) embedder: Arc<CachedEmbedder<OpenAICompatibleProvider>>,
     pub(crate) fulltext: FulltextStore,
     /// Relation backend for the epoch view and chunk content lookup (optional)
     pub(crate) relation: Option<RelationStore>,
@@ -167,68 +169,55 @@ impl Searcher {
         }
         let start = std::time::Instant::now();
 
-        // Shared query cache: identical concurrent queries must not
-        // each run the embedding pipeline and queue behind the shared LLM
-        // rate limiter. Keys embed the epoch view, so a republication
-        // naturally produces fresh keys.
-        if let Some(mut cached) = self.cache.get_result_for_view(options, query_filter).await {
-            cached.from_cache = true;
-            if let Some(metrics) = &self.search_metrics {
-                metrics.record_search(
-                    start.elapsed().as_secs_f64() * 1000.0,
-                    SearchType::from_label(options.execution_strategy().query_type_label()),
+        // Query rewriting and strategy selection run inside the compute
+        // closure: the cache key is the pre-rewrite identity (what the next
+        // identical request looks up). Concurrent identical queries
+        // single-flight onto one computation, so they do not each queue
+        // behind the shared LLM rate limiter.
+        let key = CacheKey::from_options_with_view(options, query_filter);
+        let result = self
+            .cache
+            .get_or_compute(key, || async move {
+                let mut effective = options.clone();
+                if effective.config.plugin.rewrite_enabled {
+                    effective = self.apply_query_rewrite(effective).await?;
+                }
+
+                let strategy = effective.execution_strategy();
+                let results = self
+                    .execute_search_flow(&effective, &strategy, query_filter)
+                    .await?;
+
+                let elapsed_ms = start.elapsed().as_millis() as u64;
+                tracing::trace!(
+                    total_elapsed_ms = elapsed_ms,
+                    strategy = %strategy,
+                    result_count = results.len(),
+                    "Search completed"
                 );
-            }
-            return Ok(cached);
-        }
-        // Keep the pre-rewrite options for the cache store: the key must
-        // match what the next identical request will look up.
-        let cache_options = options;
 
-        // Apply query rewriting (QueryRewrite capability) before strategy
-        // determination. Plugins chain by priority; on failure the previous
-        // query text is kept.
-        let mut options = options.clone();
-        if options.config.plugin.rewrite_enabled {
-            options = self.apply_query_rewrite(options).await?;
-        }
-
-        // Determine execution strategy from sources
-        let strategy = options.execution_strategy();
-
-        // Execute search flow (retrieval + fusion + ranking)
-        let results = self
-            .execute_search_flow(&options, &strategy, query_filter)
+                Ok(QueryResult {
+                    total: results.len(),
+                    items: results,
+                    elapsed_ms,
+                    sources: vec![strategy.to_string()],
+                    sub_queries_count: 1, // Single query by default
+                    failed_sub_queries: Vec::new(),
+                    from_cache: false,
+                })
+            })
             .await?;
 
-        let elapsed_ms = start.elapsed().as_millis() as u64;
-        tracing::trace!(
-            total_elapsed_ms = elapsed_ms,
-            strategy = %strategy,
-            result_count = results.len(),
-            "Search completed"
-        );
-
-        // Record search metrics with query type distribution
+        // Record search metrics with query type distribution. `sources` holds
+        // the display form (hybrid includes fusion weights); the metric label
+        // is the bare strategy name.
         if let Some(metrics) = &self.search_metrics {
-            metrics.record_search(
-                elapsed_ms as f64,
-                SearchType::from_label(strategy.query_type_label()),
-            );
+            let label = result.sources.first().map(String::as_str).unwrap_or("");
+            let search_type = SearchType::from_label(label)
+                .or_else(|| label.split('(').next().and_then(SearchType::from_label));
+            metrics.record_search(start.elapsed().as_secs_f64() * 1000.0, search_type);
         }
 
-        let result = QueryResult {
-            total: results.len(),
-            items: results,
-            elapsed_ms,
-            sources: vec![strategy.to_string()],
-            sub_queries_count: 1, // Single query by default
-            failed_sub_queries: Vec::new(),
-            from_cache: false,
-        };
-        self.cache
-            .put_result_for_view(cache_options, query_filter, result.clone())
-            .await;
         Ok(result)
     }
 

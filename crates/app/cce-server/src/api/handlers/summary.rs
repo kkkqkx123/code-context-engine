@@ -91,6 +91,7 @@ pub async fn handle_summary(Json(request): Json<SummaryRequest>) -> SummaryApiRe
             gitignore_path: None,
             max_content_size: None,
             max_file_size: None,
+            parallelism: None,
         };
 
         let mut scanner = FSScanner::new();

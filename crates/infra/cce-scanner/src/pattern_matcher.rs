@@ -4,7 +4,9 @@
 //! patterns in file system scanning. It supports both simple globs and
 //! recursive globstar patterns (**).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 
 use crate::ignore::IgnoreMatcher;
@@ -44,6 +46,13 @@ pub struct PatternMatcher {
     /// Ignore-file load failure, if the configured ignore file could not
     /// be applied at all.
     ignore_load_error: Option<String>,
+    /// Memoized `IgnoreMatcher::is_ignored` verdicts, keyed by the queried
+    /// path. The walker tests each ancestor directory for every file beneath
+    /// it, and directory-only patterns force a `stat` per query; caching the
+    /// per-path verdict keeps the ignore check proportional to distinct paths
+    /// instead of files × depth. Shared across the scan and safe under the
+    /// parallel file walk.
+    ignore_cache: Arc<Mutex<HashMap<PathBuf, bool>>>,
 }
 
 impl PatternMatcher {
@@ -91,6 +100,7 @@ impl PatternMatcher {
             gitignore,
             dropped_globs: dropped,
             ignore_load_error: None,
+            ignore_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -169,6 +179,28 @@ impl PatternMatcher {
         (matcher, load_error)
     }
 
+    /// Memoized [`IgnoreMatcher::is_ignored`] for the given path.
+    ///
+    /// The lock is not held while computing: a concurrent duplicate
+    /// computation is idempotent, and releasing it lets distinct paths (for
+    /// example the per-file path) be evaluated in parallel.
+    fn is_ignored_cached(&self, matcher: &IgnoreMatcher, path: &Path) -> bool {
+        if let Some(verdict) = self
+            .ignore_cache
+            .lock()
+            .expect("pattern ignore cache poisoned")
+            .get(path)
+        {
+            return *verdict;
+        }
+        let verdict = matcher.is_ignored(path);
+        self.ignore_cache
+            .lock()
+            .expect("pattern ignore cache poisoned")
+            .insert(path.to_path_buf(), verdict);
+        verdict
+    }
+
     /// Check if a file should be included based on patterns
     ///
     /// # Logic
@@ -192,14 +224,14 @@ impl PatternMatcher {
 
         // Check gitignore patterns
         if let Some(matcher) = &self.gitignore {
-            if matcher.is_ignored(path) {
+            if self.is_ignored_cached(matcher, path) {
                 return false;
             }
 
             // Check parent directories
             let mut current = path.parent();
             while let Some(parent) = current {
-                if matcher.is_ignored(parent) {
+                if self.is_ignored_cached(matcher, parent) {
                     return false;
                 }
                 current = parent.parent();
@@ -220,7 +252,7 @@ impl PatternMatcher {
 
         // Check gitignore patterns
         if let Some(matcher) = &self.gitignore {
-            if matcher.is_ignored(path) {
+            if self.is_ignored_cached(matcher, path) {
                 return true;
             }
         }

@@ -4,10 +4,14 @@ use std::collections::HashMap;
 
 use crate::Bm25Error;
 
-use crate::manager::IndexManager;
+use crate::manager::{IndexManager, commit_or_rollback, rollback_writer};
 use crate::schema::IndexSchema;
 
-/// Batch add documents to the index
+/// Batch add documents to the index.
+///
+/// Idempotent per document id (`delete_term` then add), so replaying the same
+/// batch after a transient failure yields the same index state. The batch
+/// shares the manager's long-lived writer and commits once at the end.
 pub fn batch_add_documents(
     manager: &IndexManager,
     schema: &IndexSchema,
@@ -20,9 +24,12 @@ pub fn batch_add_documents(
         let term = tantivy::Term::from_field_text(schema.document_id, &doc_id);
         writer.delete_term(term);
         let doc = schema.to_document(&doc_id, &fields);
-        writer.add_document(doc)?;
+        if let Err(error) = writer.add_document(doc) {
+            rollback_writer(&mut writer);
+            return Err(Bm25Error::from(error));
+        }
     }
 
-    writer.commit()?;
+    commit_or_rollback(&mut writer)?;
     Ok(count)
 }

@@ -41,6 +41,9 @@ pub struct IndexOptions {
     pub additional_ignore_patterns: Vec<String>,
     /// Path to custom gitignore file
     pub custom_gitignore_path: Option<PathBuf>,
+    /// Upper bound on scan worker parallelism (unset = machine default,
+    /// 0/1 = serial, >1 = dedicated pool of that size).
+    pub parallelism: Option<usize>,
 }
 
 impl Default for IndexOptions {
@@ -61,6 +64,7 @@ impl Default for IndexOptions {
             respect_gitignore: true,
             additional_ignore_patterns: Vec::new(),
             custom_gitignore_path: None,
+            parallelism: None,
         }
     }
 }
@@ -86,6 +90,7 @@ impl IndexOptions {
             respect_gitignore: scanner_config.respect_gitignore,
             additional_ignore_patterns: scanner_config.gitignore_patterns.clone(),
             custom_gitignore_path: None,
+            parallelism: scanner_config.parallelism,
         })
     }
 
@@ -149,6 +154,7 @@ impl IndexOptions {
             gitignore_path: self.custom_gitignore_path.clone(),
             max_content_size: None,
             max_file_size: None,
+            parallelism: self.parallelism,
         }
     }
 }

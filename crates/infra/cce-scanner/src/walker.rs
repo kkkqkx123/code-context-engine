@@ -21,9 +21,10 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use rayon::prelude::*;
 use tracing::{debug, warn};
 
 use crate::error::Result;
@@ -57,6 +58,12 @@ pub struct ScanOptions {
     pub max_content_size: Option<u64>,
     /// Maximum file size to process in bytes, files larger than this will be skipped
     pub max_file_size: Option<u64>,
+    /// Upper bound on scan worker parallelism.
+    ///
+    /// Unset uses the global rayon pool (the machine's available parallelism),
+    /// `0` or `1` disables parallel scanning, and a larger value builds a
+    /// dedicated pool of that many threads.
+    pub parallelism: Option<usize>,
 }
 
 impl ScanOptions {
@@ -84,6 +91,7 @@ impl From<ScannerConfig> for ScanOptions {
             gitignore_path: None,
             max_content_size: Some(config.default_max_content_size),
             max_file_size: config.max_file_size,
+            parallelism: config.parallelism,
         }
     }
 }
@@ -421,6 +429,20 @@ impl FSScanner {
     }
 }
 
+/// Outcome of processing one regular file during the walk.
+///
+/// The parallel file pass classifies each file into exactly one outcome so
+/// the caller can preserve ordering (callback for entries, failure collection
+/// for skips) after the batch completes.
+enum FileOutcome {
+    /// File was accepted; emit it through the scan callback.
+    Entry(FileEntry),
+    /// File was filtered out (built-in or plugin) and produces no entry.
+    Skipped,
+    /// File could not be processed and was skipped with an error.
+    Failure(ScanFailure),
+}
+
 /// Internal directory walker
 ///
 /// Handles the recursive directory traversal with symlink cycle detection.
@@ -438,7 +460,10 @@ struct DirectoryWalker<'a> {
     /// `false` = force-exclude). Only non-`Neutral` directory decisions are
     /// cached and reused for the whole subtree, avoiding a plugin call for
     /// every file under a decided directory.
-    filter_cache: HashMap<PathBuf, bool>,
+    ///
+    /// Interior-mutable so the parallel file pass can consult the cache while
+    /// directory decisions are inserted by the sequential directory walk.
+    filter_cache: Mutex<HashMap<PathBuf, bool>>,
     /// Entries of the previous scan keyed by relative path. Files whose
     /// (size, mtime) fingerprint is unchanged reuse the previous content hash
     /// instead of re-reading and re-hashing the file (incremental scan).
@@ -447,6 +472,10 @@ struct DirectoryWalker<'a> {
     /// unreadable directories, files that failed to process). Surfaced in
     /// `ScanReport` so silent subtree loss becomes visible to callers.
     failures: Vec<ScanFailure>,
+    /// Dedicated thread pool for bounded scan parallelism, built on first use
+    /// when `ScanOptions::parallelism` asks for more than one thread. Kept
+    /// `None` (global pool) otherwise.
+    pool: Option<rayon::ThreadPool>,
 }
 
 impl<'a> DirectoryWalker<'a> {
@@ -466,9 +495,10 @@ impl<'a> DirectoryWalker<'a> {
             dirs_count: 0,
             scanner_metrics,
             plugin_registry: None,
-            filter_cache: HashMap::new(),
+            filter_cache: Mutex::new(HashMap::new()),
             previous_entries: None,
             failures: Vec::new(),
+            pool: None,
         }
     }
 
@@ -479,13 +509,18 @@ impl<'a> DirectoryWalker<'a> {
 
     /// Record a path that was skipped with an error, keeping the walk alive.
     fn record_failure(&mut self, path: &Path, reason: impl Into<String>) {
-        if let Some(metrics) = &self.scanner_metrics {
-            metrics.record_scan_error();
-        }
-        self.failures.push(ScanFailure {
+        self.record_failure_owned(ScanFailure {
             path: path.to_path_buf(),
             reason: reason.into(),
         });
+    }
+
+    /// Record an already-built failure, keeping the walk alive.
+    fn record_failure_owned(&mut self, failure: ScanFailure) {
+        if let Some(metrics) = &self.scanner_metrics {
+            metrics.record_scan_error();
+        }
+        self.failures.push(failure);
     }
 
     /// Attach a plugin registry for the `FileFilter` capability.
@@ -518,9 +553,13 @@ impl<'a> DirectoryWalker<'a> {
     /// The cache holds non-`Neutral` directory decisions; a file or nested
     /// directory inherits the decision of its nearest decided ancestor.
     fn cached_filter_decision(&self, path: &Path) -> Option<bool> {
+        let cache = self
+            .filter_cache
+            .lock()
+            .expect("scanner filter cache poisoned");
         let mut current = Some(path);
         while let Some(dir) = current {
-            if let Some(decision) = self.filter_cache.get(dir) {
+            if let Some(decision) = cache.get(dir) {
                 return Some(*decision);
             }
             current = dir.parent();
@@ -537,12 +576,7 @@ impl<'a> DirectoryWalker<'a> {
     /// [`Self::plugin_filter_fallback_decision`]. Directory decisions are
     /// cached per directory prefix and reused for the whole subtree, so
     /// descendant files/dirs skip the plugin call entirely.
-    fn plugin_filter_decision(
-        &mut self,
-        path: &Path,
-        is_directory: bool,
-        size: u64,
-    ) -> Option<bool> {
+    fn plugin_filter_decision(&self, path: &Path, is_directory: bool, size: u64) -> Option<bool> {
         let registry = self.plugin_registry.clone()?;
 
         if let Some(decision) = self.cached_filter_decision(path) {
@@ -598,7 +632,10 @@ impl<'a> DirectoryWalker<'a> {
 
         if is_directory {
             if let Some(d) = decision {
-                self.filter_cache.insert(path.to_path_buf(), d);
+                self.filter_cache
+                    .lock()
+                    .expect("scanner filter cache poisoned")
+                    .insert(path.to_path_buf(), d);
             }
         }
         decision
@@ -612,7 +649,7 @@ impl<'a> DirectoryWalker<'a> {
     /// built-in decision untouched. Returns `Some(false)` on a veto, `None`
     /// otherwise.
     fn plugin_filter_fallback_decision(
-        &mut self,
+        &self,
         path: &Path,
         is_directory: bool,
         size: u64,
@@ -704,6 +741,11 @@ impl<'a> DirectoryWalker<'a> {
             }
         };
 
+        // Regular files are collected into runs and processed in parallel;
+        // a directory or symlink flushes the run first so the emitted entry
+        // order matches a sequential depth-first walk.
+        let mut file_batch: Vec<PathBuf> = Vec::new();
+
         for entry in entries_iter {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -742,13 +784,16 @@ impl<'a> DirectoryWalker<'a> {
             };
 
             if file_type.is_dir() {
+                self.flush_file_batch(&mut file_batch, callback)?;
                 self.handle_directory(&path, callback)?;
             } else if file_type.is_file() {
-                self.handle_file(&path, callback)?;
+                file_batch.push(path);
             } else if file_type.is_symlink() {
+                self.flush_file_batch(&mut file_batch, callback)?;
                 self.handle_symlink(&path, callback)?;
             }
         }
+        self.flush_file_batch(&mut file_batch, callback)?;
 
         Ok(())
     }
@@ -776,10 +821,95 @@ impl<'a> DirectoryWalker<'a> {
         self.walk_dir(path, callback)
     }
 
-    fn handle_file<F>(&mut self, path: &Path, callback: &mut F) -> Result<()>
+    /// Process a run of regular files in parallel, emitting entries and
+    /// collecting failures in directory order.
+    ///
+    /// Parallelism is bounded by `ScanOptions::parallelism`: unset uses the
+    /// global rayon pool (the machine's available parallelism), `0`/`1` runs
+    /// serially, and a larger value uses a dedicated pool of that size. Order
+    /// is preserved because an indexed parallel `collect` writes results back
+    /// in input order, so the emitted entry sequence matches a sequential walk.
+    fn flush_file_batch<F>(&mut self, batch: &mut Vec<PathBuf>, callback: &mut F) -> Result<()>
     where
         F: FnMut(FileEntry) -> Result<()>,
     {
+        if batch.is_empty() {
+            return Ok(());
+        }
+
+        let outcomes: Vec<FileOutcome> = match self.opts.parallelism {
+            Some(0) | Some(1) => batch
+                .iter()
+                .map(|path| self.process_file_entry(path))
+                .collect(),
+            _ => {
+                self.ensure_pool()?;
+                let this: &Self = self;
+                match &self.pool {
+                    Some(pool) => pool.install(|| {
+                        batch
+                            .par_iter()
+                            .map(|path| this.process_file_entry(path))
+                            .collect()
+                    }),
+                    None => batch
+                        .par_iter()
+                        .map(|path| this.process_file_entry(path))
+                        .collect(),
+                }
+            }
+        };
+        batch.clear();
+
+        for outcome in outcomes {
+            match outcome {
+                FileOutcome::Entry(entry) => callback(entry)?,
+                FileOutcome::Failure(failure) => self.record_failure_owned(failure),
+                FileOutcome::Skipped => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Build the dedicated scan pool on first use when a bounded parallelism
+    /// above one is configured. Unset or single-threaded parallelism keeps the
+    /// global pool / serial path.
+    fn ensure_pool(&mut self) -> Result<()> {
+        if self.pool.is_some() {
+            return Ok(());
+        }
+        let Some(threads) = self.opts.parallelism else {
+            return Ok(());
+        };
+        if threads <= 1 {
+            return Ok(());
+        }
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .thread_name(|i| format!("cce-scan-{i}"))
+            .build()
+            .map_err(|e| {
+                crate::error::ScannerError::invalid_argument(format!(
+                    "failed to build scan thread pool: {e}"
+                ))
+            })?;
+        self.pool = Some(pool);
+        Ok(())
+    }
+
+    /// Record the scan latency of a file that was filtered out.
+    fn record_scan_filtered(&self, start: Instant) {
+        if let Some(ref metrics) = self.scanner_metrics {
+            metrics.record_scan(start.elapsed().as_secs_f64() * 1000.0, true, false);
+        }
+    }
+
+    /// Apply filtering and content processing to one regular file.
+    ///
+    /// Takes `&self` so a run of files can be processed on the rayon pool;
+    /// failures are returned (instead of recorded) so the caller can preserve
+    /// directory order when it collects them.
+    fn process_file_entry(&self, path: &Path) -> FileOutcome {
         let start = Instant::now();
 
         let metadata = match std::fs::metadata(path) {
@@ -790,21 +920,18 @@ impl<'a> DirectoryWalker<'a> {
                     error = %error,
                     "Failed to stat file for plugin filtering, skipping"
                 );
-                self.record_failure(path, format!("failed to stat file: {error}"));
-                if let Some(ref metrics) = self.scanner_metrics {
-                    metrics.record_scan(start.elapsed().as_secs_f64() * 1000.0, true, false);
-                }
-                return Ok(());
+                self.record_scan_filtered(start);
+                return FileOutcome::Failure(ScanFailure {
+                    path: path.to_path_buf(),
+                    reason: format!("failed to stat file: {error}"),
+                });
             }
         };
         let size = metadata.len();
         if let Some(include) = self.plugin_filter_decision(path, false, size) {
             if !include {
-                let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-                if let Some(ref metrics) = self.scanner_metrics {
-                    metrics.record_scan(elapsed, true, false);
-                }
-                return Ok(());
+                self.record_scan_filtered(start);
+                return FileOutcome::Skipped;
             }
             // The plugin forced inclusion. If the file is not recognizable
             // and no FormatParse plugin covers it, flag the mismatch so the
@@ -830,21 +957,15 @@ impl<'a> DirectoryWalker<'a> {
             .pattern_matcher
             .should_include_file(self.pattern_path(path))
         {
-            let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-            if let Some(ref metrics) = self.scanner_metrics {
-                metrics.record_scan(elapsed, true, false);
-            }
-            return Ok(());
+            self.record_scan_filtered(start);
+            return FileOutcome::Skipped;
         }
 
         // Below-builtin fallback tier (negative priority): may veto after the
         // built-in matcher included the file.
         if let Some(false) = self.plugin_filter_fallback_decision(path, false, size) {
-            let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-            if let Some(ref metrics) = self.scanner_metrics {
-                metrics.record_scan(elapsed, true, false);
-            }
-            return Ok(());
+            self.record_scan_filtered(start);
+            return FileOutcome::Skipped;
         }
 
         match self.process_file_with_metadata(path, &metadata) {
@@ -854,12 +975,10 @@ impl<'a> DirectoryWalker<'a> {
                 if let Some(ref metrics) = self.scanner_metrics {
                     metrics.record_scan(elapsed, false, skipped);
                     if file_entry.language_info.is_some() {
-                        if let Some(ref metrics) = self.scanner_metrics {
-                            metrics.languages_detected_total.increment();
-                        }
+                        metrics.languages_detected_total.increment();
                     }
                 }
-                callback(file_entry)
+                FileOutcome::Entry(file_entry)
             }
             Err(e) => {
                 warn!(
@@ -867,8 +986,10 @@ impl<'a> DirectoryWalker<'a> {
                     error = %e,
                     "Failed to process file, skipping"
                 );
-                self.record_failure(path, format!("failed to process file: {e}"));
-                Ok(())
+                FileOutcome::Failure(ScanFailure {
+                    path: path.to_path_buf(),
+                    reason: format!("failed to process file: {e}"),
+                })
             }
         }
     }

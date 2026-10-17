@@ -189,6 +189,7 @@ pub async fn scan_local(
         gitignore_path: None,
         max_content_size: Some(MAX_INGEST_FILE_BYTES),
         max_file_size: Some(MAX_INGEST_FILE_BYTES),
+        parallelism: None,
     };
     let mut scanner = FSScanner::new();
     let report = match previous {

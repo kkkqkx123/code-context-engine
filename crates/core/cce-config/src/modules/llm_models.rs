@@ -100,6 +100,13 @@ pub struct ProviderConfig {
     /// Shared by all models of this provider: embedding, chat and rerank
     /// clients throttle against the same bucket so the combined request rate
     /// stays below the upstream limit.
+    ///
+    /// The token bucket's burst capacity is derived from this rate
+    /// (`ceil(rate / 60)`), so a low rate also serializes short bursts. The
+    /// default keeps interactive queries from queueing behind each other while
+    /// still acting as a safety net; 429 responses extend an adaptive window
+    /// when the upstream is stricter. Set it to the provider's documented
+    /// limit, or 0 for a local server with no limit.
     #[serde(default = "default_rate_limit")]
     pub rate_limit: u32,
 
@@ -278,7 +285,7 @@ impl Default for ProviderConfig {
 }
 
 fn default_rate_limit() -> u32 {
-    60
+    600
 }
 
 fn default_enabled() -> bool {
@@ -523,11 +530,11 @@ mod tests {
 
     #[test]
     fn test_provider_rate_limit_serde_default_and_explicit() {
-        // Default is 60/min when the field is absent
+        // Default is 600/min (10 rps, burst 10) when the field is absent
         let toml_without = "id = \"a\"\nname = \"A\"\nbase_url = \"https://a.example.com\"\n";
         let provider: ProviderConfig =
             toml::from_str(toml_without).expect("default rate_limit should deserialize");
-        assert_eq!(provider.rate_limit, 60);
+        assert_eq!(provider.rate_limit, 600);
 
         // Explicit 0 means unlimited
         let toml_zero =

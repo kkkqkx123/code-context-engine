@@ -525,3 +525,39 @@ fn test_scanner_reset() {
     let entries2 = scanner.scan(&opts).expect("Scan failed");
     assert_eq!(entries2.len(), 1);
 }
+
+#[test]
+fn test_scan_parallelism_modes_agree() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    for i in 0..20 {
+        let sub = temp_dir.path().join(format!("mod_{}", i % 3));
+        std::fs::create_dir_all(&sub).expect("create dir");
+        std::fs::write(
+            sub.join(format!("file_{i:02}.rs")),
+            format!("fn f{i}() {{}}"),
+        )
+        .expect("write file");
+    }
+
+    let base = ScanOptions {
+        root_path: temp_dir.path().to_str().unwrap().to_string(),
+        ..Default::default()
+    };
+
+    let mut serial = base.clone();
+    serial.parallelism = Some(1);
+    let serial_entries = create_test_scanner().scan(&serial).expect("serial scan");
+
+    let mut pooled = base.clone();
+    pooled.parallelism = Some(3);
+    let pooled_entries = create_test_scanner().scan(&pooled).expect("pooled scan");
+
+    let default_entries = create_test_scanner().scan(&base).expect("default scan");
+
+    let paths = |entries: &[FileEntry]| -> Vec<PathBuf> {
+        entries.iter().map(|e| e.relative_path.clone()).collect()
+    };
+    assert_eq!(serial_entries.len(), 20);
+    assert_eq!(paths(&serial_entries), paths(&pooled_entries));
+    assert_eq!(paths(&serial_entries), paths(&default_entries));
+}

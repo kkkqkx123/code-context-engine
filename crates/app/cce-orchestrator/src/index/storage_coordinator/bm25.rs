@@ -192,8 +192,11 @@ impl StorageCoordinator {
             .map(|d| (d.fields.get("chunk_id").map_or("", |s| s.as_str()), d))
             .collect();
 
-        // Use a map to aggregate multiple BM25 docs per entity
-        let mut entity_detail_map: std::collections::HashMap<i64, EntityDetailMapping> =
+        // Use a map to aggregate multiple BM25 docs per entity. Links are
+        // accumulated in place: re-serializing the whole mapping on every hit
+        // costs O(docs per entity) per link, so an entity referenced by many
+        // chunks becomes quadratic.
+        let mut entity_detail_map: std::collections::HashMap<i64, PendingEntityMapping> =
             std::collections::HashMap::new();
 
         for chunk in chunks {
@@ -230,21 +233,33 @@ impl StorageCoordinator {
                 } else {
                     entity_id.0 as i64
                 };
-                let entry = entity_detail_map.entry(entity_id_i64).or_insert_with(|| {
-                    EntityDetailMapping::new(entity_id_i64)
-                        .with_project_id(self.project_id)
-                        .with_epoch(self.epoch())
-                });
 
-                // Add BM25 document ID
-                let mut doc_ids = entry.get_bm25_doc_ids();
-                if !doc_ids.contains(&doc.document_id) {
-                    doc_ids.push(doc.document_id.clone());
+                let pending = entity_detail_map.entry(entity_id_i64).or_insert_with(|| {
+                    PendingEntityMapping {
+                        mapping: EntityDetailMapping::new(entity_id_i64)
+                            .with_project_id(self.project_id)
+                            .with_epoch(self.epoch()),
+                        doc_ids: Vec::new(),
+                        seen: std::collections::HashSet::new(),
+                    }
+                });
+                if pending.seen.insert(doc.document_id.clone()) {
+                    pending.doc_ids.push(doc.document_id.clone());
                 }
-                *entry = entry.clone().with_bm25_doc_ids(&doc_ids);
             }
         }
 
-        Ok(entity_detail_map.into_values().collect())
+        Ok(entity_detail_map
+            .into_values()
+            .map(|pending| pending.mapping.with_bm25_doc_ids(&pending.doc_ids))
+            .collect())
     }
+}
+
+/// Accumulator for one entity's BM25 document links, collected in a single
+/// pass so the mapping is serialized once instead of per link.
+struct PendingEntityMapping {
+    mapping: EntityDetailMapping,
+    doc_ids: Vec<String>,
+    seen: std::collections::HashSet<String>,
 }

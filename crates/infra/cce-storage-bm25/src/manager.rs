@@ -1,6 +1,7 @@
 //! Index manager for BM25 search
 
 use std::path::Path;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::Bm25Error;
 use crate::config::{Bm25AlgorithmConfig, IndexManagerConfig};
@@ -22,6 +23,14 @@ pub struct IndexManager {
     schema: IndexSchema,
     config: IndexManagerConfig,
     reader: Option<IndexReader>,
+    /// The single writer shared by every write path, kept for the index's
+    /// lifetime. Constructing an `IndexWriter` acquires the directory lock,
+    /// rebuilds the segment manager from `meta.json`, and spawns indexing and
+    /// merge threads; doing that per batch costs more than the batch itself and
+    /// tears down the merge pool before it can compact the segments. A
+    /// long-lived writer pays that cost once and lets merging proceed in the
+    /// background.
+    writer: Arc<Mutex<IndexWriter>>,
 }
 
 impl IndexManager {
@@ -63,6 +72,7 @@ impl IndexManager {
         index
             .tokenizers()
             .register("mixed", MixedTokenizer::default());
+        let writer = Self::build_writer(&index, &config)?;
         let reader = Self::create_reader(&index, &config)?;
 
         Self::write_format_version(path)?;
@@ -72,6 +82,7 @@ impl IndexManager {
             schema,
             config,
             reader,
+            writer: Arc::new(Mutex::new(writer)),
         })
     }
 
@@ -94,6 +105,7 @@ impl IndexManager {
         index
             .tokenizers()
             .register("mixed", MixedTokenizer::default());
+        let writer = Self::build_writer(&index, &config)?;
         let reader = Self::create_reader(&index, &config)?;
 
         Ok(Self {
@@ -101,6 +113,7 @@ impl IndexManager {
             schema,
             config,
             reader,
+            writer: Arc::new(Mutex::new(writer)),
         })
     }
 
@@ -148,9 +161,34 @@ impl IndexManager {
         root.join(format!("i{}", cce_types::INDEX_FORMAT_VERSION))
     }
 
-    /// Get an index writer with configured memory budget
-    pub fn writer(&self) -> Result<IndexWriter, Bm25Error> {
-        Ok(self.index.writer(self.config.writer_memory_budget)?)
+    /// Borrow the shared writer.
+    ///
+    /// Every add/update/delete path goes through this one writer and commits
+    /// when a unit of work is durable. A poisoned lock means another write
+    /// call panicked while holding it.
+    pub fn writer(&self) -> Result<MutexGuard<'_, IndexWriter>, Bm25Error> {
+        self.writer
+            .lock()
+            .map_err(|_| Bm25Error::Writer("BM25 index writer lock poisoned".to_string()))
+    }
+
+    /// Build the shared writer, honouring the configured indexer thread count.
+    fn build_writer(index: &Index, config: &IndexManagerConfig) -> Result<IndexWriter, Bm25Error> {
+        let writer = match config.writer_num_threads {
+            Some(threads) if threads > 0 => {
+                index.writer_with_num_threads(threads, config.writer_memory_budget)?
+            }
+            _ => index.writer(config.writer_memory_budget)?,
+        };
+        Ok(writer)
+    }
+
+    /// Number of searchable segments currently in the index.
+    ///
+    /// Exposed so benchmarks can assert that the shared writer keeps the
+    /// segment count bounded instead of letting it grow with the commit count.
+    pub fn segment_count(&self) -> Result<usize, Bm25Error> {
+        Ok(self.index.searchable_segment_metas()?.len())
     }
 
     /// Get an index reader with configured reload policy
@@ -206,5 +244,27 @@ impl IndexManager {
     /// Get the index manager configuration
     pub fn config(&self) -> &IndexManagerConfig {
         &self.config
+    }
+}
+
+/// Discard the uncommitted operations of a failed write.
+///
+/// The writer is shared across calls, so a failure must not leave a
+/// half-applied batch queued for the next call; rolling back restores the
+/// state to the previous commit.
+pub(crate) fn rollback_writer(writer: &mut IndexWriter) {
+    if let Err(error) = writer.rollback() {
+        tracing::error!(error = %error, "BM25 writer rollback failed");
+    }
+}
+
+/// Commit a shared writer, rolling back when the commit fails.
+pub(crate) fn commit_or_rollback(writer: &mut IndexWriter) -> Result<(), Bm25Error> {
+    match writer.commit() {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            rollback_writer(writer);
+            Err(Bm25Error::from(error))
+        }
     }
 }

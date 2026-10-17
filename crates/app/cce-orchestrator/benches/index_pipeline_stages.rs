@@ -78,6 +78,7 @@ async fn run_once(root: &std::path::Path, metadata: Arc<SqliteClient>) -> u64 {
         respect_gitignore: false,
         additional_ignore_patterns: Vec::new(),
         custom_gitignore_path: None,
+        parallelism: None,
     };
     let result = orchestrator.execute(options).await.expect("execute");
     result.indexed_files as u64

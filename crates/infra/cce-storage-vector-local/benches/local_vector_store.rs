@@ -19,7 +19,11 @@
 //! rather than the system temp dir, which is tmpfs here and turns index bytes
 //! straight into RAM pressure. A production-microbatch probe (32 points per
 //! upsert, the orchestrator default) additionally runs at 5k vectors, showing
-//! the per-batch cost the 1000-point microbatch amortizes away.
+//! the per-batch cost the 1000-point microbatch amortizes away. Two further 5k
+//! probes decompose that per-batch cost: a writer-batch probe (512 points, the
+//! `VectorBatchWriter` batch) shows the throughput recoverable by batched
+//! writes, and a payload-conversion probe isolates the serialization cost from
+//! the engine's fixed WAL/fsync/publish cost.
 //!
 //! Run: `cargo bench -p cce-storage-vector-local --bench local_vector_store`
 //!
@@ -326,6 +330,59 @@ fn main() {
         let _ = writeln!(
             out,
             "upsert_seq_prodbatch\t{PROD_PROBE_VECTORS}\t{total_ms:.1}\t{dps:.0}\t{p50:.2}\t{p99:.2}"
+        );
+    }
+
+    // Batched-write probe: the same production vector count written in the
+    // batches `VectorBatchWriter` uses (512 points) instead of 32, isolating
+    // the fixed per-upsert cost (WAL append + fsync + publish) the writer
+    // amortizes. Keep in sync with `VECTOR_WRITE_BATCH`.
+    {
+        const WRITER_BATCH: usize = 512;
+        let dir = ScratchDir::new(&format!("writerbatch{PROD_PROBE_VECTORS}"));
+        let store = open_store(&dir);
+        let points = make_points(PROD_PROBE_VECTORS);
+        let t = Instant::now();
+        let mut batch_ms = Vec::with_capacity(PROD_PROBE_VECTORS / WRITER_BATCH + 1);
+        rt.block_on(async {
+            for chunk in points.chunks(WRITER_BATCH) {
+                let bt = Instant::now();
+                store.upsert_points(chunk).await.expect("upsert");
+                batch_ms.push(bt.elapsed().as_secs_f64() * 1000.0);
+            }
+        });
+        let total_ms = t.elapsed().as_secs_f64() * 1000.0;
+        batch_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p50 = batch_ms[batch_ms.len() / 2];
+        let p99 = batch_ms[batch_ms.len() * 99 / 100];
+        let dps = PROD_PROBE_VECTORS as f64 / (total_ms / 1000.0);
+        println!(
+            "upsert {PROD_PROBE_VECTORS:>7} writerbatch({WRITER_BATCH}): {total_ms:9.1} ms  {dps:11.0} pts/s  batch p50 {p50:7.2} p99 {p99:7.2} ms"
+        );
+        let _ = writeln!(
+            out,
+            "upsert_seq_writerbatch\t{PROD_PROBE_VECTORS}\t{total_ms:.1}\t{dps:.0}\t{p50:.2}\t{p99:.2}"
+        );
+    }
+
+    // Serialization-only probe: the per-point payload conversion
+    // (`to_simvec_point` calls `payload_to_map`) an upsert pays before the
+    // engine sees a batch. Read together with the two upsert shapes above, it
+    // tells the fixed engine cost apart from the conversion cost.
+    {
+        let points = make_points(PROD_PROBE_VECTORS);
+        let t = Instant::now();
+        let mut fields = 0usize;
+        for point in &points {
+            fields += cce_storage_vector_local::payload_to_map(&point.payload).len();
+        }
+        let convert_ms = t.elapsed().as_secs_f64() * 1000.0;
+        std::hint::black_box(fields);
+        println!("        payload conversion only ({PROD_PROBE_VECTORS}): {convert_ms:9.1} ms");
+        let _ = writeln!(
+            out,
+            "payload_convert\t{PROD_PROBE_VECTORS}\t{convert_ms:.1}\t{:.0}\t-\t-",
+            PROD_PROBE_VECTORS as f64 / (convert_ms / 1000.0)
         );
     }
 

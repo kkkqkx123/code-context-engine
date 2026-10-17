@@ -119,6 +119,62 @@ impl StorageCoordinator {
         Ok(())
     }
 
+    /// Batch form of [`Self::hot_update_bm25_file`] for changed files.
+    ///
+    /// Registers the candidate-epoch deletion for every file in one pass,
+    /// persists every file's parsed entities, then commits all files' BM25
+    /// documents in a single Tantivy commit. Without this a multi-file hot
+    /// update pays one commit per changed file.
+    ///
+    /// Entities must be stored before the commit: the BM25 commit resolves
+    /// source entity ids against the epoch's stored entities. A failure
+    /// anywhere leaves the previously queryable generation intact, because
+    /// the candidate-epoch cleanup and the commit are both scoped to the
+    /// candidate.
+    pub async fn hot_update_bm25_files(
+        &self,
+        parsed_files: &[&cce_types::ParsedFile],
+        chunks: &[ChunkedResult],
+    ) -> Result<(), OrchestratorError> {
+        if parsed_files.is_empty() {
+            return Ok(());
+        }
+
+        let paths: Vec<String> = parsed_files
+            .iter()
+            .map(|parsed| parsed.path.clone())
+            .collect();
+        self.prepare_hot_update_bm25(&paths).await?;
+        for parsed in parsed_files {
+            self.store_parsed_files(std::slice::from_ref(*parsed))?;
+        }
+
+        self.store_bm25(chunks).await
+    }
+
+    /// Batch BM25 rewrite for files whose parsed entities are already stored
+    /// (chunking-drift rebuilds).
+    ///
+    /// Registers the candidate-epoch deletion for every path in one pass, then
+    /// commits all chunks in a single Tantivy commit.
+    pub async fn hot_update_bm25_paths(
+        &self,
+        paths: &[std::path::PathBuf],
+        chunks: &[ChunkedResult],
+    ) -> Result<(), OrchestratorError> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+
+        let raw: Vec<String> = paths
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        self.prepare_hot_update_bm25(&raw).await?;
+
+        self.store_bm25(chunks).await
+    }
+
     /// Remove file from vector index only (vector store + entity mappings)
     pub async fn remove_file_from_vectors(
         &self,

@@ -7,12 +7,16 @@
 //! all query-side embedder consumers (dense/summary strategies and summary
 //! boost) share a single instance.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::future::Future;
 use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use moka::future::Cache;
 
+use super::error::Result;
 use super::types::{QueryOptions, QueryResult};
 use crate::query::filter::QueryFilter;
 
@@ -116,6 +120,19 @@ impl Default for CacheConfig {
     }
 }
 
+/// Derive the query result cache configuration from the global `[cache]`
+/// section. Serving cached results requires both the master switch and the
+/// per-subsystem `query_result.enabled` flag to be on.
+impl From<&cce_config::modules::GlobalCacheConfig> for CacheConfig {
+    fn from(global: &cce_config::modules::GlobalCacheConfig) -> Self {
+        Self {
+            max_results: global.query_result.max_entries,
+            result_ttl_secs: global.query_result.ttl_secs,
+            enabled: global.enabled && global.query_result.enabled,
+        }
+    }
+}
+
 /// Query result cache
 ///
 /// Results are keyed by project + epoch view + query identity, so any
@@ -124,6 +141,15 @@ impl Default for CacheConfig {
 pub struct QueryCache {
     /// Result cache
     result_cache: Cache<CacheKey, QueryResult>,
+    /// Per-key single-flight guards for in-flight computations.
+    ///
+    /// Concurrent lookups of the same key coalesce onto one computation: the
+    /// first caller installs a guard and computes; followers clone the guard,
+    /// wait for the leader to release it, then read the published result from
+    /// `result_cache` instead of re-running the pipeline. An entry lives only
+    /// while a computation is in flight — the leader removes its own entry on
+    /// completion, so idle keys never accumulate.
+    inflight: Arc<Mutex<HashMap<CacheKey, Arc<tokio::sync::Mutex<()>>>>>,
     /// Configuration
     config: CacheConfig,
 }
@@ -138,6 +164,7 @@ impl QueryCache {
 
         Self {
             result_cache,
+            inflight: Arc::new(Mutex::new(HashMap::new())),
             config,
         }
     }
@@ -146,6 +173,7 @@ impl QueryCache {
     pub fn disabled() -> Self {
         Self {
             result_cache: Cache::new(0),
+            inflight: Arc::new(Mutex::new(HashMap::new())),
             config: CacheConfig {
                 enabled: false,
                 ..Default::default()
@@ -191,12 +219,78 @@ impl QueryCache {
     pub async fn invalidate_all(&self) {
         self.result_cache.invalidate_all();
     }
+
+    /// Return the cached result for `key`, or compute it under a per-key
+    /// single-flight guard.
+    ///
+    /// The cache is checked before and after acquiring the guard: a follower
+    /// that waited for a leader's computation reads the published entry rather
+    /// than recomputing. The stored entry always carries `from_cache = false`
+    /// (it is a fresh computation); the hit paths flip that flag before
+    /// returning. When caching is disabled the closure runs unconditionally.
+    pub async fn get_or_compute<F, Fut>(&self, key: CacheKey, compute: F) -> Result<QueryResult>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<QueryResult>>,
+    {
+        if !self.config.enabled {
+            return compute().await;
+        }
+
+        if let Some(mut cached) = self.result_cache.get(&key).await {
+            cached.from_cache = true;
+            return Ok(cached);
+        }
+
+        let guard = {
+            let mut inflight = self
+                .inflight
+                .lock()
+                .expect("query cache inflight map poisoned");
+            Arc::clone(
+                inflight
+                    .entry(key.clone())
+                    .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+            )
+        };
+        let _lock = guard.lock().await;
+
+        // A leader may have published while we waited for the guard.
+        if let Some(mut cached) = self.result_cache.get(&key).await {
+            cached.from_cache = true;
+            return Ok(cached);
+        }
+
+        let result = compute().await;
+
+        // Publish before releasing the guard so a waiter observes the entry on
+        // its cache re-check. Drop the slot on both success and failure so
+        // errored keys never linger.
+        if let Ok(value) = &result {
+            self.result_cache.insert(key.clone(), value.clone()).await;
+        }
+
+        let mut inflight = self
+            .inflight
+            .lock()
+            .expect("query cache inflight map poisoned");
+        if inflight
+            .get(&key)
+            .is_some_and(|existing| Arc::ptr_eq(existing, &guard))
+        {
+            inflight.remove(&key);
+        }
+        drop(inflight);
+
+        result
+    }
 }
 
 impl Clone for QueryCache {
     fn clone(&self) -> Self {
         Self {
             result_cache: self.result_cache.clone(),
+            inflight: Arc::clone(&self.inflight),
             config: self.config.clone(),
         }
     }
@@ -251,6 +345,28 @@ mod tests {
         assert_eq!(config.result_ttl_secs, 300);
     }
 
+    #[test]
+    fn test_cache_config_from_global() {
+        use cce_config::modules::GlobalCacheConfig;
+
+        let mut global = GlobalCacheConfig::default();
+        global.query_result.max_entries = 42;
+        global.query_result.ttl_secs = 7;
+        global.query_result.enabled = true;
+        let config = CacheConfig::from(&global);
+        assert_eq!(config.max_results, 42);
+        assert_eq!(config.result_ttl_secs, 7);
+        assert!(config.enabled);
+
+        // The master switch gates the per-subsystem flag.
+        global.enabled = false;
+        assert!(!CacheConfig::from(&global).enabled);
+
+        global.enabled = true;
+        global.query_result.enabled = false;
+        assert!(!CacheConfig::from(&global).enabled);
+    }
+
     #[tokio::test]
     async fn test_disabled_cache() {
         let cache = QueryCache::disabled();
@@ -260,5 +376,81 @@ mod tests {
         let view = crate::query::filter::QueryFilter::default();
         let result = cache.get_result_for_view(&options, &view).await;
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_or_compute_single_flight() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::sync::Barrier;
+
+        let cache = QueryCache::new(CacheConfig::default());
+        let options = QueryConfigBuilder::new(1).build("test query");
+        let view = crate::query::filter::QueryFilter::default();
+        let key = CacheKey::from_options_with_view(&options, &view);
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        // One leader plus four followers all race on the same key.
+        let barrier = Arc::new(Barrier::new(5));
+
+        let mut handles = Vec::new();
+        for _ in 0..5 {
+            let cache = cache.clone();
+            let key = key.clone();
+            let calls = Arc::clone(&calls);
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                cache
+                    .get_or_compute(key, || async {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        Ok(QueryResult::default())
+                    })
+                    .await
+            }));
+        }
+
+        let mut computed = 0;
+        for handle in handles {
+            let result = handle.await.expect("task join").expect("compute");
+            if !result.from_cache {
+                computed += 1;
+            }
+        }
+
+        // Exactly one computation ran; every follower read the published entry.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(computed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_or_compute_error_is_not_cached() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let cache = QueryCache::new(CacheConfig::default());
+        let options = QueryConfigBuilder::new(1).build("test query");
+        let view = crate::query::filter::QueryFilter::default();
+        let key = CacheKey::from_options_with_view(&options, &view);
+
+        let calls = AtomicUsize::new(0);
+
+        let failed = cache
+            .get_or_compute(key.clone(), || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(crate::query::error::QueryError::invalid("boom"))
+            })
+            .await;
+        assert!(failed.is_err());
+
+        // A failed computation is not cached, so the next call recomputes.
+        let succeeded = cache
+            .get_or_compute(key, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(QueryResult::default())
+            })
+            .await;
+        assert!(succeeded.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }
