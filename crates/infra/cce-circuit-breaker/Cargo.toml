@@ -3,6 +3,9 @@ name = "cce-circuit-breaker"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Circuit breaker and resilience primitives for external service calls"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 tokio = { workspace = true }

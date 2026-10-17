@@ -54,6 +54,8 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.86"
+license = "GPL-3.0-only"
+repository = "https://github.com/kkkqkx123/code-context-engine"
 
 [workspace.dependencies]
 # asynchronous runtime
@@ -100,8 +102,8 @@ axum = { version = "0.8.8", features = ["macros"] }
 
 # Tree-sitter
 tree-sitter = "0.26"
-tree-sitter-c = { path = "crates/tree-sitter/tree-sitter-c" }
-tree-sitter-cpp = { path = "crates/tree-sitter/tree-sitter-cpp" }
+tree-sitter-c = { version = "0.24.2", path = "crates/tree-sitter/tree-sitter-c" }
+tree-sitter-cpp = { version = "0.23.4", path = "crates/tree-sitter/tree-sitter-cpp" }
 tree-sitter-go = "0.25"
 tree-sitter-java = "0.23"
 tree-sitter-javascript = "0.25"
@@ -185,14 +187,16 @@ num_cpus = "1.16"
 uuid = { version = "1.0", features = ["v4", "v5"] }
 
 # Vendored internal crates
-# NOTE: tantivy is a vendored git submodule fork (crates/tantivy, upstream
-# 0.27 + `feat/add-configurable-k1-b` branch) redirected via `[patch.crates-io]`.
-# The version declared here MUST stay in sync with the fork's own Cargo.toml
-# version, otherwise the patch silently disengages and the crates.io build is
-# used instead (it lacks `IndexSettings.bm25_params`).
-tantivy = "0.27"
-tree-sitter-svelte = { path = "crates/tree-sitter/tree-sitter-svelte" }
-tree-sitter-vue = { path = "crates/tree-sitter/tree-sitter-vue" }
+# NOTE: the tantivy fork (crates/tantivy, upstream 0.27 +
+# `feat/add-configurable-k1-b` branch) is published to crates.io as the
+# renamed `kkkqkx-tantivy` package (the upstream names are taken); the
+# dependency keeps the `tantivy` name and resolves locally through
+# `[patch.crates-io]`. The version declared here MUST stay in sync with the
+# fork's own Cargo.toml version, otherwise the patch disengages and local
+# submodule changes are silently ignored.
+tantivy = { package = "kkkqkx-tantivy", version = "0.27" }
+tree-sitter-svelte = { package = "kkkqkx-tree-sitter-svelte", version = "1.0.2", path = "crates/tree-sitter/tree-sitter-svelte" }
+tree-sitter-vue = { package = "kkkqkx-tree-sitter-vue", version = "0.26.0", path = "crates/tree-sitter/tree-sitter-vue" }
 cce-circuit-breaker = { path = "crates/infra/cce-circuit-breaker" }
 cce-storage-common = { path = "crates/infra/cce-storage-common" }
 cce-storage-bm25 = { path = "crates/infra/cce-storage-bm25" }
@@ -209,17 +213,11 @@ cce-server-shared = { path = "crates/app/cce-server-shared" }
 cce-mcp = { path = "crates/app/cce-mcp" }
 
 [patch.crates-io]
-# Vendored fork: redirect the whole tantivy family to the local submodule so
-# the fork and all its sub-crates always resolve locally (never crates.io).
-# Sub-crates not currently required by the graph are inert defensive entries.
-tantivy = { path = "crates/tantivy" }
-tantivy-columnar = { path = "crates/tantivy/columnar" }
-tantivy-sstable = { path = "crates/tantivy/sstable" }
-tantivy-stacker = { path = "crates/tantivy/stacker" }
-tantivy-query-grammar = { path = "crates/tantivy/query-grammar" }
-tantivy-bitpacker = { path = "crates/tantivy/bitpacker" }
-tantivy-common = { path = "crates/tantivy/common" }
-tantivy-tokenizer-api = { path = "crates/tantivy/tokenizer-api" }
+# Vendored tantivy fork: patch the renamed root package so local development
+# always builds from the submodule. The fork's sub-crates are renamed to
+# `kkkqkx-tantivy-*` too and resolve through the submodule's own workspace
+# path dependencies, so no further patch entries are needed.
+kkkqkx-tantivy = { path = "crates/tantivy" }
 
 [profile.release]
 opt-level = 3

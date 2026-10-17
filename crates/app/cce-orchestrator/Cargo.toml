@@ -3,26 +3,29 @@ name = "cce-orchestrator"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Indexing and query orchestration across the parser, storage, and LLM layers"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-text = { path = "../../core/cce-text" }
-cce-plugin = { path = "../../core/cce-plugin" }
-cce-llm = { path = "../../core/cce-llm" }
-cce-parser = { path = "../../parser/cce-parser" }
-cce-codegraph = { path = "../../parser/cce-codegraph" }
-cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
-cce-storage-vector-qdrant = { path = "../../infra/cce-storage-vector-qdrant" }
-cce-storage-vector-local = { path = "../../infra/cce-storage-vector-local" }
-cce-storage-metadb-sqlite = { path = "../../infra/cce-storage-metadb-sqlite" }
-cce-storage-common = { path = "../../infra/cce-storage-common" }
-cce-storage-metadb-pg = { path = "../../infra/cce-storage-metadb-pg" }
-cce-scanner = { path = "../../infra/cce-scanner" }
-cce-llm-client = { path = "../../infra/cce-llm-client" }
-cce-circuit-breaker = { path = "../../infra/cce-circuit-breaker" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
+cce-text = { version = "0.1.0", path = "../../core/cce-text" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
+cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
+cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
+cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
+cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
+cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage-vector-qdrant" }
+cce-storage-vector-local = { version = "0.1.0", path = "../../infra/cce-storage-vector-local" }
+cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
+cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
+cce-storage-metadb-pg = { version = "0.1.0", path = "../../infra/cce-storage-metadb-pg" }
+cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
+cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
+cce-circuit-breaker = { version = "0.1.0", path = "../../infra/cce-circuit-breaker" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -56,9 +59,9 @@ rusqlite = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
-cce-bench-kit = { path = "../cce-bench-kit" }
+cce-bench-kit = { version = "0.1.0", path = "../cce-bench-kit" }
 tracing-subscriber = { workspace = true }
-llm-embedding = { path = "../../infra/llm-suite/crates/llm-embedding", features = ["mock"] }
+llm-embedding = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-embedding", features = ["mock"] }
 
 [[bench]]
 name = "chunker_concurrency"

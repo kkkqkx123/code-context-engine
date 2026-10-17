@@ -4,12 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Embedded local vector storage backed by simvec"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-storage-common = { path = "../cce-storage-common" }
-simvec = { path = "../../simvec" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-storage-common = { version = "0.1.0", path = "../cce-storage-common" }
+simvec = { version = "0.1.0", path = "../../simvec" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Shared API wire contract for CCE CLI, Server, and frontend codegen"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

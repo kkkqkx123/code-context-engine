@@ -3,6 +3,9 @@ name = "cce-parser"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "AST parsing, entity grouping, and dual-path chunking pipeline for the code context engine"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 # Serialization
@@ -63,21 +66,21 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 
 # Internal workspace crates
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-parser-core = { path = "../cce-parser-core" }
-cce-document = { path = "../cce-document" }
-cce-stdlib = { path = "../cce-stdlib" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-text = { path = "../../core/cce-text" }
-cce-plugin = { path = "../../core/cce-plugin" }
-cce-llm = { path = "../../core/cce-llm" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-parser-core = { version = "0.1.0", path = "../cce-parser-core" }
+cce-document = { version = "0.1.0", path = "../cce-document" }
+cce-stdlib = { version = "0.1.0", path = "../cce-stdlib" }
+cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
+cce-text = { version = "0.1.0", path = "../../core/cce-text" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
+cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
-cce-codegraph = { path = "../cce-codegraph" }
+cce-plugin-runtime = { version = "0.1.0", path = "../../app/cce-plugin-runtime" }
+cce-codegraph = { version = "0.1.0", path = "../cce-codegraph" }
 
 [[bench]]
 name = "parse_nl_chunk"

@@ -4,12 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Configuration system for the code context engine"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-metrics = { path = "../cce-metrics" }
-cce-types = { path = "../cce-types" }
-cce-utils = { path = "../cce-utils" }
-cce-text = { path = "../cce-text" }
+cce-metrics = { version = "0.1.0", path = "../cce-metrics" }
+cce-types = { version = "0.1.0", path = "../cce-types" }
+cce-utils = { version = "0.1.0", path = "../cce-utils" }
+cce-text = { version = "0.1.0", path = "../cce-text" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

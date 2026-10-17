@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 description = "CLI client for Code Context Engine"
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "cce-cli"
@@ -20,13 +22,13 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 dirs = { workspace = true }
 toml = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-cce-api = { path = "../cce-api" }
-cce-config = { path = "../../core/cce-config" }
-cce-mcp = { path = "../cce-mcp" }
-cce-scanner = { path = "../../infra/cce-scanner" }
-cce-types = { path = "../../core/cce-types" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-gateway = { path = "../cce-gateway" }
+cce-api = { version = "0.1.0", path = "../cce-api" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-mcp = { version = "0.1.0", path = "../cce-mcp" }
+cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-gateway = { version = "0.1.0", path = "../cce-gateway" }
 base64 = "0.22"
 tokio-util = "0.7"
 

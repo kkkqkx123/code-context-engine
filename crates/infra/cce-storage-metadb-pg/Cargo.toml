@@ -3,12 +3,15 @@ name = "cce-storage-metadb-pg"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Remote PostgreSQL relation storage backend"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-storage-common = { path = "../cce-storage-common" }
-cce-circuit-breaker = { path = "../cce-circuit-breaker" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-storage-common = { version = "0.1.0", path = "../cce-storage-common" }
+cce-circuit-breaker = { version = "0.1.0", path = "../cce-circuit-breaker" }
 tokio-postgres = { workspace = true }
 deadpool-postgres = { workspace = true }
 tokio = { workspace = true }

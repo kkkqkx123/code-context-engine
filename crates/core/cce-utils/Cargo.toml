@@ -4,9 +4,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Utility functions for the code context engine"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-llm-token = { path = "../../infra/llm-suite/crates/llm-token" }
+llm-token = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-token" }
 encoding_rs = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }

@@ -5,6 +5,8 @@ edition.workspace = true
 # rmcp requires rust 1.88; the rest of the workspace stays on 1.86.
 rust-version = "1.88"
 description = "MCP (Model Context Protocol) server for the Code Context Engine"
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "cce-mcp"
@@ -21,15 +23,15 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "si
 tokio-util = "0.7"
 axum = { workspace = true }
 schemars = "1.0"
-cce-config = { path = "../../core/cce-config" }
-cce-types = { path = "../../core/cce-types" }
-cce-server-shared = { path = "../cce-server-shared" }
-cce-api = { path = "../cce-api" }
-cce-orchestrator = { path = "../cce-orchestrator" }
-cce-parser = { path = "../../parser/cce-parser" }
-cce-codegraph = { path = "../../parser/cce-codegraph" }
-cce-storage-metadb-sqlite = { path = "../../infra/cce-storage-metadb-sqlite" }
-cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-server-shared = { version = "0.1.0", path = "../cce-server-shared" }
+cce-api = { version = "0.1.0", path = "../cce-api" }
+cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
+cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
+cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
+cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
+cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
 
 rmcp = { workspace = true, features = [
     "server",

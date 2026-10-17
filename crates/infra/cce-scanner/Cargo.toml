@@ -3,14 +3,17 @@ name = "cce-scanner"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Project file scanning with manifest cache and encoding detection"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-plugin = { path = "../../core/cce-plugin" }
-cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
+cce-plugin-runtime = { version = "0.1.0", path = "../../app/cce-plugin-runtime" }
 
 serde = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
@@ -24,7 +27,7 @@ tempfile = { workspace = true }
 criterion = { workspace = true }
 rayon = { workspace = true }
 num_cpus = { workspace = true }
-cce-bench-kit = { path = "../../app/cce-bench-kit" }
+cce-bench-kit = { version = "0.1.0", path = "../../app/cce-bench-kit" }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[bench]]

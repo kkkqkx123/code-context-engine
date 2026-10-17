@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Relation index, symbol tables, and call-chain queries"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 # Serialization
@@ -41,20 +43,20 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "fs"] }
 dirs = { workspace = true }
 
 # Internal workspace crates
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-plugin = { path = "../../core/cce-plugin" }
-cce-parser = { path = "../cce-parser" }
-cce-parser-core = { path = "../cce-parser-core" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
+cce-parser = { version = "0.1.0", path = "../cce-parser" }
+cce-parser-core = { version = "0.1.0", path = "../cce-parser-core" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
-cce-parser = { path = "../cce-parser" }
-cce-parser-core = { path = "../cce-parser-core" }
-cce-plugin-runtime = { path = "../../app/cce-plugin-runtime" }
+cce-parser = { version = "0.1.0", path = "../cce-parser" }
+cce-parser-core = { version = "0.1.0", path = "../cce-parser-core" }
+cce-plugin-runtime = { version = "0.1.0", path = "../../app/cce-plugin-runtime" }
 
 [[bench]]
 name = "relation_perf"

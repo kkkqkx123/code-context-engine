@@ -3,20 +3,23 @@ name = "cce-llm-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "LLM service client with batching, retries, and resilience"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-llm = { path = "../../core/cce-llm" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-utils = { path = "../../core/cce-utils" }
-llm-codec = { path = "../llm-suite/crates/llm-codec" }
-llm-client = { path = "../llm-suite/crates/llm-client" }
-llm-common = { path = "../llm-suite/crates/llm-common" }
-llm-embedding = { path = "../llm-suite/crates/llm-embedding" }
-llm-gateway = { path = "../llm-suite/crates/llm-gateway" }
-llm-rerank = { path = "../llm-suite/crates/llm-rerank" }
-llm-types = { path = "../llm-suite/crates/llm-types" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
+cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+llm-codec = { version = "0.1.0", path = "../llm-suite/crates/llm-codec" }
+llm-client = { version = "0.1.0", path = "../llm-suite/crates/llm-client" }
+llm-common = { version = "0.1.0", path = "../llm-suite/crates/llm-common" }
+llm-embedding = { version = "0.1.0", path = "../llm-suite/crates/llm-embedding" }
+llm-gateway = { version = "0.1.0", path = "../llm-suite/crates/llm-gateway" }
+llm-rerank = { version = "0.1.0", path = "../llm-suite/crates/llm-rerank" }
+llm-types = { version = "0.1.0", path = "../llm-suite/crates/llm-types" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
@@ -27,8 +30,8 @@ futures = { workspace = true }
 tempfile = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
-llm-embedding = { path = "../llm-suite/crates/llm-embedding", features = ["mock"] }
-llm-rerank = { path = "../llm-suite/crates/llm-rerank", features = ["mock"] }
+llm-embedding = { version = "0.1.0", path = "../llm-suite/crates/llm-embedding", features = ["mock"] }
+llm-rerank = { version = "0.1.0", path = "../llm-suite/crates/llm-rerank", features = ["mock"] }
 
 [[bench]]
 name = "embedding_scheduling"

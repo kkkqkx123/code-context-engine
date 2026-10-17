@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Document processing pipeline for non-code files (markdown, json, toml, yaml, xml, plain text)"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde = { workspace = true }
@@ -18,11 +20,11 @@ toml = { workspace = true }
 yaml-rust2 = { workspace = true }
 quick-xml = { workspace = true }
 
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-text = { path = "../../core/cce-text" }
-cce-plugin = { path = "../../core/cce-plugin" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-text = { version = "0.1.0", path = "../../core/cce-text" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

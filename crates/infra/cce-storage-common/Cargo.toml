@@ -3,11 +3,14 @@ name = "cce-storage-common"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Backend-agnostic storage contracts for vector, fulltext, and relation stores"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-config = { path = "../../core/cce-config" }
-cce-types = { path = "../../core/cce-types" }
-cce-utils = { path = "../../core/cce-utils" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 rusqlite = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
@@ -16,10 +19,10 @@ async-trait = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-cce-storage-bm25 = { path = "../cce-storage-bm25" }
-cce-storage-metadb-pg = { path = "../cce-storage-metadb-pg" }
-cce-storage-metadb-sqlite = { path = "../cce-storage-metadb-sqlite" }
-cce-storage-vector-local = { path = "../cce-storage-vector-local" }
-cce-storage-vector-qdrant = { path = "../cce-storage-vector-qdrant" }
+cce-storage-bm25 = { version = "0.1.0", path = "../cce-storage-bm25" }
+cce-storage-metadb-pg = { version = "0.1.0", path = "../cce-storage-metadb-pg" }
+cce-storage-metadb-sqlite = { version = "0.1.0", path = "../cce-storage-metadb-sqlite" }
+cce-storage-vector-local = { version = "0.1.0", path = "../cce-storage-vector-local" }
+cce-storage-vector-qdrant = { version = "0.1.0", path = "../cce-storage-vector-qdrant" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

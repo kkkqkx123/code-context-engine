@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Lightweight file supply gateway for remote hosting: enumerate, fingerprint, push, observe"
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "cce-gateway"
@@ -21,10 +23,10 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 clap = { version = "4.6", features = ["derive", "env"] }
 base64 = "0.22"
-cce-api = { path = "../cce-api" }
-cce-scanner = { path = "../../infra/cce-scanner" }
-cce-types = { path = "../../core/cce-types" }
-cce-utils = { path = "../../core/cce-utils" }
+cce-api = { version = "0.1.0", path = "../cce-api" }
+cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 zstd = { workspace = true }
 chrono = { workspace = true }
 

@@ -5,13 +5,14 @@ edition = "2021"
 rust-version = "1.80"
 description = "SDK for building native CCE (Code Context Engine) plugins as dynamic libraries"
 license = "MIT"
+repository.workspace = true
 
 [lib]
 crate-type = ["rlib"]
 
 [dependencies]
-cce-types = { path = "../../core/cce-types" }
-cce-plugin = { path = "../../core/cce-plugin" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

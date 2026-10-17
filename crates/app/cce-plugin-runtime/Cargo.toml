@@ -3,12 +3,15 @@ name = "cce-plugin-runtime"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Lua and native plugin execution runtime for the code context engine"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-cce-types = { path = "../../core/cce-types" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-plugin = { path = "../../core/cce-plugin" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
 compact_str = { workspace = true }
 smallvec = { workspace = true }
 mlua = { workspace = true, features = ["vendored", "lua55", "send"] }

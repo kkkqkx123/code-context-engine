@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Metrics primitives for the code context engine"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 dashmap = { workspace = true }

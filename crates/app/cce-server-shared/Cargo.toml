@@ -3,6 +3,9 @@ name = "cce-server-shared"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Shared server assembly layer wiring storage backends and the engine pipeline"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde = { workspace = true }
@@ -20,24 +23,24 @@ rusqlite = { workspace = true }
 chrono = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
-cce-types = { path = "../../core/cce-types" }
-cce-config = { path = "../../core/cce-config" }
-cce-utils = { path = "../../core/cce-utils" }
-cce-metrics = { path = "../../core/cce-metrics" }
-cce-plugin = { path = "../../core/cce-plugin" }
-cce-llm = { path = "../../core/cce-llm" }
-cce-plugin-runtime = { path = "../cce-plugin-runtime" }
-cce-parser = { path = "../../parser/cce-parser" }
-cce-codegraph = { path = "../../parser/cce-codegraph" }
-cce-storage-common = { path = "../../infra/cce-storage-common" }
-cce-storage-metadb-sqlite = { path = "../../infra/cce-storage-metadb-sqlite" }
-cce-storage-bm25 = { path = "../../infra/cce-storage-bm25" }
-cce-storage-vector-qdrant = { path = "../../infra/cce-storage-vector-qdrant" }
-cce-storage-vector-local = { path = "../../infra/cce-storage-vector-local" }
-cce-llm-client = { path = "../../infra/cce-llm-client" }
-cce-scanner = { path = "../../infra/cce-scanner" }
-cce-orchestrator = { path = "../cce-orchestrator" }
-cce-api = { path = "../cce-api" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
+cce-plugin = { version = "0.1.0", path = "../../core/cce-plugin" }
+cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
+cce-plugin-runtime = { version = "0.1.0", path = "../cce-plugin-runtime" }
+cce-parser = { version = "0.1.0", path = "../../parser/cce-parser" }
+cce-codegraph = { version = "0.1.0", path = "../../parser/cce-codegraph" }
+cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
+cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage-metadb-sqlite" }
+cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
+cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage-vector-qdrant" }
+cce-storage-vector-local = { version = "0.1.0", path = "../../infra/cce-storage-vector-local" }
+cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
+cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
+cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
+cce-api = { version = "0.1.0", path = "../cce-api" }
 
 [dev-dependencies]
-llm-rerank = { path = "../../infra/llm-suite/crates/llm-rerank", features = ["mock"] }
+llm-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-rerank", features = ["mock"] }
