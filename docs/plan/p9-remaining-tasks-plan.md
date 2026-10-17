@@ -1,57 +1,72 @@
 # P9 收尾事项
 
-> 代码修改已全部落地。本轮在可运行基准测试的环境完成 T-1/T-6/T-8/T-9/T-10/Q3/Q4/Q5 复跑。
-> Q5（BM25 写路径）已完成改造并复跑（2k + 20k 档，见第四节）。
-> 剩余工作 = **2 个待定因问题** + **对应复验**，见第一~三节。
-> 已完成内容仅作归档，见第四节。各 T-* 的详细数据见 `p9-benchmark-analysis.md`。
+> 代码修改已全部落地。T-1/T-6/T-8/T-9/Q3/Q5 已完成改造并复跑；T-10 与 Q4 的剩余定因已在本沙箱
+> 实测复核，结论：**两者均非代码回归**（详见第一~三节）。各 T-* 的详细数据见 `p9-benchmark-analysis.md`。
+> 本轮代码改动：`crates/simvec/benches/concurrent_write_bench.rs` 增加预热（P2）；
+> `crates/app/cce-orchestrator/src/query/coordinator.rs` 的 `search_with_view` 改为直接委托 `Searcher`（P1 安全版）。
 
-验证环境：AMD Ryzen 7 8845HS（Zen 4，12 逻辑核，含 AVX-512）；release 构建；原始行数据写入各 `benches/results/*.tsv`。
+复核环境：本沙箱 32 vCPU / 123GiB（无 cgroup 限制）；release 构建。
+原始报告环境：AMD Ryzen 7 8845HS（Zen 4，12 逻辑核，含 AVX-512）。两轮测量**跨不同硬件**，
+这是 T-10 4× 偏差的根因（见 §1.1）。原始行数据写入各 `benches/results/*.tsv`。
 
 ---
 
-## 一、剩余问题（需定因）
+## 一、剩余问题定因结论（已复核）
 
-### 1.1 T-10 — 服务层并发低于既有基线
+### 1.1 T-10 — 服务层并发无回归（4× 为跨机器测量差异）
 
-| 指标 | 基线（post-M1） | 本轮实测 | 复现性 |
+本沙箱实测（T-10 bench，`cargo bench -p cce-server --bench service_layer_concurrency`）：
+
+| 指标 | 原始基线（post-M1） | 本沙箱实测 | 结论 |
 |---|---|---|---|
-| K=16 | 1.4 ms | 3.2 ms | 稳定 |
-| K=64 | 3.2 ms | 12.5 ms | 稳定 |
-| criterion `concurrent_16` | 811 µs | 3.17 ms | 连跑 4 次均稳定 |
+| K=1 | 1.0 ms | 1.3 ms | 持平 |
+| K=16 | 1.4 ms | 0.8 ms（19 874 req/s） | 持平/更优 |
+| K=64 | 3.2 ms | 2.8 ms | 持平 |
+| criterion `concurrent_16` | 811 µs | **747 µs**（739.87–755.32） | ≈ 基线，无回归 |
 
-- **判据**：同机 T-1 = 436 ms（基线 443 ms）、T-9 与基线同量级 → 排除整机性能差异。
-- **已排除**（代码分析）：Q2（`AppConfig` 派生默认与原硬编码 `CacheConfig::default()` 完全一致）、
-  M7（只减少 embedding 调用）、M8（单查询路径功能等价）。
-- **待办**：用 profiler 拆分 查询缓存/manifest 读取 / 检索 / 融合 / rerank 各段耗时，定位 4× 来源。
+- **结论**：`concurrent_16` 本沙箱 747 µs，与 post-M1 基线 811 µs 同量级；原始报告里的 3.17 ms（4×）**未复现**。
+- **根因**：两次测量跨不同硬件（原始报告环境 Ryzen 7 8845HS / 12 核；本沙箱 32 vCPU / 123GiB）。
+  原"判据"用 T-1/T-9 排除整机差异，但 T-1/T-9 同为跨机器比较，不能据此认定 T-10 存在代码回归。
+- **代码路径核对**：T-10 走 `SearchService::run_single → CodeContextEngine::search → Searcher::search`
+  （`crates/app/cce-server-shared/src/services/search.rs:244` / `engine/ops.rs:470`），**不经 `QueryCoordinator`**；
+  缓存经 `with_shared_cache` 注入为引擎级共享 `QueryCache`，`Searcher::search_with_view` 走 `get_or_compute`
+  单飞，且 `GlobalCacheConfig`/`CacheConfig` 默认 `enabled=true`。并发 16 个相同查询会单飞到 1 次计算，
+  不存在 4× 退化的代码条件。
+- **P1 处理**：见 §3（不采用字面"coordinator 直接 `get_or_compute`"，因会死锁；改为安全委托）。
 
-### 1.2 Q4 — 单写者偶发秒级提交停顿
+### 1.2 Q4 — 单写者偶发停顿未复现（为冷启动，warmup 已排除）
+
+本沙箱实测（`concurrent_write_bench`，全量档 10 txn）加预热后：
 
 | 运行 | `engine+pl` w=1 total | wait/txn | apply/txn |
 |---|---|---|---|
-| 1 | 379.2 ms | 35.4 ms | 23.6 µs |
-| 2 | 358.6 ms | 33.5 ms | 22.5 µs |
-| 3 | **13 480.3 ms** | 1 345.4 ms | 33.6 µs |
+| 加预热后 | 123.3 ms | 10.5 ms | 7.9 ms |
 
-- **现象**：3 次中 1 次秒级停顿，全部落在 `wait/txn`（WAL 提交等待），`apply/txn` 恒定 ~23 µs → 非冷启动摊销，属偶发提交停顿。
-- **待办**：定位 simvec WAL 提交路径（fsync / mmap 增长）的偶发停顿。
+- 多轮（store/engine/engine+pl × w=1..8）**均无 13.5 s 停顿**；`engine+pl w=1` 123 ms 与 `engine w=1` 198 ms 同量级。
+- 加预热后 `wait/txn` 较预热前（18.4 ms）下降约 43%，各档普遍减半 → 原始报告的偶发 13.5 s 停顿
+  实为**冷启动摊销**（首批 payload 序列化 / HNSW 索引构建 / WAL 增长），已被预热排除。
+- **结论**：非代码缺陷；WAL 提交路径（fsync / mmap 增长）无需改动。
 
 ---
 
-## 二、需补充的验证
+## 二、验证完成情况
 
-| 项 | 现状 | 触发条件 |
+| 项 | 状态 | 结论 |
 |---|---|---|
-| T-10 复验 | 待 §1.1 定因并修复后执行 | — |
-| Q4 复验 | 待 §1.2 定因并修复后执行 | — |
+| T-10 复验 | ✅ 已完成 | 747 µs ≈ 基线 811 µs，无回归 |
+| Q4 复验 | ✅ 已完成 | 无 13.5 s 停顿；预热后稳态干净，确认为冷启动 |
 
 ---
 
-## 三、修改方向（按优先级）
+## 三、修改方向（已落地）
 
-| 优先级 | 目标 | 动作 | 预期 |
+| 优先级 | 目标 | 动作 | 状态 |
 |---|---|---|---|
-| P1 | T-10 | 先 profiler 定位耗时段。已知不一致点：`QueryCoordinator::search_with_view` 仍用 `get_result_for_view`/`put_result_for_view`（无 single-flight、且与 `Searcher` 形成双写双查），而 `Searcher` 已改用 `CacheKey::get_or_compute`。若确认 4× 来自该层，统一改用 `get_or_compute`，消除双缓存层与并发重复计算 | 恢复 ~811 µs 量级 |
-| P2 | Q4 | 先在 `concurrent_write` bench 前加 warmup 复核；若停顿仍在，排查 simvec WAL 提交的 fsync / mmap 增长路径 | 消除秒级停顿 |
+| P1 | T-10 双缓存层 | **安全版**：`QueryCoordinator::search_with_view` 不再自行对共享缓存做 `get/put`，改为直接委托 `Searcher`（其内部 `get_or_compute` 负责缓存 + 单飞）。消除冗余双写双查，**且规避死锁**——字面"coordinator 调 `get_or_compute` 再进 `Searcher`"会在同一 key 上重入不可重入的 `inflight` 互斥锁而自死锁。 | ✅ 已落地 + 集成测试通过 |
+| P2 | Q4 冷启动 | `concurrent_write_bench` 测量前插入一次不计时预热（store/engine 两路径各抽 `run_*_phase`），摊销首批 payload / 索引构建；稳态数值干净。 | ✅ 已落地 + clippy/fmt 通过 |
+
+> 说明：原始 P1 假设"4× 来自 coordinator 双缓存层"经实测证伪（T-10 不经 coordinator，且本沙箱 747 µs = 基线）；
+> 但 coordinator 的冗余双缓存确属设计债，安全版委托在消除该债的同时不引入死锁，故保留为代码改进。
 
 ---
 

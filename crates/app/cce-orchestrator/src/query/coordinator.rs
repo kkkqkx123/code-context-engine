@@ -473,48 +473,33 @@ impl QueryCoordinator {
         // Check capabilities before executing
         self.check_capabilities(options)?;
 
-        // Check cache first
-        if let Some(mut cached) = self.cache.get_result_for_view(options, view).await {
-            tracing::trace!("Cache hit for query: {}", options.query);
-
-            // Record metrics if enabled (cache hit)
-            if let Some(metrics) = &self.metrics {
-                let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-                metrics.record_query(latency_ms, true, cached.items.len());
-            }
-
-            cached.from_cache = true;
-            return Ok(cached);
-        }
-
-        tracing::trace!("Cache miss for query: {}", options.query);
-
-        // Execute search — no silent degradation. If services are unavailable,
-        // the error propagates to the caller, and the query is queued for retry.
-        // The overall timeout bounds the entire pipeline so a slow component
-        // cannot stall the request indefinitely.
+        // Caching and the single-flight guard already live on the searcher:
+        // `Searcher::search_with_view` routes through `QueryCache::get_or_compute`
+        // keyed by the same `CacheKey` this coordinator would otherwise build.
+        // Delegating to it (instead of a separate outer get/put on the same
+        // shared cache) removes the redundant double-write and, importantly,
+        // avoids re-entering `get_or_compute` for the same key: that method
+        // takes a non-reentrant per-key mutex, so a coordinator that called it
+        // and then invoked the searcher would deadlock on itself.
         let timeout_ms = options.config.timeout_ms;
-        let search_future = self.searcher.search_with_view(options, view);
-        let search_result =
-            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), search_future)
-                .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(QueryError::Timeout { timeout_ms }),
-            };
+        let search_result = match tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            self.searcher.search_with_view(options, view),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(QueryError::Timeout { timeout_ms }),
+        };
+
         match search_result {
             Ok(result) => {
-                // Store in cache
-                self.cache
-                    .put_result_for_view(options, view, result.clone())
-                    .await;
-
-                // Record metrics if enabled (cache miss)
+                // Record metrics if enabled. The cache-hit flag is carried on
+                // the result by the searcher's `get_or_compute`.
                 if let Some(metrics) = &self.metrics {
                     let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-                    metrics.record_query(latency_ms, false, result.items.len());
+                    metrics.record_query(latency_ms, result.from_cache, result.items.len());
                 }
-
                 Ok(result)
             }
             Err(e) if e.is_retryable() => {
