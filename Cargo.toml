@@ -102,8 +102,8 @@ axum = { version = "0.8.8", features = ["macros"] }
 
 # Tree-sitter
 tree-sitter = "0.26"
-tree-sitter-c = { version = "0.24.2", path = "crates/tree-sitter/tree-sitter-c" }
-tree-sitter-cpp = { version = "0.23.4", path = "crates/tree-sitter/tree-sitter-cpp" }
+tree-sitter-c = { package = "kkkqkx-tree-sitter-c", version = "0.24.2", path = "crates/tree-sitter/tree-sitter-c" }
+tree-sitter-cpp = { package = "kkkqkx-tree-sitter-cpp", version = "0.23.4", path = "crates/tree-sitter/tree-sitter-cpp" }
 tree-sitter-go = "0.25"
 tree-sitter-java = "0.23"
 tree-sitter-javascript = "0.25"
