@@ -493,6 +493,37 @@ impl super::CodeContextEngine {
             .await
     }
 
+    /// Number of queued queries for a specific project.
+    pub async fn retry_queue_len_for_project(&self, project_id: i64) -> usize {
+        self.get_retry_queue(project_id).await.len().await
+    }
+
+    /// Number of dead-lettered queries for a specific project.
+    pub async fn retry_queue_dead_len_for_project(&self, project_id: i64) -> usize {
+        self.get_retry_queue(project_id).await.dead_len().await
+    }
+
+    /// Snapshot of dead-lettered queries for a specific project.
+    pub async fn retry_queue_dead_snapshot_for_project(
+        &self,
+        project_id: i64,
+    ) -> Vec<(String, u32)> {
+        self.get_retry_queue(project_id).await.dead_snapshot().await
+    }
+
+    /// Clear the retry queue for a specific project.
+    pub async fn clear_retry_queue_for_project(&self, project_id: i64) {
+        self.get_retry_queue(project_id).await.clear().await;
+    }
+
+    /// Clear the dead-letter list for a specific project.
+    pub async fn clear_retry_queue_dead_for_project(&self, project_id: i64) -> usize {
+        let queue = self.get_retry_queue(project_id).await;
+        let cleared = queue.dead_len().await;
+        queue.clear_dead().await;
+        cleared
+    }
+
     /// Process the retry queue for a specific project
     ///
     /// Drains all ready queries and re-executes them using the project's searcher.

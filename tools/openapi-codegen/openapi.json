@@ -4,7 +4,8 @@
     "title": "CCE API",
     "description": "Code context engine: indexing, search, relations and tool endpoints",
     "license": {
-      "name": ""
+      "name": "GPL-3.0-only",
+      "identifier": "GPL-3.0-only"
     },
     "version": "1.0.0"
   },
@@ -4471,6 +4472,18 @@
         ],
         "summary": "GET /api/retry-queue — View retry queue status (aggregated across all projects)",
         "operationId": "handle_retry_queue_status",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4520,6 +4533,18 @@
         ],
         "summary": "DELETE /api/retry-queue — Clear all retry queues across all projects",
         "operationId": "handle_retry_queue_clear",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4571,6 +4596,18 @@
         ],
         "summary": "GET /api/retry-queue/dead — Snapshot of dead-lettered queries",
         "operationId": "handle_retry_queue_dead_list",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4600,6 +4637,18 @@
         ],
         "summary": "DELETE /api/retry-queue/dead — Discard the dead-letter lists",
         "operationId": "handle_retry_queue_dead_clear",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4632,6 +4681,18 @@
         "summary": "POST /api/retry-queue/process — Manually trigger retry queue processing",
         "description": "Drains all queries that are ready for retry (cooldown expired)\nand re-executes them. Returns the number of queries re-attempted.",
         "operationId": "handle_retry_queue_process",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",

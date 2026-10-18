@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
@@ -93,10 +94,10 @@
 		/>
 
 		{#if error}
-			<div class="error-banner">
+			<ErrorBanner>
 				<span>{error}</span>
 				<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
-			</div>
+			</ErrorBanner>
 		{/if}
 
 		<!-- Input Card -->
@@ -304,16 +305,6 @@
 </div>
 
 <style>
-	.error-banner {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 2rem;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		border: 1px solid var(--black);
-	}
 
 	.dismiss-btn {
 		background: none;

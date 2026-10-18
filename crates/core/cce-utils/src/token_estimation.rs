@@ -4,7 +4,7 @@
 //! and provider fallbacks agree on one counting rule. CCE-specific helpers
 //! (budget truncation) stay here.
 
-pub use llm_token::estimation::{SYMBOL_FACTOR, TokenEstimator, estimate_tokens};
+pub use llm_suite_token::estimation::{SYMBOL_FACTOR, TokenEstimator, estimate_tokens};
 
 /// Proportional cut applied per truncation round (80% = 4/5 of current length)
 const TRUNCATE_RATIO_NUM: usize = 4;

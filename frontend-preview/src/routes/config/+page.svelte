@@ -8,6 +8,7 @@
 	 * section and reports actions back through callbacks.
 	 */
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import { onMount } from 'svelte';
 	import ConfigTokenCard from '$lib/components/config/ConfigTokenCard.svelte';
 	import ConfigGlobalCard from '$lib/components/config/ConfigGlobalCard.svelte';
@@ -271,10 +272,10 @@
 		/>
 
 		{#if error}
-			<div class="error-banner">
+			<ErrorBanner>
 				<span>{error}</span>
 				<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
-			</div>
+			</ErrorBanner>
 		{/if}
 
 		<!-- Scope Navigation -->
@@ -350,16 +351,6 @@
 </div>
 
 <style>
-	.error-banner {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 2rem;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		border: 1px solid var(--black);
-	}
 
 	.dismiss-btn {
 		background: none;

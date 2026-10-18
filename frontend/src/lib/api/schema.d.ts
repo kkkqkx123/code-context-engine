@@ -1042,7 +1042,7 @@ export interface paths {
     };
     "/api/retry-queue": {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1060,7 +1060,7 @@ export interface paths {
     };
     "/api/retry-queue/dead": {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1078,7 +1078,7 @@ export interface paths {
     };
     "/api/retry-queue/process": {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6228,11 +6228,11 @@ export interface operations {
     };
     handle_retry_queue_status: {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
-        };
+        }
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6275,11 +6275,11 @@ export interface operations {
     };
     handle_retry_queue_clear: {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
-        };
+        }
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6322,11 +6322,11 @@ export interface operations {
     };
     handle_retry_queue_dead_list: {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
-        };
+        }
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6351,11 +6351,11 @@ export interface operations {
     };
     handle_retry_queue_dead_clear: {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
-        };
+        }
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6380,11 +6380,11 @@ export interface operations {
     };
     handle_retry_queue_process: {
         parameters: {
-            query?: never;
+            query?: { project_id?: number };
             header?: never;
             path?: never;
             cookie?: never;
-        };
+        }
         requestBody?: never;
         responses: {
             /** @description Success */

@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_rerank_orders_by_configured_ids() {
         use cce_llm_client::services::rerank::{DelegatingRerankProvider, RerankRequestHandler};
-        use llm_rerank::mock::MockRerankProvider;
+        use llm_suite_rerank::mock::MockRerankProvider;
 
         let provider = Arc::new(DelegatingRerankProvider::new(
             MockRerankProvider::with_order(vec!["cand-2".to_string(), "cand-1".to_string()]),
@@ -310,7 +310,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_rerank_forwards_full_candidate_set_to_provider() {
         use cce_llm_client::services::rerank::{DelegatingRerankProvider, RerankRequestHandler};
-        use llm_rerank::mock::MockRerankProvider;
+        use llm_suite_rerank::mock::MockRerankProvider;
 
         let mock = MockRerankProvider::by_score();
         let provider = Arc::new(DelegatingRerankProvider::new(mock));
@@ -339,7 +339,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_rerank_rejects_empty_query() {
         use cce_llm_client::services::rerank::{DelegatingRerankProvider, RerankRequestHandler};
-        use llm_rerank::mock::MockRerankProvider;
+        use llm_suite_rerank::mock::MockRerankProvider;
 
         let provider = Arc::new(DelegatingRerankProvider::new(MockRerankProvider::by_score()));
         let handler = RerankRequestHandler::new(provider);

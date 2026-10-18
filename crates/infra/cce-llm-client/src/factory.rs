@@ -109,7 +109,7 @@ pub fn build_generative_rerank_provider(
         &provider.get_endpoint_path(ServiceType::Chat),
     );
     let endpoint = generative_chat_endpoint(&connection, chat_url, model_config.model.clone());
-    let inner = llm_rerank::GenerativeRerankProvider::new(endpoint, connection.timeout_secs)
+    let inner = llm_suite_rerank::GenerativeRerankProvider::new(endpoint, connection.timeout_secs)
         .map_err(map_rerank_error)?;
 
     tracing::info!(
@@ -145,7 +145,7 @@ pub fn build_cohere_rerank_provider(
         })?;
     let rerank_url = full_endpoint_url(&connection.base_url, &connection.endpoint_path);
     let config = rerank_endpoint_config(&connection, rerank_url, model_config.model.clone());
-    let inner = llm_rerank::CohereRerankProvider::new(config).map_err(map_rerank_error)?;
+    let inner = llm_suite_rerank::CohereRerankProvider::new(config).map_err(map_rerank_error)?;
 
     tracing::info!(
         model = %model_key,

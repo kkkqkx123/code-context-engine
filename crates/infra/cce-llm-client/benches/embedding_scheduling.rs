@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use cce_llm_client::services::embedding::handler::SuiteEmbeddingTransport;
 use futures::stream::{self, StreamExt};
-use llm_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
+use llm_suite_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
 
 /// Vector dimension returned by the mock (must match the transport contract).
 const DIM: usize = 384;

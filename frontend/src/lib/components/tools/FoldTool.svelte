@@ -3,6 +3,8 @@
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { FoldResponse } from '$lib/api/tools';
 
@@ -45,7 +47,7 @@
 
 <div class="tool-content">
 	{#if error}
-		<div class="error-message">{error}</div>
+		<ErrorBanner message={error} />
 	{/if}
 
 	<SplitPane leftWidth={50}>
@@ -130,7 +132,7 @@
 					</div>
 					<pre class="fold-output">{result.folded_text}</pre>
 				{:else}
-					<div class="empty-output">Folded skeleton will appear here...</div>
+					<EmptyState fill message="Folded skeleton will appear here..." />
 				{/if}
 			</div>
 		{/snippet}
@@ -140,16 +142,6 @@
 <style>
 	.tool-content {
 		width: 100%;
-	}
-
-	.error-message {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 1.5rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
 	}
 
 	.tool-input,
@@ -223,15 +215,6 @@
 		margin-top: 1rem;
 		display: flex;
 		justify-content: flex-end;
-	}
-
-	.empty-output {
-		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: var(--gray-500);
-		font-style: italic;
 	}
 
 	.fold-meta {

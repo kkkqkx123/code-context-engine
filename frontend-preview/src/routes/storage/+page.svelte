@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -87,12 +88,12 @@
 		/>
 
 		{#if $storageState.error}
-			<div class="error-banner">
+			<ErrorBanner>
 				<span>{$storageState.error}</span>
 				<button class="dismiss-btn" onclick={storageActions.clearError}
 					>×</button
 				>
-			</div>
+			</ErrorBanner>
 		{/if}
 
 		<!-- Storage Status Overview -->
@@ -107,8 +108,8 @@
 									? 'Connected'
 									: 'Disconnected'}
 								variant={$storageState.status.vector_storage.connected
-									? 'active'
-									: 'inactive'}
+									? 'success'
+									: 'danger'}
 							/>
 						</div>
 						{#if $storageState.status.vector_storage.item_count > 0}
@@ -131,8 +132,8 @@
 									? 'Connected'
 									: 'Disconnected'}
 								variant={$storageState.status.bm25_storage.connected
-									? 'active'
-									: 'inactive'}
+									? 'success'
+									: 'danger'}
 							/>
 						</div>
 						{#if $storageState.status.bm25_storage.item_count > 0}
@@ -150,8 +151,8 @@
 									? 'Connected'
 									: 'Disconnected'}
 								variant={$storageState.status.relation_storage.connected
-									? 'active'
-									: 'inactive'}
+									? 'success'
+									: 'danger'}
 							/>
 						</div>
 						{#if $storageState.status.relation_storage.item_count > 0}
@@ -183,7 +184,13 @@
 						<span class="process-label">Status</span>
 						<Badge
 							label={formatQdrantStatus(qdrantStatus)}
-							variant={qdrantIsRunning() ? 'active' : 'inactive'}
+							variant={qdrantStatus.type === 'Failed'
+								? 'danger'
+								: qdrantIsRunning()
+									? 'success'
+									: qdrantIsBusy()
+										? 'warning'
+										: 'inactive'}
 						/>
 					</div>
 					{#if qdrantError}
@@ -278,16 +285,6 @@
 {/if}
 
 <style>
-	.error-banner {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 2rem;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		border: 1px solid var(--black);
-	}
 
 	.dismiss-btn {
 		background: none;

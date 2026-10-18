@@ -2,6 +2,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import type { Component } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 
 	// Tab state
 	let activeTab = $state<
@@ -215,7 +216,7 @@
 				{#if CompressionTool}
 					<CompressionTool language={compressLanguage} />
 				{:else}
-					<div class="loading-placeholder">Loading compression tool...</div>
+					<LoadingState message="Loading compression tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -226,7 +227,7 @@
 				{#if DiagnosisTool}
 					<DiagnosisTool language={diagnoseLanguage} />
 				{:else}
-					<div class="loading-placeholder">Loading diagnosis tool...</div>
+					<LoadingState message="Loading diagnosis tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -240,7 +241,7 @@
 				{#if FoldTool}
 					<FoldTool language={foldLanguage} />
 				{:else}
-					<div class="loading-placeholder">Loading fold tool...</div>
+					<LoadingState message="Loading fold tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -254,7 +255,7 @@
 				{#if FoldBatchTool}
 					<FoldBatchTool />
 				{:else}
-					<div class="loading-placeholder">Loading batch fold tool...</div>
+					<LoadingState message="Loading batch fold tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -268,7 +269,7 @@
 						language={symbolLanguage}
 					/>
 				{:else}
-					<div class="loading-placeholder">Loading symbol lookup tool...</div>
+					<LoadingState message="Loading symbol lookup tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -282,7 +283,7 @@
 				{#if ReferencesTool}
 					<ReferencesTool />
 				{:else}
-					<div class="loading-placeholder">Loading references tool...</div>
+					<LoadingState message="Loading references tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -296,7 +297,7 @@
 				{#if DefinitionTool}
 					<DefinitionTool />
 				{:else}
-					<div class="loading-placeholder">Loading definition tool...</div>
+					<LoadingState message="Loading definition tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -310,7 +311,7 @@
 				{#if KeywordSearchTool}
 					<KeywordSearchTool />
 				{:else}
-					<div class="loading-placeholder">Loading keyword search tool...</div>
+					<LoadingState message="Loading keyword search tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -324,7 +325,7 @@
 				{#if BatchCompressTool}
 					<BatchCompressTool />
 				{:else}
-					<div class="loading-placeholder">Loading batch compress tool...</div>
+					<LoadingState message="Loading batch compress tool..." />
 				{/if}
 			</Card>
 		{/if}
@@ -365,10 +366,4 @@
 		font-weight: bold;
 	}
 
-	.loading-placeholder {
-		padding: 3rem;
-		text-align: center;
-		color: var(--gray-400);
-		font-style: italic;
-	}
 </style>

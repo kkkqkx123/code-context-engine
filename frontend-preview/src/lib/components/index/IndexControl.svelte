@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { indexState, indexActions } from '$lib/stores/index';
 	import { currentProject } from '$lib/stores/project';
 	import { goto } from '$app/navigation';
@@ -120,12 +121,12 @@
 					</div>
 				</form>
 			{:else}
-				<div class="empty-state">
+				<EmptyState card>
 					<p>No project selected. Create a project to start indexing.</p>
 					<Button variant="primary" onclick={goToProjects}>
 						Go to Projects
 					</Button>
-				</div>
+				</EmptyState>
 			{/if}
 		</div>
 	{/if}
@@ -259,20 +260,7 @@
 		margin: 0;
 	}
 
-	.empty-state {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 1rem;
-		padding: 1.5rem;
-		border: 1px dashed var(--gray-300);
-		background: var(--gray-100);
-	}
 
-	.empty-state p {
-		margin: 0;
-		color: var(--gray-600);
-	}
 
 	.toggle-group {
 		display: flex;

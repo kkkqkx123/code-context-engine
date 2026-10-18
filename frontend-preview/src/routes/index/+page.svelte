@@ -1,4 +1,5 @@
 <script lang="ts">
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import type { Component } from 'svelte';
 	import { onMount } from 'svelte';
@@ -53,13 +54,13 @@
 			{#if projectListLoaded && ProjectList}
 				<ProjectList />
 			{:else}
-				<div class="loading-placeholder">Loading project list...</div>
+				<LoadingState message="Loading project list..." />
 			{/if}
 
 			{#if indexControlLoaded && IndexControl}
 				<IndexControl />
 			{:else}
-				<div class="loading-placeholder">Loading index control...</div>
+				<LoadingState message="Loading index control..." />
 			{/if}
 		</div>
 
@@ -67,7 +68,7 @@
 			{#if fileParserLoaded && FileParser}
 				<FileParser />
 			{:else}
-				<div class="loading-placeholder">Loading file parser...</div>
+				<LoadingState message="Loading file parser..." />
 			{/if}
 		</div>
 
@@ -75,7 +76,7 @@
 			{#if indexMaintenanceLoaded && IndexMaintenance}
 				<IndexMaintenance />
 			{:else}
-				<div class="loading-placeholder">Loading index maintenance...</div>
+				<LoadingState message="Loading index maintenance..." />
 			{/if}
 		</div>
 	</div>
@@ -97,13 +98,6 @@
 		margin-top: 2rem;
 	}
 
-	.loading-placeholder {
-		padding: 2rem;
-		text-align: center;
-		color: var(--gray-400);
-		font-style: italic;
-		border: 1px dashed var(--gray-200);
-	}
 
 	@media (max-width: 1024px) {
 		.content-grid {

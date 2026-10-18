@@ -2,6 +2,8 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import SplitPane from '$lib/components/ui/SplitPane.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { CompressResult } from '$lib/api/tools';
 
@@ -35,7 +37,7 @@
 
 <div class="tool-content">
 	{#if error}
-		<div class="error-message">{error}</div>
+		<ErrorBanner message={error} />
 	{/if}
 
 	<SplitPane leftWidth={50}>
@@ -92,7 +94,7 @@
 						<div class="text-content">{result.semantic_text}</div>
 					</div>
 				{:else}
-					<div class="empty-output">Results will appear here...</div>
+					<EmptyState fill message="Results will appear here..." />
 				{/if}
 			</div>
 		{/snippet}
@@ -102,16 +104,6 @@
 <style>
 	.tool-content {
 		width: 100%;
-	}
-
-	.error-message {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 1.5rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
 	}
 
 	.tool-input,
@@ -142,8 +134,8 @@
 		border: 1px solid var(--black);
 		font-family: 'Space Mono', monospace;
 		font-size: 0.9rem;
-		background: var(--black);
-		color: var(--white);
+		background: var(--white);
+		color: var(--black);
 	}
 
 	.file-path-input:focus {
@@ -169,15 +161,6 @@
 		letter-spacing: 0.05em;
 		color: var(--gray-600);
 		cursor: pointer;
-	}
-
-	.empty-output {
-		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: var(--gray-500);
-		font-style: italic;
 	}
 
 	.compression-info {

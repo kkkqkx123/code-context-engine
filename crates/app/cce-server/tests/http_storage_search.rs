@@ -312,11 +312,21 @@ async fn health_subdivisions_return_envelopes() {
         ApiResult::Success(_) => {}
         ApiResult::Error(err) => panic!("bm25 health must succeed: {}", err.error.message),
     }
-    match health::handle_retry_queue_status(State(env.state.clone())).await {
+    match health::handle_retry_queue_status(
+        State(env.state.clone()),
+        Query(cce_api::models::RetryQueueQuery { project_id: None }),
+    )
+    .await
+    {
         ApiResult::Success(_) => {}
         ApiResult::Error(err) => panic!("retry status must succeed: {}", err.error.message),
     }
-    match health::handle_retry_queue_dead_list(State(env.state)).await {
+    match health::handle_retry_queue_dead_list(
+        State(env.state),
+        Query(cce_api::models::RetryQueueQuery { project_id: None }),
+    )
+    .await
+    {
         ApiResult::Success(_) => {}
         ApiResult::Error(err) => panic!("dead list must succeed: {}", err.error.message),
     }
@@ -325,11 +335,21 @@ async fn health_subdivisions_return_envelopes() {
 #[tokio::test]
 async fn retry_queue_clear_is_idempotent() {
     let env = test_env().await;
-    let first = match health::handle_retry_queue_clear(State(env.state.clone())).await {
+    let first = match health::handle_retry_queue_clear(
+        State(env.state.clone()),
+        Query(cce_api::models::RetryQueueQuery { project_id: None }),
+    )
+    .await
+    {
         ApiResult::Success(response) => response.cleared,
         ApiResult::Error(err) => panic!("clear must succeed: {}", err.error.message),
     };
-    let second = match health::handle_retry_queue_clear(State(env.state.clone())).await {
+    let second = match health::handle_retry_queue_clear(
+        State(env.state.clone()),
+        Query(cce_api::models::RetryQueueQuery { project_id: None }),
+    )
+    .await
+    {
         ApiResult::Success(response) => response.cleared,
         ApiResult::Error(err) => panic!("second clear must succeed: {}", err.error.message),
     };
@@ -705,11 +725,21 @@ async fn metrics_text_and_cleanup_succeed() {
 #[tokio::test]
 async fn retry_process_and_dead_clear_succeed_on_idle_engine() {
     let env = test_env().await;
-    match health::handle_retry_queue_process(State(env.state.clone())).await {
+    match health::handle_retry_queue_process(
+        State(env.state.clone()),
+        Query(cce_api::models::RetryQueueQuery { project_id: None }),
+    )
+    .await
+    {
         ApiResult::Success(_) => {}
         ApiResult::Error(err) => panic!("retry process must succeed: {}", err.error.message),
     }
-    match health::handle_retry_queue_dead_clear(State(env.state)).await {
+    match health::handle_retry_queue_dead_clear(
+        State(env.state),
+        Query(cce_api::models::RetryQueueQuery { project_id: None }),
+    )
+    .await
+    {
         ApiResult::Success(_) => {}
         ApiResult::Error(err) => panic!("dead clear must succeed: {}", err.error.message),
     }

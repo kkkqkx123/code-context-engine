@@ -6,44 +6,44 @@ use cce_config::global::ResolvedEmbeddingConfig;
 use cce_llm::{EmbeddingResult, LlmError};
 use cce_utils::token_estimation::estimate_tokens;
 use futures::stream::{self, StreamExt};
-use llm_client::Resilience;
-use llm_embedding::EmbeddingProvider;
+use llm_suite_client::Resilience;
+use llm_suite_embedding::EmbeddingProvider;
 
 /// Transport for one embedding batch: an llm-suite provider wrapped in the
 /// shared resilience stack (limiter + breaker + retry injected from the
 /// gateway's per-endpoint registries, so one upstream shares one set of
 /// protection components across chat/embedding/rerank).
-pub struct SuiteEmbeddingTransport<P = llm_embedding::OpenAICompatibleProvider> {
+pub struct SuiteEmbeddingTransport<P = llm_suite_embedding::OpenAICompatibleProvider> {
     provider: P,
     resilience: Resilience,
 }
 
 /// Translates the CCE preprocessor configuration into the suite's
-/// [`llm_embedding::PreprocessorConfig`]. Nomic/Stella task types are mapped
+/// [`llm_suite_embedding::PreprocessorConfig`]. Nomic/Stella task types are mapped
 /// to their concrete prefix/template strings here so the suite stays
 /// model-agnostic.
 fn suite_preprocessor(
     config: &cce_config::PreprocessorConfig,
-) -> llm_embedding::PreprocessorConfig {
+) -> llm_suite_embedding::PreprocessorConfig {
     match config {
-        cce_config::PreprocessorConfig::None => llm_embedding::PreprocessorConfig::None,
+        cce_config::PreprocessorConfig::None => llm_suite_embedding::PreprocessorConfig::None,
         cce_config::PreprocessorConfig::Prefix { prefix } => {
-            llm_embedding::PreprocessorConfig::Prefix {
+            llm_suite_embedding::PreprocessorConfig::Prefix {
                 prefix: prefix.clone(),
             }
         }
         cce_config::PreprocessorConfig::Template { template } => {
-            llm_embedding::PreprocessorConfig::Template {
+            llm_suite_embedding::PreprocessorConfig::Template {
                 template: template.replace("{text}", "{{text}}"),
             }
         }
         cce_config::PreprocessorConfig::Nomic { task_type } => {
-            llm_embedding::PreprocessorConfig::Prefix {
+            llm_suite_embedding::PreprocessorConfig::Prefix {
                 prefix: nomic_prefix(task_type).to_string(),
             }
         }
         cce_config::PreprocessorConfig::Stella { task_type } => {
-            llm_embedding::PreprocessorConfig::Template {
+            llm_suite_embedding::PreprocessorConfig::Template {
                 template: stella_template(task_type).replace("{text}", "{{text}}"),
             }
         }
@@ -70,10 +70,10 @@ fn stella_template(task_type: &str) -> &'static str {
     }
 }
 
-impl SuiteEmbeddingTransport<llm_embedding::OpenAICompatibleProvider> {
+impl SuiteEmbeddingTransport<llm_suite_embedding::OpenAICompatibleProvider> {
     /// Builds the transport from a resolved embedding model.
     pub fn from_resolved(resolved: &ResolvedEmbeddingConfig) -> Result<Self, LlmError> {
-        let mut config = llm_embedding::EmbeddingConfig::new(
+        let mut config = llm_suite_embedding::EmbeddingConfig::new(
             full_endpoint_url(&resolved.base_url, &resolved.endpoint_path),
             resolved.model.clone(),
         )
@@ -97,7 +97,7 @@ impl SuiteEmbeddingTransport<llm_embedding::OpenAICompatibleProvider> {
             .map(|(key, value)| (key.clone(), query_string(value)))
             .collect();
         let provider =
-            llm_embedding::OpenAICompatibleProvider::new(config).map_err(map_embedding_error)?;
+            llm_suite_embedding::OpenAICompatibleProvider::new(config).map_err(map_embedding_error)?;
 
         let resilience = embedding_resilience(resolved);
         Ok(Self {
@@ -117,7 +117,7 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
     pub async fn embed_batch(&self, batch: Vec<String>) -> Result<EmbeddingResult, LlmError> {
         self.resilience
             .execute(
-                || llm_embedding::EmbeddingError::CircuitOpen,
+                || llm_suite_embedding::EmbeddingError::CircuitOpen,
                 || self.provider.embed(&batch),
             )
             .await
@@ -156,7 +156,7 @@ impl<P: EmbeddingProvider> SuiteEmbeddingTransport<P> {
 }
 
 /// Embedding Request Handler - handles batching and request orchestration
-pub struct EmbeddingRequestHandler<P = llm_embedding::OpenAICompatibleProvider> {
+pub struct EmbeddingRequestHandler<P = llm_suite_embedding::OpenAICompatibleProvider> {
     /// Suite-backed batch transport
     inner: SuiteEmbeddingTransport<P>,
 }
@@ -284,7 +284,7 @@ impl<P: EmbeddingProvider> EmbeddingRequestHandler<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
+    use llm_suite_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
     use std::collections::HashMap;
 
     fn test_resolved() -> ResolvedEmbeddingConfig {
@@ -345,7 +345,7 @@ mod tests {
         provider: MockEmbeddingProvider,
     ) -> SuiteEmbeddingTransport<MockEmbeddingProvider> {
         SuiteEmbeddingTransport::for_testing(provider).with_resilience(
-            Resilience::new().with_retry(llm_common::retry::RetryPolicy {
+            Resilience::new().with_retry(llm_suite_common::retry::RetryPolicy {
                 max_retries: 2,
                 base_delay_ms: 1,
                 exponential_backoff: true,
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn retry_floor_honors_retry_after_hint() {
-        let policy = llm_common::retry::RetryPolicy {
+        let policy = llm_suite_common::retry::RetryPolicy {
             max_retries: 3,
             base_delay_ms: 10,
             exponential_backoff: true,
@@ -368,7 +368,7 @@ mod tests {
     #[tokio::test]
     async fn retries_transient_failure_until_success() {
         let mock = MockEmbeddingProvider::with_steps(vec![
-            MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::Timeout),
+            MockEmbeddingStep::Fail(llm_suite_embedding::EmbeddingError::Timeout),
             MockEmbeddingStep::Respond,
         ]);
         let transport = retrying_transport(mock);
@@ -390,7 +390,7 @@ mod tests {
     async fn retry_budget_exhaustion_reports_the_failure() {
         let mock = MockEmbeddingProvider::with_steps(
             (0..3)
-                .map(|_| MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::Timeout))
+                .map(|_| MockEmbeddingStep::Fail(llm_suite_embedding::EmbeddingError::Timeout))
                 .collect(),
         );
         let transport = retrying_transport(mock);
@@ -409,7 +409,7 @@ mod tests {
         let mock = MockEmbeddingProvider::with_steps(
             (0..3)
                 .map(|_| {
-                    MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::InvalidRequest(
+                    MockEmbeddingStep::Fail(llm_suite_embedding::EmbeddingError::InvalidRequest(
                         "model does not support this input".to_string(),
                     ))
                 })
@@ -429,7 +429,7 @@ mod tests {
     #[tokio::test]
     async fn rate_limit_retry_after_is_propagated() {
         let mock = MockEmbeddingProvider::with_steps(vec![MockEmbeddingStep::Fail(
-            llm_embedding::EmbeddingError::Provider {
+            llm_suite_embedding::EmbeddingError::Provider {
                 status: 429,
                 message: "slow down".to_string(),
                 retry_after_ms: Some(1200),
@@ -492,7 +492,7 @@ mod tests {
     async fn concurrent_batches_surface_first_ordered_error() {
         let mock = MockEmbeddingProvider::with_steps(vec![
             MockEmbeddingStep::Respond,
-            MockEmbeddingStep::Fail(llm_embedding::EmbeddingError::Timeout),
+            MockEmbeddingStep::Fail(llm_suite_embedding::EmbeddingError::Timeout),
             MockEmbeddingStep::Respond,
         ]);
         let transport = SuiteEmbeddingTransport::for_testing(mock);

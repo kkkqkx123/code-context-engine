@@ -9,10 +9,10 @@ use crate::suite::map_rerank_error;
 use cce_config::modules::search::RerankFusionStrategy;
 use cce_llm::{LlmError, RerankProvider, RerankRequest, RerankRuntimeConfig};
 use cce_types::{RerankCandidate, RerankResult, RerankedCandidate};
-use llm_rerank::RerankProvider as SuiteRerankProvider;
+use llm_suite_rerank::RerankProvider as SuiteRerankProvider;
 
-fn to_suite_candidate(candidate: &RerankCandidate) -> llm_rerank::RerankCandidate {
-    llm_rerank::RerankCandidate {
+fn to_suite_candidate(candidate: &RerankCandidate) -> llm_suite_rerank::RerankCandidate {
+    llm_suite_rerank::RerankCandidate {
         id: candidate.id.clone(),
         content: candidate.content.clone(),
         file_path: candidate.file_path.clone(),
@@ -22,21 +22,21 @@ fn to_suite_candidate(candidate: &RerankCandidate) -> llm_rerank::RerankCandidat
     }
 }
 
-fn to_suite_fusion(strategy: &RerankFusionStrategy) -> llm_rerank::RerankFusionStrategy {
+fn to_suite_fusion(strategy: &RerankFusionStrategy) -> llm_suite_rerank::RerankFusionStrategy {
     match strategy {
-        RerankFusionStrategy::RerankOnly => llm_rerank::RerankFusionStrategy::RerankOnly,
+        RerankFusionStrategy::RerankOnly => llm_suite_rerank::RerankFusionStrategy::RerankOnly,
         RerankFusionStrategy::LinearWeighted { alpha } => {
-            llm_rerank::RerankFusionStrategy::LinearWeighted { alpha: *alpha }
+            llm_suite_rerank::RerankFusionStrategy::LinearWeighted { alpha: *alpha }
         }
-        RerankFusionStrategy::Multiplicative => llm_rerank::RerankFusionStrategy::Multiplicative,
+        RerankFusionStrategy::Multiplicative => llm_suite_rerank::RerankFusionStrategy::Multiplicative,
         RerankFusionStrategy::ReciprocalRankFusion { k } => {
-            llm_rerank::RerankFusionStrategy::ReciprocalRankFusion { k: *k }
+            llm_suite_rerank::RerankFusionStrategy::ReciprocalRankFusion { k: *k }
         }
     }
 }
 
-fn to_suite_config(config: &RerankRuntimeConfig) -> llm_rerank::RerankRuntimeConfig {
-    llm_rerank::RerankRuntimeConfig {
+fn to_suite_config(config: &RerankRuntimeConfig) -> llm_suite_rerank::RerankRuntimeConfig {
+    llm_suite_rerank::RerankRuntimeConfig {
         max_candidates: config.max_candidates,
         temperature: config.temperature,
         return_reasoning: config.return_reasoning,
@@ -45,15 +45,15 @@ fn to_suite_config(config: &RerankRuntimeConfig) -> llm_rerank::RerankRuntimeCon
     }
 }
 
-fn to_suite_request(request: &RerankRequest) -> llm_rerank::RerankRequest {
-    llm_rerank::RerankRequest {
+fn to_suite_request(request: &RerankRequest) -> llm_suite_rerank::RerankRequest {
+    llm_suite_rerank::RerankRequest {
         query: request.query.clone(),
         candidates: request.candidates.iter().map(to_suite_candidate).collect(),
         config: to_suite_config(&request.config),
     }
 }
 
-fn from_suite_result(result: llm_rerank::RerankResult) -> RerankResult {
+fn from_suite_result(result: llm_suite_rerank::RerankResult) -> RerankResult {
     RerankResult {
         reranked_candidates: result
             .reranked_candidates
@@ -79,7 +79,7 @@ fn from_suite_result(result: llm_rerank::RerankResult) -> RerankResult {
 /// Production code instantiates it with the concrete generative or
 /// cross-encoder suite providers (see the `GenerativeRerankProvider` and
 /// `CohereRerankProvider` aliases); tests inject scripted suite mocks (for
-/// example `llm_rerank::mock::MockRerankProvider`) so handler behavior is
+/// example `llm_suite_rerank::mock::MockRerankProvider`) so handler behavior is
 /// verified without network stubs.
 pub struct DelegatingRerankProvider<P> {
     inner: P,
@@ -97,16 +97,16 @@ impl<P> DelegatingRerankProvider<P> {
     }
 }
 
-impl DelegatingRerankProvider<llm_rerank::GenerativeRerankProvider> {
+impl DelegatingRerankProvider<llm_suite_rerank::GenerativeRerankProvider> {
     /// Returns the chat endpoint configuration the provider was built with.
-    pub fn endpoint(&self) -> &llm_rerank::GenerativeChatEndpoint {
+    pub fn endpoint(&self) -> &llm_suite_rerank::GenerativeChatEndpoint {
         self.inner.endpoint()
     }
 }
 
-impl DelegatingRerankProvider<llm_rerank::CohereRerankProvider> {
+impl DelegatingRerankProvider<llm_suite_rerank::CohereRerankProvider> {
     /// Returns the endpoint configuration the provider was built with.
-    pub fn config(&self) -> &llm_rerank::RerankConfig {
+    pub fn config(&self) -> &llm_suite_rerank::RerankConfig {
         self.inner.config()
     }
 }
@@ -130,9 +130,9 @@ impl<P: SuiteRerankProvider> RerankProvider for DelegatingRerankProvider<P> {
 }
 
 /// Production generative LLM reranking provider.
-pub type GenerativeRerankProvider = DelegatingRerankProvider<llm_rerank::GenerativeRerankProvider>;
+pub type GenerativeRerankProvider = DelegatingRerankProvider<llm_suite_rerank::GenerativeRerankProvider>;
 /// Production cross-encoder rerank provider using a dedicated endpoint.
-pub type CohereRerankProvider = DelegatingRerankProvider<llm_rerank::CohereRerankProvider>;
+pub type CohereRerankProvider = DelegatingRerankProvider<llm_suite_rerank::CohereRerankProvider>;
 
 #[cfg(test)]
 mod tests {
@@ -188,13 +188,13 @@ mod tests {
                 std::mem::discriminant(&converted),
                 std::mem::discriminant(&match strategy {
                     RerankFusionStrategy::RerankOnly =>
-                        llm_rerank::RerankFusionStrategy::RerankOnly,
+                        llm_suite_rerank::RerankFusionStrategy::RerankOnly,
                     RerankFusionStrategy::LinearWeighted { .. } =>
-                        llm_rerank::RerankFusionStrategy::LinearWeighted { alpha: 0.0 },
+                        llm_suite_rerank::RerankFusionStrategy::LinearWeighted { alpha: 0.0 },
                     RerankFusionStrategy::Multiplicative =>
-                        llm_rerank::RerankFusionStrategy::Multiplicative,
+                        llm_suite_rerank::RerankFusionStrategy::Multiplicative,
                     RerankFusionStrategy::ReciprocalRankFusion { .. } =>
-                        llm_rerank::RerankFusionStrategy::ReciprocalRankFusion { k: 0.0 },
+                        llm_suite_rerank::RerankFusionStrategy::ReciprocalRankFusion { k: 0.0 },
                 })
             );
         }
@@ -202,8 +202,8 @@ mod tests {
 
     #[test]
     fn result_conversion_preserves_scores_and_ranks() {
-        let converted = from_suite_result(llm_rerank::RerankResult {
-            reranked_candidates: vec![llm_rerank::RerankedCandidate {
+        let converted = from_suite_result(llm_suite_rerank::RerankResult {
+            reranked_candidates: vec![llm_suite_rerank::RerankedCandidate {
                 id: "c2".to_string(),
                 rerank_score: 0.9,
                 initial_score: 0.5,

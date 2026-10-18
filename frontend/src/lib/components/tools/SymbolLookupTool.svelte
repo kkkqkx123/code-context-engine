@@ -3,6 +3,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { get } from 'svelte/store';
 	import { toolsApi } from '$lib/api/tools';
 	import { currentProjectId } from '$lib/stores/project';
@@ -42,7 +44,7 @@
 
 <div class="tool-content">
 	{#if error}
-		<div class="error-message">{error}</div>
+		<ErrorBanner message={error} />
 	{/if}
 
 	<div class="symbol-input-section">
@@ -106,25 +108,13 @@
 			</div>
 		</div>
 	{:else if !loading}
-		<div class="empty-output">
-			Symbol extraction results will appear here...
-		</div>
+		<EmptyState padded message="Symbol extraction results will appear here..." />
 	{/if}
 </div>
 
 <style>
 	.tool-content {
 		width: 100%;
-	}
-
-	.error-message {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 1.5rem;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.85rem;
 	}
 
 	.symbol-input-section {
@@ -171,13 +161,6 @@
 	.select-input:focus {
 		outline: none;
 		border-color: var(--accent);
-	}
-
-	.empty-output {
-		padding: 3rem;
-		text-align: center;
-		color: var(--gray-500);
-		font-style: italic;
 	}
 
 	.symbols-results {

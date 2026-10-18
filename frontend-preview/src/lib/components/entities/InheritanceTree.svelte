@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import type {
 		ClassInheritanceResponse,
 		ClassImplementationsResponse,
@@ -56,9 +57,7 @@
 
 <div class="inheritance-tree">
 	{#if !hasData}
-		<div class="empty-state">
-			<p>No inheritance data available</p>
-		</div>
+		<EmptyState padded message="No inheritance data available" />
 	{:else}
 		<div class="view-toggle" role="tablist" aria-label="Inheritance view mode">
 			<button
@@ -183,12 +182,6 @@
 		padding: 1rem;
 	}
 
-	.empty-state {
-		padding: 3rem;
-		text-align: center;
-		color: var(--gray-400);
-		font-style: italic;
-	}
 
 	.view-toggle {
 		display: flex;

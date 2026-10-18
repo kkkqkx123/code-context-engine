@@ -11,6 +11,7 @@
 	import { toastActions } from '$lib/stores/toast';
 	import { ApiError } from '$lib/api/client';
 	import { onMount } from 'svelte';
+	import { projects, loadProjects } from '$lib/stores/project';
 
 	const REFRESH_MS = 30_000;
 
@@ -20,13 +21,14 @@
 	let busy = $state(false);
 	let clearConfirmOpen = $state(false);
 	let error = $state<string | null>(null);
+	let selectedProjectId = $state<number | null>(null);
 
 	async function load() {
 		loading = true;
 		error = null;
 		try {
-			status = await retryQueueApi.getStatus();
-			const dead = await retryQueueApi.getDead();
+			status = await retryQueueApi.getStatus(selectedProjectId);
+			const dead = await retryQueueApi.getDead(selectedProjectId);
 			deadEntries = dead.entries;
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : String(e);
@@ -38,7 +40,7 @@
 	async function clearDead() {
 		busy = true;
 		try {
-			const res = await retryQueueApi.clearDead();
+			const res = await retryQueueApi.clearDead(selectedProjectId);
 			toastActions.show(res.message, 'success');
 			clearConfirmOpen = false;
 			await load();
@@ -57,6 +59,7 @@
 	}
 
 	onMount(() => {
+		loadProjects();
 		load();
 		const timer = setInterval(load, REFRESH_MS);
 		return () => clearInterval(timer);
@@ -79,6 +82,28 @@
 		{#if error}
 			<div class="error-banner">{error}</div>
 		{/if}
+
+		<div class="filter-row">
+			<label for="retry-project-scope">Project scope</label>
+			<select
+				id="retry-project-scope"
+				onchange={(e) => {
+					const value = (e.currentTarget as HTMLSelectElement).value;
+					selectedProjectId = value === 'all' ? null : Number(value);
+					load();
+				}}
+			>
+				<option value="all" selected={selectedProjectId === null}>All projects</option>
+				{#each $projects as project (project.id)}
+					<option
+						value={Number(project.id)}
+						selected={selectedProjectId === Number(project.id)}
+					>
+						{project.name || `#${project.id}`}
+					</option>
+				{/each}
+			</select>
+		</div>
 
 		{#if status}
 			<div class="stats-row">
@@ -155,6 +180,19 @@
 {/if}
 
 <style>
+	.filter-row {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		margin-bottom: 1rem;
+	}
+	.filter-row label {
+		font-size: 0.8rem;
+		color: var(--color-text-muted, #888);
+	}
+	.filter-row select {
+		padding: 0.35rem 0.5rem;
+	}
 	.stats-row {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

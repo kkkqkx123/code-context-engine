@@ -1,6 +1,7 @@
 //! Health check models
 
 use serde::{Deserialize, Serialize};
+use utoipa::IntoParams;
 use utoipa::ToSchema;
 
 /// Health status response
@@ -109,4 +110,14 @@ pub struct RetryQueueProcessResponse {
 pub struct RetryQueueClearResponse {
     pub cleared: usize,
     pub message: String,
+}
+
+/// Retry queue query parameters
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RetryQueueQuery {
+    /// Optional project ID to scope retry-queue operations to one project.
+    /// When omitted, operations aggregate across all projects.
+    #[serde(default)]
+    pub project_id: Option<i64>,
 }

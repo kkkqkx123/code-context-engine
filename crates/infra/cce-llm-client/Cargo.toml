@@ -13,13 +13,13 @@ cce-config = { version = "0.1.0", path = "../../core/cce-config" }
 cce-llm = { version = "0.1.0", path = "../../core/cce-llm" }
 cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }
 cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
-llm-codec = { version = "0.1.0", path = "../llm-suite/crates/llm-codec" }
-llm-client = { version = "0.1.0", path = "../llm-suite/crates/llm-client" }
-llm-common = { version = "0.1.0", path = "../llm-suite/crates/llm-common" }
-llm-embedding = { version = "0.1.0", path = "../llm-suite/crates/llm-embedding" }
-llm-gateway = { version = "0.1.0", path = "../llm-suite/crates/llm-gateway" }
-llm-rerank = { version = "0.1.0", path = "../llm-suite/crates/llm-rerank" }
-llm-types = { version = "0.1.0", path = "../llm-suite/crates/llm-types" }
+llm-suite-codec = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-codec" }
+llm-suite-client = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-client" }
+llm-suite-common = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-common" }
+llm-suite-embedding = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-embedding" }
+llm-suite-gateway = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-gateway" }
+llm-suite-rerank = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-rerank" }
+llm-suite-types = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-types" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
@@ -30,8 +30,8 @@ futures = { workspace = true }
 tempfile = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
-llm-embedding = { version = "0.1.0", path = "../llm-suite/crates/llm-embedding", features = ["mock"] }
-llm-rerank = { version = "0.1.0", path = "../llm-suite/crates/llm-rerank", features = ["mock"] }
+llm-suite-embedding = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-embedding", features = ["mock"] }
+llm-suite-rerank = { version = "0.1.0", path = "../llm-suite/crates/llm-suite-rerank", features = ["mock"] }
 
 [[bench]]
 name = "embedding_scheduling"

@@ -2,6 +2,7 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import { toolsApi, type KeywordSearchResult } from '$lib/api/tools';
 	import { currentProjectId } from '$lib/stores/project';
 	import { get } from 'svelte/store';
@@ -47,7 +48,7 @@
 
 <div class="tool">
 	{#if error}
-		<div class="tool-error">{error}</div>
+		<InlineError message={error} />
 	{/if}
 
 	<div class="form-row">
@@ -128,13 +129,6 @@
 		gap: 1rem;
 	}
 
-	.tool-error {
-		padding: 0.6rem 0.75rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
-	}
 
 	.form-row {
 		display: flex;

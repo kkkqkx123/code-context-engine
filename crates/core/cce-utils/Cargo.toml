@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-llm-token = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-token" }
+llm-suite-token = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-token" }
 encoding_rs = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }

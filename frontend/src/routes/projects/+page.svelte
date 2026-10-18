@@ -1,6 +1,8 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -175,10 +177,10 @@
 	/>
 
 	{#if error}
-		<div class="error-banner">
+		<ErrorBanner>
 			<span>{error}</span>
 			<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
-		</div>
+		</ErrorBanner>
 	{/if}
 
 	<div class="layout">
@@ -192,9 +194,7 @@
 				</div>
 
 				{#if $projects.length === 0}
-					<p class="empty-state">
-						No projects found. Create your first project to get started.
-					</p>
+					<EmptyState padded message="No projects found. Create your first project to get started." />
 				{:else}
 					<div class="project-list">
 						{#each $projects as project (project.id)}
@@ -367,16 +367,6 @@
 </div>
 
 <style>
-	.error-banner {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 2rem;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		border: 1px solid var(--black);
-	}
 
 	.dismiss-btn {
 		background: none;
@@ -404,12 +394,6 @@
 		margin-bottom: 1.5rem;
 	}
 
-	.empty-state {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 3rem 0;
-	}
 
 	.project-list {
 		display: flex;

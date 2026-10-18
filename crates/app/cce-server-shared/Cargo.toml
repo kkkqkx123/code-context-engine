@@ -43,4 +43,4 @@ cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
 
 [dev-dependencies]
-llm-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-rerank", features = ["mock"] }
+llm-suite-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-rerank", features = ["mock"] }

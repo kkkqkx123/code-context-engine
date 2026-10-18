@@ -11,10 +11,10 @@ use cce_llm::{EmbeddingResult, LlmError};
 use cce_metrics::{EmbeddingErrorType, EmbeddingMetrics};
 use cce_utils::token_estimation::estimate_tokens;
 
-use llm_embedding::EmbeddingProvider as SuiteEmbeddingProvider;
+use llm_suite_embedding::EmbeddingProvider as SuiteEmbeddingProvider;
 
 /// OpenAI-compatible API embedder
-pub struct OpenAICompatibleProvider<P = llm_embedding::OpenAICompatibleProvider> {
+pub struct OpenAICompatibleProvider<P = llm_suite_embedding::OpenAICompatibleProvider> {
     /// Batching handler over the llm-suite transport
     handler: EmbeddingRequestHandler<P>,
     embed_config: EmbeddingConfig,
@@ -33,7 +33,7 @@ impl<P> std::fmt::Debug for OpenAICompatibleProvider<P> {
     }
 }
 
-impl OpenAICompatibleProvider<llm_embedding::OpenAICompatibleProvider> {
+impl OpenAICompatibleProvider<llm_suite_embedding::OpenAICompatibleProvider> {
     /// Create embedder from global AppConfig and a single model name.
     pub fn from_model(
         global_config: &cce_config::AppConfig,

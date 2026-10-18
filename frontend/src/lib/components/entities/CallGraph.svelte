@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import type { CallChainNode } from '$lib/api/search';
 	import EntityGraphView from '$lib/components/graph/EntityGraphView.svelte';
 	import { callChainToElements } from '$lib/utils/entity-graph';
@@ -25,9 +26,7 @@
 
 <div class="call-graph-container">
 	{#if nodes.length === 0}
-		<div class="empty-state">
-			<p>No call graph data available</p>
-		</div>
+		<EmptyState padded message="No call graph data available" />
 	{:else}
 		<div class="view-toggle" role="tablist" aria-label="Call graph view mode">
 			<button
@@ -86,12 +85,6 @@
 		padding: 1rem;
 	}
 
-	.empty-state {
-		padding: 3rem;
-		text-align: center;
-		color: var(--gray-400);
-		font-style: italic;
-	}
 
 	.view-toggle {
 		display: flex;

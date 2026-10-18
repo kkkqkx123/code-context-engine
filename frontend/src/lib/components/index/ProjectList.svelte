@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { errorMessage } from '$lib/utils/errors';
 	import {
 		projects,
@@ -194,9 +195,7 @@
 	{/if}
 
 	{#if $projects.length === 0}
-		<p class="empty-state">
-			No projects found. Create your first project above.
-		</p>
+		<EmptyState padded message="No projects found. Create your first project above." />
 	{:else}
 		<div class="project-list">
 			{#each $projects as project (project.id)}
@@ -288,12 +287,6 @@
 		margin-bottom: 1.5rem;
 	}
 
-	.empty-state {
-		color: var(--gray-400);
-		font-style: italic;
-		text-align: center;
-		padding: 3rem 0;
-	}
 
 	.project-list {
 		display: flex;

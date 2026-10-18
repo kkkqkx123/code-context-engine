@@ -1,5 +1,6 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import type { Component } from 'svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -70,14 +71,14 @@
 		/>
 
 		{#if $watchState.error}
-			<div class="error-banner">
+			<ErrorBanner>
 				<span>{$watchState.error}</span>
 				<button
 					class="dismiss-btn"
 					onclick={() => watchState.update((s) => ({ ...s, error: null }))}
 					>×</button
 				>
-			</div>
+			</ErrorBanner>
 		{/if}
 
 		{#if $watchState.error && $watchState.error.includes('gateway-supplied')}
@@ -218,16 +219,6 @@
 </div>
 
 <style>
-	.error-banner {
-		background: var(--danger);
-		color: var(--white);
-		padding: 1rem;
-		margin-bottom: 2rem;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		border: 1px solid var(--black);
-	}
 
 	.dismiss-btn {
 		background: none;

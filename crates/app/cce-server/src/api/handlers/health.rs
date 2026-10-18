@@ -5,14 +5,14 @@
 //! - Per-service detailed diagnostics
 //! - Retry queue inspection and manual processing
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 
 use crate::api::response::ApiResult;
 use crate::api::state::AppState;
 use cce_api::models::{
     Bm25HealthResponse, EmbeddingHealthResponse, ErrorResponse, HealthStatus, QdrantDiagnostic,
     QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
-    RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse,
+    RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse, RetryQueueQuery,
     RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
 
@@ -147,6 +147,7 @@ pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25
 /// GET /api/retry-queue — View retry queue status (aggregated across all projects)
 #[utoipa::path(
     get, path = "/api/retry-queue", tag = "Health",
+    params(RetryQueueQuery),
     responses(
         (status = 200, body = RetryQueueStatusResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),
@@ -156,14 +157,34 @@ pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25
 )]
 pub async fn handle_retry_queue_status(
     State(state): State<AppState>,
+    Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueStatusResponse> {
-    let pending_count = state.engine.retry_queue_total_len().await;
-    let dead_count = state.engine.retry_queue_total_dead_len().await;
-    ApiResult::Success(RetryQueueStatusResponse {
-        pending_count,
-        is_empty: pending_count == 0,
-        dead_count,
-    })
+    if let Some(project_id) = query.project_id {
+        if let Err(e) = crate::api::validation::validate_project_id(project_id) {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                format!("Invalid project_id: {}", e),
+            ));
+        }
+        let pending_count = state.engine.retry_queue_len_for_project(project_id).await;
+        let dead_count = state
+            .engine
+            .retry_queue_dead_len_for_project(project_id)
+            .await;
+        ApiResult::Success(RetryQueueStatusResponse {
+            pending_count,
+            is_empty: pending_count == 0,
+            dead_count,
+        })
+    } else {
+        let pending_count = state.engine.retry_queue_total_len().await;
+        let dead_count = state.engine.retry_queue_total_dead_len().await;
+        ApiResult::Success(RetryQueueStatusResponse {
+            pending_count,
+            is_empty: pending_count == 0,
+            dead_count,
+        })
+    }
 }
 
 /// POST /api/retry-queue/process — Manually trigger retry queue processing
@@ -172,6 +193,7 @@ pub async fn handle_retry_queue_status(
 /// and re-executes them. Returns the number of queries re-attempted.
 #[utoipa::path(
     post, path = "/api/retry-queue/process", tag = "Health",
+    params(RetryQueueQuery),
     responses(
         (status = 200, body = RetryQueueProcessResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),
@@ -181,15 +203,45 @@ pub async fn handle_retry_queue_status(
 )]
 pub async fn handle_retry_queue_process(
     State(state): State<AppState>,
+    Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueProcessResponse> {
-    let count = match state.engine.process_retry_queue(1).await {
-        Ok(count) => count,
-        Err(e) => {
+    let count = if let Some(project_id) = query.project_id {
+        if let Err(e) = crate::api::validation::validate_project_id(project_id) {
             return ApiResult::Error(ErrorResponse::new(
-                error_codes::INTERNAL_ERROR,
-                format!("Failed to process retry queue: {}", e),
+                error_codes::INVALID_REQUEST,
+                format!("Invalid project_id: {}", e),
             ));
         }
+        match state.engine.process_retry_queue(project_id).await {
+            Ok(count) => count,
+            Err(e) => {
+                return ApiResult::Error(ErrorResponse::new(
+                    error_codes::INTERNAL_ERROR,
+                    format!("Failed to process retry queue: {}", e),
+                ));
+            }
+        }
+    } else {
+        let project_ids: Vec<i64> = state
+            .engine
+            .metadata_store()
+            .map(|store| {
+                store
+                    .as_ref()
+                    .with_transaction(|tx| {
+                        cce_storage_metadb_sqlite::ProjectRepository::get_all(tx)
+                    })
+                    .map(|records| records.into_iter().map(|r| r.id).collect())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let mut total = 0usize;
+        for project_id in project_ids {
+            if let Ok(count) = state.engine.process_retry_queue(project_id).await {
+                total += count;
+            }
+        }
+        total
     };
     ApiResult::Success(RetryQueueProcessResponse {
         processed: count,
@@ -203,6 +255,7 @@ pub async fn handle_retry_queue_process(
 /// DELETE /api/retry-queue — Clear all retry queues across all projects
 #[utoipa::path(
     delete, path = "/api/retry-queue", tag = "Health",
+    params(RetryQueueQuery),
     responses(
         (status = 200, body = RetryQueueClearResponse, description = "Success"),
         (status = 400, body = ErrorResponse, description = "Invalid request"),
@@ -212,18 +265,35 @@ pub async fn handle_retry_queue_process(
 )]
 pub async fn handle_retry_queue_clear(
     State(state): State<AppState>,
+    Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueClearResponse> {
-    let pending = state.engine.retry_queue_total_len().await;
-    state.engine.clear_all_retry_queues().await;
-    ApiResult::Success(RetryQueueClearResponse {
-        cleared: pending,
-        message: format!("Retry queue cleared, {} queries discarded", pending),
-    })
+    if let Some(project_id) = query.project_id {
+        if let Err(e) = crate::api::validation::validate_project_id(project_id) {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                format!("Invalid project_id: {}", e),
+            ));
+        }
+        let pending = state.engine.retry_queue_len_for_project(project_id).await;
+        state.engine.clear_retry_queue_for_project(project_id).await;
+        ApiResult::Success(RetryQueueClearResponse {
+            cleared: pending,
+            message: format!("Retry queue cleared, {} queries discarded", pending),
+        })
+    } else {
+        let pending = state.engine.retry_queue_total_len().await;
+        state.engine.clear_all_retry_queues().await;
+        ApiResult::Success(RetryQueueClearResponse {
+            cleared: pending,
+            message: format!("Retry queue cleared, {} queries discarded", pending),
+        })
+    }
 }
 
 /// GET /api/retry-queue/dead — Snapshot of dead-lettered queries
 #[utoipa::path(
     get, path = "/api/retry-queue/dead", tag = "Health",
+    params(RetryQueueQuery),
     responses(
         (status = 200, body = RetryQueueDeadResponse, description = "Success"),
         (status = 500, body = ErrorResponse, description = "Internal error")
@@ -231,8 +301,22 @@ pub async fn handle_retry_queue_clear(
 )]
 pub async fn handle_retry_queue_dead_list(
     State(state): State<AppState>,
+    Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueDeadResponse> {
-    let entries = state.engine.retry_queue_dead_snapshot().await;
+    let entries = if let Some(project_id) = query.project_id {
+        if let Err(e) = crate::api::validation::validate_project_id(project_id) {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                format!("Invalid project_id: {}", e),
+            ));
+        }
+        state
+            .engine
+            .retry_queue_dead_snapshot_for_project(project_id)
+            .await
+    } else {
+        state.engine.retry_queue_dead_snapshot().await
+    };
     let dead_count = entries.len();
     ApiResult::Success(RetryQueueDeadResponse {
         dead_count,
@@ -246,6 +330,7 @@ pub async fn handle_retry_queue_dead_list(
 /// DELETE /api/retry-queue/dead — Discard the dead-letter lists
 #[utoipa::path(
     delete, path = "/api/retry-queue/dead", tag = "Health",
+    params(RetryQueueQuery),
     responses(
         (status = 200, body = RetryQueueDeadClearResponse, description = "Success"),
         (status = 500, body = ErrorResponse, description = "Internal error")
@@ -253,8 +338,22 @@ pub async fn handle_retry_queue_dead_list(
 )]
 pub async fn handle_retry_queue_dead_clear(
     State(state): State<AppState>,
+    Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueDeadClearResponse> {
-    let cleared = state.engine.clear_all_retry_queue_dead().await;
+    let cleared = if let Some(project_id) = query.project_id {
+        if let Err(e) = crate::api::validation::validate_project_id(project_id) {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                format!("Invalid project_id: {}", e),
+            ));
+        }
+        state
+            .engine
+            .clear_retry_queue_dead_for_project(project_id)
+            .await
+    } else {
+        state.engine.clear_all_retry_queue_dead().await
+    };
     ApiResult::Success(RetryQueueDeadClearResponse {
         cleared,
         message: format!(

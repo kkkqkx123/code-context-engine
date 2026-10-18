@@ -13,7 +13,7 @@ use cce_config::modules::ServiceType;
 use cce_llm::{ChatConfig, ChatResult, LlmClient, LlmError, Message, MessageRole};
 use cce_types::error::common::TimeoutError;
 
-static GATEWAY: OnceLock<llm_gateway::LlmGateway> = OnceLock::new();
+static GATEWAY: OnceLock<llm_suite_gateway::LlmGateway> = OnceLock::new();
 static TOKEN_SINK: OnceLock<GatewayMetricsSink> = OnceLock::new();
 
 /// Process-wide gateway. Breakers and rate limiters live in the gateway
@@ -23,9 +23,9 @@ static TOKEN_SINK: OnceLock<GatewayMetricsSink> = OnceLock::new();
 /// Production entry points must call [`init_gateway`] before any request so
 /// the gateway is constructed together with its metrics sink. Tests may rely
 /// on lazy construction without metrics.
-pub fn global_gateway() -> &'static llm_gateway::LlmGateway {
+pub fn global_gateway() -> &'static llm_suite_gateway::LlmGateway {
     GATEWAY.get_or_init(|| {
-        let gateway = llm_gateway::LlmGateway::new();
+        let gateway = llm_suite_gateway::LlmGateway::new();
         match TOKEN_SINK.get() {
             Some(sink) => gateway.with_token_metrics(std::sync::Arc::new(sink.clone())),
             None => gateway,
@@ -56,8 +56,8 @@ impl GatewayMetricsSink {
     }
 }
 
-impl llm_client::TokenUsageSink for GatewayMetricsSink {
-    fn record_token_usage(&self, usage: &llm_types::llm::TokenUsageStats, model: Option<&str>) {
+impl llm_suite_client::TokenUsageSink for GatewayMetricsSink {
+    fn record_token_usage(&self, usage: &llm_suite_types::llm::TokenUsageStats, model: Option<&str>) {
         let model = model.unwrap_or("unknown");
         self.registry
             .counter("llm_gateway_tokens_prompt_total", &[("model", model)])
@@ -68,7 +68,7 @@ impl llm_client::TokenUsageSink for GatewayMetricsSink {
     }
 }
 
-impl llm_client::LlmMetricsSink for GatewayMetricsSink {
+impl llm_suite_client::LlmMetricsSink for GatewayMetricsSink {
     fn record_first_byte(&self, duration_ms: f64, model: Option<&str>) {
         let model = model.unwrap_or("unknown");
         self.registry
@@ -124,7 +124,7 @@ pub fn init_gateway(registry: &cce_metrics::MetricsRegistry) {
     let sink = GatewayMetricsSink::new(registry);
     let _ = TOKEN_SINK.set(sink.clone());
     let _ =
-        GATEWAY.set(llm_gateway::LlmGateway::new().with_token_metrics(std::sync::Arc::new(sink)));
+        GATEWAY.set(llm_suite_gateway::LlmGateway::new().with_token_metrics(std::sync::Arc::new(sink)));
 }
 
 /// Installs the process-wide gateway metrics sink.
@@ -158,12 +158,12 @@ pub fn full_endpoint_url(base_url: &str, endpoint_path: &str) -> String {
 
 /// Converts a per-minute provider budget into a token-bucket config.
 /// A zero budget means unlimited and yields no limiter.
-fn rate_limit_for(per_minute: u32) -> Option<llm_types::llm::RateLimitConfig> {
+fn rate_limit_for(per_minute: u32) -> Option<llm_suite_types::llm::RateLimitConfig> {
     if per_minute == 0 {
         return None;
     }
     let requests_per_second = f64::from(per_minute) / 60.0;
-    Some(llm_types::llm::RateLimitConfig {
+    Some(llm_suite_types::llm::RateLimitConfig {
         requests_per_second,
         burst: requests_per_second.ceil() as u32,
     })
@@ -188,14 +188,14 @@ fn resilience_from_parts(
     breaker: &cce_config::modules::CircuitBreakerConfig,
     max_retries: u32,
     retry_delay_ms: u64,
-) -> llm_client::Resilience {
+) -> llm_suite_client::Resilience {
     let gateway = global_gateway();
     let key = resilience_key(base_url, provider_id);
-    let mut stack = llm_client::Resilience::new();
+    let mut stack = llm_suite_client::Resilience::new();
     if breaker.enabled {
         stack = stack.with_breaker(gateway.shared_breaker(
             &key,
-            llm_client::CircuitBreakerConfig {
+            llm_suite_client::CircuitBreakerConfig {
                 min_samples: breaker.min_samples.max(1),
                 failure_threshold: f64::from(breaker.failure_ratio),
                 open_duration_ms: breaker.open_duration_ms.max(1),
@@ -208,7 +208,7 @@ fn resilience_from_parts(
         let burst = rps.ceil() as u32;
         stack = stack.with_limiter(gateway.shared_limiter(&key, rps, burst));
     }
-    stack = stack.with_retry(llm_common::retry::RetryPolicy {
+    stack = stack.with_retry(llm_suite_common::retry::RetryPolicy {
         max_retries,
         base_delay_ms: retry_delay_ms,
         exponential_backoff: true,
@@ -219,7 +219,7 @@ fn resilience_from_parts(
 /// Builds the shared resilience stack for an embedding model, registering
 /// its breaker and limiter under the same per-upstream key the chat path
 /// uses so one provider shares one set of protection components.
-pub fn embedding_resilience(resolved: &ResolvedEmbeddingConfig) -> llm_client::Resilience {
+pub fn embedding_resilience(resolved: &ResolvedEmbeddingConfig) -> llm_suite_client::Resilience {
     resilience_from_parts(
         &resolved.base_url,
         &resolved.provider_id,
@@ -231,7 +231,7 @@ pub fn embedding_resilience(resolved: &ResolvedEmbeddingConfig) -> llm_client::R
 }
 
 /// Builds the shared resilience stack for a rerank model.
-pub fn rerank_resilience(connection: &ResolvedLlmConnection) -> llm_client::Resilience {
+pub fn rerank_resilience(connection: &ResolvedLlmConnection) -> llm_suite_client::Resilience {
     resilience_from_parts(
         &connection.base_url,
         &connection.provider_id,
@@ -245,11 +245,11 @@ pub fn rerank_resilience(connection: &ResolvedLlmConnection) -> llm_client::Resi
 /// Converts the sampling-based CCE breaker settings into the llm-suite config.
 pub fn circuit_breaker_config(
     config: &cce_config::modules::CircuitBreakerConfig,
-) -> Option<llm_types::llm::CircuitBreakerConfig> {
+) -> Option<llm_suite_types::llm::CircuitBreakerConfig> {
     if !config.enabled {
         return None;
     }
-    Some(llm_types::llm::CircuitBreakerConfig {
+    Some(llm_suite_types::llm::CircuitBreakerConfig {
         min_samples: config.min_samples.max(1),
         failure_threshold: f64::from(config.failure_ratio),
         open_duration_ms: config.open_duration_ms.max(1),
@@ -257,7 +257,7 @@ pub fn circuit_breaker_config(
     })
 }
 
-fn metadata_from_headers(headers: &HashMap<String, String>) -> Option<llm_types::Metadata> {
+fn metadata_from_headers(headers: &HashMap<String, String>) -> Option<llm_suite_types::Metadata> {
     if headers.is_empty() {
         return None;
     }
@@ -271,7 +271,7 @@ fn metadata_from_headers(headers: &HashMap<String, String>) -> Option<llm_types:
 
 fn metadata_from_params(
     params: &HashMap<String, serde_json::Value>,
-) -> Option<llm_types::Metadata> {
+) -> Option<llm_suite_types::Metadata> {
     if params.is_empty() {
         return None;
     }
@@ -281,15 +281,15 @@ fn metadata_from_params(
 /// Builds the shared provider definition for a resolved connection.
 pub fn provider_definition(
     connection: &ResolvedLlmConnection,
-) -> llm_types::llm::LlmProviderDefinition {
-    llm_types::llm::LlmProviderDefinition {
+) -> llm_suite_types::llm::LlmProviderDefinition {
+    llm_suite_types::llm::LlmProviderDefinition {
         id: connection.provider_id.clone(),
         name: None,
         description: None,
         base_url: Some(connection.base_url.clone()),
         auth_type: None,
         default_headers: metadata_from_headers(&connection.extra_headers),
-        format: llm_types::llm::LlmFormat::OpenaiChat,
+        format: llm_suite_types::llm::LlmFormat::OpenaiChat,
         model_discovery: None,
         api_version: None,
         metadata: None,
@@ -313,11 +313,11 @@ pub fn chat_profile(
     model_key: &str,
     resolved: &ResolvedChatConfig,
     connection: &ResolvedLlmConnection,
-) -> llm_types::llm::LlmProfile {
-    llm_types::llm::LlmProfile {
+) -> llm_suite_types::llm::LlmProfile {
+    llm_suite_types::llm::LlmProfile {
         id: profile_id_for(model_key, ServiceType::Chat),
         name: model_key.to_string(),
-        format: llm_types::llm::LlmFormat::OpenaiChat,
+        format: llm_suite_types::llm::LlmFormat::OpenaiChat,
         provider_id: Some(connection.provider_id.clone()),
         model: resolved.model.clone(),
         api_key: connection.api_keys.first().cloned(),
@@ -375,8 +375,8 @@ pub fn rerank_endpoint_config(
     connection: &ResolvedLlmConnection,
     endpoint_url: impl Into<String>,
     model: impl Into<String>,
-) -> llm_rerank::RerankConfig {
-    let mut config = llm_rerank::RerankConfig::new(endpoint_url, model);
+) -> llm_suite_rerank::RerankConfig {
+    let mut config = llm_suite_rerank::RerankConfig::new(endpoint_url, model);
     config.timeout_secs = connection.timeout_secs;
     config.api_key = connection.api_keys.first().cloned();
     config.proxy = connection.proxy_url.clone();
@@ -395,8 +395,8 @@ pub fn generative_chat_endpoint(
     connection: &ResolvedLlmConnection,
     endpoint_url: impl Into<String>,
     model: impl Into<String>,
-) -> llm_rerank::GenerativeChatEndpoint {
-    let mut endpoint = llm_rerank::GenerativeChatEndpoint::new(endpoint_url, model);
+) -> llm_suite_rerank::GenerativeChatEndpoint {
+    let mut endpoint = llm_suite_rerank::GenerativeChatEndpoint::new(endpoint_url, model);
     endpoint.api_key = connection.api_keys.first().cloned();
     endpoint.proxy = connection.proxy_url.clone();
     endpoint.no_proxy = connection.no_proxy.clone();
@@ -449,8 +449,8 @@ fn map_rate_limit(message: String, retry_after_ms: Option<u64>) -> LlmError {
 }
 
 /// Converts a gateway chat error into the CCE error contract.
-pub fn map_chat_error(error: llm_codec::error::LlmError) -> LlmError {
-    use llm_codec::error::LlmError as SuiteError;
+pub fn map_chat_error(error: llm_suite_codec::error::LlmError) -> LlmError {
+    use llm_suite_codec::error::LlmError as SuiteError;
     match error {
         SuiteError::RateLimited { retry_after_ms } => {
             LlmError::RateLimitExceeded(retry_after_ms.unwrap_or(5000))
@@ -499,8 +499,8 @@ pub fn map_chat_error(error: llm_codec::error::LlmError) -> LlmError {
 }
 
 /// Converts an llm-suite embedding error into the CCE error contract.
-pub fn map_embedding_error(error: llm_embedding::EmbeddingError) -> LlmError {
-    use llm_embedding::EmbeddingError as SuiteError;
+pub fn map_embedding_error(error: llm_suite_embedding::EmbeddingError) -> LlmError {
+    use llm_suite_embedding::EmbeddingError as SuiteError;
     match error {
         SuiteError::Config(message) => LlmError::config(message),
         SuiteError::InvalidRequest(message) => LlmError::InvalidInput(message),
@@ -524,8 +524,8 @@ pub fn map_embedding_error(error: llm_embedding::EmbeddingError) -> LlmError {
 }
 
 /// Converts an llm-suite rerank error into the CCE error contract.
-pub fn map_rerank_error(error: llm_rerank::RerankError) -> LlmError {
-    use llm_rerank::RerankError as SuiteError;
+pub fn map_rerank_error(error: llm_suite_rerank::RerankError) -> LlmError {
+    use llm_suite_rerank::RerankError as SuiteError;
     match error {
         SuiteError::Config(message) => LlmError::config(message),
         SuiteError::InvalidRequest(message) => LlmError::InvalidInput(message),
@@ -548,16 +548,16 @@ pub fn map_rerank_error(error: llm_rerank::RerankError) -> LlmError {
     }
 }
 
-fn suite_role(role: &MessageRole) -> llm_types::message::MessageRole {
+fn suite_role(role: &MessageRole) -> llm_suite_types::message::MessageRole {
     match role {
-        MessageRole::System => llm_types::message::MessageRole::System,
-        MessageRole::User => llm_types::message::MessageRole::User,
-        MessageRole::Assistant => llm_types::message::MessageRole::Assistant,
+        MessageRole::System => llm_suite_types::message::MessageRole::System,
+        MessageRole::User => llm_suite_types::message::MessageRole::User,
+        MessageRole::Assistant => llm_suite_types::message::MessageRole::Assistant,
     }
 }
 
-fn generation_params(config: &ChatConfig) -> llm_types::llm::LlmGenerationParams {
-    let mut params = llm_types::llm::LlmGenerationParams {
+fn generation_params(config: &ChatConfig) -> llm_suite_types::llm::LlmGenerationParams {
+    let mut params = llm_suite_types::llm::LlmGenerationParams {
         temperature: Some(f64::from(config.temperature)),
         max_tokens: Some(config.max_tokens),
         top_p: Some(f64::from(config.top_p)),
@@ -571,11 +571,11 @@ fn generation_params(config: &ChatConfig) -> llm_types::llm::LlmGenerationParams
     }
     if let Some(format) = &config.response_format {
         let kind = if format.format_type.contains("json") {
-            llm_types::llm::ResponseFormatKind::JsonObject
+            llm_suite_types::llm::ResponseFormatKind::JsonObject
         } else {
-            llm_types::llm::ResponseFormatKind::Text
+            llm_suite_types::llm::ResponseFormatKind::Text
         };
-        params.response_format = Some(llm_types::llm::LlmResponseFormat {
+        params.response_format = Some(llm_suite_types::llm::LlmResponseFormat {
             kind: Some(kind),
             ..Default::default()
         });
@@ -610,12 +610,12 @@ impl LlmClient for SuiteChatClient {
         messages: &[Message],
         config: &ChatConfig,
     ) -> Result<ChatResult, LlmError> {
-        let request = llm_types::llm::LlmRequest {
+        let request = llm_suite_types::llm::LlmRequest {
             profile_id: self.profile_id.clone(),
             messages: messages
                 .iter()
                 .map(|message| {
-                    llm_types::message::Message::text(
+                    llm_suite_types::message::Message::text(
                         suite_role(&message.role),
                         message.content.as_str(),
                     )
@@ -632,6 +632,8 @@ impl LlmClient for SuiteChatClient {
             dead_loop_detection: None,
             protocol_auto_converted: None,
             timeout_ms: None,
+            prompt_caching: None,
+            cached_content: None,
         };
         let response = global_gateway()
             .generate(&request, None)
@@ -720,7 +722,7 @@ mod tests {
 
     #[test]
     fn chat_error_mapping_covers_contract_variants() {
-        use llm_codec::error::LlmError as SuiteError;
+        use llm_suite_codec::error::LlmError as SuiteError;
         assert!(matches!(
             map_chat_error(SuiteError::RateLimited {
                 retry_after_ms: Some(1500)

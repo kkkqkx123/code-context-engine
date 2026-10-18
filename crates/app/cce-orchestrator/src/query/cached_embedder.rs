@@ -116,8 +116,8 @@ impl<E: EmbeddingProvider> EmbeddingProvider for CachedEmbedder<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm_embedding::EmbeddingError;
-    use llm_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
+    use llm_suite_embedding::EmbeddingError;
+    use llm_suite_embedding::mock::{MockEmbeddingProvider, MockEmbeddingStep};
 
     type MockEmbedder = cce_llm_client::OpenAICompatibleProvider<MockEmbeddingProvider>;
 

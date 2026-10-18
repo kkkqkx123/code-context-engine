@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
+	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { onMount } from 'svelte';
@@ -57,9 +58,7 @@
 		</PageHeader>
 
 		{#if $healthState.error}
-			<div class="error-banner">
-				<span>{$healthState.error}</span>
-			</div>
+			<ErrorBanner message={$healthState.error} />
 		{/if}
 
 		<Card
@@ -162,7 +161,7 @@
 										? 'Present'
 										: 'Missing'}
 									variant={$healthState.qdrant.diagnostic.collection_exists
-										? 'active'
+										? 'success'
 										: 'warning'}
 								/>
 							</div>
@@ -236,7 +235,7 @@
 								<span class="kv-label">Enabled</span>
 								<Badge
 									label={$healthState.bm25.enabled ? 'Yes' : 'No'}
-									variant={$healthState.bm25.enabled ? 'active' : 'inactive'}
+									variant={$healthState.bm25.enabled ? 'success' : 'inactive'}
 								/>
 							</div>
 						{/if}
@@ -335,19 +334,6 @@
 {/if}
 
 <style>
-	.error-banner {
-		background: var(--danger);
-		color: var(--white);
-		padding: 0.75rem 1rem;
-		margin-bottom: 1.5rem;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		border: 1px solid var(--black);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.8rem;
-	}
-
 	.service-grid {
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
