@@ -201,6 +201,29 @@ pub(crate) fn api_routes() -> Router<AppState> {
             api_paths::METRICS_CLEANUP,
             delete(handlers::metrics::handle_cleanup_metrics),
         )
+        // Log management
+        .route(api_paths::LOGS, get(handlers::logs::handle_get_logs))
+        .route(
+            api_paths::LOGS_FILES,
+            get(handlers::logs::handle_list_log_files),
+        )
+        .route(
+            api_paths::LOGS_FILE_DOWNLOAD_TEMPLATE,
+            get(handlers::logs::handle_download_log_file),
+        )
+        .route(
+            api_paths::LOGS_FILE_TEMPLATE,
+            delete(handlers::logs::handle_delete_log_file),
+        )
+        .route(
+            api_paths::LOGS_ROTATE,
+            post(handlers::logs::handle_rotate_logs),
+        )
+        .route(
+            api_paths::LOGS_CONFIG,
+            get(handlers::logs::handle_get_log_config)
+                .put(handlers::logs::handle_update_log_config),
+        )
         // Watch (hot reload) - project-scoped
         .route(
             api_paths::WATCH_START_TEMPLATE,
@@ -244,6 +267,8 @@ pub(crate) fn api_routes() -> Router<AppState> {
             api_paths::QDRANT_PROCESS_RESTART,
             post(handlers::qdrant_admin::handle_qdrant_process_restart),
         )
+        // WebSocket log stream
+        .route(api_paths::LOGS_WS, get(handlers::logs::handle_ws_logs))
         // Search
         .route(api_paths::SEARCH, post(handlers::search::handle_search))
         // Aggregated search (multi-query with parallel retrieval)

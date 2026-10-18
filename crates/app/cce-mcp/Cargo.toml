@@ -24,6 +24,7 @@ tokio-util = "0.7"
 axum = { workspace = true }
 schemars = "1.0"
 cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-logging = { version = "0.1.0", path = "../../core/cce-logging" }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
 cce-server-shared = { version = "0.1.0", path = "../cce-server-shared" }
 cce-api = { version = "0.1.0", path = "../cce-api" }

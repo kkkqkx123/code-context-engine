@@ -506,6 +506,14 @@ output = "stdout"
 format = "pretty"
 # Log file path (required if output is "file")
 file = ""
+# Optional raw filter directives overriding level, e.g. "info,cce_server=debug"
+# filter = "info"
+# Maximum size of a single log file in megabytes before rotation
+# max_file_size_mb = 100
+# Maximum number of retained log files
+# max_files = 10
+# Maximum total size of the log directory in megabytes
+# max_total_size_mb = 1024
 
 [orchestrator]
 

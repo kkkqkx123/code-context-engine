@@ -24,6 +24,7 @@ pub mod health;
 pub mod index;
 #[cfg(feature = "admission")]
 pub mod ingest;
+pub mod logs;
 pub mod metrics;
 pub mod project;
 pub mod qdrant_admin;

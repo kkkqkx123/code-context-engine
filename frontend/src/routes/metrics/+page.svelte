@@ -4,6 +4,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { metricsApi, type AggregatedMetric } from '$lib/api/metrics';
@@ -54,9 +56,9 @@
 		return Number(value).toFixed(2);
 	}
 
-	function typeBadgeVariant(metricType: string): 'info' | 'active' | 'warning' {
+	function typeBadgeVariant(metricType: string): 'info' | 'success' | 'warning' {
 		if (metricType === 'counter') return 'info';
-		if (metricType === 'gauge') return 'active';
+		if (metricType === 'gauge') return 'success';
 		return 'warning';
 	}
 
@@ -177,13 +179,13 @@
 			</div>
 
 			{#if historyError}
-				<div class="inline-error">{historyError}</div>
+				<InlineError message={historyError} />
 			{:else if historyRows.length === 0}
-				<p class="loading-text">
-					{historyLoaded
+				<LoadingState
+					message={historyLoaded
 						? 'No metric records in the selected range'
 						: 'Loading metric history...'}
-				</p>
+				/>
 			{:else}
 				<div class="table-wrap">
 					<table>
@@ -243,13 +245,13 @@
 				{/if}
 			</div>
 			{#if prometheusError}
-				<div class="inline-error">{prometheusError}</div>
+				<InlineError message={prometheusError} />
 			{:else if prometheusText}
 				<pre class="prom-output">{prometheusText}</pre>
 			{:else}
-				<p class="loading-text">
-					Load the current Prometheus payload to inspect or copy it.
-				</p>
+				<LoadingState
+					message="Load the current Prometheus payload to inspect or copy it."
+				/>
 			{/if}
 		</Card>
 
@@ -284,7 +286,7 @@
 				<div class="inline-success">{cleanupMessage}</div>
 			{/if}
 			{#if cleanupError}
-				<div class="inline-error">{cleanupError}</div>
+				<InlineError message={cleanupError} />
 			{/if}
 		</Card>
 	</div>
@@ -458,15 +460,6 @@
 		gap: 1rem;
 	}
 
-	.inline-error {
-		margin-top: 1rem;
-		padding: 0.6rem 0.75rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-	}
-
 	.inline-success {
 		margin-top: 1rem;
 		padding: 0.6rem 0.75rem;
@@ -474,12 +467,6 @@
 		color: var(--success);
 		font-family: 'Space Mono', monospace;
 		font-size: 0.75rem;
-	}
-
-	.loading-text {
-		color: var(--gray-400);
-		font-style: italic;
-		padding: 1rem 0;
 	}
 
 	.dialog-overlay {

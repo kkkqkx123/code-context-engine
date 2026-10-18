@@ -26,6 +26,7 @@ cce-admission = { version = "0.1.0", path = "../cce-admission", optional = true 
 base64 = { version = "0.22", optional = true }
 zstd = { version = "0.13", optional = true }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-logging = { version = "0.1.0", path = "../../core/cce-logging" }
 cce-config = { version = "0.1.0", path = "../../core/cce-config" }
 cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 cce-metrics = { version = "0.1.0", path = "../../core/cce-metrics" }

@@ -8,6 +8,7 @@
 	import { onProjectChange } from '$lib/stores/project';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 
 	// Lazy load all heavy components
 	let EntityDetail: Component | null = $state(null);
@@ -309,7 +310,7 @@
 							onNavigate={handleNavigate}
 						/>
 					{:else}
-						<div class="loading-spinner">Loading graph...</div>
+						<LoadingState message="Loading graph..." />
 					{/if}
 				</Card>
 			{:else if currentTab === 'inheritance'}
@@ -323,7 +324,7 @@
 							onNavigate={handleNavigate}
 						/>
 					{:else}
-						<div class="loading-spinner">Loading tree...</div>
+						<LoadingState message="Loading tree..." />
 					{/if}
 				</Card>
 			{:else if currentTab === 'call-chain'}
@@ -623,13 +624,6 @@
 		font-style: italic;
 		text-align: center;
 		padding: 2rem;
-	}
-
-	.loading-spinner {
-		padding: 2rem;
-		text-align: center;
-		color: var(--gray-600);
-		font-family: 'Space Mono', monospace;
 	}
 
 	.loading-spinner-button {

@@ -8,4 +8,4 @@
 pub use cce_server_shared::{engine, maintenance, runtime};
 
 pub mod api;
-pub mod logger;
+pub use cce_logging as logger;

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use cce_config::Settings;
 use cce_config::modules::McpTransport;
+use cce_logging;
 use cce_server_shared::engine::CodeContextEngine;
 use cce_server_shared::state::AppState;
 use tokio_util::sync::CancellationToken;
@@ -16,13 +17,10 @@ fn main() -> anyhow::Result<()> {
     Settings::init_with_fallback(None);
 
     // MCP is a protocol server: logs must never touch stdout in stdio mode.
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Force stderr output while honoring configured level.
+    let mut logger_config = Settings::logger().unwrap_or_default();
+    logger_config.output = cce_config::global::LogOutput::Stderr;
+    let _ = cce_logging::init(&logger_config);
 
     let config = Settings::global()?.clone();
     let mcp_config = config.mcp.clone();

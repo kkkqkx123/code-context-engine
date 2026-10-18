@@ -8,6 +8,7 @@
 	import Button from '../ui/Button.svelte';
 	import ProgressBar from '../ui/ProgressBar.svelte';
 	import Badge from '../ui/Badge.svelte';
+	import InlineError from '../ui/InlineError.svelte';
 
 	// Form state
 	let incremental = $state(false);
@@ -42,7 +43,7 @@
 		<div class="progress-section">
 			<div class="progress-header">
 				<h3>Indexing in Progress</h3>
-				<Badge variant="active">{$indexState.phase || 'Processing'}</Badge>
+				<Badge variant="info">{$indexState.phase || 'Processing'}</Badge>
 			</div>
 
 			<ProgressBar progress={$indexState.progress} showLabel={true} />
@@ -58,7 +59,7 @@
 				<div class="error-info">
 					<span class="error-count">Errors: {$indexState.errorCount}</span>
 					{#if $indexState.lastError}
-						<p class="error-message">{$indexState.lastError}</p>
+						<InlineError message={$indexState.lastError} />
 					{/if}
 				</div>
 			{/if}
@@ -185,13 +186,6 @@
 		font-family: 'Space Grotesk', sans-serif;
 		font-weight: 700;
 		color: var(--danger);
-	}
-
-	.error-message {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		color: var(--gray-600);
-		margin-top: 0.5rem;
 	}
 
 	.progress-actions {

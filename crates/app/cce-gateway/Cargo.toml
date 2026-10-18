@@ -26,6 +26,8 @@ base64 = "0.22"
 cce-api = { version = "0.1.0", path = "../cce-api" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-logging = { version = "0.1.0", path = "../../core/cce-logging" }
 cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
 zstd = { workspace = true }
 chrono = { workspace = true }

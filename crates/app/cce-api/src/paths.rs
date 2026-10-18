@@ -78,6 +78,14 @@ pub const TOOLS_COMPRESS: &str = "/api/tools/compress";
 pub const TOOLS_COMPRESS_BATCH: &str = "/api/tools/compress/batch";
 pub const TOOLS_DIAGNOSE: &str = "/api/tools/diagnose";
 pub const TOOLS_FOLD: &str = "/api/tools/fold";
+
+pub const LOGS: &str = "/api/logs";
+pub const LOGS_FILES: &str = "/api/logs/files";
+pub const LOGS_FILE_TEMPLATE: &str = "/api/logs/files/{name}";
+pub const LOGS_FILE_DOWNLOAD_TEMPLATE: &str = "/api/logs/files/{name}/download";
+pub const LOGS_ROTATE: &str = "/api/logs/rotate";
+pub const LOGS_CONFIG: &str = "/api/logs/config";
+pub const LOGS_WS: &str = "/ws/logs";
 pub const TOOLS_FOLD_BATCH: &str = "/api/tools/fold/batch";
 pub const TOOLS_KEYWORD_SEARCH: &str = "/api/tools/keyword-search";
 pub const TOOLS_SYMBOLS: &str = "/api/tools/symbols";

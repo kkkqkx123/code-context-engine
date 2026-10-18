@@ -28,7 +28,9 @@ fn to_suite_fusion(strategy: &RerankFusionStrategy) -> llm_suite_rerank::RerankF
         RerankFusionStrategy::LinearWeighted { alpha } => {
             llm_suite_rerank::RerankFusionStrategy::LinearWeighted { alpha: *alpha }
         }
-        RerankFusionStrategy::Multiplicative => llm_suite_rerank::RerankFusionStrategy::Multiplicative,
+        RerankFusionStrategy::Multiplicative => {
+            llm_suite_rerank::RerankFusionStrategy::Multiplicative
+        }
         RerankFusionStrategy::ReciprocalRankFusion { k } => {
             llm_suite_rerank::RerankFusionStrategy::ReciprocalRankFusion { k: *k }
         }
@@ -130,7 +132,8 @@ impl<P: SuiteRerankProvider> RerankProvider for DelegatingRerankProvider<P> {
 }
 
 /// Production generative LLM reranking provider.
-pub type GenerativeRerankProvider = DelegatingRerankProvider<llm_suite_rerank::GenerativeRerankProvider>;
+pub type GenerativeRerankProvider =
+    DelegatingRerankProvider<llm_suite_rerank::GenerativeRerankProvider>;
 /// Production cross-encoder rerank provider using a dedicated endpoint.
 pub type CohereRerankProvider = DelegatingRerankProvider<llm_suite_rerank::CohereRerankProvider>;
 

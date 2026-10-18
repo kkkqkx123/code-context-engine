@@ -358,6 +358,18 @@ fn apply_logger_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
     if let Ok(val) = std::env::var("CCE_LOG_FILE") {
         config.logger.file = Some(val);
     }
+    if let Ok(val) = std::env::var("CCE_LOG_FILTER") {
+        config.logger.filter = Some(val);
+    }
+    if let Ok(val) = std::env::var("CCE_LOG_MAX_FILE_SIZE_MB") {
+        config.logger.max_file_size_mb = val.parse().ok();
+    }
+    if let Ok(val) = std::env::var("CCE_LOG_MAX_FILES") {
+        config.logger.max_files = val.parse().ok();
+    }
+    if let Ok(val) = std::env::var("CCE_LOG_MAX_TOTAL_SIZE_MB") {
+        config.logger.max_total_size_mb = val.parse().ok();
+    }
     Ok(())
 }
 

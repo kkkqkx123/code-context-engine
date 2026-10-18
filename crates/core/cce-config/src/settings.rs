@@ -184,6 +184,18 @@ impl Settings {
         Ok(Self::global()?.logger)
     }
 
+    /// Update logging configuration at runtime.
+    pub fn set_logger(config: super::global::LoggingConfig) -> Result<(), ConfigError> {
+        let lock = GLOBAL_CONFIG
+            .get()
+            .ok_or_else(|| ConfigError::Other("Configuration not initialized.".to_string()))?;
+        let mut guard = lock
+            .write()
+            .map_err(|e| ConfigError::Other(format!("Failed to acquire write lock: {}", e)))?;
+        guard.logger = config;
+        Ok(())
+    }
+
     /// Get scanner configuration
     ///
     /// Returns an error if configuration has not been initialized.

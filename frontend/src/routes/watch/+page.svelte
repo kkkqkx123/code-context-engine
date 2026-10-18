@@ -7,6 +7,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import { watchState, watchActions } from '$lib/stores/watch';
 
 	// Lazy load LogViewer component
@@ -162,7 +163,7 @@
 						<span class="live-dot" class:active={$watchState.isWatching}></span>
 						<Badge
 							label={$watchState.isWatching ? 'Active' : 'Inactive'}
-							variant={$watchState.isWatching ? 'active' : 'inactive'}
+							variant={$watchState.isWatching ? 'success' : 'inactive'}
 						/>
 					</div>
 					<div class="status-info">
@@ -212,7 +213,7 @@
 			{#if LogViewer}
 				<LogViewer events={$watchState.events} paused={isPaused} />
 			{:else}
-				<div class="loading-spinner">Loading log viewer...</div>
+				<LoadingState message="Loading log viewer..." />
 			{/if}
 		</Card>
 	</div>
@@ -308,7 +309,7 @@
 	}
 
 	.live-dot.active {
-		background: var(--accent);
+		background: var(--success);
 		animation: pulse 2s infinite;
 	}
 
@@ -346,13 +347,6 @@
 		font-size: 0.75rem;
 		color: var(--gray-600);
 		margin-left: auto;
-	}
-
-	.loading-spinner {
-		padding: 2rem;
-		text-align: center;
-		color: var(--gray-600);
-		font-family: 'Space Mono', monospace;
 	}
 
 	@media (max-width: 1024px) {

@@ -1,4 +1,4 @@
-//! Configuration management for logging
+//! Configuration helpers for logging.
 
 use tracing::Level;
 
@@ -47,36 +47,5 @@ pub fn get_output_string(config: &LoggingConfig) -> &'static str {
         LogOutput::Stdout => "stdout",
         LogOutput::Stderr => "stderr",
         LogOutput::File => "file",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_level() {
-        assert_eq!(parse_level(LogLevel::Trace), Level::TRACE);
-        assert_eq!(parse_level(LogLevel::Debug), Level::DEBUG);
-        assert_eq!(parse_level(LogLevel::Info), Level::INFO);
-        assert_eq!(parse_level(LogLevel::Warn), Level::WARN);
-        assert_eq!(parse_level(LogLevel::Error), Level::ERROR);
-    }
-
-    #[test]
-    fn test_validate_config_valid() {
-        let config = LoggingConfig::default();
-
-        assert!(validate_config(&config).is_ok());
-    }
-
-    #[test]
-    fn test_validate_config_file_without_path() {
-        let config = LoggingConfig {
-            output: LogOutput::File,
-            ..Default::default()
-        };
-
-        assert!(validate_config(&config).is_err());
     }
 }

@@ -26,7 +26,11 @@
 		| '/ops/retry-queue'
 		| '/metrics'
 		| '/tools'
-		| '/config';
+		| '/config'
+		| '/logs/realtime'
+		| '/logs/search'
+		| '/logs/files'
+		| '/logs/config';
 
 	interface NavItem {
 		href: NavHref;
@@ -54,6 +58,15 @@
 				{ href: '/entities', label: 'Entities' },
 				{ href: '/graph', label: 'Graph' },
 				{ href: '/summary', label: 'Summary' },
+			],
+		},
+		{
+			title: 'Logs',
+			items: [
+				{ href: '/logs/realtime', label: 'Realtime' },
+				{ href: '/logs/search', label: 'Search' },
+				{ href: '/logs/files', label: 'Files' },
+				{ href: '/logs/config', label: 'Config' },
 			],
 		},
 		{

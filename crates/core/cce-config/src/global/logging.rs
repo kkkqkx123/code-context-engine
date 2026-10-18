@@ -93,4 +93,36 @@ pub struct LoggingConfig {
     /// Empty string is treated as None
     #[serde(deserialize_with = "empty_string_as_none", default)]
     pub file: Option<String>,
+    /// Optional raw filter directives (e.g. "info,cce_server=debug").
+    /// When set, overrides `level`.
+    #[serde(default)]
+    pub filter: Option<String>,
+    /// Maximum size of a single log file in megabytes before rotation.
+    #[serde(default)]
+    pub max_file_size_mb: Option<u64>,
+    /// Maximum number of retained log files.
+    #[serde(default)]
+    pub max_files: Option<usize>,
+    /// Maximum total size of the log directory in megabytes.
+    #[serde(default)]
+    pub max_total_size_mb: Option<u64>,
+    /// Enable HTTP API for log management.
+    #[serde(default = "default_true")]
+    pub enable_http_api: bool,
+    /// WebSocket broadcast channel capacity.
+    #[serde(default = "default_ws_capacity")]
+    pub ws_capacity: usize,
+    /// In-memory ring buffer capacity for recent logs.
+    #[serde(default = "default_buffer_size")]
+    pub memory_buffer_size: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_ws_capacity() -> usize {
+    256
+}
+fn default_buffer_size() -> usize {
+    10000
 }

@@ -96,8 +96,8 @@ impl SuiteEmbeddingTransport<llm_suite_embedding::OpenAICompatibleProvider> {
             .iter()
             .map(|(key, value)| (key.clone(), query_string(value)))
             .collect();
-        let provider =
-            llm_suite_embedding::OpenAICompatibleProvider::new(config).map_err(map_embedding_error)?;
+        let provider = llm_suite_embedding::OpenAICompatibleProvider::new(config)
+            .map_err(map_embedding_error)?;
 
         let resilience = embedding_resilience(resolved);
         Ok(Self {

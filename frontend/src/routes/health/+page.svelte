@@ -3,6 +3,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { onMount } from 'svelte';
 	import { healthState, healthActions } from '$lib/stores/health';
@@ -124,11 +126,11 @@
 					</div>
 				{/if}
 			{:else}
-				<p class="loading-text">
-					{$healthState.isLoading
+				<LoadingState
+					message={$healthState.isLoading
 						? 'Loading health status...'
 						: 'No health data yet'}
-				</p>
+				/>
 			{/if}
 		</Card>
 
@@ -181,11 +183,11 @@
 							>
 						</div>
 						{#if $healthState.qdrant.diagnostic?.error}
-							<div class="kv-error">{$healthState.qdrant.diagnostic.error}</div>
+							<InlineError message={$healthState.qdrant.diagnostic.error} />
 						{/if}
 					</div>
 				{:else}
-					<p class="loading-text">Diagnostics not loaded</p>
+					<LoadingState message="Diagnostics not loaded" />
 				{/if}
 			</Card>
 
@@ -214,7 +216,7 @@
 						{/if}
 					</div>
 				{:else}
-					<p class="loading-text">Embedding health not loaded</p>
+					<LoadingState message="Embedding health not loaded" />
 				{/if}
 			</Card>
 
@@ -248,7 +250,7 @@
 						{/if}
 					</div>
 				{:else}
-					<p class="loading-text">BM25 health not loaded</p>
+					<LoadingState message="BM25 health not loaded" />
 				{/if}
 			</Card>
 		</div>
@@ -284,7 +286,7 @@
 					</Button>
 				</div>
 			{:else}
-				<p class="loading-text">Retry queue status not loaded</p>
+				<LoadingState message="Retry queue status not loaded" />
 			{/if}
 		</Card>
 	</div>
@@ -433,15 +435,6 @@
 		font-size: 0.7rem;
 	}
 
-	.kv-error {
-		margin-top: 0.5rem;
-		padding: 0.5rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.7rem;
-	}
-
 	.retry-row {
 		display: flex;
 		align-items: center;
@@ -467,12 +460,6 @@
 		margin-top: 1rem;
 		padding-top: 1rem;
 		border-top: 1px solid var(--gray-200);
-	}
-
-	.loading-text {
-		color: var(--gray-400);
-		font-style: italic;
-		padding: 1rem 0;
 	}
 
 	.dialog-overlay {

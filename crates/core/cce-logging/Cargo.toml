@@ -1,0 +1,19 @@
+[package]
+name = "cce-logging"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Unified logging infrastructure for Code Context Engine"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cce-config = { version = "0.1.0", path = "../cce-config" }
+cce-types = { version = "0.1.0", path = "../cce-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json", "registry"] }
+tracing-appender = { workspace = true }
+chrono = { workspace = true }

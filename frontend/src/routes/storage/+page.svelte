@@ -6,6 +6,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import LoadingState from '$lib/components/ui/LoadingState.svelte';
 	import { storageState, storageActions } from '$lib/stores/storage';
 	import { qdrantApi, type QdrantProcessStatus } from '$lib/api/qdrant';
 
@@ -162,7 +163,7 @@
 						{/if}
 					</div>
 				{:else}
-					<p class="loading-text">Loading storage status...</p>
+					<LoadingState message="Loading storage status..." />
 				{/if}
 			</div>
 
@@ -322,14 +323,6 @@
 	.spec-detail {
 		font-size: 0.85rem;
 		color: var(--gray-600);
-	}
-
-	.loading-text {
-		color: var(--gray-400);
-		font-style: italic;
-		grid-column: 1 / -1;
-		text-align: center;
-		padding: 2rem;
 	}
 
 	.disk-usage {

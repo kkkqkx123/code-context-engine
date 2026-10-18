@@ -3,6 +3,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import { searchApi, type EntitySearchResultItem } from '$lib/api/search';
 	import { entityState, entityActions } from '$lib/stores/entities';
 	import { currentProjectId, onProjectChange } from '$lib/stores/project';
@@ -155,7 +156,7 @@
 			</div>
 
 			{#if error}
-				<div class="inline-error">{error}</div>
+				<InlineError message={error} />
 			{:else if searched && results.length === 0}
 				<p class="placeholder-text">No entities matched the query.</p>
 			{:else if results.length > 0}
@@ -398,15 +399,6 @@
 		font-family: 'Space Mono', monospace;
 		font-size: 0.7rem;
 		color: var(--gray-500);
-	}
-
-	.inline-error {
-		margin-top: 1rem;
-		padding: 0.6rem 0.75rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
 	}
 
 	.placeholder-text {

@@ -3,6 +3,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import {
 		indexApi,
 		type IndexStatsResponse,
@@ -159,7 +160,7 @@
 			</Button>
 		</div>
 		{#if statsError}
-			<div class="inline-error">{statsError}</div>
+			<InlineError message={statsError} />
 		{:else if statsLoading}
 			<p class="stats-loading">Loading statistics...</p>
 		{:else if stats}
@@ -225,7 +226,7 @@
 			</p>
 		{/if}
 		{#if deleteFileError}
-			<div class="inline-error">{deleteFileError}</div>
+			<InlineError message={deleteFileError} />
 		{/if}
 		{#if deleteFileResult}
 			<div class="result-row">
@@ -264,7 +265,7 @@
 			<p class="arm-warning">Click again to permanently delete this entity.</p>
 		{/if}
 		{#if deleteEntityError}
-			<div class="inline-error">{deleteEntityError}</div>
+			<InlineError message={deleteEntityError} />
 		{/if}
 		{#if deleteEntityMessage}
 			<div class="result-row">
@@ -313,7 +314,7 @@
 			</p>
 		{/if}
 		{#if batchError}
-			<div class="inline-error">{batchError}</div>
+			<InlineError message={batchError} />
 		{/if}
 		{#if batchResult}
 			<div class="result-row">
@@ -429,15 +430,6 @@
 	.arm-warning {
 		margin: 0.5rem 0 0;
 		color: var(--warning);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
-	}
-
-	.inline-error {
-		margin-top: 0.75rem;
-		padding: 0.6rem 0.75rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
 		font-family: 'Space Mono', monospace;
 		font-size: 0.72rem;
 	}

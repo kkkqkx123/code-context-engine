@@ -17,8 +17,13 @@ async fn main() -> Result<()> {
     // Parse command line arguments
     let cli = Cli::parse();
 
-    // Initialize logger
-    tracing_subscriber::fmt::init();
+    // Initialize logger from configuration
+    let _ = cce_config::Settings::init_with_fallback(None);
+    if let Ok(cfg) = cce_config::Settings::logger() {
+        let _ = cce_logging::init(&cfg);
+    } else {
+        tracing_subscriber::fmt::init();
+    }
 
     // Execute command
     cli.execute().await

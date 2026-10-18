@@ -4,6 +4,7 @@ members = [
     # core
     "crates/core/cce-types",
     "crates/core/cce-config",
+    "crates/core/cce-logging",
     "crates/core/cce-utils",
     "crates/core/cce-metrics",
     "crates/core/cce-text",
@@ -98,7 +99,7 @@ tracing-appender = "0.2.4"
 
 # HTTP
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-axum = { version = "0.8.8", features = ["macros"] }
+axum = { version = "0.8.8", features = ["macros", "ws"] }
 
 # Tree-sitter
 tree-sitter = "0.26"

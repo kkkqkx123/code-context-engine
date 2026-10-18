@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { errorMessage } from '$lib/utils/errors';
 	import Button from '$lib/components/ui/Button.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import { toolsApi, type BatchFoldResponse } from '$lib/api/tools';
 
@@ -65,7 +66,7 @@
 
 <div class="tool-content">
 	{#if error}
-		<div class="error-message">{error}</div>
+		<InlineError message={error} />
 	{/if}
 
 	<div class="defaults">
@@ -202,14 +203,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
-	}
-
-	.error-message {
-		padding: 0.6rem 0.75rem;
-		border: 1px solid var(--danger);
-		color: var(--danger);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.72rem;
 	}
 
 	.defaults,

@@ -123,6 +123,10 @@ fn params_from(args: &Args) -> SyncParams {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let _ = cce_config::Settings::init_with_fallback(None);
+    if let Ok(cfg) = cce_config::Settings::logger() {
+        let _ = cce_logging::init(&cfg);
+    }
     let client = GatewayClient::new_with_token(&args.server, args.token.clone())?;
     let params = params_from(&args);
     if args.once {

@@ -57,7 +57,11 @@ impl GatewayMetricsSink {
 }
 
 impl llm_suite_client::TokenUsageSink for GatewayMetricsSink {
-    fn record_token_usage(&self, usage: &llm_suite_types::llm::TokenUsageStats, model: Option<&str>) {
+    fn record_token_usage(
+        &self,
+        usage: &llm_suite_types::llm::TokenUsageStats,
+        model: Option<&str>,
+    ) {
         let model = model.unwrap_or("unknown");
         self.registry
             .counter("llm_gateway_tokens_prompt_total", &[("model", model)])
@@ -123,8 +127,8 @@ impl llm_suite_client::LlmMetricsSink for GatewayMetricsSink {
 pub fn init_gateway(registry: &cce_metrics::MetricsRegistry) {
     let sink = GatewayMetricsSink::new(registry);
     let _ = TOKEN_SINK.set(sink.clone());
-    let _ =
-        GATEWAY.set(llm_suite_gateway::LlmGateway::new().with_token_metrics(std::sync::Arc::new(sink)));
+    let _ = GATEWAY
+        .set(llm_suite_gateway::LlmGateway::new().with_token_metrics(std::sync::Arc::new(sink)));
 }
 
 /// Installs the process-wide gateway metrics sink.
