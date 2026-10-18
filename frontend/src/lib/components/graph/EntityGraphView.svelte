@@ -15,7 +15,12 @@
 	} from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
 	import type { GraphElement } from '$lib/utils/graph-elements';
-	import { steppedZoom } from '$lib/utils/graph-viewport';
+	import {
+		fitGraphViewport,
+		zoomGraphViewport,
+		resetGraphViewport,
+		exportGraphPng,
+	} from '$lib/utils/graph-viewport';
 
 	interface Props {
 		elements?: GraphElement[];
@@ -43,35 +48,8 @@
 	);
 	let edgeCount = $derived(elements.length - nodeCount);
 
-	function fitViewport() {
-		cy?.fit(undefined, 40);
-	}
-
-	function zoomViewport(direction: number) {
-		if (!cy) return;
-		cy.zoom({
-			level: steppedZoom(cy.zoom(), direction),
-			renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
-		});
-	}
-
-	function resetViewport() {
-		if (!cy) return;
-		cy.zoom(1);
-		cy.center();
-	}
-
 	function relayout() {
 		cy?.layout(layoutOptions(layout)).run();
-	}
-
-	function exportPng() {
-		if (!cy) return;
-		const png = cy.png({ full: true, scale: 2, bg: '#ffffff' });
-		const link = document.createElement('a');
-		link.href = png;
-		link.download = 'entity-graph.png';
-		link.click();
 	}
 </script>
 
@@ -80,13 +58,13 @@
 		{nodeCount}
 		{edgeCount}
 		{layout}
-		onZoomIn={() => zoomViewport(1)}
-		onZoomOut={() => zoomViewport(-1)}
-		onFit={fitViewport}
-		onReset={resetViewport}
+		onZoomIn={() => zoomGraphViewport(cy, 1)}
+		onZoomOut={() => zoomGraphViewport(cy, -1)}
+		onFit={() => fitGraphViewport(cy)}
+		onReset={() => resetGraphViewport(cy)}
 		onRelayout={relayout}
 		onLayoutChange={(value) => (layout = value)}
-		onExportPng={exportPng}
+		onExportPng={() => exportGraphPng(cy)}
 	/>
 	<GraphCanvas
 		bind:cy

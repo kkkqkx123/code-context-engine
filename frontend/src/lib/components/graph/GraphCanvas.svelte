@@ -109,6 +109,8 @@
 		impactTransitive?: string[];
 		/** Case-insensitive substring used to highlight matching nodes. */
 		search?: string;
+		/** Whether a load/expand is in progress; shows a canvas overlay. */
+		loading?: boolean;
 		/** Whether to render the relation label on each edge. */
 		showEdgeLabels?: boolean;
 		/** Minimum canvas height in pixels; entity tabs use a compact value. */
@@ -132,6 +134,7 @@
 		impactTransitive = [],
 		search = '',
 		showEdgeLabels = false,
+		loading = false,
 		minHeight = 520,
 		onNodeSelect = () => {},
 		onNodeActivate = () => {},
@@ -353,14 +356,41 @@
 	});
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
 	class="graph-canvas"
 	bind:this={container}
 	role="application"
 	aria-label="Relation graph canvas"
+	tabindex="0"
+	onkeydown={(event) => {
+		if (!cy) return;
+		if (event.key === '+' || event.key === '=') {
+			event.preventDefault();
+			cy.zoom({
+				level: Math.min(GRAPH_MAX_ZOOM, cy.zoom() * 1.25),
+				renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+			});
+		} else if (event.key === '-') {
+			event.preventDefault();
+			cy.zoom({
+				level: Math.max(GRAPH_MIN_ZOOM, cy.zoom() / 1.25),
+				renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+			});
+		} else if (event.key === '0') {
+			event.preventDefault();
+			cy.fit(undefined, 40);
+		}
+	}}
 	style="min-height: {minHeight}px"
 >
-	{#if elements.length === 0}
+	{#if loading}
+		<div class="canvas-loading" role="status" aria-live="polite">
+			<span>Loading graph…</span>
+		</div>
+	{/if}
+	{#if elements.length === 0 && !loading}
 		<div class="canvas-empty">
 			<p>No graph data</p>
 			<span>Select an entity to explore its relationships</span>
@@ -404,6 +434,21 @@
 	.canvas-empty span {
 		font-family: 'Space Grotesk', sans-serif;
 		font-size: 0.85rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
+	}
+
+	.canvas-loading {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.6);
+		pointer-events: none;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
 	}
 </style>
