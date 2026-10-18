@@ -118,8 +118,8 @@ export const projectApi = {
 	// Get project details
 	getProject: (id: string): Promise<ProjectDetailResponse> =>
 		call(
-			client.GET('/api/project/{id}', {
-				params: { path: { id: Number(id) } },
+			client.GET('/api/project/{project_id}', {
+				params: { path: { project_id: Number(id) } },
 			}),
 		),
 
@@ -133,8 +133,8 @@ export const projectApi = {
 		data: UpdateProjectRequest,
 	): Promise<ProjectDetailResponse> =>
 		call(
-			client.PUT('/api/project/{id}', {
-				params: { path: { id } },
+			client.PUT('/api/project/{project_id}', {
+				params: { path: { project_id: id } },
 				body: data,
 			}),
 		),
@@ -142,32 +142,32 @@ export const projectApi = {
 	// Delete project
 	deleteProject: (id: string): Promise<ProjectDeleteResponse> =>
 		call(
-			client.DELETE('/api/project/{id}', {
-				params: { path: { id: Number(id) } },
+			client.DELETE('/api/project/{project_id}', {
+				params: { path: { project_id: Number(id) } },
 			}),
 		),
 
 	// Trigger project indexing
 	indexProject: (id: string): Promise<ProjectIndexResponse> =>
 		call(
-			client.POST('/api/project/{id}/index', {
-				params: { path: { id: Number(id) } },
+			client.POST('/api/project/{project_id}/index', {
+				params: { path: { project_id: Number(id) } },
 			}),
 		),
 
 	// Reload project configuration from file system
 	reloadProject: (id: string): Promise<ProjectConfigReloadResponse> =>
 		call(
-			client.POST('/api/project/{id}/reload', {
-				params: { path: { id: Number(id) } },
+			client.POST('/api/project/{project_id}/reload', {
+				params: { path: { project_id: Number(id) } },
 			}),
 		),
 
 	// Read merged project configuration (global defaults plus project overrides)
 	getProjectConfig: (id: string): Promise<ProjectConfigGetResponse> =>
 		call(
-			client.GET('/api/project/{id}/config', {
-				params: { path: { id: Number(id) } },
+			client.GET('/api/project/{project_id}/config', {
+				params: { path: { project_id: Number(id) } },
 			}),
 		),
 
@@ -177,8 +177,8 @@ export const projectApi = {
 		config: Record<string, unknown>,
 	): Promise<ProjectConfigUpdateResponse> =>
 		call(
-			client.PUT('/api/project/{id}/config', {
-				params: { path: { id: Number(id) } },
+			client.PUT('/api/project/{project_id}/config', {
+				params: { path: { project_id: Number(id) } },
 				body: { config },
 			}),
 		),

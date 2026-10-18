@@ -308,7 +308,8 @@ export const mockGraphNodes: GraphNode[] = [
 	{ id: '303', kind: 'struct', label: 'Config', source_file: 'crates/cce-config/src/model.rs', source_location: '4:0' }
 ];
 
-export const mockGraphEdges: GraphEdge[] = [
+/** Mock edges before the deterministic id is attached. */
+const rawGraphEdges: Omit<GraphEdge, 'edge_id'>[] = [
 	// main component: parser pipeline
 	{ source: '106', target: '105', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
 	{ source: '105', target: '107', relation: 'call.direct', domain: 'call', confidence: 'extracted', weight: 1 },
@@ -340,6 +341,13 @@ export const mockGraphEdges: GraphEdge[] = [
 	// cross-component config usage
 	{ source: '206', target: '303', relation: 'dependency.import.named', domain: 'dependency', confidence: 'inferred', weight: 0.6 }
 ];
+
+/** Mock edges with the deterministic backend id attached, mirroring
+ *  RelationType's `edge_id` field so mock payloads satisfy the contract. */
+export const mockGraphEdges: GraphEdge[] = rawGraphEdges.map((edge) => ({
+	...edge,
+	edge_id: `${edge.source}->${edge.target}@${edge.relation}`,
+}));
 
 const graphBase = { success: true, relation_epoch: 1 };
 

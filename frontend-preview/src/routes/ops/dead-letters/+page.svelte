@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import { deadLetterApi, type DeadLetterFileEntry } from '$lib/api/dead-letters';
+	import {
+		deadLetterApi,
+		type DeadLetterFileEntry,
+	} from '$lib/api/dead-letters';
 	import { deadLetterGuidance } from '$lib/dead-letter-actions';
 	import { toastActions } from '$lib/stores/toast';
 	import { ApiError } from '$lib/api/client';
@@ -17,9 +20,9 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let busy = $state(false);
-	let selected = $state<Set<string>>(new Set());
+	let selected = new SvelteSet<string>();
 	let ackTarget = $state<DeadLetterFileEntry | null>(null);
-	let expanded = $state<Set<string>>(new Set());
+	let expanded = new SvelteSet<string>();
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	// Follow the global project selection (sidebar/topbar ProjectSelector).
@@ -29,8 +32,8 @@
 		if (id !== lastLoadedProject) {
 			lastLoadedProject = id;
 			projectId = id;
-			selected = new Set();
-			expanded = new Set();
+			selected.clear();
+			expanded.clear();
 			load();
 		}
 	});
@@ -47,7 +50,9 @@
 			files = res.files;
 			// Drop selections that no longer exist in the list.
 			const paths = new Set(files.map((f) => f.file_path));
-			selected = new Set([...selected].filter((p) => paths.has(p)));
+			for (const p of [...selected]) {
+				if (!paths.has(p)) selected.delete(p);
+			}
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : String(e);
 		} finally {
@@ -68,35 +73,22 @@
 	}
 
 	function toggleSelect(path: string) {
-		const next = new Set(selected);
-		if (next.has(path)) next.delete(path);
-		else next.add(path);
-		selected = next;
+		if (selected.has(path)) selected.delete(path);
+		else selected.add(path);
 	}
 
 	function toggleSelectAll() {
-		selected =
-			selected.size === files.length ? new Set() : new Set(files.map((f) => f.file_path));
+		if (selected.size === files.length) {
+			selected.clear();
+		} else {
+			selected.clear();
+			for (const f of files) selected.add(f.file_path);
+		}
 	}
 
 	function toggleExpand(path: string) {
-		const next = new Set(expanded);
-		if (next.has(path)) next.delete(path);
-		else next.add(path);
-		expanded = next;
-	}
-
-	function reportMessage(m: {
-		retried?: number;
-		succeeded?: number;
-		still_failed?: number;
-		truncated_chunks?: number;
-		affected?: number;
-	}) {
-		if (m.retried !== undefined) {
-			return `retried ${m.retried}, succeeded ${m.succeeded}, still failed ${m.still_failed}, chunks truncated ${m.truncated_chunks}`;
-		}
-		return `acknowledged ${m.affected} module(s)`;
+		if (expanded.has(path)) expanded.delete(path);
+		else expanded.add(path);
 	}
 
 	async function runRetry(paths: string[]) {
@@ -136,7 +128,9 @@
 			try {
 				await deadLetterApi.acknowledge(projectId, path);
 			} catch (e) {
-				failures.push(`${path}: ${e instanceof ApiError ? e.message : String(e)}`);
+				failures.push(
+					`${path}: ${e instanceof ApiError ? e.message : String(e)}`,
+				);
 			}
 		}
 		busy = false;
@@ -178,7 +172,11 @@
 			title="Index Dead Letters"
 			subtitle="Permanently failed index modules requiring manual intervention"
 		>
-			<Button variant="secondary" onclick={load} disabled={loading || projectId === null}>
+			<Button
+				variant="secondary"
+				onclick={load}
+				disabled={loading || projectId === null}
+			>
 				Refresh
 			</Button>
 			<Button
@@ -195,11 +193,19 @@
 		{/if}
 
 		{#if projectId === null}
-			<Card><p class="empty">Select a project to inspect its dead letters.</p></Card>
+			<Card
+				><p class="empty">
+					Select a project to inspect its dead letters.
+				</p></Card
+			>
 		{:else if loading && files.length === 0}
 			<Card><p class="empty">Loading dead letters…</p></Card>
 		{:else if files.length === 0}
-			<Card><p class="empty">No dead letters. All index modules are healthy.</p></Card>
+			<Card
+				><p class="empty">
+					No dead letters. All index modules are healthy.
+				</p></Card
+			>
 		{:else}
 			<Card>
 				<div class="toolbar">
@@ -252,7 +258,10 @@
 									/>
 								</td>
 								<td>
-									<button class="file-link" onclick={() => toggleExpand(file.file_path)}>
+									<button
+										class="file-link"
+										onclick={() => toggleExpand(file.file_path)}
+									>
 										{file.file_path}
 									</button>
 									<span class="version">v{file.version}</span>
@@ -261,7 +270,9 @@
 									{#each file.modules as m (m.module)}
 										<span class="module-chip" class:acked={m.acknowledged}>
 											{m.module} ×{m.retry_count}
-											{#if m.truncated}<em title="already truncate-retried">T</em>{/if}
+											{#if m.truncated}<em title="already truncate-retried"
+													>T</em
+												>{/if}
 											{#if m.acknowledged}<em title="acknowledged">✓</em>{/if}
 										</span>
 									{/each}
@@ -269,7 +280,9 @@
 								<td class="guidance">{guidance.hint}</td>
 								<td class="actions">
 									<Button
-										variant={guidance.primary === 'retry' ? 'primary' : 'secondary'}
+										variant={guidance.primary === 'retry'
+											? 'primary'
+											: 'secondary'}
 										disabled={busy || pending.length === 0}
 										onclick={() => runRetry([file.file_path])}
 									>
@@ -292,7 +305,9 @@
 											<div class="module-detail">
 												<strong>{m.module}</strong>
 												<span class="code">{m.error_code ?? 'NO_CODE'}</span>
-												<span class="acked-flag">{m.acknowledged ? 'acknowledged' : 'pending'}</span>
+												<span class="acked-flag"
+													>{m.acknowledged ? 'acknowledged' : 'pending'}</span
+												>
 												<p>{m.error_message ?? '(no message)'}</p>
 											</div>
 										{/each}
@@ -308,13 +323,23 @@
 </div>
 
 {#if ackTarget}
-	<div class="modal-backdrop" role="presentation" onclick={() => (ackTarget = null)}>
+	<div
+		class="modal-backdrop"
+		role="presentation"
+		onclick={() => (ackTarget = null)}
+	>
 		<div class="modal" role="dialog" aria-modal="true">
 			<h3>Acknowledge dead letter?</h3>
 			<p>{ackConfirmMessage()}</p>
 			<div class="modal-actions">
-				<Button variant="secondary" onclick={() => (ackTarget = null)}>Cancel</Button>
-				<Button variant="danger" disabled={busy} onclick={() => runAcknowledge(ackTarget!.file_path)}>
+				<Button variant="secondary" onclick={() => (ackTarget = null)}
+					>Cancel</Button
+				>
+				<Button
+					variant="danger"
+					disabled={busy}
+					onclick={() => runAcknowledge(ackTarget!.file_path)}
+				>
 					Acknowledge
 				</Button>
 			</div>

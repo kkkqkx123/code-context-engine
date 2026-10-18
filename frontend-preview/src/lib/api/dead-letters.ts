@@ -8,8 +8,7 @@ import type { components } from './schema';
 
 export type DeadLetterModuleEntry =
 	components['schemas']['DeadLetterModuleEntry'];
-export type DeadLetterFileEntry =
-	components['schemas']['DeadLetterFileEntry'];
+export type DeadLetterFileEntry = components['schemas']['DeadLetterFileEntry'];
 export type DeadLetterListResponse =
 	components['schemas']['DeadLetterListResponse'];
 export type DeadLetterActionResponse =
@@ -18,8 +17,7 @@ export type RetryQueueStatus =
 	components['schemas']['RetryQueueStatusResponse'];
 export type RetryQueueDeadResponse =
 	components['schemas']['RetryQueueDeadResponse'];
-export type RetryQueueDeadEntry =
-	components['schemas']['RetryQueueDeadEntry'];
+export type RetryQueueDeadEntry = components['schemas']['RetryQueueDeadEntry'];
 export type RetryQueueDeadClearResponse =
 	components['schemas']['RetryQueueDeadClearResponse'];
 
@@ -27,8 +25,8 @@ export const deadLetterApi = {
 	// List dead-lettered files of a project
 	list: (projectId: number): Promise<DeadLetterListResponse> =>
 		call(
-			client.GET('/api/project/{id}/dead-letters', {
-				params: { path: { id: projectId } },
+			client.GET('/api/project/{project_id}/dead-letters', {
+				params: { path: { project_id: projectId } },
 			}),
 		),
 
@@ -38,8 +36,8 @@ export const deadLetterApi = {
 		files: string[],
 	): Promise<DeadLetterActionResponse> =>
 		call(
-			client.POST('/api/project/{id}/dead-letters/retry', {
-				params: { path: { id: projectId } },
+			client.POST('/api/project/{project_id}/dead-letters/retry', {
+				params: { path: { project_id: projectId } },
 				body: { files },
 			}),
 		),
@@ -51,8 +49,8 @@ export const deadLetterApi = {
 		module?: string,
 	): Promise<DeadLetterActionResponse> =>
 		call(
-			client.POST('/api/project/{id}/dead-letters/acknowledge', {
-				params: { path: { id: projectId } },
+			client.POST('/api/project/{project_id}/dead-letters/acknowledge', {
+				params: { path: { project_id: projectId } },
 				body: {
 					file_path: filePath,
 					...(module !== undefined ? { module } : {}),

@@ -13,13 +13,13 @@ import type {
 	ClassImplementationsResponse,
 	ClassInheritanceResponse,
 } from '$lib/api/entities';
+import { relationDomain } from './graph-domains';
 import {
 	edgeElementId,
-	relationDomain,
 	toElementEdge,
 	toElementNode,
 	type GraphElement,
-} from './graph-style';
+} from './graph-elements';
 import type { GraphEdge, GraphNode } from '$lib/api/graph';
 
 /** Relation value used for call chain edges. Maps to the call domain. */
@@ -70,6 +70,7 @@ export function callChainToElements(nodes: CallChainNode[]): GraphElement[] {
 			relation,
 			confidence: 'extracted',
 			domain: relationDomain(relation),
+			edge_id: edgeElementId({ source, target, relation }),
 		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) continue;
@@ -136,6 +137,7 @@ export function inheritanceToElements(
 			relation,
 			confidence: 'extracted',
 			domain: 'structural',
+			edge_id: edgeElementId({ source, target, relation }),
 		};
 		const id = edgeElementId(edge);
 		if (seenEdges.has(id)) return;

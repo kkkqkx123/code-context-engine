@@ -4,6 +4,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { searchApi, type EntitySearchResultItem } from '$lib/api/search';
+	import { entityState, entityActions } from '$lib/stores/entities';
 	import { currentProjectId, onProjectChange } from '$lib/stores/project';
 	import { get } from 'svelte/store';
 	import { errorMessage } from '$lib/utils/errors';
@@ -19,6 +20,8 @@
 	let loading = $state(false);
 	let searched = $state(false);
 	let error = $state<string | null>(null);
+	let classificationLimit = $state(50);
+	let classificationBusy = $state(false);
 
 	const KIND_OPTIONS = [
 		'function',
@@ -62,9 +65,31 @@
 			results = [];
 			searched = false;
 			error = null;
+			entityActions.clear();
 			if (query.trim()) void runSearch();
 		}),
 	);
+
+	async function runClassificationStats() {
+		classificationBusy = true;
+		try {
+			await entityActions.loadClassificationStats();
+		} finally {
+			classificationBusy = false;
+		}
+	}
+
+	async function runClassificationDetail(category: string) {
+		classificationBusy = true;
+		try {
+			await entityActions.loadRelationsByClassification(
+				category,
+				classificationLimit,
+			);
+		} finally {
+			classificationBusy = false;
+		}
+	}
 
 	function kindBadgeVariant(
 		kind: string,
@@ -190,6 +215,76 @@
 				<p class="placeholder-text">
 					Search the entity index by name. Results link to entity details with
 					call chains and relationships.
+				</p>
+			{/if}
+		</Card>
+
+		<Card
+			title="Classification"
+			subtitle="External-call classification counts and category detail"
+		>
+			<div class="search-bar">
+				<label class="kind-select-label" for="classification-limit">
+					Detail limit
+				</label>
+				<select
+					id="classification-limit"
+					class="kind-select"
+					bind:value={classificationLimit}
+					aria-label="Classification detail limit"
+				>
+					<option value={20}>20</option>
+					<option value={50}>50</option>
+					<option value={100}>100</option>
+				</select>
+				<Button
+					variant="secondary"
+					onclick={runClassificationStats}
+					disabled={classificationBusy}
+				>
+					{classificationBusy ? 'Loading...' : 'Load stats'}
+				</Button>
+			</div>
+
+			{#if $entityState.classificationStats}
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>
+								<th>Category</th>
+								<th>Count</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each Object.entries($entityState.classificationStats.stats) as [category, count] (category)}
+								<tr>
+									<td class="cell-mono">{category}</td>
+									<td class="cell-mono">{count}</td>
+									<td>
+										<Button
+											variant="secondary"
+											onclick={() => runClassificationDetail(category)}
+											disabled={classificationBusy}
+										>
+											Detail
+										</Button>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				<div class="result-meta">
+					{$entityState.classificationStats.total} classified relations
+					{#if $entityState.classificationCategory}
+						· showing {$entityState.classificationRelations.length} in
+						{$entityState.classificationCategory}
+					{/if}
+				</div>
+			{:else}
+				<p class="placeholder-text">
+					Load per-category counts, then drill into one category.
 				</p>
 			{/if}
 		</Card>

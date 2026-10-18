@@ -27,6 +27,9 @@ export type Diagnostic = components['schemas']['DiagnosticEntry'];
 export type AstNodeInfo = components['schemas']['AstNodeInfo'];
 export type FoldRequest = components['schemas']['FoldRequest'];
 export type FoldResponse = components['schemas']['FoldResponse'];
+export type BatchFoldItem = components['schemas']['BatchFoldItem'];
+export type BatchFoldRequest = components['schemas']['BatchFoldRequest'];
+export type BatchFoldResponse = components['schemas']['BatchFoldResponse'];
 export type SymbolInfo = components['schemas']['SymbolInfo'];
 export type GetSymsRequest = components['schemas']['GetSymbolsRequest'];
 export type FileSymbolResult = components['schemas']['FileSymbolResult'];
@@ -87,6 +90,10 @@ export const toolsApi = {
 	// Fold raw text into a symbol skeleton (stateless)
 	fold: (data: FoldRequest): Promise<FoldResponse> =>
 		call(client.POST('/api/tools/fold', { body: data })),
+
+	// Fold multiple raw texts in one batch (stateless)
+	foldBatch: (data: BatchFoldRequest): Promise<BatchFoldResponse> =>
+		call(client.POST('/api/tools/fold/batch', { body: data })),
 
 	// Extract symbols from files (project-scoped)
 	getSymbols: async (data: GetSymsRequest): Promise<GetSymbolsResult> => {

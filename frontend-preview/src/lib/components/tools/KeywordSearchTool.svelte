@@ -9,6 +9,8 @@
 	let query = $state('');
 	let termOperator = $state<'or' | 'and'>('or');
 	let topN = $state(10);
+	let offset = $state(0);
+	let epochText = $state('');
 	let result = $state<KeywordSearchResult | null>(null);
 	let loading = $state(false);
 	let error = $state('');
@@ -19,12 +21,21 @@
 		loading = true;
 		error = '';
 		result = null;
+		const trimmedEpoch = epochText.trim();
+		const epoch = trimmedEpoch === '' ? null : Number(trimmedEpoch);
+		if (epoch !== null && (!Number.isInteger(epoch) || epoch < 0)) {
+			error = 'Epoch must be a non-negative integer or empty for the current generation';
+			loading = false;
+			return;
+		}
 		try {
 			result = await toolsApi.keywordSearch({
 				project_id: get(currentProjectId),
 				query: q,
 				term_operator: termOperator,
 				top_n: topN,
+				offset,
+				epoch,
 			});
 		} catch (e) {
 			error = errorMessage(e) ?? 'Keyword search failed';
@@ -65,6 +76,21 @@
 				min="1"
 				max="100"
 				bind:value={topN}
+			/>
+		</label>
+		<label class="field field-narrow">
+			<span class="field-label">Offset</span>
+			<input class="text-input" type="number" min="0" bind:value={offset} />
+		</label>
+		<label class="field field-narrow">
+			<span class="field-label">Epoch</span>
+			<input
+				class="text-input"
+				type="text"
+				inputmode="numeric"
+				placeholder="auto"
+				bind:value={epochText}
+				aria-label="Index epoch for version-aware filtering, empty for current"
 			/>
 		</label>
 		<Button onclick={handleSearch} disabled={!query.trim() || loading}>

@@ -81,14 +81,15 @@
 	 * instance and calls Cytoscape methods directly via bind:cy.
 	 */
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM } from '$lib/utils/graph-viewport';
 	import type { Core, ElementDefinition, StylesheetStyle } from 'cytoscape';
+	import { graphStylesheet } from '$lib/utils/graph-stylesheet';
 	import {
-		graphStylesheet,
 		RELATION_DOMAIN_ORDER,
-		type GraphElement,
 		type RelationDomain,
-	} from '$lib/utils/graph-style';
+	} from '$lib/utils/graph-domains';
+	import { type GraphElement } from '$lib/utils/graph-elements';
 
 	// GraphLayoutName and layoutOptions are exported from <script module> above.
 
@@ -153,10 +154,14 @@
 		if (!cy) return;
 
 		cy.batch(() => {
-			cy!.elements().removeClass('focus dimmed impact impact-transitive selected incident');
+			cy!
+				.elements()
+				.removeClass('focus dimmed impact impact-transitive selected incident');
 
-			const direct = new Set(impactDirect);
-			const transitive = new Set(impactTransitive);
+			// SvelteSet keeps the reactive-context lint rule satisfied; these
+			// sets are scratch collections for Cytoscape decoration passes.
+			const direct = new SvelteSet(impactDirect);
+			const transitive = new SvelteSet(impactTransitive);
 
 			cy!.nodes().forEach((node) => {
 				const id = node.id();
@@ -169,7 +174,7 @@
 
 			const needle = search?.trim().toLowerCase() ?? '';
 			const searching = needle.length >= 2;
-			const matched = new Set<string>();
+			const matched = new SvelteSet<string>();
 			if (searching) {
 				cy!.nodes().forEach((node) => {
 					const label = String(node.data('label') ?? '').toLowerCase();
@@ -177,7 +182,10 @@
 					else node.addClass('dimmed');
 				});
 				cy!.edges().forEach((edge) => {
-					if (!matched.has(edge.source().id()) && !matched.has(edge.target().id())) {
+					if (
+						!matched.has(edge.source().id()) &&
+						!matched.has(edge.target().id())
+					) {
 						edge.addClass('dimmed');
 					}
 				});

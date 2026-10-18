@@ -8,6 +8,7 @@
 		| 'compress'
 		| 'diagnose'
 		| 'fold'
+		| 'fold-batch'
 		| 'symbols'
 		| 'references'
 		| 'definition'
@@ -19,6 +20,7 @@
 	let CompressionTool: Component | null = $state(null);
 	let DiagnosisTool: Component | null = $state(null);
 	let FoldTool: Component | null = $state(null);
+	let FoldBatchTool: Component | null = $state(null);
 	let SymbolLookupTool: Component | null = $state(null);
 	let ReferencesTool: Component | null = $state(null);
 	let DefinitionTool: Component | null = $state(null);
@@ -52,6 +54,13 @@
 		if (!FoldTool) {
 			const module = await import('$lib/components/tools/FoldTool.svelte');
 			FoldTool = module.default;
+		}
+	}
+
+	async function loadFoldBatchTool() {
+		if (!FoldBatchTool) {
+			const module = await import('$lib/components/tools/FoldBatchTool.svelte');
+			FoldBatchTool = module.default;
 		}
 	}
 
@@ -103,6 +112,8 @@
 			loadDiagnosisTool();
 		} else if (activeTab === 'fold') {
 			loadFoldTool();
+		} else if (activeTab === 'fold-batch') {
+			loadFoldBatchTool();
 		} else if (activeTab === 'symbols') {
 			loadSymbolLookupTool();
 		} else if (activeTab === 'references') {
@@ -150,6 +161,13 @@
 				onclick={() => (activeTab = 'fold')}
 			>
 				File Fold
+			</button>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'fold-batch'}
+				onclick={() => (activeTab = 'fold-batch')}
+			>
+				Batch Fold
 			</button>
 			<button
 				class="tab-btn"
@@ -223,6 +241,20 @@
 					<FoldTool language={foldLanguage} />
 				{:else}
 					<div class="loading-placeholder">Loading fold tool...</div>
+				{/if}
+			</Card>
+		{/if}
+
+		<!-- Batch Fold Tool -->
+		{#if activeTab === 'fold-batch'}
+			<Card
+				title="Batch Fold"
+				subtitle="Fold multiple raw texts in one request"
+			>
+				{#if FoldBatchTool}
+					<FoldBatchTool />
+				{:else}
+					<div class="loading-placeholder">Loading batch fold tool...</div>
 				{/if}
 			</Card>
 		{/if}

@@ -10,6 +10,9 @@
 	let line = $state(1);
 	let column = $state(1);
 	let symbol = $state('');
+	let contextLines = $state<number | null>(null);
+	let includeSnippet: boolean | null = $state(null);
+	let includeEntityInfo: boolean | null = $state(null);
 	let result = $state<FindReferencesResult | null>(null);
 	let loading = $state(false);
 	let error = $state('');
@@ -27,12 +30,21 @@
 				line,
 				column,
 				symbol: symbol.trim() || undefined,
+				context_lines: contextLines ?? undefined,
+				include_snippet: includeSnippet,
+				include_entity_info: includeEntityInfo,
 			});
 		} catch (e) {
 			error = errorMessage(e) ?? 'Find references failed';
 		} finally {
 			loading = false;
 		}
+	}
+
+	function triValue(raw: string): boolean | null {
+		if (raw === 'on') return true;
+		if (raw === 'off') return false;
+		return null;
 	}
 </script>
 
@@ -67,6 +79,53 @@
 				bind:value={symbol}
 				placeholder="authenticate"
 			/>
+		</label>
+		<label class="field field-narrow">
+			<span class="field-label">Context lines</span>
+			<input
+				class="text-input"
+				type="number"
+				min="0"
+				value={contextLines ?? ''}
+				oninput={(e) => {
+					const n = Number((e.target as HTMLInputElement).value);
+					contextLines = Number.isInteger(n) && n >= 0 ? n : null;
+				}}
+			/>
+		</label>
+		<label class="field field-narrow">
+			<span class="field-label">Snippets</span>
+			<select
+				class="text-input"
+				value={includeSnippet === true
+					? 'on'
+					: includeSnippet === false
+						? 'off'
+						: ''}
+				onchange={(e) =>
+					(includeSnippet = triValue((e.target as HTMLSelectElement).value))}
+			>
+				<option value="">Default</option>
+				<option value="on">On</option>
+				<option value="off">Off</option>
+			</select>
+		</label>
+		<label class="field field-narrow">
+			<span class="field-label">Entity info</span>
+			<select
+				class="text-input"
+				value={includeEntityInfo === true
+					? 'on'
+					: includeEntityInfo === false
+						? 'off'
+						: ''}
+				onchange={(e) =>
+					(includeEntityInfo = triValue((e.target as HTMLSelectElement).value))}
+			>
+				<option value="">Default</option>
+				<option value="on">On</option>
+				<option value="off">Off</option>
+			</select>
 		</label>
 		<Button onclick={handleFind} disabled={!filePath.trim() || loading}>
 			{#if loading}Searching...{:else}Find References{/if}

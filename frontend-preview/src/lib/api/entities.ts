@@ -23,6 +23,20 @@ export type ClassInheritanceResponse =
 export type InterfaceRelation = components['schemas']['InterfaceRelation'];
 export type ClassImplementationsResponse =
 	components['schemas']['ClassImplementationsResponse'];
+export type ClassificationStatsResponse =
+	components['schemas']['ClassificationStatsResponse'];
+
+/** Relation listing filter shared by calls, callers and call-chain. */
+export interface RelationFilter {
+	maxDepth?: number;
+	offset?: number;
+	limit?: number;
+	excludeTests?: boolean;
+	directoryPrefix?: string;
+	excludedFiles?: string[];
+	domains?: string;
+	includeExternal?: boolean;
+}
 
 export const entityApi = {
 	// Function details
@@ -37,10 +51,26 @@ export const entityApi = {
 		),
 
 	// Functions called by this function
-	getCalls: (projectId: number, id: string): Promise<FunctionCallsResponse> =>
+	getCalls: (
+		projectId: number,
+		id: string,
+		filter?: RelationFilter,
+	): Promise<FunctionCallsResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/function/{id}/calls', {
-				params: { path: { project_id: projectId, id } },
+				params: {
+					path: { project_id: projectId, id },
+					query: {
+						max_depth: filter?.maxDepth,
+						offset: filter?.offset,
+						limit: filter?.limit,
+						exclude_tests: filter?.excludeTests,
+						directory_prefix: filter?.directoryPrefix,
+						excluded_files: filter?.excludedFiles,
+						domains: filter?.domains,
+						include_external: filter?.includeExternal,
+					},
+				},
 			}),
 		),
 
@@ -48,10 +78,23 @@ export const entityApi = {
 	getCallers: (
 		projectId: number,
 		id: string,
+		filter?: RelationFilter,
 	): Promise<FunctionCallersResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/function/{id}/callers', {
-				params: { path: { project_id: projectId, id } },
+				params: {
+					path: { project_id: projectId, id },
+					query: {
+						max_depth: filter?.maxDepth,
+						offset: filter?.offset,
+						limit: filter?.limit,
+						exclude_tests: filter?.excludeTests,
+						directory_prefix: filter?.directoryPrefix,
+						excluded_files: filter?.excludedFiles,
+						domains: filter?.domains,
+						include_external: filter?.includeExternal,
+					},
+				},
 			}),
 		),
 
@@ -60,12 +103,23 @@ export const entityApi = {
 		projectId: number,
 		id: string,
 		direction: 'up' | 'down' = 'down',
+		filter?: RelationFilter,
 	): Promise<CallChainResponse> =>
 		call(
 			client.GET('/api/project/{project_id}/call-chain/{id}', {
 				params: {
 					path: { project_id: projectId, id },
-					query: { direction },
+					query: {
+						direction,
+						max_depth: filter?.maxDepth,
+						offset: filter?.offset,
+						limit: filter?.limit,
+						exclude_tests: filter?.excludeTests,
+						directory_prefix: filter?.directoryPrefix,
+						excluded_files: filter?.excludedFiles,
+						domains: filter?.domains,
+						include_external: filter?.includeExternal,
+					},
 				},
 			}),
 		),
@@ -106,5 +160,33 @@ export const entityApi = {
 			client.GET('/api/project/{project_id}/class/{id}/implementations', {
 				params: { path: { project_id: projectId, id } },
 			}),
+		),
+
+	// Counts of resolved relations grouped by external call classification
+	getClassificationStats: (
+		projectId: number,
+	): Promise<ClassificationStatsResponse> =>
+		call(
+			client.GET('/api/project/{project_id}/relations/classification/stats', {
+				params: { path: { project_id: projectId } },
+			}),
+		),
+
+	// Relations in one external call classification category
+	getRelationsByClassification: (
+		projectId: number,
+		classification: string,
+		limit?: number,
+	): Promise<unknown[]> =>
+		call(
+			client.GET(
+				'/api/project/{project_id}/relations/classification/{classification}',
+				{
+					params: {
+						path: { project_id: projectId, classification },
+						query: { limit },
+					},
+				},
+			),
 		),
 };

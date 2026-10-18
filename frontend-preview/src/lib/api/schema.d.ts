@@ -424,7 +424,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/project/{id}": {
+    "/api/project/{project_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -438,126 +438,6 @@ export interface paths {
         post?: never;
         /** Handle delete project request */
         delete: operations["handle_delete_project"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/{id}/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Handle read merged project config request */
-        get: operations["handle_get_project_config"];
-        /** Handle update project config request */
-        put: operations["handle_update_project_config"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/{id}/dead-letter/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Handle a manual dead-letter truncate-retry request */
-        post: operations["handle_dead_letter_retry"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/{id}/dead-letters": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List the dead-letter files of a project */
-        get: operations["handle_dead_letter_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/{id}/dead-letters/acknowledge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Acknowledge the dead letter(s) of one file so they leave the retry flow */
-        post: operations["handle_dead_letter_acknowledge"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/{id}/dead-letters/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run a dead-letter truncate-retry pass restricted to the requested files */
-        post: operations["handle_dead_letter_files_retry"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/{id}/index": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Handle project indexing request */
-        post: operations["handle_project_index"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/{id}/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Handle reload project config request (hot reload) */
-        post: operations["handle_reload_project_config"];
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -625,6 +505,75 @@ export interface paths {
         get: operations["handle_class_inheritance"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Handle read merged project config request */
+        get: operations["handle_get_project_config"];
+        /** Handle update project config request */
+        put: operations["handle_update_project_config"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/dead-letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the dead-letter files of a project */
+        get: operations["handle_dead_letter_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/dead-letters/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge the dead letter(s) of one file so they leave the retry flow */
+        post: operations["handle_dead_letter_acknowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/dead-letters/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a dead-letter truncate-retry pass restricted to the requested files */
+        post: operations["handle_dead_letter_files_retry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -873,6 +822,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/project/{project_id}/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle project indexing request */
+        post: operations["handle_project_index"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/project/{project_id}/relations/classification/stats": {
         parameters: {
             query?: never;
@@ -908,6 +874,23 @@ export interface paths {
         get: operations["get_relations_by_classification"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle reload project config request (hot reload) */
+        post: operations["handle_reload_project_config"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1158,7 +1141,7 @@ export interface paths {
         /**
          * Handle storage status request
          * @description Checks all storage components and returns their status.
-         *     Uses Qdrant's diagnose() method for comprehensive health assessment.
+         *     Uses vector diagnostics for comprehensive health assessment.
          */
         get: operations["handle_storage_status"];
         put?: never;
@@ -1422,6 +1405,8 @@ export interface components {
             exclude_content_types?: string[];
             /** @description Global exclude patterns */
             exclude_patterns?: string[];
+            /** @description Per-request relation-expansion opt-in, applied to the merged hits. */
+            expand?: boolean | null;
             /** @description Include only specific category values */
             include_categories?: string[];
             /** @description Global include patterns */
@@ -1436,6 +1421,11 @@ export interface components {
             project_id?: number | null;
             /** @description Project root path (optional if project_id is provided) */
             project_path?: string | null;
+            /**
+             * @description Query intent override applied to every sub-query.
+             *     Empty means auto-detect per sub-query text.
+             */
+            query_intent?: string | null;
             /** @description Per-request rerank max candidates override */
             rerank_max_candidates?: number | null;
             /** @description Decomposed sub-queries */
@@ -1722,7 +1712,7 @@ export interface components {
          * @description Whether a result carries its full body or a file-and-range reference.
          * @enum {string}
          */
-        ContentStateDto: "full" | "reference_over_limit" | "reference_file_missing" | "reference_file_level";
+        ContentStateDto: "full" | "reference_over_limit" | "reference_file_missing" | "reference_file_level" | "reference_chunk_missing";
         /** @description Create project request */
         CreateProjectRequest: {
             /** @description Directories to exclude */
@@ -1737,8 +1727,13 @@ export interface components {
             respect_gitignore?: boolean;
             /** @description Root directory path */
             root_path: string;
+            /**
+             * @description File supply mode: local or gateway. Remote templates set gateway
+             *     so the host refuses local watching and expects gateway events.
+             */
+            supply_mode?: string | null;
         };
-        /** @description Request body of `POST /api/project/{id}/dead-letters/acknowledge`. */
+        /** @description Request body of `POST /api/project/{project_id}/dead-letters/acknowledge`. */
         DeadLetterAcknowledgeRequest: {
             /** @description File path to acknowledge. */
             file_path: string;
@@ -1766,7 +1761,7 @@ export interface components {
              */
             version: number;
         };
-        /** @description Response of `GET /api/project/{id}/dead-letters`. */
+        /** @description Response of `GET /api/project/{project_id}/dead-letters`. */
         DeadLetterListResponse: {
             files: components["schemas"]["DeadLetterFileEntry"][];
             /** Format: int64 */
@@ -1793,23 +1788,10 @@ export interface components {
             /** @description Whether the module already went through a lossy truncate-retry. */
             truncated: boolean;
         };
-        /** @description Request body of `POST /api/project/{id}/dead-letters/retry`. */
+        /** @description Request body of `POST /api/project/{project_id}/dead-letters/retry`. */
         DeadLetterRetryRequest: {
             /** @description Restrict the retry pass to these file paths; empty means all candidates. */
             files?: string[];
-        };
-        /** @description Dead-letter truncate-retry response */
-        DeadLetterRetryResponse: {
-            message: string;
-            /** @description Files re-chunked from disk and re-stored. */
-            retried: number;
-            /** @description Files retried that failed again; they stay in the dead letter state. */
-            still_failed: number;
-            /** @description Files whose Embedding module succeeded after the truncate retry. */
-            succeeded: number;
-            success: boolean;
-            /** @description Chunks truncated during the retry. */
-            truncated_chunks: number;
         };
         /** @description Definition code with metadata */
         DefinitionCode: {
@@ -1948,6 +1930,11 @@ export interface components {
             depth?: number | null;
             /** Format: int64 */
             file_id: number;
+            /**
+             * @description Project-relative file path resolved from `file_id`. `None` when the
+             *     file row is missing, so callers without a second lookup stay actionable.
+             */
+            file_path?: string | null;
             /** Format: int64 */
             id: number;
             kind: string;
@@ -2184,7 +2171,10 @@ export interface components {
             relation_epoch: number;
             relation_info?: unknown;
             success: boolean;
-            /** @description Cycle count reported, before the `limit` cap. */
+            /**
+             * @description Detected count up to one probe past `limit`; a lower bound, not the
+             *     true project total. Equals the reported length unless truncated.
+             */
             total_cycles?: number;
             /** @description Whether more cycles exist than were reported. */
             truncated?: boolean;
@@ -2202,6 +2192,11 @@ export interface components {
              */
             call_context?: string | null;
             /**
+             * @description Call-site byte span for call-class edges; absent for non-call edges.
+             *     Edge counts are per call site when present, per entity pair otherwise.
+             */
+            callsite?: string | null;
+            /**
              * @description Conditional-compilation guard the calling entity carries, when it has
              *     one. The edge exists only under that predicate.
              */
@@ -2213,6 +2208,8 @@ export interface components {
              *     classification, frontend must not re-derive it from `relation`.
              */
             domain: string;
+            /** @description Stable edge identity over `(source, target, relation[, callsite])`. */
+            edge_id: string;
             /** @description True when the edge points outside the indexed project. */
             is_external?: boolean;
             relation: string;
@@ -2748,12 +2745,18 @@ export interface components {
             directory_prefix?: string | null;
             /** @description Per-request rerank override */
             enable_rerank?: boolean | null;
-            /** @description Exclude specific category values (e.g., ["test", "generated"]) */
+            /** @description Exclude specific category values (e.g., ["code", "config"]) */
             exclude_categories?: string[];
-            /** @description Content types to exclude (e.g., "test", "generated", "vendor") */
+            /** @description Content types to exclude (currently only "test" / "tests" is supported) */
             exclude_content_types?: string[];
             exclude_patterns?: string[];
-            /** @description Include only specific category values (e.g., ["test", "config"]) */
+            /**
+             * @description Per-request relation-expansion opt-in. When `Some(true)` the server
+             *     resolves call-graph neighbours for the top-N hits and annotates them
+             *     into `code_chunk`; `None` defers to the project configuration.
+             */
+            expand?: boolean | null;
+            /** @description Include only specific category values (e.g., ["code", "config"]) */
             include_categories?: string[];
             include_patterns?: string[];
             limit?: number;
@@ -2767,6 +2770,11 @@ export interface components {
             /** @description Project root path (optional if project_id is provided) */
             project_path?: string | null;
             query: string;
+            /**
+             * @description Query intent override ("semantic", "keyword", "hybrid", "entity").
+             *     Empty means auto-detect.
+             */
+            query_intent?: string | null;
             query_type?: string;
             /** @description Per-request rerank max candidates override */
             rerank_max_candidates?: number | null;
@@ -2796,6 +2804,8 @@ export interface components {
         };
         /** @description Search result item */
         SearchResultItem: {
+            /** @description Attached caller (backward) units. */
+            backward_nodes?: number;
             code_chunk: string;
             /** @description Whether `code_chunk` is the full body or a reference. */
             content_state?: components["schemas"]["ContentStateDto"];
@@ -2808,7 +2818,15 @@ export interface components {
             entity_ids?: number[];
             entity_names?: string[];
             entity_type?: string | null;
+            /** @description True when relation expansion attached at least one neighbour unit. */
+            expanded?: boolean;
+            /** @description Number of attached expansion units (forward + backward). */
+            expanded_nodes?: number;
             file_path: string;
+            /** @description Attached callee (forward) units. */
+            forward_nodes?: number;
+            /** @description Forward units dropped as directly inferable from the rendered body. */
+            omitted_self_evident?: number;
             /**
              * Format: float
              * @description Unified relevance score (post-fusion).
@@ -2816,6 +2834,11 @@ export interface components {
             score: number;
             /** @description Retrieval sources that contributed to this result (e.g. "vector", "bm25"). */
             sources?: string[];
+            /**
+             * @description Stable symbol IDs for the hit's entities, joinable against the graph
+             *     query interfaces. Empty when no relation snapshot is available.
+             */
+            stable_symbol_ids?: string[];
             /** Format: int32 */
             start_line: number;
         };
@@ -2976,6 +2999,8 @@ export interface components {
             name?: string | null;
             /** @description Whether to respect .gitignore */
             respect_gitignore?: boolean | null;
+            /** @description File supply mode: local or gateway. */
+            supply_mode?: string | null;
         };
         /** @description Watch status */
         WatchStatus: {
@@ -4117,7 +4142,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Project id */
-                id: number;
+                project_id: number;
             };
             cookie?: never;
         };
@@ -4167,7 +4192,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Project id or path */
-                id: string;
+                project_id: string;
             };
             cookie?: never;
         };
@@ -4221,7 +4246,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Project id */
-                id: number;
+                project_id: number;
             };
             cookie?: never;
         };
@@ -4234,391 +4259,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectDeleteResponse"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_get_project_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectConfigGetResponse"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_update_project_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProjectConfigUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectConfigUpdateResponse"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_dead_letter_retry: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeadLetterRetryResponse"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_dead_letter_list: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeadLetterListResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_dead_letter_acknowledge: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeadLetterAcknowledgeRequest"];
-            };
-        };
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeadLetterActionResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_dead_letter_files_retry: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeadLetterRetryRequest"];
-            };
-        };
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeadLetterActionResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_project_index: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectIndexResponse"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Resource not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    handle_reload_project_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Project id */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectConfigReloadResponse"];
                 };
             };
             /** @description Invalid request */
@@ -4905,6 +4545,241 @@ export interface operations {
             };
             /** @description Index unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_get_project_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectConfigGetResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_update_project_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectConfigUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectConfigUpdateResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_dead_letter_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterListResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_dead_letter_acknowledge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeadLetterAcknowledgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterActionResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_dead_letter_files_retry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeadLetterRetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeadLetterActionResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5788,6 +5663,56 @@ export interface operations {
             };
         };
     };
+    handle_project_index: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectIndexResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_classification_stats: {
         parameters: {
             query?: never;
@@ -5900,6 +5825,56 @@ export interface operations {
             };
             /** @description Index unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_reload_project_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectConfigReloadResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

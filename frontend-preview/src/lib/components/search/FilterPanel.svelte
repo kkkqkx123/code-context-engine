@@ -100,6 +100,38 @@
 			Number.isInteger(n) && n > 0 ? n : null,
 		);
 	}
+
+	const INTENT_CHOICES = [
+		{ value: '', label: 'Auto-detect' },
+		{ value: 'semantic', label: 'Semantic' },
+		{ value: 'keyword', label: 'Keyword' },
+		{ value: 'hybrid', label: 'Hybrid' },
+		{ value: 'entity', label: 'Entity' },
+	] as const;
+
+	function handleIntentChange(event: Event) {
+		const target = event.target as HTMLSelectElement;
+		searchActions.updateFilter('query_intent', target.value);
+	}
+
+	const EXPAND_CHOICES = [
+		{ value: 'default', label: 'Server default' },
+		{ value: 'on', label: 'On' },
+		{ value: 'off', label: 'Off' },
+	] as const;
+
+	function expandValue(): string {
+		if ($searchState.filters.expand === true) return 'on';
+		if ($searchState.filters.expand === false) return 'off';
+		return 'default';
+	}
+
+	function handleExpandChange(event: Event) {
+		const target = event.target as HTMLSelectElement;
+		const value =
+			target.value === 'on' ? true : target.value === 'off' ? false : null;
+		searchActions.updateFilter('expand', value);
+	}
 </script>
 
 <div class="filter-panel">
@@ -177,8 +209,8 @@
 			</button>
 			<p class="hint">
 				Leave all empty to auto-run BM25 + Vector on the main query. Each
-				sub-query may use its own text, type, and weight; filters below apply
-				to aggregated search as well.
+				sub-query may use its own text, type, and weight; filters below apply to
+				aggregated search as well.
 			</p>
 		</div>
 	{/if}
@@ -312,6 +344,35 @@
 				value={$searchState.filters.rerank_max_candidates ?? ''}
 				oninput={handleRerankMaxChange}
 			/>
+		</div>
+	</div>
+
+	<div class="filter-grid">
+		<div class="filter-section">
+			<label class="section-label" for="intent-select">Query Intent</label>
+			<select
+				id="intent-select"
+				value={$searchState.filters.query_intent}
+				onchange={handleIntentChange}
+			>
+				{#each INTENT_CHOICES as choice (choice.value)}
+					<option value={choice.value}>{choice.label}</option>
+				{/each}
+			</select>
+		</div>
+		<div class="filter-section">
+			<label class="section-label" for="expand-select"
+				>Call-graph Expansion</label
+			>
+			<select
+				id="expand-select"
+				value={expandValue()}
+				onchange={handleExpandChange}
+			>
+				{#each EXPAND_CHOICES as choice (choice.value)}
+					<option value={choice.value}>{choice.label}</option>
+				{/each}
+			</select>
 		</div>
 	</div>
 </div>

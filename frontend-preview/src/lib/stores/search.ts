@@ -58,6 +58,10 @@ export interface SearchFilters {
 	/** null = leave rerank at server default */
 	enable_rerank: boolean | null;
 	rerank_max_candidates: number | null;
+	/** Empty = auto-detect; otherwise semantic, keyword, hybrid, entity. */
+	query_intent: string;
+	/** null = leave expansion at server default */
+	expand: boolean | null;
 }
 
 export interface SearchState {
@@ -125,6 +129,8 @@ function filtersFromUrl(): SearchFilters {
 			include_patterns: '',
 			enable_rerank: null,
 			rerank_max_candidates: null,
+			query_intent: '',
+			expand: null,
 		};
 	}
 	const params = new URLSearchParams(window.location.search);
@@ -138,6 +144,8 @@ function filtersFromUrl(): SearchFilters {
 		include_patterns: params.get('incl_glob') ?? '',
 		enable_rerank: parseRerankParam(params.get('rerank')),
 		rerank_max_candidates: parsePositiveInt(params.get('rerank_n')),
+		query_intent: params.get('intent') ?? '',
+		expand: parseRerankParam(params.get('expand')),
 	};
 }
 
@@ -197,6 +205,10 @@ function syncUrl(state: SearchState) {
 		params.set('rerank', state.filters.enable_rerank ? 'on' : 'off');
 	if (state.filters.rerank_max_candidates !== null)
 		params.set('rerank_n', String(state.filters.rerank_max_candidates));
+	if (state.filters.query_intent)
+		params.set('intent', state.filters.query_intent);
+	if (state.filters.expand !== null)
+		params.set('expand', state.filters.expand ? 'on' : 'off');
 	window.history.replaceState(
 		null,
 		'',
@@ -204,7 +216,7 @@ function syncUrl(state: SearchState) {
 	);
 }
 
-function buildCommonFilterFields(state: SearchState) {
+export function buildCommonFilterFields(state: SearchState) {
 	return {
 		min_score: state.filters.min_score || undefined,
 		directory_prefix: state.filters.directory_prefix || undefined,
@@ -215,6 +227,8 @@ function buildCommonFilterFields(state: SearchState) {
 		include_patterns: parseGlobs(state.filters.include_patterns),
 		enable_rerank: state.filters.enable_rerank ?? undefined,
 		rerank_max_candidates: state.filters.rerank_max_candidates ?? undefined,
+		query_intent: state.filters.query_intent || undefined,
+		expand: state.filters.expand ?? undefined,
 	};
 }
 

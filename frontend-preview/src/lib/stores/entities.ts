@@ -11,6 +11,8 @@ import {
 	type FunctionCallersResponse,
 	type ClassInheritanceResponse,
 	type ClassImplementationsResponse,
+	type ClassificationStatsResponse,
+	type RelationFilter,
 } from '../api/entities';
 import { type CallChainNode } from '../api/search';
 import { currentProjectId } from './project';
@@ -28,6 +30,9 @@ export interface EntityState {
 	callPathLength: number;
 	inheritance: ClassInheritanceResponse | null;
 	implementations: ClassImplementationsResponse | null;
+	classificationStats: ClassificationStatsResponse | null;
+	classificationRelations: unknown[];
+	classificationCategory: string;
 	isLoading: boolean;
 	error: string | null;
 }
@@ -42,13 +47,16 @@ export const entityState = writable<EntityState>({
 	callPathLength: 0,
 	inheritance: null,
 	implementations: null,
+	classificationStats: null,
+	classificationRelations: [],
+	classificationCategory: '',
 	isLoading: false,
 	error: null,
 });
 
 // Actions
 export const entityActions = {
-	async loadFunction(id: string) {
+	async loadFunction(id: string, filter?: RelationFilter) {
 		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
 
 		try {
@@ -56,8 +64,8 @@ export const entityActions = {
 
 			const [func, calls, callers] = await Promise.all([
 				entityApi.getFunction(projId, id),
-				entityApi.getCalls(projId, id),
-				entityApi.getCallers(projId, id),
+				entityApi.getCalls(projId, id, filter),
+				entityApi.getCallers(projId, id, filter),
 			]);
 
 			entityState.update((s) => ({
@@ -105,11 +113,20 @@ export const entityActions = {
 		}
 	},
 
-	async loadCallChain(id: string, direction: 'up' | 'down' = 'down') {
+	async loadCallChain(
+		id: string,
+		direction: 'up' | 'down' = 'down',
+		filter?: RelationFilter,
+	) {
 		try {
 			const projId = get(currentProjectId);
 
-			const response = await entityApi.getCallChain(projId, id, direction);
+			const response = await entityApi.getCallChain(
+				projId,
+				id,
+				direction,
+				filter,
+			);
 			entityState.update((s) => ({ ...s, callChain: response.call_chain }));
 		} catch (error) {
 			console.error('Failed to load call chain:', error);
@@ -174,7 +191,65 @@ export const entityActions = {
 			callPathLength: 0,
 			inheritance: null,
 			implementations: null,
+			classificationStats: null,
+			classificationRelations: [],
+			classificationCategory: '',
 			error: null,
 		}));
+	},
+
+	/** Project-level external-call classification counts. */
+	async loadClassificationStats() {
+		entityState.update((s) => ({ ...s, isLoading: true, error: null }));
+		try {
+			const projId = get(currentProjectId);
+			const stats = await entityApi.getClassificationStats(projId);
+			entityState.update((s) => ({
+				...s,
+				classificationStats: stats,
+				isLoading: false,
+			}));
+			return stats;
+		} catch (error) {
+			console.error('Failed to load classification stats:', error);
+			entityState.update((s) => ({
+				...s,
+				isLoading: false,
+				error: 'Failed to load classification stats',
+			}));
+			return null;
+		}
+	},
+
+	/** Relations in one external-call classification category. */
+	async loadRelationsByClassification(classification: string, limit?: number) {
+		entityState.update((s) => ({
+			...s,
+			isLoading: true,
+			error: null,
+			classificationCategory: classification,
+		}));
+		try {
+			const projId = get(currentProjectId);
+			const relations = await entityApi.getRelationsByClassification(
+				projId,
+				classification,
+				limit,
+			);
+			entityState.update((s) => ({
+				...s,
+				classificationRelations: relations,
+				isLoading: false,
+			}));
+			return relations;
+		} catch (error) {
+			console.error('Failed to load classification relations:', error);
+			entityState.update((s) => ({
+				...s,
+				isLoading: false,
+				error: 'Failed to load classification relations',
+			}));
+			return null;
+		}
 	},
 };
