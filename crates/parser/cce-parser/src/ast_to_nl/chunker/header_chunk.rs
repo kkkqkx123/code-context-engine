@@ -239,7 +239,16 @@ fn process_path(
                 } else {
                     owner
                 };
-                continuation_for_block = format!("{} {}.", first.kind.kind_label(), display);
+                // Continuation blocks keep the group topic sentence ahead of
+                // the member identity so split halves and tiny merged members
+                // still carry file-level intent in vector space.
+                continuation_for_block = format!(
+                    "{} {}. {} {}.",
+                    ctx.group.kind.kind_label(),
+                    ctx.group.name,
+                    first.kind.kind_label(),
+                    display
+                );
                 &continuation_for_block
             } else {
                 &input.texts.continuation

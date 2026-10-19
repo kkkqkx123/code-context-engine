@@ -428,18 +428,39 @@ impl RegularGroupTemplate {
         member_desc: &str,
         _member: &cce_types::entity::GroupedEntity,
     ) -> bool {
-        // Method-signature summaries intentionally mention member names in the
-        // group description; only full-text subsumption marks a member redundant.
-        let group_norm = normalize_whitespace(group_desc).to_lowercase();
-        let member_norm = normalize_whitespace(member_desc).to_lowercase();
-        if !member_norm.is_empty()
-            && !group_norm.is_empty()
-            && (group_norm.contains(&member_norm) || member_norm.contains(&group_norm))
-        {
-            return true;
+        // Segment-scoped subsumption with no length-ratio threshold.
+        //
+        // Both texts are newline-joined segments (entity line, doc lines,
+        // relation/signature/calls lines, method summary). A member is
+        // redundant only when every one of its segments appears whole inside
+        // a single group segment. Shared boilerplate can never suppress a
+        // sibling that carries its own distinctive segment (e.g. read/write
+        // siblings share asserts and size checks but differ in the
+        // decode/encode branch), and a bare name mention in `Methods: ...`
+        // can never subsume a full member description because the kind label
+        // plus qualified name keeps the entity segment longer than the
+        // mention. A member that extends the group (extra calls/doc line) is
+        // always kept however short the extension is.
+        let group_segs = Self::desc_segments(group_desc);
+        let member_segs = Self::desc_segments(member_desc);
+        if group_segs.is_empty() || member_segs.is_empty() {
+            return false;
         }
+        member_segs
+            .iter()
+            .all(|m| group_segs.iter().any(|g| g.contains(m.as_str())))
+    }
 
-        false
+    /// Split a rendered description into comparable segments.
+    ///
+    /// The split happens before whitespace collapsing so a match can never
+    /// be stitched across segment boundaries; each segment is then
+    /// normalized identically (case-insensitive, whitespace-collapsed).
+    fn desc_segments(text: &str) -> Vec<String> {
+        text.split('\n')
+            .map(|seg| normalize_whitespace(seg).to_lowercase())
+            .filter(|seg| !seg.is_empty())
+            .collect()
     }
 
     /// Check if two texts are duplicates via substring matching.
@@ -1056,5 +1077,80 @@ mod tests {
             "literal rows must not leak into text, got: {}",
             member_desc
         );
+    }
+
+    fn dummy_member() -> cce_types::entity::GroupedEntity {
+        cce_types::entity::GroupedEntity {
+            id: cce_types::entity::EntityId(1),
+            name: "member".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_duplicate_member_suppresses_exact_duplicate() {
+        assert!(RegularGroupTemplate::is_duplicate_member(
+            "function foo.\nreturns x.",
+            "function foo.\nreturns x.",
+            &dummy_member(),
+        ));
+    }
+
+    #[test]
+    fn test_duplicate_member_keeps_read_write_siblings() {
+        // Shared boilerplate (asserts, size checks) must not suppress the
+        // sibling carrying the distinctive decode branch.
+        let group = "struct codec.\nassert size.\ncheck bounds.\nMethods: decode(); encode().";
+        let member = "function codec.decode.\nassert size.\ncheck bounds.\ndecode tag type.";
+        assert!(!RegularGroupTemplate::is_duplicate_member(
+            group,
+            member,
+            &dummy_member(),
+        ));
+    }
+
+    #[test]
+    fn test_duplicate_member_keeps_member_with_novel_segment() {
+        // A member that extends the group by even one short line (calls
+        // info) is never redundant, however small the extension is.
+        assert!(!RegularGroupTemplate::is_duplicate_member(
+            "function foo.\nreturns x.",
+            "function foo.\nreturns x.\ncalls: bar.",
+            &dummy_member(),
+        ));
+    }
+
+    #[test]
+    fn test_duplicate_member_suppresses_member_fully_covered_by_large_group() {
+        // Redundancy ignores group size: every member segment appears whole
+        // in some group segment, so the member adds nothing.
+        let group = "class c.\nfunction foo.\nreturns x.\nMethods: a(); b(); c(); d(); e(); f().";
+        assert!(RegularGroupTemplate::is_duplicate_member(
+            group,
+            "function foo.\nreturns x.",
+            &dummy_member(),
+        ));
+    }
+
+    #[test]
+    fn test_duplicate_member_methods_mention_does_not_subsume() {
+        // A bare name mention in the Methods summary must not subsume the
+        // full member description with kind label and qualified name.
+        assert!(!RegularGroupTemplate::is_duplicate_member(
+            "struct oncecell.\nmethods: get_mut().",
+            "method oncecell.get_mut.\nreturns a mutable reference.",
+            &dummy_member(),
+        ));
+    }
+
+    #[test]
+    fn test_duplicate_member_rejects_cross_segment_stitching() {
+        // Member segments must each fit inside a single group segment;
+        // sentences scattered across different group segments do not count.
+        assert!(!RegularGroupTemplate::is_duplicate_member(
+            "class c.\nreturns a.\nreturns b.",
+            "returns a. returns b.",
+            &dummy_member(),
+        ));
     }
 }

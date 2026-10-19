@@ -328,15 +328,13 @@ fn extract_clean_source(source: &str, start_byte: usize, end_byte: usize) -> Str
         .lines()
         .enumerate()
         .map(|(i, line)| {
-            let stripped = match line.find("//") {
-                Some(pos) => &line[..pos],
-                None => line,
-            };
-            let stripped = match stripped.find('#') {
-                Some(pos) => &stripped[..pos],
-                None => stripped,
-            };
-            let trimmed = stripped.trim_end();
+            // Protocol comments (`// TagType`, `// DataSize`, trailing
+            // `// AVCPacketType`) and preprocessor directives (`#define`,
+            // `#include`) carry field semantics for C-like languages and
+            // must survive into the embedding sidecar. Comment facts and
+            // docstring statements are already skipped by the caller, so
+            // keeping comment text here does not duplicate template output.
+            let trimmed = line.trim_end();
             if i == 0 {
                 format!("{}{}", " ".repeat(keyword_indent), trimmed)
             } else {
@@ -773,9 +771,11 @@ mod tests {
 
     #[test]
     fn test_extract_clean_source_strips_comments() {
+        // Protocol comments and trailing field notes are retrieval signals
+        // and must survive into the embedding sidecar.
         let source = "let x = 5; // initialize\nlet y = 10;";
         let result = extract_clean_source(source, 0, source.len());
-        assert!(!result.contains("//"), "should strip comments");
+        assert!(result.contains("// initialize"), "should keep comments");
         assert!(result.contains("let x = 5;"), "should keep code");
         assert!(result.contains("let y = 10;"), "should keep code");
     }
