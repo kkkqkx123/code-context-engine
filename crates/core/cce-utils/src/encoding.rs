@@ -18,6 +18,10 @@
 //! - Big5
 //! - Shift_JIS
 //!
+//! All encoding detection is delegated to the `encoding-guess` crate's
+//! multi-stage pipeline; this module adds a confidence-threshold gate and
+//! file-level convenience wrappers on top of it.
+//!
 //! # Example
 //!
 //! ```no_run

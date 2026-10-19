@@ -215,7 +215,7 @@ impl FileProcessor {
         if !sample.contains(&0x00) {
             return true;
         }
-        encoding_guess::stages::detect_utf16_shape(sample).is_some()
+        encoding_guess::detect_utf16_shape(sample).is_some()
     }
 
     /// Create IO error with context, preserving the original error kind

@@ -98,7 +98,7 @@ pub fn is_text_bytes(data: &[u8]) -> bool {
     if !sample.contains(&0) {
         return true;
     }
-    encoding_guess::stages::detect_utf16_shape(sample).is_some()
+    encoding_guess::detect_utf16_shape(sample).is_some()
 }
 
 /// Check if file is text file
