@@ -211,48 +211,11 @@ impl FileProcessor {
         }
 
         let check_len = content.len().min(check_size);
-        if !content[..check_len].contains(&0x00) {
+        let sample = &content[..check_len];
+        if !sample.contains(&0x00) {
             return true;
         }
-        Self::looks_like_utf16_without_bom(&content[..check_len])
-    }
-
-    /// Alternating-NUL shape with printable ASCII on the other parity.
-    /// Thresholds mirror the encoding detector so the pre-check and the
-    /// decoder agree on wide text instead of misclassifying it as binary.
-    fn looks_like_utf16_without_bom(sample: &[u8]) -> bool {
-        if sample.len() < 4 {
-            return false;
-        }
-        let mut nul_even = 0usize;
-        let mut nul_odd = 0usize;
-        let mut printable = 0usize;
-        let mut checked = 0usize;
-        for pair in sample.chunks_exact(2) {
-            let (a, b) = (pair[0], pair[1]);
-            if a == 0 {
-                nul_even += 1;
-            } else if matches!(a, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
-                printable += 1;
-            }
-            if b == 0 {
-                nul_odd += 1;
-            } else if matches!(b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
-                printable += 1;
-            }
-            checked += 1;
-        }
-        if checked == 0 {
-            return false;
-        }
-        let nul_total = nul_even + nul_odd;
-        if nul_total * 10 < checked * 4 {
-            return false;
-        }
-        if nul_even.max(nul_odd) * 10 < nul_total * 9 {
-            return false;
-        }
-        printable * 2 >= checked
+        encoding_guess::stages::detect_utf16_shape(sample).is_some()
     }
 
     /// Create IO error with context, preserving the original error kind

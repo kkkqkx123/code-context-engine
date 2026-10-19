@@ -87,10 +87,8 @@ const BINARY_EXTENSIONS: &[&str] = &[
 
 /// Byte-level text classification shared by local and remote supply paths.
 ///
-/// Empty input counts as text. Content without NUL bytes counts as text.
-/// Content with NUL bytes counts as text only when it has the alternating-NUL
-/// shape of BOM-less UTF-16 text with printable ASCII on the other parity,
-/// matching the encoding detector so the pre-check and the decoder agree.
+/// Empty input counts as text. Delegates the UTF-16 shape check to
+/// encoding-guess so the pre-check and the decoder agree.
 pub fn is_text_bytes(data: &[u8]) -> bool {
     if data.is_empty() {
         return true;
@@ -100,46 +98,7 @@ pub fn is_text_bytes(data: &[u8]) -> bool {
     if !sample.contains(&0) {
         return true;
     }
-    looks_like_utf16_without_bom(sample)
-}
-
-/// Alternating-NUL shape with printable ASCII on the other parity.
-///
-/// Thresholds mirror the encoding detector so wide text is not misclassified
-/// as binary.
-fn looks_like_utf16_without_bom(sample: &[u8]) -> bool {
-    if sample.len() < 4 {
-        return false;
-    }
-    let mut nul_even = 0usize;
-    let mut nul_odd = 0usize;
-    let mut printable = 0usize;
-    let mut checked = 0usize;
-    for pair in sample.chunks_exact(2) {
-        let (a, b) = (pair[0], pair[1]);
-        if a == 0 {
-            nul_even += 1;
-        } else if matches!(a, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
-            printable += 1;
-        }
-        if b == 0 {
-            nul_odd += 1;
-        } else if matches!(b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E) {
-            printable += 1;
-        }
-        checked += 1;
-    }
-    if checked == 0 {
-        return false;
-    }
-    let nul_total = nul_even + nul_odd;
-    if nul_total * 10 < checked * 4 {
-        return false;
-    }
-    if nul_even.max(nul_odd) * 10 < nul_total * 9 {
-        return false;
-    }
-    printable * 2 >= checked
+    encoding_guess::stages::detect_utf16_shape(sample).is_some()
 }
 
 /// Check if file is text file

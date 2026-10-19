@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
 use crate::encoding::error::Error;
-use crate::encoding::types::{DetectorConfig, EncodingResult, EncodingType, Result};
+use crate::encoding::types::{DetectorConfig, EncodingResult, Result};
 
 pub struct Detector {
     config: DetectorConfig,
@@ -17,19 +17,8 @@ impl Detector {
         Self::new(DetectorConfig::default())
     }
 
-    pub fn with_encodings(encodings: Vec<String>) -> Self {
-        let config = DetectorConfig {
-            detect_encodings: encodings,
-            ..Default::default()
-        };
-        Self::new(config)
-    }
-
     pub fn with_min_confidence(min_confidence: f64) -> Self {
-        let config = DetectorConfig {
-            min_confidence,
-            ..Default::default()
-        };
+        let config = DetectorConfig { min_confidence };
         Self::new(config)
     }
 
@@ -62,7 +51,6 @@ impl Detector {
                 Ok((path.clone(), result))
             })
             .collect();
-
         results
     }
 
@@ -103,16 +91,16 @@ impl Detector {
             return Ok(EncodingResult::new(bom_encoding, 1.0));
         }
 
-        if self.is_ascii(data) {
-            return Ok(EncodingResult::new("UTF-8", 1.0));
-        }
-
         // NUL-containing UTF-8 is technically valid, so a BOM-less UTF-16
         // file would otherwise be claimed as UTF-8 with mojibake. Check the
         // alternating-NUL shape before the UTF-8 fast path so the decoder
         // and the scanner pre-check agree on wide text.
         if let Some(wide) = Self::detect_utf16_without_bom(data) {
             return Ok(EncodingResult::new(wide, 0.85));
+        }
+
+        if self.is_ascii(data) {
+            return Ok(EncodingResult::new("UTF-8", 1.0));
         }
 
         if self.is_valid_utf8(data) {
@@ -124,10 +112,14 @@ impl Detector {
             return Ok(EncodingResult::new("UTF-8", confidence));
         }
 
-        self.heuristic_detect(data)
+        // Delegate remaining detection to encoding-guess, which applies
+        // byte-validity filtering and CJK gating instead of the legacy
+        // density-penalised heuristics.
+        let guess = encoding_guess::Guess::new().guess(data);
+        Ok(EncodingResult::new(guess.encoding, guess.confidence))
     }
 
-    fn detect_bom(&self, data: &[u8]) -> Option<String> {
+    pub fn detect_bom(&self, data: &[u8]) -> Option<String> {
         if data.len() >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
             return Some("UTF-8".to_string());
         }
@@ -142,51 +134,16 @@ impl Detector {
         None
     }
 
-    fn is_ascii(&self, data: &[u8]) -> bool {
+    pub fn is_ascii(&self, data: &[u8]) -> bool {
         data.iter().all(|&b| b <= 127)
     }
 
-    fn has_high_ascii(&self, data: &[u8]) -> bool {
+    pub fn has_high_ascii(&self, data: &[u8]) -> bool {
         data.iter().any(|&b| b > 127)
     }
 
-    fn is_valid_utf8(&self, data: &[u8]) -> bool {
+    pub fn is_valid_utf8(&self, data: &[u8]) -> bool {
         std::str::from_utf8(data).is_ok()
-    }
-
-    fn heuristic_detect(&self, data: &[u8]) -> Result<EncodingResult> {
-        let mut candidates = Vec::new();
-
-        for encoding_name in &self.config.detect_encodings {
-            if let Some(encoding_type) = EncodingType::parse(encoding_name) {
-                if let Some(confidence) = self.detect_encoding(data, encoding_type) {
-                    candidates.push((encoding_type, confidence));
-                }
-            }
-        }
-
-        if candidates.is_empty() {
-            // No multi-byte encoding matched: remaining high-byte text is
-            // most likely a single-byte Western encoding. WINDOWS-1252
-            // decodes every byte, so label it honestly at low confidence
-            // instead of mislabeling the bytes as UTF-8.
-            return Ok(EncodingResult::new("WINDOWS-1252", 0.3));
-        }
-
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        let best = &candidates[0];
-        Ok(EncodingResult::new(best.0.as_str(), best.1))
-    }
-
-    fn detect_encoding(&self, data: &[u8], encoding_type: EncodingType) -> Option<f64> {
-        match encoding_type {
-            EncodingType::GBK | EncodingType::GB18030 => self.detect_gbk(data),
-            EncodingType::Big5 => self.detect_big5(data),
-            EncodingType::ShiftJIS => self.detect_shift_jis(data),
-            EncodingType::Windows1252 => Self::detect_windows1252(data),
-            _ => None,
-        }
     }
 
     /// BOM-less UTF-16 shape: alternating NUL bytes with printable ASCII on
@@ -234,136 +191,6 @@ impl Detector {
             Some("UTF-16BE")
         }
     }
-
-    /// Single-byte Western text: high bytes outside CJK lead ranges with a
-    /// dense printable share. Capped below structured-encoding confidence
-    /// so CJK-looking data keeps its prior claim.
-    fn detect_windows1252(data: &[u8]) -> Option<f64> {
-        if data.is_empty() {
-            return None;
-        }
-        let mut printable = 0usize;
-        let mut high = 0usize;
-        for &b in data.iter().take(8192) {
-            if matches!(b, 0x09 | 0x0A | 0x0D | 0x20..=0x7E | 0xA0..=0xFF) {
-                printable += 1;
-            }
-            if b >= 0x80 {
-                high += 1;
-            }
-        }
-        let len = data.len().min(8192) as f64;
-        if high == 0 {
-            return None;
-        }
-        let ratio = printable as f64 / len;
-        if ratio < 0.7 {
-            return None;
-        }
-        Some((0.55 + 0.25 * ratio).min(0.8))
-    }
-
-    fn detect_gbk(&self, data: &[u8]) -> Option<f64> {
-        let mut valid_count = 0;
-        let mut total_multi_byte = 0;
-
-        let mut i = 0;
-        while i < data.len() {
-            if data[i] >= 0x81 && data[i] <= 0xFE {
-                total_multi_byte += 1;
-                if i + 1 < data.len() {
-                    let next = data[i + 1];
-                    if (0x40..=0x7E).contains(&next) || (0x80..=0xFE).contains(&next) {
-                        valid_count += 1;
-                        i += 2;
-                        continue;
-                    }
-                }
-            }
-            i += 1;
-        }
-
-        if total_multi_byte == 0 {
-            return None;
-        }
-
-        let ratio = valid_count as f64 / total_multi_byte as f64;
-        if ratio < 0.5 {
-            return None;
-        }
-
-        let density = (total_multi_byte * 2) as f64 / data.len() as f64;
-        let confidence = ratio * (0.5 + 0.5 * density);
-        Some(confidence.min(1.0))
-    }
-
-    fn detect_big5(&self, data: &[u8]) -> Option<f64> {
-        let mut valid_count = 0;
-        let mut total_multi_byte = 0;
-
-        let mut i = 0;
-        while i < data.len() {
-            if data[i] >= 0x81 && data[i] <= 0xFE {
-                total_multi_byte += 1;
-                if i + 1 < data.len() {
-                    let next = data[i + 1];
-                    if (0x40..=0x7E).contains(&next) || (0xA1..=0xFE).contains(&next) {
-                        valid_count += 1;
-                        i += 2;
-                        continue;
-                    }
-                }
-            }
-            i += 1;
-        }
-
-        if total_multi_byte == 0 {
-            return None;
-        }
-
-        let ratio = valid_count as f64 / total_multi_byte as f64;
-        if ratio < 0.5 {
-            return None;
-        }
-
-        let density = (total_multi_byte * 2) as f64 / data.len() as f64;
-        let confidence = ratio * (0.5 + 0.5 * density);
-        Some(confidence.min(1.0))
-    }
-
-    fn detect_shift_jis(&self, data: &[u8]) -> Option<f64> {
-        let mut valid_count = 0;
-        let mut total_multi_byte = 0;
-
-        let mut i = 0;
-        while i < data.len() {
-            if (data[i] >= 0x81 && data[i] <= 0x9F) || (data[i] >= 0xE0 && data[i] <= 0xEF) {
-                total_multi_byte += 1;
-                if i + 1 < data.len() {
-                    let next = data[i + 1];
-                    if (0x40..=0x7E).contains(&next) || (0x80..=0xFC).contains(&next) {
-                        valid_count += 1;
-                        i += 2;
-                        continue;
-                    }
-                }
-            }
-            i += 1;
-        }
-
-        if total_multi_byte == 0 {
-            return None;
-        }
-
-        let ratio = valid_count as f64 / total_multi_byte as f64;
-        if ratio < 0.5 {
-            return None;
-        }
-
-        let density = (total_multi_byte * 2) as f64 / data.len() as f64;
-        let confidence = ratio * (0.5 + 0.5 * density);
-        Some(confidence.min(1.0))
-    }
 }
 
 #[cfg(test)]
@@ -374,13 +201,6 @@ mod tests {
     fn test_detector_default() {
         let detector = Detector::with_default_config();
         assert_eq!(detector.config.min_confidence, 0.7);
-        assert_eq!(detector.config.detect_encodings.len(), 5);
-    }
-
-    #[test]
-    fn test_detector_with_encodings() {
-        let detector = Detector::with_encodings(vec!["UTF-8".to_string(), "GBK".to_string()]);
-        assert_eq!(detector.config.detect_encodings.len(), 2);
     }
 
     #[test]
@@ -510,32 +330,5 @@ mod tests {
         assert!(detector.is_valid_utf8(b"Hello World"));
         assert!(detector.is_valid_utf8("Hello, world.".as_bytes()));
         assert!(!detector.is_valid_utf8(&[0x80, 0x81, 0x82, 0x83]));
-    }
-
-    #[test]
-    fn test_detect_gbk() {
-        let detector = Detector::with_default_config();
-        let gbk_data = [0xC4, 0xE3, 0xBA, 0xC3];
-        let confidence = detector.detect_gbk(&gbk_data);
-        assert!(confidence.is_some());
-        assert!(confidence.expect("confidence should be Some") >= 0.5);
-    }
-
-    #[test]
-    fn test_detect_big5() {
-        let detector = Detector::with_default_config();
-        let big5_data = [0xA4, 0x40, 0xA4, 0x55];
-        let confidence = detector.detect_big5(&big5_data);
-        assert!(confidence.is_some());
-        assert!(confidence.expect("confidence should be Some") >= 0.5);
-    }
-
-    #[test]
-    fn test_detect_shift_jis() {
-        let detector = Detector::with_default_config();
-        let shift_jis_data = [0x82, 0xA0, 0x82, 0xA2];
-        let confidence = detector.detect_shift_jis(&shift_jis_data);
-        assert!(confidence.is_some());
-        assert!(confidence.expect("confidence should be Some") >= 0.5);
     }
 }

@@ -42,4 +42,4 @@ pub mod types;
 pub use detector::Detector;
 pub use encoder::Encoder;
 pub use error::Error;
-pub use types::{DetectorConfig, EncoderConfig, EncodingResult, EncodingType, Result};
+pub use types::{DetectorConfig, EncoderConfig, EncodingResult, Result};

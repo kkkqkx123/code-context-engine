@@ -25,20 +25,12 @@ impl EncodingResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectorConfig {
-    pub detect_encodings: Vec<String>,
     pub min_confidence: f64,
 }
 
 impl Default for DetectorConfig {
     fn default() -> Self {
         Self {
-            detect_encodings: vec![
-                "UTF-8".to_string(),
-                "GBK".to_string(),
-                "Big5".to_string(),
-                "Shift_JIS".to_string(),
-                "WINDOWS-1252".to_string(),
-            ],
             min_confidence: 0.7,
         }
     }
@@ -58,77 +50,6 @@ impl Default for EncoderConfig {
         }
     }
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum EncodingType {
-    UTF8,
-    UTF16LE,
-    UTF16BE,
-    GBK,
-    Big5,
-    ShiftJIS,
-    GB18030,
-    Windows1252,
-}
-
-impl EncodingType {
-    /// Parse encoding type from string name
-    pub fn parse(name: &str) -> Option<Self> {
-        match name.to_uppercase().as_str() {
-            "UTF-8" | "UTF8" => Some(Self::UTF8),
-            "UTF-16LE" | "UTF16LE" => Some(Self::UTF16LE),
-            "UTF-16BE" | "UTF16BE" => Some(Self::UTF16BE),
-            "GBK" => Some(Self::GBK),
-            "BIG5" => Some(Self::Big5),
-            "SHIFT_JIS" | "SHIFTJIS" => Some(Self::ShiftJIS),
-            "GB18030" => Some(Self::GB18030),
-            "WINDOWS-1252" | "WINDOWS1252" | "LATIN1" | "LATIN-1" | "ISO-8859-1" => {
-                Some(Self::Windows1252)
-            }
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::UTF8 => "UTF-8",
-            Self::UTF16LE => "UTF-16LE",
-            Self::UTF16BE => "UTF-16BE",
-            Self::GBK => "GBK",
-            Self::Big5 => "Big5",
-            Self::ShiftJIS => "Shift_JIS",
-            Self::GB18030 => "GB18030",
-            Self::Windows1252 => "WINDOWS-1252",
-        }
-    }
-
-    pub fn to_encoding_rs(&self) -> &'static encoding_rs::Encoding {
-        match self {
-            Self::UTF8 => encoding_rs::UTF_8,
-            Self::UTF16LE => encoding_rs::UTF_16LE,
-            Self::UTF16BE => encoding_rs::UTF_16BE,
-            Self::GBK | Self::GB18030 => encoding_rs::GBK,
-            Self::Big5 => encoding_rs::BIG5,
-            Self::ShiftJIS => encoding_rs::SHIFT_JIS,
-            Self::Windows1252 => encoding_rs::WINDOWS_1252,
-        }
-    }
-}
-
-impl std::fmt::Display for EncodingType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl std::str::FromStr for EncodingType {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("Unknown encoding: {}", s))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,13 +67,6 @@ mod tests {
     fn test_detector_config_default() {
         let config = DetectorConfig::default();
         assert_eq!(config.min_confidence, 0.7);
-        assert_eq!(config.detect_encodings.len(), 5);
-        assert!(config.detect_encodings.contains(&"UTF-8".to_string()));
-        assert!(
-            config
-                .detect_encodings
-                .contains(&"WINDOWS-1252".to_string())
-        );
     }
 
     #[test]
@@ -162,52 +76,11 @@ mod tests {
         assert!(!config.strict_mode);
     }
 
-    #[test]
-    fn test_encoding_type_parse() {
-        assert_eq!(EncodingType::parse("UTF-8"), Some(EncodingType::UTF8));
-        assert_eq!(EncodingType::parse("utf8"), Some(EncodingType::UTF8));
-        assert_eq!(EncodingType::parse("GBK"), Some(EncodingType::GBK));
-        assert_eq!(EncodingType::parse("Big5"), Some(EncodingType::Big5));
-        assert_eq!(
-            EncodingType::parse("Shift_JIS"),
-            Some(EncodingType::ShiftJIS)
-        );
-        assert_eq!(
-            EncodingType::parse("ShiftJIS"),
-            Some(EncodingType::ShiftJIS)
-        );
-        assert_eq!(EncodingType::parse("GB18030"), Some(EncodingType::GB18030));
-        assert_eq!(
-            EncodingType::parse("WINDOWS-1252"),
-            Some(EncodingType::Windows1252)
-        );
-        assert_eq!(
-            EncodingType::parse("latin1"),
-            Some(EncodingType::Windows1252)
-        );
-        assert_eq!(EncodingType::parse("UNKNOWN"), None);
-    }
 
-    #[test]
-    fn test_encoding_type_from_str() {
-        use std::str::FromStr;
-        assert!(EncodingType::from_str("UTF-8").is_ok());
-        assert!(EncodingType::from_str("UNKNOWN").is_err());
-    }
 
-    #[test]
-    fn test_encoding_type_as_str() {
-        assert_eq!(EncodingType::UTF8.as_str(), "UTF-8");
-        assert_eq!(EncodingType::UTF16LE.as_str(), "UTF-16LE");
-        assert_eq!(EncodingType::GBK.as_str(), "GBK");
-        assert_eq!(EncodingType::Big5.as_str(), "Big5");
-        assert_eq!(EncodingType::ShiftJIS.as_str(), "Shift_JIS");
-        assert_eq!(EncodingType::Windows1252.as_str(), "WINDOWS-1252");
-    }
 
-    #[test]
-    fn test_encoding_type_display() {
-        assert_eq!(format!("{}", EncodingType::UTF8), "UTF-8");
-        assert_eq!(format!("{}", EncodingType::GBK), "GBK");
-    }
+
+
+
+
 }
