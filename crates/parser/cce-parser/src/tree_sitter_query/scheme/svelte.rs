@@ -102,55 +102,54 @@ pub fn entity_query() -> &'static str {
 
 ; {#if ...} block
 (if_statement
-  (if_start_expr) @entity.if.start
-  (else_if_statement)* @entity.if.else_if
-  (else_statement
-    (else_expr) @entity.else.start
-    (if_end_expr) @entity.if.end
+  (if_start) @entity.if.start
+  (else_if_block)* @entity.if.else_if
+  (else_block
+    (else_start) @entity.else.start
   )? @entity.else
+  (if_end) @entity.if.end
 ) @entity.if
 
-; {:else if ...} block inside else_if_statement
-(else_if_statement
-  (else_if_expr) @entity.else_if.start
+; {:else if ...} block inside else_if_block
+(else_if_block
+  (else_if_start) @entity.else_if.start
 ) @entity.else_if
 
 ; {#each ...} block
 (each_statement
-  (each_start_expr) @entity.each.start
-  (each_end_expr) @entity.each.end
+  (each_start) @entity.each.start
+  (each_end) @entity.each.end
 ) @entity.each
 
 ; {:else} inside each (no items)
-(else_each_statement
-  (else_expr) @entity.each.else.start
-  (each_end_expr) @entity.each.else.end
+(else_block
+  (else_start) @entity.each.else.start
 ) @entity.each.else
 
 ; {#await ...} block
 (await_statement
-  (await_start_expr) @entity.await.start
-  (then_statement)* @entity.await.then
-  (catch_statement
-    (catch_expr) @entity.catch.start
-    (await_end_expr) @entity.await.end
+  (await_start) @entity.await.start
+  (then_block)* @entity.await.then
+  (catch_block
+    (catch_start) @entity.catch.start
   )? @entity.catch
+  (await_end) @entity.await.end
 ) @entity.await
 
 ; {:then} block
-(then_statement
-  (then_expr) @entity.then.start
+(then_block
+  (then_start) @entity.then.start
 ) @entity.then
 
 ; {:catch} block
-(catch_statement
-  (catch_expr) @entity.catch.start
+(catch_block
+  (catch_start) @entity.catch.start
 ) @entity.catch
 
 ; {#key ...} block
 (key_statement
-  (key_start_expr) @entity.key.start
-  (key_end_expr) @entity.key.end
+  (key_start) @entity.key.start
+  (key_end) @entity.key.end
 ) @entity.key
 
 ; ============================================
@@ -175,7 +174,7 @@ pub fn entity_query() -> &'static str {
 (quoted_attribute_value) @entity.attribute.quoted_value
 
 ; Expression attribute value (unquoted expression)
-(expr_attribute_value
+(attribute_value
   (expression) @entity.attribute.expr_value
 ) @entity.attribute.expr
 
@@ -275,13 +274,13 @@ pub fn entity_query() -> &'static str {
 (raw_text) @entity.raw_text
 
 ; Raw text expression (inside blocks)
-(raw_text_expr) @entity.raw_text_expr
+(svelte_raw_text) @entity.svelte_raw_text
 
 ; Raw text await (inside await block)
-(raw_text_await) @entity.raw_text_await
+(svelte_raw_text) @entity.svelte_raw_text
 
 ; Raw text each (inside each block)
-(raw_text_each) @entity.raw_text_each
+(svelte_raw_text) @entity.svelte_raw_text
 "#
 }
 
@@ -353,12 +352,12 @@ pub fn structural_query() -> &'static str {
 
 ; Element binding (bind:this) - a template reference.
 ; The bound value is an expression (`{el}`), which the Svelte grammar
-; parses as `expr_attribute_value`; the inner `raw_text_expr` holds the
+; parses as `attribute_value`; the inner `svelte_raw_text` holds the
 ; bare identifier without the braces.
 (attribute
   (attribute_name) @entity.template_reference.name
   (#eq? @entity.template_reference.name "bind:this")
-  (expr_attribute_value (expression (raw_text_expr) @entity.template_reference.value))
+  (expression (svelte_raw_text) @entity.template_reference.value)
 ) @entity.template_reference
 
 ; ============================================
@@ -407,28 +406,28 @@ pub fn structural_query() -> &'static str {
 
 ; If statement contains content
 (if_statement
-  (if_start_expr) @entity.control.flow.if.start
+  (if_start) @entity.control.flow.if.start
   (expression) @entity.control.flow.if.condition
-  (raw_text_expr)? @entity.control.flow.if.content
-  (else_if_statement)* @entity.control.flow.if.else_if
-  (else_statement)? @entity.control.flow.if.else
+  (svelte_raw_text)? @entity.control.flow.if.content
+  (else_if_block)* @entity.control.flow.if.else_if
+  (else_block)? @entity.control.flow.if.else
 ) @entity.control.flow.if.block
 
 ; Each statement contains content
 (each_statement
-  (each_start_expr) @entity.control.flow.each.start
+  (each_start) @entity.control.flow.each.start
   (expression) @entity.control.flow.each.collection
-  (raw_text_each)? @entity.control.flow.each.content
-  (else_each_statement)? @entity.control.flow.each.empty
+  (svelte_raw_text)? @entity.control.flow.each.content
+  (else_block)? @entity.control.flow.each.empty
 ) @entity.control.flow.each.block
 
 ; Await statement contains content
 (await_statement
-  (await_start_expr) @entity.control.flow.await.start
+  (await_start) @entity.control.flow.await.start
   (expression) @entity.control.flow.await.promise
-  (raw_text_await)? @entity.control.flow.await.pending
-  (then_statement)? @entity.control.flow.await.resolved
-  (catch_statement)? @entity.control.flow.await.rejected
+  (svelte_raw_text)? @entity.control.flow.await.pending
+  (then_block)? @entity.control.flow.await.resolved
+  (catch_block)? @entity.control.flow.await.rejected
 ) @entity.control.flow.await.block
 
 ; ============================================
@@ -519,8 +518,6 @@ pub fn behavior_query() -> String {
     String::from(
         r#"
 (expression) @behavior.data.reference
-(html_expr) @behavior.data.reference
-(const_expr) @behavior.data.bind
 "#,
     )
 }

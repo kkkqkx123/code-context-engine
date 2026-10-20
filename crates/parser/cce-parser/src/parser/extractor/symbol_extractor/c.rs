@@ -100,8 +100,15 @@ impl CExtractor {
     }
 
     /// Extract function name from a declarator node
-    /// Handles both simple declarators and function declarators
+    /// Handles pointer declarators, function declarators and plain identifiers
     fn extract_function_name(declarator: &tree_sitter::Node, source: &str) -> String {
+        // Unwrap pointer declarators, e.g. `struct pmt_t* pat_find(...)`
+        if declarator.kind() == "pointer_declarator" {
+            if let Some(inner_declarator) = declarator.child_by_field_name("declarator") {
+                return Self::extract_function_name(&inner_declarator, source);
+            }
+        }
+
         // Check if this is a function declarator
         if declarator.kind() == "function_declarator" {
             // Get the declarator part (which contains the function name)

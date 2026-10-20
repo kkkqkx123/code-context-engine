@@ -27,11 +27,13 @@ impl IndexTextEnricher {
         language: Language,
         bm25_cleaner: &Bm25TextCleaner,
     ) {
-        let Some(extra_text) =
-            self.build_extra_text(conversion.entity_id, processing_result, source)
-        else {
+        let extra_text = self
+            .build_extra_text(conversion.entity_id, processing_result, source)
+            .unwrap_or_default();
+
+        if extra_text.trim().is_empty() {
             return;
-        };
+        }
 
         let bm25_cleaned = bm25_cleaner.clean(&extra_text);
 

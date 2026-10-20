@@ -499,6 +499,20 @@ fn c_tiny_single_function_yields_entity() {
 }
 
 #[test]
+fn c_pointer_return_function_yields_entity() {
+    let parsed = parse_file(
+        "lookup.c",
+        "struct pmt_t* pat_find(struct pat_t* pat, unsigned short pn) {\n    unsigned int i;\n    for (i = 0; i < pat->pmt_count; i++) {\n        if (pat->pmts[i].pn == pn)\n            return &pat->pmts[i];\n    }\n    return 0;\n}\n",
+    );
+    let found = find(&parsed.entities, EntityKind::Function, "pat_find");
+    assert!(
+        found.parameters.iter().any(|p| p.0.contains("pat")),
+        "pointer-return function should keep parameters, got {:?}",
+        found.parameters
+    );
+}
+
+#[test]
 fn c_static_function_modifier() {
     let parsed = parse_file(
         "mod.c",

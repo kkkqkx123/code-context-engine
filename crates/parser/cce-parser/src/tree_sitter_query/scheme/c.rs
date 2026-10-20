@@ -115,6 +115,32 @@ pub fn entity_query() -> &'static str {
   body: (compound_statement) @entity.function.body
 ) @entity.function
 
+; Function definition with pointer return type, e.g.
+; `struct pmt_t* pat_find(struct pat_t* pat, uint16_t pn)`.
+; The declarator is a pointer_declarator wrapping the function_declarator,
+; so the plain pattern above never matches and the function is silently lost.
+(function_definition
+  type: (_) @entity.function.return_type @entity.function.signature.return_type
+  declarator: (pointer_declarator
+    declarator: (function_declarator
+      declarator: (identifier) @entity.function.name @entity.function.signature.name
+      parameters: (parameter_list) @entity.function.params @entity.function.signature.params
+    )
+  )
+  body: (compound_statement) @entity.function.body
+) @entity.function
+
+; Function declaration (prototype) with pointer return type.
+(declaration
+  type: (_) @entity.function.prototype.return_type @entity.function.prototype.signature.return_type
+  declarator: (pointer_declarator
+    declarator: (function_declarator
+      declarator: (identifier) @entity.function.prototype.name @entity.function.prototype.signature.name
+      parameters: (parameter_list) @entity.function.prototype.params @entity.function.prototype.signature.params
+    )
+  )
+) @entity.function.prototype
+
 ; Function declaration (prototype)
 (declaration
   type: (_) @entity.function.prototype.return_type @entity.function.prototype.signature.return_type

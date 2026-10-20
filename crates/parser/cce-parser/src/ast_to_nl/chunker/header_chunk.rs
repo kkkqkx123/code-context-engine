@@ -166,8 +166,18 @@ fn smart_chunk_with_header(
     }
 
     if !header_embedding.is_empty() || member_convs.iter().any(|c| c.embedding_text.is_some()) {
+        // Merged-fragment groups have no real owner: the header is only the
+        // first sibling fragment, so compacting it to a brief would silently
+        // drop that fragment's body while members keep theirs in full (e.g. a
+        // read/write function pair keeping only the write body). Keep the
+        // full header text here; budget packing below still bounds the chunk.
+        let first_text = if group.group_type == crate::grouper::types::GroupType::MergedFragments {
+            header_embedding.clone()
+        } else {
+            helper.compact_header(&header_embedding, &brief_embedding, ChunkPath::Embedding)
+        };
         let texts = HeaderTexts {
-            first: helper.compact_header(&header_embedding, &brief_embedding, ChunkPath::Embedding),
+            first: first_text,
             // Continuation chunks repeat only a minimal identity title: the
             // full class docstring belongs to the first chunk only. Reusing
             // the brief header here would inject the same boilerplate prefix
@@ -926,5 +936,102 @@ mod tests {
         )];
         let results = from_segments_for_test(&tracker, segs, &group, ChunkPath::Bm25, &nlb);
         assert_eq!(results[0].metadata.bm25_word_count, Some(4));
+    }
+
+    fn merged_pair_group() -> EntityGroup {
+        let mut group = test_group();
+        group.group_id = CompactString::from("merged_pair");
+        group.group_type = GroupType::MergedFragments;
+        group.name = CompactString::from("read_fn");
+        group.header = Some(GroupedEntity::new(
+            EntityId(10),
+            EntityKind::Function,
+            "read_fn".to_string(),
+            "read_fn".to_string(),
+        ));
+        group.header_id = Some(EntityId(10));
+        let member = GroupedEntity::new(
+            EntityId(11),
+            EntityKind::Function,
+            "write_fn".to_string(),
+            "write_fn".to_string(),
+        );
+        group.members = [member].into_iter().collect();
+        group.member_ids = [EntityId(11)].into_iter().collect();
+        group.entity_spans = [
+            (
+                EntityId(10),
+                Span {
+                    start_byte: 0,
+                    end_byte: 100,
+                    ..Default::default()
+                },
+            ),
+            (
+                EntityId(11),
+                Span {
+                    start_byte: 100,
+                    end_byte: 200,
+                    ..Default::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        group
+    }
+
+    fn long_body(marker: &str, words: usize) -> String {
+        let body: Vec<String> = (0..words).map(|i| format!("{marker}{i}")).collect();
+        format!("function mod.{marker} (x: int) -> int.\n{}", body.join(" "))
+    }
+
+    #[test]
+    fn test_merged_fragments_keep_full_header_body_on_embedding_path() {
+        let cfg = ChunkingConfig::default();
+        let est = TokenEstimator::default();
+        let splitter = TextSplitter::new(cfg.clone());
+        let infra = infra(&cfg, &est, &splitter);
+        let mut tracker = GroupTracker::new();
+        let group = merged_pair_group();
+        let header_conv = ConversionResult::embedding_only(
+            EntityId(10),
+            EntityKind::Function,
+            "read_fn".to_string(),
+            "test.c".to_string(),
+            long_body("readbody", 200),
+        );
+        let member_conv = ConversionResult::embedding_only(
+            EntityId(11),
+            EntityKind::Function,
+            "write_fn".to_string(),
+            "test.c".to_string(),
+            long_body("writebody", 100),
+        );
+        let conversions = crate::ast_to_nl::converter::GroupConversions {
+            group: group.clone(),
+            header_conversion: Some(header_conv),
+            member_conversions: vec![member_conv],
+        };
+        let out = super::chunk_group_with_conversions(
+            &infra,
+            &mut tracker,
+            &group,
+            &conversions,
+            "test.c",
+        )
+        .expect("chunk");
+        assert!(!out.chunks.is_empty());
+        let joined: String = out.chunks.iter().map(|c| c.text.as_str()).collect();
+        assert!(
+            joined.contains("readbody199"),
+            "merged header body must survive compacting, got {:?}",
+            joined
+        );
+        assert!(
+            joined.contains("writebody99"),
+            "merged member body must survive, got {:?}",
+            joined
+        );
     }
 }

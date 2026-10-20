@@ -261,6 +261,17 @@ fn read_bytes_to_utf8(data: &[u8], path: &Path) -> Result<String, String> {
 /// * `Ok((String, String))` - Tuple of (UTF-8 content, detected encoding name)
 /// * `Err(String)` - Error message if conversion fails
 fn read_bytes_to_utf8_with_encoding(data: &[u8], path: &Path) -> Result<(String, String), String> {
+    // Fast path: bytes that are already valid UTF-8 never need heuristic
+    // detection. Guessing on valid text is not just wasted work, it can
+    // actively misfire (e.g. ASCII C sources containing base64 fragments
+    // being classified as UTF-7) and drop the whole file downstream.
+    if let Ok(text) = std::str::from_utf8(data) {
+        return Ok((
+            text.strip_prefix('\u{FEFF}').unwrap_or(text).to_owned(),
+            "UTF-8".to_owned(),
+        ));
+    }
+
     // Detect encoding
     let detector = Detector::with_default_config();
     let encoding_result = detector
@@ -345,5 +356,15 @@ mod tests {
         assert!(is_text_bytes(b"Hello, World!\n"));
         assert!(!is_text_bytes(b"Hello\x00World"));
         assert!(!is_text_bytes(&[0u8; 100]));
+    }
+
+    #[test]
+    fn test_valid_utf8_with_base64_plus_never_guessed_as_utf7() {
+        let content = "int sdp_h264_load(uint8_t* data, int bytes, const char* config) {\n    const char* s = \"aO+8sA==\";\n    return 0;\n}\n";
+        let (text, encoding) =
+            read_bytes_to_utf8_with_encoding(content.as_bytes(), Path::new("sdp-h264.c"))
+                .expect("valid UTF-8 source must decode");
+        assert_eq!(text, content);
+        assert_eq!(encoding, "UTF-8");
     }
 }

@@ -105,6 +105,7 @@ impl RegularGroupTemplate {
                 }
             }
         }
+
     }
 
     fn push_member_signals(all_parts: &mut Vec<String>, group: &EntityGroup) {
@@ -162,6 +163,7 @@ impl RegularGroupTemplate {
         if !types.is_empty() {
             all_parts.push(format!("Types: {}.", types.join(" ")));
         }
+
     }
 
     fn is_import_like(kind: EntityKind) -> bool {

@@ -75,12 +75,4 @@ mod tests {
         assert!(config.remove_bom);
         assert!(!config.strict_mode);
     }
-
-
-
-
-
-
-
-
 }

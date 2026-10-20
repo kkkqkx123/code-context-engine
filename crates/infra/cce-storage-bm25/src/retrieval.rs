@@ -577,11 +577,38 @@ where
             if whole_term_doc_freq(&mut doc_freq, &mut cache, whole_token.text.as_str()) == 0
                 && !splits.is_empty()
             {
+                // CamelCase queries (`flvHeaderRead`) never meet the indexed
+                // separator form (`flv_header_read`) as a whole term. When the
+                // whole form is absent from the corpus, also try the
+                // separator-joined split form: if the corpus attests it, the
+                // query regains the discriminative whole-term signal instead
+                // of matching only through common subwords.
+                let joined = if splits.len() > 1 {
+                    let candidate = splits
+                        .iter()
+                        .map(|split| split.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("_");
+                    if candidate != whole_token.text
+                        && whole_term_doc_freq(&mut doc_freq, &mut cache, &candidate) > 0
+                    {
+                        Some(candidate)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 for split in splits {
                     if split.text.is_empty() || is_query_stopword(split.text.as_str()) {
                         continue;
                     }
                     expanded.push(((*split).clone(), 1.0));
+                }
+                if let Some(joined) = joined {
+                    let mut joined_token = (*whole_token).clone();
+                    joined_token.text = joined;
+                    expanded.push((joined_token, 1.0));
                 }
                 continue;
             }
@@ -602,4 +629,61 @@ where
         }
     }
     expanded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn token(text: &str, position: u32, position_length: u32) -> MixedToken {
+        MixedToken {
+            text: text.to_string(),
+            offset_from: 0,
+            offset_to: text.len(),
+            position,
+            position_length,
+        }
+    }
+
+    fn camel_query_tokens() -> Vec<MixedToken> {
+        vec![
+            token("flvheaderread", 0, 1),
+            token("flv", 0, 0),
+            token("header", 0, 0),
+            token("read", 0, 0),
+        ]
+    }
+
+    #[test]
+    fn test_camel_query_recovers_separator_joined_whole_term() {
+        let mut df = HashMap::new();
+        df.insert("flv_header_read".to_string(), 3u64);
+        df.insert("flv".to_string(), 900u64);
+        let expanded = expand_query_tokens(&camel_query_tokens(), |text| {
+            df.get(text).copied().unwrap_or(0)
+        });
+        assert!(
+            expanded
+                .iter()
+                .any(|(token, scale)| token.text == "flv_header_read" && *scale == 1.0),
+            "joined form attested in corpus must be added, got {:?}",
+            expanded
+                .iter()
+                .map(|(token, scale)| (token.text.as_str(), *scale))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_camel_query_without_attested_join_keeps_splits_only() {
+        let expanded = expand_query_tokens(&camel_query_tokens(), |_| 0u64);
+        assert!(
+            expanded
+                .iter()
+                .all(|(token, _)| token.text != "flv_header_read"),
+            "unattested join must not be invented"
+        );
+        assert!(expanded.iter().any(|(token, _)| token.text == "flv"));
+    }
 }

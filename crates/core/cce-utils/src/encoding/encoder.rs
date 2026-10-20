@@ -70,7 +70,8 @@ impl Encoder {
             from_encoding
         };
 
-        if encoding_name.eq_ignore_ascii_case("UTF-8") || encoding_name.eq_ignore_ascii_case("UTF8") {
+        if encoding_name.eq_ignore_ascii_case("UTF-8") || encoding_name.eq_ignore_ascii_case("UTF8")
+        {
             let new_data = self.remove_bom(&data);
             if new_data.len() == data.len() {
                 return Ok(false);
@@ -202,8 +203,6 @@ mod tests {
         assert_eq!(result, "にて");
     }
 
-
-
     #[test]
     fn test_to_utf8_utf16le() {
         let encoder = Encoder::default();
@@ -315,4 +314,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

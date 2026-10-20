@@ -57,6 +57,11 @@ pub struct SegmentHeaderContext {
 
 pub struct ChunkBuilder;
 
+/// Identifier byte test shared by name-boundary matching in this module.
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
 /// Whether an entity carries its own docstring, making it semantically
 /// self-contained. Members with an independent description must stay in
 /// their own chunk (Embedding path) so their topic is not diluted by
@@ -158,21 +163,88 @@ impl ChunkBuilder {
             if name.is_empty() {
                 continue;
             }
-            let qualified = match owner {
+            let qualified: String = match owner {
                 Some(prefix) if name != prefix && !name.starts_with(&format!("{prefix}.")) => {
                     format!("{prefix}.{name}")
                 }
-                _ => name,
+                _ => name.clone(),
             };
             if first_line.contains(&qualified) {
                 continue;
             }
-            parts.push(format!("{} {}.", kind.kind_label(), qualified));
+            parts.push(Self::signature_identity(group, id, &name, &qualified, kind));
         }
         if parts.is_empty() {
             return None;
         }
         Some(parts.join("\n") + "\n\n")
+    }
+
+    /// Identity line for one continued entity.
+    ///
+    /// Continuation segments start mid-entity, so a bare kind-plus-name line
+    /// is not enough to tell overloads apart or to match signature-level
+    /// queries. When the entity carries a substantive signature (a parameter
+    /// list mentioning its own name), the signature itself is repeated with
+    /// the bare name owner-qualified; otherwise the previous kind-plus-name
+    /// form is kept.
+    fn signature_identity(
+        group: &EntityGroup,
+        id: EntityId,
+        name: &str,
+        qualified: &str,
+        kind: EntityKind,
+    ) -> String {
+        if let Some(signature) = Self::entity_signature_by_id(group, id) {
+            if signature.contains('(') && signature.contains(name) {
+                return format!(
+                    "{}.",
+                    Self::qualify_name_in_text(&signature, name, qualified)
+                );
+            }
+        }
+        format!("{} {}.", kind.kind_label(), qualified)
+    }
+
+    /// First non-empty signature of an entity in the group, if any.
+    fn entity_signature_by_id(group: &EntityGroup, id: EntityId) -> Option<String> {
+        if let Some(header) = &group.header {
+            if header.id == id && !header.signature.is_empty() {
+                return Some(header.signature.clone());
+            }
+        }
+        group
+            .members
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.signature.clone())
+            .filter(|signature| !signature.is_empty())
+    }
+
+    /// Replace the bare entity name inside a signature with its qualified
+    /// form, matching whole identifiers only.
+    fn qualify_name_in_text(signature: &str, name: &str, qualified: &str) -> String {
+        if name.is_empty() || name == qualified {
+            return signature.to_string();
+        }
+        let mut out = String::with_capacity(signature.len() + qualified.len());
+        let mut rest = signature;
+        while let Some(pos) = rest.find(name) {
+            let before = pos.checked_sub(1).map(|i| rest.as_bytes()[i]);
+            let after = rest.as_bytes().get(pos + name.len()).copied();
+            let boundary_before = before.is_none_or(|b| !is_ident_byte(b));
+            let boundary_after = after.is_none_or(|b| !is_ident_byte(b));
+            if boundary_before && boundary_after {
+                out.push_str(&rest[..pos]);
+                out.push_str(qualified);
+                rest = &rest[pos + name.len()..];
+            } else {
+                out.push_str(&rest[..pos + 1]);
+                rest = &rest[pos + 1..];
+            }
+        }
+        out.push_str(rest);
+        out
     }
 
     /// Cross-group parent name for a standalone child group.
@@ -903,7 +975,51 @@ mod tests {
         )
         .expect("covered method repeats its identity");
         assert!(
-            identity.contains("method Processor.findName."),
+            identity.contains("Processor.findName(int hash)."),
+            "continuation should repeat the signature, got: {identity}"
+        );
+    }
+
+    #[test]
+    fn test_continuation_identity_falls_back_without_signature() {
+        let mut group = method_group();
+        group.header = Some(GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Method,
+            "plain".to_string(),
+            String::new(),
+        ));
+        let identity = ChunkBuilder::continuation_identity(
+            &group,
+            &[EntityId(2)],
+            "body fragment",
+            Some("Processor"),
+        )
+        .expect("identity without signature falls back to kind plus name");
+        assert!(
+            identity.contains("method Processor.plain."),
+            "unexpected identity: {identity}"
+        );
+    }
+
+    #[test]
+    fn test_continuation_identity_qualifies_signature_name() {
+        let mut group = method_group();
+        group.header = Some(GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Function,
+            "pat_find".to_string(),
+            "struct pmt_t* pat_find (struct pat_t* pat, unsigned short pn)".to_string(),
+        ));
+        let identity = ChunkBuilder::continuation_identity(
+            &group,
+            &[EntityId(2)],
+            "loop body fragment",
+            Some("mpeg-pat"),
+        )
+        .expect("pointer-return function repeats its signature");
+        assert!(
+            identity.contains("mpeg-pat.pat_find (struct pat_t* pat, unsigned short pn)."),
             "unexpected identity: {identity}"
         );
     }
