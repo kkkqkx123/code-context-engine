@@ -10,6 +10,7 @@
  *     element (exercises the host's null/skip handling).
  *   - Embedding single/batch: always returns an error with
  *     error_type "logic" (exercises error_type restoration on the host).
+ *   - Vocabulary: returns a two-entry domain terminology table.
  */
 
 #include "cce_plugin.h"
@@ -122,4 +123,16 @@ char *cce_plugin_generate_embedding_batch(void *ctx, const char *groups_json) {
     return dup_str(
         "{\"result\":\"error\",\"message\":\"embedding batch unsupported by C plugin\","
         "\"error_type\":\"logic\"}");
+}
+
+bool cce_plugin_has_vocabulary(void) {
+    return true;
+}
+
+char *cce_plugin_vocabulary(void *ctx) {
+    (void)ctx;
+    return dup_str(
+        "{\"result\":\"ok\",\"value\":["
+        "{\"token\":\"stts\",\"expansion\":\"sync time-to-sample\"},"
+        "{\"token\":\"sdp\",\"expansion\":\"session description protocol\"}]}");
 }

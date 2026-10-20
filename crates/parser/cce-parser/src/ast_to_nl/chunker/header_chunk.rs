@@ -223,12 +223,25 @@ fn process_path(
         .iter()
         .map(|m| super::chunk_builder::entity_has_own_descriptor(ctx.group, m.entity_id))
         .collect();
+    // A member whose own source spans more than one line carries an
+    // implementation and can stand alone as a chunk; a single declaration
+    // line cannot.
+    let member_multiline: Vec<bool> = member_convs
+        .iter()
+        .map(|m| {
+            ctx.group
+                .entity_spans
+                .get(&m.entity_id)
+                .is_some_and(|span| span.end_position.row > span.start_position.row)
+        })
+        .collect();
     let member_groups = input.helper.group_members_by_header_budget(
         member_convs,
         first_budget,
         continuation_budget,
         input.path,
         &member_self_contained,
+        &member_multiline,
     );
     let total = member_groups.len();
 

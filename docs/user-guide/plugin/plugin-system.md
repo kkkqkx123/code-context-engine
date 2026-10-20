@@ -68,6 +68,7 @@ CCE 支持通过插件扩展核心功能，包括 Lua 脚本插件和原生动�
 | `Chunk` | 覆盖分块逻辑 | Override |
 | `RelationExtract` | 提取符号/关系 | Additive |
 | `FileFilter` | 文件包含/排除决策 | Override |
+| `Vocabulary` | 领域术语表（token → 释义） | Additive |
 
 ### 查询管道扩展点
 
@@ -136,6 +137,7 @@ end
 | `classify_stdlib(module_path)` | LangHeuristics | 模块路径 |
 | `is_test_file(path, content)` | LangHeuristics | 路径、内容 |
 | `entity_kind(capture_name)` | LangHeuristics | 查询捕获名 |
+| `vocabulary()` | Vocabulary | 无参数，返回术语条目数组 |
 
 ## Native 插件开发
 

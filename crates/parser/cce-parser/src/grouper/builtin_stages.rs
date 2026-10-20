@@ -6,9 +6,93 @@
 //! - Low-value entity filtering
 //! - Group name collision assertion
 
-use cce_types::entity::{Entity, EntityId, EntityKind};
+use std::collections::{HashMap, HashSet};
 
-use super::types::EntityGroup;
+use cce_types::Span;
+use cce_types::entity::{Entity, EntityId, EntityKind, GroupedEntity};
+
+use super::types::{EntityGroup, GroupType};
+
+/// Absorb the function-like groups nested in a template group.
+///
+/// A C++ function template yields two entities for the same code: the
+/// template and the function it declares. The function's group nests inside
+/// the template's group under the same name, which the grouper forbids: the
+/// chunker would then see the same code under two identities and could drop
+/// one of them. The function becomes a member of the template's group
+/// instead.
+pub fn absorb_template_groups(groups: &mut Vec<EntityGroup>) -> usize {
+    // Collect the template groups and the groups they absorb.
+    let mut absorbed: HashMap<String, Vec<(GroupedEntity, Span)>> = HashMap::new();
+    for group in groups.iter() {
+        let Some(header) = group.header.as_ref() else {
+            continue;
+        };
+        if header.kind != EntityKind::Template || header.name.is_empty() {
+            continue;
+        }
+        let nested: Vec<(GroupedEntity, Span)> = groups
+            .iter()
+            .filter(|other| {
+                other.header.as_ref().is_some_and(|h| {
+                    h.kind.is_function_like() && h.name.eq_ignore_ascii_case(&header.name)
+                }) && group.span.contains(&other.span)
+            })
+            .filter_map(|other| {
+                let header = other.header.clone()?;
+                let span = other
+                    .entity_spans
+                    .get(&header.id)
+                    .copied()
+                    .unwrap_or(other.span);
+                Some((header, span))
+            })
+            .collect();
+        if !nested.is_empty() {
+            absorbed.insert(group.group_id.as_str().to_string(), nested);
+        }
+    }
+    if absorbed.is_empty() {
+        return 0;
+    }
+
+    // Drop the absorbed groups: their content now lives in the template's
+    // group, and keeping them would nest a same-named group inside it.
+    let absorbed_ids: HashSet<EntityId> = absorbed
+        .values()
+        .flatten()
+        .map(|(header, _)| header.id)
+        .collect();
+    let mut kept: Vec<EntityGroup> = Vec::with_capacity(groups.len());
+    for group in groups.drain(..) {
+        let is_absorbed = group
+            .header
+            .as_ref()
+            .is_some_and(|header| absorbed_ids.contains(&header.id));
+        if !is_absorbed {
+            kept.push(group);
+        }
+    }
+    *groups = kept;
+
+    // Add the absorbed entities as members of their template group.
+    for (group_id, members) in absorbed {
+        let Some(template) = groups
+            .iter_mut()
+            .find(|group| group.group_id.as_str() == group_id)
+        else {
+            continue;
+        };
+        for (member, span) in members {
+            template.entity_spans.insert(member.id, span);
+            template.member_ids.push(member.id);
+            template.members.push(member);
+        }
+        template.group_type = GroupType::ClassWithMethods;
+    }
+
+    absorbed_ids.len()
+}
 
 /// Resolve parent-child relationships between entity groups based on entity hierarchy.
 ///
@@ -219,6 +303,75 @@ mod tests {
                 10,
             ),
         )
+    }
+
+    /// A C++ function template yields a template entity and the function it
+    /// declares; the function's group nests inside the template's group under
+    /// the same name and has to become a member of it.
+    #[test]
+    fn test_function_template_absorbs_its_function() {
+        let template = Entity::new(
+            EntityId(1),
+            EntityKind::Template,
+            "GetRtpExtension".to_string(),
+            Span::new(100, 500, 7, 0, 12, 0),
+        );
+        let function = Entity::new(
+            EntityId(2),
+            EntityKind::Function,
+            "GetRtpExtension".to_string(),
+            Span::new(150, 500, 8, 0, 12, 0),
+        );
+        let mut groups = vec![
+            EntityGroup::from_entity(template.clone(), Language::C),
+            EntityGroup::from_entity(function.clone(), Language::C),
+        ];
+
+        let absorbed = absorb_template_groups(&mut groups);
+
+        assert_eq!(absorbed, 1);
+        assert_eq!(groups.len(), 1, "the function group is gone");
+        let template_group = &groups[0];
+        assert_eq!(
+            template_group.header.as_ref().map(|h| h.id),
+            Some(EntityId(1))
+        );
+        assert_eq!(
+            template_group.members.len(),
+            1,
+            "the function became a member of the template group"
+        );
+        assert_eq!(template_group.members[0].id, EntityId(2));
+        assert!(
+            template_group
+                .entity_spans
+                .get(&EntityId(2))
+                .is_some_and(|span| span.start_byte == 150),
+            "the absorbed function keeps its own span"
+        );
+    }
+
+    #[test]
+    fn test_unrelated_function_is_not_absorbed_by_a_template() {
+        let template = Entity::new(
+            EntityId(1),
+            EntityKind::Template,
+            "GetRtpExtension".to_string(),
+            Span::new(100, 500, 7, 0, 12, 0),
+        );
+        let other = Entity::new(
+            EntityId(2),
+            EntityKind::Function,
+            "SomethingElse".to_string(),
+            Span::new(150, 500, 8, 0, 12, 0),
+        );
+        let mut groups = vec![
+            EntityGroup::from_entity(template, Language::C),
+            EntityGroup::from_entity(other, Language::C),
+        ];
+
+        assert_eq!(absorb_template_groups(&mut groups), 0);
+        assert_eq!(groups.len(), 2);
     }
 
     #[test]

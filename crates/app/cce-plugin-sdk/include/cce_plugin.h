@@ -70,8 +70,8 @@ uint32_t cce_plugin_abi_version(void);
  *
  * `capabilities` is an optional array of declared capability facet names
  * (`text_gen` | `format_parse` | `entity_extract` | `ast_language` |
- * `group` | `chunk` | `rerank`); when absent the host probes the
- * `cce_plugin_has_*` exports at runtime.
+ * `group` | `chunk` | `rerank` | `vocabulary`); when absent the host probes
+ * the `cce_plugin_has_*` exports at runtime.
  *
  * `capability_priorities` is an optional object mapping capability names to
  * per-capability priorities; capabilities not listed fall back to
@@ -210,6 +210,8 @@ bool cce_plugin_has_fusion(void);
 bool cce_plugin_has_result_filter(void);
 /* Whether the plugin implements `FileFilter`. */
 bool cce_plugin_has_file_filter(void);
+/* Whether the plugin implements the `Vocabulary` capability. */
+bool cce_plugin_has_vocabulary(void);
 
 /*
  * ── Additional FFI entry points ───────────────────────────────────────────
@@ -401,6 +403,19 @@ char *cce_plugin_filter_file(void *ctx, const char *file_path, bool is_directory
                              uint64_t size);
 
 /*
+ * Return the domain terminology table of the plugin.
+ *   (void *ctx) -> char *result_json
+ *
+ * Result `value` is a JSON array of VocabularyEntry objects:
+ *   [{"token":"stts","expansion":"sync time-to-sample"}]
+ *
+ * The host merges the tables of all matching plugins, matches the tokens
+ * against whole identifiers in the indexed text and renders the matched
+ * expansions as a glossary line.
+ */
+char *cce_plugin_vocabulary(void *ctx);
+
+/*
  * Return the tree-sitter query string for a query type (index 0..7:
  * entity, call, control_flow, behavior, dependency, comment, embedded,
  * structural), or NULL when no scheme is provided for that type.
@@ -429,7 +444,6 @@ char *cce_plugin_language_name(void);
  *   ["zig","zir"]
  */
 char *cce_plugin_language_extensions(void);
-
 /*
  * Whether the plugin remaps a custom language onto a host built-in
  * grammar (no tree-sitter grammar is embedded in the plugin). When true,

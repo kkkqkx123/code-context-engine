@@ -225,6 +225,29 @@ impl SmallFragmentMerger {
                 }
             }
 
+            // Fragments of different kinds must not merge. A merged group is
+            // presented to the retriever as one unit under a single header, so
+            // a function prototype that absorbs a run of enum constants
+            // produces a unit whose title names the prototype while its text
+            // is a list of unrelated constants. Merging peers of the same
+            // kind keeps the unit coherent. Import-like fragments are
+            // exempt: they are dropped as a whole, so the kinds they mix
+            // never reach a retriever.
+            if let Some(prev) = current_batch.last() {
+                let both_import_like =
+                    Self::is_import_like_group(prev) && Self::is_import_like_group(group);
+                if !both_import_like
+                    && Self::header_kind(prev) != Self::header_kind(group)
+                    && !current_batch.is_empty()
+                {
+                    if let Some(merged) =
+                        self.create_merged_group(std::mem::take(&mut current_batch))
+                    {
+                        merged_groups.push(merged);
+                    }
+                }
+            }
+
             // Check gap from previous fragment
             if let Some(prev_end) = prev_end_byte {
                 let gap = group.span.start_byte.saturating_sub(prev_end);
@@ -330,6 +353,14 @@ impl SmallFragmentMerger {
             .header
             .as_ref()
             .is_some_and(|h| h.kind.is_import_like())
+    }
+
+    /// Kind of the entity that names the group.
+    ///
+    /// A group without a header has no kind of its own, so it never merges
+    /// with a group that has one.
+    fn header_kind(group: &EntityGroup) -> Option<EntityKind> {
+        group.header.as_ref().map(|h| h.kind)
     }
 
     /// Create a merged group from a batch of fragments
@@ -551,5 +582,48 @@ mod tests {
             "regular small fragments must still merge into one group"
         );
         assert_eq!(groups.len(), 1);
+    }
+
+    #[test]
+    fn test_fragments_of_different_kinds_do_not_merge() {
+        // A merged group is one retrieval unit under one header. A function
+        // prototype that absorbs a run of enum constants would be titled
+        // after the prototype while its text lists unrelated constants.
+        let merger = SmallFragmentMerger::new(128, 80, 50, 0);
+        let mut groups = vec![
+            group(EntityKind::Function, "prototype", 0, 1),
+            group(EntityKind::EnumVariant, "TAG_A", 1, 2),
+            group(EntityKind::EnumVariant, "TAG_B", 2, 3),
+        ];
+
+        merger.process(
+            &mut groups,
+            &padded_source("int prototype(void);\nTAG_A\nTAG_B"),
+        );
+
+        assert_eq!(
+            groups.len(),
+            2,
+            "the prototype must not absorb the enum constants"
+        );
+        let kinds: Vec<EntityKind> = groups
+            .iter()
+            .filter_map(|g| g.header.as_ref().map(|h| h.kind))
+            .collect();
+        assert!(kinds.contains(&EntityKind::Function));
+        assert!(kinds.contains(&EntityKind::EnumVariant));
+        let enum_group = groups
+            .iter()
+            .find(|g| {
+                g.header
+                    .as_ref()
+                    .is_some_and(|h| h.kind == EntityKind::EnumVariant)
+            })
+            .expect("the enum constants form their own group");
+        assert_eq!(
+            enum_group.members.len(),
+            1,
+            "the enum constants of the same kind still merge with each other"
+        );
     }
 }

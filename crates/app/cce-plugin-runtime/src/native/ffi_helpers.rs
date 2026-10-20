@@ -45,6 +45,9 @@ pub(crate) type FusionWeightsFn =
 pub(crate) type FilterFileFn =
     unsafe extern "C" fn(*mut c_void, *const c_char, bool, u64) -> *mut c_char;
 
+/// `cce_plugin_vocabulary(ctx)`
+pub(crate) type VocabularyFn = unsafe extern "C" fn(*mut c_void) -> *mut c_char;
+
 /// `cce_plugin_query_scheme(ctx, query_type)`
 pub(crate) type QuerySchemeFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_char;
 
@@ -353,6 +356,7 @@ pub(crate) fn capability_label(operation: &str) -> &'static str {
         "fusion_weights" => "fusion",
         "filter_results" => "result_filter",
         "filter_file" => "file_filter",
+        "vocabulary" => "vocabulary",
         _ => "unknown",
     }
 }

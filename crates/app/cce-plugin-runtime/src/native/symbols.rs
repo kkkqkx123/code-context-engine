@@ -238,6 +238,16 @@ pub(crate) const FILTER_FILE: AbiSymbol = AbiSymbol {
     bytes: b"cce_plugin_filter_file\0",
 };
 
+// ── Domain vocabulary ──
+pub(crate) const HAS_VOCABULARY: AbiSymbol = AbiSymbol {
+    name: "cce_plugin_has_vocabulary",
+    bytes: b"cce_plugin_has_vocabulary\0",
+};
+pub(crate) const VOCABULARY: AbiSymbol = AbiSymbol {
+    name: "cce_plugin_vocabulary",
+    bytes: b"cce_plugin_vocabulary\0",
+};
+
 /// Every symbol the host resolves, in one list for contract tests.
 #[cfg(test)]
 pub(crate) const ALL_SYMBOLS: &[AbiSymbol] = &[
@@ -292,6 +302,8 @@ pub(crate) const ALL_SYMBOLS: &[AbiSymbol] = &[
     FILTER_RESULTS,
     HAS_FILE_FILTER,
     FILTER_FILE,
+    HAS_VOCABULARY,
+    VOCABULARY,
 ];
 
 #[cfg(test)]

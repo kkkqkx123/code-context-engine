@@ -428,8 +428,45 @@ function plugin.extract_relations(content, file_path, language)
 end
 ```
 
-## LanguageRemap - 语言重映射
+## Vocabulary - 领域术语表
 
+提供领域缩写 / 术语的释义，宿主在索引富化阶段把命中的术语追加为一行
+`Glossary: ...`，同时进入 BM25 与 Embedding 两条检索路径。
+
+### 使用场景
+
+- 媒体服务等领域存在大量缩写（`stts`、`ctts`、`sdp`），释义有助于召回
+- 通用引擎不内置任何领域术语，术语知识由插件按项目提供
+
+### 返回值
+
+```lua
+function plugin.vocabulary()
+    return {
+        { token = "stts", expansion = "sync time-to-sample" },
+        { token = "sdp",  expansion = "session description protocol" }
+    }
+end
+```
+
+### 宿主行为
+
+- 加法档：所有匹配插件的术语表按 token 合并去重（首次出现优先）
+- 整 token 匹配：`stts` 不匹配 `stts_box`；匹配区分大小写
+- 扫描范围：实体名称、签名、索引富化阶段的函数体文本
+- 每个实体最多追加一行 `Glossary: stts = sync time-to-sample; sdp = ...`
+- 宿主限制条目数量与单条长度，避免索引膨胀
+- 未安装插件时行为与普通文本生成完全一致
+
+### 路由
+
+与其他能力一致，按 `file_patterns` / `languages` / `enabled` 过滤，按优先级排序。
+术语表按 `(file_path, language)` 缓存，避免每个实体重复查询插件。
+
+示例插件见 [`examples/media_vocabulary.lua`](examples/media_vocabulary.lua)，
+包含 ISO 基础媒体文件格式的常用缩写。
+
+## LanguageRemap - 语言重映射
 将自定义语言映射到宿主内置语法。
 
 ### 配置

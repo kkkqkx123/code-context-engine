@@ -165,8 +165,10 @@ cargo build --release
 | `filter_results(ctx, query, results_json)` | `Result<Option<Vec<ResultFilterEntry>>, PluginError>` | `Ok(None)` | `supports_result_filter→true` |
 | `supports_file_filter()` | `bool` | `false` | — |
 | `filter_file(ctx, file_path, is_directory, size)` | `Result<Option<FileFilterDecision>, PluginError>` | `Ok(None)` | `supports_file_filter→true` |
+| `supports_vocabulary()` | `bool` | `false` | — |
+| `vocabulary(ctx)` | `Result<Vec<VocabularyEntry>, PluginError>` | 空表 | `supports_vocabulary→true` |
 
-> **版本提示**：ABI 版本历史已重置为 1（开发阶段不回退兼容）。NL 生成方法均携带 `ctx` 上下文指针（`create_context` 的返回值，无生命周期时为 null）。所有 SDK 插件默认实现 batch 方法（逐个回退到单条），为吞吐量建议重写为单次批量处理。流水线扩展能力（`TextGen` / `FormatParse` / `EntityExtract` / `Group` / `GroupOverride` / `Chunk` / `Rerank` / `AstLanguage` / `LanguageRemap` / `LangHeuristics` / `RelationExtract` / `SymbolExtract` / `QueryRewrite` / `Fusion` / `ResultFilter` / `FileFilter`）均为同一 ABI 的可选能力。
+> **版本提示**：ABI 版本历史已重置为 1（开发阶段不回退兼容）。NL 生成方法均携带 `ctx` 上下文指针（`create_context` 的返回值，无生命周期时为 null）。所有 SDK 插件默认实现 batch 方法（逐个回退到单条），为吞吐量建议重写为单次批量处理。流水线扩展能力（`TextGen` / `FormatParse` / `EntityExtract` / `Group` / `GroupOverride` / `Chunk` / `Rerank` / `AstLanguage` / `LanguageRemap` / `LangHeuristics` / `RelationExtract` / `SymbolExtract` / `QueryRewrite` / `Fusion` / `ResultFilter` / `FileFilter` / `Vocabulary`）均为同一 ABI 的可选能力。
 
 ### 流水线扩展能力
 
@@ -176,7 +178,7 @@ cargo build --release
 
 - **覆盖档**（首个非空结果胜出）：`FormatParse`、`GroupOverride`、`Chunk`、`Rerank`、`SymbolExtract`、`Fusion`、`FileFilter`、`LangHeuristics`、`TextGen`（逐组填充）。
 - **链式档**（全部按顺序执行，前一输出为后一输入）：`Group`、`QueryRewrite`、`ResultFilter`。
-- **加法档**（结果合并）：`EntityExtract`、`RelationExtract`、`AstLanguage`、`LanguageRemap`。
+- **加法档**（结果合并）：`EntityExtract`、`RelationExtract`、`AstLanguage`、`LanguageRemap`、`Vocabulary`。
 
 优先级建议区间：0–99 通用兜底 / 100–999 语言领域特定 / 1000–9999 显式覆盖级。宿主可在 `.cce/plugins.json` 的条目中显式覆盖优先级（`priority` 字段），无需改动插件文件。
 
@@ -198,6 +200,7 @@ cargo build --release
 - **Fusion**：覆写混合融合权重与算法（覆盖档，首个非 `None` 生效）。返回 `FusionWeights { vector_weight, bm25_weight, min_score, algorithm, rrf_k }`，权重由宿主校验至 `[0, 1]`；`algorithm` 为算法名（`weighted_min_max` / `rrf` / `borda_count`，未知名忽略），`rrf_k` 仅配合 `rrf` 使用（缺省 60，零值拒绝）。
 - **ResultFilter**：重排后按 id 移除 / 增益 / 标注候选（链式档）。返回 `ResultFilterEntry { id, remove, boost, note }` 数组。
 - **FileFilter**：扫描期文件纳入 / 排除决策（覆盖档，首个非 `Neutral` 生效）。返回 `FileFilterDecision`（`include` / `exclude` / `neutral`）；`Neutral` 交由内置 `PatternMatcher`。
+- **Vocabulary**：领域术语表（加法档，多个插件的表按 token 合并去重）。实现 `vocabulary()`，返回 `VocabularyEntry { token, expansion }` 数组；宿主负责整 token 匹配（`stts` 不匹配 `stts_box`）并在索引富化阶段向 BM25 与 Embedding 文本追加一行 `Glossary: stts = sync time-to-sample`。宿主限制条目数量与单条长度，插件只提供数据。
 
 跨 FFI 的实体 / 文档 / 分块 / 重排 JSON schema 见 `include/cce_plugin.h` 注释。
 
@@ -282,6 +285,7 @@ declare_plugin!(MyPlugin, MyPlugin::new()); // 自定义初始化
 | `cce_plugin_has_fusion` / `cce_plugin_fusion_weights` | `Fusion` 能力 | ✅ |
 | `cce_plugin_has_result_filter` / `cce_plugin_filter_results` | `ResultFilter` 能力 | ✅ |
 | `cce_plugin_has_file_filter` / `cce_plugin_filter_file` | `FileFilter` 能力 | ✅ |
+| `cce_plugin_has_vocabulary` / `cce_plugin_vocabulary` | `Vocabulary` 能力（领域术语表） | ✅ |
 
 所有函数始终生成，未实现的能力返回 `{"result":"none"}`。宿主通过 `supports_*` 方法判断是否调用，因此不会产生额外开销。
 
@@ -328,6 +332,10 @@ bool        cce_plugin_has_test_file_heuristic(void);
 char*       cce_plugin_is_test_file(void* ctx, const char* file_path, const char* content);
 bool        cce_plugin_has_entity_kind_heuristic(void);
 char*       cce_plugin_entity_kind(void* ctx, const char* capture_name);
+
+// 领域术语（Vocabulary）
+bool        cce_plugin_has_vocabulary(void);
+char*       cce_plugin_vocabulary(void* ctx);
 ```
 
 ### FFI 结果格式

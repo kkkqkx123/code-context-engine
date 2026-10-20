@@ -63,7 +63,7 @@ pub use cce_types::grouper::EntityGroup;
 pub use cce_types::plugin::{
     FileFilterDecision, FusionWeights, GroupPluginContext, PluginDocument, PluginEntity,
     PluginExport, PluginImport, PluginRelation, PluginSymbol, QueryRewriteResult,
-    ResultFilterEntry,
+    ResultFilterEntry, VocabularyEntry,
 };
 pub use cce_types::{ChunkedResult, GroupConversions, RerankCandidate, RerankResult};
 
@@ -213,6 +213,16 @@ mod tests {
         assert!(value.iter().all(|v| v.is_null()));
     }
 
+    #[test]
+    fn test_vocabulary_default_returns_empty_list() {
+        assert!(!cce_plugin_has_vocabulary());
+        let ptr = unsafe { cce_plugin_vocabulary(std::ptr::null_mut()) };
+        let s = unsafe { c_string_to_string(ptr) };
+        let result: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(result["result"], "ok");
+        assert!(result["value"].as_array().unwrap().is_empty());
+    }
+
     /// The header is the authoritative ABI definition; the generated symbols
     /// must stay in sync with it. This test greps the header for every symbol
     /// the macro generates.
@@ -262,6 +272,7 @@ mod tests {
             "cce_plugin_has_fusion",
             "cce_plugin_has_result_filter",
             "cce_plugin_has_file_filter",
+            "cce_plugin_has_vocabulary",
             "cce_plugin_group",
             "cce_plugin_extract_symbols",
             "cce_plugin_extract_relations",
@@ -269,6 +280,7 @@ mod tests {
             "cce_plugin_fusion_weights",
             "cce_plugin_filter_results",
             "cce_plugin_filter_file",
+            "cce_plugin_vocabulary",
         ];
         for symbol in expected_symbols {
             assert!(

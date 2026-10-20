@@ -45,6 +45,8 @@ pub struct LuaPlugin {
     pub(crate) fusion_weights_fn_name: Option<String>,
     pub(crate) filter_results_fn_name: Option<String>,
     pub(crate) filter_file_fn_name: Option<String>,
+    /// `plugin.vocabulary()` (`Vocabulary`).
+    pub(crate) vocabulary_fn_name: Option<String>,
     /// Custom language name (`LanguageRemap`, e.g. "mytpl").
     pub(crate) language_name: Option<String>,
     /// File extensions for the remapped custom language (e.g. ["tplx"]).
@@ -225,6 +227,12 @@ impl LuaPlugin {
             .flatten()
             .map(|_| "filter_file".to_string());
 
+        let vocabulary_fn_name = plugin_table
+            .get::<Option<mlua::Function>>("vocabulary")
+            .ok()
+            .flatten()
+            .map(|_| "vocabulary".to_string());
+
         // `LanguageRemap` declarations: `plugin.language_name`,
         // `plugin.language_extensions`, `plugin.remap_grammar_language`,
         // optional `plugin.query_schemes = { entity = "...", ... }`.
@@ -341,6 +349,7 @@ impl LuaPlugin {
             fusion_weights_fn_name,
             filter_results_fn_name,
             filter_file_fn_name,
+            vocabulary_fn_name,
             language_name,
             language_extensions,
             remap_grammar_language,

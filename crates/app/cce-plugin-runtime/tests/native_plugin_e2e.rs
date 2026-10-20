@@ -20,7 +20,7 @@ fn build_c_plugin() -> &'static PathBuf {
     ARTIFACT.get_or_init(|| {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         let src = manifest.join("tests/fixtures/c_plugin.c");
-        let header_dir = manifest.join("../../plugin-sdk/include");
+        let header_dir = manifest.join("../cce-plugin-sdk/include");
 
         let dir = tempfile::Builder::new()
             .prefix("cce-e2e-c-plugin-")
@@ -89,6 +89,7 @@ fn test_capabilities() {
     let plugin = load_plugin();
     assert!(plugin.supports_bm25());
     assert!(plugin.supports_embedding());
+    assert!(plugin.supports_vocabulary());
 }
 
 #[test]
@@ -154,4 +155,15 @@ fn test_generate_embedding_batch_error_type_restored() {
         }
         other => panic!("expected LogicError, got: {other:?}"),
     }
+}
+
+#[test]
+fn test_vocabulary_entries_are_read() {
+    let plugin = load_plugin();
+    let entries = plugin.vocabulary().expect("vocabulary call failed");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].token, "stts");
+    assert_eq!(entries[0].expansion, "sync time-to-sample");
+    assert_eq!(entries[1].token, "sdp");
+    assert_eq!(entries[1].expansion, "session description protocol");
 }

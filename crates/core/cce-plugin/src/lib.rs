@@ -73,7 +73,7 @@ pub enum PluginError {
 /// - **Chain tier** (all run in priority order, previous output is next
 ///   input): `Group`, `QueryRewrite`, `ResultFilter`.
 /// - **Additive tier** (all run, results merged): `EntityExtract`,
-///   `RelationExtract`, `AstLanguage`.
+///   `RelationExtract`, `AstLanguage`, `Vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum PluginCapability {
     /// AST→NL text generation (existing `generate_bm25` / `generate_embedding`).
@@ -141,6 +141,11 @@ pub enum PluginCapability {
     /// Override tier — first non-`Neutral` decision wins.
     #[serde(rename = "file_filter")]
     FileFilter,
+    /// Domain terminology table (token → expansion).
+    /// Additive tier — every matching plugin contributes entries and the
+    /// host merges them.
+    #[serde(rename = "vocabulary")]
+    Vocabulary,
 }
 
 impl PluginCapability {
@@ -163,6 +168,7 @@ impl PluginCapability {
             PluginCapability::Fusion => "fusion",
             PluginCapability::ResultFilter => "result_filter",
             PluginCapability::FileFilter => "file_filter",
+            PluginCapability::Vocabulary => "vocabulary",
         }
     }
 
@@ -197,6 +203,7 @@ impl PluginCapability {
             PluginCapability::Fusion => plugin.supports_fusion(),
             PluginCapability::ResultFilter => plugin.supports_result_filter(),
             PluginCapability::FileFilter => plugin.supports_file_filter(),
+            PluginCapability::Vocabulary => plugin.supports_vocabulary(),
         }
     }
 
@@ -219,6 +226,7 @@ impl PluginCapability {
             "fusion" => Ok(PluginCapability::Fusion),
             "result_filter" => Ok(PluginCapability::ResultFilter),
             "file_filter" => Ok(PluginCapability::FileFilter),
+            "vocabulary" => Ok(PluginCapability::Vocabulary),
             other => Err(format!("unknown capability: {other}")),
         }
     }
@@ -390,6 +398,12 @@ pub trait CodePlugin: Send + Sync {
     /// Whether this plugin can make file inclusion/exclusion decisions
     /// during scanning (`FileFilter`).
     fn supports_file_filter(&self) -> bool {
+        false
+    }
+
+    /// Whether the plugin provides a domain terminology table
+    /// (`Vocabulary`).
+    fn supports_vocabulary(&self) -> bool {
         false
     }
 
@@ -711,6 +725,20 @@ pub trait CodePlugin: Send + Sync {
         _size: u64,
     ) -> Result<Option<cce_types::plugin::FileFilterDecision>, PluginError> {
         Ok(None)
+    }
+
+    // ── Vocabulary ─────────────────────────────────────────────────────
+
+    /// Return the domain terminology table of this plugin.
+    ///
+    /// The plugin owns the terminology: each entry maps an identifier token
+    /// to its human-readable expansion. The host merges the tables of all
+    /// matching plugins, matches the tokens against whole identifiers in the
+    /// indexed text, and renders the matched expansions as a glossary line.
+    ///
+    /// An empty table (the default) means the plugin contributes nothing.
+    fn vocabulary(&self) -> Result<Vec<cce_types::plugin::VocabularyEntry>, PluginError> {
+        Ok(Vec::new())
     }
 }
 

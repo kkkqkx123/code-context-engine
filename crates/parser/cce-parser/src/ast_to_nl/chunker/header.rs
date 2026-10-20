@@ -107,17 +107,20 @@ impl<'a> HeaderHelper<'a> {
 
     /// Group members into header-budget-sized groups.
     ///
-    /// On the Embedding path, members flagged `self_contained` (they carry
-    /// their own docstring/behavior description) are always placed in a
-    /// single-member group, so their topic is never diluted by adjacent
-    /// members. The BM25 path is unaffected.
+    /// A member may become a chunk of its own only when it can stand alone
+    /// as a chunk.
     ///
-    /// On the BM25 path, groups with more members than
-    /// `bm25_large_group_split_threshold` skip budget packing entirely: each
-    /// member becomes its own chunk. Packing dozens of small members into one
-    /// `max_bm25_words` block dilutes term frequency and triggers length
-    /// normalization, which collapses deep recall for large classes. Small
-    /// groups keep the packing behavior so tiny functions stay merged.
+    /// On the Embedding path that means the member is flagged `self_contained`
+    /// (it carries its own docstring/behavior description), so its topic is
+    /// never diluted by adjacent members.
+    ///
+    /// On the BM25 path the member qualifies when it is `self_contained` or
+    /// when its own source spans more than one line. A single declaration
+    /// line - a macro, an enum constant, a struct field, a function-local
+    /// variable - has no retrieval value of its own, and emitting it alone
+    /// fills the corpus with one-line chunks. Such members are packed with
+    /// their peers instead, which keeps the declaration searchable without
+    /// spending a corpus slot on it.
     pub fn group_members_by_header_budget(
         &self,
         members: &[ConversionResult],
@@ -125,16 +128,10 @@ impl<'a> HeaderHelper<'a> {
         continuation_budget: usize,
         path: ChunkPath,
         member_self_contained: &[bool],
+        member_multiline: &[bool],
     ) -> Vec<Vec<ConversionResult>> {
         if first_budget == usize::MAX {
             return vec![members.to_vec()];
-        }
-
-        if path == ChunkPath::Bm25
-            && self.config.bm25_large_group_split_threshold > 0
-            && members.len() > self.config.bm25_large_group_split_threshold
-        {
-            return members.iter().map(|m| vec![m.clone()]).collect();
         }
 
         let min_cost = match path {
@@ -157,9 +154,14 @@ impl<'a> HeaderHelper<'a> {
             };
             let member_cost = self.unit_count(member_text, path);
 
-            if path == ChunkPath::Embedding
-                && member_self_contained.get(idx).copied().unwrap_or(false)
-            {
+            let may_stand_alone = match path {
+                ChunkPath::Embedding => member_self_contained.get(idx).copied().unwrap_or(false),
+                ChunkPath::Bm25 => {
+                    member_self_contained.get(idx).copied().unwrap_or(false)
+                        || member_multiline.get(idx).copied().unwrap_or(false)
+                }
+            };
+            if may_stand_alone {
                 if !current_group.is_empty() {
                     groups.push(std::mem::take(&mut current_group));
                     current_cost = 0;
@@ -273,18 +275,58 @@ mod tests {
     }
 
     #[test]
-    fn test_bm25_large_group_splits_per_member() {
+    fn test_bm25_multiline_members_split_per_member() {
         default_helper(|helper| {
             let members = member_conversions(13);
-            let flags = vec![false; members.len()];
+            let self_contained = vec![false; members.len()];
+            let multiline = vec![true; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &flags,
+                &self_contained,
+                &multiline,
             );
             assert_eq!(groups.len(), 13);
+            assert!(groups.iter().all(|g| g.len() == 1));
+        });
+    }
+
+    #[test]
+    fn test_bm25_single_line_members_are_packed() {
+        default_helper(|helper| {
+            let members = member_conversions(13);
+            let self_contained = vec![false; members.len()];
+            let multiline = vec![false; members.len()];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Bm25,
+                &self_contained,
+                &multiline,
+            );
+            assert_eq!(groups.len(), 1);
+            assert_eq!(groups[0].len(), 13);
+        });
+    }
+
+    #[test]
+    fn test_bm25_self_contained_single_line_member_stands_alone() {
+        default_helper(|helper| {
+            let members = member_conversions(3);
+            let self_contained = vec![false, true, false];
+            let multiline = vec![false; members.len()];
+            let groups = helper.group_members_by_header_budget(
+                &members,
+                1000,
+                1000,
+                ChunkPath::Bm25,
+                &self_contained,
+                &multiline,
+            );
+            assert_eq!(groups.len(), 3);
             assert!(groups.iter().all(|g| g.len() == 1));
         });
     }
@@ -293,45 +335,35 @@ mod tests {
     fn test_bm25_small_group_keeps_packing() {
         default_helper(|helper| {
             let members = member_conversions(3);
-            let flags = vec![false; members.len()];
+            let self_contained = vec![false; members.len()];
+            let multiline = vec![false; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
                 1000,
                 ChunkPath::Bm25,
-                &flags,
+                &self_contained,
+                &multiline,
             );
             assert_eq!(groups.len(), 1);
         });
     }
 
     #[test]
-    fn test_embedding_path_ignores_large_group_split() {
+    fn test_embedding_path_packs_members_without_own_description() {
         default_helper(|helper| {
             let members = member_conversions(13);
-            let flags = vec![false; members.len()];
+            let self_contained = vec![false; members.len()];
+            let multiline = vec![true; members.len()];
             let groups = helper.group_members_by_header_budget(
                 &members,
                 1000,
                 1000,
                 ChunkPath::Embedding,
-                &flags,
+                &self_contained,
+                &multiline,
             );
             assert_eq!(groups.len(), 1);
         });
-    }
-
-    #[test]
-    fn test_bm25_large_group_split_disabled_by_zero_threshold() {
-        let cfg = ChunkingConfig {
-            bm25_large_group_split_threshold: 0,
-            ..Default::default()
-        };
-        let helper = HeaderHelper::new(&cfg);
-        let members = member_conversions(13);
-        let flags = vec![false; members.len()];
-        let groups =
-            helper.group_members_by_header_budget(&members, 1000, 1000, ChunkPath::Bm25, &flags);
-        assert_eq!(groups.len(), 1);
     }
 }

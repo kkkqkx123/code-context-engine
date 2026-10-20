@@ -90,6 +90,10 @@ impl CodePlugin for NativePlugin {
         self.filter_file_fn.is_some() && self.has_file_filter
     }
 
+    fn supports_vocabulary(&self) -> bool {
+        self.vocabulary_fn.is_some() && self.has_vocabulary
+    }
+
     fn tree_sitter_language(&self) -> Option<*const std::ffi::c_void> {
         let f = self.tree_sitter_language_fn?;
         if !self.has_ast_language {
@@ -724,6 +728,34 @@ impl CodePlugin for NativePlugin {
                 PluginError::InvalidOutput(format!("Invalid FileFilterDecision: {e}"))
             }),
             None => Ok(None),
+        }
+    }
+
+    // ── Vocabulary ────────────────────────────────────────────────────
+
+    fn vocabulary(&self) -> Result<Vec<cce_types::plugin::VocabularyEntry>, PluginError> {
+        if !self.supports_vocabulary() {
+            return Ok(Vec::new());
+        }
+        let Some(func) = self.vocabulary_fn else {
+            return Ok(Vec::new());
+        };
+        let free_string_fn = self.free_string_fn;
+        let ctx = self.context.as_ref().map(|c| SendPtr(c.0));
+        let value = self.execute_with_timeout("vocabulary", move || {
+            // SAFETY: `func` is a valid function pointer from the same
+            // library; `call_owned_string_fn1` reads and frees its output.
+            let raw = unsafe { call_owned_string_fn1(|ctx| func(ctx), free_string_fn, ctx) }?;
+            match raw {
+                Some(json) => parse_ffi_json_result(&json),
+                None => Ok(None),
+            }
+        })?;
+        match value {
+            Some(v) => serde_json::from_value(v).map_err(|e| {
+                PluginError::InvalidOutput(format!("Invalid VocabularyEntry list: {e}"))
+            }),
+            None => Ok(Vec::new()),
         }
     }
 }

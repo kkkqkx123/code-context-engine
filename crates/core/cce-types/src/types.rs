@@ -53,7 +53,7 @@ pub use grouper::{EntityGroup, GroupType, ProcessingResult, ProcessingStats};
 pub use plugin::{
     FileFilterDecision, FusionWeights, GroupPluginContext, PluginDocument, PluginEntity,
     PluginExport, PluginImport, PluginRelation, PluginSymbol, PluginSymbolLocation,
-    QueryRewriteResult, ResultFilterEntry,
+    QueryRewriteResult, ResultFilterEntry, VocabularyEntry,
 };
 
 pub use import::ImportSource;

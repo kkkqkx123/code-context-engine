@@ -68,7 +68,7 @@ CCE plugin system enables extending the indexing pipeline via **Lua scripts** an
 
 ## Capability System
 
-### Capability Facets (16 total)
+### Capability Facets (17 total)
 
 | Facet | Consumption | Description |
 |-------|-------------|-------------|
@@ -88,6 +88,7 @@ CCE plugin system enables extending the indexing pipeline via **Lua scripts** an
 | `Fusion` | Override | Hybrid fusion weight override |
 | `ResultFilter` | Chain | Post-rerank result filtering/annotation |
 | `FileFilter` | Override | Scanner file inclusion/exclusion |
+| `Vocabulary` | Additive | Domain terminology table (token → expansion) |
 
 ### Priority System
 

@@ -813,6 +813,60 @@ fn test_file_filter_decision() {
     assert_eq!(plugin.filter_file("a/readme.md", false, 10).unwrap(), None);
 }
 
+// ── Vocabulary ───────────────────────────────────────────────────
+
+#[test]
+fn test_vocabulary_table_is_read_from_the_plugin() {
+    let script = r#"
+            plugin = {
+                id = "media_vocabulary",
+                capabilities = { "vocabulary" },
+                vocabulary = function()
+                    return {
+                        { token = "stts", expansion = "sync time-to-sample" },
+                        { token = "sdp", expansion = "session description protocol" }
+                    }
+                end
+            }
+        "#;
+    let plugin = LuaPlugin::from_script(script).unwrap();
+    assert!(plugin.supports_vocabulary());
+
+    let entries = plugin.vocabulary().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].token, "stts");
+    assert_eq!(entries[0].expansion, "sync time-to-sample");
+    assert_eq!(entries[1].token, "sdp");
+    assert_eq!(entries[1].expansion, "session description protocol");
+}
+
+#[test]
+fn test_vocabulary_absent_by_default() {
+    let plugin = LuaPlugin::from_script(r#"plugin = { id = "plain" }"#).unwrap();
+    assert!(!plugin.supports_vocabulary());
+    assert!(plugin.vocabulary().unwrap().is_empty());
+}
+
+#[test]
+fn test_vocabulary_skips_incomplete_entries() {
+    let script = r#"
+            plugin = {
+                id = "partial_vocabulary",
+                vocabulary = function()
+                    return {
+                        { token = "stts" },
+                        { expansion = "no token" },
+                        { token = "sdp", expansion = "session description protocol" }
+                    }
+                end
+            }
+        "#;
+    let plugin = LuaPlugin::from_script(script).unwrap();
+    let entries = plugin.vocabulary().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].token, "sdp");
+}
+
 // ── SymbolExtract ────────────────────────────────────────────────
 
 #[test]

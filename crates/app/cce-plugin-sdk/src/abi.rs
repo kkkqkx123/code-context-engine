@@ -121,6 +121,15 @@ macro_rules! declare_plugin {
             .unwrap_or(false)
         }
 
+        /// Whether this plugin implements the `Vocabulary` capability.
+        #[no_mangle]
+        pub extern "C" fn cce_plugin_has_vocabulary() -> bool {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                PLUGIN.supports_vocabulary()
+            }))
+            .unwrap_or(false)
+        }
+
         /// Create a plugin context (opaque pointer).
         ///
         /// Returns null if the plugin does not require context.
@@ -730,6 +739,15 @@ macro_rules! declare_plugin {
                 PLUGIN.filter_file(ctx, &path_str, is_directory, size)
             });
             $crate::ffi::result_to_c_string::<$crate::FileFilterDecision>(&result)
+        }
+
+        /// Return the domain terminology table.
+        #[no_mangle]
+        pub unsafe extern "C" fn cce_plugin_vocabulary(
+            ctx: *mut std::ffi::c_void,
+        ) -> *mut std::ffi::c_char {
+            let result = $crate::ffi::catch_unwind(|| PLUGIN.vocabulary(ctx));
+            $crate::ffi::vec_result_to_c_string(&result)
         }
 
         /// Return the tree-sitter query string for a query type, or null.

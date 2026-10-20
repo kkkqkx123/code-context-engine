@@ -4,6 +4,7 @@
 //! indexing. It keeps export-oriented presentation conversion unchanged.
 
 use crate::ast_to_nl::noise::NoiseProfile;
+use crate::ast_to_nl::vocabulary::VocabularyTable;
 use crate::grouper::ProcessingResult;
 use cce_text::Bm25TextCleaner;
 use cce_types::ast_to_nl::ConversionResult;
@@ -26,27 +27,62 @@ impl IndexTextEnricher {
         source: &str,
         language: Language,
         bm25_cleaner: &Bm25TextCleaner,
+        vocabulary: Option<&VocabularyTable>,
     ) {
         let extra_text = self
             .build_extra_text(conversion.entity_id, processing_result, source)
             .unwrap_or_default();
 
-        if extra_text.trim().is_empty() {
-            return;
+        if !extra_text.trim().is_empty() {
+            let bm25_cleaned = bm25_cleaner.clean(&extra_text);
+
+            // Embedding path: strip language-specific syntax noise (`unsafe {}`,
+            // `&*`, `&mut *` for Rust) while preserving implementation logic, then
+            // remove safety boilerplate comments. BM25 keeps the raw code so the
+            // tokenizer can produce dual-form tokens (whole identifier + subword
+            // splits), maximizing recall for both exact-spelling and fuzzy queries.
+            let profile = NoiseProfile::for_language(language);
+            let stripped = strip_syntax_noise(&extra_text, profile);
+            let emb_cleaned =
+                crate::ast_to_nl::embedding::filter_embedding_noise(&stripped, profile);
+
+            conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
         }
 
-        let bm25_cleaned = bm25_cleaner.clean(&extra_text);
+        if let Some(vocabulary) = vocabulary {
+            self.append_glossary(
+                conversion,
+                processing_result,
+                &extra_text,
+                vocabulary,
+                bm25_cleaner,
+            );
+        }
+    }
 
-        // Embedding path: strip language-specific syntax noise (`unsafe {}`,
-        // `&*`, `&mut *` for Rust) while preserving implementation logic, then
-        // remove safety boilerplate comments. BM25 keeps the raw code so the
-        // tokenizer can produce dual-form tokens (whole identifier + subword
-        // splits), maximizing recall for both exact-spelling and fuzzy queries.
-        let profile = NoiseProfile::for_language(language);
-        let stripped = strip_syntax_noise(&extra_text, profile);
-        let emb_cleaned = crate::ast_to_nl::embedding::filter_embedding_noise(&stripped, profile);
-
-        conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
+    /// Append the glossary line for the domain terms used by the entity.
+    ///
+    /// The scan covers the entity name, its signature and the function body
+    /// text produced by the index enrichment stage. Every entity contributes
+    /// at most one line, listing the matched terms in table order.
+    fn append_glossary(
+        &self,
+        conversion: &mut ConversionResult,
+        processing_result: &ProcessingResult,
+        body_text: &str,
+        vocabulary: &VocabularyTable,
+        bm25_cleaner: &Bm25TextCleaner,
+    ) {
+        let signature = find_entity_signature(processing_result, conversion.entity_id)
+            .map(str::to_string)
+            .unwrap_or_default();
+        let matched =
+            vocabulary.matched_entries(&[conversion.name.as_str(), signature.as_str(), body_text]);
+        let Some(line) = VocabularyTable::glossary_line(&matched) else {
+            return;
+        };
+        let cleaned = bm25_cleaner.clean(&line);
+        conversion.append_index_context_raw_separate(&cleaned, &cleaned);
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by
@@ -357,6 +393,52 @@ fn find_entity_span(
             if span.end_byte > span.start_byte {
                 return Some((span.start_byte, span.end_byte));
             }
+        }
+    }
+    None
+}
+
+/// The signature of an entity, taken from the group it belongs to.
+fn find_entity_signature(
+    processing_result: &ProcessingResult,
+    entity_id: EntityId,
+) -> Option<&str> {
+    for group in &processing_result.groups {
+        if let Some(header) = &group.header {
+            if header.id == entity_id {
+                return Some(header.signature.as_str());
+            }
+        }
+        for member in &group.members {
+            if member.id == entity_id {
+                return Some(member.signature.as_str());
+            }
+        }
+        if let Some(signature) = find_nested_signature(&group.nested_groups, entity_id) {
+            return Some(signature);
+        }
+    }
+    None
+}
+
+/// The signature of an entity inside a nested group tree.
+fn find_nested_signature(
+    groups: &[cce_types::grouper::EntityGroup],
+    entity_id: EntityId,
+) -> Option<&str> {
+    for group in groups {
+        if let Some(header) = &group.header {
+            if header.id == entity_id {
+                return Some(header.signature.as_str());
+            }
+        }
+        for member in &group.members {
+            if member.id == entity_id {
+                return Some(member.signature.as_str());
+            }
+        }
+        if let Some(signature) = find_nested_signature(&group.nested_groups, entity_id) {
+            return Some(signature);
         }
     }
     None

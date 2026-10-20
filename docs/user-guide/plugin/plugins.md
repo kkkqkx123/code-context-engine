@@ -26,6 +26,7 @@ CCE 插件系统允许你扩展核心功能，支持 Lua 脚本和原生动态�
 | 索引 | GroupOverride | 分组逻辑覆盖 |
 | 索引 | Chunk | 分块逻辑覆盖 |
 | 索引 | FileFilter | 文件过滤 |
+| 索引 | Vocabulary | 领域术语表 |
 | 查询 | QueryRewrite | 查询重写 |
 | 查询 | Rerank | 结果重排序 |
 | 查询 | Fusion | 融合权重调整 |

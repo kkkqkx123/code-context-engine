@@ -4,7 +4,7 @@
 //! its own `cce_plugin_*` exports without colliding with the lib crate's
 //! `#[cfg(test)]`-only `TestPlugin`.
 
-use cce_plugin_sdk::{declare_plugin, FfiPlugin, PluginError, PluginMetadata};
+use cce_plugin_sdk::{declare_plugin, FfiPlugin, PluginError, PluginMetadata, VocabularyEntry};
 
 struct NlPlugin;
 
@@ -76,6 +76,17 @@ impl FfiPlugin for NlPlugin {
             })
             .collect())
     }
+
+    fn supports_vocabulary(&self) -> bool {
+        true
+    }
+
+    fn vocabulary(&self, _ctx: *mut std::ffi::c_void) -> Result<Vec<VocabularyEntry>, PluginError> {
+        Ok(vec![
+            VocabularyEntry::new("stts", "sync time-to-sample"),
+            VocabularyEntry::new("sdp", "session description protocol"),
+        ])
+    }
 }
 
 declare_plugin!(NlPlugin);
@@ -144,4 +155,20 @@ fn test_embedding_batch_falls_back_to_single() {
 fn test_lifecycle_null() {
     assert!(cce_plugin_create().is_null());
     unsafe { cce_plugin_destroy(std::ptr::null_mut()) };
+}
+
+#[test]
+fn test_vocabulary() {
+    assert!(cce_plugin_has_vocabulary());
+    let ptr = unsafe { cce_plugin_vocabulary(std::ptr::null_mut()) };
+    let s = read(ptr);
+    let result: serde_json::Value = serde_json::from_str(&s).unwrap();
+    assert_eq!(result["result"], "ok");
+    assert_eq!(result["value"][0]["token"], "stts");
+    assert_eq!(result["value"][0]["expansion"], "sync time-to-sample");
+    assert_eq!(result["value"][1]["token"], "sdp");
+    assert_eq!(
+        result["value"][1]["expansion"],
+        "session description protocol"
+    );
 }

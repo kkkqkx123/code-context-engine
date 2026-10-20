@@ -67,7 +67,7 @@ use cce_metrics::PluginMetrics;
 use super::ffi_helpers::{
     AbiVersionFn, CreateContextFn, DestroyContextFn, FilterFileFn, FreeStringFn, FusionWeightsFn,
     HasCapabilityFn, MetadataFn, PluginContext, PluginStringFn, PluginStringFn2, PluginStringFn3,
-    QuerySchemeFn, SendPtr, StringOnlyFn, TreeSitterLangFn, call_owned_string_fn1,
+    QuerySchemeFn, SendPtr, StringOnlyFn, TreeSitterLangFn, VocabularyFn, call_owned_string_fn1,
     call_owned_string_only, call_plugin_string, capability_label, parse_ffi_json_result,
     symbol_missing_err,
 };
@@ -143,6 +143,8 @@ pub struct NativePlugin {
     pub(crate) has_result_filter: bool,
     /// Whether the plugin reports `FileFilter` support.
     pub(crate) has_file_filter: bool,
+    /// Whether the plugin reports `Vocabulary` support.
+    pub(crate) has_vocabulary: bool,
 
     // ── Required function pointers ──
     /// `cce_plugin_free_string` symbol.
@@ -185,6 +187,8 @@ pub struct NativePlugin {
     pub(crate) filter_results_fn: Option<PluginStringFn2>,
     /// `cce_plugin_filter_file` — None if not exported.
     pub(crate) filter_file_fn: Option<FilterFileFn>,
+    /// `cce_plugin_vocabulary` — None if not exported.
+    pub(crate) vocabulary_fn: Option<VocabularyFn>,
     /// `cce_plugin_tree_sitter_language` — None if not exported.
     pub(crate) tree_sitter_language_fn: Option<TreeSitterLangFn>,
     /// `cce_plugin_remap_grammar_language` — None if not exported.
@@ -400,6 +404,8 @@ impl NativePlugin {
             unsafe { library.get(HAS_RESULT_FILTER.bytes).ok().map(|s| *s) };
         let has_file_filter_fn: Option<HasCapabilityFn> =
             unsafe { library.get(HAS_FILE_FILTER.bytes).ok().map(|s| *s) };
+        let has_vocabulary_fn: Option<HasCapabilityFn> =
+            unsafe { library.get(HAS_VOCABULARY.bytes).ok().map(|s| *s) };
 
         // cce_plugin_parse_document / post_group / chunk / rerank
         let parse_document_fn: Option<PluginStringFn2> =
@@ -429,6 +435,8 @@ impl NativePlugin {
             unsafe { library.get(FILTER_RESULTS.bytes).ok().map(|s| *s) };
         let filter_file_fn: Option<FilterFileFn> =
             unsafe { library.get(FILTER_FILE.bytes).ok().map(|s| *s) };
+        let vocabulary_fn: Option<VocabularyFn> =
+            unsafe { library.get(VOCABULARY.bytes).ok().map(|s| *s) };
 
         // AstLanguage symbols
         let query_scheme_fn: Option<QuerySchemeFn> =
@@ -493,6 +501,7 @@ impl NativePlugin {
             .map(|f| unsafe { f() })
             .unwrap_or(false);
         let has_file_filter = has_file_filter_fn.map(|f| unsafe { f() }).unwrap_or(false);
+        let has_vocabulary = has_vocabulary_fn.map(|f| unsafe { f() }).unwrap_or(false);
 
         // ── 7. Create plugin context if lifecycle is supported ──
         let context = if unsafe { has_lifecycle_fn() } {
@@ -575,6 +584,7 @@ impl NativePlugin {
             has_fusion,
             has_result_filter,
             has_file_filter,
+            has_vocabulary,
             free_string_fn,
             generate_bm25_fn,
             generate_embedding_fn,
@@ -594,6 +604,7 @@ impl NativePlugin {
             fusion_weights_fn,
             filter_results_fn,
             filter_file_fn,
+            vocabulary_fn,
             tree_sitter_language_fn,
             remap_grammar_language_fn,
             classify_stdlib_fn,

@@ -20,8 +20,8 @@ use compact_str::CompactString;
 use crate::plugin::PluginRegistry;
 
 use super::builtin_stages::{
-    assert_no_same_name_nested_groups, drop_import_only_groups, resolve_group_hierarchy,
-    should_skip_low_value_entity,
+    absorb_template_groups, assert_no_same_name_nested_groups, drop_import_only_groups,
+    resolve_group_hierarchy, should_skip_low_value_entity,
 };
 use super::plugin_grouping::{
     apply_plugin_post_group, apply_stdlib_heuristics, inject_plugin_entities,
@@ -401,6 +401,13 @@ impl PreprocessingPipeline {
                 groups.push(EntityGroup::from_entity(entity, language));
             }
         }
+
+        // Stage 3b: Absorb the function-like groups nested in a template group.
+        // A C++ function template yields two entities for the same code, and
+        // the function's group would nest inside the template's group under
+        // the same name.
+        let absorbed_templates = absorb_template_groups(&mut groups);
+        if absorbed_templates > 0 {}
 
         // Stage 4: Inject supplementary plugin entities (EntityExtract).
         // Regex-based extractors (e.g. Flask route decorators) complement the

@@ -14,7 +14,9 @@ use cce_plugin::{PluginBundle, PluginRegistry};
 use cce_plugin_runtime::LuaPlugin;
 use cce_types::ParsedFile;
 use cce_types::ast_to_nl::options::OutputMode;
+use cce_types::grouper::{EntityGroup, GroupType, ProcessingResult};
 use cce_types::language::Language;
+use cce_types::{EntityId, EntityKind, GroupedEntity, Span};
 
 fn pattern_extract_plugin(script: &str) -> Arc<dyn cce_plugin::CodePlugin> {
     Arc::new(LuaPlugin::from_script(script).expect("valid lua"))
@@ -458,4 +460,177 @@ fn test_lang_heuristics_full_chain() {
     );
 
     cce_parser::tree_sitter_init::clear_plugin_languages_all();
+}
+
+// ── Vocabulary (domain terminology) ─────────────────────────────────────
+
+/// A Lua plugin contributing a domain terminology table.
+const MEDIA_VOCABULARY_SCRIPT: &str = r#"
+    plugin = {
+        id = "media_vocabulary",
+        vocabulary = function()
+            return {
+                { token = "stts", expansion = "sync time-to-sample" },
+                { token = "sdp", expansion = "session description protocol" }
+            }
+        end
+    }
+"#;
+
+/// Build a standalone group whose entity body spans the whole source.
+fn vocabulary_group(name: &str, signature: &str, language: Language) -> EntityGroup {
+    let header = GroupedEntity {
+        id: EntityId(1),
+        kind: EntityKind::Function,
+        name: name.to_string(),
+        signature: signature.to_string(),
+        doc_comment: Some("/// Parses the table.".to_string()),
+        ..Default::default()
+    };
+    EntityGroup {
+        group_id: "group_1".into(),
+        group_type: GroupType::Standalone,
+        header: Some(header),
+        header_id: Some(EntityId(1)),
+        entity_spans: std::collections::HashMap::from([(
+            EntityId(1),
+            Span::new(0, 60, 0, 0, 0, 3),
+        )]),
+        kind: EntityKind::Function,
+        name: name.into(),
+        language,
+        ..Default::default()
+    }
+}
+
+/// Convert the group with the given registry and return the header texts.
+fn convert_with_registry(
+    registry: PluginRegistry,
+    group: &EntityGroup,
+    source: &str,
+) -> (String, String) {
+    let converter =
+        cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
+            .with_plugin_registry(Arc::new(registry));
+    let processing_result = ProcessingResult {
+        groups: vec![group.clone()],
+        entity_meta: Default::default(),
+        behavior: Default::default(),
+        control_flow: Default::default(),
+        stats: Default::default(),
+    };
+    let results = converter.convert_entity_groups(
+        &processing_result.groups,
+        "src/media.c",
+        None,
+        Some(&processing_result),
+        Some(source),
+    );
+    let header = results[0]
+        .header_conversion
+        .as_ref()
+        .expect("the group must produce a header conversion");
+    (
+        header.bm25_text.clone().unwrap_or_default(),
+        header.embedding_text.clone().unwrap_or_default(),
+    )
+}
+
+/// `Vocabulary`: the plugin table is turned into a `Glossary:` line that is
+/// appended to both the BM25 and the embedding text.
+#[test]
+fn test_vocabulary_appends_glossary_to_conversion_text() {
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT));
+
+    let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
+    let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
+    let (bm25, embedding) = convert_with_registry(registry, &group, source);
+
+    for (path, text) in [("bm25", &bm25), ("embedding", &embedding)] {
+        assert!(
+            text.contains(
+                "Glossary: stts = sync time-to-sample; sdp = session description protocol"
+            ),
+            "{path} text must carry the glossary line, got: {text}"
+        );
+    }
+}
+
+/// `Vocabulary`: the tables of several plugins are merged, and a token
+/// contributed twice is emitted once.
+#[test]
+fn test_vocabulary_merges_multiple_plugins() {
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT));
+    let other = r#"
+        plugin = {
+            id = "other_vocabulary",
+            vocabulary = function()
+                return {
+                    { token = "sdp", expansion = "duplicate meaning" },
+                    { token = "avcc", expansion = "AVC configuration" }
+                }
+            end
+        }
+    "#;
+    registry.register(pattern_extract_plugin(other));
+
+    let source = "int parse(sdp) {\n    int stts = 1;\n    int avcc = 2;\n    return stts;\n}\n";
+    let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
+    let (bm25, _) = convert_with_registry(registry, &group, source);
+
+    assert!(
+        bm25.contains("Glossary: stts = sync time-to-sample; sdp = session description protocol; avcc = AVC configuration"),
+        "the merged glossary must keep the first meaning of a duplicated token, got: {bm25}"
+    );
+}
+
+/// `Vocabulary`: a plugin restricted to another language does not contribute.
+#[test]
+fn test_vocabulary_respects_language_filter() {
+    let mut registry = PluginRegistry::new();
+    registry.register_bundle(
+        PluginBundle::new(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT))
+            .with_languages(vec!["rust".to_string()]),
+    );
+
+    let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
+    let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
+    let (bm25, embedding) = convert_with_registry(registry, &group, source);
+
+    assert!(
+        !bm25.contains("Glossary:"),
+        "a plugin of another language must not contribute, got: {bm25}"
+    );
+    assert!(
+        !embedding.contains("Glossary:"),
+        "a plugin of another language must not contribute, got: {embedding}"
+    );
+}
+
+/// `Vocabulary`: without a plugin the conversion text stays untouched.
+#[test]
+fn test_vocabulary_absent_without_plugin() {
+    let registry = PluginRegistry::new();
+
+    let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
+    let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
+    let (bm25, embedding) = convert_with_registry(registry, &group, source);
+
+    assert!(!bm25.contains("Glossary:"), "got: {bm25}");
+    assert!(!embedding.contains("Glossary:"), "got: {embedding}");
+}
+
+/// The example plugin shipped with the documentation must stay loadable and
+/// must keep contributing a terminology table.
+#[test]
+fn test_example_media_vocabulary_plugin_loads() {
+    let script = include_str!("../../../../docs/user-guide/plugin/examples/media_vocabulary.lua");
+    let plugin = pattern_extract_plugin(script);
+    assert!(plugin.supports_vocabulary());
+
+    let entries = plugin.vocabulary().expect("vocabulary lookup");
+    assert!(entries.iter().any(|e| e.token == "stts"));
+    assert!(entries.iter().any(|e| e.token == "ctts"));
 }

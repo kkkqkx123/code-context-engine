@@ -10,6 +10,7 @@
 //! - [`QueryRewriteResult`], [`FusionWeights`], [`ResultFilterEntry`]: the
 //!   query-side capabilities (`QueryRewrite` / `Fusion` / `ResultFilter`).
 //! - [`FileFilterDecision`]: the `FileFilter` capability.
+//! - [`VocabularyEntry`]: the `Vocabulary` capability (domain terminology).
 //!
 //! The host converts these into the existing pipeline types (`GroupedEntity`,
 //! `entity_spans`) so downstream stages (grouper → AST→NL → chunker) remain
@@ -385,6 +386,34 @@ pub struct ResultFilterEntry {
     /// Optional note (only used for logging/inspection).
     #[serde(default)]
     pub note: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Vocabulary contract
+// ---------------------------------------------------------------------------
+
+/// One glossary entry contributed by the `Vocabulary` capability.
+///
+/// The plugin owns the terminology: `token` is the identifier that appears in
+/// the source (e.g. `"stts"`) and `expansion` is the human-readable meaning
+/// (e.g. `"sync time-to-sample"`). The host only matches whole identifier
+/// tokens and renders the expansion; it never interprets the terminology.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct VocabularyEntry {
+    /// The identifier token to match (e.g. `"stts"`).
+    pub token: String,
+    /// The human-readable expansion of the token (e.g. `"sync time-to-sample"`).
+    pub expansion: String,
+}
+
+impl VocabularyEntry {
+    /// Create a glossary entry.
+    pub fn new(token: impl Into<String>, expansion: impl Into<String>) -> Self {
+        Self {
+            token: token.into(),
+            expansion: expansion.into(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

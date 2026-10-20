@@ -18,7 +18,7 @@ use cce_types::plugin::GroupPluginContext;
 use cce_types::{
     ChunkedResult, FileFilterDecision, FusionWeights, GroupConversions, PluginDocument,
     PluginEntity, PluginExport, PluginImport, PluginRelation, PluginSymbol, QueryRewriteResult,
-    RerankResult, ResultFilterEntry,
+    RerankResult, ResultFilterEntry, VocabularyEntry,
 };
 
 impl CodePlugin for LuaPlugin {
@@ -1087,7 +1087,6 @@ impl CodePlugin for LuaPlugin {
     fn supports_file_filter(&self) -> bool {
         self.filter_file_fn_name.is_some()
     }
-
     fn filter_file(
         &self,
         file_path: &str,
@@ -1121,6 +1120,51 @@ impl CodePlugin for LuaPlugin {
                 },
                 _ => Ok(None),
             }
+        })
+    }
+
+    // ── Vocabulary ────────────────────────────────────────────────────
+
+    fn supports_vocabulary(&self) -> bool {
+        self.vocabulary_fn_name.is_some()
+    }
+
+    fn vocabulary(&self) -> Result<Vec<VocabularyEntry>, PluginError> {
+        let Some(fn_name) = &self.vocabulary_fn_name else {
+            return Ok(Vec::new());
+        };
+        let fn_name = fn_name.clone();
+        self.execute_with_timeout("vocabulary", move |lua| {
+            let plugin_table: Table = lua
+                .globals()
+                .get("plugin")
+                .map_err(|e| PluginError::ScriptError(e.to_string()))?;
+            let func: mlua::Function = plugin_table.get(fn_name.as_str()).map_err(|e| {
+                PluginError::LogicError(format!("Failed to get vocabulary function: {e}"))
+            })?;
+            let result: mlua::Value = func
+                .call::<mlua::Value>(())
+                .map_err(|e| PluginError::ScriptError(format!("vocabulary error: {e}")))?;
+            let mlua::Value::Table(entries) = result else {
+                return Ok(Vec::new());
+            };
+            let mut out = Vec::new();
+            for pair in entries.pairs::<mlua::Value, mlua::Value>() {
+                let (_, value) = pair.map_err(|e| {
+                    PluginError::ScriptError(format!("vocabulary result iteration error: {e}"))
+                })?;
+                let mlua::Value::Table(entry) = value else {
+                    continue;
+                };
+                let Some(token) = get_string_field(&entry, "token") else {
+                    continue;
+                };
+                let Some(expansion) = get_string_field(&entry, "expansion") else {
+                    continue;
+                };
+                out.push(VocabularyEntry { token, expansion });
+            }
+            Ok(out)
         })
     }
 }

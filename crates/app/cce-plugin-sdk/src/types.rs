@@ -2,7 +2,7 @@ use cce_plugin::{PluginError, PluginMetadata};
 use cce_types::grouper::EntityGroup;
 use cce_types::plugin::{
     FileFilterDecision, FusionWeights, PluginDocument, PluginEntity, PluginExport, PluginImport,
-    PluginRelation, PluginSymbol, QueryRewriteResult, ResultFilterEntry,
+    PluginRelation, PluginSymbol, QueryRewriteResult, ResultFilterEntry, VocabularyEntry,
 };
 use cce_types::{ChunkedResult, RerankResult};
 
@@ -117,6 +117,12 @@ pub trait FfiPlugin: Send + Sync + 'static {
 
     /// Whether the plugin provides `FileFilter`.
     fn supports_file_filter(&self) -> bool {
+        false
+    }
+
+    /// Whether the plugin provides a domain terminology table
+    /// (`Vocabulary`).
+    fn supports_vocabulary(&self) -> bool {
         false
     }
 
@@ -422,6 +428,17 @@ pub trait FfiPlugin: Send + Sync + 'static {
         _size: u64,
     ) -> Result<Option<FileFilterDecision>, PluginError> {
         Ok(None)
+    }
+
+    // ── Optional: Vocabulary ─────────────────────────────────────────
+
+    /// Return the domain terminology table of the plugin.
+    ///
+    /// Each entry maps an identifier token to its human-readable expansion.
+    /// The host owns the matching (whole identifier tokens) and the
+    /// rendering, so plugins only provide data.
+    fn vocabulary(&self, _ctx: *mut std::ffi::c_void) -> Result<Vec<VocabularyEntry>, PluginError> {
+        Ok(Vec::new())
     }
 
     // ── Optional: AstLanguage (Native-only) ──

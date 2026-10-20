@@ -196,6 +196,8 @@ impl ExtractionContext {
 /// - Java: `"com/example/Utils.java"` -> `"com.example.Utils"`
 /// - Go: `"pkg/utils/helper.go"` -> `"pkg/utils/helper"`
 /// - JS/TS: `"src/utils/helper.ts"` -> `"src/utils/helper"`
+/// - C/C++: `"src/util.h"` -> `"src/util.h"` (the translation unit is the
+///   file, so the extension is kept and `util.h` / `util.c` stay distinct)
 pub fn determine_module_path(
     file_path: &Path,
     project_root: &Path,
@@ -256,6 +258,12 @@ pub fn determine_module_path(
             let module = strip_file_extension(path_str).replace(['/', '\\'], ".");
             Some(module)
         }
+        Language::C | Language::Cpp => {
+            // C/C++ have no module system: the translation unit is the file.
+            // A header and its implementation share a stem (`foo.h` / `foo.c`),
+            // so the extension is kept to keep the two module paths distinct.
+            Some(relative)
+        }
         Language::JavaScript
         | Language::TypeScript
         | Language::Jsx
@@ -265,8 +273,6 @@ pub fn determine_module_path(
         | Language::Dart
         | Language::Bash
         | Language::Lua
-        | Language::C
-        | Language::Cpp
         | Language::Vue
         | Language::Svelte => {
             let path_str = relative.as_str();
@@ -381,6 +387,38 @@ mod tests {
         let project_root = PathBuf::from("/project");
         let module = determine_module_path(&file_path, &project_root, Language::Go);
         assert_eq!(module, Some("pkg/utils/helper".to_string()));
+    }
+
+    #[test]
+    fn test_c_module_path_keeps_extension() {
+        let file_path = PathBuf::from("/project/libmov/test/mov-file-buffer.c");
+        let project_root = PathBuf::from("/project");
+        let module = determine_module_path(&file_path, &project_root, Language::C);
+        assert_eq!(module, Some("libmov/test/mov-file-buffer.c".to_string()));
+    }
+
+    #[test]
+    fn test_cpp_header_and_source_module_paths_are_distinct() {
+        let project_root = PathBuf::from("/project");
+        let header = determine_module_path(
+            &PathBuf::from("/project/librtsp/rtp.h"),
+            &project_root,
+            Language::Cpp,
+        );
+        let source = determine_module_path(
+            &PathBuf::from("/project/librtsp/rtp.c"),
+            &project_root,
+            Language::Cpp,
+        );
+        let impl_file = determine_module_path(
+            &PathBuf::from("/project/librtsp/rtp.cpp"),
+            &project_root,
+            Language::Cpp,
+        );
+
+        assert_eq!(header, Some("librtsp/rtp.h".to_string()));
+        assert_eq!(source, Some("librtsp/rtp.c".to_string()));
+        assert_eq!(impl_file, Some("librtsp/rtp.cpp".to_string()));
     }
 
     #[test]

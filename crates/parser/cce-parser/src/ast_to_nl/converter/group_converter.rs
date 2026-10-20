@@ -113,6 +113,7 @@ impl super::AstToNlConverter {
                 if let (Some(pr), Some(src)) = (processing_result, source) {
                     for gc in &mut group_conversions {
                         let language = gc.group.language;
+                        let vocabulary = self.vocabulary_for(file_path, language);
                         if let Some(header) = gc.header_conversion.as_mut() {
                             IndexTextEnricher::new().enrich_conversion(
                                 header,
@@ -120,6 +121,7 @@ impl super::AstToNlConverter {
                                 src,
                                 language,
                                 &self.bm25_cleaner,
+                                vocabulary.as_deref(),
                             );
                         }
                         for member in &mut gc.member_conversions {
@@ -129,6 +131,7 @@ impl super::AstToNlConverter {
                                 src,
                                 language,
                                 &self.bm25_cleaner,
+                                vocabulary.as_deref(),
                             );
                         }
                     }
@@ -196,6 +199,7 @@ impl super::AstToNlConverter {
         if let (Some(pr), Some(src)) = (processing_result, source) {
             for gc in &mut group_conversions {
                 let language = gc.group.language;
+                let vocabulary = self.vocabulary_for(file_path, language);
                 if let Some(header) = gc.header_conversion.as_mut() {
                     IndexTextEnricher::new().enrich_conversion(
                         header,
@@ -203,6 +207,7 @@ impl super::AstToNlConverter {
                         src,
                         language,
                         &self.bm25_cleaner,
+                        vocabulary.as_deref(),
                     );
                 }
                 for member in &mut gc.member_conversions {
@@ -212,6 +217,7 @@ impl super::AstToNlConverter {
                         src,
                         language,
                         &self.bm25_cleaner,
+                        vocabulary.as_deref(),
                     );
                 }
             }

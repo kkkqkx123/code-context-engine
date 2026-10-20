@@ -347,6 +347,22 @@ impl PluginRegistry {
         })
     }
 
+    /// Plugins that contribute a domain terminology table (`Vocabulary`).
+    ///
+    /// The returned plugins are ordered by descending effective priority
+    /// (ties by registration order); the caller merges their tables in that
+    /// order.
+    pub fn get_vocabulary_providers(
+        &self,
+        file_path: Option<&str>,
+        language: Option<&str>,
+    ) -> Vec<&Arc<dyn CodePlugin>> {
+        self.filter_plugins(file_path, language, PluginCapability::Vocabulary, |e| {
+            PluginCapability::declared(&e.capabilities, PluginCapability::Vocabulary)
+                && e.plugin.supports_vocabulary()
+        })
+    }
+
     pub fn remove(&mut self, id: &str) -> bool {
         self.entries.remove(id).is_some()
     }
@@ -441,6 +457,7 @@ mod tests {
         bm25: bool,
         embedding: bool,
         fusion: bool,
+        vocabulary: bool,
     }
 
     impl TestPlugin {
@@ -459,6 +476,7 @@ mod tests {
                 bm25: true,
                 embedding: true,
                 fusion: true,
+                vocabulary: false,
             }
         }
     }
@@ -475,6 +493,9 @@ mod tests {
         }
         fn supports_fusion(&self) -> bool {
             self.fusion
+        }
+        fn supports_vocabulary(&self) -> bool {
+            self.vocabulary
         }
     }
 
@@ -769,6 +790,98 @@ mod tests {
 
         let (_, below) = registry.get_override_plugins(PluginCapability::TextGen, None, None);
         assert_eq!(below.len(), 1);
+    }
+
+    #[test]
+    fn test_vocabulary_providers_are_filtered_and_ordered() {
+        let mut registry = PluginRegistry::new();
+
+        let mut plain = TestPlugin::new("plain");
+        plain.vocabulary = true;
+        registry.register(Arc::new(plain));
+
+        let mut high = TestPlugin::new("high");
+        high.vocabulary = true;
+        high.meta.priority = 100;
+        registry.register(Arc::new(high));
+
+        // A plugin without the capability never contributes.
+        registry.register(Arc::new(TestPlugin::new("no_vocabulary")));
+
+        let providers = registry.get_vocabulary_providers(None, None);
+        let ids: Vec<&str> = providers.iter().map(|p| id_of(p)).collect();
+        assert_eq!(ids, vec!["high", "plain"]);
+    }
+
+    #[test]
+    fn test_vocabulary_providers_respect_file_and_language_filters() {
+        let mut registry = PluginRegistry::new();
+        let mut plugin = TestPlugin::new("c_only");
+        plugin.vocabulary = true;
+        registry.register_bundle(
+            PluginBundle::new(Arc::new(plugin))
+                .with_file_patterns(vec!["*.c".to_string()])
+                .with_languages(vec!["c".to_string()]),
+        );
+
+        assert_eq!(
+            registry
+                .get_vocabulary_providers(Some("a.c"), Some("c"))
+                .len(),
+            1
+        );
+        assert_eq!(
+            registry
+                .get_vocabulary_providers(Some("a.rs"), Some("rust"))
+                .len(),
+            0
+        );
+        assert_eq!(
+            registry
+                .get_vocabulary_providers(Some("a.c"), Some("rust"))
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_vocabulary_providers_skip_disabled_plugins() {
+        struct DisabledPlugin {
+            meta: PluginMetadata,
+        }
+
+        impl CodePlugin for DisabledPlugin {
+            fn metadata(&self) -> &PluginMetadata {
+                &self.meta
+            }
+            fn is_disabled(&self) -> bool {
+                true
+            }
+            fn supports_vocabulary(&self) -> bool {
+                true
+            }
+        }
+
+        let mut registry = PluginRegistry::new();
+        let mut plugin = TestPlugin::new("disabled");
+        plugin.vocabulary = true;
+        registry.register(Arc::new(plugin));
+        registry.register(Arc::new(DisabledPlugin {
+            meta: PluginMetadata {
+                id: "circuit_broken".to_string(),
+                name: "circuit_broken".to_string(),
+                version: "0.1.0".to_string(),
+                priority: 0,
+                capability_priorities: HashMap::new(),
+                capability_timeouts: HashMap::new(),
+                description: None,
+                capabilities: Vec::new(),
+            },
+        }));
+
+        let providers = registry.get_vocabulary_providers(None, None);
+        let ids: Vec<&str> = providers.iter().map(|p| id_of(p)).collect();
+        assert_eq!(ids, vec!["disabled"]);
     }
 
     #[test]

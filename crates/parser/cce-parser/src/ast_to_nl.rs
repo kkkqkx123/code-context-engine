@@ -41,6 +41,7 @@ pub mod code_form_converter;
 pub mod converter;
 pub mod embedding;
 pub mod noise;
+pub mod vocabulary;
 
 // Internal implementation modules (crate-only access)
 pub mod chunker;
@@ -85,6 +86,9 @@ pub use embedding::EmbeddingGenerator;
 
 // Re-export from noise
 pub use noise::NoiseProfile;
+
+// Re-export from vocabulary
+pub use vocabulary::VocabularyTable;
 
 // Re-export output mode
 pub use cce_types::OutputMode;

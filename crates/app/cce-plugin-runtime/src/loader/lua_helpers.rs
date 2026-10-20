@@ -62,6 +62,7 @@ pub(crate) fn capability_label(operation: &str) -> &'static str {
         "fusion_weights" => "fusion",
         "filter_results" => "result_filter",
         "filter_file" => "file_filter",
+        "vocabulary" => "vocabulary",
         _ => "unknown",
     }
 }
