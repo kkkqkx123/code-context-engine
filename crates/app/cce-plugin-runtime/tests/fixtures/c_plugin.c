@@ -134,5 +134,6 @@ char *cce_plugin_vocabulary(void *ctx) {
     return dup_str(
         "{\"result\":\"ok\",\"value\":["
         "{\"token\":\"stts\",\"expansion\":\"sync time-to-sample\"},"
+        "{\"token\":\"broken\"},"
         "{\"token\":\"sdp\",\"expansion\":\"session description protocol\"}]}");
 }

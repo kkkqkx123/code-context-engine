@@ -52,6 +52,7 @@ impl FileProcessor {
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             chunking_config: config.chunking.clone(),
             document_chunking_config: config.document_chunking.clone(),
+            ast_to_nl_config: config.clone(),
             pipeline_fingerprint: cce_utils::hash::hash_serializable(&config),
             plugin_registry: None,
             parser_metrics: None,
@@ -77,8 +78,9 @@ impl FileProcessor {
             doc_pipeline: Arc::new(PipelineRouter::new()),
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             pipeline_fingerprint: cce_utils::hash::hash_serializable(&config),
-            chunking_config: config.chunking,
+            chunking_config: config.chunking.clone(),
             document_chunking_config: config.document_chunking.clone(),
+            ast_to_nl_config: config,
             plugin_registry: None,
             parser_metrics: None,
             grouper_metrics: None,
@@ -103,6 +105,7 @@ impl FileProcessor {
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             chunking_config: ast_to_nl_config.chunking.clone(),
             document_chunking_config: ast_to_nl_config.document_chunking.clone(),
+            ast_to_nl_config: ast_to_nl_config.clone(),
             pipeline_fingerprint: cce_utils::hash::hash_serializable(ast_to_nl_config),
             plugin_registry: None,
             parser_metrics: None,
@@ -128,8 +131,9 @@ impl FileProcessor {
             doc_pipeline: Arc::new(PipelineRouter::new()),
             chunk_cache: Arc::new(RwLock::new(LruCache::new(cache_size))),
             pipeline_fingerprint: cce_utils::hash::hash_serializable(&config),
-            chunking_config: config.chunking,
+            chunking_config: config.chunking.clone(),
             document_chunking_config: config.document_chunking.clone(),
+            ast_to_nl_config: config,
             plugin_registry: None,
             parser_metrics: None,
             grouper_metrics: None,
@@ -178,8 +182,10 @@ impl FileProcessor {
         self.pre_processor =
             Arc::new(PreprocessingPipeline::new().with_plugin_registry(plugin_registry.clone()));
 
-        // Get current config from existing converter
-        let config = AstToNlConfig::default();
+        // Rebuild the converter and the chunker from the configuration the
+        // processor was built with, so the project's own settings survive the
+        // registry injection.
+        let config = self.ast_to_nl_config.clone();
         self.converter = Arc::new(
             AstToNlConverter::with_config(&config).with_plugin_registry(plugin_registry.clone()),
         );

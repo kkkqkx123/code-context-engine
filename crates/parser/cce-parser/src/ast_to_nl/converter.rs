@@ -72,14 +72,13 @@ pub struct AstToNlConverter {
     bm25_generator: Bm25Generator,
     embedding_generator: EmbeddingGenerator,
     plugin_registry: Option<std::sync::Arc<PluginRegistry>>,
-    /// Merged glossary tables, keyed by file path and language.
+    /// Merged glossary tables, keyed by the provider set that produced them.
     ///
     /// The plugin registry is attached once at construction, so the cache
     /// lifetime matches the registry lifetime and the collected tables never
     /// go stale.
-    vocabulary_cache: std::sync::Mutex<
-        std::collections::HashMap<(String, Language), std::sync::Arc<VocabularyTable>>,
-    >,
+    vocabulary_cache:
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<VocabularyTable>>>,
     pub(crate) bm25_cleaner: Bm25TextCleaner,
     pub(crate) embedding_cleaner: EmbeddingTextCleaner,
 }
@@ -116,8 +115,7 @@ impl AstToNlConverter {
             .unwrap_or(self.config.default_mode)
     }
 
-    /// The merged glossary table for a file, collected once per
-    /// (file path, language) pair.
+    /// The merged glossary table for a file, collected once per provider set.
     ///
     /// Returns `None` when no plugin provides a terminology table.
     pub(crate) fn vocabulary_for(
@@ -126,21 +124,18 @@ impl AstToNlConverter {
         language: Language,
     ) -> Option<std::sync::Arc<VocabularyTable>> {
         let registry = self.plugin_registry.as_ref()?;
-        let key = (file_path.to_string(), language);
+        let language_name = language.to_string();
+        let providers = vocabulary::providers(registry.as_ref(), file_path, &language_name);
+        if providers.is_empty() {
+            return None;
+        }
+        let key = vocabulary::provider_identity(&providers, registry.revision());
         if let Ok(cache) = self.vocabulary_cache.lock() {
             if let Some(table) = cache.get(&key) {
                 return Some(table.clone());
             }
         }
-        let language_name = language.to_string();
-        let table = std::sync::Arc::new(vocabulary::collect(
-            registry.as_ref(),
-            file_path,
-            &language_name,
-        ));
-        if table.is_empty() {
-            return None;
-        }
+        let table = std::sync::Arc::new(vocabulary::merge(&providers));
         if let Ok(mut cache) = self.vocabulary_cache.lock() {
             cache.insert(key, table.clone());
         }

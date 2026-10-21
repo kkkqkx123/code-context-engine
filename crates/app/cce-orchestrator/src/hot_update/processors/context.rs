@@ -11,6 +11,7 @@ use crate::index::{FileProcessor, StorageCoordinator};
 use crate::operation::CheckpointManager;
 use cce_config::NestProcessorConfig;
 use cce_metrics::HotUpdateStorageMetrics;
+use cce_plugin::PluginRegistry;
 
 /// Shared processor context
 ///
@@ -51,19 +52,26 @@ impl ProcessorContext {
 
     /// Create a processor context whose file processor is scoped to one
     /// project.
+    ///
+    /// The plugin registry is attached to the file processor so the
+    /// hot-update path produces the same text as the full-index path.
     pub fn new_with_project(
         storage: Arc<StorageCoordinator>,
         pre_processor_config: NestProcessorConfig,
         license_config: cce_config::LicenseHeaderConfig,
         project_id: i64,
+        plugin_registry: Option<Arc<PluginRegistry>>,
     ) -> Self {
+        let file_processor = FileProcessor::with_pre_processor_config(pre_processor_config)
+            .with_license_config(license_config)
+            .with_project_id(project_id);
+        let file_processor = match plugin_registry {
+            Some(registry) => file_processor.with_plugin_registry(registry),
+            None => file_processor,
+        };
         Self {
             storage,
-            file_processor: Arc::new(TokioMutex::new(
-                FileProcessor::with_pre_processor_config(pre_processor_config)
-                    .with_license_config(license_config)
-                    .with_project_id(project_id),
-            )),
+            file_processor: Arc::new(TokioMutex::new(file_processor)),
             checkpoint_manager: None,
             storage_metrics: None,
         }

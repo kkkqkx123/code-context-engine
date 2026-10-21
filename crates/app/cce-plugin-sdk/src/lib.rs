@@ -215,7 +215,9 @@ mod tests {
 
     #[test]
     fn test_vocabulary_default_returns_empty_list() {
-        assert!(!cce_plugin_has_vocabulary());
+        // The SDK always exposes the vocabulary entry point; a plugin without
+        // terminology answers with an empty table.
+        assert!(cce_plugin_has_vocabulary());
         let ptr = unsafe { cce_plugin_vocabulary(std::ptr::null_mut()) };
         let s = unsafe { c_string_to_string(ptr) };
         let result: serde_json::Value = serde_json::from_str(&s).unwrap();

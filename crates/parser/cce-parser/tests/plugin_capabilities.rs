@@ -509,6 +509,16 @@ fn convert_with_registry(
     group: &EntityGroup,
     source: &str,
 ) -> (String, String) {
+    convert_with_registry_and_path(registry, group, source, "src/media.c")
+}
+
+/// Convert the group with the given registry and file path.
+fn convert_with_registry_and_path(
+    registry: PluginRegistry,
+    group: &EntityGroup,
+    source: &str,
+    file_path: &str,
+) -> (String, String) {
     let converter =
         cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
             .with_plugin_registry(Arc::new(registry));
@@ -521,7 +531,7 @@ fn convert_with_registry(
     };
     let results = converter.convert_entity_groups(
         &processing_result.groups,
-        "src/media.c",
+        file_path,
         None,
         Some(&processing_result),
         Some(source),
@@ -622,6 +632,122 @@ fn test_vocabulary_absent_without_plugin() {
     assert!(!embedding.contains("Glossary:"), "got: {embedding}");
 }
 
+/// `Vocabulary`: a language alias in the plugin declaration addresses the
+/// same language as the host name.
+#[test]
+fn test_vocabulary_accepts_language_alias() {
+    let mut registry = PluginRegistry::new();
+    registry.register_bundle(
+        PluginBundle::new(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT))
+            .with_languages(vec!["cpp".to_string()]),
+    );
+
+    let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
+    let group = vocabulary_group("parse", "int parse(sdp)", Language::Cpp);
+    let (bm25, embedding) =
+        convert_with_registry_and_path(registry, &group, source, "src/media.cpp");
+
+    assert!(
+        bm25.contains("Glossary: stts = sync time-to-sample"),
+        "the alias must route the plugin, got: {bm25}"
+    );
+    assert!(
+        embedding.contains("Glossary: stts = sync time-to-sample"),
+        "the alias must route the plugin, got: {embedding}"
+    );
+}
+
+/// `Vocabulary`: a term matches an identifier segment, so compound
+/// identifiers carry the expansion.
+#[test]
+fn test_vocabulary_matches_identifier_segments() {
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT));
+
+    let source = "int parse_stts(int stts_count) {\n    return stts_count;\n}\n";
+    let group = vocabulary_group("parse_stts", "int parse_stts(int)", Language::C);
+    let (bm25, _) = convert_with_registry(registry, &group, source);
+
+    assert!(
+        bm25.contains("Glossary: stts = sync time-to-sample"),
+        "a compound identifier must match through its segment, got: {bm25}"
+    );
+}
+
+/// `Vocabulary`: a short term never matches inside a longer word.
+#[test]
+fn test_vocabulary_short_token_does_not_match_inside_a_word() {
+    let script = r#"
+        plugin = {
+            id = "short_vocabulary",
+            vocabulary = function()
+                return { { token = "ts", expansion = "timestamp" } }
+            end
+        }
+    "#;
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(script));
+
+    let source = "int parse(int stts) {\n    return stts;\n}\n";
+    let group = vocabulary_group("parse", "int parse(int)", Language::C);
+    let (bm25, _) = convert_with_registry(registry, &group, source);
+
+    assert!(
+        !bm25.contains("Glossary:"),
+        "a short term must not match inside a longer word, got: {bm25}"
+    );
+}
+
+/// `Vocabulary`: the table is queried once per provider set, not once per
+/// entity group.
+#[test]
+fn test_vocabulary_table_is_reused_across_files() {
+    let script = r#"
+        plugin = {
+            id = "counting_vocabulary",
+            vocabulary = function()
+                return { { token = "stts", expansion = "sync time-to-sample" } }
+            end
+        }
+    "#;
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(script));
+
+    let converter =
+        cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
+            .with_plugin_registry(Arc::new(registry));
+    let source = "int parse(int stts) {\n    return stts;\n}\n";
+    let group = vocabulary_group("parse", "int parse(int)", Language::C);
+    let processing_result = ProcessingResult {
+        groups: vec![group.clone()],
+        entity_meta: Default::default(),
+        behavior: Default::default(),
+        control_flow: Default::default(),
+        stats: Default::default(),
+    };
+
+    for path in ["src/a.c", "src/b.c", "src/c.c"] {
+        let results = converter.convert_entity_groups(
+            &processing_result.groups,
+            path,
+            None,
+            Some(&processing_result),
+            Some(source),
+        );
+        let header = results[0]
+            .header_conversion
+            .as_ref()
+            .expect("the group must produce a header conversion");
+        assert!(
+            header
+                .bm25_text
+                .as_deref()
+                .is_some_and(|text| text.contains("Glossary: stts")),
+            "every file of the provider set must carry the glossary line"
+        );
+    }
+}
+
 /// The example plugin shipped with the documentation must stay loadable and
 /// must keep contributing a terminology table.
 #[test]
@@ -633,4 +759,28 @@ fn test_example_media_vocabulary_plugin_loads() {
     let entries = plugin.vocabulary().expect("vocabulary lookup");
     assert!(entries.iter().any(|e| e.token == "stts"));
     assert!(entries.iter().any(|e| e.token == "ctts"));
+}
+
+/// The example plugin declares `["c", "cpp"]` in its registration snippet.
+/// Both languages must route to it.
+#[test]
+fn test_example_media_vocabulary_plugin_routes_declared_languages() {
+    let script = include_str!("../../../../docs/user-guide/plugin/examples/media_vocabulary.lua");
+    let source = "int parse(int stts) {\n    return stts;\n}\n";
+    for (language, path) in [
+        (Language::C, "src/media.c"),
+        (Language::Cpp, "src/media.cpp"),
+    ] {
+        let mut registry = PluginRegistry::new();
+        registry.register_bundle(
+            PluginBundle::new(pattern_extract_plugin(script))
+                .with_languages(vec!["c".to_string(), "cpp".to_string()]),
+        );
+        let group = vocabulary_group("parse", "int parse(int)", language);
+        let (bm25, _) = convert_with_registry_and_path(registry, &group, source, path);
+        assert!(
+            bm25.contains("Glossary: stts ="),
+            "the example plugin must contribute for {language}, got: {bm25}"
+        );
+    }
 }

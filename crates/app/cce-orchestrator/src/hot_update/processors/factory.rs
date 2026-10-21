@@ -137,19 +137,25 @@ pub fn create_index_processors(
 /// with the full-index path; when absent, a default pipeline is used.
 /// `grouper_config` drives both the render-input fingerprint and the grouper
 /// that derives entity groups from parsed files at export time.
+/// `plugin_registry` carries the plugins that take part in text generation,
+/// so the exported documents match the indexed chunks.
 pub fn create_export_processor(
     exporter: Arc<NlDocumentExporter>,
     ast_to_nl_config: Option<&cce_config::AstToNlConfig>,
     grouper_config: &NestProcessorConfig,
     summary_config: Option<&cce_config::SummaryConfig>,
+    plugin_registry: Option<Arc<PluginRegistry>>,
 ) -> NlDocumentUpdateProcessor {
     let grouper_fingerprint = crate::export::fingerprint::config_fingerprint(grouper_config);
     let summary_fingerprint = summary_config
         .map(crate::export::fingerprint::config_fingerprint)
         .unwrap_or_default();
-    let processor = match ast_to_nl_config {
-        Some(config) => NlDocumentUpdateProcessor::from_config(exporter, config),
-        None => NlDocumentUpdateProcessor::new(exporter),
+    let processor = match (ast_to_nl_config, plugin_registry) {
+        (Some(config), Some(registry)) => {
+            NlDocumentUpdateProcessor::from_config_with_plugins(exporter, config, registry)
+        }
+        (Some(config), None) => NlDocumentUpdateProcessor::from_config(exporter, config),
+        (None, _) => NlDocumentUpdateProcessor::new(exporter),
     };
     processor
         .with_grouper_config(grouper_config.clone())
@@ -362,6 +368,7 @@ impl ProcessorFactory {
             pre_processor_config,
             license_config.clone(),
             project_id,
+            plugin_registry.clone(),
         );
         if let Some(cm) = &checkpoint_manager {
             context = context.with_checkpoint_manager(cm.clone());
@@ -415,8 +422,8 @@ impl ProcessorFactory {
                     "Relation processor disabled until a unified snapshot publisher is configured"
                 );
             }
-            if let Some(registry) = plugin_registry {
-                relation_processor = relation_processor.with_plugin_registry(registry);
+            if let Some(registry) = plugin_registry.as_ref() {
+                relation_processor = relation_processor.with_plugin_registry(registry.clone());
             }
             if let Some(metrics) = relation_metrics {
                 relation_processor = relation_processor.with_relation_metrics(metrics);
@@ -436,8 +443,13 @@ impl ProcessorFactory {
                 .clone()
                 .unwrap_or_else(|| ExportConfig::new(PathBuf::from("."), project_id));
             let exporter = Arc::new(NlDocumentExporter::new(export_cfg));
-            let mut export_processor =
-                create_export_processor(exporter, ast_to_nl_config, grouper_config, summary_config);
+            let mut export_processor = create_export_processor(
+                exporter,
+                ast_to_nl_config,
+                grouper_config,
+                summary_config,
+                plugin_registry.clone(),
+            );
             if let Some(cm) = &checkpoint_manager {
                 export_processor = export_processor.with_checkpoint_manager(cm.clone());
             }

@@ -5,6 +5,7 @@ use crate::{
     CodePlugin, OverridePluginSplit, PRIORITY_MAX, PRIORITY_MIN, PluginBundle, PluginCapability,
     PluginError, PluginSource,
 };
+use cce_types::language::Language;
 
 struct RegistryEntry {
     plugin: Arc<dyn CodePlugin>,
@@ -40,6 +41,11 @@ impl RegistryEntry {
 pub struct PluginRegistry {
     entries: HashMap<String, RegistryEntry>,
     next_seq: u64,
+    /// Revision counter, advanced whenever the plugin set changes.
+    ///
+    /// Consumers that cache plugin-derived data use it to detect that the
+    /// cached data no longer matches the registry.
+    revision: u64,
 }
 
 impl Default for PluginRegistry {
@@ -54,6 +60,7 @@ impl PluginRegistry {
         Self {
             entries: HashMap::new(),
             next_seq: 0,
+            revision: 0,
         }
     }
 
@@ -125,6 +132,7 @@ impl PluginRegistry {
                 seq,
             },
         );
+        self.revision += 1;
     }
 
     fn resolve_capability_priorities(
@@ -251,13 +259,24 @@ impl PluginRegistry {
         if allowed.is_empty() {
             return true;
         }
-        match language {
-            Some(lang) => {
-                let lang_lower = lang.to_lowercase();
-                allowed.iter().any(|l| l.to_lowercase() == lang_lower)
+        let Some(language) = language else {
+            return false;
+        };
+        // Resolve both sides through the host language table so that aliases
+        // ("cpp" / "c++", "js" / "javascript") address the same language.
+        // Languages the table does not know (custom plugin languages) fall
+        // back to a literal case-insensitive comparison.
+        let resolved = Language::from_name(language);
+        allowed.iter().any(|candidate| {
+            let candidate = candidate.trim();
+            if candidate.eq_ignore_ascii_case(language) {
+                return true;
             }
-            None => false,
-        }
+            match (resolved, Language::from_name(candidate)) {
+                (Some(left), Some(right)) => left == right,
+                _ => false,
+            }
+        })
     }
 
     pub fn get_plugins(
@@ -364,7 +383,19 @@ impl PluginRegistry {
     }
 
     pub fn remove(&mut self, id: &str) -> bool {
-        self.entries.remove(id).is_some()
+        let removed = self.entries.remove(id).is_some();
+        if removed {
+            self.revision += 1;
+        }
+        removed
+    }
+
+    /// The registry revision, advanced on every plugin set change.
+    ///
+    /// Consumers that cache plugin-derived data fold it into their cache key
+    /// so a stale entry is never served after the plugin set changed.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn ids(&self) -> Vec<String> {
@@ -388,6 +419,39 @@ impl PluginRegistry {
             .filter(|entry| {
                 PluginCapability::declared(&entry.capabilities, PluginCapability::TextGen)
                     && PluginCapability::supported(entry.plugin.as_ref(), PluginCapability::TextGen)
+            })
+            .map(|entry| {
+                let meta = entry.plugin.metadata();
+                format!(
+                    "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                    meta.id,
+                    meta.version,
+                    entry.priority,
+                    entry.content_digest.as_deref().unwrap_or("-")
+                )
+            })
+            .collect();
+        rows.sort();
+        calculate_hash(rows.join("\u{1e}").as_bytes())
+    }
+
+    /// Fingerprint of the terminology plugins (`Vocabulary`).
+    ///
+    /// The fingerprint changes when a terminology plugin is added, removed or
+    /// its content changes, so consumers that cache the produced text can
+    /// detect that the cached text no longer matches the plugin set.
+    pub fn vocabulary_fingerprint(&self) -> String {
+        use cce_utils::hash::calculate_hash;
+
+        let mut rows: Vec<String> = self
+            .entries
+            .values()
+            .filter(|entry| {
+                PluginCapability::declared(&entry.capabilities, PluginCapability::Vocabulary)
+                    && PluginCapability::supported(
+                        entry.plugin.as_ref(),
+                        PluginCapability::Vocabulary,
+                    )
             })
             .map(|entry| {
                 let meta = entry.plugin.metadata();
@@ -580,6 +644,56 @@ mod tests {
         );
         assert_eq!(registry.get_bm25_generators(None, None).len(), 0);
         assert_eq!(registry.get_bm25_generators(None, Some("python")).len(), 1);
+    }
+
+    #[test]
+    fn test_language_filter_accepts_aliases() {
+        let mut registry = PluginRegistry::new();
+        registry.register_bundle(
+            PluginBundle::new(Arc::new(TestPlugin::new("cpp_alias")))
+                .with_languages(vec!["cpp".to_string()]),
+        );
+
+        assert_eq!(
+            registry
+                .get_bm25_generators(Some("a.cpp"), Some("C++"))
+                .len(),
+            1,
+            "the alias must address the same language as the host name"
+        );
+        assert_eq!(
+            registry.get_bm25_generators(Some("a.c"), Some("C")).len(),
+            0,
+            "a different language must not match"
+        );
+    }
+
+    #[test]
+    fn test_language_filter_resolves_both_sides() {
+        let mut registry = PluginRegistry::new();
+        registry.register_bundle(
+            PluginBundle::new(Arc::new(TestPlugin::new("js_alias")))
+                .with_languages(vec!["javascript".to_string()]),
+        );
+
+        assert_eq!(
+            registry
+                .get_bm25_generators(Some("a.js"), Some("JavaScript"))
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_revision_advances_with_the_plugin_set() {
+        let mut registry = PluginRegistry::new();
+        let initial = registry.revision();
+        registry.register(Arc::new(TestPlugin::new("a")));
+        assert!(registry.revision() > initial);
+        let after_register = registry.revision();
+        assert!(registry.remove("a"));
+        assert!(registry.revision() > after_register);
+        assert!(!registry.remove("a"));
     }
 
     #[test]

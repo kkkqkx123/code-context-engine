@@ -51,9 +51,10 @@ pub use ast_to_nl::{
 pub use grouper::{EntityGroup, GroupType, ProcessingResult, ProcessingStats};
 
 pub use plugin::{
-    FileFilterDecision, FusionWeights, GroupPluginContext, PluginDocument, PluginEntity,
-    PluginExport, PluginImport, PluginRelation, PluginSymbol, PluginSymbolLocation,
-    QueryRewriteResult, ResultFilterEntry, VocabularyEntry,
+    FileFilterDecision, FusionWeights, GroupPluginContext, MAX_VOCABULARY_ENTRIES,
+    MAX_VOCABULARY_EXPANSION_LENGTH, PluginDocument, PluginEntity, PluginExport, PluginImport,
+    PluginRelation, PluginSymbol, PluginSymbolLocation, QueryRewriteResult, ResultFilterEntry,
+    VocabularyEntry,
 };
 
 pub use import::ImportSource;

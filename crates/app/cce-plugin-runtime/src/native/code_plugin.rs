@@ -1,8 +1,11 @@
 use std::ffi::{CStr, CString};
 
+use tracing::warn;
+
 use crate::error::PluginError;
 use crate::types::PluginMetadata;
 use cce_plugin::CodePlugin;
+use cce_types::MAX_VOCABULARY_ENTRIES;
 use cce_types::grouper::EntityGroup;
 
 use super::ffi_helpers::SendPtr;
@@ -751,13 +754,54 @@ impl CodePlugin for NativePlugin {
                 None => Ok(None),
             }
         })?;
-        match value {
-            Some(v) => serde_json::from_value(v).map_err(|e| {
-                PluginError::InvalidOutput(format!("Invalid VocabularyEntry list: {e}"))
-            }),
-            None => Ok(Vec::new()),
+        let Some(value) = value else {
+            return Ok(Vec::new());
+        };
+        let serde_json::Value::Array(items) = value else {
+            return Err(PluginError::InvalidOutput(
+                "Vocabulary result must be a JSON array of entries".to_string(),
+            ));
+        };
+        let plugin_id = self.metadata.id.clone();
+        let mut out = Vec::with_capacity(items.len().min(MAX_VOCABULARY_ENTRIES));
+        for item in items {
+            let Some(entry) = parse_vocabulary_entry(&item) else {
+                warn!(
+                    plugin = %plugin_id,
+                    "Skipping malformed vocabulary entry"
+                );
+                continue;
+            };
+            let Some(entry) = entry.normalized() else {
+                warn!(
+                    plugin = %plugin_id,
+                    "Skipping vocabulary entry without usable terminology"
+                );
+                continue;
+            };
+            if out.len() >= MAX_VOCABULARY_ENTRIES {
+                warn!(
+                    plugin = %plugin_id,
+                    limit = MAX_VOCABULARY_ENTRIES,
+                    "Vocabulary table exceeds the host limit; further entries are dropped"
+                );
+                break;
+            }
+            out.push(entry);
         }
+        Ok(out)
     }
+}
+
+/// Read one vocabulary entry from its JSON representation.
+///
+/// Returns `None` when the entry does not carry a string token and a string
+/// expansion.
+fn parse_vocabulary_entry(value: &serde_json::Value) -> Option<cce_types::plugin::VocabularyEntry> {
+    let object = value.as_object()?;
+    let token = object.get("token")?.as_str()?;
+    let expansion = object.get("expansion")?.as_str()?;
+    Some(cce_types::plugin::VocabularyEntry::new(token, expansion))
 }
 
 impl NativePlugin {

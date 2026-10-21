@@ -161,6 +161,8 @@ fn test_generate_embedding_batch_error_type_restored() {
 fn test_vocabulary_entries_are_read() {
     let plugin = load_plugin();
     let entries = plugin.vocabulary().expect("vocabulary call failed");
+    // The fixture also carries an entry without an expansion; it is dropped
+    // while the usable entries survive.
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].token, "stts");
     assert_eq!(entries[0].expansion, "sync time-to-sample");

@@ -56,7 +56,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use libloading::Library;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::default_timeout_for;
 use crate::error::PluginError;
@@ -502,6 +502,15 @@ impl NativePlugin {
             .unwrap_or(false);
         let has_file_filter = has_file_filter_fn.map(|f| unsafe { f() }).unwrap_or(false);
         let has_vocabulary = has_vocabulary_fn.map(|f| unsafe { f() }).unwrap_or(false);
+
+        // The vocabulary capability needs both the guard and the entry point.
+        // A plugin that exports only one of them would silently contribute
+        // nothing, so the mismatch is reported.
+        if has_vocabulary_fn.is_some() != vocabulary_fn.is_some() {
+            warn!(
+                "Native plugin exports only one of the vocabulary symbols; the capability stays disabled"
+            );
+        }
 
         // ── 7. Create plugin context if lifecycle is supported ──
         let context = if unsafe { has_lifecycle_fn() } {

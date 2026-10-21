@@ -42,6 +42,7 @@ use cce_parser::ast_to_nl::AstToNlConverter;
 use cce_parser::ast_to_nl::chunker::GroupChunker;
 use cce_parser::grouper::PreprocessingPipeline;
 use cce_parser::grouper::types::ProcessingResult;
+use cce_plugin::PluginRegistry;
 use cce_storage_metadb_sqlite::SqliteClient;
 use cce_storage_metadb_sqlite::snapshot_store::SqliteSnapshotStore;
 
@@ -98,6 +99,11 @@ pub struct NlDocumentUpdateProcessor {
     /// AST-to-NL pipeline configuration used for rendering (fingerprinted so
     /// recovery can detect configuration drift).
     ast_to_nl_config: Arc<tokio::sync::RwLock<AstToNlConfig>>,
+    /// Plugin registry used for text generation.
+    ///
+    /// The registry is kept so a configuration reload rebuilds the converter
+    /// with the same plugins.
+    plugin_registry: Option<Arc<PluginRegistry>>,
     /// Fingerprint of the grouper configuration that produced the entity
     /// groups rendered by this processor.
     grouper_fingerprint: String,
@@ -109,7 +115,7 @@ pub struct NlDocumentUpdateProcessor {
 impl NlDocumentUpdateProcessor {
     /// Create a new update processor
     pub fn new(exporter: Arc<NlDocumentExporter>) -> Self {
-        Self::new_with_config(exporter, &AstToNlConfig::default())
+        Self::new_with_config(exporter, &AstToNlConfig::default(), None)
     }
 
     /// Create a new update processor with an explicit AST-to-NL pipeline config.
@@ -118,18 +124,38 @@ impl NlDocumentUpdateProcessor {
     /// it must use the same pipeline configuration as the full-index path to
     /// produce consistent output.
     pub fn from_config(exporter: Arc<NlDocumentExporter>, config: &AstToNlConfig) -> Self {
-        Self::new_with_config(exporter, config)
+        Self::new_with_config(exporter, config, None)
+    }
+
+    /// Create a new update processor with an explicit AST-to-NL pipeline
+    /// config and the plugin registry.
+    ///
+    /// The registry carries the plugins that take part in text generation, so
+    /// the exported documents carry the same enrichment as the indexed chunks.
+    pub fn from_config_with_plugins(
+        exporter: Arc<NlDocumentExporter>,
+        config: &AstToNlConfig,
+        plugin_registry: Arc<PluginRegistry>,
+    ) -> Self {
+        Self::new_with_config(exporter, config, Some(plugin_registry))
     }
 
     /// Shared constructor capturing the AST-to-NL pipeline configuration.
-    fn new_with_config(exporter: Arc<NlDocumentExporter>, config: &AstToNlConfig) -> Self {
+    fn new_with_config(
+        exporter: Arc<NlDocumentExporter>,
+        config: &AstToNlConfig,
+        plugin_registry: Option<Arc<PluginRegistry>>,
+    ) -> Self {
         let ast_to_nl_config = config.clone();
+        let converter = AstToNlConverter::with_config(config);
+        let converter = match plugin_registry.as_ref() {
+            Some(registry) => converter.with_plugin_registry(registry.clone()),
+            None => converter,
+        };
         Self {
             exporter: Arc::new(tokio::sync::RwLock::new(exporter)),
             converter: PresentationConverter::new(),
-            ast_converter: Arc::new(tokio::sync::RwLock::new(Arc::new(
-                AstToNlConverter::with_config(config),
-            ))),
+            ast_converter: Arc::new(tokio::sync::RwLock::new(Arc::new(converter))),
             chunker: Arc::new(tokio::sync::RwLock::new(Arc::new(GroupChunker::new(
                 config.chunking.clone(),
             )))),
@@ -141,6 +167,7 @@ impl NlDocumentUpdateProcessor {
             staging: Mutex::new(ExportStaging::default()),
             relation_epoch_cache: Mutex::new(None),
             ast_to_nl_config: Arc::new(tokio::sync::RwLock::new(ast_to_nl_config)),
+            plugin_registry,
             grouper_fingerprint: String::new(),
             summary_fingerprint: String::new(),
         }
@@ -153,7 +180,7 @@ impl NlDocumentUpdateProcessor {
         exporter: Arc<NlDocumentExporter>,
     ) -> std::result::Result<Self, cce_types::error::ConfigError> {
         let config = Settings::ast_to_nl()?;
-        Ok(Self::new_with_config(exporter, &config))
+        Ok(Self::new_with_config(exporter, &config, None))
     }
 
     /// Set enabled state
@@ -468,6 +495,7 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
                 &self.ast_converter,
                 &self.chunker,
                 &self.ast_to_nl_config,
+                self.plugin_registry.as_ref(),
                 &self.relation_epoch_cache,
                 config_path,
             )
@@ -661,6 +689,7 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
             &self.ast_converter,
             &self.chunker,
             &self.ast_to_nl_config,
+            self.plugin_registry.as_ref(),
             &self.relation_epoch_cache,
             config_path,
         )
@@ -673,6 +702,7 @@ impl UpdateProcessor for NlDocumentUpdateProcessor {
             &self.ast_converter,
             &self.chunker,
             &self.ast_to_nl_config,
+            self.plugin_registry.as_ref(),
             &self.relation_epoch_cache,
             config_path,
         )

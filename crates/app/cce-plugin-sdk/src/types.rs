@@ -122,8 +122,13 @@ pub trait FfiPlugin: Send + Sync + 'static {
 
     /// Whether the plugin provides a domain terminology table
     /// (`Vocabulary`).
+    ///
+    /// The default is `true`: the SDK always exports the vocabulary entry
+    /// point, and a plugin without terminology returns an empty table. The
+    /// table decides whether the plugin contributes, so implementing
+    /// [`FfiPlugin::vocabulary`] is enough to publish a terminology table.
     fn supports_vocabulary(&self) -> bool {
-        false
+        true
     }
 
     /// Whether the plugin has lifecycle management (create_context / destroy_context).
@@ -435,8 +440,12 @@ pub trait FfiPlugin: Send + Sync + 'static {
     /// Return the domain terminology table of the plugin.
     ///
     /// Each entry maps an identifier token to its human-readable expansion.
-    /// The host owns the matching (whole identifier tokens) and the
-    /// rendering, so plugins only provide data.
+    /// The host owns the matching (identifier tokens and their segments)
+    /// and the rendering, so plugins only provide data.
+    ///
+    /// The host keeps at most 256 entries and truncates an expansion longer
+    /// than 200 characters; entries without a token or an expansion are
+    /// dropped.
     fn vocabulary(&self, _ctx: *mut std::ffi::c_void) -> Result<Vec<VocabularyEntry>, PluginError> {
         Ok(Vec::new())
     }

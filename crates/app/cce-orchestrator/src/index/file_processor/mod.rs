@@ -12,7 +12,7 @@ mod builder;
 mod code;
 mod document;
 
-use cce_config::{ChunkingConfig, LicenseHeaderConfig};
+use cce_config::{AstToNlConfig, ChunkingConfig, LicenseHeaderConfig};
 use cce_metrics::{FileProcessingMetrics, ParserMetrics, PipelineStageMetrics};
 use cce_parser::ast_to_nl::chunker::{ChunkedResult, GroupChunker};
 use cce_parser::ast_to_nl::{AstToNlConverter, ConversionRequest};
@@ -108,6 +108,13 @@ pub struct FileProcessor {
     pub(crate) chunking_config: ChunkingConfig,
     /// Document-specific chunking configuration (if None, uses chunking_config)
     pub(crate) document_chunking_config: Option<ChunkingConfig>,
+    /// The AST-to-NL configuration the converter and the chunker are built
+    /// from.
+    ///
+    /// Injecting the plugin registry rebuilds both components; the stored
+    /// configuration keeps them on the project's own settings instead of
+    /// falling back to the defaults.
+    pub(crate) ast_to_nl_config: AstToNlConfig,
     /// Hash of the AST-to-NL configuration. `pipeline_fingerprint()` folds
     /// this together with the parser pipeline version and the TextGen plugin
     /// set fingerprint to drive storage-module drift detection.
@@ -155,6 +162,7 @@ impl Clone for FileProcessor {
             chunk_cache: Arc::clone(&self.chunk_cache),
             chunking_config: self.chunking_config.clone(),
             document_chunking_config: self.document_chunking_config.clone(),
+            ast_to_nl_config: self.ast_to_nl_config.clone(),
             pipeline_fingerprint: self.pipeline_fingerprint.clone(),
             plugin_registry: self.plugin_registry.clone(),
             parser_metrics: self.parser_metrics.clone(),
@@ -198,6 +206,8 @@ impl FileProcessor {
         if let Some(registry) = &self.plugin_registry {
             material.push('|');
             material.push_str(&registry.textgen_fingerprint());
+            material.push('|');
+            material.push_str(&registry.vocabulary_fingerprint());
         }
         cce_utils::hash::calculate_hash(material.as_bytes())
     }

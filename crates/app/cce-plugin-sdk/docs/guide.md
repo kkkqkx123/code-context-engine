@@ -165,7 +165,7 @@ cargo build --release
 | `filter_results(ctx, query, results_json)` | `Result<Option<Vec<ResultFilterEntry>>, PluginError>` | `Ok(None)` | `supports_result_filter→true` |
 | `supports_file_filter()` | `bool` | `false` | — |
 | `filter_file(ctx, file_path, is_directory, size)` | `Result<Option<FileFilterDecision>, PluginError>` | `Ok(None)` | `supports_file_filter→true` |
-| `supports_vocabulary()` | `bool` | `false` | — |
+| `supports_vocabulary()` | `bool` | `true` | — |
 | `vocabulary(ctx)` | `Result<Vec<VocabularyEntry>, PluginError>` | 空表 | `supports_vocabulary→true` |
 
 > **版本提示**：ABI 版本历史已重置为 1（开发阶段不回退兼容）。NL 生成方法均携带 `ctx` 上下文指针（`create_context` 的返回值，无生命周期时为 null）。所有 SDK 插件默认实现 batch 方法（逐个回退到单条），为吞吐量建议重写为单次批量处理。流水线扩展能力（`TextGen` / `FormatParse` / `EntityExtract` / `Group` / `GroupOverride` / `Chunk` / `Rerank` / `AstLanguage` / `LanguageRemap` / `LangHeuristics` / `RelationExtract` / `SymbolExtract` / `QueryRewrite` / `Fusion` / `ResultFilter` / `FileFilter` / `Vocabulary`）均为同一 ABI 的可选能力。
@@ -200,7 +200,7 @@ cargo build --release
 - **Fusion**：覆写混合融合权重与算法（覆盖档，首个非 `None` 生效）。返回 `FusionWeights { vector_weight, bm25_weight, min_score, algorithm, rrf_k }`，权重由宿主校验至 `[0, 1]`；`algorithm` 为算法名（`weighted_min_max` / `rrf` / `borda_count`，未知名忽略），`rrf_k` 仅配合 `rrf` 使用（缺省 60，零值拒绝）。
 - **ResultFilter**：重排后按 id 移除 / 增益 / 标注候选（链式档）。返回 `ResultFilterEntry { id, remove, boost, note }` 数组。
 - **FileFilter**：扫描期文件纳入 / 排除决策（覆盖档，首个非 `Neutral` 生效）。返回 `FileFilterDecision`（`include` / `exclude` / `neutral`）；`Neutral` 交由内置 `PatternMatcher`。
-- **Vocabulary**：领域术语表（加法档，多个插件的表按 token 合并去重）。实现 `vocabulary()`，返回 `VocabularyEntry { token, expansion }` 数组；宿主负责整 token 匹配（`stts` 不匹配 `stts_box`）并在索引富化阶段向 BM25 与 Embedding 文本追加一行 `Glossary: stts = sync time-to-sample`。宿主限制条目数量与单条长度，插件只提供数据。
+- **Vocabulary**：领域术语表（加法档，多个插件的表按 token 合并去重）。实现 `vocabulary()`，返回 `VocabularyEntry { token, expansion }` 数组；宿主负责匹配（标识符 token 及其下划线、驼峰分段，`stts` 命中 `parse_stts`，而 `ts` 不命中 `stts`）并在索引富化阶段向 BM25 与 Embedding 文本追加一行 `Glossary: stts = sync time-to-sample`。宿主在插件边界限制条目数量（256）与单条长度（200 字符），并丢弃缺少 token 或释义的条目；插件只提供数据。SDK 始终导出词汇入口，未实现术语表的插件返回空表。
 
 跨 FFI 的实体 / 文档 / 分块 / 重排 JSON schema 见 `include/cce_plugin.h` 注释。
 
@@ -287,7 +287,7 @@ declare_plugin!(MyPlugin, MyPlugin::new()); // 自定义初始化
 | `cce_plugin_has_file_filter` / `cce_plugin_filter_file` | `FileFilter` 能力 | ✅ |
 | `cce_plugin_has_vocabulary` / `cce_plugin_vocabulary` | `Vocabulary` 能力（领域术语表） | ✅ |
 
-所有函数始终生成，未实现的能力返回 `{"result":"none"}`。宿主通过 `supports_*` 方法判断是否调用，因此不会产生额外开销。
+所有函数始终生成。未实现的能力返回 `{"result":"none"}`；返回集合的批量类入口（如 `cce_plugin_generate_bm25_batch`、`cce_plugin_generate_embedding_batch`、`cce_plugin_vocabulary`）在未实现时返回 `{"result":"ok","value":[]}`。宿主通过 `supports_*` 方法判断是否调用，因此不会产生额外开销。
 
 ### 静态单例与 panic 防护
 

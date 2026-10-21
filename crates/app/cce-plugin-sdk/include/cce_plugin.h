@@ -70,8 +70,13 @@ uint32_t cce_plugin_abi_version(void);
  *
  * `capabilities` is an optional array of declared capability facet names
  * (`text_gen` | `format_parse` | `entity_extract` | `ast_language` |
- * `group` | `chunk` | `rerank` | `vocabulary`); when absent the host probes
- * the `cce_plugin_has_*` exports at runtime.
+ * `language_remap` | `lang_heuristics` | `symbol_extract` | `group` |
+ * `group_override` | `chunk` | `rerank` | `relation_extract` |
+ * `query_rewrite` | `fusion` | `result_filter` | `file_filter` |
+ * `vocabulary`); when absent the host probes the `cce_plugin_has_*` exports
+ * at runtime. A non-empty list is an allowlist: a capability that is not
+ * listed is never routed to the plugin, even when the plugin exports the
+ * matching symbols.
  *
  * `capability_priorities` is an optional object mapping capability names to
  * per-capability priorities; capabilities not listed fall back to
@@ -210,7 +215,9 @@ bool cce_plugin_has_fusion(void);
 bool cce_plugin_has_result_filter(void);
 /* Whether the plugin implements `FileFilter`. */
 bool cce_plugin_has_file_filter(void);
-/* Whether the plugin implements the `Vocabulary` capability. */
+/* Whether the plugin implements the `Vocabulary` capability.
+ * The SDK always exports this symbol and answers true; a plugin without
+ * terminology returns an empty table instead. */
 bool cce_plugin_has_vocabulary(void);
 
 /*
@@ -410,8 +417,14 @@ char *cce_plugin_filter_file(void *ctx, const char *file_path, bool is_directory
  *   [{"token":"stts","expansion":"sync time-to-sample"}]
  *
  * The host merges the tables of all matching plugins, matches the tokens
- * against whole identifiers in the indexed text and renders the matched
- * expansions as a glossary line.
+ * against identifier tokens and their segments in the indexed text and
+ * renders the matched expansions as a glossary line.
+ *
+ * The host keeps at most 256 entries per table and truncates an expansion
+ * longer than 200 characters. An entry without a token or without an
+ * expansion is dropped. The plugin must list "vocabulary" in its declared
+ * `capabilities` to be routed to; the guard `cce_plugin_has_vocabulary` and
+ * this entry point must both be exported.
  */
 char *cce_plugin_vocabulary(void *ctx);
 

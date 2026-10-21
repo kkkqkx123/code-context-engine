@@ -452,16 +452,20 @@ end
 ### 宿主行为
 
 - 加法档：所有匹配插件的术语表按 token 合并去重（首次出现优先）
-- 整 token 匹配：`stts` 不匹配 `stts_box`；匹配区分大小写
+- 匹配发生在标识符 token 及其分段上：`stts` 命中 `parse_stts`、`stts_box`、`sttsCount`；
+  分段边界是真实的标识符边界，因此短术语不会误命中长词内部（`ts` 不命中 `stts`）；匹配区分大小写
 - 扫描范围：实体名称、签名、索引富化阶段的函数体文本
 - 每个实体最多追加一行 `Glossary: stts = sync time-to-sample; sdp = ...`
-- 宿主限制条目数量与单条长度，避免索引膨胀
+- 宿主限制条目数量与单条长度，避免索引膨胀：单张表最多 256 条，单条释义最多 200 字符，
+  超长释义被截断，缺少 token 或释义的条目被丢弃
 - 未安装插件时行为与普通文本生成完全一致
 
 ### 路由
 
 与其他能力一致，按 `file_patterns` / `languages` / `enabled` 过滤，按优先级排序。
-术语表按 `(file_path, language)` 缓存，避免每个实体重复查询插件。
+语言名支持别名：`cpp` 与 `c++`、`js` 与 `javascript`、`py` 与 `python` 指向同一语言。
+术语表按"贡献术语的插件集合 + 注册表修订号"缓存：词汇接口不接收文件参数，
+同一插件集合对所有文件产出相同术语表，因此缓存条目数与文件数无关。
 
 示例插件见 [`examples/media_vocabulary.lua`](examples/media_vocabulary.lua)，
 包含 ISO 基础媒体文件格式的常用缩写。

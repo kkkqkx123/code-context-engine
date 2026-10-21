@@ -867,6 +867,46 @@ fn test_vocabulary_skips_incomplete_entries() {
     assert_eq!(entries[0].token, "sdp");
 }
 
+#[test]
+fn test_vocabulary_rejects_a_non_table_result() {
+    let script = r#"
+            plugin = {
+                id = "broken_vocabulary",
+                vocabulary = function()
+                    return "not a table"
+                end
+            }
+        "#;
+    let plugin = LuaPlugin::from_script(script).unwrap();
+    assert!(
+        plugin.vocabulary().is_err(),
+        "a malformed table must be reported instead of silently ignored"
+    );
+}
+
+#[test]
+fn test_vocabulary_enforces_the_host_limits() {
+    let script = r#"
+            plugin = {
+                id = "oversized_vocabulary",
+                vocabulary = function()
+                    local entries = {}
+                    for index = 1, 400 do
+                        entries[#entries + 1] = { token = "t" .. index, expansion = string.rep("x", 500) }
+                    end
+                    return entries
+                end
+            }
+        "#;
+    let plugin = LuaPlugin::from_script(script).unwrap();
+    let entries = plugin.vocabulary().unwrap();
+    assert_eq!(entries.len(), cce_types::MAX_VOCABULARY_ENTRIES);
+    assert_eq!(
+        entries[0].expansion.chars().count(),
+        cce_types::MAX_VOCABULARY_EXPANSION_LENGTH
+    );
+}
+
 // ── SymbolExtract ────────────────────────────────────────────────
 
 #[test]

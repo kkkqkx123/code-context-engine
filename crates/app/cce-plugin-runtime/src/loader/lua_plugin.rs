@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::error::PluginError;
 use crate::loader::lua_mapping::entity_group_to_lua_table;
@@ -12,7 +12,7 @@ use crate::types::PluginMetadata;
 use crate::utils::CancellationToken;
 use cce_metrics::PluginMetrics;
 use cce_types::QueryType;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use super::lua_helpers::{capability_label, parse_query_type, read_lua_priority};
 use super::lua_vm_pool::LuaVmPool;
@@ -20,6 +20,9 @@ use crate::default_timeout_for;
 
 const DEFAULT_MEMORY_LIMIT_KB: usize = 64 * 1024;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 10_000;
+
+/// Number of consecutive timeouts after which a plugin is disabled.
+const CIRCUIT_BREAKER_THRESHOLD: u64 = 3;
 
 static LUA_PLUGIN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -64,6 +67,13 @@ pub struct LuaPlugin {
     /// Host-side compiled regex patterns for entity extraction (`plugin.patterns`).
     pub(crate) patterns: Vec<CompiledPattern>,
     pub(crate) metrics: Option<Arc<PluginMetrics>>,
+    /// Set once the plugin exceeded its consecutive timeout budget.
+    ///
+    /// A disabled plugin is skipped by the registry, so a script that hangs
+    /// is not called again for every indexed file.
+    pub(crate) disabled: AtomicBool,
+    /// Number of consecutive timeouts observed so far.
+    pub(crate) consecutive_timeouts: AtomicU64,
 }
 
 impl LuaPlugin {
@@ -359,6 +369,8 @@ impl LuaPlugin {
             entity_kind_fn_name,
             patterns,
             metrics: None,
+            disabled: AtomicBool::new(false),
+            consecutive_timeouts: AtomicU64::new(0),
         })
     }
 
@@ -417,6 +429,9 @@ impl LuaPlugin {
     /// thread terminates shortly after the caller gives up waiting
     /// (rather than running to completion).  After the call finishes
     /// the VM is returned to the pool for reuse.
+    ///
+    /// After [`CIRCUIT_BREAKER_THRESHOLD`] consecutive timeouts the plugin
+    /// is disabled and further calls fail with a circuit-broken error.
     pub(crate) fn execute_with_timeout<R>(
         &self,
         operation: &str,
@@ -425,6 +440,9 @@ impl LuaPlugin {
     where
         R: Send + 'static,
     {
+        if self.disabled.load(Ordering::SeqCst) {
+            return Err(PluginError::CircuitBroken);
+        }
         let plugin_id = self.metadata.id.clone();
         let start = Instant::now();
         let result = self.run_with_timeout(operation, f);
@@ -439,6 +457,24 @@ impl LuaPlugin {
                     m.record_execution_error(&plugin_id);
                 }
             }
+        }
+        match &result {
+            Ok(_) => {
+                self.consecutive_timeouts.store(0, Ordering::SeqCst);
+            }
+            Err(PluginError::Timeout) => {
+                let count = self.consecutive_timeouts.fetch_add(1, Ordering::SeqCst) + 1;
+                if count >= CIRCUIT_BREAKER_THRESHOLD {
+                    self.disabled.store(true, Ordering::SeqCst);
+                    error!(
+                        plugin = %plugin_id,
+                        operation = %operation,
+                        consecutive_timeouts = count,
+                        "Plugin disabled by circuit breaker after repeated timeouts"
+                    );
+                }
+            }
+            Err(_) => {}
         }
         result
     }

@@ -16,14 +16,18 @@ use cce_types::ast_to_nl::RerankCandidate;
 use cce_types::grouper::EntityGroup;
 use cce_types::plugin::GroupPluginContext;
 use cce_types::{
-    ChunkedResult, FileFilterDecision, FusionWeights, GroupConversions, PluginDocument,
-    PluginEntity, PluginExport, PluginImport, PluginRelation, PluginSymbol, QueryRewriteResult,
-    RerankResult, ResultFilterEntry, VocabularyEntry,
+    ChunkedResult, FileFilterDecision, FusionWeights, GroupConversions, MAX_VOCABULARY_ENTRIES,
+    PluginDocument, PluginEntity, PluginExport, PluginImport, PluginRelation, PluginSymbol,
+    QueryRewriteResult, RerankResult, ResultFilterEntry, VocabularyEntry,
 };
 
 impl CodePlugin for LuaPlugin {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
+    }
+
+    fn is_disabled(&self) -> bool {
+        self.disabled.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn generate_bm25(
@@ -1134,6 +1138,7 @@ impl CodePlugin for LuaPlugin {
             return Ok(Vec::new());
         };
         let fn_name = fn_name.clone();
+        let plugin_id = self.metadata.id.clone();
         self.execute_with_timeout("vocabulary", move |lua| {
             let plugin_table: Table = lua
                 .globals()
@@ -1146,7 +1151,9 @@ impl CodePlugin for LuaPlugin {
                 .call::<mlua::Value>(())
                 .map_err(|e| PluginError::ScriptError(format!("vocabulary error: {e}")))?;
             let mlua::Value::Table(entries) = result else {
-                return Ok(Vec::new());
+                return Err(PluginError::InvalidOutput(format!(
+                    "Plugin {plugin_id} vocabulary must return a table of entries"
+                )));
             };
             let mut out = Vec::new();
             for pair in entries.pairs::<mlua::Value, mlua::Value>() {
@@ -1154,15 +1161,43 @@ impl CodePlugin for LuaPlugin {
                     PluginError::ScriptError(format!("vocabulary result iteration error: {e}"))
                 })?;
                 let mlua::Value::Table(entry) = value else {
+                    warn!(
+                        plugin = %plugin_id,
+                        "Skipping vocabulary entry that is not a table"
+                    );
                     continue;
                 };
                 let Some(token) = get_string_field(&entry, "token") else {
+                    warn!(
+                        plugin = %plugin_id,
+                        "Skipping vocabulary entry without a string token"
+                    );
                     continue;
                 };
                 let Some(expansion) = get_string_field(&entry, "expansion") else {
+                    warn!(
+                        plugin = %plugin_id,
+                        token = %token,
+                        "Skipping vocabulary entry without a string expansion"
+                    );
                     continue;
                 };
-                out.push(VocabularyEntry { token, expansion });
+                let Some(entry) = VocabularyEntry::new(token, expansion).normalized() else {
+                    warn!(
+                        plugin = %plugin_id,
+                        "Skipping vocabulary entry without usable terminology"
+                    );
+                    continue;
+                };
+                if out.len() >= MAX_VOCABULARY_ENTRIES {
+                    warn!(
+                        plugin = %plugin_id,
+                        limit = MAX_VOCABULARY_ENTRIES,
+                        "Vocabulary table exceeds the host limit; further entries are dropped"
+                    );
+                    break;
+                }
+                out.push(entry);
             }
             Ok(out)
         })

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use cce_config::{AstToNlConfig, Settings};
 use cce_parser::ast_to_nl::AstToNlConverter;
 use cce_parser::ast_to_nl::chunker::GroupChunker;
+use cce_plugin::PluginRegistry;
 
 use crate::export::nl_exporter::NlDocumentExporter;
 use crate::hot_update::Result;
@@ -16,11 +17,15 @@ use crate::hot_update::Result;
 /// Rebuild the internal exporter and converters from the current global
 /// configuration, applying changed `export.include_summary` / relation
 /// flags and AST-to-NL pipeline settings.
+///
+/// The plugin registry is carried over so the rebuilt converter keeps the
+/// plugins that take part in text generation.
 pub async fn rebuild_from_config(
     exporter: &Arc<tokio::sync::RwLock<Arc<NlDocumentExporter>>>,
     ast_converter: &Arc<tokio::sync::RwLock<Arc<AstToNlConverter>>>,
     chunker: &Arc<tokio::sync::RwLock<Arc<GroupChunker>>>,
     ast_to_nl_config: &Arc<tokio::sync::RwLock<AstToNlConfig>>,
+    plugin_registry: Option<&Arc<PluginRegistry>>,
     relation_epoch_cache: &tokio::sync::Mutex<Option<i64>>,
     config_path: &Path,
 ) -> Result<()> {
@@ -36,7 +41,12 @@ pub async fn rebuild_from_config(
     *exporter.write().await = new_exporter;
 
     if let Ok(config) = Settings::ast_to_nl() {
-        *ast_converter.write().await = Arc::new(AstToNlConverter::with_config(&config));
+        let converter = AstToNlConverter::with_config(&config);
+        let converter = match plugin_registry {
+            Some(registry) => converter.with_plugin_registry(registry.clone()),
+            None => converter,
+        };
+        *ast_converter.write().await = Arc::new(converter);
         *chunker.write().await = Arc::new(GroupChunker::new(config.chunking.clone()));
         *ast_to_nl_config.write().await = config;
     }

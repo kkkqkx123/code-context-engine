@@ -11,13 +11,27 @@ use cce_types::ast_to_nl::ConversionResult;
 use cce_types::language::Language;
 use cce_types::{BehaviorFactKind, EntityId};
 
-/// Enriches entity conversion text with index-only sidecar data.
-#[derive(Debug, Default, Clone, Copy)]
-pub(super) struct IndexTextEnricher;
+use super::super::embedding::text_cleaner::EmbeddingTextCleaner;
 
-impl IndexTextEnricher {
-    pub fn new() -> Self {
-        Self
+/// Enriches entity conversion text with index-only sidecar data.
+///
+/// The cleaners are borrowed from the converter, so the enricher stays
+/// cheap to build for every entity.
+#[derive(Clone, Copy)]
+pub(super) struct IndexTextEnricher<'a> {
+    bm25_cleaner: &'a Bm25TextCleaner,
+    embedding_cleaner: &'a EmbeddingTextCleaner,
+}
+
+impl<'a> IndexTextEnricher<'a> {
+    pub fn new(
+        bm25_cleaner: &'a Bm25TextCleaner,
+        embedding_cleaner: &'a EmbeddingTextCleaner,
+    ) -> Self {
+        Self {
+            bm25_cleaner,
+            embedding_cleaner,
+        }
     }
 
     pub fn enrich_conversion(
@@ -26,7 +40,6 @@ impl IndexTextEnricher {
         processing_result: &ProcessingResult,
         source: &str,
         language: Language,
-        bm25_cleaner: &Bm25TextCleaner,
         vocabulary: Option<&VocabularyTable>,
     ) {
         let extra_text = self
@@ -34,7 +47,7 @@ impl IndexTextEnricher {
             .unwrap_or_default();
 
         if !extra_text.trim().is_empty() {
-            let bm25_cleaned = bm25_cleaner.clean(&extra_text);
+            let bm25_cleaned = self.bm25_cleaner.clean(&extra_text);
 
             // Embedding path: strip language-specific syntax noise (`unsafe {}`,
             // `&*`, `&mut *` for Rust) while preserving implementation logic, then
@@ -50,13 +63,7 @@ impl IndexTextEnricher {
         }
 
         if let Some(vocabulary) = vocabulary {
-            self.append_glossary(
-                conversion,
-                processing_result,
-                &extra_text,
-                vocabulary,
-                bm25_cleaner,
-            );
+            self.append_glossary(conversion, processing_result, &extra_text, vocabulary);
         }
     }
 
@@ -65,13 +72,16 @@ impl IndexTextEnricher {
     /// The scan covers the entity name, its signature and the function body
     /// text produced by the index enrichment stage. Every entity contributes
     /// at most one line, listing the matched terms in table order.
+    ///
+    /// Each retrieval path cleans the line with its own cleaner: the keyword
+    /// cleaner strips quotes and configured filler words, while the embedding
+    /// cleaner keeps the expansion verbatim so the meaning survives.
     fn append_glossary(
         &self,
         conversion: &mut ConversionResult,
         processing_result: &ProcessingResult,
         body_text: &str,
         vocabulary: &VocabularyTable,
-        bm25_cleaner: &Bm25TextCleaner,
     ) {
         let signature = find_entity_signature(processing_result, conversion.entity_id)
             .map(str::to_string)
@@ -81,8 +91,9 @@ impl IndexTextEnricher {
         let Some(line) = VocabularyTable::glossary_line(&matched) else {
             return;
         };
-        let cleaned = bm25_cleaner.clean(&line);
-        conversion.append_index_context_raw_separate(&cleaned, &cleaned);
+        let bm25_text = self.bm25_cleaner.clean(&line);
+        let embedding_text = self.embedding_cleaner.clean(&line);
+        conversion.append_index_context_raw_separate(&bm25_text, &embedding_text);
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by
@@ -537,7 +548,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -567,7 +580,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -603,7 +618,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("code facts should still produce text");
@@ -638,7 +655,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -687,7 +706,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -707,7 +728,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher.build_extra_text(EntityId(1), &processing_result, "");
         assert!(result.is_none());
     }
@@ -776,7 +799,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -811,7 +836,9 @@ mod tests {
             stats: Default::default(),
         };
 
-        let enricher = IndexTextEnricher::new();
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let embedding_cleaner = EmbeddingTextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");

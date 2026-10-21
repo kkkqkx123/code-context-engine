@@ -6,26 +6,19 @@
 //! the matching and the rendering so every plugin contributes the same
 //! shape of output:
 //!
-//! - matching is restricted to whole identifier tokens, so a short token
-//!   (`ts`) never matches a longer identifier (`timestamp`);
+//! - matching happens on identifier tokens and on their underscore and
+//!   camelCase segments, so `stts` matches `parse_stts` while `ts` never
+//!   matches `stts`;
 //! - the tables of all matching plugins are merged and de-duplicated by
 //!   token, keeping the first occurrence;
 //! - an entity contributes at most one `Glossary: ...` line, whose entries
 //!   are separated by semicolons.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
-use cce_plugin::PluginRegistry;
-use cce_types::plugin::VocabularyEntry;
-
-/// Maximum number of glossary entries the host keeps for one file.
-///
-/// The limit bounds the index growth a misbehaving plugin can cause; the
-/// entries beyond it are dropped.
-pub const MAX_VOCABULARY_ENTRIES: usize = 256;
-
-/// Maximum length (in characters) of a single glossary expansion.
-pub const MAX_EXPANSION_LENGTH: usize = 200;
+use cce_plugin::{CodePlugin, PluginRegistry};
+use cce_types::plugin::{MAX_VOCABULARY_ENTRIES, VocabularyEntry};
 
 /// A merged glossary table collected from the matching `Vocabulary` plugins.
 #[derive(Debug, Default, Clone)]
@@ -49,18 +42,15 @@ impl VocabularyTable {
         table
     }
 
-    /// Append an entry, ignoring duplicates and over-long expansions.
+    /// Append an entry, ignoring duplicates and unusable entries.
     ///
     /// Returns `true` when the entry was accepted.
-    fn push(&mut self, mut entry: VocabularyEntry) -> bool {
-        if entry.token.is_empty() || entry.expansion.trim().is_empty() {
+    fn push(&mut self, entry: VocabularyEntry) -> bool {
+        let Some(entry) = entry.normalized() else {
             return false;
-        }
+        };
         if self.entries.len() >= MAX_VOCABULARY_ENTRIES {
             return false;
-        }
-        if entry.expansion.chars().count() > MAX_EXPANSION_LENGTH {
-            entry.expansion = entry.expansion.chars().take(MAX_EXPANSION_LENGTH).collect();
         }
         if !self.tokens.insert(entry.token.clone()) {
             return false;
@@ -79,7 +69,7 @@ impl VocabularyTable {
         &self.entries
     }
 
-    /// The entries whose token occurs as a whole identifier in `texts`.
+    /// The entries whose token occurs as an identifier token in `texts`.
     ///
     /// The result keeps the table order, so the rendered glossary line is
     /// stable across entities.
@@ -89,7 +79,7 @@ impl VocabularyTable {
         }
         let mut present: HashSet<&str> = HashSet::new();
         for text in texts {
-            present.extend(identifier_runs(text));
+            present.extend(identifier_tokens(text));
         }
         self.entries
             .iter()
@@ -112,13 +102,43 @@ impl VocabularyTable {
     }
 }
 
-/// Collect and merge the terminology tables of all matching plugins.
+/// The plugins that contribute a terminology table to a file.
 ///
-/// Plugins are consulted in registry priority order; a failing plugin is
-/// logged and skipped, the remaining tables still contribute.
-pub fn collect(registry: &PluginRegistry, file_path: &str, language: &str) -> VocabularyTable {
+/// The plugins are ordered by descending effective priority (ties by
+/// registration order), which is the order their tables are merged in.
+pub fn providers<'a>(
+    registry: &'a PluginRegistry,
+    file_path: &str,
+    language: &str,
+) -> Vec<&'a Arc<dyn CodePlugin>> {
+    registry.get_vocabulary_providers(Some(file_path), Some(language))
+}
+
+/// The identity of a provider set, used as the cache key of the merged table.
+///
+/// The vocabulary interface takes no file argument, so one provider set
+/// yields the same table for every file it routes to. The identity therefore
+/// describes the providers themselves plus the registry revision, which keeps
+/// the number of cached tables independent of the number of indexed files.
+pub fn provider_identity(providers: &[&Arc<dyn CodePlugin>], revision: u64) -> String {
+    let mut rows: Vec<String> = providers
+        .iter()
+        .map(|plugin| {
+            let meta = plugin.metadata();
+            format!("{}\u{1f}{}", meta.id, meta.version)
+        })
+        .collect();
+    rows.sort();
+    format!("{}\u{1e}{}", revision, rows.join("\u{1f}"))
+}
+
+/// Merge the terminology tables of the given providers.
+///
+/// A failing plugin is logged and skipped, the remaining tables still
+/// contribute.
+pub fn merge(providers: &[&Arc<dyn CodePlugin>]) -> VocabularyTable {
     let mut table = VocabularyTable::default();
-    for plugin in registry.get_vocabulary_providers(Some(file_path), Some(language)) {
+    for plugin in providers {
         match plugin.vocabulary() {
             Ok(entries) => {
                 for entry in entries {
@@ -137,35 +157,102 @@ pub fn collect(registry: &PluginRegistry, file_path: &str, language: &str) -> Vo
     table
 }
 
-/// The identifier-like runs of `text`.
+/// The identifier tokens of `text`.
 ///
-/// A run is a maximal sequence of alphanumeric characters and underscores,
-/// which is the granularity at which identifiers are compared.
-fn identifier_runs(text: &str) -> impl Iterator<Item = &str> {
+/// A token is a maximal sequence of alphanumeric characters and underscores,
+/// plus each of its underscore and camelCase separated segments. Matching a
+/// term against `parse_stts` therefore hits `stts`, while `ts` never matches
+/// `stts`: a segment boundary is a real identifier boundary.
+fn identifier_tokens(text: &str) -> impl Iterator<Item = &str> {
     text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .filter(|run| !run.is_empty())
+        .flat_map(|run| {
+            let mut tokens = vec![run];
+            tokens.extend(split_identifier_segments(run));
+            tokens
+        })
+}
+
+/// The underscore and camelCase separated segments of an identifier run.
+///
+/// Digits never start a new segment, so `co64` stays one token.
+fn split_identifier_segments(run: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    for part in run.split('_') {
+        if part.is_empty() {
+            continue;
+        }
+        let chars: Vec<(usize, char)> = part.char_indices().collect();
+        let mut start = 0usize;
+        for index in 1..chars.len() {
+            let previous = chars[index - 1].1;
+            let current = chars[index].1;
+            let next = chars.get(index + 1).map(|(_, c)| *c);
+            let boundary = (previous.is_lowercase() && current.is_uppercase())
+                || (previous.is_uppercase()
+                    && current.is_uppercase()
+                    && next.is_some_and(|c| c.is_lowercase()));
+            if boundary {
+                segments.push(&part[start..chars[index].0]);
+                start = chars[index].0;
+            }
+        }
+        segments.push(&part[start..]);
+    }
+    segments
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cce_types::plugin::MAX_VOCABULARY_EXPANSION_LENGTH;
 
     fn entry(token: &str, expansion: &str) -> VocabularyEntry {
         VocabularyEntry::new(token, expansion)
     }
 
     #[test]
-    fn test_matches_whole_identifier_only() {
+    fn test_matches_identifier_token_only() {
         let table = VocabularyTable::from_entries([entry("stts", "sync time-to-sample")]);
         assert_eq!(table.matched_entries(&["stts"]).len(), 1);
         assert!(
-            table.matched_entries(&["stts_box"]).is_empty(),
-            "a longer identifier must not match a short token"
+            table.matched_entries(&["stts_box"]).len() == 1,
+            "a compound identifier must match through its segment"
         );
         assert!(
             table.matched_entries(&["mystts"]).is_empty(),
             "a substring must not match"
         );
+    }
+
+    #[test]
+    fn test_matches_identifier_segments() {
+        let table = VocabularyTable::from_entries([
+            entry("stts", "sync time-to-sample"),
+            entry("h264", "H.264 video"),
+        ]);
+        let matched = table.matched_entries(&["parse_stts", "decode_h264_frame"]);
+        assert_eq!(matched.len(), 2);
+        assert!(
+            table
+                .matched_entries(&["sttsCount"])
+                .iter()
+                .any(|e| e.token == "stts")
+        );
+    }
+
+    #[test]
+    fn test_short_token_does_not_match_inside_a_segment() {
+        let table = VocabularyTable::from_entries([entry("ts", "timestamp")]);
+        assert!(table.matched_entries(&["stts"]).is_empty());
+        assert!(table.matched_entries(&["timestamp"]).is_empty());
+        assert_eq!(table.matched_entries(&["ts"]).len(), 1);
+    }
+
+    #[test]
+    fn test_digit_sequences_stay_one_segment() {
+        let table = VocabularyTable::from_entries([entry("co64", "64-bit chunk offset box")]);
+        assert_eq!(table.matched_entries(&["co64_offset"]).len(), 1);
     }
 
     #[test]
@@ -182,7 +269,7 @@ mod tests {
             entry("stts", "sync time-to-sample"),
             entry("sdp", "session description protocol"),
         ]);
-        let matched = table.matched_entries(&["parse_stts", "fn parse(sdp: &str)", "let x = 1;"]);
+        let matched = table.matched_entries(&["parse", "fn parse(sdp: &str)", "let x = 1;"]);
         assert_eq!(matched.len(), 1);
         assert_eq!(matched[0].token, "sdp");
     }
@@ -216,11 +303,11 @@ mod tests {
 
     #[test]
     fn test_over_long_expansion_is_truncated() {
-        let long = "x".repeat(MAX_EXPANSION_LENGTH + 50);
+        let long = "x".repeat(MAX_VOCABULARY_EXPANSION_LENGTH + 50);
         let table = VocabularyTable::from_entries([entry("token", &long)]);
         assert_eq!(
             table.entries()[0].expansion.chars().count(),
-            MAX_EXPANSION_LENGTH
+            MAX_VOCABULARY_EXPANSION_LENGTH
         );
     }
 
@@ -246,8 +333,23 @@ mod tests {
     }
 
     #[test]
-    fn test_identifier_runs_split_on_punctuation() {
-        let runs: Vec<&str> = identifier_runs("fn parse(sdp: &str) -> bool").collect();
-        assert_eq!(runs, vec!["fn", "parse", "sdp", "str", "bool"]);
+    fn test_identifier_tokens_split_on_punctuation() {
+        let tokens: Vec<&str> = identifier_tokens("fn parse(sdp: &str) -> bool").collect();
+        assert!(tokens.contains(&"fn"));
+        assert!(tokens.contains(&"parse"));
+        assert!(tokens.contains(&"sdp"));
+        assert!(tokens.contains(&"str"));
+        assert!(tokens.contains(&"bool"));
+    }
+
+    #[test]
+    fn test_identifier_segments_split_camel_case() {
+        let segments = split_identifier_segments("parseSttsBox");
+        assert_eq!(segments, vec!["parse", "Stts", "Box"]);
+        assert_eq!(
+            split_identifier_segments("HTTPResponse"),
+            vec!["HTTP", "Response"]
+        );
+        assert_eq!(split_identifier_segments("stts"), vec!["stts"]);
     }
 }

@@ -392,12 +392,23 @@ pub struct ResultFilterEntry {
 // Vocabulary contract
 // ---------------------------------------------------------------------------
 
+/// Maximum number of glossary entries the host accepts from one plugin table.
+///
+/// The limit bounds the memory a misbehaving plugin can force on the host;
+/// the entries beyond it are dropped at the plugin boundary.
+pub const MAX_VOCABULARY_ENTRIES: usize = 256;
+
+/// Maximum length (in characters) of a single glossary expansion.
+///
+/// Longer expansions are truncated at the plugin boundary.
+pub const MAX_VOCABULARY_EXPANSION_LENGTH: usize = 200;
+
 /// One glossary entry contributed by the `Vocabulary` capability.
 ///
 /// The plugin owns the terminology: `token` is the identifier that appears in
 /// the source (e.g. `"stts"`) and `expansion` is the human-readable meaning
-/// (e.g. `"sync time-to-sample"`). The host only matches whole identifier
-/// tokens and renders the expansion; it never interprets the terminology.
+/// (e.g. `"sync time-to-sample"`). The host only matches identifier tokens
+/// and renders the expansion; it never interprets the terminology.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct VocabularyEntry {
     /// The identifier token to match (e.g. `"stts"`).
@@ -413,6 +424,28 @@ impl VocabularyEntry {
             token: token.into(),
             expansion: expansion.into(),
         }
+    }
+
+    /// The normalized entry, or `None` when it carries no usable terminology.
+    ///
+    /// The token and the expansion are trimmed, and the expansion is
+    /// truncated to [`MAX_VOCABULARY_EXPANSION_LENGTH`]. Both the plugin
+    /// boundary and the host-side merge apply this rule, so a table is
+    /// interpreted identically no matter which side inspects it.
+    pub fn normalized(&self) -> Option<VocabularyEntry> {
+        let token = self.token.trim();
+        let expansion = self.expansion.trim();
+        if token.is_empty() || expansion.is_empty() {
+            return None;
+        }
+        let expansion: String = expansion
+            .chars()
+            .take(MAX_VOCABULARY_EXPANSION_LENGTH)
+            .collect();
+        Some(VocabularyEntry {
+            token: token.to_string(),
+            expansion,
+        })
     }
 }
 
