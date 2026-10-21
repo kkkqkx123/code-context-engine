@@ -74,7 +74,7 @@ fn re_split_segment(
     let boundaries = infra.splitter.split_range(
         &seg.text,
         group,
-        SplitStrategy::ByMembers,
+        SplitStrategy::ByNlEntityBoundaries,
         path,
         Some(&shifted),
         0..seg.text.len(),

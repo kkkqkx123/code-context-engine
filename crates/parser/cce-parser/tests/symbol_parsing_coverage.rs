@@ -86,7 +86,17 @@ fn cpp_class_template_entities() {
     );
     find(&parsed.entities, EntityKind::Class, "Calculator");
     find(&parsed.entities, EntityKind::Method, "add");
-    find(&parsed.entities, EntityKind::Function, "identity");
+    // A function template yields one entity: the template that declares the
+    // function. The inner function definition describes the same code and is
+    // not a second entity.
+    find(&parsed.entities, EntityKind::Template, "identity");
+    assert!(
+        !parsed
+            .entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Function && e.name == "identity"),
+        "the template and the function it declares are one entity"
+    );
 }
 
 #[test]

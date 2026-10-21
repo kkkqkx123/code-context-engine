@@ -798,6 +798,106 @@ mod tests {
     }
 
     #[test]
+    fn test_fragments_claim_the_range_of_the_code_they_carry() {
+        // A C function group holds its local variables as members, but those
+        // members contribute no text of their own: the group text is the
+        // function's own text, local declarations included. Every fragment
+        // of that text therefore carries the function's code and must claim
+        // the function's range, not the narrow range of a local variable
+        // whose name happens to appear inside the text.
+        let config = ChunkingConfig {
+            max_bm25_words: 20,
+            ..Default::default()
+        };
+        let estimator = TokenEstimator::default();
+        let splitter = TextSplitter::new(config.clone());
+        let mut tracker = GroupTracker::new();
+
+        let mut group = create_test_group("body");
+        group.members.push(GroupedEntity::new(
+            EntityId(2),
+            EntityKind::Variable,
+            "ptr".to_string(),
+            "uint8_t* ptr".to_string(),
+        ));
+        group.member_ids.push(EntityId(2));
+        group.entity_spans.insert(
+            EntityId(0),
+            Span::new(0, 400, 198, 0, 240, 0),
+        );
+        group.entity_spans.insert(
+            EntityId(2),
+            Span::new(100, 120, 200, 0, 200, 0),
+        );
+        group.span = Span::new(0, 400, 198, 0, 240, 0);
+
+        let body = "mov_writer_move body line with ptr inside it and more words to overflow the budget \
+                    so the group text is split into several fragments that all carry function code"
+            .repeat(3);
+        let header_conv = ConversionResult {
+            entity_id: EntityId(0),
+            kind: EntityKind::Function,
+            name: "mov_writer_move".to_string(),
+            file_path: "mov-writer.c".to_string(),
+            bm25_text: Some(body.clone()),
+            embedding_text: Some(body),
+            embedding_tokens: None,
+            bm25_word_count: None,
+            keywords: vec![],
+            source_entity_ids: vec![],
+            source_span: Span::default(),
+            entity_metadata: Default::default(),
+            entity_end_lines: vec![],
+            embedding_brief_header: None,
+        };
+
+        let group_conversions = GroupConversions {
+            group: group.clone(),
+            header_conversion: Some(header_conv),
+            member_conversions: vec![],
+        };
+
+        let infra = ChunkInfrastructure {
+            config: &config,
+            estimator: &estimator,
+            splitter: &splitter,
+        };
+        let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
+            &infra,
+            &mut tracker,
+            &group,
+            &group_conversions,
+            "mov-writer.c",
+        )
+        .expect("chunk")
+        .chunks;
+
+        let bm25: Vec<_> = chunks
+            .iter()
+            .filter(|c| c.path == ChunkPath::Bm25)
+            .collect();
+        assert!(bm25.len() > 1, "the over-budget text must be split");
+        for chunk in bm25 {
+            let ranges = chunk.metadata.source_ranges();
+            assert!(
+                !ranges.is_empty(),
+                "a fragment must claim a source range: {:?}",
+                chunk.chunk_id
+            );
+            for range in ranges {
+                assert_eq!(
+                    range.start_position.row, 198,
+                    "a fragment of the function body claims the function range"
+                );
+                assert_eq!(
+                    range.end_position.row, 240,
+                    "a fragment of the function body claims the function range"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_add_relations_empty() {
         let tracker = GroupTracker::new();
         let mut chunks: Vec<crate::ast_to_nl::chunker::ChunkedResult> = vec![];

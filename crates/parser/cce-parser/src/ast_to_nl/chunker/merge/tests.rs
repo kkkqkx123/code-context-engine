@@ -462,6 +462,130 @@ fn test_merge_small_chunks_no_merge_when_above_threshold() {
 }
 
 #[test]
+fn test_merge_small_chunks_blocks_different_kinds() {
+    // A merged chunk keeps the left chunk's identity, so a macro group must
+    // not absorb the following function: the unit would be titled after the
+    // macro while its body is an unrelated function.
+    let config = ChunkingConfig {
+        min_chunk_tokens: 150,
+        max_tokens: 512,
+        ..Default::default()
+    };
+    let group_spans = HashMap::from([
+        ("g1".to_string(), Span::new(0, 10, 0, 0, 0, 0)),
+        ("g2".to_string(), Span::new(10, 20, 0, 0, 0, 0)),
+    ]);
+
+    // Small enough to be rescued by a merge, so the kind affinity is the
+    // only reason the two chunks stay apart.
+    let chunk_text = || "hello world foo bar ".repeat(3);
+
+    let mut macro_chunk = make_test_chunk_with_code_meta(
+        "g1_emb_0",
+        "g1",
+        ChunkPath::Embedding,
+        &chunk_text(),
+        125,
+        vec![EntityId(1)],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        Span::new(0, 10, 0, 0, 0, 0),
+        false,
+        None,
+        None,
+    );
+    macro_chunk.metadata.as_code_mut().unwrap().entity_kind = EntityKind::Macro;
+
+    let mut function_chunk = make_test_chunk_with_code_meta(
+        "g2_emb_0",
+        "g2",
+        ChunkPath::Embedding,
+        &chunk_text(),
+        125,
+        vec![EntityId(2)],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        Span::new(10, 20, 0, 0, 0, 0),
+        false,
+        None,
+        None,
+    );
+    function_chunk.metadata.as_code_mut().unwrap().entity_kind = EntityKind::Function;
+
+    let result =
+        merge_small_chunks_cross_group(vec![macro_chunk, function_chunk], &group_spans, &config);
+
+    assert_eq!(
+        result.len(),
+        2,
+        "chunks of different kinds must not merge across groups"
+    );
+}
+
+#[test]
+fn test_merge_small_chunks_merges_same_kinds() {
+    let config = ChunkingConfig {
+        min_chunk_tokens: 150,
+        max_tokens: 512,
+        ..Default::default()
+    };
+    let group_spans = HashMap::from([
+        ("g1".to_string(), Span::new(0, 10, 0, 0, 0, 0)),
+        ("g2".to_string(), Span::new(10, 20, 0, 0, 0, 0)),
+    ]);
+
+    // Small enough to be rescued by a merge.
+    let chunk_text = || "hello world foo bar ".repeat(3);
+
+    let chunks = vec![
+        make_test_chunk_with_code_meta(
+            "g1_emb_0",
+            "g1",
+            ChunkPath::Embedding,
+            &chunk_text(),
+            15,
+            vec![EntityId(1)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            Span::new(0, 10, 0, 0, 0, 0),
+            false,
+            None,
+            None,
+        ),
+        make_test_chunk_with_code_meta(
+            "g2_emb_0",
+            "g2",
+            ChunkPath::Embedding,
+            &chunk_text(),
+            15,
+            vec![EntityId(2)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            Span::new(10, 20, 0, 0, 0, 0),
+            false,
+            None,
+            None,
+        ),
+    ];
+
+    let result = merge_small_chunks_cross_group(chunks, &group_spans, &config);
+
+    assert_eq!(
+        result.len(),
+        1,
+        "peers of the same kind still merge into one unit"
+    );
+}
+
+#[test]
 fn test_merge_small_chunks_single_chunk() {
     let config = ChunkingConfig::default();
     let group_spans = HashMap::new();

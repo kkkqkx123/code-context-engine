@@ -3,8 +3,6 @@ use crate::grouper::GroupType;
 /// Split strategy
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitStrategy {
-    /// Split at member boundaries (uses group.entity_spans — source code offsets)
-    ByMembers,
     /// Split at sentence boundaries
     BySentences,
     /// Split at paragraph boundaries
@@ -16,6 +14,10 @@ pub enum SplitStrategy {
     /// Split at nested group boundaries
     ByNestedGroups,
     /// Split at entity boundaries using pre-computed NL-text-relative offsets.
+    ///
+    /// The offsets come from the conversion layer, which knows which text
+    /// each entity contributed. Without them the level has no data and the
+    /// recursion descends to a coarser source.
     ByNlEntityBoundaries,
 }
 
@@ -30,25 +32,25 @@ impl SplitStrategy {
         match group_type {
             GroupType::ClassWithNestedClasses => SplitStrategy::ByNestedGroups,
             GroupType::StructWithNestedStructs => SplitStrategy::ByNestedGroups,
-            _ => SplitStrategy::ByMembers,
+            _ => SplitStrategy::ByNlEntityBoundaries,
         }
     }
 
     /// Get default strategy for group type
     pub fn for_group_type(group_type: GroupType) -> Self {
         match group_type {
-            GroupType::ClassWithMethods => SplitStrategy::ByMembers,
-            GroupType::RelatedFunctions => SplitStrategy::ByMembers,
+            GroupType::ClassWithMethods => SplitStrategy::ByNlEntityBoundaries,
+            GroupType::RelatedFunctions => SplitStrategy::ByNlEntityBoundaries,
             GroupType::Standalone => SplitStrategy::ByParagraphs,
-            GroupType::InterfaceWithImpls => SplitStrategy::ByMembers,
-            GroupType::TraitWithImpls => SplitStrategy::ByMembers,
-            GroupType::ModuleWithContents => SplitStrategy::ByMembers,
-            GroupType::TestSuiteWithCases => SplitStrategy::ByMembers,
-            GroupType::CompositePattern => SplitStrategy::ByMembers,
+            GroupType::InterfaceWithImpls => SplitStrategy::ByNlEntityBoundaries,
+            GroupType::TraitWithImpls => SplitStrategy::ByNlEntityBoundaries,
+            GroupType::ModuleWithContents => SplitStrategy::ByNlEntityBoundaries,
+            GroupType::TestSuiteWithCases => SplitStrategy::ByNlEntityBoundaries,
+            GroupType::CompositePattern => SplitStrategy::ByNlEntityBoundaries,
             GroupType::ClassWithNestedClasses => SplitStrategy::ByNestedGroups,
             GroupType::StructWithNestedStructs => SplitStrategy::ByNestedGroups,
             GroupType::FunctionWithLogicalBlocks => SplitStrategy::BySentences,
-            GroupType::FunctionWithMembers => SplitStrategy::ByMembers,
+            GroupType::FunctionWithMembers => SplitStrategy::ByNlEntityBoundaries,
             GroupType::MergedFragments => SplitStrategy::ByParagraphs,
             GroupType::FileDocumentation => SplitStrategy::ByParagraphs,
         }
@@ -63,7 +65,7 @@ mod tests {
     fn test_strategy_for_group_type() {
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::ClassWithMethods),
-            SplitStrategy::ByMembers
+            SplitStrategy::ByNlEntityBoundaries
         );
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::Standalone),
@@ -71,11 +73,11 @@ mod tests {
         );
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::RelatedFunctions),
-            SplitStrategy::ByMembers
+            SplitStrategy::ByNlEntityBoundaries
         );
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::InterfaceWithImpls),
-            SplitStrategy::ByMembers
+            SplitStrategy::ByNlEntityBoundaries
         );
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::ClassWithNestedClasses),
@@ -91,15 +93,15 @@ mod tests {
         );
         assert_eq!(
             SplitStrategy::for_bm25_group_type(GroupType::FunctionWithLogicalBlocks),
-            SplitStrategy::ByMembers
+            SplitStrategy::ByNlEntityBoundaries
         );
         assert_eq!(
             SplitStrategy::for_bm25_group_type(GroupType::Standalone),
-            SplitStrategy::ByMembers
+            SplitStrategy::ByNlEntityBoundaries
         );
         assert_eq!(
             SplitStrategy::for_bm25_group_type(GroupType::MergedFragments),
-            SplitStrategy::ByMembers
+            SplitStrategy::ByNlEntityBoundaries
         );
         assert_eq!(
             SplitStrategy::for_bm25_group_type(GroupType::ClassWithNestedClasses),

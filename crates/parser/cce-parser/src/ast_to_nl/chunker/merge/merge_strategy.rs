@@ -44,7 +44,13 @@ pub(crate) fn combined_cost(a: &ChunkedResult, b: &ChunkedResult, path: ChunkPat
 ///    content as `Test` (or dilute a test chunk), causing the no-test
 ///    evaluation variant to drop production content. This mirrors the
 ///    group-level guard in `SmallFragmentMerger`.
-/// 3. Size threshold via `boundary::can_merge`: either side below the
+/// 3. Kind affinity: a merged chunk keeps the left chunk's identity (its
+///    title, kind and keywords), so the right side must describe the same
+///    kind of entity. A macro group that absorbs the following function
+///    produces a unit titled after the macro whose body is an unrelated
+///    function, and the mismatch in the other direction is just as
+///    misleading. Only peers of one kind may merge across groups.
+/// 4. Size threshold via `boundary::can_merge`: either side below the
 ///    path's min threshold and the combined cost within the merge ceiling.
 ///
 /// This is the single merge decision shared by the intra-splitter pass and
@@ -70,7 +76,23 @@ pub(crate) fn should_merge(
     if prev.metadata.test_info.is_test() != next.metadata.test_info.is_test() {
         return false;
     }
+    if !shares_kind(prev, next) {
+        return false;
+    }
     can_merge(&prev.text, &next.text, path, config)
+}
+
+/// Whether two chunks describe the same kind of entity.
+///
+/// The identity a merge keeps is the left chunk's, so merging chunks of
+/// different kinds would label the right side's content with the left
+/// side's kind. A chunk that carries no kind states nothing about its
+/// content, so it cannot contradict the other side.
+fn shares_kind(prev: &ChunkedResult, next: &ChunkedResult) -> bool {
+    match (prev.metadata.entity_kind(), next.metadata.entity_kind()) {
+        (Some(prev_kind), Some(next_kind)) => prev_kind == next_kind,
+        _ => true,
+    }
 }
 
 /// Whether a chunk is an entity-aligned unit that may claim topic purity.

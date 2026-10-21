@@ -51,8 +51,23 @@ pub fn chunk_group_with_conversions(
 
             let mut all_chunks = ChunkOutput::default();
 
+            // The group's text is the header entity's own text: no member
+            // contributes a text region of its own here. Locating member
+            // names inside that text would cut the header's own body at an
+            // incidental mention (a local variable in a C function body, a
+            // name in the member table) and hand the remaining body to that
+            // member, so the fragment would claim a range narrower than the
+            // code it carries. The header's own region is the only interval
+            // the conversion layer can state here.
+            let header_entity_id = header.entity_id;
+
             if !bm25_text.is_empty() {
-                let nl_boundaries = super::boundary::locate_entities_in_nl_text(&bm25_text, group);
+                let nl_boundaries = super::boundary::compute_nl_entity_boundaries(
+                    &bm25_text,
+                    Some(header_entity_id),
+                    &[],
+                    ChunkPath::Bm25,
+                );
                 let input = super::chunker::ChunkInput {
                     infra,
                     group,
@@ -60,12 +75,8 @@ pub fn chunk_group_with_conversions(
                     file_path,
                     keywords: &header.keywords,
                     path: ChunkPath::Bm25,
-                    strategy: if nl_boundaries.is_empty() {
-                        SplitStrategy::for_bm25_group_type(group.group_type)
-                    } else {
-                        SplitStrategy::ByNlEntityBoundaries
-                    },
-                    nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
+                    strategy: SplitStrategy::ByNlEntityBoundaries,
+                    nl_boundaries: Some(nl_boundaries.as_slice()),
                     tracker: &*tracker,
                     header_mode: None,
                 };
@@ -73,8 +84,12 @@ pub fn chunk_group_with_conversions(
             }
 
             if !embedding_text.is_empty() {
-                let nl_boundaries =
-                    super::boundary::locate_entities_in_nl_text(&embedding_text, group);
+                let nl_boundaries = super::boundary::compute_nl_entity_boundaries(
+                    &embedding_text,
+                    Some(header_entity_id),
+                    &[],
+                    ChunkPath::Embedding,
+                );
                 let input = super::chunker::ChunkInput {
                     infra,
                     group,
@@ -82,12 +97,8 @@ pub fn chunk_group_with_conversions(
                     file_path,
                     keywords: &header.keywords,
                     path: ChunkPath::Embedding,
-                    strategy: if nl_boundaries.is_empty() {
-                        SplitStrategy::for_group_type(group.group_type)
-                    } else {
-                        SplitStrategy::ByNlEntityBoundaries
-                    },
-                    nl_boundaries: (!nl_boundaries.is_empty()).then_some(nl_boundaries.as_slice()),
+                    strategy: SplitStrategy::ByNlEntityBoundaries,
+                    nl_boundaries: Some(nl_boundaries.as_slice()),
                     tracker: &*tracker,
                     header_mode: None,
                 };
@@ -331,6 +342,10 @@ fn process_path(
 
 /// Assemble the combined header + member text for one member group, along
 /// with the entity ids of the members that contributed text (in order).
+///
+/// A member without text contributes nothing: the entity intervals the
+/// splitter works with are computed from the same texts, so an empty member
+/// must not shift the offsets of the members that follow it.
 fn assemble_combined_text(
     header_text: &str,
     members: &[ConversionResult],
@@ -347,7 +362,7 @@ fn assemble_combined_text(
             ChunkPath::Bm25 => &member.bm25_text,
             ChunkPath::Embedding => &member.embedding_text,
         };
-        if let Some(text) = member_text {
+        if let Some(text) = member_text.as_deref().filter(|text| !text.is_empty()) {
             if !combined_text.is_empty() {
                 combined_text.push_str("\n\n");
             }

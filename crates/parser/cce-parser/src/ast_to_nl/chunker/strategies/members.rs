@@ -9,29 +9,13 @@ use super::super::boundary::{ChunkBoundary, NlEntityBoundary, SplitReason, cost}
 use super::super::result::ChunkPath;
 use super::lines::extend_or_push_trailing;
 
-/// Partition `text[range]` at located entity-name spans.
+/// Partition `text[range]` at the entity intervals the conversion layer
+/// reported.
 ///
 /// Pure strategy: returns a complete partition of the interval (entity spans
 /// plus the gaps between them) and never falls back to another strategy.
-/// Returns an empty list when no entity boundary data is available in the
-/// range — the caller (`split_range`) descends to a coarser boundary source.
-pub fn split_by_members(
-    text: &str,
-    group: &EntityGroup,
-    path: ChunkPath,
-    config: &ChunkingConfig,
-    range: Range<usize>,
-) -> Vec<ChunkBoundary> {
-    let nl_boundaries = super::super::boundary::locate_entities_in_nl_text(text, group);
-    split_by_members_with_nl(text, group, path, config, &nl_boundaries, range)
-}
-
-/// Partition `text[range]` at NL-text-relative entity spans (accumulating
-/// entities into chunks up to the path limit).
-///
-/// Pure strategy: returns a complete partition of the interval and never
-/// falls back to another strategy. An oversized entity is emitted as a single
-/// piece; re-splitting it is the caller's (`split_range`) job.
+/// Returns an empty list when no entity interval covers the range — the
+/// caller (`split_range`) descends to a coarser boundary source.
 pub fn split_by_members_with_nl(
     text: &str,
     _group: &EntityGroup,
@@ -179,64 +163,35 @@ fn path_limit(path: ChunkPath, config: &ChunkingConfig) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use cce_config::modules::ChunkingConfig;
-    use cce_types::Span;
-    use cce_types::entity::{EntityId, EntityKind, GroupedEntity};
+    use cce_types::entity::EntityId;
 
-    use crate::grouper::types::{EntityGroup, GroupType};
+    use crate::grouper::types::EntityGroup;
 
     use super::super::super::result::ChunkPath;
     use super::*;
 
     #[test]
-    fn test_split_by_members_with_entity_spans() {
+    fn test_split_by_members_with_entity_intervals() {
         let config = ChunkingConfig::default();
 
         let text = "Test method1 entity3";
-        let span_default = Span::default();
-        let group = EntityGroup {
-            group_id: compact_str::CompactString::from("test"),
-            group_type: GroupType::ClassWithMethods,
-            header: Some(GroupedEntity {
-                id: EntityId(1),
-                kind: EntityKind::Class,
-                name: "Test".to_string(),
-                ..Default::default()
-            }),
-            header_id: Some(EntityId(1)),
-            members: smallvec::smallvec![GroupedEntity {
-                id: EntityId(2),
-                kind: EntityKind::Method,
-                name: "method1".to_string(),
-                ..Default::default()
-            },],
-            member_ids: smallvec::smallvec![EntityId(2)],
-            entity_spans: HashMap::from([
-                (
-                    EntityId(1),
-                    Span {
-                        start_byte: 0,
-                        end_byte: 6,
-                        ..span_default
-                    },
-                ),
-                (
-                    EntityId(2),
-                    Span {
-                        start_byte: 7,
-                        end_byte: 15,
-                        ..span_default
-                    },
-                ),
-            ]),
-            kind: EntityKind::Class,
-            name: compact_str::CompactString::from("Test"),
-            ..Default::default()
-        };
+        let nlb = vec![
+            NlEntityBoundary {
+                entity_id: EntityId(1),
+                start_byte: 0,
+                end_byte: 6,
+            },
+            NlEntityBoundary {
+                entity_id: EntityId(2),
+                start_byte: 7,
+                end_byte: 15,
+            },
+        ];
+        let group = EntityGroup::default();
 
-        let boundaries = split_by_members(text, &group, ChunkPath::Bm25, &config, 0..text.len());
+        let boundaries =
+            split_by_members_with_nl(text, &group, ChunkPath::Bm25, &config, &nlb, 0..text.len());
         assert!(!boundaries.is_empty());
         // Partition covers the whole range.
         assert_eq!(boundaries.first().unwrap().start_byte, 0);
@@ -244,34 +199,16 @@ mod tests {
     }
 
     #[test]
-    fn test_split_by_members_no_located_spans_returns_empty() {
+    fn test_split_by_members_without_intervals_returns_empty() {
         let config = ChunkingConfig::default();
 
         let text = "short";
-        let group = EntityGroup {
-            group_id: compact_str::CompactString::from("test"),
-            group_type: GroupType::ClassWithMethods,
-            header: Some(GroupedEntity {
-                id: EntityId(1),
-                kind: EntityKind::Class,
-                name: "Test".to_string(),
-                ..Default::default()
-            }),
-            header_id: Some(EntityId(1)),
-            entity_spans: HashMap::from([(
-                EntityId(1),
-                Span {
-                    start_byte: 0,
-                    end_byte: 999,
-                    ..Default::default()
-                },
-            )]),
-            ..Default::default()
-        };
+        let group = EntityGroup::default();
 
-        // No entity name occurs in the text → no boundary data → empty list
+        // No entity interval covers the range → no boundary data → empty list
         // (the caller descends to a coarser boundary source).
-        let boundaries = split_by_members(text, &group, ChunkPath::Bm25, &config, 0..text.len());
+        let boundaries =
+            split_by_members_with_nl(text, &group, ChunkPath::Bm25, &config, &[], 0..text.len());
         assert!(boundaries.is_empty());
     }
 

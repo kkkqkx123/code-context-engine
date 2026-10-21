@@ -39,7 +39,7 @@
 //!
 //! The chunker selects strategies based on group type:
 //!
-//! - **ByMembers**: Split at entity boundaries (classes, functions)
+//! - **ByNlEntityBoundaries**: Split at entity boundaries (classes, functions)
 //! - **BySentences**: Split at sentence boundaries (standalone entities)
 //! - **ByParagraphs**: Split at paragraph boundaries (modules)
 //! - **ByNestedGroups**: Split at nested class/struct boundaries

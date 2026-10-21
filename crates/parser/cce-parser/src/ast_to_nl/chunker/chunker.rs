@@ -183,6 +183,16 @@ impl GroupChunker {
         };
 
         if !bm25_text.trim().is_empty() {
+            // The text belongs to the converted entity alone, so its region
+            // is the whole text. Splitting it at name occurrences would hand
+            // the text after an incidental mention to whichever entity owns
+            // that name.
+            let nl_boundaries = super::boundary::compute_nl_entity_boundaries(
+                &bm25_text,
+                Some(conversion.entity_id),
+                &[],
+                ChunkPath::Bm25,
+            );
             let input = ChunkInput {
                 infra: &infra,
                 group,
@@ -190,8 +200,8 @@ impl GroupChunker {
                 file_path,
                 keywords: &conversion.keywords,
                 path: ChunkPath::Bm25,
-                strategy: SplitStrategy::for_bm25_group_type(group.group_type),
-                nl_boundaries: None,
+                strategy: SplitStrategy::ByNlEntityBoundaries,
+                nl_boundaries: Some(nl_boundaries.as_slice()),
                 tracker: &tracker,
                 header_mode: None,
             };
@@ -207,6 +217,12 @@ impl GroupChunker {
         };
 
         if !embedding_text.trim().is_empty() {
+            let nl_boundaries = super::boundary::compute_nl_entity_boundaries(
+                &embedding_text,
+                Some(conversion.entity_id),
+                &[],
+                ChunkPath::Embedding,
+            );
             let input = ChunkInput {
                 infra: &infra,
                 group,
@@ -214,8 +230,8 @@ impl GroupChunker {
                 file_path,
                 keywords: &conversion.keywords,
                 path: ChunkPath::Embedding,
-                strategy: SplitStrategy::for_group_type(group.group_type),
-                nl_boundaries: None,
+                strategy: SplitStrategy::ByNlEntityBoundaries,
+                nl_boundaries: Some(nl_boundaries.as_slice()),
                 tracker: &tracker,
                 header_mode: None,
             };

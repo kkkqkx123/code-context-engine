@@ -87,7 +87,7 @@ impl BoundaryLevel {
     fn from_strategy(strategy: SplitStrategy) -> Self {
         match strategy {
             SplitStrategy::ByNestedGroups => Self::NestedGroups,
-            SplitStrategy::ByMembers | SplitStrategy::ByNlEntityBoundaries => Self::Entities,
+            SplitStrategy::ByNlEntityBoundaries => Self::Entities,
             SplitStrategy::BySentences => Self::Sentences,
             SplitStrategy::ByLines => Self::Lines,
             SplitStrategy::ByParagraphs => Self::Paragraphs,
@@ -293,17 +293,20 @@ impl TextSplitter {
                 range,
             ),
             BoundaryLevel::Entities => {
-                if let Some(nl) = nl_boundaries {
-                    strategies::members::split_by_members_with_nl(
+                // Entity boundaries come from the conversion layer, which
+                // knows which text each entity contributed. Without those
+                // intervals the level has no data and the recursion descends
+                // to a coarser source.
+                match nl_boundaries {
+                    Some(nl) => strategies::members::split_by_members_with_nl(
                         text,
                         group,
                         path,
                         &self.config,
                         nl,
                         range,
-                    )
-                } else {
-                    strategies::members::split_by_members(text, group, path, &self.config, range)
+                    ),
+                    None => Vec::new(),
                 }
             }
             BoundaryLevel::Sentences => {
@@ -504,7 +507,7 @@ mod tests {
     #[test]
     fn test_split_range_full_chain_from_members() {
         let text = "no entity spans no sentences no lines no paras";
-        let boundaries = split_with_limits(text, SplitStrategy::ByMembers, 3);
+        let boundaries = split_with_limits(text, SplitStrategy::ByNlEntityBoundaries, 3);
         assert!(boundaries.len() > 1);
         assert_partition(text, &boundaries);
     }
@@ -587,7 +590,7 @@ mod tests {
         let boundaries = splitter.split_range(
             text,
             &EntityGroup::default(),
-            SplitStrategy::ByMembers,
+            SplitStrategy::ByNlEntityBoundaries,
             ChunkPath::Bm25,
             Some(&nlb),
             0..text.len(),
@@ -767,7 +770,7 @@ mod tests {
     fn test_split_range_random_text_invariants() {
         let strategies = [
             SplitStrategy::ByNestedGroups,
-            SplitStrategy::ByMembers,
+            SplitStrategy::ByNlEntityBoundaries,
             SplitStrategy::BySentences,
             SplitStrategy::ByLines,
             SplitStrategy::ByParagraphs,

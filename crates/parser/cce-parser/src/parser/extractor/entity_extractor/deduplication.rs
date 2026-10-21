@@ -130,6 +130,23 @@ pub(crate) fn deduplicate_contained_entities(entities: &mut Vec<Entity>) {
                     .or_insert_with(|| child.doc_comment.clone().unwrap_or_default());
                 to_remove.insert(child.id);
             }
+
+            // Template function duality: a C++ function template is matched
+            // twice, once as the `template_declaration` and once as the
+            // `function_definition` it declares. The template already names
+            // the function and covers its body, so the inner Function is
+            // dropped in favor of the template. Keeping both would render
+            // the same function twice, once as a template and once as its
+            // own definition.
+            if parent.kind == EntityKind::Template
+                && child.kind == EntityKind::Function
+                && parent.name == child.name
+            {
+                doc_propagations
+                    .entry(parent.id)
+                    .or_insert_with(|| child.doc_comment.clone().unwrap_or_default());
+                to_remove.insert(child.id);
+            }
         }
     }
 
@@ -285,6 +302,65 @@ mod tests {
         let main = entities.iter().find(|e| e.name == "main").unwrap();
         assert!(!main.metadata.contains_key("type_annotation"));
         assert!(!main.metadata.contains_key("constructor_type"));
+    }
+
+    #[test]
+    fn test_deduplicate_contained_entities_drops_template_function() {
+        // A C++ function template is matched twice: as the
+        // `template_declaration` and as the `function_definition` it
+        // declares. The template already names the function and covers its
+        // body, so the inner function must not survive as a second entity
+        // for the same code.
+        let mut entities = vec![
+            Entity::new(
+                EntityId(0),
+                EntityKind::Template,
+                "GetRtpExtension".to_string(),
+                Span::new(0, 200, 0, 0, 10, 0),
+            ),
+            Entity::new(
+                EntityId(1),
+                EntityKind::Function,
+                "GetRtpExtension".to_string(),
+                Span::new(40, 200, 1, 0, 10, 0),
+            ),
+        ];
+
+        deduplicate_contained_entities(&mut entities);
+
+        assert_eq!(
+            entities.len(),
+            1,
+            "the template and its function describe the same code"
+        );
+        assert_eq!(entities[0].kind, EntityKind::Template);
+        assert_eq!(entities[0].name, "GetRtpExtension");
+    }
+
+    #[test]
+    fn test_deduplicate_contained_entities_keeps_differently_named_function() {
+        // A template and an unrelated function nested in its body are
+        // different entities; the function must survive.
+        let mut entities = vec![
+            Entity::new(
+                EntityId(0),
+                EntityKind::Template,
+                "GetRtpExtension".to_string(),
+                Span::new(0, 200, 0, 0, 10, 0),
+            ),
+            Entity::new(
+                EntityId(1),
+                EntityKind::Function,
+                "helper".to_string(),
+                Span::new(40, 200, 1, 0, 10, 0),
+            ),
+        ];
+
+        deduplicate_contained_entities(&mut entities);
+
+        let names: Vec<_> = entities.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"helper"));
+        assert!(names.contains(&"GetRtpExtension"));
     }
 
     #[test]
