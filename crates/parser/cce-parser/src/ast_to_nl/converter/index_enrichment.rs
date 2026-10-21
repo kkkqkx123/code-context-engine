@@ -9,7 +9,7 @@ use cce_plugin::vocabulary::VocabularyTable;
 use cce_text::Bm25TextCleaner;
 use cce_types::ast_to_nl::ConversionResult;
 use cce_types::language::Language;
-use cce_types::{BehaviorFactKind, EntityId};
+use cce_types::{BehaviorFactKind, ControlFlowFactKind, EntityId};
 
 /// Enriches entity conversion text with index-only sidecar data.
 ///
@@ -33,6 +33,20 @@ impl<'a> IndexTextEnricher<'a> {
         language: Language,
         vocabulary: Option<&VocabularyTable>,
     ) {
+        // Topic anchor: what the entity branches on. A function that
+        // dispatches on protocol constants states its whole subject in
+        // those constants, but they sit deep inside a syntax-heavy body.
+        // The anchor lifts them to the head of the text, where a retriever
+        // reads them before the body drowns them.
+        if let Some(anchor) = topic_anchor(conversion.entity_id, processing_result) {
+            if let Some(text) = conversion.embedding_text.as_mut() {
+                *text = insert_after_first_line(text, &anchor);
+            }
+            if let Some(text) = conversion.bm25_text.as_mut() {
+                *text = insert_after_first_line(text, &anchor);
+            }
+        }
+
         let extra_text = self
             .build_extra_text(conversion.entity_id, processing_result, source)
             .unwrap_or_default();
@@ -215,6 +229,129 @@ impl<'a> IndexTextEnricher<'a> {
 
         let texts: Vec<String> = merged.into_iter().map(|(_, _, t)| t).collect();
         Some(texts.join("\n"))
+    }
+}
+
+/// Maximum number of branch discriminants listed in a topic anchor.
+const MAX_ANCHOR_DISCRIMINANTS: usize = 8;
+
+/// Topic anchor of an entity: the values its branches dispatch on.
+///
+/// A function that dispatches on protocol constants states its whole
+/// subject in those constants, but the body buries them under a
+/// `switch`/`case` skeleton. The anchor lifts the discriminants to the head
+/// of the text so a retriever meets them before the syntax does.
+///
+/// The anchor is purely lexical: it restates identifiers that the entity's
+/// own source already contains, so it cannot invent a subject the code does
+/// not have. An entity without branches gets no anchor.
+fn topic_anchor(entity_id: EntityId, processing_result: &ProcessingResult) -> Option<String> {
+    let facts = processing_result.control_flow.get(entity_id)?;
+
+    let mut discriminants: Vec<String> = Vec::new();
+    let mut branches = 0usize;
+    let mut loops = 0usize;
+
+    for fact in &facts.facts {
+        match fact.kind {
+            ControlFlowFactKind::If | ControlFlowFactKind::Match => {
+                branches += 1;
+                for label in branch_discriminants(&fact.text) {
+                    if discriminants.len() >= MAX_ANCHOR_DISCRIMINANTS {
+                        break;
+                    }
+                    if !discriminants.iter().any(|d| d == &label) {
+                        discriminants.push(label);
+                    }
+                }
+            }
+            ControlFlowFactKind::Loop => loops += 1,
+            _ => {}
+        }
+    }
+
+    if !discriminants.is_empty() {
+        return Some(format!("branches on: {}.", discriminants.join(", ")));
+    }
+    if branches > 0 || loops > 0 {
+        let mut shape = Vec::new();
+        if branches > 0 {
+            shape.push(format!("{} branches", branches));
+        }
+        if loops > 0 {
+            shape.push(format!("{} loops", loops));
+        }
+        return Some(format!("control flow: {}.", shape.join(", ")));
+    }
+    None
+}
+
+/// Discriminant identifiers of a branch statement.
+///
+/// The labels of a `case` arm are the values the branch dispatches on. They
+/// are read from the branch's own source text, so they are exactly the
+/// identifiers the code mentions.
+fn branch_discriminants(text: &str) -> Vec<String> {
+    const CASE: &str = "case";
+    let bytes = text.as_bytes();
+    let mut labels = Vec::new();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if !text[index..].starts_with(CASE) {
+            index += 1;
+            continue;
+        }
+        // The keyword must stand on its own: `case` inside a longer
+        // identifier is not a branch label.
+        let before_ok = index == 0 || !is_identifier_byte(bytes[index - 1]);
+        let after = index + CASE.len();
+        let after_ok = after >= bytes.len() || !is_identifier_byte(bytes[after]);
+        if !before_ok || !after_ok {
+            index = after;
+            continue;
+        }
+        let label_start = after
+            + bytes[after..]
+                .iter()
+                .position(|b| !b.is_ascii_whitespace())
+                .unwrap_or(0);
+        let label_end = label_start
+            + bytes[label_start..]
+                .iter()
+                .take_while(|b| is_identifier_byte(**b))
+                .count();
+        if label_end > label_start {
+            let label = &text[label_start..label_end];
+            if label != "default" {
+                labels.push(label.to_string());
+            }
+        }
+        index = label_end.max(after);
+    }
+
+    labels
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Insert a line right behind the first line of `text`.
+///
+/// The first line of a converted entity is its identity line, so the anchor
+/// lands directly behind the identity and ahead of the body.
+fn insert_after_first_line(text: &str, line: &str) -> String {
+    match text.find('\n') {
+        Some(end) => {
+            let mut result = String::with_capacity(text.len() + line.len() + 1);
+            result.push_str(&text[..=end]);
+            result.push_str(line);
+            result.push('\n');
+            result.push_str(&text[end + 1..]);
+            result
+        }
+        None => format!("{}\n{}", text, line),
     }
 }
 

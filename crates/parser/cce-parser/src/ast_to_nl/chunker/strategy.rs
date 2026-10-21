@@ -1,16 +1,16 @@
 use crate::grouper::GroupType;
 
 /// Split strategy
+///
+/// The starting level of the split recursion, not the full policy. The
+/// recursion itself descends through every boundary source (entity, sentence,
+/// line, paragraph, token) until the text fits, so a strategy only says
+/// where the descent begins. Only levels that a group type can select are
+/// listed here; the finer levels belong to the recursion's own ladder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitStrategy {
-    /// Split at sentence boundaries
-    BySentences,
     /// Split at paragraph boundaries
     ByParagraphs,
-    /// Split at line boundaries
-    ByLines,
-    /// Force token-level split
-    ByTokens,
     /// Split at nested group boundaries
     ByNestedGroups,
     /// Split at entity boundaries using pre-computed NL-text-relative offsets.
@@ -49,7 +49,6 @@ impl SplitStrategy {
             GroupType::CompositePattern => SplitStrategy::ByNlEntityBoundaries,
             GroupType::ClassWithNestedClasses => SplitStrategy::ByNestedGroups,
             GroupType::StructWithNestedStructs => SplitStrategy::ByNestedGroups,
-            GroupType::FunctionWithLogicalBlocks => SplitStrategy::BySentences,
             GroupType::FunctionWithMembers => SplitStrategy::ByNlEntityBoundaries,
             GroupType::MergedFragments => SplitStrategy::ByParagraphs,
             GroupType::FileDocumentation => SplitStrategy::ByParagraphs,
@@ -86,14 +85,6 @@ mod tests {
         assert_eq!(
             SplitStrategy::for_group_type(GroupType::StructWithNestedStructs),
             SplitStrategy::ByNestedGroups
-        );
-        assert_eq!(
-            SplitStrategy::for_group_type(GroupType::FunctionWithLogicalBlocks),
-            SplitStrategy::BySentences
-        );
-        assert_eq!(
-            SplitStrategy::for_bm25_group_type(GroupType::FunctionWithLogicalBlocks),
-            SplitStrategy::ByNlEntityBoundaries
         );
         assert_eq!(
             SplitStrategy::for_bm25_group_type(GroupType::Standalone),

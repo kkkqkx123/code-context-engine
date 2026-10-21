@@ -88,10 +88,7 @@ impl BoundaryLevel {
         match strategy {
             SplitStrategy::ByNestedGroups => Self::NestedGroups,
             SplitStrategy::ByNlEntityBoundaries => Self::Entities,
-            SplitStrategy::BySentences => Self::Sentences,
-            SplitStrategy::ByLines => Self::Lines,
             SplitStrategy::ByParagraphs => Self::Paragraphs,
-            SplitStrategy::ByTokens => Self::Tokens,
         }
     }
 }
@@ -429,7 +426,7 @@ mod tests {
 
     fn split_with_limits(
         text: &str,
-        strategy: SplitStrategy,
+        level: BoundaryLevel,
         max_tokens: usize,
     ) -> Vec<ChunkBoundary> {
         let config = ChunkingConfig {
@@ -437,14 +434,35 @@ mod tests {
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
-        splitter.split_range(
+        splitter.split_range_at(
             text,
             &EntityGroup::default(),
-            strategy,
             ChunkPath::Embedding,
             None,
             0..text.len(),
+            level,
+            &[],
         )
+    }
+
+    fn split_at_level(
+        text: &str,
+        level: BoundaryLevel,
+        path: ChunkPath,
+        config: ChunkingConfig,
+    ) -> Vec<ChunkSegment> {
+        let splitter = TextSplitter::new(config);
+        let boundaries = splitter.split_range_at(
+            text,
+            &EntityGroup::default(),
+            path,
+            None,
+            0..text.len(),
+            level,
+            &[],
+        );
+        let segments = splitter.boundaries_to_segments(boundaries, text);
+        splitter.maybe_merge_segments(segments, path)
     }
 
     fn assert_partition(text: &str, boundaries: &[ChunkBoundary]) {
@@ -491,7 +509,7 @@ mod tests {
     #[test]
     fn test_split_range_by_sentences_stops_at_tokens() {
         let text = "A B C D E F G H";
-        let boundaries = split_with_limits(text, SplitStrategy::BySentences, 3);
+        let boundaries = split_with_limits(text, BoundaryLevel::Sentences, 3);
         assert!(boundaries.len() > 1);
         assert_partition(text, &boundaries);
     }
@@ -499,7 +517,7 @@ mod tests {
     #[test]
     fn test_split_range_full_chain_from_nested_groups() {
         let text = "no nested groups no members no sentence ends no newlines no paragraphs";
-        let boundaries = split_with_limits(text, SplitStrategy::ByNestedGroups, 3);
+        let boundaries = split_with_limits(text, BoundaryLevel::NestedGroups, 3);
         assert!(boundaries.len() > 1);
         assert_partition(text, &boundaries);
     }
@@ -507,7 +525,7 @@ mod tests {
     #[test]
     fn test_split_range_full_chain_from_members() {
         let text = "no entity spans no sentences no lines no paras";
-        let boundaries = split_with_limits(text, SplitStrategy::ByNlEntityBoundaries, 3);
+        let boundaries = split_with_limits(text, BoundaryLevel::Entities, 3);
         assert!(boundaries.len() > 1);
         assert_partition(text, &boundaries);
     }
@@ -515,7 +533,7 @@ mod tests {
     #[test]
     fn test_split_range_from_sentences_to_tokens() {
         let text = "word word word word word word word";
-        let boundaries = split_with_limits(text, SplitStrategy::BySentences, 3);
+        let boundaries = split_with_limits(text, BoundaryLevel::Sentences, 3);
         assert!(boundaries.len() > 1);
         assert_partition(text, &boundaries);
     }
@@ -653,13 +671,14 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
         let text = "one two three four five six seven eight nine ten";
-        let boundaries = splitter.split_range(
+        let boundaries = splitter.split_range_at(
             text,
             &EntityGroup::default(),
-            SplitStrategy::BySentences,
             ChunkPath::Bm25,
             None,
             0..text.len(),
+            BoundaryLevel::Sentences,
+            &[],
         );
         assert!(boundaries.len() >= 2);
         assert_partition(text, &boundaries);
@@ -712,13 +731,14 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
         let text = "这是一段用于测试分块器不变量保证的中文文本，包含一些标点符号。以及换行\n测试。";
-        let boundaries = splitter.split_range(
+        let boundaries = splitter.split_range_at(
             text,
             &EntityGroup::default(),
-            SplitStrategy::BySentences,
             ChunkPath::Embedding,
             None,
             0..text.len(),
+            BoundaryLevel::Sentences,
+            &[],
         );
         assert!(boundaries.len() >= 2);
         assert_partition(text, &boundaries);
@@ -768,12 +788,13 @@ mod tests {
 
     #[test]
     fn test_split_range_random_text_invariants() {
-        let strategies = [
-            SplitStrategy::ByNestedGroups,
-            SplitStrategy::ByNlEntityBoundaries,
-            SplitStrategy::BySentences,
-            SplitStrategy::ByLines,
-            SplitStrategy::ByParagraphs,
+        let levels = [
+            BoundaryLevel::NestedGroups,
+            BoundaryLevel::Entities,
+            BoundaryLevel::Sentences,
+            BoundaryLevel::Lines,
+            BoundaryLevel::Paragraphs,
+            BoundaryLevel::Tokens,
         ];
         let mut rng = Lcg(0x5eed_c0de_cafe_f00d);
         for round in 0..64 {
@@ -794,15 +815,16 @@ mod tests {
                     ..Default::default()
                 },
             };
-            let strategy = strategies[rng.range(strategies.len())];
+            let level = levels[rng.range(levels.len())];
             let splitter = TextSplitter::new(cfg);
-            let boundaries = splitter.split_range(
+            let boundaries = splitter.split_range_at(
                 &text,
                 &EntityGroup::default(),
-                strategy,
                 path,
                 None,
                 0..text.len(),
+                level,
+                &[],
             );
 
             // Invariants: monotonic + contiguous, non-zero, full coverage,
@@ -812,7 +834,7 @@ mod tests {
             for b in &boundaries {
                 assert_eq!(
                     b.start_byte, prev,
-                    "round {round}: strategy={strategy:?} path={path:?} partition gap/overlap"
+                    "round {round}: level={level:?} path={path:?} partition gap/overlap"
                 );
                 assert!(b.start_byte < b.end_byte, "round {round}: zero-length");
                 assert!(text.is_char_boundary(b.start_byte));
@@ -822,7 +844,7 @@ mod tests {
                     let piece_cost = cost(piece, path);
                     assert!(
                         piece_cost <= limit,
-                        "round {round}: strategy={strategy:?} path={path:?} text={text:?} piece of {piece_cost} exceeds limit {limit}: {:?}",
+                        "round {round}: level={level:?} path={path:?} text={text:?} piece of {piece_cost} exceeds limit {limit}: {:?}",
                         piece
                     );
                 }
@@ -980,13 +1002,12 @@ mod tests {
             respect_boundaries: false,
             ..Default::default()
         };
-        let splitter = TextSplitter::new(config);
         let text = "one two. three four. five six. seven eight.";
-        let segments = splitter.split(
+        let segments = split_at_level(
             text,
-            &EntityGroup::default(),
-            SplitStrategy::BySentences,
+            BoundaryLevel::Sentences,
             ChunkPath::Bm25,
+            config,
         );
         assert!(segments.len() >= 3);
     }
@@ -997,13 +1018,12 @@ mod tests {
             max_bm25_words: 512,
             ..Default::default()
         };
-        let splitter = TextSplitter::new(config);
         let text = "one two. three four. five six. seven eight.";
-        let segments = splitter.split(
+        let segments = split_at_level(
             text,
-            &EntityGroup::default(),
-            SplitStrategy::BySentences,
+            BoundaryLevel::Sentences,
             ChunkPath::Bm25,
+            config,
         );
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, text);

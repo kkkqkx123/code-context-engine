@@ -1,3 +1,4 @@
+use crate::grouper::types::GroupType;
 use crate::grouper::EntityGroup;
 use cce_types::ConversionResult;
 use cce_types::ParseError;
@@ -194,7 +195,19 @@ fn smart_chunk_with_header(
             // the brief header here would inject the same boilerplate prefix
             // into every continuation chunk, dragging their embeddings
             // toward a shared common-component direction.
-            continuation: format!("{} {}.", group.kind.kind_label(), group.name),
+            //
+            // A merged group has no own topic to repeat: its name is the
+            // first fragment's name. Such a block falls back to the file
+            // scope, which states where the block comes from without
+            // claiming a sibling as its subject.
+            continuation: if group.group_type == GroupType::MergedFragments {
+                match crate::ast_to_nl::converter::entity_converter::module_stem(file_path) {
+                    Some(stem) => format!("{} in {}.", group.kind.kind_label(), stem),
+                    None => format!("{} {}.", group.kind.kind_label(), group.name),
+                }
+            } else {
+                format!("{} {}.", group.kind.kind_label(), group.name)
+            },
         };
         let path_input = PathInput {
             header_conv,
@@ -263,26 +276,39 @@ fn process_path(
             &input.texts.first
         } else if input.path == ChunkPath::Embedding {
             if let Some(first) = members.first() {
-                let owner = if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str() {
-                    String::new()
+                if ctx.group.group_type == GroupType::MergedFragments {
+                    // A merged group is named after its first fragment, which
+                    // is a sibling and not the owner of the rest. Its block
+                    // head must state what the block actually holds:
+                    // qualifying the members with the group name asserts an
+                    // ownership that does not exist and pulls every block of
+                    // the group toward the first fragment.
+                    let names: Vec<&str> = members.iter().map(|m| m.name.as_str()).collect();
+                    continuation_for_block =
+                        format!("{} {}.", first.kind.kind_label(), names.join(", "));
                 } else {
-                    format!("{}.{}", ctx.group.name, first.name)
-                };
-                let display = if owner.is_empty() {
-                    first.name.clone()
-                } else {
-                    owner
-                };
-                // Continuation blocks keep the group topic sentence ahead of
-                // the member identity so split halves and tiny merged members
-                // still carry file-level intent in vector space.
-                continuation_for_block = format!(
-                    "{} {}. {} {}.",
-                    ctx.group.kind.kind_label(),
-                    ctx.group.name,
-                    first.kind.kind_label(),
-                    display
-                );
+                    let owner = if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str()
+                    {
+                        String::new()
+                    } else {
+                        format!("{}.{}", ctx.group.name, first.name)
+                    };
+                    let display = if owner.is_empty() {
+                        first.name.clone()
+                    } else {
+                        owner
+                    };
+                    // Continuation blocks keep the group topic sentence ahead of
+                    // the member identity so split halves and tiny merged members
+                    // still carry file-level intent in vector space.
+                    continuation_for_block = format!(
+                        "{} {}. {} {}.",
+                        ctx.group.kind.kind_label(),
+                        ctx.group.name,
+                        first.kind.kind_label(),
+                        display
+                    );
+                }
                 &continuation_for_block
             } else {
                 &input.texts.continuation

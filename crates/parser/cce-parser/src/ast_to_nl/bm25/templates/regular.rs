@@ -105,6 +105,28 @@ impl RegularGroupTemplate {
                 }
             }
         }
+
+        // Call targets are exact identifiers, so they are the strongest
+        // recall terms the entity owns. They stay in the content field and
+        // never enter the boosted keyword field.
+        if let Some(calls) = Self::call_targets_line(entity) {
+            all_parts.push(calls);
+        }
+    }
+
+    /// Call-target line of an entity: `Calls: foo, bar.`
+    ///
+    /// The metadata key is filled by the grouper's call-path injection
+    /// stage, which knows the resolved call targets of every entity.
+    fn call_targets_line(entity: &cce_types::entity::GroupedEntity) -> Option<String> {
+        let calls = entity
+            .metadata
+            .get(cce_types::entity::meta_keys::CALL_PATHS)?
+            .trim();
+        if calls.is_empty() {
+            return None;
+        }
+        Some(format!("Calls: {}.", calls))
     }
 
     fn push_member_signals(all_parts: &mut Vec<String>, group: &EntityGroup) {

@@ -329,6 +329,27 @@ mod tests {
     }
 
     #[test]
+    fn test_shipped_sample_configs_parse() {
+        // The shipped sample configurations must stay loadable: a partial
+        // table is only accepted when every field carries a documented
+        // default, so a sample that omits a field would break the loader.
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let samples = [
+            "config.toml",
+            "config.example.toml",
+            ".cce/.cce.example.toml",
+            ".cce/.cce.minimal.toml",
+        ];
+        for sample in samples {
+            let path = repo_root.join(sample);
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {sample}: {e}"));
+            toml::from_str::<AppConfig>(&content)
+                .unwrap_or_else(|e| panic!("{sample} must parse: {e}"));
+        }
+    }
+
+    #[test]
     fn test_load_project_config() {
         let project_config_toml = r#"
 name = "test-project"

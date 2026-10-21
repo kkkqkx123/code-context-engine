@@ -241,11 +241,11 @@ max_tokens = 512
 # Overlap token count for embedding (default: 50)
 overlap_tokens = 50
 
-# Maximum word count for BM25 (default: 200)
-# max_bm25_words = 200
+# Maximum word count for BM25 (default: 150)
+# max_bm25_words = 150
 
-# Overlap word count for BM25 (default: 20)
-# overlap_bm25_words = 20
+# Overlap word count for BM25 (default: 5)
+# overlap_bm25_words = 5
 
 # Maximum overlap ratio (default: 0.2 = 20%)
 # max_overlap_ratio = 0.2
@@ -259,7 +259,7 @@ overlap_tokens = 50
 # Whether to respect entity boundaries when splitting (default: true)
 respect_boundaries = true
 # Merge threshold, 0 = use max_tokens (merge anything that fits) (default: 0)
-# merge_threshold = 0
+# cross_group_merge_threshold = 0
 
 [ast_to_nl.bm25]
 # Maximum number of keywords to extract (default: 10)

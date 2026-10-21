@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use cce_plugin::PluginCapability;
 use cce_types::FILE_DOC_SENTINEL_ID;
 use cce_types::FILE_FALLBACK_SENTINEL_ID;
-use cce_types::entity::{Entity, EntityId, EntityKind, GroupedEntity, ParsedFile};
+use cce_types::entity::{meta_keys, Entity, EntityId, EntityKind, GroupedEntity, ParsedFile};
 use cce_types::language::Language;
 use cce_types::test_info::TestInfo;
 use compact_str::CompactString;
@@ -477,7 +477,7 @@ impl PreprocessingPipeline {
                             if let Some(ref mut header) = group.header {
                                 header
                                     .metadata
-                                    .insert("call_paths".to_string(), paths.join(", "));
+                                    .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
                             }
                         }
                     }
@@ -487,7 +487,7 @@ impl PreprocessingPipeline {
                         if !paths.is_empty() {
                             member
                                 .metadata
-                                .insert("call_paths".to_string(), paths.join(", "));
+                                .insert(meta_keys::CALL_PATHS.to_string(), paths.join(", "));
                         }
                     }
                 }

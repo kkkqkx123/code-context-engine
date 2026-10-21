@@ -77,6 +77,34 @@ fn default_dead_letter_retry_interval_secs() -> u64 {
     300
 }
 
+fn default_scan_batch_size() -> usize {
+    100
+}
+
+fn default_parse_concurrency() -> usize {
+    10
+}
+
+fn default_process_concurrency() -> usize {
+    BatchConfig::default_file_concurrency()
+}
+
+fn default_store_batch_size() -> usize {
+    50
+}
+
+fn default_batch_embedding_size() -> usize {
+    32
+}
+
+fn default_batch_embedding_delay_ms() -> u64 {
+    100
+}
+
+fn default_embedding_stage_timeout_secs() -> u64 {
+    0
+}
+
 impl Default for OrchestratorConfig {
     fn default() -> Self {
         Self {
@@ -100,6 +128,7 @@ pub struct BatchConfig {
     /// Recovery cost is constant regardless of batch size (recovery always
     /// re-scans; per-batch validation happens downstream), so do not shrink
     /// this value to speed up recovery. Size it by memory budget instead.
+    #[serde(default = "default_scan_batch_size")]
     pub scan_batch_size: usize,
     /// Maximum concurrent file parsing tasks
     /// Controls CPU and memory usage during parsing.
@@ -107,24 +136,30 @@ pub struct BatchConfig {
     /// beyond that gains flatten. Values far outside this range deserve
     /// a second look (too low leaves CPU idle, too high only adds
     /// scheduling overhead).
+    #[serde(default = "default_parse_concurrency")]
     pub parse_concurrency: usize,
     /// Maximum concurrent file processing tasks
     /// Includes entity grouping and NL conversion.
     /// CPU-bound parse/chunk work scales with the host's logical CPUs and
     /// merely flattens past them, so the default tracks the machine via
     /// [`BatchConfig::default_file_concurrency`] instead of a fixed constant.
+    #[serde(default = "default_process_concurrency")]
     pub process_concurrency: usize,
     /// Number of chunks to accumulate before storing
     /// Controls memory during chunking phase
+    #[serde(default = "default_store_batch_size")]
     pub store_batch_size: usize,
     /// Number of texts to send per embedding API call
     /// Should match API token limits (typically 32-64)
+    #[serde(default = "default_batch_embedding_size")]
     pub embedding_batch_size: usize,
     /// Milliseconds to sleep between embedding batches
     /// Helps avoid API rate limits
+    #[serde(default = "default_batch_embedding_delay_ms")]
     pub embedding_batch_delay_ms: u64,
     /// Wall-clock deadline for one embedding stage pass, in seconds.
     /// 0 means auto-derive: microbatch count x per-microbatch retry budget.
+    #[serde(default = "default_embedding_stage_timeout_secs")]
     pub embedding_stage_timeout_secs: u64,
 }
 

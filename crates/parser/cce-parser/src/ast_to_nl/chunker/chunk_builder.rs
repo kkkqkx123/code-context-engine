@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::grouper::types::GroupType;
 use crate::grouper::EntityGroup;
 use cce_types::ConversionResult;
 use cce_types::entity::{EntityId, EntityKind};
@@ -266,16 +267,22 @@ impl ChunkBuilder {
     /// Ownership qualifier shared by BM25 titles, keywords, and identities.
     ///
     /// A recorded cross-group parent wins over the current group name: for
-    /// standalone child groups (and merged groups named after one member)
-    /// the parent is the real owner. Container groups keep their own name,
-    /// which already qualifies their members. Without a parent the group
-    /// name stays the qualifier, preserving the previous behavior.
+    /// standalone child groups the parent is the real owner. Container groups
+    /// keep their own name, which already qualifies their members. A merged
+    /// group has no owner at all: it is named after its first fragment,
+    /// which is a sibling rather than the owner of the rest, so qualifying
+    /// with it would assert a false relation. Such groups fall back to the
+    /// file scope. Without a parent the group name stays the qualifier,
+    /// preserving the previous behavior.
     fn resolve_owner<'a>(group: &'a EntityGroup, parent: Option<&'a str>) -> Option<&'a str> {
         if group.group_type.is_container() && !group.name.is_empty() {
             return Some(group.name.as_str());
         }
         if let Some(name) = parent.filter(|p| !p.is_empty()) {
             return Some(name);
+        }
+        if group.group_type == GroupType::MergedFragments {
+            return None;
         }
         if group.name.is_empty() {
             return None;
@@ -346,12 +353,18 @@ impl ChunkBuilder {
                     && !group.name.is_empty()
                     && name != group.name.as_str()
                 {
-                    // A recorded parent is the real owner for standalone and
-                    // merged groups; only container members use the group name.
+                    // A recorded parent is the real owner for standalone
+                    // groups; only container members use the group name.
                     if let Some(owner) = Self::resolve_owner(group, parent) {
                         return format!("{owner}.{name}");
                     }
-                    return format!("{}.{}", group.name, name);
+                    // A merged group is named after one of its own
+                    // fragments, so it never owns the others. Such a title
+                    // falls back to the file scope instead of claiming a
+                    // sibling as a member.
+                    if group.group_type != GroupType::MergedFragments {
+                        return format!("{}.{}", group.name, name);
+                    }
                 }
                 return Self::qualify_bm25_title(name, group, parent, file_path);
             }
@@ -387,6 +400,19 @@ impl ChunkBuilder {
         result
     }
 
+    /// Whether a chunk states a topic of its own.
+    ///
+    /// A chunk states a topic when it names what it calls or what it
+    /// branches on. Such a chunk is retrievable on its own. A chunk that
+    /// states neither says nothing about its subject, and how long it is
+    /// does not change that: a dense body of code is not a topic.
+    pub(crate) fn states_own_topic(text: &str) -> bool {
+        text.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("calls: ") || line.starts_with("branches on: ")
+        })
+    }
+
     fn prepend_identity_if_needed(text: &mut String, name: &str, kind: EntityKind) {
         // Import-like groups produce a bulky structured identity line
         // (e.g. `std::{...} (import).`) that adds no retrieval value.
@@ -407,6 +433,28 @@ impl ChunkBuilder {
         if !first_line_has_name {
             *text = identity_line + &*text;
         }
+    }
+
+    /// Name that identifies the content a chunk actually holds.
+    ///
+    /// A merged group is named after its first fragment, which is a sibling
+    /// of the other fragments rather than their owner. A block that does
+    /// not hold that fragment must not carry its name: the name would
+    /// claim a subject the block does not contain and would make every
+    /// block of the group compete for the same queries. Such a block names
+    /// the first entity it holds instead.
+    fn chunk_identity_name(group: &EntityGroup, content_entity_ids: &[EntityId]) -> String {
+        let holds_header = group
+            .header_id
+            .is_some_and(|header_id| content_entity_ids.contains(&header_id));
+        if group.group_type == GroupType::MergedFragments && !holds_header {
+            if let Some(id) = content_entity_ids.first()
+                && let Some(name) = Self::entity_name_by_id(group, *id)
+            {
+                return name;
+            }
+        }
+        group.name.to_string()
     }
 
     pub fn from_single_text(
@@ -530,11 +578,8 @@ impl ChunkBuilder {
                     None
                 };
                 if path == ChunkPath::Embedding && !is_continuation {
-                    Self::prepend_identity_if_needed(
-                        &mut segment_text,
-                        group.name.as_str(),
-                        group.kind,
-                    );
+                    let identity = Self::chunk_identity_name(group, &segment.boundary.entity_ids);
+                    Self::prepend_identity_if_needed(&mut segment_text, &identity, group.kind);
                 }
                 // Strategies without entity boundaries (paragraphs, tokens,
                 // lines) produce segments with no entity ids. Attribute the
@@ -629,7 +674,7 @@ impl ChunkBuilder {
                 let token_count = cost(&segment_text, path);
 
                 let self_contained = path == ChunkPath::Embedding
-                    && first_content_entity_id(
+                    && (first_content_entity_id(
                         content_entity_ids.iter(),
                         // The group header is context, not content: a chunk
                         // holding only the header (or the header plus bare
@@ -642,7 +687,11 @@ impl ChunkBuilder {
                             .and_then(|c| c.header_entity_id)
                             .or(group.header_id),
                     )
-                    .is_some_and(|id| entity_has_own_descriptor(group, id));
+                    .is_some_and(|id| entity_has_own_descriptor(group, id))
+                        // A chunk that names what it calls or branches on
+                        // states its own subject even when its entity has no
+                        // documentation.
+                        || Self::states_own_topic(&segment_text));
 
                 let (bm25_title, bm25_keywords) = if path == ChunkPath::Bm25 {
                     let effective_ids = if content_entity_ids.is_empty() {
@@ -665,7 +714,27 @@ impl ChunkBuilder {
                         ),
                     )
                 } else {
-                    (Some(group.name.to_string()), keywords.to_vec())
+                    // The embedding path carries no keyword index, but the
+                    // title still names the chunk in filters, relation
+                    // attribution and result presentation. Naming every
+                    // block of a group after the group would give a merged
+                    // group's blocks one shared identity, so the title is
+                    // computed per block from the entities it actually
+                    // holds.
+                    let effective_ids = if content_entity_ids.is_empty() {
+                        group.all_entity_ids()
+                    } else {
+                        content_entity_ids.clone()
+                    };
+                    (
+                        Some(Self::bm25_title_for_ids(
+                            group,
+                            &effective_ids,
+                            parent.as_deref(),
+                            file_path,
+                        )),
+                        keywords.to_vec(),
+                    )
                 };
 
                 ChunkedResult {
@@ -733,14 +802,11 @@ impl ChunkBuilder {
     }
 
     pub fn from_unsplit(&self, mut ctx: UnsplitContext) -> ChunkedResult {
-        if ctx.path == ChunkPath::Embedding {
-            Self::prepend_identity_if_needed(
-                &mut ctx.text,
-                ctx.group.name.as_str(),
-                ctx.group.kind,
-            );
-        }
         let content_entity_ids = ctx.content_entity_ids;
+        if ctx.path == ChunkPath::Embedding {
+            let identity = Self::chunk_identity_name(ctx.group, &content_entity_ids);
+            Self::prepend_identity_if_needed(&mut ctx.text, &identity, ctx.group.kind);
+        }
         let (source_span, source_ranges, source_span_kind) =
             source_coverage::source_coverage_for_entity_ids(
                 ctx.group,
@@ -749,11 +815,15 @@ impl ChunkBuilder {
             );
 
         let token_count = cost(&ctx.text, ctx.path);
+        let states_topic = Self::states_own_topic(&ctx.text);
         let text = ctx.text;
 
         let self_contained = ctx.path == ChunkPath::Embedding
-            && first_content_entity_id(content_entity_ids.iter(), ctx.group.header_id)
-                .is_some_and(|id| entity_has_own_descriptor(ctx.group, id));
+            && (first_content_entity_id(content_entity_ids.iter(), ctx.group.header_id)
+                .is_some_and(|id| entity_has_own_descriptor(ctx.group, id))
+                // A chunk that names what it calls or branches on states its
+                // own subject even when its entity has no documentation.
+                || states_topic);
 
         let (bm25_title, bm25_keywords) = if ctx.path == ChunkPath::Bm25 {
             let effective_ids = if content_entity_ids.is_empty() {
@@ -776,7 +846,25 @@ impl ChunkBuilder {
                 ),
             )
         } else {
-            (Some(ctx.group.name.to_string()), ctx.keywords)
+            // The embedding path indexes no keyword field, but the title
+            // still names the chunk in filters, relation attribution and
+            // result presentation. It is computed per chunk from the
+            // entities the chunk holds, so the blocks of a merged group do
+            // not share one identity.
+            let effective_ids = if content_entity_ids.is_empty() {
+                ctx.group.all_entity_ids()
+            } else {
+                content_entity_ids.clone()
+            };
+            (
+                Some(Self::bm25_title_for_ids(
+                    ctx.group,
+                    &effective_ids,
+                    ctx.parent_qualifier.as_deref(),
+                    ctx.file_path,
+                )),
+                ctx.keywords,
+            )
         };
 
         ChunkedResult {

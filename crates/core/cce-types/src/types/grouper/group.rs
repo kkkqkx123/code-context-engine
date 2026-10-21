@@ -27,7 +27,6 @@ pub enum GroupType {
     CompositePattern,
     ClassWithNestedClasses,
     StructWithNestedStructs,
-    FunctionWithLogicalBlocks,
     /// Function with its internal members (macros, closures, statements)
     FunctionWithMembers,
     /// Merged small fragments
@@ -49,7 +48,6 @@ impl std::fmt::Display for GroupType {
             GroupType::CompositePattern => write!(f, "composite_pattern"),
             GroupType::ClassWithNestedClasses => write!(f, "class_with_nested_classes"),
             GroupType::StructWithNestedStructs => write!(f, "struct_with_nested_structs"),
-            GroupType::FunctionWithLogicalBlocks => write!(f, "function_with_logical_blocks"),
             GroupType::FunctionWithMembers => write!(f, "function_with_members"),
             GroupType::MergedFragments => write!(f, "merged_fragments"),
             GroupType::FileDocumentation => write!(f, "file_documentation"),

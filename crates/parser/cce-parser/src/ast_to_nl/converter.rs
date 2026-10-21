@@ -42,7 +42,7 @@
 //! // let chunks = chunker.chunk_groups(&group_conversions, file_path);
 //! ```
 
-mod entity_converter;
+pub(crate) mod entity_converter;
 pub mod group_converter;
 mod index_enrichment;
 

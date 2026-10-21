@@ -132,6 +132,17 @@ impl RegularGroupTemplate {
             group.header.as_ref(),
         );
 
+        // The group header is the group's primary entity, so its call
+        // targets belong to the group description. They sit right behind the
+        // identity line, where a retriever reads them before the body
+        // buries them under syntax.
+        if let Some(calls) = Self::call_targets_line(group.header.as_ref()) {
+            if !desc.contains(&calls) {
+                desc.push('\n');
+                desc.push_str(&calls);
+            }
+        }
+
         // Inheritance leads the description so it survives header
         // truncation in chunking (repeated headers are cut to a third of
         // the chunk limit; trailing lines would be lost for large docs).
@@ -305,13 +316,29 @@ impl RegularGroupTemplate {
         }
 
         // Preserve call path info in compact form for identifier-level recall
-        if let Some(call_paths) = member.metadata.get(meta_keys::CALL_PATHS) {
-            if !call_paths.is_empty() {
-                member_desc.push_str(&format!("\ncalls: {}", call_paths));
-            }
+        if let Some(calls) = Self::call_targets_line(Some(member)) {
+            member_desc.push('\n');
+            member_desc.push_str(&calls);
         }
 
         member_desc
+    }
+
+    /// Call-target line of an entity: `calls: foo, bar.`
+    ///
+    /// The call targets are the strongest lexical signal an entity owns: a
+    /// function's role is stated by what it calls, and the names are exact
+    /// identifiers that match a query verbatim. The metadata key is filled by
+    /// the grouper's call-path injection stage, which knows the resolved
+    /// call targets of every entity.
+    fn call_targets_line(
+        entity: Option<&cce_types::entity::GroupedEntity>,
+    ) -> Option<String> {
+        let calls = entity?.metadata.get(meta_keys::CALL_PATHS)?.trim();
+        if calls.is_empty() {
+            return None;
+        }
+        Some(format!("calls: {}.", calls))
     }
 
     /// Whether a variable relation line restates information already present.

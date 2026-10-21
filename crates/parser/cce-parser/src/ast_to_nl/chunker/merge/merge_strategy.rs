@@ -11,6 +11,7 @@ use cce_types::Span;
 
 use crate::ast_to_nl::chunker::SplitReason;
 use crate::ast_to_nl::chunker::boundary::{can_merge, cost, merge_limits};
+use crate::ast_to_nl::chunker::chunk_builder::ChunkBuilder;
 use crate::ast_to_nl::chunker::config::ChunkingConfig;
 use crate::ast_to_nl::chunker::result::{ChunkPath, ChunkedResult};
 
@@ -78,6 +79,22 @@ pub(crate) fn should_merge(
     }
     if !shares_kind(prev, next) {
         return false;
+    }
+    // A chunk that states no topic of its own inherits the topic of the
+    // neighbour it follows. Size alone does not make a chunk self-sufficient:
+    // a dense body of code says nothing about its subject, so a chunk that
+    // says nothing is a poor retrieval unit even when it is long. The
+    // neighbour keeps the merged chunk's identity, so the topic travels
+    // with the merge.
+    if path == ChunkPath::Embedding
+        && ChunkBuilder::states_own_topic(&prev.text)
+        && !ChunkBuilder::states_own_topic(&next.text)
+        && is_topic_unit(prev)
+    {
+        let (_, ceiling) = merge_limits(path, config);
+        if combined_cost(prev, next, path) <= ceiling {
+            return true;
+        }
     }
     can_merge(&prev.text, &next.text, path, config)
 }

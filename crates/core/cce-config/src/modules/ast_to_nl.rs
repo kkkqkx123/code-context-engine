@@ -152,26 +152,31 @@ impl Validate for EmbeddingGeneratorConfig {
 pub struct ChunkingConfig {
     /// Maximum token count for embedding (default: 512)
     /// Used for LLM embedding size limits
+    #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
     /// Overlap token count for embedding (default: 50)
+    #[serde(default = "default_overlap_tokens")]
     pub overlap_tokens: usize,
 
-    /// Maximum word count for BM25 (default: 200)
+    /// Maximum word count for BM25 (default: 150)
     /// BM25 length normalization should be based on actual word count, not tokens
     #[serde(default = "default_max_bm25_words")]
     pub max_bm25_words: usize,
-    /// Overlap word count for BM25 (default: 20)
+    /// Overlap word count for BM25 (default: 5)
     #[serde(default = "default_overlap_bm25_words")]
     pub overlap_bm25_words: usize,
 
     /// Maximum overlap ratio (default: 0.2 = 20%)
+    #[serde(default = "default_max_overlap_ratio")]
     pub max_overlap_ratio: f32,
-    /// Minimum chunk token count (default: 250)
+    /// Minimum chunk token count (default: 150)
+    #[serde(default = "default_min_chunk_tokens")]
     pub min_chunk_tokens: usize,
     /// Minimum chunk BM25 word count (default: 80)
     #[serde(default = "default_min_chunk_bm25_words")]
     pub min_chunk_bm25_words: usize,
     /// Whether to respect entity boundaries when splitting (default: true)
+    #[serde(default = "default_respect_boundaries")]
     pub respect_boundaries: bool,
     /// Shared merge ceiling for both intra-group and cross-group merging
     /// (0 = use per-path max limit).
@@ -187,15 +192,15 @@ pub struct ChunkingConfig {
 impl Default for ChunkingConfig {
     fn default() -> Self {
         Self {
-            max_tokens: 512,
-            overlap_tokens: 50,
+            max_tokens: default_max_tokens(),
+            overlap_tokens: default_overlap_tokens(),
             max_bm25_words: default_max_bm25_words(),
             overlap_bm25_words: default_overlap_bm25_words(),
-            max_overlap_ratio: 0.2,
-            min_chunk_tokens: 150,
-            min_chunk_bm25_words: 80,
-            respect_boundaries: true,
-            cross_group_merge_threshold: 0,
+            max_overlap_ratio: default_max_overlap_ratio(),
+            min_chunk_tokens: default_min_chunk_tokens(),
+            min_chunk_bm25_words: default_min_chunk_bm25_words(),
+            respect_boundaries: default_respect_boundaries(),
+            cross_group_merge_threshold: default_cross_group_merge_threshold(),
         }
     }
 }
@@ -292,6 +297,26 @@ fn default_max_keywords() -> usize {
 
 fn default_cross_group_merge_threshold() -> usize {
     0
+}
+
+fn default_max_tokens() -> usize {
+    512
+}
+
+fn default_overlap_tokens() -> usize {
+    50
+}
+
+fn default_max_overlap_ratio() -> f32 {
+    0.2
+}
+
+fn default_min_chunk_tokens() -> usize {
+    150
+}
+
+fn default_respect_boundaries() -> bool {
+    true
 }
 
 fn default_min_chunk_bm25_words() -> usize {
@@ -392,5 +417,35 @@ mod tests {
 
         let valid = ChunkingConfig::default();
         assert!(valid.validate_structured().is_ok());
+    }
+
+    #[test]
+    fn test_partial_chunking_table_uses_documented_defaults() {
+        // A chunking table that only overrides one field must load, and every
+        // omitted field must take the value its documentation states.
+        let chunking: ChunkingConfig =
+            toml::from_str("max_bm25_words = 200").expect("partial chunking table must parse");
+        assert_eq!(chunking.max_bm25_words, 200);
+        assert_eq!(chunking.max_tokens, 512);
+        assert_eq!(chunking.overlap_tokens, 50);
+        assert_eq!(chunking.overlap_bm25_words, 5);
+        assert_eq!(chunking.max_overlap_ratio, 0.2);
+        assert_eq!(chunking.min_chunk_tokens, 150);
+        assert_eq!(chunking.min_chunk_bm25_words, 80);
+        assert!(chunking.respect_boundaries);
+        assert_eq!(chunking.cross_group_merge_threshold, 0);
+    }
+
+    #[test]
+    fn test_documented_defaults_match_implementation() {
+        let defaults = ChunkingConfig::default();
+        assert_eq!(defaults.max_tokens, 512);
+        assert_eq!(defaults.overlap_tokens, 50);
+        assert_eq!(defaults.max_bm25_words, 150);
+        assert_eq!(defaults.overlap_bm25_words, 5);
+        assert_eq!(defaults.max_overlap_ratio, 0.2);
+        assert_eq!(defaults.min_chunk_tokens, 150);
+        assert_eq!(defaults.min_chunk_bm25_words, 80);
+        assert!(defaults.respect_boundaries);
     }
 }
