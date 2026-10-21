@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::{
     CodePlugin, OverridePluginSplit, PRIORITY_MAX, PRIORITY_MIN, PluginBundle, PluginCapability,
@@ -46,6 +46,14 @@ pub struct PluginRegistry {
     /// Consumers that cache plugin-derived data use it to detect that the
     /// cached data no longer matches the registry.
     revision: u64,
+    /// Merged terminology tables, keyed by the provider set that produced them.
+    ///
+    /// The table depends only on the contributing plugins, not on the file
+    /// being processed, so one entry serves every file of a project. Keeping
+    /// the cache in the registry lets every consumer (the AST-to-NL pipeline,
+    /// the chunker, the document pipeline) share it, so a plugin is queried
+    /// once per provider set instead of once per consumer.
+    vocabulary_tables: Mutex<HashMap<String, Arc<crate::vocabulary::VocabularyTable>>>,
 }
 
 impl Default for PluginRegistry {
@@ -61,6 +69,7 @@ impl PluginRegistry {
             entries: HashMap::new(),
             next_seq: 0,
             revision: 0,
+            vocabulary_tables: Mutex::new(HashMap::new()),
         }
     }
 
@@ -364,6 +373,36 @@ impl PluginRegistry {
             PluginCapability::declared(&e.capabilities, PluginCapability::TextGen)
                 && e.plugin.supports_embedding()
         })
+    }
+
+    /// The merged terminology table for a file.
+    ///
+    /// The table is collected from the plugins that contribute terminology to
+    /// the file and cached per provider set, so a plugin is queried once per
+    /// plugin set instead of once per file. `language` is `None` for files
+    /// that carry no language, such as documents.
+    ///
+    /// Returns `None` when no plugin contributes terminology to the file.
+    pub fn vocabulary_table(
+        &self,
+        file_path: &str,
+        language: Option<&str>,
+    ) -> Option<Arc<crate::vocabulary::VocabularyTable>> {
+        let providers = self.get_vocabulary_providers(Some(file_path), language);
+        if providers.is_empty() {
+            return None;
+        }
+        let key = crate::vocabulary::provider_identity(&providers, self.revision());
+        if let Ok(cache) = self.vocabulary_tables.lock()
+            && let Some(table) = cache.get(&key)
+        {
+            return Some(table.clone());
+        }
+        let table = Arc::new(crate::vocabulary::merge(&providers));
+        if let Ok(mut cache) = self.vocabulary_tables.lock() {
+            cache.insert(key, table.clone());
+        }
+        Some(table)
     }
 
     /// Plugins that contribute a domain terminology table (`Vocabulary`).

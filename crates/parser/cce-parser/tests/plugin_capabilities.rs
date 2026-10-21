@@ -479,18 +479,10 @@ const MEDIA_VOCABULARY_SCRIPT: &str = r#"
 
 /// Build a standalone group whose entity body spans the whole source.
 fn vocabulary_group(name: &str, signature: &str, language: Language) -> EntityGroup {
-    let header = GroupedEntity {
-        id: EntityId(1),
-        kind: EntityKind::Function,
-        name: name.to_string(),
-        signature: signature.to_string(),
-        doc_comment: Some("/// Parses the table.".to_string()),
-        ..Default::default()
-    };
     EntityGroup {
         group_id: "group_1".into(),
         group_type: GroupType::Standalone,
-        header: Some(header),
+        header: Some(vocabulary_header(name, signature)),
         header_id: Some(EntityId(1)),
         entity_spans: std::collections::HashMap::from([(
             EntityId(1),
@@ -503,22 +495,25 @@ fn vocabulary_group(name: &str, signature: &str, language: Language) -> EntityGr
     }
 }
 
-/// Convert the group with the given registry and return the header texts.
-fn convert_with_registry(
-    registry: PluginRegistry,
-    group: &EntityGroup,
-    source: &str,
-) -> (String, String) {
-    convert_with_registry_and_path(registry, group, source, "src/media.c")
+/// Build the header entity of a vocabulary group.
+fn vocabulary_header(name: &str, signature: &str) -> GroupedEntity {
+    GroupedEntity {
+        id: EntityId(1),
+        kind: EntityKind::Function,
+        name: name.to_string(),
+        signature: signature.to_string(),
+        doc_comment: Some("/// Parses the table.".to_string()),
+        ..Default::default()
+    }
 }
 
-/// Convert the group with the given registry and file path.
-fn convert_with_registry_and_path(
+/// Convert the group with the given registry and return the header conversion.
+fn convert_header_with_registry_and_path(
     registry: PluginRegistry,
     group: &EntityGroup,
     source: &str,
     file_path: &str,
-) -> (String, String) {
+) -> cce_types::ConversionResult {
     let converter =
         cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
             .with_plugin_registry(Arc::new(registry));
@@ -536,35 +531,37 @@ fn convert_with_registry_and_path(
         Some(&processing_result),
         Some(source),
     );
-    let header = results[0]
+    results[0]
         .header_conversion
-        .as_ref()
-        .expect("the group must produce a header conversion");
-    (
-        header.bm25_text.clone().unwrap_or_default(),
-        header.embedding_text.clone().unwrap_or_default(),
-    )
+        .clone()
+        .expect("the group must produce a header conversion")
 }
 
-/// `Vocabulary`: the plugin table is turned into a `Glossary:` line that is
-/// appended to both the BM25 and the embedding text.
+/// The entity-level glossary line of a converted group.
+fn glossary_with_registry(
+    registry: PluginRegistry,
+    group: &EntityGroup,
+    source: &str,
+) -> Option<String> {
+    let conversion = convert_header_with_registry_and_path(registry, group, source, "src/media.c");
+    conversion.glossary
+}
+
+/// `Vocabulary`: the plugin table is turned into a `Glossary:` line that
+/// travels with the conversion result.
 #[test]
-fn test_vocabulary_appends_glossary_to_conversion_text() {
+fn test_vocabulary_produces_glossary_line() {
     let mut registry = PluginRegistry::new();
     registry.register(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT));
 
     let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
-    let (bm25, embedding) = convert_with_registry(registry, &group, source);
+    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
 
-    for (path, text) in [("bm25", &bm25), ("embedding", &embedding)] {
-        assert!(
-            text.contains(
-                "Glossary: stts = sync time-to-sample; sdp = session description protocol"
-            ),
-            "{path} text must carry the glossary line, got: {text}"
-        );
-    }
+    assert_eq!(
+        glossary,
+        "Glossary: stts = sync time-to-sample; sdp = session description protocol"
+    );
 }
 
 /// `Vocabulary`: the tables of several plugins are merged, and a token
@@ -588,11 +585,11 @@ fn test_vocabulary_merges_multiple_plugins() {
 
     let source = "int parse(sdp) {\n    int stts = 1;\n    int avcc = 2;\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
-    let (bm25, _) = convert_with_registry(registry, &group, source);
+    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
 
-    assert!(
-        bm25.contains("Glossary: stts = sync time-to-sample; sdp = session description protocol; avcc = AVC configuration"),
-        "the merged glossary must keep the first meaning of a duplicated token, got: {bm25}"
+    assert_eq!(
+        glossary,
+        "Glossary: stts = sync time-to-sample; sdp = session description protocol; avcc = AVC configuration"
     );
 }
 
@@ -607,29 +604,24 @@ fn test_vocabulary_respects_language_filter() {
 
     let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
-    let (bm25, embedding) = convert_with_registry(registry, &group, source);
+    let conversion = convert_header_with_registry_and_path(registry, &group, source, "src/media.c");
 
     assert!(
-        !bm25.contains("Glossary:"),
-        "a plugin of another language must not contribute, got: {bm25}"
-    );
-    assert!(
-        !embedding.contains("Glossary:"),
-        "a plugin of another language must not contribute, got: {embedding}"
+        conversion.glossary.is_none(),
+        "a plugin of another language must not contribute"
     );
 }
 
-/// `Vocabulary`: without a plugin the conversion text stays untouched.
+/// `Vocabulary`: without a plugin the conversion stays untouched.
 #[test]
 fn test_vocabulary_absent_without_plugin() {
     let registry = PluginRegistry::new();
 
     let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
-    let (bm25, embedding) = convert_with_registry(registry, &group, source);
+    let conversion = convert_header_with_registry_and_path(registry, &group, source, "src/media.c");
 
-    assert!(!bm25.contains("Glossary:"), "got: {bm25}");
-    assert!(!embedding.contains("Glossary:"), "got: {embedding}");
+    assert!(conversion.glossary.is_none());
 }
 
 /// `Vocabulary`: a language alias in the plugin declaration addresses the
@@ -644,16 +636,12 @@ fn test_vocabulary_accepts_language_alias() {
 
     let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(sdp)", Language::Cpp);
-    let (bm25, embedding) =
-        convert_with_registry_and_path(registry, &group, source, "src/media.cpp");
+    let conversion =
+        convert_header_with_registry_and_path(registry, &group, source, "src/media.cpp");
 
-    assert!(
-        bm25.contains("Glossary: stts = sync time-to-sample"),
-        "the alias must route the plugin, got: {bm25}"
-    );
-    assert!(
-        embedding.contains("Glossary: stts = sync time-to-sample"),
-        "the alias must route the plugin, got: {embedding}"
+    assert_eq!(
+        conversion.glossary.as_deref(),
+        Some("Glossary: stts = sync time-to-sample; sdp = session description protocol")
     );
 }
 
@@ -666,11 +654,28 @@ fn test_vocabulary_matches_identifier_segments() {
 
     let source = "int parse_stts(int stts_count) {\n    return stts_count;\n}\n";
     let group = vocabulary_group("parse_stts", "int parse_stts(int)", Language::C);
-    let (bm25, _) = convert_with_registry(registry, &group, source);
+    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
 
     assert!(
-        bm25.contains("Glossary: stts = sync time-to-sample"),
-        "a compound identifier must match through its segment, got: {bm25}"
+        glossary.contains("Glossary: stts = sync time-to-sample"),
+        "a compound identifier must match through its segment, got: {glossary}"
+    );
+}
+
+/// `Vocabulary`: the match ignores case, matching the index tokenizer that
+/// lowercases every token.
+#[test]
+fn test_vocabulary_matching_ignores_case() {
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT));
+
+    let source = "int parse(int STTS) {\n    return STTS;\n}\n";
+    let group = vocabulary_group("parse", "int parse(int)", Language::C);
+    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
+
+    assert!(
+        glossary.contains("Glossary: stts = sync time-to-sample"),
+        "an upper-case identifier must match the term, got: {glossary}"
     );
 }
 
@@ -690,11 +695,38 @@ fn test_vocabulary_short_token_does_not_match_inside_a_word() {
 
     let source = "int parse(int stts) {\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(int)", Language::C);
-    let (bm25, _) = convert_with_registry(registry, &group, source);
+    let conversion = convert_header_with_registry_and_path(registry, &group, source, "src/media.c");
 
     assert!(
-        !bm25.contains("Glossary:"),
-        "a short term must not match inside a longer word, got: {bm25}"
+        conversion.glossary.is_none(),
+        "a short term must not match inside a longer word"
+    );
+}
+
+/// `Vocabulary`: a term that only occurs in the documentation comment still
+/// reaches the glossary.
+#[test]
+fn test_vocabulary_scans_the_doc_comment() {
+    let script = r#"
+        plugin = {
+            id = "doc_vocabulary",
+            vocabulary = function()
+                return { { token = "sdp", expansion = "session description protocol" } }
+            end
+        }
+    "#;
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(script));
+
+    let mut group = vocabulary_group("parse", "int parse(int)", Language::C);
+    group.header.as_mut().expect("header").doc_comment =
+        Some("/// Parses an SDP packet.".to_string());
+    let source = "int parse(int value) {\n    return value;\n}\n";
+    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
+
+    assert!(
+        glossary.contains("Glossary: sdp = session description protocol"),
+        "a term in the doc comment must reach the glossary, got: {glossary}"
     );
 }
 
@@ -740,10 +772,65 @@ fn test_vocabulary_table_is_reused_across_files() {
             .expect("the group must produce a header conversion");
         assert!(
             header
-                .bm25_text
+                .glossary
                 .as_deref()
                 .is_some_and(|text| text.contains("Glossary: stts")),
             "every file of the provider set must carry the glossary line"
+        );
+    }
+}
+
+/// `Vocabulary`: every chunk of a group carries the glossary line, so the
+/// expansions stay retrievable no matter which chunk the retriever picks.
+#[test]
+fn test_vocabulary_reaches_every_chunk_of_a_group() {
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT));
+
+    let mut group = vocabulary_group("Parser", "class Parser", Language::Cpp);
+    group.group_type = GroupType::ClassWithMethods;
+    group.kind = EntityKind::Class;
+    group.members = vec![GroupedEntity {
+        id: EntityId(2),
+        kind: EntityKind::Method,
+        name: "parse_stts".to_string(),
+        signature: "int parse_stts(int)".to_string(),
+        ..Default::default()
+    }]
+    .into();
+    let source = "class Parser {\n    int parse_stts(int v) { return v; }\n};\n";
+    let processing_result = ProcessingResult {
+        groups: vec![group.clone()],
+        entity_meta: Default::default(),
+        behavior: Default::default(),
+        control_flow: Default::default(),
+        stats: Default::default(),
+    };
+
+    let registry = Arc::new(registry);
+    let converter =
+        cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
+            .with_plugin_registry(registry.clone());
+    let conversions = converter.convert_entity_groups(
+        &processing_result.groups,
+        "src/media.cpp",
+        None,
+        Some(&processing_result),
+        Some(source),
+    );
+
+    let chunker = cce_parser::ast_to_nl::chunker::GroupChunker::new(ChunkingConfig::default())
+        .with_plugin_registry(registry);
+    let output = chunker
+        .chunk_groups(&conversions, "src/media.cpp")
+        .expect("chunking");
+
+    assert!(!output.chunks.is_empty(), "the group must produce chunks");
+    for chunk in &output.chunks {
+        assert!(
+            chunk.text.contains("Glossary: stts = sync time-to-sample"),
+            "every chunk must carry the glossary line, got: {}",
+            chunk.text
         );
     }
 }
@@ -777,10 +864,13 @@ fn test_example_media_vocabulary_plugin_routes_declared_languages() {
                 .with_languages(vec!["c".to_string(), "cpp".to_string()]),
         );
         let group = vocabulary_group("parse", "int parse(int)", language);
-        let (bm25, _) = convert_with_registry_and_path(registry, &group, source, path);
+        let conversion = convert_header_with_registry_and_path(registry, &group, source, path);
         assert!(
-            bm25.contains("Glossary: stts ="),
-            "the example plugin must contribute for {language}, got: {bm25}"
+            conversion
+                .glossary
+                .as_deref()
+                .is_some_and(|text| text.contains("Glossary: stts =")),
+            "the example plugin must contribute for {language}"
         );
     }
 }

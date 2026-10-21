@@ -85,7 +85,7 @@ impl DirectExportGenerator {
         let embedding_text = conversions
             .header_conversion
             .as_ref()
-            .and_then(|c| c.embedding_text.clone());
+            .and_then(|c| Self::with_glossary(c.embedding_text.clone(), c.glossary.as_deref()));
 
         Ok(DirectExportDocument {
             name: header.name.clone(),
@@ -99,6 +99,23 @@ impl DirectExportGenerator {
             nested_items: Self::extract_nested(group),
             related_entities: Vec::new(),
         })
+    }
+
+    /// Append the domain glossary line to an entity description.
+    ///
+    /// The line lists the domain terms the entity uses together with their
+    /// human-readable expansions, so a reader of the exported document does
+    /// not have to look the abbreviations up.
+    fn with_glossary(text: Option<String>, glossary: Option<&str>) -> Option<String> {
+        let mut text = text?;
+        match glossary {
+            Some(glossary) if !glossary.is_empty() => {
+                text.push('\n');
+                text.push_str(glossary);
+            }
+            _ => {}
+        }
+        Some(text)
     }
 
     /// Extract member information from enriched conversions
@@ -118,7 +135,9 @@ impl DirectExportGenerator {
                     .member_conversions
                     .iter()
                     .find(|c| c.entity_id == member.id)
-                    .and_then(|c| c.embedding_text.clone());
+                    .and_then(|c| {
+                        Self::with_glossary(c.embedding_text.clone(), c.glossary.as_deref())
+                    });
 
                 MemberInfo {
                     name: member.name.clone(),

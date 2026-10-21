@@ -14,6 +14,7 @@
 use tracing::{debug, warn};
 
 use cce_config::modules::ChunkingConfig;
+use cce_text::Bm25TextCleaner;
 use cce_types::ChunkedResult;
 use cce_types::ParseError;
 use cce_types::TestInfo;
@@ -369,17 +370,22 @@ impl PipelineRouter {
         if let Some(parsed) =
             self.process_with_plugin_list(content, file_path, config, output_mode, &above)
         {
-            return Ok((parsed.0, parsed.1, false));
+            let (mut chunks, summary) = parsed;
+            append_glossary(&mut chunks, file_path, registry);
+            return Ok((chunks, summary, false));
         }
 
-        let (chunks, summary, degraded) =
+        let (mut chunks, summary, degraded) =
             self.process_with_degraded_flag(content, file_path, config, output_mode)?;
+        append_glossary(&mut chunks, file_path, registry);
 
         if chunks.is_empty() {
             if let Some(parsed) =
                 self.process_with_plugin_list(content, file_path, config, output_mode, &below)
             {
-                return Ok((parsed.0, parsed.1, degraded));
+                let (mut chunks, summary) = parsed;
+                append_glossary(&mut chunks, file_path, registry);
+                return Ok((chunks, summary, degraded));
             }
         }
         Ok((chunks, summary, degraded))
@@ -427,6 +433,38 @@ impl PipelineRouter {
 impl Default for PipelineRouter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Append the domain glossary line to every document chunk that uses a term.
+///
+/// The chunk is the unit that is actually retrieved, so matching the chunk's
+/// own text puts exactly the expansions the chunk needs in front of the
+/// retriever. Documents carry no language, so the contributing plugins are
+/// selected by file pattern only.
+fn append_glossary(
+    chunks: &mut [ChunkedResult],
+    file_path: &str,
+    registry: &cce_plugin::PluginRegistry,
+) {
+    let Some(table) = registry.vocabulary_table(file_path, None) else {
+        return;
+    };
+    if table.is_empty() {
+        return;
+    }
+    let bm25_cleaner = Bm25TextCleaner::new();
+    for chunk in chunks.iter_mut() {
+        let matched = table.matched_entries(&[chunk.text.as_str()]);
+        let Some(line) = cce_plugin::vocabulary::VocabularyTable::glossary_line(&matched) else {
+            continue;
+        };
+        let text = bm25_cleaner.clean(&line);
+        if text.is_empty() {
+            continue;
+        }
+        chunk.text.push('\n');
+        chunk.text.push_str(&text);
     }
 }
 
@@ -785,6 +823,92 @@ mod tests {
         assert!(
             chunks.iter().any(|c| c.text.contains("PLUGIN-A")),
             "the highest-priority non-declining plugin must win"
+        );
+    }
+
+    /// A `Vocabulary` plugin contributes terminology to document chunks.
+    ///
+    /// Documents carry no language, so the contributing plugins are selected
+    /// by file pattern only.
+    #[test]
+    fn test_vocabulary_appends_glossary_to_document_chunks() {
+        struct VocabularyPlugin {
+            meta: PluginMetadata,
+        }
+
+        impl CodePlugin for VocabularyPlugin {
+            fn metadata(&self) -> &PluginMetadata {
+                &self.meta
+            }
+
+            fn supports_vocabulary(&self) -> bool {
+                true
+            }
+
+            fn vocabulary(&self) -> Result<Vec<cce_types::plugin::VocabularyEntry>, PluginError> {
+                Ok(vec![cce_types::plugin::VocabularyEntry::new(
+                    "stts",
+                    "sync time-to-sample",
+                )])
+            }
+        }
+
+        let mut registry = PluginRegistry::new();
+        let mut bundle = PluginBundle::new(std::sync::Arc::new(VocabularyPlugin {
+            meta: PluginMetadata {
+                id: "media_vocabulary".to_string(),
+                name: "Media Vocabulary".to_string(),
+                version: "0.1.0".to_string(),
+                priority: 0,
+                capabilities: vec!["vocabulary".to_string()],
+                capability_priorities: std::collections::HashMap::new(),
+                capability_timeouts: std::collections::HashMap::new(),
+                description: None,
+            },
+        }));
+        bundle = bundle.with_file_patterns(vec!["*.md".to_string()]);
+        registry.register_bundle(bundle);
+
+        let config = ChunkingConfig::default();
+        let (chunks, _) = PipelineRouter::new()
+            .process_with_plugins(
+                "# Media\n\nThe stts box carries the sample table.\n",
+                "doc.md",
+                &config,
+                OutputMode::default(),
+                &registry,
+            )
+            .expect("the markdown pipeline must handle the file");
+
+        assert!(!chunks.is_empty());
+        assert!(
+            chunks
+                .iter()
+                .any(|c| c.text.contains("Glossary: stts = sync time-to-sample")),
+            "the document chunk must carry the terminology expansion, got: {:?}",
+            chunks.iter().map(|c| &c.text).collect::<Vec<_>>()
+        );
+    }
+
+    /// Without a `Vocabulary` plugin the document chunks stay untouched.
+    #[test]
+    fn test_vocabulary_absent_without_plugin() {
+        let registry = PluginRegistry::new();
+        let config = ChunkingConfig::default();
+        let (chunks, _) = PipelineRouter::new()
+            .process_with_plugins(
+                "# Media\n\nThe stts box carries the sample table.\n",
+                "doc.md",
+                &config,
+                OutputMode::default(),
+                &registry,
+            )
+            .expect("the markdown pipeline must handle the file");
+
+        assert!(!chunks.is_empty());
+        assert!(
+            chunks.iter().all(|c| !c.text.contains("Glossary:")),
+            "no plugin means no glossary line"
         );
     }
 }

@@ -26,12 +26,16 @@
 
 use crate::grouper::EntityGroup;
 use cce_plugin::CodePlugin;
+use cce_plugin::vocabulary::VocabularyTable;
+use cce_text::Bm25TextCleaner;
 use cce_types::ConversionResult;
 use cce_types::ParseError;
 use cce_types::Span;
 use cce_types::entity::EntityId;
 use cce_utils::token_estimation::TokenEstimator;
 use std::sync::Arc;
+
+use crate::ast_to_nl::embedding::text_cleaner::EmbeddingTextCleaner;
 
 /// Output of one chunking unit (a single text path, a group, or a whole file).
 ///
@@ -128,8 +132,13 @@ pub struct GroupChunker {
     estimator: TokenEstimator,
     splitter: TextSplitter,
     overlap_manager: OverlapManager,
-    /// Plugin registry for the `Chunk` override capability.
+    /// Plugin registry for the `Chunk` override capability and the
+    /// `Vocabulary` terminology table.
     plugin_registry: Option<std::sync::Arc<crate::plugin::PluginRegistry>>,
+    /// Cleaner for the keyword path of the glossary line.
+    bm25_cleaner: Bm25TextCleaner,
+    /// Cleaner for the semantic path of the glossary line.
+    embedding_cleaner: EmbeddingTextCleaner,
 }
 
 impl GroupChunker {
@@ -141,17 +150,59 @@ impl GroupChunker {
             splitter: TextSplitter::new(config.clone()),
             overlap_manager: OverlapManager::new(config.clone()),
             plugin_registry: None,
+            bm25_cleaner: Bm25TextCleaner::new(),
+            embedding_cleaner: EmbeddingTextCleaner::new(),
         }
     }
 
     /// Attach a plugin registry so `Chunk`-capability plugins can override
-    /// the built-in chunking.
+    /// the built-in chunking and `Vocabulary` plugins can contribute
+    /// terminology.
     pub fn with_plugin_registry(
         mut self,
         plugin_registry: std::sync::Arc<crate::plugin::PluginRegistry>,
     ) -> Self {
         self.plugin_registry = Some(plugin_registry);
         self
+    }
+
+    /// Append the domain glossary line to every chunk that uses a term.
+    ///
+    /// The chunk is the unit that is actually retrieved: a BM25 chunk is one
+    /// document and an embedding chunk is one vector. Matching the chunk's
+    /// own text therefore puts exactly the expansions the chunk needs in
+    /// front of the retriever, and no chunk carries the terms of its
+    /// neighbours.
+    ///
+    /// Each path cleans the line with its own cleaner: the keyword cleaner
+    /// strips quotes and configured filler words, while the embedding cleaner
+    /// keeps the expansion verbatim so the meaning survives.
+    fn append_glossary(&self, output: &mut ChunkOutput, file_path: &str, language: &str) {
+        let Some(registry) = self.plugin_registry.as_ref() else {
+            return;
+        };
+        let Some(table) = registry.vocabulary_table(file_path, Some(language)) else {
+            return;
+        };
+        if table.is_empty() {
+            return;
+        }
+        for chunk in &mut output.chunks {
+            let matched = table.matched_entries(&[chunk.text.as_str()]);
+            let Some(line) = VocabularyTable::glossary_line(&matched) else {
+                continue;
+            };
+            let text = match chunk.path {
+                ChunkPath::Bm25 => self.bm25_cleaner.clean(&line),
+                ChunkPath::Embedding => self.embedding_cleaner.clean(&line),
+            };
+            if text.is_empty() {
+                continue;
+            }
+            chunk.text.push('\n');
+            chunk.text.push_str(&text);
+            chunk.token_count = super::boundary::cost(&chunk.text, chunk.path);
+        }
     }
 
     /// Process entity group with independent dual-path splitting
@@ -246,6 +297,9 @@ impl GroupChunker {
 
         add_relations(&tracker, &mut all_chunks.chunks);
 
+        let language = group.language.to_string();
+        self.append_glossary(&mut all_chunks, file_path, &language);
+
         Ok(all_chunks)
     }
 
@@ -311,22 +365,28 @@ impl GroupChunker {
                 )
             });
 
-        if let Some((above, below)) = override_plugins {
+        let mut output = if let Some((above, below)) = override_plugins {
             if let Some(chunks) = self.try_plugin_chunk(group_conversions, file_path, &above) {
-                return Ok(ChunkOutput::with_chunks(chunks));
-            }
-
-            let builtin = self.chunk_groups_builtin(group_conversions, file_path)?;
-
-            if builtin.chunks.is_empty() {
-                if let Some(chunks) = self.try_plugin_chunk(group_conversions, file_path, &below) {
-                    return Ok(ChunkOutput::with_chunks(chunks));
+                ChunkOutput::with_chunks(chunks)
+            } else {
+                let builtin = self.chunk_groups_builtin(group_conversions, file_path)?;
+                if builtin.chunks.is_empty() {
+                    match self.try_plugin_chunk(group_conversions, file_path, &below) {
+                        Some(chunks) => ChunkOutput::with_chunks(chunks),
+                        None => builtin,
+                    }
+                } else {
+                    builtin
                 }
             }
-            return Ok(builtin);
-        }
+        } else {
+            self.chunk_groups_builtin(group_conversions, file_path)?
+        };
 
-        self.chunk_groups_builtin(group_conversions, file_path)
+        if let Some(language) = language {
+            self.append_glossary(&mut output, file_path, &language);
+        }
+        Ok(output)
     }
 
     /// Chunk groups with the built-in chunker (merge + overlap passes).

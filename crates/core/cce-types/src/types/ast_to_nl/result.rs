@@ -135,6 +135,18 @@ pub struct ConversionResult {
     /// "once cell inherent_impl. Methods: new, with_value, is_initialized, initialize."
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding_brief_header: Option<String>,
+
+    /// Domain glossary line of this entity.
+    ///
+    /// Rendered from the `Vocabulary` plugin capability: it lists the domain
+    /// terms the entity uses together with their human-readable expansions.
+    ///
+    /// The line is carried apart from the BM25 and embedding texts because
+    /// its landing point differs per output. The chunker appends a per-chunk
+    /// line to the indexed text, while the export path renders the
+    /// entity-level line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glossary: Option<String>,
 }
 
 impl Default for ConversionResult {
@@ -155,6 +167,7 @@ impl Default for ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
+            glossary: None,
         }
     }
 }
@@ -190,6 +203,7 @@ impl ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
+            glossary: None,
         }
     }
 
@@ -219,6 +233,7 @@ impl ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
+            glossary: None,
         }
     }
 
@@ -249,6 +264,7 @@ impl ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
+            glossary: None,
         }
     }
 
@@ -259,6 +275,17 @@ impl ConversionResult {
     ) -> Self {
         self.source_entity_ids = entity_ids;
         self
+    }
+
+    /// Set the domain glossary line of this entity.
+    pub fn with_glossary(mut self, glossary: Option<String>) -> Self {
+        self.glossary = glossary;
+        self
+    }
+
+    /// Set the domain glossary line of this entity.
+    pub fn set_glossary(&mut self, glossary: Option<String>) {
+        self.glossary = glossary;
     }
 
     /// Set source span

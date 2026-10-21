@@ -55,9 +55,9 @@ use crate::ast_to_nl::ConversionRequest;
 use crate::ast_to_nl::bm25::generator::Bm25Generator;
 use crate::ast_to_nl::embedding::generator::EmbeddingGenerator;
 use crate::ast_to_nl::embedding::text_cleaner::EmbeddingTextCleaner;
-use crate::ast_to_nl::vocabulary::{self, VocabularyTable};
 use crate::plugin::PluginRegistry;
 use cce_config::AstToNlConfig;
+use cce_plugin::vocabulary::VocabularyTable;
 use cce_text::Bm25TextCleaner;
 use cce_types::OutputMode;
 use cce_types::language::Language;
@@ -72,13 +72,6 @@ pub struct AstToNlConverter {
     bm25_generator: Bm25Generator,
     embedding_generator: EmbeddingGenerator,
     plugin_registry: Option<std::sync::Arc<PluginRegistry>>,
-    /// Merged glossary tables, keyed by the provider set that produced them.
-    ///
-    /// The plugin registry is attached once at construction, so the cache
-    /// lifetime matches the registry lifetime and the collected tables never
-    /// go stale.
-    vocabulary_cache:
-        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<VocabularyTable>>>,
     pub(crate) bm25_cleaner: Bm25TextCleaner,
     pub(crate) embedding_cleaner: EmbeddingTextCleaner,
 }
@@ -91,7 +84,6 @@ impl AstToNlConverter {
             bm25_generator: Bm25Generator::with_config(&config.bm25),
             embedding_generator: EmbeddingGenerator::with_config(&config.embedding),
             plugin_registry: None,
-            vocabulary_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             bm25_cleaner: Bm25TextCleaner::with_config(config.text_cleaner.clone()),
             embedding_cleaner: EmbeddingTextCleaner::new(),
         }
@@ -124,22 +116,7 @@ impl AstToNlConverter {
         language: Language,
     ) -> Option<std::sync::Arc<VocabularyTable>> {
         let registry = self.plugin_registry.as_ref()?;
-        let language_name = language.to_string();
-        let providers = vocabulary::providers(registry.as_ref(), file_path, &language_name);
-        if providers.is_empty() {
-            return None;
-        }
-        let key = vocabulary::provider_identity(&providers, registry.revision());
-        if let Ok(cache) = self.vocabulary_cache.lock() {
-            if let Some(table) = cache.get(&key) {
-                return Some(table.clone());
-            }
-        }
-        let table = std::sync::Arc::new(vocabulary::merge(&providers));
-        if let Ok(mut cache) = self.vocabulary_cache.lock() {
-            cache.insert(key, table.clone());
-        }
-        Some(table)
+        registry.vocabulary_table(file_path, Some(&language.to_string()))
     }
 }
 

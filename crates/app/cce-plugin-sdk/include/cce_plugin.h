@@ -420,11 +420,15 @@ char *cce_plugin_filter_file(void *ctx, const char *file_path, bool is_directory
  * against identifier tokens and their segments in the indexed text and
  * renders the matched expansions as a glossary line.
  *
- * The host keeps at most 256 entries per table and truncates an expansion
- * longer than 200 characters. An entry without a token or without an
- * expansion is dropped. The plugin must list "vocabulary" in its declared
- * `capabilities` to be routed to; the guard `cce_plugin_has_vocabulary` and
- * this entry point must both be exported.
+ * Matching ignores case: the index tokenizer lowercases every token, so a
+ * term written "stts" matches a source identifier written "STTS".
+ *
+ * The host keeps at most 256 entries per table and at most 1024 entries in
+ * the merged table, and truncates an expansion longer than 200 characters.
+ * An entry without a token or without an expansion is dropped. The plugin
+ * must list "vocabulary" in its declared `capabilities` to be routed to; the
+ * guard `cce_plugin_has_vocabulary` and this entry point must both be
+ * exported.
  */
 char *cce_plugin_vocabulary(void *ctx);
 

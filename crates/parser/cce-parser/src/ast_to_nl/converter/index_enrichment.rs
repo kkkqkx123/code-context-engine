@@ -4,14 +4,12 @@
 //! indexing. It keeps export-oriented presentation conversion unchanged.
 
 use crate::ast_to_nl::noise::NoiseProfile;
-use crate::ast_to_nl::vocabulary::VocabularyTable;
 use crate::grouper::ProcessingResult;
+use cce_plugin::vocabulary::VocabularyTable;
 use cce_text::Bm25TextCleaner;
 use cce_types::ast_to_nl::ConversionResult;
 use cce_types::language::Language;
 use cce_types::{BehaviorFactKind, EntityId};
-
-use super::super::embedding::text_cleaner::EmbeddingTextCleaner;
 
 /// Enriches entity conversion text with index-only sidecar data.
 ///
@@ -20,18 +18,11 @@ use super::super::embedding::text_cleaner::EmbeddingTextCleaner;
 #[derive(Clone, Copy)]
 pub(super) struct IndexTextEnricher<'a> {
     bm25_cleaner: &'a Bm25TextCleaner,
-    embedding_cleaner: &'a EmbeddingTextCleaner,
 }
 
 impl<'a> IndexTextEnricher<'a> {
-    pub fn new(
-        bm25_cleaner: &'a Bm25TextCleaner,
-        embedding_cleaner: &'a EmbeddingTextCleaner,
-    ) -> Self {
-        Self {
-            bm25_cleaner,
-            embedding_cleaner,
-        }
+    pub fn new(bm25_cleaner: &'a Bm25TextCleaner) -> Self {
+        Self { bm25_cleaner }
     }
 
     pub fn enrich_conversion(
@@ -63,20 +54,18 @@ impl<'a> IndexTextEnricher<'a> {
         }
 
         if let Some(vocabulary) = vocabulary {
-            self.append_glossary(conversion, processing_result, &extra_text, vocabulary);
+            self.compute_glossary(conversion, processing_result, &extra_text, vocabulary);
         }
     }
 
-    /// Append the glossary line for the domain terms used by the entity.
+    /// Compute the glossary line for the domain terms used by the entity.
     ///
-    /// The scan covers the entity name, its signature and the function body
-    /// text produced by the index enrichment stage. Every entity contributes
-    /// at most one line, listing the matched terms in table order.
-    ///
-    /// Each retrieval path cleans the line with its own cleaner: the keyword
-    /// cleaner strips quotes and configured filler words, while the embedding
-    /// cleaner keeps the expansion verbatim so the meaning survives.
-    fn append_glossary(
+    /// The scan covers the entity name, its signature, its documentation
+    /// comment and the function body text produced by the index enrichment
+    /// stage. The line is carried on the conversion result instead of being
+    /// appended to the texts: the indexed text receives a per-chunk line from
+    /// the chunker, while this entity-level line serves the export path.
+    fn compute_glossary(
         &self,
         conversion: &mut ConversionResult,
         processing_result: &ProcessingResult,
@@ -86,14 +75,16 @@ impl<'a> IndexTextEnricher<'a> {
         let signature = find_entity_signature(processing_result, conversion.entity_id)
             .map(str::to_string)
             .unwrap_or_default();
-        let matched =
-            vocabulary.matched_entries(&[conversion.name.as_str(), signature.as_str(), body_text]);
-        let Some(line) = VocabularyTable::glossary_line(&matched) else {
-            return;
-        };
-        let bm25_text = self.bm25_cleaner.clean(&line);
-        let embedding_text = self.embedding_cleaner.clean(&line);
-        conversion.append_index_context_raw_separate(&bm25_text, &embedding_text);
+        let doc_comment = find_entity_doc_comment(processing_result, conversion.entity_id)
+            .map(str::to_string)
+            .unwrap_or_default();
+        let matched = vocabulary.matched_entries(&[
+            conversion.name.as_str(),
+            signature.as_str(),
+            doc_comment.as_str(),
+            body_text,
+        ]);
+        conversion.set_glossary(VocabularyTable::glossary_line(&matched));
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by
@@ -414,42 +405,54 @@ fn find_entity_signature(
     processing_result: &ProcessingResult,
     entity_id: EntityId,
 ) -> Option<&str> {
+    find_entity(processing_result, entity_id).map(|entity| entity.signature.as_str())
+}
+
+/// The documentation comment of an entity, taken from the group it belongs to.
+fn find_entity_doc_comment(
+    processing_result: &ProcessingResult,
+    entity_id: EntityId,
+) -> Option<&str> {
+    find_entity(processing_result, entity_id).and_then(|entity| entity.doc_comment.as_deref())
+}
+
+/// The entity with the given id, taken from the group tree it belongs to.
+fn find_entity(
+    processing_result: &ProcessingResult,
+    entity_id: EntityId,
+) -> Option<&cce_types::entity::GroupedEntity> {
     for group in &processing_result.groups {
-        if let Some(header) = &group.header {
-            if header.id == entity_id {
-                return Some(header.signature.as_str());
-            }
+        if let Some(header) = &group.header
+            && header.id == entity_id
+        {
+            return Some(header);
         }
-        for member in &group.members {
-            if member.id == entity_id {
-                return Some(member.signature.as_str());
-            }
+        if let Some(member) = group.members.iter().find(|member| member.id == entity_id) {
+            return Some(member);
         }
-        if let Some(signature) = find_nested_signature(&group.nested_groups, entity_id) {
-            return Some(signature);
+        if let Some(entity) = find_nested_entity(&group.nested_groups, entity_id) {
+            return Some(entity);
         }
     }
     None
 }
 
-/// The signature of an entity inside a nested group tree.
-fn find_nested_signature(
+/// The entity with the given id inside a nested group tree.
+fn find_nested_entity(
     groups: &[cce_types::grouper::EntityGroup],
     entity_id: EntityId,
-) -> Option<&str> {
+) -> Option<&cce_types::entity::GroupedEntity> {
     for group in groups {
-        if let Some(header) = &group.header {
-            if header.id == entity_id {
-                return Some(header.signature.as_str());
-            }
+        if let Some(header) = &group.header
+            && header.id == entity_id
+        {
+            return Some(header);
         }
-        for member in &group.members {
-            if member.id == entity_id {
-                return Some(member.signature.as_str());
-            }
+        if let Some(member) = group.members.iter().find(|member| member.id == entity_id) {
+            return Some(member);
         }
-        if let Some(signature) = find_nested_signature(&group.nested_groups, entity_id) {
-            return Some(signature);
+        if let Some(entity) = find_nested_entity(&group.nested_groups, entity_id) {
+            return Some(entity);
         }
     }
     None
@@ -549,8 +552,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -581,8 +583,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -619,8 +620,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("code facts should still produce text");
@@ -656,8 +656,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -707,8 +706,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -729,8 +727,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher.build_extra_text(EntityId(1), &processing_result, "");
         assert!(result.is_none());
     }
@@ -800,8 +797,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");
@@ -837,8 +833,7 @@ mod tests {
         };
 
         let bm25_cleaner = Bm25TextCleaner::new();
-        let embedding_cleaner = EmbeddingTextCleaner::new();
-        let enricher = IndexTextEnricher::new(&bm25_cleaner, &embedding_cleaner);
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
         let result = enricher
             .build_extra_text(EntityId(1), &processing_result, source)
             .expect("should produce text");

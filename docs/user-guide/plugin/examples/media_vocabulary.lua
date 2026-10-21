@@ -17,6 +17,11 @@
 --       }
 --     ]
 --   }
+--
+-- Documents carry no language, so the plugin only reaches them when no
+-- `languages` list is declared (or when the list is left empty). Drop the
+-- `languages` entry to let the terminology apply to the markdown design
+-- notes of the same project as well.
 
 plugin = {
     id = "media-vocabulary",
@@ -27,7 +32,8 @@ plugin = {
 }
 
 -- Returns the terminology table. The host matches the tokens against whole
--- identifiers and renders the matched entries as a `Glossary:` line.
+-- identifiers and their segments, ignoring case, and renders the matched
+-- entries as a `Glossary:` line on every chunk that uses them.
 function plugin.vocabulary()
     return {
         { token = "ftyp", expansion = "file type box" },

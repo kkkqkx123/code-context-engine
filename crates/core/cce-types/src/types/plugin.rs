@@ -398,6 +398,15 @@ pub struct ResultFilterEntry {
 /// the entries beyond it are dropped at the plugin boundary.
 pub const MAX_VOCABULARY_ENTRIES: usize = 256;
 
+/// Maximum number of glossary entries the host keeps after merging the tables
+/// of all matching plugins.
+///
+/// The per-table limit bounds a single plugin; this limit bounds the merged
+/// table the host actually searches against. Several plugins may each stay
+/// within [`MAX_VOCABULARY_ENTRIES`] while their union exceeds this budget,
+/// so the two limits are separate constraints.
+pub const MAX_MERGED_VOCABULARY_ENTRIES: usize = 1024;
+
 /// Maximum length (in characters) of a single glossary expansion.
 ///
 /// Longer expansions are truncated at the plugin boundary.
@@ -446,6 +455,16 @@ impl VocabularyEntry {
             token: token.to_string(),
             expansion,
         })
+    }
+
+    /// The key this entry is matched and de-duplicated by.
+    ///
+    /// The host compares terminology case-insensitively, because the index
+    /// tokenizer lowercases every token: a term written `stts` must match a
+    /// source identifier written `STTS`. The key is therefore the lowercased
+    /// token, while the entry keeps the plugin's own spelling for rendering.
+    pub fn match_key(&self) -> String {
+        self.token.to_lowercase()
     }
 }
 

@@ -375,6 +375,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
+            glossary: None,
         }
     }
 
@@ -704,6 +705,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
+            glossary: None,
         }
     }
 
@@ -771,6 +773,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
+            glossary: None,
         };
 
         let group_conversions = GroupConversions {
@@ -821,19 +824,18 @@ mod tests {
             "uint8_t* ptr".to_string(),
         ));
         group.member_ids.push(EntityId(2));
-        group.entity_spans.insert(
-            EntityId(0),
-            Span::new(0, 400, 198, 0, 240, 0),
-        );
-        group.entity_spans.insert(
-            EntityId(2),
-            Span::new(100, 120, 200, 0, 200, 0),
-        );
+        group
+            .entity_spans
+            .insert(EntityId(0), Span::new(0, 400, 198, 0, 240, 0));
+        group
+            .entity_spans
+            .insert(EntityId(2), Span::new(100, 120, 200, 0, 200, 0));
         group.span = Span::new(0, 400, 198, 0, 240, 0);
 
-        let body = "mov_writer_move body line with ptr inside it and more words to overflow the budget \
+        let body =
+            "mov_writer_move body line with ptr inside it and more words to overflow the budget \
                     so the group text is split into several fragments that all carry function code"
-            .repeat(3);
+                .repeat(3);
         let header_conv = ConversionResult {
             entity_id: EntityId(0),
             kind: EntityKind::Function,
@@ -849,6 +851,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
+            glossary: None,
         };
 
         let group_conversions = GroupConversions {

@@ -10,6 +10,9 @@
 
 mod registry;
 
+/// Domain terminology table of the `Vocabulary` capability.
+pub mod vocabulary;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

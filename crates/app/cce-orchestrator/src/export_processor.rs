@@ -152,13 +152,19 @@ impl NlDocumentUpdateProcessor {
             Some(registry) => converter.with_plugin_registry(registry.clone()),
             None => converter,
         };
+        // The chunker carries the registry as well: it owns the `Chunk`
+        // override capability and the `Vocabulary` terminology table, so the
+        // exported chunks carry the same enrichment as the indexed ones.
+        let chunker = GroupChunker::new(config.chunking.clone());
+        let chunker = match plugin_registry.as_ref() {
+            Some(registry) => chunker.with_plugin_registry(registry.clone()),
+            None => chunker,
+        };
         Self {
             exporter: Arc::new(tokio::sync::RwLock::new(exporter)),
             converter: PresentationConverter::new(),
             ast_converter: Arc::new(tokio::sync::RwLock::new(Arc::new(converter))),
-            chunker: Arc::new(tokio::sync::RwLock::new(Arc::new(GroupChunker::new(
-                config.chunking.clone(),
-            )))),
+            chunker: Arc::new(tokio::sync::RwLock::new(Arc::new(chunker))),
             grouper: PreprocessingPipeline::with_config(NestProcessorConfig::default()),
             enabled: true,
             checkpoint_manager: None,

@@ -47,7 +47,12 @@ pub async fn rebuild_from_config(
             None => converter,
         };
         *ast_converter.write().await = Arc::new(converter);
-        *chunker.write().await = Arc::new(GroupChunker::new(config.chunking.clone()));
+        let new_chunker = GroupChunker::new(config.chunking.clone());
+        let new_chunker = match plugin_registry {
+            Some(registry) => new_chunker.with_plugin_registry(registry.clone()),
+            None => new_chunker,
+        };
+        *chunker.write().await = Arc::new(new_chunker);
         *ast_to_nl_config.write().await = config;
     }
 
