@@ -67,7 +67,12 @@ pub fn source_coverage_for_entity_ids(
             SourceSpanKind::GroupFallback
         };
         let mut span = group.span;
-        let mut ranges = vec![span];
+        // No entity could be attributed to the chunk, so it has no precise
+        // source range. The group span stays available as a navigation span,
+        // but it must not be handed out as an exact range: a chunk that
+        // carries a fraction of the group would otherwise be credited with
+        // every source range the group covers.
+        let mut ranges = Vec::new();
         expand_to_doc_comment_start(group, entity_ids, &mut span, &mut ranges);
         return (span, ranges, fallback_kind);
     }
@@ -253,6 +258,23 @@ mod tests {
             ranges[0].start_position.row, 0,
             "Expanded doc comment start must be written back into source ranges"
         );
+    }
+
+    #[test]
+    fn no_entity_leaves_no_precise_range() {
+        let header = make_header(1, None);
+        let group_span = make_span(100, 500, 41, 90);
+        let group = make_group(GroupType::MergedFragments, Some(header), group_span);
+
+        // A chunk that carries no identifiable entity owns no source range.
+        // Handing out the whole group span would let it claim every source
+        // range the group covers.
+        let (source_span, ranges, kind) =
+            source_coverage_for_entity_ids(&group, &[], SourceSpanKind::ExactEntities);
+
+        assert_eq!(source_span.start_byte, group_span.start_byte);
+        assert!(ranges.is_empty());
+        assert_eq!(kind, SourceSpanKind::GroupFallback);
     }
 
     #[test]

@@ -210,6 +210,13 @@ pub fn intersect_entities_in_range(
 }
 
 /// Compute NL-text-relative entity boundaries for a header + member sequence.
+///
+/// The block head is either an entity's own text — the group's header — or
+/// a synthetic summary of the members the block holds. A synthetic head
+/// belongs to the first member: the head states what the block holds, and
+/// the first member is what the block starts with. Attributing it to the
+/// group's header instead would make every continuation block look as if it
+/// carried the group's first fragment.
 pub fn compute_nl_entity_boundaries(
     header_text: &str,
     header_entity_id: Option<EntityId>,
@@ -248,10 +255,21 @@ pub fn compute_nl_entity_boundaries(
         let member_start = current_offset;
         let member_end = current_offset + member_text.len();
 
+        // A synthetic head is not an entity's own text, so it is folded into
+        // the first member's region instead of standing on its own.
+        let (region_start, region_end) = if header_entity_id.is_none()
+            && !header_text.is_empty()
+            && boundaries.is_empty()
+        {
+            (0, member_end)
+        } else {
+            (member_start, member_end)
+        };
+
         boundaries.push(NlEntityBoundary {
             entity_id: member.entity_id,
-            start_byte: member_start,
-            end_byte: member_end,
+            start_byte: region_start,
+            end_byte: region_end,
         });
 
         current_offset = member_end;
@@ -344,5 +362,45 @@ mod tests {
     fn test_compute_nl_entity_boundaries_no_header() {
         let boundaries = compute_nl_entity_boundaries("", None, &[], ChunkPath::Bm25);
         assert!(boundaries.is_empty());
+    }
+
+    #[test]
+    fn test_compute_nl_entity_boundaries_synthetic_head_belongs_to_first_member() {
+        use cce_types::entity::EntityId;
+
+        // A continuation block starts with a synthetic head that names the
+        // members the block holds. The head is no entity's own text, so it
+        // must not be attributed to the group header: the block would then
+        // look as if it carried the group's first fragment.
+        let head_text = "function first, second.";
+        let member1 = ConversionResult {
+            entity_id: EntityId(2),
+            bm25_text: Some("first description".to_string()),
+            embedding_text: Some("first emb".to_string()),
+            ..Default::default()
+        };
+        let member2 = ConversionResult {
+            entity_id: EntityId(3),
+            bm25_text: Some("second description".to_string()),
+            embedding_text: Some("second emb".to_string()),
+            ..Default::default()
+        };
+
+        let boundaries = compute_nl_entity_boundaries(
+            head_text,
+            None,
+            &[member1, member2],
+            ChunkPath::Bm25,
+        );
+
+        assert_eq!(boundaries.len(), 2);
+        assert_eq!(boundaries[0].entity_id, EntityId(2));
+        assert_eq!(boundaries[0].start_byte, 0);
+        assert_eq!(
+            boundaries[0].end_byte,
+            head_text.len() + 2 + "first description".len()
+        );
+        assert_eq!(boundaries[1].entity_id, EntityId(3));
+        assert_eq!(boundaries[1].start_byte, boundaries[0].end_byte + 2);
     }
 }

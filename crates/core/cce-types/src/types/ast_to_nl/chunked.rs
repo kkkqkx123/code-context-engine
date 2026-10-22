@@ -482,15 +482,19 @@ impl ChunkMetadata {
     /// `EnclosingEntity`, or `DocumentRange`). Returns an empty slice when
     /// source ranges are unavailable or unreliable (`Unavailable`, `GroupFallback`).
     pub fn source_ranges(&self) -> &[Span] {
-        if !self.source_ranges.is_empty() {
-            &self.source_ranges
-        } else {
-            // Only fall back to source_span when it's reliable
-            match self.source_span_kind {
-                SourceSpanKind::ExactEntities
-                | SourceSpanKind::EnclosingEntity
-                | SourceSpanKind::DocumentRange => std::slice::from_ref(&self.source_span),
-                SourceSpanKind::Unavailable | SourceSpanKind::GroupFallback => &[],
+        // The precision of the stored ranges never outranks the declared
+        // kind: a chunk whose ownership could not be recovered has no exact
+        // range, whatever it may carry in the range list.
+        match self.source_span_kind {
+            SourceSpanKind::Unavailable | SourceSpanKind::GroupFallback => &[],
+            SourceSpanKind::ExactEntities
+            | SourceSpanKind::EnclosingEntity
+            | SourceSpanKind::DocumentRange => {
+                if !self.source_ranges.is_empty() {
+                    &self.source_ranges
+                } else {
+                    std::slice::from_ref(&self.source_span)
+                }
             }
         }
     }
@@ -942,5 +946,25 @@ mod tests {
             None,
         );
         assert_eq!(doc.source_span_kind, SourceSpanKind::DocumentRange);
+    }
+
+    #[test]
+    fn test_source_ranges_follow_the_declared_precision() {
+        let span = Span::new(0, 100, 0, 0, 9, 0);
+        let mut meta = ChunkMetadata::for_code(
+            "a.rs".to_string(),
+            span,
+            Language::Rust,
+            CodeSpecificMetadata::default(),
+        );
+
+        // A chunk whose ownership could not be recovered has no exact
+        // range, whatever it may carry in the range list.
+        meta.source_ranges = vec![span];
+        meta.source_span_kind = SourceSpanKind::GroupFallback;
+        assert!(meta.source_ranges().is_empty());
+
+        meta.source_span_kind = SourceSpanKind::ExactEntities;
+        assert_eq!(meta.source_ranges().len(), 1);
     }
 }

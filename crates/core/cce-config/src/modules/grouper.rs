@@ -70,15 +70,12 @@ pub struct NestProcessorConfig {
     #[serde(default = "default_true")]
     pub enable_small_fragment_merging: bool,
 
-    /// Minimum tokens for small fragment merging
-    #[serde(default = "default_small_fragment_min_tokens")]
-    pub small_fragment_min_tokens: usize,
-
-    /// Minimum BM25 words for small fragment merging
-    #[serde(default = "default_small_fragment_min_words")]
-    pub small_fragment_min_words: usize,
-
     /// Maximum span lines for small fragment merging
+    ///
+    /// The budget bounds a merged group as a whole: it is measured from the
+    /// group's first fragment, so a chain of fragments can never span more
+    /// lines than this, and a fragment that is larger than the budget stays
+    /// on its own.
     #[serde(default = "default_small_fragment_max_span_lines")]
     pub small_fragment_max_span_lines: usize,
 
@@ -102,14 +99,6 @@ fn default_max_nesting_depth() -> usize {
 
 fn default_min_nested_size() -> usize {
     5
-}
-
-fn default_small_fragment_min_tokens() -> usize {
-    128
-}
-
-fn default_small_fragment_min_words() -> usize {
-    80
 }
 
 fn default_small_fragment_max_span_lines() -> usize {
@@ -139,8 +128,6 @@ impl Default for NestProcessorConfig {
             enable_plugin_pattern_detection: true,
             enable_function_member_grouping: true,
             enable_small_fragment_merging: true,
-            small_fragment_min_tokens: 128,
-            small_fragment_min_words: 80,
             small_fragment_max_span_lines: 50,
             enable_group_hierarchy: true,
             near_merge_proximity_bytes: 300,

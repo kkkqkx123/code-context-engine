@@ -14,59 +14,39 @@ use cce_types::entity::{EntityId, EntityKind, GroupedEntity};
 ///
 /// # Merge Strategy
 ///
-/// 1. Collect all standalone groups sorted by source position
+/// 1. Collect all groups eligible for merging, sorted by source position
 /// 2. Greedily merge fragments within proximity threshold until the span
 ///    budget is met
 /// 3. Create MergedFragments groups from merged fragments
 /// 4. Replace original standalone groups with merged groups
 ///
-/// # Fragment classes
+/// # Eligibility and budget
 ///
-/// A fragment is either *small* (below the size thresholds) or
-/// *substantial* (above them). Both join a group with their neighbours, but
-/// they differ in what they may do there:
+/// A group may join a merged group when its own span fits within the line
+/// budget a merged group may cover, and when it belongs to the same family
+/// as its neighbours: same file scope, same test status, same entity kind.
+/// A function that is larger than the budget stays on its own, and a
+/// function that merely exceeds a size threshold still groups with the
+/// siblings it belongs with.
 ///
-/// * A small fragment is a leftover. It has no subject of its own and must
-///   not become a chunk on its own.
-/// * A substantial fragment is a complete unit that happens to sit next to
-///   other units. It keeps its identity inside the group, and it anchors
-///   the group's span budget: the budget keeps a chain of small fragments
-///   from swallowing a whole file, while a substantial fragment is still
-///   allowed to keep the neighbours it belongs with.
+/// The budget bounds the whole batch, not the individual fragment: it is
+/// measured from the batch's first fragment, so a chain of fragments can
+/// never swallow a file.
 pub struct SmallFragmentMerger {
-    min_tokens: usize,
-    min_words: usize,
     max_span_lines: usize,
     proximity_bytes: usize,
 }
 
-/// Size class of a standalone fragment.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FragmentSize {
-    /// Below the size thresholds: too small to be a chunk on its own.
-    Small,
-    /// Above the size thresholds: a complete unit that keeps its identity
-    /// inside a group.
-    Substantial,
-}
-
 impl Default for SmallFragmentMerger {
     fn default() -> Self {
-        Self::new(128, 80, 50, 0)
+        Self::new(50, 0)
     }
 }
 
 impl SmallFragmentMerger {
     /// Create a new SmallFragmentMerger
-    pub fn new(
-        min_tokens: usize,
-        min_words: usize,
-        max_span_lines: usize,
-        proximity_bytes: usize,
-    ) -> Self {
+    pub fn new(max_span_lines: usize, proximity_bytes: usize) -> Self {
         Self {
-            min_tokens,
-            min_words,
             max_span_lines,
             proximity_bytes,
         }
@@ -75,8 +55,6 @@ impl SmallFragmentMerger {
     /// Create with config from NestProcessorConfig
     pub fn with_config(config: &cce_config::NestProcessorConfig) -> Self {
         Self::new(
-            config.small_fragment_min_tokens,
-            config.small_fragment_min_words,
             config.small_fragment_max_span_lines,
             config.near_merge_proximity_bytes,
         )
@@ -103,16 +81,15 @@ impl SmallFragmentMerger {
             return 0;
         }
 
-        // Determine the size class of every standalone group. A group whose
+        // Determine which groups may join a merged group. A group whose
         // span exceeds the line budget is too large to belong to a group at
-        // all; the rest join their neighbours, small ones as leftovers and
-        // substantial ones as units that keep their identity.
-        let mut candidates: Vec<(usize, &EntityGroup, FragmentSize)> = standalone_indices
+        // all; the rest join their neighbours.
+        let mut candidates: Vec<(usize, &EntityGroup)> = standalone_indices
             .iter()
             .filter_map(|&idx| {
                 let group = &groups[idx];
-                self.fragment_size(group, file_source)
-                    .map(|size| (idx, group, size))
+                self.is_merge_eligible(group, file_source)
+                    .then_some((idx, group))
             })
             .collect();
 
@@ -121,7 +98,7 @@ impl SmallFragmentMerger {
         }
 
         // Sort by source position
-        candidates.sort_by_key(|(_, g, _)| g.span.start_byte);
+        candidates.sort_by_key(|(_, g)| g.span.start_byte);
 
         // Greedy merge adjacent fragments
         let merged_groups = self.merge_adjacent_fragments(&candidates, groups);
@@ -132,7 +109,7 @@ impl SmallFragmentMerger {
 
         // Build set of indices to remove
         let indices_to_remove: std::collections::HashSet<usize> =
-            candidates.iter().map(|(idx, _, _)| *idx).collect();
+            candidates.iter().map(|(idx, _)| *idx).collect();
 
         // Replace the first standalone group with the first merged group, add rest
         let merge_count = merged_groups.len();
@@ -155,37 +132,14 @@ impl SmallFragmentMerger {
         merge_count
     }
 
-    /// Size class of a standalone group, or `None` when the group is too
-    /// large to belong to a group at all.
+    /// Whether a group may join a merged group.
     ///
     /// The line budget decides membership: a group that spans more lines
-    /// than a merged group may cover stays on its own. The size thresholds
-    /// decide only what the fragment may do inside the group.
-    fn fragment_size(&self, group: &EntityGroup, file_source: &str) -> Option<FragmentSize> {
+    /// than a merged group may cover stays on its own. A group without a
+    /// body of its own (an import, a zero-variant enum) carries no source
+    /// text but still belongs to the neighbourhood it sits in.
+    fn is_merge_eligible(&self, group: &EntityGroup, file_source: &str) -> bool {
         let span = &group.span;
-
-        // Import-like entities are always considered small and should be merged
-        // into adjacent code blocks — standalone imports/exports have no semantic
-        // retrieval value (symbol search should use BM25/symbol index).
-        if let Some(ref header) = group.header {
-            if matches!(
-                header.kind,
-                EntityKind::Import | EntityKind::Require | EntityKind::Include | EntityKind::Export
-            ) {
-                return Some(FragmentSize::Small);
-            }
-        }
-
-        // Zero-variant void enums (e.g., `enum Void {}`) have empty spans
-        // and no doc comment — treat them as always small.
-        if let Some(ref header) = group.header {
-            if matches!(header.kind, EntityKind::Enum)
-                && header.doc_comment.is_none()
-                && group.members.is_empty()
-            {
-                return Some(FragmentSize::Small);
-            }
-        }
 
         // Check line count first (uses span, no need for combined_source)
         let line_count = if span.end_position.row > span.start_position.row {
@@ -194,7 +148,11 @@ impl SmallFragmentMerger {
             1
         };
         if line_count > self.max_span_lines {
-            return None;
+            return false;
+        }
+
+        if Self::is_bodyless(group) {
+            return true;
         }
 
         // Extract source text from file_source using byte offsets
@@ -203,26 +161,32 @@ impl SmallFragmentMerger {
         } else if let Some(ref s) = group.combined_source {
             s.as_ref()
         } else {
-            return None;
+            return false;
         };
 
-        if source.is_empty() {
-            return None;
-        }
+        !source.is_empty()
+    }
 
-        // Estimate tokens (rough: ~4 chars per token)
-        let estimated_tokens = source.len() / 4;
-        if estimated_tokens > self.min_tokens {
-            return Some(FragmentSize::Substantial);
+    /// Whether a group has no body of its own.
+    ///
+    /// Import-like entities are always merged into adjacent code blocks:
+    /// standalone imports/exports have no semantic retrieval value (symbol
+    /// search should use BM25/symbol index). A zero-variant void enum (e.g.
+    /// `enum Void {}`) has an empty span and no doc comment, so it carries
+    /// no source text either.
+    fn is_bodyless(group: &EntityGroup) -> bool {
+        let Some(header) = group.header.as_ref() else {
+            return false;
+        };
+        if matches!(
+            header.kind,
+            EntityKind::Import | EntityKind::Require | EntityKind::Include | EntityKind::Export
+        ) {
+            return true;
         }
-
-        // Estimate words
-        let word_count = source.split_whitespace().filter(|w| !w.is_empty()).count();
-        if word_count > self.min_words {
-            return Some(FragmentSize::Substantial);
-        }
-
-        Some(FragmentSize::Small)
+        matches!(header.kind, EntityKind::Enum)
+            && header.doc_comment.is_none()
+            && group.members.is_empty()
     }
 
     /// Greedily merge adjacent fragments within proximity threshold
@@ -231,19 +195,19 @@ impl SmallFragmentMerger {
     /// unless a non-standalone group exists in the gap between them.
     fn merge_adjacent_fragments(
         &self,
-        candidates: &[(usize, &EntityGroup, FragmentSize)],
+        candidates: &[(usize, &EntityGroup)],
         all_groups: &[EntityGroup],
     ) -> Vec<EntityGroup> {
         let mut merged_groups = Vec::new();
-        let mut current_batch: Vec<(&EntityGroup, FragmentSize)> = Vec::new();
+        let mut current_batch: Vec<&EntityGroup> = Vec::new();
         let mut prev_end_byte: Option<usize> = None;
 
-        for (_, group, size) in candidates {
+        for (_, group) in candidates {
             // Import-like fragments must never merge with non-import fragments.
             // Import-only groups are dropped before chunking (they have no
             // retrieval value), so absorbing a non-import entity into an
             // import batch would silently remove its content from retrieval.
-            if let Some((prev, _)) = current_batch.last() {
+            if let Some(prev) = current_batch.last() {
                 if Self::is_import_like_group(prev) != Self::is_import_like_group(group)
                     && !current_batch.is_empty()
                 {
@@ -261,7 +225,7 @@ impl SmallFragmentMerger {
             // kind keeps the unit coherent. Import-like fragments are
             // exempt: they are dropped as a whole, so the kinds they mix
             // never reach a retriever.
-            if let Some((prev, _)) = current_batch.last() {
+            if let Some(prev) = current_batch.last() {
                 let both_import_like =
                     Self::is_import_like_group(prev) && Self::is_import_like_group(group);
                 if !both_import_like
@@ -310,7 +274,7 @@ impl SmallFragmentMerger {
                 // be merged even when adjacent. E.g., a top-level function and imports
                 // nested inside a test module may be adjacent in source but belong to
                 // different logical containers.
-                if let Some((prev, _)) = current_batch.last() {
+                if let Some(prev) = current_batch.last() {
                     if prev.parent_group_id != group.parent_group_id && !current_batch.is_empty() {
                         if let Some(merged) = self.flush_batch(&mut current_batch)
                         {
@@ -323,7 +287,7 @@ impl SmallFragmentMerger {
                 // into a production fragment group (and vice versa). Merging
                 // would mark the production chunk as `Test` and cause the
                 // no-test evaluation variant to drop production content.
-                if let Some((prev, _)) = current_batch.last() {
+                if let Some(prev) = current_batch.last() {
                     if prev.test_info.is_test() != group.test_info.is_test()
                         && !current_batch.is_empty()
                     {
@@ -339,23 +303,17 @@ impl SmallFragmentMerger {
                 // making the first chunk claim the entire file. Flush when the
                 // batch would exceed the configured span budget.
                 //
-                // The budget is measured from the batch's anchor: its first
-                // fragment, or the last substantial fragment that joined it.
-                // A substantial fragment anchors the budget because it is a
-                // complete unit in its own right: it may keep the neighbours
-                // it belongs with, while a chain of leftovers still cannot
-                // swallow a file.
-                if !current_batch.is_empty() {
-                    let start_row = if *size == FragmentSize::Substantial {
-                        group.span.start_position.row
-                    } else {
-                        Self::batch_anchor_row(&current_batch)
-                            .unwrap_or(group.span.start_position.row)
-                    };
+                // The budget is measured from the batch's first fragment, so
+                // the batch as a whole stays within the span a merged group
+                // may cover. Measuring it from the fragment that happens to
+                // join next would let every fragment restart the window and
+                // the chain would swallow the file.
+                if let Some(first) = current_batch.first() {
+                    let start_row = first.span.start_position.row;
                     let end_row = current_batch
                         .last()
-                        .map(|(g, _)| g.span.end_position.row)
-                        .unwrap_or(group.span.start_position.row)
+                        .map(|g| g.span.end_position.row)
+                        .unwrap_or(start_row)
                         .max(group.span.end_position.row);
                     if end_row.saturating_sub(start_row) > self.max_span_lines {
                         if let Some(merged) = self.flush_batch(&mut current_batch) {
@@ -365,15 +323,13 @@ impl SmallFragmentMerger {
                 }
             }
 
-            current_batch.push((group, *size));
+            current_batch.push(group);
             prev_end_byte = Some(group.span.end_byte);
         }
 
         // Flush last batch
         if !current_batch.is_empty() {
-            if let Some(merged) = self.create_merged_group(
-                current_batch.into_iter().map(|(g, _)| g).collect(),
-            ) {
+            if let Some(merged) = self.create_merged_group(current_batch) {
                 merged_groups.push(merged);
             }
         }
@@ -382,28 +338,10 @@ impl SmallFragmentMerger {
     }
 
     /// Turn the current batch into a merged group and empty the batch.
-    fn flush_batch(
-        &self,
-        batch: &mut Vec<(&EntityGroup, FragmentSize)>,
-    ) -> Option<EntityGroup> {
-        let merged = self.create_merged_group(batch.iter().map(|(g, _)| *g).collect());
+    fn flush_batch(&self, batch: &mut Vec<&EntityGroup>) -> Option<EntityGroup> {
+        let merged = self.create_merged_group(batch.clone());
         batch.clear();
         merged
-    }
-
-    /// Row the span budget of a batch is measured from.
-    ///
-    /// A substantial fragment anchors the budget: it is a complete unit
-    /// that keeps its identity inside the group, so the fragments that
-    /// follow it are measured against it rather than against the batch's
-    /// first leftover.
-    fn batch_anchor_row(batch: &[(&EntityGroup, FragmentSize)]) -> Option<usize> {
-        let anchor = batch
-            .iter()
-            .rev()
-            .find(|(_, size)| *size == FragmentSize::Substantial)
-            .or_else(|| batch.first())?;
-        Some(anchor.0.span.start_position.row)
     }
 
     /// Whether a group may join a merged group.
@@ -568,12 +506,43 @@ mod tests {
     }
 
     #[test]
+    fn test_merged_span_stays_within_the_budget() {
+        // The budget bounds the batch, not the individual fragment: a chain
+        // of complete functions must not grow into a group that spans more
+        // lines than a merged group may cover.
+        let merger = SmallFragmentMerger::new(50, 0);
+        let mut groups = vec![
+            group(EntityKind::Function, "first", 0, 20),
+            group(EntityKind::Function, "second", 20, 40),
+            group(EntityKind::Function, "third", 40, 60),
+            group(EntityKind::Function, "fourth", 60, 80),
+            group(EntityKind::Function, "fifth", 80, 100),
+        ];
+
+        merger.process(&mut groups, &padded_source("fn a() {} fn b() {}"));
+
+        assert!(
+            groups.len() > 1,
+            "a chain of functions must be split into several groups, got {}",
+            groups.len()
+        );
+        for merged in &groups {
+            let span_lines = merged.span.end_position.row - merged.span.start_position.row;
+            assert!(
+                span_lines <= 50,
+                "merged group {} spans {span_lines} lines, over the budget",
+                merged.name
+            );
+        }
+    }
+
+    #[test]
     fn test_import_like_fragments_never_merge_with_non_import() {
         // Imports are separated at the entity level. The merger must
         // never absorb a real entity into an import batch — import-only groups
         // are dropped before chunking, so an absorbed entity would silently
         // disappear from retrieval.
-        let merger = SmallFragmentMerger::new(128, 80, 50, 0);
+        let merger = SmallFragmentMerger::new(50, 0);
         let mut groups = vec![
             group(EntityKind::Import, "use std::fmt;", 0, 1),
             group(EntityKind::Function, "helper", 1, 3),
@@ -613,7 +582,7 @@ mod tests {
         // Adjacent imports may merge into one import-only group.
         // The pipeline drops that group as a whole — no retrieval content is
         // lost because imports carry no retrieval value.
-        let merger = SmallFragmentMerger::new(128, 80, 50, 0);
+        let merger = SmallFragmentMerger::new(50, 0);
         let mut groups = vec![
             group(EntityKind::Import, "use std::fmt;", 0, 1),
             group(EntityKind::Export, "pub use crate::x;", 1, 2),
@@ -643,7 +612,7 @@ mod tests {
     fn test_non_import_fragments_still_merge_with_each_other() {
         // Regression guard: the import boundary rule must not disable the
         // regular small-fragment merging between real entities.
-        let merger = SmallFragmentMerger::new(128, 80, 50, 0);
+        let merger = SmallFragmentMerger::new(50, 0);
         let mut groups = vec![
             group(EntityKind::Function, "helper_a", 0, 1),
             group(EntityKind::Function, "helper_b", 1, 2),
@@ -666,7 +635,7 @@ mod tests {
         // A merged group is one retrieval unit under one header. A function
         // prototype that absorbs a run of enum constants would be titled
         // after the prototype while its text lists unrelated constants.
-        let merger = SmallFragmentMerger::new(128, 80, 50, 0);
+        let merger = SmallFragmentMerger::new(50, 0);
         let mut groups = vec![
             group(EntityKind::Function, "prototype", 0, 1),
             group(EntityKind::EnumVariant, "TAG_A", 1, 2),

@@ -51,9 +51,15 @@ pub struct UnsplitContext<'a> {
 /// differently from member entities: it is excluded from content attribution
 /// (it is context), and it joins the source coverage of the first segment of
 /// the first member group.
-pub struct SegmentHeaderContext {
+pub struct SegmentHeaderContext<'a> {
     pub header_entity_id: Option<EntityId>,
     pub include_header_in_first_coverage: bool,
+    /// Topic lines of the entities this batch covers, keyed by entity id.
+    ///
+    /// A continuation block repeats the topic of the entity it continues,
+    /// so that a block holding the tail of an entity still states what the
+    /// entity is about.
+    pub topic_lines: &'a [(EntityId, Vec<String>)],
 }
 
 pub struct ChunkBuilder;
@@ -61,6 +67,36 @@ pub struct ChunkBuilder;
 /// Identifier byte test shared by name-boundary matching in this module.
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
+}
+
+/// Prefixes of the text lines that state an entity's subject.
+const TOPIC_LINE_PREFIXES: [&str; 3] = ["branches on: ", "control flow: ", "calls: "];
+
+/// Maximum number of topic lines an entity contributes to a block head.
+const MAX_TOPIC_LINES: usize = 3;
+
+/// Whether a line states an entity's subject.
+///
+/// The three forms are the branch discriminants an entity dispatches on, the
+/// shape of its control flow, and the functions it calls. All three name
+/// what the entity is about; none of them describes the surrounding code.
+fn is_topic_line(line: &str) -> bool {
+    let line = line.trim_start();
+    TOPIC_LINE_PREFIXES.iter().any(|prefix| {
+        line.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    })
+}
+
+/// The topic lines of a converted entity.
+///
+/// A block that carries only the tail of an entity keeps none of them, so a
+/// continuation block repeats them to stay retrievable on its own.
+pub(crate) fn topic_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter(|line| is_topic_line(line))
+        .take(MAX_TOPIC_LINES)
+        .collect()
 }
 
 /// Whether an entity carries its own docstring, making it semantically
@@ -151,6 +187,7 @@ impl ChunkBuilder {
         entity_ids: &[EntityId],
         segment_text: &str,
         parent: Option<&str>,
+        topic_lines: &[(EntityId, Vec<String>)],
     ) -> Option<String> {
         let first_line = segment_text.lines().next().unwrap_or_default();
         let owner = Self::resolve_owner(group, parent);
@@ -174,6 +211,16 @@ impl ChunkBuilder {
                 continue;
             }
             parts.push(Self::signature_identity(group, id, &name, &qualified, kind));
+            // The entity's own topic travels with the continuation: a block
+            // that holds the tail of an entity says nothing about what the
+            // entity is about without it.
+            if let Some(lines) = topic_lines
+                .iter()
+                .find(|(topic_id, _)| *topic_id == id)
+                .map(|(_, lines)| lines)
+            {
+                parts.push(lines.join("\n"));
+            }
         }
         if parts.is_empty() {
             return None;
@@ -402,15 +449,12 @@ impl ChunkBuilder {
 
     /// Whether a chunk states a topic of its own.
     ///
-    /// A chunk states a topic when it names what it calls or what it
-    /// branches on. Such a chunk is retrievable on its own. A chunk that
-    /// states neither says nothing about its subject, and how long it is
-    /// does not change that: a dense body of code is not a topic.
+    /// A chunk states a topic when it names what it calls or branches on.
+    /// Such a chunk is retrievable on its own. A chunk that states neither
+    /// says nothing about its subject, and how long it is does not change
+    /// that: a dense body of code is not a topic.
     pub(crate) fn states_own_topic(text: &str) -> bool {
-        text.lines().any(|line| {
-            let line = line.trim_start();
-            line.starts_with("calls: ") || line.starts_with("branches on: ")
-        })
+        text.lines().any(is_topic_line)
     }
 
     fn prepend_identity_if_needed(text: &mut String, name: &str, kind: EntityKind) {
@@ -556,7 +600,7 @@ impl ChunkBuilder {
         file_path: &str,
         keywords: &[String],
         nl_boundaries: &[NlEntityBoundary],
-        header_ctx: Option<SegmentHeaderContext>,
+        header_ctx: Option<SegmentHeaderContext<'_>>,
     ) -> Vec<ChunkedResult> {
         let total = segments.len();
         let is_fragment = total > 1;
@@ -582,23 +626,28 @@ impl ChunkBuilder {
                     Self::prepend_identity_if_needed(&mut segment_text, &identity, group.kind);
                 }
                 // Strategies without entity boundaries (paragraphs, tokens,
-                // lines) produce segments with no entity ids. Attribute the
-                // entities whose NL ranges intersect this segment's byte
-                // range; only fall back to the whole group when no entity
-                // matches (extreme single-entity or boundary-less cases).
-                let raw_entity_ids: Vec<_> = if segment.boundary.entity_ids.is_empty() {
-                    let intersected = super::boundary::intersect_entities_in_range(
+                // lines) produce segments with no entity ids. The entities
+                // whose NL ranges intersect this segment's byte range are
+                // the ones the segment actually carries.
+                let covered_entity_ids: Vec<_> = if segment.boundary.entity_ids.is_empty() {
+                    super::boundary::intersect_entities_in_range(
                         nl_boundaries,
                         segment.boundary.start_byte,
                         segment.boundary.end_byte,
-                    );
-                    if intersected.is_empty() {
-                        group.all_entity_ids()
-                    } else {
-                        intersected
-                    }
+                    )
                 } else {
                     segment.boundary.entity_ids.clone()
+                };
+                // Attribution falls back to the whole group when the segment
+                // carries no entity at all (extreme single-entity or
+                // boundary-less cases): the chunk still needs a subject. The
+                // fallback is an attribution, never a source range: a chunk
+                // that carries a fraction of the group must not claim the
+                // group's source ranges.
+                let raw_entity_ids: Vec<_> = if covered_entity_ids.is_empty() {
+                    group.all_entity_ids()
+                } else {
+                    covered_entity_ids.clone()
                 };
                 // The header entity is context, not content: exclude it from
                 // content attribution on the header path.
@@ -610,6 +659,17 @@ impl ChunkBuilder {
                         .collect()
                 } else {
                     raw_entity_ids
+                };
+                // The source coverage names the entities the segment carries,
+                // not the ones it is attributed to.
+                let covered_content_ids: Vec<_> = if let Some(ctx) = &header_ctx {
+                    covered_entity_ids
+                        .iter()
+                        .copied()
+                        .filter(|id| Some(*id) != ctx.header_entity_id)
+                        .collect()
+                } else {
+                    covered_entity_ids.clone()
                 };
                 if is_continuation {
                     // Continuation segments repeat the identity of the
@@ -625,9 +685,16 @@ impl ChunkBuilder {
                     } else {
                         &content_entity_ids
                     };
-                    if let Some(prefix) =
-                        Self::continuation_identity(group, ids, &segment_text, parent.as_deref())
-                    {
+                    if let Some(prefix) = Self::continuation_identity(
+                        group,
+                        ids,
+                        &segment_text,
+                        parent.as_deref(),
+                        header_ctx
+                            .as_ref()
+                            .map(|ctx| ctx.topic_lines)
+                            .unwrap_or_default(),
+                    ) {
                         segment_text = prefix + &segment_text;
                     } else {
                         Self::prepend_identity_if_needed(
@@ -650,15 +717,13 @@ impl ChunkBuilder {
                     if index == 0 && ctx.include_header_in_first_coverage {
                         ctx.header_entity_id
                             .into_iter()
-                            .chain(content_entity_ids.iter().copied())
+                            .chain(covered_content_ids.iter().copied())
                             .collect()
-                    } else if content_entity_ids.is_empty() {
-                        group.all_entity_ids()
                     } else {
-                        content_entity_ids.clone()
+                        covered_content_ids.clone()
                     }
                 } else {
-                    content_entity_ids.clone()
+                    covered_content_ids.clone()
                 };
                 let (source_span, source_ranges, source_span_kind) =
                     source_coverage::source_coverage_for_entity_ids(
@@ -1060,6 +1125,7 @@ mod tests {
             &[EntityId(2)],
             "body fragment without the signature line",
             Some("Processor"),
+            &[],
         )
         .expect("covered method repeats its identity");
         assert!(
@@ -1082,6 +1148,7 @@ mod tests {
             &[EntityId(2)],
             "body fragment",
             Some("Processor"),
+            &[],
         )
         .expect("identity without signature falls back to kind plus name");
         assert!(
@@ -1104,6 +1171,7 @@ mod tests {
             &[EntityId(2)],
             "loop body fragment",
             Some("mpeg-pat"),
+            &[],
         )
         .expect("pointer-return function repeats its signature");
         assert!(
@@ -1151,5 +1219,35 @@ mod tests {
             "U.java",
         );
         assert_eq!(title, "Processor.helper");
+    }
+
+    #[test]
+    fn test_topic_line_recognizes_every_shape() {
+        // The three shapes of a topic statement are equally a statement of
+        // what the entity is about.
+        assert!(ChunkBuilder::states_own_topic(
+            "function handler.\nbranches on: rtmp->connect, rtmp->play."
+        ));
+        assert!(ChunkBuilder::states_own_topic(
+            "function handler.\ncontrol flow: 2 branches."
+        ));
+        assert!(ChunkBuilder::states_own_topic(
+            "function handler.\ncalls: assert, memset."
+        ));
+        assert!(ChunkBuilder::states_own_topic(
+            "function handler.\nCalls: assert, memset."
+        ));
+        assert!(!ChunkBuilder::states_own_topic(
+            "function handler.\nint depth = 0;\nreturn depth;"
+        ));
+    }
+
+    #[test]
+    fn test_topic_lines_are_collected_for_continuation() {
+        let text = "function handler.\nbranches on: rtmp->connect.\ncalls: assert.\nint depth = 0;";
+        let lines = topic_lines(text);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "branches on: rtmp->connect.");
+        assert_eq!(lines[1], "calls: assert.");
     }
 }
