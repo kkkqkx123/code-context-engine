@@ -331,9 +331,7 @@ impl RegularGroupTemplate {
     /// identifiers that match a query verbatim. The metadata key is filled by
     /// the grouper's call-path injection stage, which knows the resolved
     /// call targets of every entity.
-    fn call_targets_line(
-        entity: Option<&cce_types::entity::GroupedEntity>,
-    ) -> Option<String> {
+    fn call_targets_line(entity: Option<&cce_types::entity::GroupedEntity>) -> Option<String> {
         let calls = entity?.metadata.get(meta_keys::CALL_PATHS)?.trim();
         if calls.is_empty() {
             return None;

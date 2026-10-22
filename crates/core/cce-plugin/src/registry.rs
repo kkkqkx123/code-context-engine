@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::path_pattern::PathPattern;
 use crate::vocabulary::{FileVocabulary, VocabularyTable};
 use crate::{
     CodePlugin, OverridePluginSplit, PRIORITY_MAX, PRIORITY_MIN, PluginBundle, PluginCapability,
@@ -11,7 +12,11 @@ use cce_types::language::Language;
 struct RegistryEntry {
     plugin: Arc<dyn CodePlugin>,
     file_patterns: Option<Vec<String>>,
-    compiled_globs: Option<Vec<Option<globset::GlobMatcher>>>,
+    /// The compiled file patterns of the plugin.
+    ///
+    /// A pattern that cannot be parsed is left out: it would route the
+    /// plugin by a rule nobody wrote.
+    compiled_patterns: Vec<PathPattern>,
     languages: Option<Vec<String>>,
     capabilities: Vec<String>,
     priority: i32,
@@ -113,18 +118,11 @@ impl PluginRegistry {
         if self.entries.contains_key(&id) {
             tracing::warn!("Replacing duplicate plugin: {id}");
         }
-        let compiled_globs = bundle.file_patterns.as_ref().map(|patterns| {
-            patterns
-                .iter()
-                .map(|p| {
-                    if p.contains('*') || p.contains('?') || p.contains('[') {
-                        globset::Glob::new(p).ok().map(|g| g.compile_matcher())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        });
+        let compiled_patterns = bundle
+            .file_patterns
+            .as_ref()
+            .map(|patterns| compile_file_patterns(patterns))
+            .unwrap_or_default();
         let capabilities = bundle
             .capabilities
             .clone()
@@ -158,7 +156,7 @@ impl PluginRegistry {
             RegistryEntry {
                 plugin: bundle.plugin,
                 file_patterns: bundle.file_patterns,
-                compiled_globs,
+                compiled_patterns,
                 languages: bundle.languages,
                 capabilities,
                 priority,
@@ -248,7 +246,9 @@ impl PluginRegistry {
             .filter(|e| {
                 if let Some(path) = file_path {
                     if let Some(patterns) = &e.file_patterns {
-                        if !Self::matches_any_pattern(path, patterns, e.compiled_globs.as_deref()) {
+                        if !patterns.is_empty()
+                            && !e.compiled_patterns.iter().any(|p| p.matches(path))
+                        {
                             return false;
                         }
                     }
@@ -264,45 +264,6 @@ impl PluginRegistry {
 
         matched.sort_by_key(|e| (std::cmp::Reverse(e.effective_priority(capability)), e.seq));
         matched
-    }
-
-    fn matches_any_pattern(
-        path: &str,
-        patterns: &[String],
-        compiled_globs: Option<&[Option<globset::GlobMatcher>]>,
-    ) -> bool {
-        if patterns.is_empty() {
-            return true;
-        }
-        let iter = patterns.iter().enumerate();
-        if let Some(globs) = compiled_globs {
-            for (i, pattern) in iter {
-                let ok = if let Some(Some(matcher)) = globs.get(i) {
-                    matcher.is_match(path)
-                } else {
-                    path.ends_with(pattern)
-                };
-                if ok {
-                    return true;
-                }
-            }
-        } else {
-            for pattern in patterns {
-                let ok = if pattern.contains('*') || pattern.contains('?') || pattern.contains('[')
-                {
-                    match globset::Glob::new(pattern) {
-                        Ok(g) => g.compile_matcher().is_match(path),
-                        Err(_) => false,
-                    }
-                } else {
-                    path.ends_with(pattern)
-                };
-                if ok {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     fn matches_language(language: Option<&str>, allowed: &[String]) -> bool {
@@ -632,6 +593,26 @@ impl PluginRegistry {
         rows.sort();
         calculate_hash(rows.join("\u{1e}").as_bytes())
     }
+}
+
+/// Compile the file patterns of a plugin.
+///
+/// A pattern that cannot be parsed is dropped: it states a routing rule the
+/// host does not understand, and keeping it would route files by a guess.
+fn compile_file_patterns(patterns: &[String]) -> Vec<PathPattern> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match PathPattern::compile(pattern) {
+            Some(compiled) => Some(compiled),
+            None => {
+                tracing::warn!(
+                    pattern = %pattern,
+                    "Dropping invalid plugin file pattern"
+                );
+                None
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1176,6 +1157,52 @@ mod tests {
             Arc::ptr_eq(&first, &second),
             "a table without a scope serves every file of the provider set"
         );
+    }
+
+    /// The entry-level scope and the plugin-level file filter route by the
+    /// same path pattern language, so the same pattern must select the same
+    /// files at both levels.
+    #[test]
+    fn test_the_scope_and_the_plugin_filter_select_the_same_files() {
+        let patterns = [
+            "*.c",
+            "packages/player/**",
+            "**/tests/**",
+            "src/main.rs",
+            "player.c",
+        ];
+        let paths = [
+            "src/main.c",
+            "packages/player/src/a.c",
+            "packages/recorder/src/a.rs",
+            "src/tests/a.c",
+            "src/main.rs",
+            "src/player.c",
+        ];
+
+        for pattern in patterns {
+            let mut registry = PluginRegistry::new();
+            registry.register_bundle(
+                PluginBundle::new(Arc::new(TablePlugin::new(
+                    "scoped",
+                    vec![scoped_entry("track", "media track", pattern)],
+                )))
+                .with_file_patterns(vec![pattern.to_string()]),
+            );
+
+            for path in paths {
+                let routed = !registry
+                    .get_vocabulary_providers(Some(path), None)
+                    .is_empty();
+                let scoped = registry
+                    .vocabulary_for(path, None)
+                    .is_some_and(|view| !view.matched_entries(&["track"]).is_empty());
+                assert_eq!(
+                    routed, scoped,
+                    "the pattern {pattern} must route and scope alike for {path}"
+                );
+            }
+        }
     }
 
     #[test]

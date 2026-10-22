@@ -257,14 +257,12 @@ pub fn compute_nl_entity_boundaries(
 
         // A synthetic head is not an entity's own text, so it is folded into
         // the first member's region instead of standing on its own.
-        let (region_start, region_end) = if header_entity_id.is_none()
-            && !header_text.is_empty()
-            && boundaries.is_empty()
-        {
-            (0, member_end)
-        } else {
-            (member_start, member_end)
-        };
+        let (region_start, region_end) =
+            if header_entity_id.is_none() && !header_text.is_empty() && boundaries.is_empty() {
+                (0, member_end)
+            } else {
+                (member_start, member_end)
+            };
 
         boundaries.push(NlEntityBoundary {
             entity_id: member.entity_id,
@@ -386,12 +384,8 @@ mod tests {
             ..Default::default()
         };
 
-        let boundaries = compute_nl_entity_boundaries(
-            head_text,
-            None,
-            &[member1, member2],
-            ChunkPath::Bm25,
-        );
+        let boundaries =
+            compute_nl_entity_boundaries(head_text, None, &[member1, member2], ChunkPath::Bm25);
 
         assert_eq!(boundaries.len(), 2);
         assert_eq!(boundaries[0].entity_id, EntityId(2));

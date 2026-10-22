@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use crate::grouper::types::GroupType;
 use crate::grouper::EntityGroup;
+use crate::grouper::types::GroupType;
 use cce_types::ConversionResult;
 use cce_types::entity::{EntityId, EntityKind};
 
@@ -491,12 +491,12 @@ impl ChunkBuilder {
         let holds_header = group
             .header_id
             .is_some_and(|header_id| content_entity_ids.contains(&header_id));
-        if group.group_type == GroupType::MergedFragments && !holds_header {
-            if let Some(id) = content_entity_ids.first()
-                && let Some(name) = Self::entity_name_by_id(group, *id)
-            {
-                return name;
-            }
+        if group.group_type == GroupType::MergedFragments
+            && !holds_header
+            && let Some(id) = content_entity_ids.first()
+            && let Some(name) = Self::entity_name_by_id(group, *id)
+        {
+            return name;
         }
         group.name.to_string()
     }

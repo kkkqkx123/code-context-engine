@@ -1,5 +1,5 @@
-use crate::grouper::types::GroupType;
 use crate::grouper::EntityGroup;
+use crate::grouper::types::GroupType;
 use cce_types::ConversionResult;
 use cce_types::ParseError;
 use cce_types::entity::EntityId;
@@ -287,12 +287,12 @@ fn process_path(
                     continuation_for_block =
                         format!("{} {}.", first.kind.kind_label(), names.join(", "));
                 } else {
-                    let owner = if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str()
-                    {
-                        String::new()
-                    } else {
-                        format!("{}.{}", ctx.group.name, first.name)
-                    };
+                    let owner =
+                        if ctx.group.name.is_empty() || ctx.group.name == first.name.as_str() {
+                            String::new()
+                        } else {
+                            format!("{}.{}", ctx.group.name, first.name)
+                        };
                     let display = if owner.is_empty() {
                         first.name.clone()
                     } else {

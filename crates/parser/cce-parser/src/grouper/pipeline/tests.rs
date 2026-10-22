@@ -672,7 +672,10 @@ fn test_call_target_name_drops_the_receiver() {
         call_target_name("dash->name.c_str").as_deref(),
         Some("c_str")
     );
-    assert_eq!(call_target_name("be_read_uint16").as_deref(), Some("be_read_uint16"));
+    assert_eq!(
+        call_target_name("be_read_uint16").as_deref(),
+        Some("be_read_uint16")
+    );
     assert_eq!(
         call_target_name("std::collections::HashMap::new").as_deref(),
         Some("std::collections::HashMap::new")

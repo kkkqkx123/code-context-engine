@@ -68,7 +68,7 @@ CCE 支持通过插件扩展核心功能，包括 Lua 脚本插件和原生动�
 | `Chunk` | 覆盖分块逻辑 | Override |
 | `RelationExtract` | 提取符号/关系 | Additive |
 | `FileFilter` | 文件包含/排除决策 | Override |
-| `Vocabulary` | 领域术语表（token → 释义） | Additive |
+| `Vocabulary` | 领域术语表（token → 释义，条目可带路径作用域） | Additive |
 
 ### 查询管道扩展点
 

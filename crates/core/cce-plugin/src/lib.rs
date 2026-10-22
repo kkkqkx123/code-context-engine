@@ -8,6 +8,7 @@
 //! - [`PluginBundle`]: A loaded plugin with its filter metadata
 //! - [`PluginRegistry`]: In-memory store for registered plugins (pure, no I/O)
 
+mod path_pattern;
 mod registry;
 
 /// Domain terminology table of the `Vocabulary` capability.

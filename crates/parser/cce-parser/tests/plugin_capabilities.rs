@@ -927,3 +927,83 @@ fn test_vocabulary_scope_leaves_unrelated_files_untouched() {
         "a file outside every scope must not receive a terminology line"
     );
 }
+
+/// The indexed chunk texts and the exported glossary of a converted group.
+///
+/// These are the two outputs a terminology table can change, so comparing
+/// them covers the whole path the table reaches.
+fn indexed_output_with_registry(
+    registry: PluginRegistry,
+    group: &EntityGroup,
+    source: &str,
+    file_path: &str,
+) -> (Vec<String>, Option<String>) {
+    let registry = Arc::new(registry);
+    let converter =
+        cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
+            .with_plugin_registry(registry.clone());
+    let processing_result = ProcessingResult {
+        groups: vec![group.clone()],
+        entity_meta: Default::default(),
+        behavior: Default::default(),
+        control_flow: Default::default(),
+        stats: Default::default(),
+    };
+    let conversions = converter.convert_entity_groups(
+        &processing_result.groups,
+        file_path,
+        None,
+        Some(&processing_result),
+        Some(source),
+    );
+
+    let chunker = cce_parser::ast_to_nl::chunker::GroupChunker::new(ChunkingConfig::default())
+        .with_plugin_registry(registry);
+    let output = chunker
+        .chunk_groups(&conversions, file_path)
+        .expect("chunking");
+
+    let chunks = output
+        .chunks
+        .iter()
+        .map(|chunk| chunk.text.clone())
+        .collect();
+    let glossary = conversions
+        .first()
+        .and_then(|group| group.header_conversion.as_ref())
+        .and_then(|conversion| conversion.glossary.clone());
+    (chunks, glossary)
+}
+
+/// `Vocabulary`: a plugin whose scopes select no file of this project must
+/// leave the index and the export exactly as a project without any
+/// terminology plugin leaves them.
+#[test]
+fn test_vocabulary_outside_every_scope_matches_the_baseline() {
+    let source = "int play(int track) {\n    return track;\n}\n";
+    let group = vocabulary_group("play", "int play(int)", Language::C);
+    let path = "packages/tools/play.c";
+
+    let baseline = indexed_output_with_registry(PluginRegistry::new(), &group, source, path);
+
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(SCOPED_VOCABULARY_SCRIPT));
+    let scoped = indexed_output_with_registry(registry, &group, source, path);
+
+    assert!(
+        !baseline.0.is_empty(),
+        "the group must produce chunks for the comparison to mean anything"
+    );
+    assert!(
+        baseline.1.is_none(),
+        "a project without a terminology plugin carries no glossary line"
+    );
+    assert_eq!(
+        scoped.0, baseline.0,
+        "a file outside every scope must not change the indexed text"
+    );
+    assert_eq!(
+        scoped.1, baseline.1,
+        "a file outside every scope must not change the exported description"
+    );
+}

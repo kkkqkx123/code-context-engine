@@ -1003,12 +1003,7 @@ mod tests {
             ..Default::default()
         };
         let text = "one two. three four. five six. seven eight.";
-        let segments = split_at_level(
-            text,
-            BoundaryLevel::Sentences,
-            ChunkPath::Bm25,
-            config,
-        );
+        let segments = split_at_level(text, BoundaryLevel::Sentences, ChunkPath::Bm25, config);
         assert!(segments.len() >= 3);
     }
 
@@ -1019,12 +1014,7 @@ mod tests {
             ..Default::default()
         };
         let text = "one two. three four. five six. seven eight.";
-        let segments = split_at_level(
-            text,
-            BoundaryLevel::Sentences,
-            ChunkPath::Bm25,
-            config,
-        );
+        let segments = split_at_level(text, BoundaryLevel::Sentences, ChunkPath::Bm25, config);
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, text);
         assert_eq!(segments[0].boundary.token_count, 8);

@@ -88,7 +88,7 @@ CCE plugin system enables extending the indexing pipeline via **Lua scripts** an
 | `Fusion` | Override | Hybrid fusion weight override |
 | `ResultFilter` | Chain | Post-rerank result filtering/annotation |
 | `FileFilter` | Override | Scanner file inclusion/exclusion |
-| `Vocabulary` | Additive | Domain terminology table (token → expansion) |
+| `Vocabulary` | Additive | Domain terminology table (token → expansion), with an optional path scope per entry |
 
 ### Priority System
 

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use cce_plugin::PluginCapability;
 use cce_types::FILE_DOC_SENTINEL_ID;
 use cce_types::FILE_FALLBACK_SENTINEL_ID;
-use cce_types::entity::{meta_keys, Entity, EntityId, EntityKind, GroupedEntity, ParsedFile};
+use cce_types::entity::{Entity, EntityId, EntityKind, GroupedEntity, ParsedFile, meta_keys};
 use cce_types::language::Language;
 use cce_types::test_info::TestInfo;
 use compact_str::CompactString;
@@ -407,7 +407,7 @@ impl PreprocessingPipeline {
         // the function's group would nest inside the template's group under
         // the same name.
         let absorbed_templates = absorb_template_groups(&mut groups);
-        if absorbed_templates > 0 {}
+        tracing::debug!(absorbed_templates, "Absorbed nested template groups");
 
         // Stage 4: Inject supplementary plugin entities (EntityExtract).
         // Regex-based extractors (e.g. Flask route decorators) complement the

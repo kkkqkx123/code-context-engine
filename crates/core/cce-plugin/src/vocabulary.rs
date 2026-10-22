@@ -18,7 +18,9 @@
 //!   file of its provider set; a scoped table is resolved per file. The
 //!   entries that share a token are decided by the scope priority, then by
 //!   how narrow the matching scope is, then by the order the tables were
-//!   merged in;
+//!   merged in. The scope patterns speak the same path pattern language as
+//!   the plugin-level file filter, so both routing levels select the same
+//!   files for the same pattern;
 //! - the matched terms are rendered as a single `Glossary: ...` line whose
 //!   entries are separated by semicolons.
 //!
@@ -28,7 +30,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::{CodePlugin, PluginRegistry};
+use crate::CodePlugin;
+use crate::path_pattern::PathPattern;
 use cce_types::plugin::{MAX_MERGED_VOCABULARY_ENTRIES, VocabularyEntry, VocabularyScope};
 
 /// A merged glossary table collected from the matching `Vocabulary` plugins.
@@ -281,7 +284,7 @@ impl CompiledScope {
 #[derive(Debug, Clone)]
 struct CompiledPattern {
     /// The matcher of the pattern.
-    matcher: PatternMatcher,
+    pattern: PathPattern,
     /// How narrow the pattern is.
     specificity: Specificity,
 }
@@ -289,30 +292,7 @@ struct CompiledPattern {
 impl CompiledPattern {
     /// Whether the pattern selects `path`.
     fn matches(&self, path: &str) -> bool {
-        self.matcher.matches(path)
-    }
-}
-
-/// The matcher of one path pattern.
-///
-/// A pattern that carries a wildcard is a glob; a pattern without one is a
-/// path suffix. This is the same dialect the plugin-level file filter uses,
-/// so both routing levels share one pattern language.
-#[derive(Debug, Clone)]
-enum PatternMatcher {
-    /// A glob pattern.
-    Glob(globset::GlobMatcher),
-    /// A literal path suffix.
-    Suffix(String),
-}
-
-impl PatternMatcher {
-    /// Whether the pattern selects `path`.
-    fn matches(&self, path: &str) -> bool {
-        match self {
-            Self::Glob(matcher) => matcher.is_match(path),
-            Self::Suffix(suffix) => path.ends_with(suffix),
-        }
+        self.pattern.matches(path)
     }
 }
 
@@ -325,26 +305,18 @@ fn compile_patterns(patterns: &[String]) -> Vec<CompiledPattern> {
         .iter()
         .filter_map(|pattern| {
             let specificity = pattern_specificity(pattern);
-            if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-                match globset::Glob::new(pattern) {
-                    Ok(glob) => Some(CompiledPattern {
-                        matcher: PatternMatcher::Glob(glob.compile_matcher()),
-                        specificity,
-                    }),
-                    Err(error) => {
-                        tracing::warn!(
-                            pattern = %pattern,
-                            %error,
-                            "Dropping invalid vocabulary scope pattern"
-                        );
-                        None
-                    }
-                }
-            } else {
-                Some(CompiledPattern {
-                    matcher: PatternMatcher::Suffix(pattern.clone()),
+            match PathPattern::compile(pattern) {
+                Some(compiled) => Some(CompiledPattern {
+                    pattern: compiled,
                     specificity,
-                })
+                }),
+                None => {
+                    tracing::warn!(
+                        pattern = %pattern,
+                        "Dropping invalid vocabulary scope pattern"
+                    );
+                    None
+                }
             }
         })
         .collect()
@@ -389,18 +361,6 @@ fn pattern_specificity(pattern: &str) -> Specificity {
         .filter(|character| !matches!(character, '*' | '?' | '[' | ']' | '{' | '}'))
         .count() as i32;
     Specificity { components, chars }
-}
-
-/// The plugins that contribute a terminology table to a file.
-///
-/// The plugins are ordered by descending effective priority (ties by
-/// registration order), which is the order their tables are merged in.
-pub fn providers<'a>(
-    registry: &'a PluginRegistry,
-    file_path: &str,
-    language: &str,
-) -> Vec<&'a Arc<dyn CodePlugin>> {
-    registry.get_vocabulary_providers(Some(file_path), Some(language))
 }
 
 /// The identity of a provider set, used as the cache key of the merged table.

@@ -245,9 +245,7 @@ impl SmallFragmentMerger {
                 if gap > self.proximity_bytes {
                     // Gap exceeds proximity threshold: flush current batch
                     if !current_batch.is_empty() {
-                        if let Some(merged) =
-                            self.flush_batch(&mut current_batch)
-                        {
+                        if let Some(merged) = self.flush_batch(&mut current_batch) {
                             merged_groups.push(merged);
                         }
                     }
@@ -261,9 +259,7 @@ impl SmallFragmentMerger {
                     if has_non_standalone_between {
                         // Non-standalone group blocks the merge: flush
                         if !current_batch.is_empty() {
-                            if let Some(merged) =
-                                self.flush_batch(&mut current_batch)
-                            {
+                            if let Some(merged) = self.flush_batch(&mut current_batch) {
                                 merged_groups.push(merged);
                             }
                         }
@@ -276,8 +272,7 @@ impl SmallFragmentMerger {
                 // different logical containers.
                 if let Some(prev) = current_batch.last() {
                     if prev.parent_group_id != group.parent_group_id && !current_batch.is_empty() {
-                        if let Some(merged) = self.flush_batch(&mut current_batch)
-                        {
+                        if let Some(merged) = self.flush_batch(&mut current_batch) {
                             merged_groups.push(merged);
                         }
                     }
@@ -291,8 +286,7 @@ impl SmallFragmentMerger {
                     if prev.test_info.is_test() != group.test_info.is_test()
                         && !current_batch.is_empty()
                     {
-                        if let Some(merged) = self.flush_batch(&mut current_batch)
-                        {
+                        if let Some(merged) = self.flush_batch(&mut current_batch) {
                             merged_groups.push(merged);
                         }
                     }
