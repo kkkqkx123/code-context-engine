@@ -10,7 +10,8 @@
 //! - [`QueryRewriteResult`], [`FusionWeights`], [`ResultFilterEntry`]: the
 //!   query-side capabilities (`QueryRewrite` / `Fusion` / `ResultFilter`).
 //! - [`FileFilterDecision`]: the `FileFilter` capability.
-//! - [`VocabularyEntry`]: the `Vocabulary` capability (domain terminology).
+//! - [`VocabularyEntry`] / [`VocabularyScope`]: the `Vocabulary` capability
+//!   (domain terminology and the path constraints it applies to).
 //!
 //! The host converts these into the existing pipeline types (`GroupedEntity`,
 //! `entity_spans`) so downstream stages (grouper → AST→NL → chunker) remain
@@ -396,7 +397,7 @@ pub struct ResultFilterEntry {
 ///
 /// The limit bounds the memory a misbehaving plugin can force on the host;
 /// the entries beyond it are dropped at the plugin boundary.
-pub const MAX_VOCABULARY_ENTRIES: usize = 256;
+pub const MAX_VOCABULARY_ENTRIES: usize = 1024;
 
 /// Maximum number of glossary entries the host keeps after merging the tables
 /// of all matching plugins.
@@ -405,12 +406,123 @@ pub const MAX_VOCABULARY_ENTRIES: usize = 256;
 /// table the host actually searches against. Several plugins may each stay
 /// within [`MAX_VOCABULARY_ENTRIES`] while their union exceeds this budget,
 /// so the two limits are separate constraints.
-pub const MAX_MERGED_VOCABULARY_ENTRIES: usize = 1024;
+pub const MAX_MERGED_VOCABULARY_ENTRIES: usize = 4096;
 
 /// Maximum length (in characters) of a single glossary expansion.
 ///
 /// Longer expansions are truncated at the plugin boundary.
 pub const MAX_VOCABULARY_EXPANSION_LENGTH: usize = 200;
+
+/// Maximum number of path patterns one glossary scope may carry.
+///
+/// A scope is a routing constraint, not a data set: a handful of patterns
+/// covers every package layout, and the limit bounds the work a misbehaving
+/// plugin can force on the host.
+pub const MAX_VOCABULARY_SCOPE_PATTERNS: usize = 16;
+
+/// Maximum length (in characters) of one path pattern of a glossary scope.
+///
+/// Longer patterns are truncated at the plugin boundary.
+pub const MAX_VOCABULARY_SCOPE_PATTERN_LENGTH: usize = 256;
+
+/// The path constraints under which a glossary entry applies.
+///
+/// A scope is matched against the project-relative path of the indexed file.
+/// An entry without a scope applies to every file the contributing plugins
+/// route to; a scoped entry applies only to the files its patterns select.
+/// This is what lets one table carry different meanings of the same token for
+/// different packages of a multi-package project.
+///
+/// The patterns use the same glob dialect as the plugin-level `file_patterns`
+/// filter, so both routing levels share one pattern language.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct VocabularyScope {
+    /// The patterns that select the files the entry applies to.
+    ///
+    /// An empty list places no restriction on the include side.
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// The patterns that exclude files from the entry.
+    ///
+    /// A file matching any exclude pattern never receives the entry.
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// The priority of the scope among entries that share a token.
+    ///
+    /// A higher priority wins. The default is `0`.
+    #[serde(default)]
+    pub priority: i32,
+}
+
+impl VocabularyScope {
+    /// Whether the scope places no restriction at all.
+    pub fn is_unrestricted(&self) -> bool {
+        self.include.is_empty() && self.exclude.is_empty()
+    }
+
+    /// The normalized scope, or `None` when the scope expresses a constraint
+    /// that no pattern can satisfy.
+    ///
+    /// The patterns are trimmed, the empty ones are dropped, and the lists are
+    /// capped. A scope whose patterns are all unusable yields `None`: a
+    /// constraint that cannot be satisfied must not silently degrade into
+    /// "applies everywhere" and put a wrong meaning into the index.
+    pub fn normalized(&self) -> Option<VocabularyScope> {
+        let include = normalize_scope_patterns(&self.include);
+        let exclude = normalize_scope_patterns(&self.exclude);
+        let wrote_patterns = !self.include.is_empty() || !self.exclude.is_empty();
+        if wrote_patterns && include.is_empty() && exclude.is_empty() {
+            return None;
+        }
+        Some(VocabularyScope {
+            include,
+            exclude,
+            priority: self.priority,
+        })
+    }
+
+    /// The canonical form of the scope, used to tell scopes apart.
+    ///
+    /// The pattern lists are unordered sets, so the key sorts them: two scopes
+    /// with the same patterns in a different order are the same scope.
+    pub fn key(&self) -> String {
+        let mut include = self.include.clone();
+        let mut exclude = self.exclude.clone();
+        include.sort();
+        exclude.sort();
+        let mut key = String::new();
+        key.push('i');
+        for pattern in &include {
+            key.push('\u{1f}');
+            key.push_str(pattern);
+        }
+        key.push('\u{1e}');
+        key.push('e');
+        for pattern in &exclude {
+            key.push('\u{1f}');
+            key.push_str(pattern);
+        }
+        key.push('\u{1e}');
+        key.push_str(&self.priority.to_string());
+        key
+    }
+}
+
+/// Trim the patterns of one scope list, drop the empty ones and cap the list.
+fn normalize_scope_patterns(patterns: &[String]) -> Vec<String> {
+    patterns
+        .iter()
+        .map(|pattern| pattern.trim())
+        .filter(|pattern| !pattern.is_empty())
+        .take(MAX_VOCABULARY_SCOPE_PATTERNS)
+        .map(|pattern| {
+            pattern
+                .chars()
+                .take(MAX_VOCABULARY_SCOPE_PATTERN_LENGTH)
+                .collect()
+        })
+        .collect()
+}
 
 /// One glossary entry contributed by the `Vocabulary` capability.
 ///
@@ -418,12 +530,22 @@ pub const MAX_VOCABULARY_EXPANSION_LENGTH: usize = 200;
 /// the source (e.g. `"stts"`) and `expansion` is the human-readable meaning
 /// (e.g. `"sync time-to-sample"`). The host only matches identifier tokens
 /// and renders the expansion; it never interprets the terminology.
+///
+/// The optional `scope` restricts the files the entry applies to, which is
+/// what lets one table carry different meanings of the same token for
+/// different packages of a multi-package project.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct VocabularyEntry {
     /// The identifier token to match (e.g. `"stts"`).
     pub token: String,
     /// The human-readable expansion of the token (e.g. `"sync time-to-sample"`).
     pub expansion: String,
+    /// The path constraints under which the entry applies.
+    ///
+    /// `None` means the entry applies to every file the contributing plugins
+    /// route to.
+    #[serde(default)]
+    pub scope: Option<VocabularyScope>,
 }
 
 impl VocabularyEntry {
@@ -432,15 +554,31 @@ impl VocabularyEntry {
         Self {
             token: token.into(),
             expansion: expansion.into(),
+            scope: None,
+        }
+    }
+
+    /// Create a glossary entry that applies to the files its scope selects.
+    pub fn with_scope(
+        token: impl Into<String>,
+        expansion: impl Into<String>,
+        scope: VocabularyScope,
+    ) -> Self {
+        Self {
+            token: token.into(),
+            expansion: expansion.into(),
+            scope: Some(scope),
         }
     }
 
     /// The normalized entry, or `None` when it carries no usable terminology.
     ///
     /// The token and the expansion are trimmed, and the expansion is
-    /// truncated to [`MAX_VOCABULARY_EXPANSION_LENGTH`]. Both the plugin
-    /// boundary and the host-side merge apply this rule, so a table is
-    /// interpreted identically no matter which side inspects it.
+    /// truncated to [`MAX_VOCABULARY_EXPANSION_LENGTH`]. The scope is
+    /// normalized as well, and a scope that cannot be satisfied drops the
+    /// entry. Both the plugin boundary and the host-side merge apply this
+    /// rule, so a table is interpreted identically no matter which side
+    /// inspects it.
     pub fn normalized(&self) -> Option<VocabularyEntry> {
         let token = self.token.trim();
         let expansion = self.expansion.trim();
@@ -451,9 +589,14 @@ impl VocabularyEntry {
             .chars()
             .take(MAX_VOCABULARY_EXPANSION_LENGTH)
             .collect();
+        let scope = match &self.scope {
+            None => None,
+            Some(scope) => Some(scope.normalized()?),
+        };
         Some(VocabularyEntry {
             token: token.to_string(),
             expansion,
+            scope,
         })
     }
 
@@ -465,6 +608,18 @@ impl VocabularyEntry {
     /// token, while the entry keeps the plugin's own spelling for rendering.
     pub fn match_key(&self) -> String {
         self.token.to_lowercase()
+    }
+
+    /// The key of the scope this entry applies under.
+    ///
+    /// An entry without a scope and an entry whose scope places no
+    /// restriction apply to the same files, but they are not the same scope:
+    /// the unrestricted one can still carry a priority.
+    pub fn scope_key(&self) -> String {
+        match &self.scope {
+            None => String::new(),
+            Some(scope) => scope.key(),
+        }
     }
 }
 
@@ -665,6 +820,74 @@ impl From<PluginExport> for StandardizedExport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_vocabulary_entry_without_a_scope_stays_unrestricted() {
+        let entry = VocabularyEntry::new("stts", "sync time-to-sample")
+            .normalized()
+            .expect("entry");
+        assert!(entry.scope.is_none());
+        assert!(entry.scope_key().is_empty());
+    }
+
+    #[test]
+    fn test_vocabulary_scope_is_trimmed_and_capped() {
+        let scope = VocabularyScope {
+            include: vec!["  packages/player/**  ".to_string()],
+            exclude: vec!["   ".to_string()],
+            priority: 3,
+        };
+        let normalized = scope.normalized().expect("scope");
+        assert_eq!(normalized.include, vec!["packages/player/**".to_string()]);
+        assert!(normalized.exclude.is_empty());
+        assert_eq!(normalized.priority, 3);
+    }
+
+    #[test]
+    fn test_vocabulary_scope_caps_the_pattern_count() {
+        let include: Vec<String> = (0..MAX_VOCABULARY_SCOPE_PATTERNS + 5)
+            .map(|index| format!("packages/p{index}/**"))
+            .collect();
+        let scope = VocabularyScope {
+            include,
+            exclude: Vec::new(),
+            priority: 0,
+        };
+        let normalized = scope.normalized().expect("scope");
+        assert_eq!(normalized.include.len(), MAX_VOCABULARY_SCOPE_PATTERNS);
+    }
+
+    #[test]
+    fn test_vocabulary_entry_with_an_unusable_scope_is_dropped() {
+        let entry = VocabularyEntry::with_scope(
+            "track",
+            "media track",
+            VocabularyScope {
+                include: vec!["   ".to_string()],
+                exclude: Vec::new(),
+                priority: 0,
+            },
+        );
+        assert!(
+            entry.normalized().is_none(),
+            "a scope without a usable pattern must not degrade into an unrestricted entry"
+        );
+    }
+
+    #[test]
+    fn test_vocabulary_scope_key_ignores_the_pattern_order() {
+        let first = VocabularyScope {
+            include: vec!["a/**".to_string(), "b/**".to_string()],
+            exclude: Vec::new(),
+            priority: 0,
+        };
+        let second = VocabularyScope {
+            include: vec!["b/**".to_string(), "a/**".to_string()],
+            exclude: Vec::new(),
+            priority: 0,
+        };
+        assert_eq!(first.key(), second.key());
+    }
 
     #[test]
     fn test_plugin_import_to_standardized_symbol() {

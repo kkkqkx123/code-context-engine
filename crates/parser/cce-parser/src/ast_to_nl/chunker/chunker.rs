@@ -26,7 +26,7 @@
 
 use crate::grouper::EntityGroup;
 use cce_plugin::CodePlugin;
-use cce_plugin::vocabulary::VocabularyTable;
+use cce_plugin::vocabulary::FileVocabulary;
 use cce_text::Bm25TextCleaner;
 use cce_types::ConversionResult;
 use cce_types::ParseError;
@@ -181,15 +181,15 @@ impl GroupChunker {
         let Some(registry) = self.plugin_registry.as_ref() else {
             return;
         };
-        let Some(table) = registry.vocabulary_table(file_path, Some(language)) else {
+        let Some(vocabulary) = registry.vocabulary_for(file_path, Some(language)) else {
             return;
         };
-        if table.is_empty() {
+        if vocabulary.is_empty() {
             return;
         }
         for chunk in &mut output.chunks {
-            let matched = table.matched_entries(&[chunk.text.as_str()]);
-            let Some(line) = VocabularyTable::glossary_line(&matched) else {
+            let matched = vocabulary.matched_entries(&[chunk.text.as_str()]);
+            let Some(line) = FileVocabulary::glossary_line(&matched) else {
                 continue;
             };
             let text = match chunk.path {

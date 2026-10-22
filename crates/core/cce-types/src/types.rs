@@ -52,9 +52,10 @@ pub use grouper::{EntityGroup, GroupType, ProcessingResult, ProcessingStats};
 
 pub use plugin::{
     FileFilterDecision, FusionWeights, GroupPluginContext, MAX_VOCABULARY_ENTRIES,
-    MAX_VOCABULARY_EXPANSION_LENGTH, PluginDocument, PluginEntity, PluginExport, PluginImport,
+    MAX_VOCABULARY_EXPANSION_LENGTH, MAX_VOCABULARY_SCOPE_PATTERN_LENGTH,
+    MAX_VOCABULARY_SCOPE_PATTERNS, PluginDocument, PluginEntity, PluginExport, PluginImport,
     PluginRelation, PluginSymbol, PluginSymbolLocation, QueryRewriteResult, ResultFilterEntry,
-    VocabularyEntry,
+    VocabularyEntry, VocabularyScope,
 };
 
 pub use import::ImportSource;

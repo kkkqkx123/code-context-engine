@@ -1,7 +1,7 @@
 use mlua::Table;
 use tracing::warn;
 
-use super::lua_helpers::{get_string_field, parse_entity_array};
+use super::lua_helpers::{get_string_field, parse_entity_array, read_vocabulary_scope};
 use super::lua_plugin::LuaPlugin;
 use crate::error::PluginError;
 use crate::loader::lua_mapping::{
@@ -1182,7 +1182,22 @@ impl CodePlugin for LuaPlugin {
                     );
                     continue;
                 };
-                let Some(entry) = VocabularyEntry::new(token, expansion).normalized() else {
+                let scope = match read_vocabulary_scope(&entry) {
+                    Ok(scope) => scope,
+                    Err(message) => {
+                        warn!(
+                            plugin = %plugin_id,
+                            token = %token,
+                            "Skipping vocabulary entry with an unusable scope: {message}"
+                        );
+                        continue;
+                    }
+                };
+                let entry = match scope {
+                    Some(scope) => VocabularyEntry::with_scope(token, expansion, scope),
+                    None => VocabularyEntry::new(token, expansion),
+                };
+                let Some(entry) = entry.normalized() else {
                     warn!(
                         plugin = %plugin_id,
                         "Skipping vocabulary entry without usable terminology"

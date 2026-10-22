@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::vocabulary::{FileVocabulary, VocabularyTable};
 use crate::{
     CodePlugin, OverridePluginSplit, PRIORITY_MAX, PRIORITY_MIN, PluginBundle, PluginCapability,
     PluginError, PluginSource,
@@ -53,7 +54,24 @@ pub struct PluginRegistry {
     /// the cache in the registry lets every consumer (the AST-to-NL pipeline,
     /// the chunker, the document pipeline) share it, so a plugin is queried
     /// once per provider set instead of once per consumer.
-    vocabulary_tables: Mutex<HashMap<String, Arc<crate::vocabulary::VocabularyTable>>>,
+    vocabulary_tables: Mutex<HashMap<String, Arc<VocabularyProviders>>>,
+    /// The terminology that applies to one file, keyed by the provider set and
+    /// the project-relative path of the file.
+    ///
+    /// Only tables that carry a scope need one entry per file: the scope
+    /// decides which entries apply, and that decision depends on the file.
+    file_vocabularies: Mutex<HashMap<(String, String), Arc<FileVocabulary>>>,
+}
+
+/// The terminology artifacts of one provider set.
+struct VocabularyProviders {
+    /// The merged table of the provider set.
+    table: Arc<VocabularyTable>,
+    /// The terminology that applies to every file of the provider set.
+    ///
+    /// It exists only when no entry of the table carries a scope; otherwise
+    /// the applicable entries depend on the file.
+    unrestricted: Option<Arc<FileVocabulary>>,
 }
 
 impl Default for PluginRegistry {
@@ -61,6 +79,13 @@ impl Default for PluginRegistry {
         Self::new()
     }
 }
+
+/// The number of file-resolved terminology views the registry keeps.
+///
+/// A view is cheap, but the number of indexed files is not; the cache is
+/// dropped when it outgrows the bound so a long-running server keeps a
+/// bounded footprint.
+const MAX_CACHED_FILE_VOCABULARIES: usize = 4096;
 
 impl PluginRegistry {
     /// Create an empty registry.
@@ -70,6 +95,7 @@ impl PluginRegistry {
             next_seq: 0,
             revision: 0,
             vocabulary_tables: Mutex::new(HashMap::new()),
+            file_vocabularies: Mutex::new(HashMap::new()),
         }
     }
 
@@ -142,6 +168,21 @@ impl PluginRegistry {
             },
         );
         self.revision += 1;
+        self.clear_vocabulary_caches();
+    }
+
+    /// Drop the cached terminology of the previous plugin set.
+    ///
+    /// The cache keys carry the registry revision, so the entries of the
+    /// previous revision can never be served again; dropping them keeps the
+    /// cache from growing with every plugin change.
+    fn clear_vocabulary_caches(&self) {
+        if let Ok(mut cache) = self.vocabulary_tables.lock() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.file_vocabularies.lock() {
+            cache.clear();
+        }
     }
 
     fn resolve_capability_priorities(
@@ -375,34 +416,76 @@ impl PluginRegistry {
         })
     }
 
-    /// The merged terminology table for a file.
+    /// The terminology that applies to a file.
     ///
-    /// The table is collected from the plugins that contribute terminology to
+    /// The tables are collected from the plugins that contribute terminology to
     /// the file and cached per provider set, so a plugin is queried once per
     /// plugin set instead of once per file. `language` is `None` for files
     /// that carry no language, such as documents.
     ///
+    /// The result holds the entries whose scope matches the file, so one
+    /// table can carry a different meaning of the same token for each package
+    /// of a multi-package project. A table without a scope yields the same
+    /// terminology for every file of its provider set.
+    ///
     /// Returns `None` when no plugin contributes terminology to the file.
-    pub fn vocabulary_table(
+    pub fn vocabulary_for(
         &self,
         file_path: &str,
         language: Option<&str>,
-    ) -> Option<Arc<crate::vocabulary::VocabularyTable>> {
+    ) -> Option<Arc<FileVocabulary>> {
         let providers = self.get_vocabulary_providers(Some(file_path), language);
         if providers.is_empty() {
             return None;
         }
         let key = crate::vocabulary::provider_identity(&providers, self.revision());
-        if let Ok(cache) = self.vocabulary_tables.lock()
-            && let Some(table) = cache.get(&key)
+        let merged = self.vocabulary_providers(&key, &providers);
+        if let Some(unrestricted) = &merged.unrestricted {
+            return Some(unrestricted.clone());
+        }
+        // The scope decides which entries apply, so the result depends on the
+        // file and is cached per file.
+        let file_key = (key, file_path.to_string());
+        if let Ok(cache) = self.file_vocabularies.lock()
+            && let Some(view) = cache.get(&file_key)
         {
-            return Some(table.clone());
+            return Some(view.clone());
         }
-        let table = Arc::new(crate::vocabulary::merge(&providers));
+        let view = Arc::new(FileVocabulary::resolved(merged.table.clone(), file_path));
+        if let Ok(mut cache) = self.file_vocabularies.lock() {
+            if cache.len() >= MAX_CACHED_FILE_VOCABULARIES {
+                cache.clear();
+            }
+            cache.insert(file_key, view.clone());
+        }
+        Some(view)
+    }
+
+    /// The merged tables of a provider set, cached per provider set.
+    fn vocabulary_providers(
+        &self,
+        key: &str,
+        providers: &[&Arc<dyn CodePlugin>],
+    ) -> Arc<VocabularyProviders> {
+        if let Ok(cache) = self.vocabulary_tables.lock()
+            && let Some(merged) = cache.get(key)
+        {
+            return merged.clone();
+        }
+        let table = Arc::new(crate::vocabulary::merge(providers));
+        let unrestricted = if table.has_scopes() {
+            None
+        } else {
+            Some(Arc::new(FileVocabulary::all(table.clone())))
+        };
+        let merged = Arc::new(VocabularyProviders {
+            table,
+            unrestricted,
+        });
         if let Ok(mut cache) = self.vocabulary_tables.lock() {
-            cache.insert(key, table.clone());
+            cache.insert(key.to_string(), merged.clone());
         }
-        Some(table)
+        merged
     }
 
     /// Plugins that contribute a domain terminology table (`Vocabulary`).
@@ -425,6 +508,7 @@ impl PluginRegistry {
         let removed = self.entries.remove(id).is_some();
         if removed {
             self.revision += 1;
+            self.clear_vocabulary_caches();
         }
         removed
     }
@@ -994,6 +1078,103 @@ mod tests {
                 .get_vocabulary_providers(Some("a.c"), Some("rust"))
                 .len(),
             0
+        );
+    }
+
+    /// A plugin that contributes a terminology table.
+    struct TablePlugin {
+        meta: PluginMetadata,
+        entries: Vec<cce_types::plugin::VocabularyEntry>,
+    }
+
+    impl TablePlugin {
+        fn new(id: &str, entries: Vec<cce_types::plugin::VocabularyEntry>) -> Self {
+            Self {
+                meta: PluginMetadata {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    version: "0.1.0".to_string(),
+                    priority: 0,
+                    capability_priorities: HashMap::new(),
+                    capability_timeouts: HashMap::new(),
+                    description: None,
+                    capabilities: vec!["vocabulary".to_string()],
+                },
+                entries,
+            }
+        }
+    }
+
+    impl CodePlugin for TablePlugin {
+        fn metadata(&self) -> &PluginMetadata {
+            &self.meta
+        }
+        fn supports_vocabulary(&self) -> bool {
+            true
+        }
+        fn vocabulary(&self) -> Result<Vec<cce_types::plugin::VocabularyEntry>, PluginError> {
+            Ok(self.entries.clone())
+        }
+    }
+
+    fn scoped_entry(
+        token: &str,
+        expansion: &str,
+        include: &str,
+    ) -> cce_types::plugin::VocabularyEntry {
+        cce_types::plugin::VocabularyEntry::with_scope(
+            token,
+            expansion,
+            cce_types::plugin::VocabularyScope {
+                include: vec![include.to_string()],
+                exclude: Vec::new(),
+                priority: 0,
+            },
+        )
+    }
+
+    #[test]
+    fn test_vocabulary_is_resolved_per_file() {
+        let mut registry = PluginRegistry::new();
+        registry.register(Arc::new(TablePlugin::new(
+            "scoped",
+            vec![scoped_entry("track", "media track", "packages/player/**")],
+        )));
+
+        let inside = registry
+            .vocabulary_for("packages/player/src/a.c", Some("c"))
+            .expect("vocabulary");
+        assert_eq!(inside.matched_entries(&["track"]).len(), 1);
+
+        let outside = registry
+            .vocabulary_for("packages/recorder/src/a.c", Some("c"))
+            .expect("vocabulary");
+        assert!(
+            outside.matched_entries(&["track"]).is_empty(),
+            "a file outside the scope must not receive the entry"
+        );
+    }
+
+    #[test]
+    fn test_vocabulary_without_scope_is_shared_across_files() {
+        let mut registry = PluginRegistry::new();
+        registry.register(Arc::new(TablePlugin::new(
+            "plain",
+            vec![cce_types::plugin::VocabularyEntry::new(
+                "stts",
+                "sync time-to-sample",
+            )],
+        )));
+
+        let first = registry
+            .vocabulary_for("src/a.c", Some("c"))
+            .expect("vocabulary");
+        let second = registry
+            .vocabulary_for("src/b.c", Some("c"))
+            .expect("vocabulary");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a table without a scope serves every file of the provider set"
         );
     }
 

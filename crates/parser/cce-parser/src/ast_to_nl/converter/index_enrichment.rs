@@ -5,7 +5,7 @@
 
 use crate::ast_to_nl::noise::NoiseProfile;
 use crate::grouper::ProcessingResult;
-use cce_plugin::vocabulary::VocabularyTable;
+use cce_plugin::vocabulary::FileVocabulary;
 use cce_text::Bm25TextCleaner;
 use cce_types::ast_to_nl::ConversionResult;
 use cce_types::language::Language;
@@ -31,7 +31,7 @@ impl<'a> IndexTextEnricher<'a> {
         processing_result: &ProcessingResult,
         source: &str,
         language: Language,
-        vocabulary: Option<&VocabularyTable>,
+        vocabulary: Option<&FileVocabulary>,
     ) {
         // Topic anchor: what the entity branches on. A function that
         // dispatches on protocol constants states its whole subject in
@@ -84,7 +84,7 @@ impl<'a> IndexTextEnricher<'a> {
         conversion: &mut ConversionResult,
         processing_result: &ProcessingResult,
         body_text: &str,
-        vocabulary: &VocabularyTable,
+        vocabulary: &FileVocabulary,
     ) {
         let signature = find_entity_signature(processing_result, conversion.entity_id)
             .map(str::to_string)
@@ -98,7 +98,7 @@ impl<'a> IndexTextEnricher<'a> {
             doc_comment.as_str(),
             body_text,
         ]);
-        conversion.set_glossary(VocabularyTable::glossary_line(&matched));
+        conversion.set_glossary(FileVocabulary::glossary_line(&matched));
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by

@@ -447,16 +447,16 @@ fn append_glossary(
     file_path: &str,
     registry: &cce_plugin::PluginRegistry,
 ) {
-    let Some(table) = registry.vocabulary_table(file_path, None) else {
+    let Some(vocabulary) = registry.vocabulary_for(file_path, None) else {
         return;
     };
-    if table.is_empty() {
+    if vocabulary.is_empty() {
         return;
     }
     let bm25_cleaner = Bm25TextCleaner::new();
     for chunk in chunks.iter_mut() {
-        let matched = table.matched_entries(&[chunk.text.as_str()]);
-        let Some(line) = cce_plugin::vocabulary::VocabularyTable::glossary_line(&matched) else {
+        let matched = vocabulary.matched_entries(&[chunk.text.as_str()]);
+        let Some(line) = cce_plugin::vocabulary::FileVocabulary::glossary_line(&matched) else {
             continue;
         };
         let text = bm25_cleaner.clean(&line);

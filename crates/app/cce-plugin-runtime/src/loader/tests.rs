@@ -891,7 +891,7 @@ fn test_vocabulary_enforces_the_host_limits() {
                 id = "oversized_vocabulary",
                 vocabulary = function()
                     local entries = {}
-                    for index = 1, 400 do
+                    for index = 1, 1200 do
                         entries[#entries + 1] = { token = "t" .. index, expansion = string.rep("x", 500) }
                     end
                     return entries
@@ -905,6 +905,58 @@ fn test_vocabulary_enforces_the_host_limits() {
         entries[0].expansion.chars().count(),
         cce_types::MAX_VOCABULARY_EXPANSION_LENGTH
     );
+}
+
+#[test]
+fn test_vocabulary_reads_the_scope_of_an_entry() {
+    let script = r#"
+            plugin = {
+                id = "scoped_vocabulary",
+                vocabulary = function()
+                    return {
+                        { token = "track", expansion = "media track",
+                          scope = { include = { "packages/player/**" },
+                                    exclude = { "packages/player/tests/**" },
+                                    priority = 10 } },
+                        { token = "stts", expansion = "sync time-to-sample" }
+                    }
+                end
+            }
+        "#;
+    let plugin = LuaPlugin::from_script(script).unwrap();
+    let entries = plugin.vocabulary().unwrap();
+    assert_eq!(entries.len(), 2);
+    let scope = entries[0].scope.as_ref().expect("scope");
+    assert_eq!(scope.include, vec!["packages/player/**".to_string()]);
+    assert_eq!(scope.exclude, vec!["packages/player/tests/**".to_string()]);
+    assert_eq!(scope.priority, 10);
+    assert!(
+        entries[1].scope.is_none(),
+        "an entry without a scope applies to every file"
+    );
+}
+
+#[test]
+fn test_vocabulary_skips_an_entry_with_an_unusable_scope() {
+    let script = r#"
+            plugin = {
+                id = "broken_scope",
+                vocabulary = function()
+                    return {
+                        { token = "track", expansion = "media track", scope = "packages/player/**" },
+                        { token = "stts", expansion = "sync time-to-sample" }
+                    }
+                end
+            }
+        "#;
+    let plugin = LuaPlugin::from_script(script).unwrap();
+    let entries = plugin.vocabulary().unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "a scope the host cannot read must not degrade into an unrestricted entry"
+    );
+    assert_eq!(entries[0].token, "stts");
 }
 
 // ── SymbolExtract ────────────────────────────────────────────────

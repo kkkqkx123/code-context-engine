@@ -163,9 +163,17 @@ fn test_vocabulary_entries_are_read() {
     let entries = plugin.vocabulary().expect("vocabulary call failed");
     // The fixture also carries an entry without an expansion; it is dropped
     // while the usable entries survive.
-    assert_eq!(entries.len(), 2);
+    assert_eq!(entries.len(), 3);
     assert_eq!(entries[0].token, "stts");
     assert_eq!(entries[0].expansion, "sync time-to-sample");
     assert_eq!(entries[1].token, "sdp");
     assert_eq!(entries[1].expansion, "session description protocol");
+    assert!(
+        entries[0].scope.is_none(),
+        "an entry without a scope applies to every file"
+    );
+    let scope = entries[2].scope.as_ref().expect("scope");
+    assert_eq!(scope.include, vec!["packages/player/**".to_string()]);
+    assert!(scope.exclude.is_empty());
+    assert_eq!(scope.priority, 5);
 }

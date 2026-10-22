@@ -87,3 +87,73 @@ pub(crate) fn get_string_field(table: &Table, key: &str) -> Option<String> {
         _ => None,
     }
 }
+
+/// Read the scope of a vocabulary entry.
+///
+/// The scope is a table with an `include` list, an `exclude` list and an
+/// optional `priority`. A missing scope yields `None`.
+///
+/// A scope that cannot be read yields an error: the entry states a constraint
+/// the host cannot honor, and honoring it as "applies everywhere" would put a
+/// wrong meaning into the index.
+pub(crate) fn read_vocabulary_scope(
+    entry: &Table,
+) -> Result<Option<cce_types::plugin::VocabularyScope>, String> {
+    let raw: mlua::Value = entry
+        .get("scope")
+        .map_err(|error| format!("failed to read the scope: {error}"))?;
+    let mlua::Value::Table(scope) = raw else {
+        if matches!(raw, mlua::Value::Nil) {
+            return Ok(None);
+        }
+        return Err("the scope must be a table".to_string());
+    };
+    let include = read_pattern_list(&scope, "include")?;
+    let exclude = read_pattern_list(&scope, "exclude")?;
+    let priority = read_scope_priority(&scope)?;
+    Ok(Some(cce_types::plugin::VocabularyScope {
+        include,
+        exclude,
+        priority,
+    }))
+}
+
+/// Read one list of path patterns of a scope.
+fn read_pattern_list(scope: &Table, key: &str) -> Result<Vec<String>, String> {
+    let raw: mlua::Value = scope
+        .get(key)
+        .map_err(|error| format!("failed to read the scope {key}: {error}"))?;
+    let mlua::Value::Table(list) = raw else {
+        if matches!(raw, mlua::Value::Nil) {
+            return Ok(Vec::new());
+        }
+        return Err(format!("the scope {key} must be a list of patterns"));
+    };
+    let mut patterns = Vec::new();
+    for pair in list.pairs::<mlua::Value, mlua::Value>() {
+        let (_, value) =
+            pair.map_err(|error| format!("failed to read the scope {key}: {error}"))?;
+        let mlua::Value::String(pattern) = value else {
+            return Err(format!("the scope {key} must be a list of patterns"));
+        };
+        patterns.push(pattern.to_string_lossy().to_string());
+    }
+    Ok(patterns)
+}
+
+/// Read the priority of a scope.
+fn read_scope_priority(scope: &Table) -> Result<i32, String> {
+    let raw: mlua::Value = scope
+        .get("priority")
+        .map_err(|error| format!("failed to read the scope priority: {error}"))?;
+    match raw {
+        mlua::Value::Nil => Ok(0),
+        mlua::Value::Integer(value) => i32::try_from(value)
+            .map_err(|_| format!("the scope priority must be a 32-bit integer, got {value}")),
+        mlua::Value::Number(value) if value.is_finite() && value.fract() == 0.0 => {
+            i32::try_from(value as i64)
+                .map_err(|_| format!("the scope priority must be a 32-bit integer, got {value}"))
+        }
+        _ => Err("the scope priority must be a 32-bit integer".to_string()),
+    }
+}

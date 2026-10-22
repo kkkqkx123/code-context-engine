@@ -416,6 +416,19 @@ char *cce_plugin_filter_file(void *ctx, const char *file_path, bool is_directory
  * Result `value` is a JSON array of VocabularyEntry objects:
  *   [{"token":"stts","expansion":"sync time-to-sample"}]
  *
+ * An entry may carry a scope that restricts the files it applies to:
+ *   {"token":"track","expansion":"media track",
+ *    "scope":{"include":["packages/player/**"],
+ *             "exclude":["packages/player/tests/**"],
+ *             "priority":0}}
+ *
+ * The scope patterns are matched against the project-relative path of the
+ * indexed file and use the same glob dialect as the plugin-level
+ * `file_patterns` filter. An entry without a scope applies to every file the
+ * plugin is routed to. When several entries share a token, the one with the
+ * higher scope priority wins, then the one whose matching scope is the
+ * narrowest, then the one of the plugin with the higher priority.
+ *
  * The host merges the tables of all matching plugins, matches the tokens
  * against identifier tokens and their segments in the indexed text and
  * renders the matched expansions as a glossary line.
@@ -423,9 +436,10 @@ char *cce_plugin_filter_file(void *ctx, const char *file_path, bool is_directory
  * Matching ignores case: the index tokenizer lowercases every token, so a
  * term written "stts" matches a source identifier written "STTS".
  *
- * The host keeps at most 256 entries per table and at most 1024 entries in
+ * The host keeps at most 1024 entries per table and at most 4096 entries in
  * the merged table, and truncates an expansion longer than 200 characters.
- * An entry without a token or without an expansion is dropped. The plugin
+ * An entry without a token or without an expansion is dropped, and so is an
+ * entry whose scope the host cannot read or cannot satisfy. The plugin
  * must list "vocabulary" in its declared `capabilities` to be routed to; the
  * guard `cce_plugin_has_vocabulary` and this entry point must both be
  * exported.

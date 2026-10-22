@@ -10,7 +10,8 @@
  *     element (exercises the host's null/skip handling).
  *   - Embedding single/batch: always returns an error with
  *     error_type "logic" (exercises error_type restoration on the host).
- *   - Vocabulary: returns a two-entry domain terminology table.
+ *   - Vocabulary: returns a domain terminology table, one entry of which
+ *     carries a path scope.
  */
 
 #include "cce_plugin.h"
@@ -135,5 +136,7 @@ char *cce_plugin_vocabulary(void *ctx) {
         "{\"result\":\"ok\",\"value\":["
         "{\"token\":\"stts\",\"expansion\":\"sync time-to-sample\"},"
         "{\"token\":\"broken\"},"
-        "{\"token\":\"sdp\",\"expansion\":\"session description protocol\"}]}");
+        "{\"token\":\"sdp\",\"expansion\":\"session description protocol\"},"
+        "{\"token\":\"track\",\"expansion\":\"media track\","
+        "\"scope\":{\"include\":[\"packages/player/**\"],\"priority\":5}}]}");
 }

@@ -661,16 +661,12 @@ impl ChunkBuilder {
                     raw_entity_ids
                 };
                 // The source coverage names the entities the segment carries,
-                // not the ones it is attributed to.
-                let covered_content_ids: Vec<_> = if let Some(ctx) = &header_ctx {
-                    covered_entity_ids
-                        .iter()
-                        .copied()
-                        .filter(|id| Some(*id) != ctx.header_entity_id)
-                        .collect()
-                } else {
-                    covered_entity_ids.clone()
-                };
+                // not the ones it is attributed to. The group header is
+                // context on the attribution side, but a segment that
+                // carries the header's own text covers the header's source
+                // lines: dropping the header here leaves such a segment
+                // with no source coverage at all.
+                let covered_source_ids = covered_entity_ids;
                 if is_continuation {
                     // Continuation segments repeat the identity of the
                     // entities they cover (see `continuation_identity`) on
@@ -717,13 +713,13 @@ impl ChunkBuilder {
                     if index == 0 && ctx.include_header_in_first_coverage {
                         ctx.header_entity_id
                             .into_iter()
-                            .chain(covered_content_ids.iter().copied())
+                            .chain(covered_source_ids.iter().copied())
                             .collect()
                     } else {
-                        covered_content_ids.clone()
+                        covered_source_ids.clone()
                     }
                 } else {
-                    covered_content_ids.clone()
+                    covered_source_ids.clone()
                 };
                 let (source_span, source_ranges, source_span_kind) =
                     source_coverage::source_coverage_for_entity_ids(
@@ -1019,6 +1015,111 @@ mod tests {
     use compact_str::CompactString;
     use smallvec::SmallVec;
     use std::collections::HashMap;
+
+    use super::super::boundary::ChunkBoundary;
+
+    /// Group whose header is one fragment and whose member is another.
+    ///
+    /// The header owns source lines 11-40, the member owns lines 43-51.
+    fn header_with_member_group() -> EntityGroup {
+        let mut group = EntityGroup {
+            group_id: CompactString::from("merged_group_1"),
+            group_type: GroupType::MergedFragments,
+            header: Some(GroupedEntity::new(
+                EntityId(1),
+                EntityKind::Function,
+                "read_fn".to_string(),
+                "read_fn".to_string(),
+            )),
+            header_id: Some(EntityId(1)),
+            members: smallvec::smallvec![GroupedEntity::new(
+                EntityId(2),
+                EntityKind::Function,
+                "write_fn".to_string(),
+                "write_fn".to_string(),
+            )],
+            member_ids: smallvec::smallvec![EntityId(2)],
+            entity_spans: HashMap::new(),
+            combined_source: None,
+            combined_source_lazy: std::sync::OnceLock::new(),
+            span: cce_types::Span::default(),
+            kind: EntityKind::Function,
+            name: CompactString::from("read_fn"),
+            language: Language::C,
+            pattern_info: crate::grouper::types::PatternInfo::None,
+            member_roles: SmallVec::new(),
+            nested_groups: Box::new([]),
+            nesting_level: 0,
+            parent_group_id: None,
+            has_significant_nested: false,
+            metadata: Default::default(),
+            test_info: cce_types::TestInfo::unknown(),
+        };
+        group
+            .entity_spans
+            .insert(EntityId(1), cce_types::Span::new(0, 400, 10, 0, 40, 0));
+        group
+            .entity_spans
+            .insert(EntityId(2), cce_types::Span::new(400, 500, 42, 0, 50, 0));
+        group
+    }
+
+    #[test]
+    fn continuation_of_the_group_header_keeps_source_coverage() {
+        // A group header whose own text is long enough to be split leaves a
+        // continuation block that carries the header's body. The header is
+        // context on the attribution side, but the block still covers the
+        // header's source lines: without the header in the coverage set the
+        // block would own no source range at all.
+        let group = header_with_member_group();
+        let tracker = GroupTracker::new();
+        let segments = vec![
+            ChunkSegment::new(
+                ChunkBoundary::new(0, 200, SplitReason::TokenLimit)
+                    .with_entity_ids(vec![EntityId(1)]),
+                "function read_fn.\nfirst half of the header body".to_string(),
+            ),
+            ChunkSegment::new(
+                ChunkBoundary::new(200, 400, SplitReason::TokenLimit)
+                    .with_entity_ids(vec![EntityId(1)]),
+                "second half of the header body".to_string(),
+            ),
+        ];
+        let chunks = ChunkBuilder::new().from_segments(
+            &tracker,
+            &segments,
+            ChunkPath::Embedding,
+            &group,
+            "lib.c",
+            &[],
+            &[],
+            Some(SegmentHeaderContext {
+                header_entity_id: group.header_id,
+                include_header_in_first_coverage: true,
+                topic_lines: &[],
+            }),
+        );
+
+        assert_eq!(chunks.len(), 2);
+        for chunk in &chunks {
+            assert!(
+                !chunk.metadata.source_ranges().is_empty(),
+                "block {} must own a source range",
+                chunk.chunk_id
+            );
+        }
+        let ranges = chunks[1].metadata.source_ranges();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(
+            ranges[0].line_range_opt(),
+            Some((11, 40)),
+            "the continuation block covers the header's own source lines"
+        );
+        assert!(
+            chunks[1].metadata.content_entity_ids().is_empty(),
+            "the header stays context for attribution"
+        );
+    }
 
     fn method_group() -> EntityGroup {
         EntityGroup {

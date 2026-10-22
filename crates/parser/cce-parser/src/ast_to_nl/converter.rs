@@ -57,7 +57,7 @@ use crate::ast_to_nl::embedding::generator::EmbeddingGenerator;
 use crate::ast_to_nl::embedding::text_cleaner::EmbeddingTextCleaner;
 use crate::plugin::PluginRegistry;
 use cce_config::AstToNlConfig;
-use cce_plugin::vocabulary::VocabularyTable;
+use cce_plugin::vocabulary::FileVocabulary;
 use cce_text::Bm25TextCleaner;
 use cce_types::OutputMode;
 use cce_types::language::Language;
@@ -107,16 +107,16 @@ impl AstToNlConverter {
             .unwrap_or(self.config.default_mode)
     }
 
-    /// The merged glossary table for a file, collected once per provider set.
+    /// The terminology that applies to a file.
     ///
     /// Returns `None` when no plugin provides a terminology table.
     pub(crate) fn vocabulary_for(
         &self,
         file_path: &str,
         language: Language,
-    ) -> Option<std::sync::Arc<VocabularyTable>> {
+    ) -> Option<std::sync::Arc<FileVocabulary>> {
         let registry = self.plugin_registry.as_ref()?;
-        registry.vocabulary_table(file_path, Some(&language.to_string()))
+        registry.vocabulary_for(file_path, Some(&language.to_string()))
     }
 }
 

@@ -874,3 +874,56 @@ fn test_example_media_vocabulary_plugin_routes_declared_languages() {
         );
     }
 }
+
+/// A Lua plugin whose terminology carries a path scope.
+const SCOPED_VOCABULARY_SCRIPT: &str = r#"
+    plugin = {
+        id = "scoped_vocabulary",
+        vocabulary = function()
+            return {
+                { token = "track", expansion = "media track",
+                  scope = { include = { "packages/player/**" } } },
+                { token = "track", expansion = "training track",
+                  scope = { include = { "packages/recorder/**" } } }
+            }
+        end
+    }
+"#;
+
+/// `Vocabulary`: the same token carries a different meaning in each package
+/// of a multi-package project.
+#[test]
+fn test_vocabulary_scope_gives_each_package_its_own_meaning() {
+    let source = "int play(int track) {\n    return track;\n}\n";
+    let group = vocabulary_group("play", "int play(int)", Language::C);
+
+    for (path, expected) in [
+        ("packages/player/src/play.c", "media track"),
+        ("packages/recorder/src/play.c", "training track"),
+    ] {
+        let mut registry = PluginRegistry::new();
+        registry.register(pattern_extract_plugin(SCOPED_VOCABULARY_SCRIPT));
+        let conversion = convert_header_with_registry_and_path(registry, &group, source, path);
+        assert_eq!(
+            conversion.glossary.as_deref(),
+            Some(format!("Glossary: track = {expected}").as_str()),
+            "the file {path} must carry the meaning of its own package"
+        );
+    }
+}
+
+/// `Vocabulary`: a file outside every scope receives no terminology at all.
+#[test]
+fn test_vocabulary_scope_leaves_unrelated_files_untouched() {
+    let source = "int play(int track) {\n    return track;\n}\n";
+    let group = vocabulary_group("play", "int play(int)", Language::C);
+
+    let mut registry = PluginRegistry::new();
+    registry.register(pattern_extract_plugin(SCOPED_VOCABULARY_SCRIPT));
+    let conversion =
+        convert_header_with_registry_and_path(registry, &group, source, "packages/tools/play.c");
+    assert!(
+        conversion.glossary.is_none(),
+        "a file outside every scope must not receive a terminology line"
+    );
+}

@@ -796,12 +796,55 @@ impl CodePlugin for NativePlugin {
 /// Read one vocabulary entry from its JSON representation.
 ///
 /// Returns `None` when the entry does not carry a string token and a string
-/// expansion.
+/// expansion, or when it carries a scope the host cannot honor.
 fn parse_vocabulary_entry(value: &serde_json::Value) -> Option<cce_types::plugin::VocabularyEntry> {
     let object = value.as_object()?;
     let token = object.get("token")?.as_str()?;
     let expansion = object.get("expansion")?.as_str()?;
-    Some(cce_types::plugin::VocabularyEntry::new(token, expansion))
+    let scope = match object.get("scope") {
+        None => None,
+        Some(value) if value.is_null() => None,
+        Some(value) => Some(parse_vocabulary_scope(value)?),
+    };
+    Some(cce_types::plugin::VocabularyEntry {
+        token: token.to_string(),
+        expansion: expansion.to_string(),
+        scope,
+    })
+}
+
+/// Read the scope of a vocabulary entry from its JSON representation.
+///
+/// Returns `None` when the scope cannot be read: an entry that states a
+/// constraint the host cannot honor must not be applied to files it was never
+/// meant for.
+fn parse_vocabulary_scope(value: &serde_json::Value) -> Option<cce_types::plugin::VocabularyScope> {
+    let object = value.as_object()?;
+    let include = parse_pattern_list(object.get("include"))?;
+    let exclude = parse_pattern_list(object.get("exclude"))?;
+    let priority = match object.get("priority") {
+        None => 0,
+        Some(value) if value.is_null() => 0,
+        Some(value) => i32::try_from(value.as_i64()?).ok()?,
+    };
+    Some(cce_types::plugin::VocabularyScope {
+        include,
+        exclude,
+        priority,
+    })
+}
+
+/// Read one list of path patterns of a scope from its JSON representation.
+fn parse_pattern_list(value: Option<&serde_json::Value>) -> Option<Vec<String>> {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Some(Vec::new());
+    };
+    let array = value.as_array()?;
+    let mut patterns = Vec::with_capacity(array.len());
+    for item in array {
+        patterns.push(item.as_str()?.to_string());
+    }
+    Some(patterns)
 }
 
 impl NativePlugin {

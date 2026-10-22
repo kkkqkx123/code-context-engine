@@ -87,3 +87,15 @@ function plugin.vocabulary()
         { token = "dash", expansion = "dynamic adaptive streaming over HTTP" },
     }
 end
+
+-- A scoped entry applies to the files its patterns select only. The patterns
+-- are matched against the project-relative path and use the same glob
+-- dialect as the plugin-level `file_patterns` filter, so a file name pattern
+-- and a file suffix are just path globs:
+--
+--   { token = "track", expansion = "media track",
+--     scope = { include = { "packages/player/**" } } }
+--
+-- The same token may carry a different meaning in another package; the host
+-- picks the entry whose scope is the narrowest match, and uses the explicit
+-- scope priority to break a tie.
