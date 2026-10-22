@@ -27,11 +27,11 @@ pub use validation::{
 
 pub use modules::{
     AstToNlConfig, BatchConfig, Bm25Config, Bm25GeneratorConfig, CacheConfig, ChunkingConfig,
-    DebounceConfig, EmbedderConfig, EmbeddingGeneratorConfig, FileWatchConfig, HotUpdateConfig,
-    IndexConfig, IndexerConfig, LicenseHeaderConfig, LicenseHeaderRule, NestProcessorConfig,
-    OrchestratorConfig, PreprocessorConfig, QdrantConfig, RelationBuilderParams, RelationConfig,
-    RerankConfig, ScannerConfig, SummaryConfig, SummaryGenerationStrategy, SymbolResolutionConfig,
-    default_embed_input_token_limit,
+    DebounceConfig, EmbedderConfig, EmbeddingGeneratorConfig, FileWatchConfig, GlossaryScope,
+    HotUpdateConfig, IndexConfig, IndexerConfig, LicenseHeaderConfig, LicenseHeaderRule,
+    NestProcessorConfig, OrchestratorConfig, PreprocessorConfig, QdrantConfig,
+    RelationBuilderParams, RelationConfig, RerankConfig, ScannerConfig, SummaryConfig,
+    SummaryGenerationStrategy, SymbolResolutionConfig, default_embed_input_token_limit,
 };
 
 pub use project_registry::{ProjectEntry, ProjectMetadata, ProjectScope, RegistryError};

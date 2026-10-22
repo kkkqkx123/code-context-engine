@@ -136,17 +136,18 @@ pub struct ConversionResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding_brief_header: Option<String>,
 
-    /// Domain glossary line of this entity.
+    /// The domain terminology this entity uses.
     ///
-    /// Rendered from the `Vocabulary` plugin capability: it lists the domain
-    /// terms the entity uses together with their human-readable expansions.
+    /// Collected from the `Vocabulary` plugin capability: it lists the
+    /// domain terms the entity uses together with their human-readable
+    /// expansions.
     ///
-    /// The line is carried apart from the BM25 and embedding texts because
-    /// its landing point differs per output. The chunker appends a per-chunk
-    /// line to the indexed text, while the export path renders the
-    /// entity-level line.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub glossary: Option<String>,
+    /// The terminology is carried apart from the BM25 and embedding texts
+    /// because its landing point differs per output. The chunker injects the
+    /// expansions into the indexed text, while the export path renders them
+    /// into the entity description it writes for a reader.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<crate::types::plugin::VocabularyMatch>,
 }
 
 impl Default for ConversionResult {
@@ -167,7 +168,7 @@ impl Default for ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         }
     }
 }
@@ -203,7 +204,7 @@ impl ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         }
     }
 
@@ -233,7 +234,7 @@ impl ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         }
     }
 
@@ -264,7 +265,7 @@ impl ConversionResult {
             entity_metadata: EntityMetadata::default(),
             entity_end_lines: Vec::new(),
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         }
     }
 
@@ -277,14 +278,14 @@ impl ConversionResult {
         self
     }
 
-    /// Set the domain glossary line of this entity.
-    pub fn with_glossary(mut self, glossary: Option<String>) -> Self {
+    /// Set the domain terminology of this entity.
+    pub fn with_glossary(mut self, glossary: Vec<crate::types::plugin::VocabularyMatch>) -> Self {
         self.glossary = glossary;
         self
     }
 
-    /// Set the domain glossary line of this entity.
-    pub fn set_glossary(&mut self, glossary: Option<String>) {
+    /// Set the domain terminology of this entity.
+    pub fn set_glossary(&mut self, glossary: Vec<crate::types::plugin::VocabularyMatch>) {
         self.glossary = glossary;
     }
 

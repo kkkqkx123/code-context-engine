@@ -32,8 +32,10 @@ plugin = {
 }
 
 -- Returns the terminology table. The host matches the tokens against whole
--- identifiers and their segments, ignoring case, and renders the matched
--- entries as a `Glossary:` line on every chunk that uses them.
+-- identifiers and their segments, ignoring case, and places the expansion of
+-- a matched term at its first occurrence: inline after the identifier for
+-- the embedding text, and as a trailing block at the end of the line for
+-- the keyword text.
 function plugin.vocabulary()
     return {
         { token = "ftyp", expansion = "file type box" },

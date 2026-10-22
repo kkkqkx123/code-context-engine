@@ -375,7 +375,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         }
     }
 
@@ -705,7 +705,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         }
     }
 
@@ -773,7 +773,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         };
 
         let group_conversions = GroupConversions {
@@ -851,7 +851,7 @@ mod tests {
             entity_metadata: Default::default(),
             entity_end_lines: vec![],
             embedding_brief_header: None,
-            glossary: None,
+            glossary: Vec::new(),
         };
 
         let group_conversions = GroupConversions {

@@ -69,6 +69,12 @@ pub struct CompleteFileProcessResult {
     /// Non-zero means indexed content is incomplete: the file must be
     /// reported as degraded even though processing succeeded.
     pub dropped_blank_segments: usize,
+    /// The domain terminology the pipeline placed into the indexed text.
+    ///
+    /// The counters describe how many expansions the file received, how
+    /// many did not fit into the room their chunk reserved for them, and
+    /// how many chunks broke their budget.
+    pub vocabulary: cce_plugin::vocabulary::VocabularyStats,
     /// Structured document pipeline degraded to plain text.
     pub document_degraded: bool,
     /// Tree-sitter reported syntax errors while parsing.
@@ -295,7 +301,7 @@ impl FileProcessor {
                 .document_chunking_config
                 .as_ref()
                 .unwrap_or(&self.chunking_config);
-            let (chunks, _, _) =
+            let (chunks, _, _, _) =
                 self.process_doc(&content, relative_path, output_mode, chunking_config)?;
             Ok(Some(chunks))
         } else {
@@ -350,7 +356,7 @@ impl FileProcessor {
                 .document_chunking_config
                 .as_ref()
                 .unwrap_or(&self.chunking_config);
-            let (chunks, _, _) =
+            let (chunks, _, _, _) =
                 self.process_doc(&content, &relative_path, output_mode, chunking_config)?;
             Ok(Some(chunks))
         } else {

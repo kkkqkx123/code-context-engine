@@ -72,13 +72,14 @@ impl<'a> IndexTextEnricher<'a> {
         }
     }
 
-    /// Compute the glossary line for the domain terms used by the entity.
+    /// Collect the domain terminology of the entity.
     ///
     /// The scan covers the entity name, its signature, its documentation
     /// comment and the function body text produced by the index enrichment
-    /// stage. The line is carried on the conversion result instead of being
-    /// appended to the texts: the indexed text receives a per-chunk line from
-    /// the chunker, while this entity-level line serves the export path.
+    /// stage. The terminology is carried on the conversion result instead of
+    /// being written into the texts: the chunker places the expansions into
+    /// the indexed text, while the export path renders them into the
+    /// entity description it writes for a reader.
     fn compute_glossary(
         &self,
         conversion: &mut ConversionResult,
@@ -98,7 +99,7 @@ impl<'a> IndexTextEnricher<'a> {
             doc_comment.as_str(),
             body_text,
         ]);
-        conversion.set_glossary(FileVocabulary::glossary_line(&matched));
+        conversion.set_glossary(matched);
     }
 
     /// Build merged code text from control flow and behavior facts, sorted by

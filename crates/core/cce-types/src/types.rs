@@ -55,7 +55,7 @@ pub use plugin::{
     MAX_VOCABULARY_EXPANSION_LENGTH, MAX_VOCABULARY_SCOPE_PATTERN_LENGTH,
     MAX_VOCABULARY_SCOPE_PATTERNS, PluginDocument, PluginEntity, PluginExport, PluginImport,
     PluginRelation, PluginSymbol, PluginSymbolLocation, QueryRewriteResult, ResultFilterEntry,
-    VocabularyEntry, VocabularyScope,
+    VocabularyEntry, VocabularyMatch, VocabularyScope,
 };
 
 pub use import::ImportSource;

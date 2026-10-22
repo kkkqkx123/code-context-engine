@@ -135,6 +135,18 @@ pub struct IndexQualityMetrics {
     pub entity_metadata_malformed_total: LabeledCounter,
     pub empty_files_total: LabeledCounter,
     pub dead_letter_truncated_total: LabeledCounter,
+    /// The number of domain terminology entries placed into the indexed text.
+    pub vocabulary_entries_injected_total: LabeledCounter,
+    /// The number of matched terminology entries that did not fit into the
+    /// room their chunk reserved for them.
+    pub vocabulary_entries_truncated_total: LabeledCounter,
+    /// The number of files whose text carries a domain terminology table.
+    pub vocabulary_files_with_table_total: LabeledCounter,
+    /// The number of chunks whose injected text exceeded the chunk limit.
+    ///
+    /// The reserved room makes this impossible; a non-zero count means the
+    /// reserve ratio is configured too small.
+    pub vocabulary_budget_overflow_total: LabeledCounter,
 }
 
 impl IndexQualityMetrics {
@@ -154,7 +166,41 @@ impl IndexQualityMetrics {
             empty_files_total: registry.counter("empty_files_total", &[("project_id", &proj_val)]),
             dead_letter_truncated_total: registry
                 .counter("dead_letter_truncated_total", &[("project_id", &proj_val)]),
+            vocabulary_entries_injected_total: registry.counter(
+                "vocabulary_entries_injected_total",
+                &[("project_id", &proj_val)],
+            ),
+            vocabulary_entries_truncated_total: registry.counter(
+                "vocabulary_entries_truncated_total",
+                &[("project_id", &proj_val)],
+            ),
+            vocabulary_files_with_table_total: registry.counter(
+                "vocabulary_files_with_table_total",
+                &[("project_id", &proj_val)],
+            ),
+            vocabulary_budget_overflow_total: registry.counter(
+                "vocabulary_budget_overflow_total",
+                &[("project_id", &proj_val)],
+            ),
         })
+    }
+
+    /// Record the domain terminology of one file.
+    ///
+    /// A file that carries a terminology table counts once, whether or not
+    /// its text mentioned any of the terms.
+    pub fn record_vocabulary(&self, injected: usize, truncated: usize, overflow: usize) {
+        if injected > 0 {
+            self.vocabulary_entries_injected_total.add(injected as u64);
+            self.vocabulary_files_with_table_total.increment();
+        }
+        if truncated > 0 {
+            self.vocabulary_entries_truncated_total
+                .add(truncated as u64);
+        }
+        if overflow > 0 {
+            self.vocabulary_budget_overflow_total.add(overflow as u64);
+        }
     }
 
     pub fn record_deferred_uncommitted(&self, count: usize) {

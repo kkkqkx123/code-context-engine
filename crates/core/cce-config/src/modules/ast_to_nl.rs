@@ -147,6 +147,23 @@ impl Validate for EmbeddingGeneratorConfig {
     }
 }
 
+/// The granularity at which domain terminology is injected.
+///
+/// The chunk is the unit that is actually retrieved, so the chunk is also
+/// the unit that carries the expansion of a term: every chunk that mentions
+/// a term explains it. The entity scope trades that coverage for a smaller
+/// index: the expansion is placed once per entity, so only the chunk that
+/// holds the first occurrence explains the term.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GlossaryScope {
+    /// One expansion per chunk, at the first occurrence inside the chunk.
+    #[default]
+    Chunk,
+    /// One expansion per entity, at the first occurrence inside the entity.
+    Entity,
+}
+
 /// Chunking configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkingConfig {
@@ -187,6 +204,25 @@ pub struct ChunkingConfig {
     /// its word limit.
     #[serde(default = "default_cross_group_merge_threshold")]
     pub cross_group_merge_threshold: usize,
+
+    /// The share of the chunk limit reserved for domain terminology
+    /// (default: 0.06).
+    ///
+    /// The reserve is taken out of the limits the splitter works with, so
+    /// every chunk it produces leaves exactly this much room for the
+    /// injected expansions. A reserve of 0 disables the room and lets the
+    /// injection push a chunk over its limit.
+    #[serde(default = "default_glossary_reserve_ratio")]
+    pub glossary_reserve_ratio: f32,
+
+    /// The maximum number of terminology entries one chunk may carry
+    /// (default: 4).
+    #[serde(default = "default_glossary_max_entries")]
+    pub glossary_max_entries: usize,
+
+    /// The granularity of the terminology injection (default: chunk).
+    #[serde(default)]
+    pub glossary_scope: GlossaryScope,
 }
 
 impl Default for ChunkingConfig {
@@ -201,6 +237,9 @@ impl Default for ChunkingConfig {
             min_chunk_bm25_words: default_min_chunk_bm25_words(),
             respect_boundaries: default_respect_boundaries(),
             cross_group_merge_threshold: default_cross_group_merge_threshold(),
+            glossary_reserve_ratio: default_glossary_reserve_ratio(),
+            glossary_max_entries: default_glossary_max_entries(),
+            glossary_scope: GlossaryScope::default(),
         }
     }
 }
@@ -224,6 +263,57 @@ impl ChunkingConfig {
             }
         }
     }
+
+    /// The room one chunk reserves for domain terminology, in the unit of
+    /// `path` (words for BM25, tokens for Embedding).
+    ///
+    /// The reserve is the share of the chunk limit the terminology injection
+    /// may spend. It is computed from the limits the caller configured, so
+    /// the splitter can run on limits reduced by exactly this amount.
+    pub fn glossary_reserve(&self, path: cce_types::ChunkPath) -> usize {
+        let (limit, ratio) = match path {
+            cce_types::ChunkPath::Bm25 => (self.max_bm25_words, self.glossary_reserve_ratio),
+            cce_types::ChunkPath::Embedding => (self.max_tokens, self.glossary_reserve_ratio),
+        };
+        if limit == 0 || ratio <= 0.0 {
+            return 0;
+        }
+        ((limit as f32) * ratio).ceil() as usize
+    }
+
+    /// The chunk limits reduced by the terminology reserve.
+    ///
+    /// The splitter runs on these limits, so the chunks it produces leave
+    /// exactly the reserved room for the injected expansions and can never
+    /// grow past the configured limit once the expansions are in place.
+    ///
+    /// The overlap size is never reduced: an overlap that reaches into the
+    /// reserved room would defeat the reserve.
+    pub fn with_glossary_reserve(&self) -> Self {
+        let mut reserved = self.clone();
+        let token_reserve = self.glossary_reserve(cce_types::ChunkPath::Embedding);
+        let word_reserve = self.glossary_reserve(cce_types::ChunkPath::Bm25);
+
+        reserved.max_tokens = reduced_limit(self.max_tokens, token_reserve, self.overlap_tokens);
+        reserved.max_bm25_words =
+            reduced_limit(self.max_bm25_words, word_reserve, self.overlap_bm25_words);
+        if self.cross_group_merge_threshold != 0 {
+            reserved.cross_group_merge_threshold =
+                reduced_limit(self.cross_group_merge_threshold, token_reserve, 0);
+        }
+        reserved
+    }
+}
+
+/// The limit reduced by `reserve`, never below `floor`.
+///
+/// The floor keeps the limit above the overlap size, so the reduced limit
+/// stays a valid configuration.
+fn reduced_limit(limit: usize, reserve: usize, floor: usize) -> usize {
+    limit
+        .saturating_sub(reserve)
+        .max(floor.saturating_add(1))
+        .min(limit)
 }
 
 impl Validate for ChunkingConfig {
@@ -282,6 +372,20 @@ impl Validate for ChunkingConfig {
                 "must be 0 or no greater than max_tokens",
             ));
         }
+        if self.glossary_reserve_ratio < 0.0 || self.glossary_reserve_ratio >= 1.0 {
+            errors.push(ConfigValidationError::out_of_range(
+                "chunking.glossary_reserve_ratio",
+                self.glossary_reserve_ratio.to_string(),
+                "0",
+                "1",
+            ));
+        }
+        if self.glossary_max_entries == 0 {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.glossary_max_entries",
+                "must be greater than 0",
+            ));
+        }
 
         if errors.is_empty() {
             Ok(())
@@ -333,6 +437,14 @@ fn default_max_bm25_words() -> usize {
 
 fn default_overlap_bm25_words() -> usize {
     5
+}
+
+fn default_glossary_reserve_ratio() -> f32 {
+    0.06
+}
+
+fn default_glossary_max_entries() -> usize {
+    4
 }
 
 #[cfg(test)]

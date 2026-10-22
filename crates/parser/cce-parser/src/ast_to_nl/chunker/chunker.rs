@@ -25,9 +25,12 @@
 //! This separation allows flexible policy decisions while keeping splitting logic reusable.
 
 use crate::grouper::EntityGroup;
+use cce_config::modules::GlossaryScope;
 use cce_plugin::CodePlugin;
-use cce_plugin::vocabulary::FileVocabulary;
-use cce_text::Bm25TextCleaner;
+use cce_plugin::vocabulary::{
+    ExpandedTerms, FileVocabulary, InjectionBudget, InjectionStyle, TerminologyIndex,
+    VocabularyStats, inject,
+};
 use cce_types::ConversionResult;
 use cce_types::ParseError;
 use cce_types::Span;
@@ -35,17 +38,19 @@ use cce_types::entity::EntityId;
 use cce_utils::token_estimation::TokenEstimator;
 use std::sync::Arc;
 
-use crate::ast_to_nl::embedding::text_cleaner::EmbeddingTextCleaner;
-
 /// Output of one chunking unit (a single text path, a group, or a whole file).
 ///
 /// `dropped_blank_segments` counts segments the splitter produced as
 /// whitespace-only and had to drop: content loss that must surface as a
 /// degraded file rather than stay invisible behind a warn log.
+///
+/// `vocabulary` counts the domain terminology the chunker placed into the
+/// chunks and the terminology that did not fit into the reserved room.
 #[derive(Debug, Default)]
 pub struct ChunkOutput {
     pub chunks: Vec<ChunkedResult>,
     pub dropped_blank_segments: usize,
+    pub vocabulary: VocabularyStats,
 }
 
 impl ChunkOutput {
@@ -53,12 +58,14 @@ impl ChunkOutput {
         Self {
             chunks,
             dropped_blank_segments: 0,
+            vocabulary: VocabularyStats::default(),
         }
     }
 
     pub(crate) fn absorb(&mut self, other: ChunkOutput) {
         self.chunks.extend(other.chunks);
         self.dropped_blank_segments += other.dropped_blank_segments;
+        self.vocabulary.absorb(other.vocabulary);
     }
 }
 
@@ -130,28 +137,20 @@ impl Bm25Chunk {
 pub struct GroupChunker {
     config: ChunkingConfig,
     estimator: TokenEstimator,
-    splitter: TextSplitter,
     overlap_manager: OverlapManager,
     /// Plugin registry for the `Chunk` override capability and the
     /// `Vocabulary` terminology table.
     plugin_registry: Option<std::sync::Arc<crate::plugin::PluginRegistry>>,
-    /// Cleaner for the keyword path of the glossary line.
-    bm25_cleaner: Bm25TextCleaner,
-    /// Cleaner for the semantic path of the glossary line.
-    embedding_cleaner: EmbeddingTextCleaner,
 }
 
 impl GroupChunker {
     /// Create new GroupChunker
     pub fn new(config: ChunkingConfig) -> Self {
         Self {
-            config: config.clone(),
-            estimator: TokenEstimator::default(),
-            splitter: TextSplitter::new(config.clone()),
             overlap_manager: OverlapManager::new(config.clone()),
+            config,
+            estimator: TokenEstimator::default(),
             plugin_registry: None,
-            bm25_cleaner: Bm25TextCleaner::new(),
-            embedding_cleaner: EmbeddingTextCleaner::new(),
         }
     }
 
@@ -166,7 +165,34 @@ impl GroupChunker {
         self
     }
 
-    /// Append the domain glossary line to every chunk that uses a term.
+    /// The terminology that applies to one file.
+    ///
+    /// Returns `None` when no plugin contributes a terminology table to the
+    /// file, or when the table that applies to the file carries no entry.
+    fn terminology(&self, file_path: &str, language: Option<&str>) -> Option<Arc<FileVocabulary>> {
+        let registry = self.plugin_registry.as_ref()?;
+        let vocabulary = registry.vocabulary_for(file_path, language)?;
+        if vocabulary.is_empty() {
+            return None;
+        }
+        Some(vocabulary)
+    }
+
+    /// The chunk limits that apply to one file.
+    ///
+    /// A file that carries a terminology table reserves a share of the chunk
+    /// limits for the injected expansions: the splitter then produces chunks
+    /// that leave exactly that much room, so the injection can never push a
+    /// chunk over its limit. A file without a terminology table keeps the
+    /// configured limits, and its text stays exactly as it was.
+    fn effective_config(&self, file_path: &str, language: Option<&str>) -> ChunkingConfig {
+        match self.terminology(file_path, language) {
+            Some(_) => self.config.with_glossary_reserve(),
+            None => self.config.clone(),
+        }
+    }
+
+    /// Inject the domain terminology into every chunk that uses a term.
     ///
     /// The chunk is the unit that is actually retrieved: a BM25 chunk is one
     /// document and an embedding chunk is one vector. Matching the chunk's
@@ -174,35 +200,85 @@ impl GroupChunker {
     /// front of the retriever, and no chunk carries the terms of its
     /// neighbours.
     ///
-    /// Each path cleans the line with its own cleaner: the keyword cleaner
-    /// strips quotes and configured filler words, while the embedding cleaner
-    /// keeps the expansion verbatim so the meaning survives.
-    fn append_glossary(&self, output: &mut ChunkOutput, file_path: &str, language: &str) {
-        let Some(registry) = self.plugin_registry.as_ref() else {
-            return;
-        };
-        let Some(vocabulary) = registry.vocabulary_for(file_path, Some(language)) else {
-            return;
-        };
-        if vocabulary.is_empty() {
-            return;
+    /// The expansions are placed at the first occurrence of the term, never
+    /// in place of the term itself. The reserved room bounds how much the
+    /// injection may add, so the chunk keeps its budget.
+    ///
+    /// The chunk scope expands a term in every chunk that mentions it. The
+    /// entity scope expands it once per entity, in the chunk that holds the
+    /// first occurrence, so the expansion does not repeat across the chunks
+    /// of one entity.
+    fn inject_vocabulary(
+        &self,
+        chunks: &mut [ChunkedResult],
+        vocabulary: &FileVocabulary,
+    ) -> VocabularyStats {
+        let mut stats = VocabularyStats::default();
+        let index = TerminologyIndex::new(&vocabulary.matches());
+        if index.is_empty() {
+            return stats;
         }
-        for chunk in &mut output.chunks {
-            let matched = vocabulary.matched_entries(&[chunk.text.as_str()]);
-            let Some(line) = FileVocabulary::glossary_line(&matched) else {
-                continue;
+        let per_entity = self.config.glossary_scope == GlossaryScope::Entity;
+        let mut expanded = ExpandedTerms::default();
+        let mut entity = String::new();
+        for chunk in chunks.iter_mut() {
+            if per_entity {
+                if chunk.source_group_id != entity {
+                    entity = chunk.source_group_id.clone();
+                    expanded = ExpandedTerms::default();
+                }
+            } else {
+                expanded = ExpandedTerms::default();
+            }
+            let (style, reserve) = match chunk.path {
+                ChunkPath::Bm25 => (
+                    InjectionStyle::Bm25,
+                    self.config.glossary_reserve(ChunkPath::Bm25),
+                ),
+                ChunkPath::Embedding => (
+                    InjectionStyle::Embedding,
+                    self.config.glossary_reserve(ChunkPath::Embedding),
+                ),
             };
-            let text = match chunk.path {
-                ChunkPath::Bm25 => self.bm25_cleaner.clean(&line),
-                ChunkPath::Embedding => self.embedding_cleaner.clean(&line),
+            let budget = InjectionBudget {
+                max_entries: self.config.glossary_max_entries,
+                max_cost: reserve,
             };
-            if text.is_empty() {
+            let injection = inject(&chunk.text, &index, style, &budget, &mut expanded);
+            stats.injected += injection.injected;
+            stats.truncated += injection.truncated;
+            if injection.injected == 0 {
                 continue;
             }
-            chunk.text.push('\n');
-            chunk.text.push_str(&text);
+            chunk.text = injection.text;
             chunk.token_count = super::boundary::cost(&chunk.text, chunk.path);
+            if chunk.metadata.bm25_word_count.is_some() {
+                chunk.metadata.bm25_word_count = Some(
+                    chunk
+                        .text
+                        .split_whitespace()
+                        .filter(|word| !word.is_empty())
+                        .count(),
+                );
+            }
+            // The reserved room bounds the injection, so the chunk keeps the
+            // budget it was split under. A chunk that breaks that rule means
+            // the reserve is configured too small for the expansions.
+            let over_budget = self.config.exceeds_limit(&chunk.text, chunk.path);
+            debug_assert!(
+                !over_budget,
+                "glossary injection must respect the chunk budget"
+            );
+            if over_budget {
+                stats.overflow += 1;
+                tracing::warn!(
+                    chunk_id = %chunk.chunk_id,
+                    path = ?chunk.path,
+                    "Glossary injection exceeded the chunk budget; raise chunking.glossary_reserve_ratio"
+                );
+            }
         }
+        stats
     }
 
     /// Process entity group with independent dual-path splitting
@@ -227,10 +303,13 @@ impl GroupChunker {
 
         let mut all_chunks = ChunkOutput::default();
 
+        let language = group.language.to_string();
+        let config = self.effective_config(file_path, Some(&language));
+        let splitter = TextSplitter::new(config.clone());
         let infra = ChunkInfrastructure {
-            config: &self.config,
+            config: &config,
             estimator: &self.estimator,
-            splitter: &self.splitter,
+            splitter: &splitter,
         };
 
         if !bm25_text.trim().is_empty() {
@@ -261,12 +340,6 @@ impl GroupChunker {
 
         let bm25_count = all_chunks.chunks.len();
 
-        let infra = ChunkInfrastructure {
-            config: &self.config,
-            estimator: &self.estimator,
-            splitter: &self.splitter,
-        };
-
         if !embedding_text.trim().is_empty() {
             let nl_boundaries = super::boundary::compute_nl_entity_boundaries(
                 &embedding_text,
@@ -289,6 +362,13 @@ impl GroupChunker {
             all_chunks.absorb(chunk_single_path(input)?);
         }
 
+        // The expansions are placed before the overlap, so the overlap a
+        // chunk carries points into the text the retriever sees.
+        if let Some(vocabulary) = self.terminology(file_path, Some(&language)) {
+            let stats = self.inject_vocabulary(&mut all_chunks.chunks, &vocabulary);
+            all_chunks.vocabulary.absorb(stats);
+        }
+
         let total = all_chunks.chunks.len();
         if bm25_count < total {
             self.overlap_manager
@@ -296,9 +376,6 @@ impl GroupChunker {
         }
 
         add_relations(&tracker, &mut all_chunks.chunks);
-
-        let language = group.language.to_string();
-        self.append_glossary(&mut all_chunks, file_path, &language);
 
         Ok(all_chunks)
     }
@@ -315,10 +392,13 @@ impl GroupChunker {
         group_conversions: &crate::ast_to_nl::converter::GroupConversions,
         file_path: &str,
     ) -> Result<ChunkOutput, ParseError> {
+        let language = group.language.to_string();
+        let config = self.effective_config(file_path, Some(&language));
+        let splitter = TextSplitter::new(config.clone());
         let infra = ChunkInfrastructure {
-            config: &self.config,
+            config: &config,
             estimator: &self.estimator,
-            splitter: &self.splitter,
+            splitter: &splitter,
         };
         let mut tracker = GroupTracker::new();
         crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
@@ -365,14 +445,20 @@ impl GroupChunker {
                 )
             });
 
-        let mut output = if let Some((above, below)) = override_plugins {
+        let output = if let Some((above, below)) = override_plugins {
             if let Some(chunks) = self.try_plugin_chunk(group_conversions, file_path, &above) {
-                ChunkOutput::with_chunks(chunks)
+                let mut output = ChunkOutput::with_chunks(chunks);
+                self.inject_into_output(&mut output, file_path, language.as_deref());
+                output
             } else {
                 let builtin = self.chunk_groups_builtin(group_conversions, file_path)?;
                 if builtin.chunks.is_empty() {
                     match self.try_plugin_chunk(group_conversions, file_path, &below) {
-                        Some(chunks) => ChunkOutput::with_chunks(chunks),
+                        Some(chunks) => {
+                            let mut output = ChunkOutput::with_chunks(chunks);
+                            self.inject_into_output(&mut output, file_path, language.as_deref());
+                            output
+                        }
                         None => builtin,
                     }
                 } else {
@@ -383,10 +469,25 @@ impl GroupChunker {
             self.chunk_groups_builtin(group_conversions, file_path)?
         };
 
-        if let Some(language) = language {
-            self.append_glossary(&mut output, file_path, &language);
-        }
         Ok(output)
+    }
+
+    /// Inject the domain terminology into the chunks of an output.
+    ///
+    /// The built-in chunker places the expansions itself, between the merge
+    /// and the overlap pass. A plugin that produced the chunks instead owns
+    /// the whole text, so the host places the expansions here.
+    fn inject_into_output(
+        &self,
+        output: &mut ChunkOutput,
+        file_path: &str,
+        language: Option<&str>,
+    ) {
+        let Some(table) = self.terminology(file_path, language) else {
+            return;
+        };
+        let stats = self.inject_vocabulary(&mut output.chunks, &table);
+        output.vocabulary.absorb(stats);
     }
 
     /// Chunk groups with the built-in chunker (merge + overlap passes).
@@ -395,10 +496,15 @@ impl GroupChunker {
         group_conversions: &[crate::ast_to_nl::converter::GroupConversions],
         file_path: &str,
     ) -> Result<ChunkOutput, ParseError> {
+        let language = group_conversions
+            .first()
+            .map(|gc| gc.group.language.to_string());
+        let config = self.effective_config(file_path, language.as_deref());
+        let splitter = TextSplitter::new(config.clone());
         let infra = ChunkInfrastructure {
-            config: &self.config,
+            config: &config,
             estimator: &self.estimator,
-            splitter: &self.splitter,
+            splitter: &splitter,
         };
         let mut tracker = GroupTracker::new();
         let mut all_chunks = ChunkOutput::default();
@@ -452,26 +558,34 @@ impl GroupChunker {
         // The type system guarantees Bm25Chunk cannot enter this path.
         let emb_chunks_inner: Vec<ChunkedResult> =
             emb_chunks.into_iter().map(|c| c.into_inner()).collect();
-        let merged_emb_chunks = super::merge::merge_small_chunks_cross_group(
-            emb_chunks_inner,
-            &group_spans,
-            &self.config,
-        );
+        let merged_emb_chunks =
+            super::merge::merge_small_chunks_cross_group(emb_chunks_inner, &group_spans, &config);
 
-        let mut emb_chunks: Vec<EmbeddingChunk> = merged_emb_chunks
-            .into_iter()
-            .map(EmbeddingChunk::new)
-            .collect();
+        let mut emb_results: Vec<ChunkedResult> = merged_emb_chunks;
+        let mut bm25_results: Vec<ChunkedResult> =
+            bm25_chunks.into_iter().map(|c| c.into_inner()).collect();
+
+        // The expansions are placed before the overlap, so the overlap a
+        // chunk carries points into the text the retriever sees.
+        let mut vocabulary = VocabularyStats::default();
+        if let Some(table) = self.terminology(file_path, language.as_deref()) {
+            vocabulary = self.inject_vocabulary(&mut emb_results, &table);
+            vocabulary.absorb(self.inject_vocabulary(&mut bm25_results, &table));
+        }
+
+        let mut emb_chunks: Vec<EmbeddingChunk> =
+            emb_results.into_iter().map(EmbeddingChunk::new).collect();
         self.overlap_manager.apply_overlap_emb(&mut emb_chunks);
 
-        let total_chunks = emb_chunks.len() + bm25_chunks.len();
+        let total_chunks = emb_chunks.len() + bm25_results.len();
 
         let mut result = Vec::with_capacity(total_chunks);
         result.extend(emb_chunks.into_iter().map(|c| c.into_inner()));
-        result.extend(bm25_chunks.into_iter().map(|c| c.into_inner()));
+        result.extend(bm25_results);
         Ok(ChunkOutput {
             chunks: result,
             dropped_blank_segments,
+            vocabulary,
         })
     }
 
@@ -669,6 +783,7 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
         return Ok(ChunkOutput {
             chunks: Vec::new(),
             dropped_blank_segments: blank_count,
+            vocabulary: VocabularyStats::default(),
         });
     }
 
@@ -693,6 +808,7 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
             header_ctx,
         ),
         dropped_blank_segments: blank_count,
+        vocabulary: VocabularyStats::default(),
     })
 }
 

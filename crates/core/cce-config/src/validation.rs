@@ -760,6 +760,7 @@ mod tests {
             min_chunk_bm25_words: 0,
             cross_group_merge_threshold: 0,
             respect_boundaries: true,
+            ..Default::default()
         };
         let err = config.validate_structured().unwrap_err();
         let msg = err.to_string();

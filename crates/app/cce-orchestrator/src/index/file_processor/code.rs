@@ -257,6 +257,7 @@ impl FileProcessor {
 
         // Step 5: Enhance chunks with entity association info
         let dropped_blank_segments = chunk_output.dropped_blank_segments;
+        let vocabulary = chunk_output.vocabulary;
         let enhanced_chunks: Vec<ChunkedResult> = chunk_output
             .chunks
             .into_iter()
@@ -281,6 +282,7 @@ impl FileProcessor {
             processing_result: Some(processing_result),
             doc_summary: None,
             dropped_blank_segments,
+            vocabulary,
             document_degraded: false,
             has_syntax_errors,
             syntax_diagnostics,

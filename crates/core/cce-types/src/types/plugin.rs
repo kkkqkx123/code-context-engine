@@ -623,6 +623,38 @@ impl VocabularyEntry {
     }
 }
 
+/// One terminology entry reduced to what an expansion needs.
+///
+/// The scope of a [`VocabularyEntry`] only decides which files the entry
+/// applies to. Once the entry applies, the token and the expansion are all
+/// the rendering needs, so the entry is reduced to this pair before it
+/// travels with a conversion result.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct VocabularyMatch {
+    /// The token as the plugin spelled it.
+    pub token: String,
+    /// The human-readable expansion of the token.
+    pub expansion: String,
+}
+
+impl VocabularyMatch {
+    /// Create a terminology match.
+    pub fn new(token: impl Into<String>, expansion: impl Into<String>) -> Self {
+        Self {
+            token: token.into(),
+            expansion: expansion.into(),
+        }
+    }
+
+    /// The key this match is matched by.
+    ///
+    /// The comparison is case-insensitive, because the index tokenizer
+    /// lowercases every token.
+    pub fn match_key(&self) -> String {
+        self.token.to_lowercase()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Scan contract
 // ---------------------------------------------------------------------------

@@ -75,8 +75,14 @@ pub fn compute_nl_doc_output_path(
 
 /// Strip index-only sidecar text from export content.
 ///
-/// Export should use pure presentation text, not the enriched index text
-/// that contains control-flow and behavior sidecars.
+/// The indexed text carries two kinds of enhancement:
+///
+/// - **sidecar**: the control-flow and behaviour fragments that only make
+///   sense as index context. The export strips them.
+/// - **terminology**: the expansion of a domain term, placed at the first
+///   occurrence of the term. The export keeps them, because a reader of the
+///   exported document needs the meaning of an abbreviation as much as a
+///   retriever does.
 pub fn strip_index_context(text: &str) -> String {
     text.trim_end().to_string()
 }

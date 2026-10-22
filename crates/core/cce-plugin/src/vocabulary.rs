@@ -21,18 +21,30 @@
 //!   merged in. The scope patterns speak the same path pattern language as
 //!   the plugin-level file filter, so both routing levels select the same
 //!   files for the same pattern;
-//! - the matched terms are rendered as a single `Glossary: ...` line whose
-//!   entries are separated by semicolons.
+//! - the matched terms are injected into the text that is retrieved: the
+//!   expansion is placed at the first occurrence of the term, never in
+//!   place of the term itself (see [`injection`]).
 //!
 //! This module is the single implementation of that contract. The AST-to-NL
 //! pipeline and the document pipeline both build on it.
+
+mod injection;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::CodePlugin;
 use crate::path_pattern::PathPattern;
-use cce_types::plugin::{MAX_MERGED_VOCABULARY_ENTRIES, VocabularyEntry, VocabularyScope};
+use cce_types::plugin::{
+    MAX_MERGED_VOCABULARY_ENTRIES, VocabularyEntry, VocabularyMatch, VocabularyScope,
+};
+
+use injection::identifier_tokens;
+
+pub use injection::{
+    ExpandedTerms, Injection, InjectionBudget, InjectionStyle, TerminologyIndex, VocabularyStats,
+    inject,
+};
 
 /// A merged glossary table collected from the matching `Vocabulary` plugins.
 #[derive(Debug, Default, Clone)]
@@ -185,11 +197,21 @@ impl FileVocabulary {
             .map(move |index| &entries[*index as usize])
     }
 
+    /// The applicable entries as terminology matches, in table order.
+    ///
+    /// The scope of an entry only decides which files it applies to; once
+    /// it applies, the token and the expansion are all the rendering needs.
+    pub fn matches(&self) -> Vec<VocabularyMatch> {
+        self.entries()
+            .map(|entry| VocabularyMatch::new(entry.token.clone(), entry.expansion.clone()))
+            .collect()
+    }
+
     /// The entries whose token occurs as an identifier token in `texts`.
     ///
-    /// The result keeps the table order, so the rendered glossary line is
+    /// The result keeps the table order, so the rendered expansions stay
     /// stable across entities.
-    pub fn matched_entries(&self, texts: &[&str]) -> Vec<&VocabularyEntry> {
+    pub fn matched_entries(&self, texts: &[&str]) -> Vec<VocabularyMatch> {
         if self.indexes.is_empty() {
             return Vec::new();
         }
@@ -203,21 +225,8 @@ impl FileVocabulary {
         }
         self.entries()
             .filter(|entry| present.contains(&entry.match_key()))
+            .map(|entry| VocabularyMatch::new(entry.token.clone(), entry.expansion.clone()))
             .collect()
-    }
-
-    /// Render the glossary line for the given entries.
-    ///
-    /// Returns `None` when no entry matched.
-    pub fn glossary_line(entries: &[&VocabularyEntry]) -> Option<String> {
-        if entries.is_empty() {
-            return None;
-        }
-        let parts: Vec<String> = entries
-            .iter()
-            .map(|entry| format!("{} = {}", entry.token, entry.expansion))
-            .collect();
-        Some(format!("Glossary: {}", parts.join("; ")))
     }
 }
 
@@ -417,27 +426,6 @@ pub fn merge(providers: &[&Arc<dyn CodePlugin>]) -> VocabularyTable {
     table
 }
 
-/// The identifier tokens of `text`, lowercased.
-///
-/// A token is a maximal sequence of alphanumeric characters and underscores,
-/// plus each of its underscore and camelCase separated segments. Matching a
-/// term against `parse_stts` therefore hits `stts`, while `ts` never matches
-/// `stts`: a segment boundary is a real identifier boundary.
-fn identifier_tokens(text: &str) -> impl Iterator<Item = String> {
-    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .filter(|run| !run.is_empty())
-        .flat_map(|run| {
-            let mut tokens = Vec::new();
-            tokens.push(run.to_lowercase());
-            tokens.extend(
-                split_identifier_segments(run)
-                    .into_iter()
-                    .map(str::to_lowercase),
-            );
-            tokens
-        })
-}
-
 /// The underscore and camelCase separated segments of an identifier run.
 ///
 /// Digits never start a new segment, so `co64` stays one token.
@@ -615,35 +603,33 @@ mod tests {
     }
 
     #[test]
-    fn test_glossary_line_format() {
+    fn test_matched_entries_keep_the_plugin_spelling() {
+        let table = VocabularyTable::from_entries([entry("avcC", "AVC decoder configuration")]);
+        let view = FileVocabulary::all(Arc::new(table));
+        let matched = view.matched_entries(&["avcc"]);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].token, "avcC");
+        assert_eq!(matched[0].expansion, "AVC decoder configuration");
+    }
+
+    #[test]
+    fn test_matched_entries_are_empty_without_matches() {
+        let table = VocabularyTable::from_entries([entry("stts", "sync time-to-sample")]);
+        let view = FileVocabulary::all(Arc::new(table));
+        assert!(view.matched_entries(&["nothing here"]).is_empty());
+    }
+
+    #[test]
+    fn test_matches_lists_every_applicable_entry() {
         let table = VocabularyTable::from_entries([
             entry("stts", "sync time-to-sample"),
             entry("sdp", "session description protocol"),
         ]);
         let view = FileVocabulary::all(Arc::new(table));
-        let matched = view.matched_entries(&["stts and sdp"]);
-        let line = FileVocabulary::glossary_line(&matched).expect("glossary line");
-        assert_eq!(
-            line,
-            "Glossary: stts = sync time-to-sample; sdp = session description protocol"
-        );
-    }
-
-    #[test]
-    fn test_glossary_line_keeps_the_plugin_spelling() {
-        let table = VocabularyTable::from_entries([entry("avcC", "AVC decoder configuration")]);
-        let view = FileVocabulary::all(Arc::new(table));
-        let matched = view.matched_entries(&["avcc"]);
-        let line = FileVocabulary::glossary_line(&matched).expect("glossary line");
-        assert_eq!(line, "Glossary: avcC = AVC decoder configuration");
-    }
-
-    #[test]
-    fn test_glossary_line_is_absent_without_matches() {
-        let table = VocabularyTable::from_entries([entry("stts", "sync time-to-sample")]);
-        let view = FileVocabulary::all(Arc::new(table));
-        let matched = view.matched_entries(&["nothing here"]);
-        assert!(FileVocabulary::glossary_line(&matched).is_none());
+        let matches = view.matches();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].token, "stts");
+        assert_eq!(matches[1].token, "sdp");
     }
 
     #[test]

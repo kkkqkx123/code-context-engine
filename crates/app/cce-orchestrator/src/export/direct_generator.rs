@@ -5,8 +5,19 @@
 //! processing pipeline.
 
 use cce_parser::ast_to_nl::converter::group_converter::GroupConversions;
+use cce_plugin::vocabulary::{
+    ExpandedTerms, InjectionBudget, InjectionStyle, TerminologyIndex, inject,
+};
 use cce_types::entity::EntityKind;
+use cce_types::plugin::VocabularyMatch;
 use cce_utils::comment_cleaner::strip_comment_markers;
+
+/// The maximum number of terminology expansions one exported entity carries.
+///
+/// The export is a document for a reader, not a retrieval unit, so the
+/// bound only keeps a pathological entity from burying its description
+/// under expansions.
+const MAX_EXPORTED_TERMS: usize = 8;
 
 /// Export document generated from enriched GroupConversions
 #[derive(Debug, Clone)]
@@ -85,7 +96,7 @@ impl DirectExportGenerator {
         let embedding_text = conversions
             .header_conversion
             .as_ref()
-            .and_then(|c| Self::with_glossary(c.embedding_text.clone(), c.glossary.as_deref()));
+            .and_then(|c| Self::with_terminology(c.embedding_text.clone(), &c.glossary));
 
         Ok(DirectExportDocument {
             name: header.name.clone(),
@@ -101,21 +112,30 @@ impl DirectExportGenerator {
         })
     }
 
-    /// Append the domain glossary line to an entity description.
+    /// Render the domain terminology into an entity description.
     ///
-    /// The line lists the domain terms the entity uses together with their
-    /// human-readable expansions, so a reader of the exported document does
-    /// not have to look the abbreviations up.
-    fn with_glossary(text: Option<String>, glossary: Option<&str>) -> Option<String> {
-        let mut text = text?;
-        match glossary {
-            Some(glossary) if !glossary.is_empty() => {
-                text.push('\n');
-                text.push_str(glossary);
-            }
-            _ => {}
+    /// The expansion of a term is placed at the first occurrence of the term,
+    /// so a reader of the exported document learns the meaning of an
+    /// abbreviation without looking it up. The identifier itself stays as it
+    /// was written.
+    fn with_terminology(text: Option<String>, glossary: &[VocabularyMatch]) -> Option<String> {
+        let text = text?;
+        if glossary.is_empty() {
+            return Some(text);
         }
-        Some(text)
+        let index = TerminologyIndex::new(glossary);
+        let budget = InjectionBudget {
+            max_entries: MAX_EXPORTED_TERMS,
+            max_cost: usize::MAX,
+        };
+        let injection = inject(
+            &text,
+            &index,
+            InjectionStyle::Embedding,
+            &budget,
+            &mut ExpandedTerms::default(),
+        );
+        Some(injection.text)
     }
 
     /// Extract member information from enriched conversions
@@ -135,9 +155,7 @@ impl DirectExportGenerator {
                     .member_conversions
                     .iter()
                     .find(|c| c.entity_id == member.id)
-                    .and_then(|c| {
-                        Self::with_glossary(c.embedding_text.clone(), c.glossary.as_deref())
-                    });
+                    .and_then(|c| Self::with_terminology(c.embedding_text.clone(), &c.glossary));
 
                 MemberInfo {
                     name: member.name.clone(),

@@ -3,6 +3,7 @@ use crate::error::OrchestratorError;
 use cce_config::ChunkingConfig;
 use cce_parser::ast_to_nl::chunker::ChunkedResult;
 use cce_parser::summary::FileCategory;
+use cce_plugin::vocabulary::VocabularyStats;
 use cce_scanner::{FileContentPayload, FileEntry};
 use cce_types::{ContentRoute, LanguageInfo, OutputMode, ParsedFile};
 
@@ -20,23 +21,29 @@ impl FileProcessor {
             Vec<ChunkedResult>,
             Option<cce_parser::document::DocSummary>,
             bool,
+            VocabularyStats,
         ),
         OrchestratorError,
     > {
         let result = match &self.plugin_registry {
-            Some(registry) => self.doc_pipeline.process_with_plugins_degraded_flag(
-                content,
-                file_path,
-                chunking_config,
-                output_mode,
-                registry,
-            ),
-            None => self.doc_pipeline.process_with_degraded_flag(
-                content,
-                file_path,
-                chunking_config,
-                output_mode,
-            ),
+            Some(registry) => self
+                .doc_pipeline
+                .process_with_plugins_degraded_flag(
+                    content,
+                    file_path,
+                    chunking_config,
+                    output_mode,
+                    registry,
+                )
+                .map(|(chunks, summary, degraded, vocabulary)| {
+                    (chunks, summary, degraded, vocabulary)
+                }),
+            None => self
+                .doc_pipeline
+                .process_with_degraded_flag(content, file_path, chunking_config, output_mode)
+                .map(|(chunks, summary, degraded)| {
+                    (chunks, summary, degraded, VocabularyStats::default())
+                }),
         };
         // The document pipeline already reports typed ParseError variants
         // (Json/Yaml/Xml/... parsing); propagate instead of stringifying.
@@ -60,7 +67,7 @@ impl FileProcessor {
             .unwrap_or(&self.chunking_config);
 
         // Use document pipeline for processing
-        let (chunks, _summary, _) =
+        let (chunks, _summary, _, _) =
             self.process_doc(content, &file_path, output_mode, chunking_config)?;
 
         // Generate a placeholder ParsedFile so downstream storage can handle
@@ -110,7 +117,7 @@ impl FileProcessor {
             .unwrap_or(&self.chunking_config);
 
         // Use document pipeline for processing
-        let (chunks, doc_summary, document_degraded) =
+        let (chunks, doc_summary, document_degraded, vocabulary) =
             self.process_doc(content, &file_path, output_mode, chunking_config)?;
 
         let language_info = file_entry
@@ -131,6 +138,7 @@ impl FileProcessor {
             processing_result: None,
             doc_summary,
             dropped_blank_segments: 0,
+            vocabulary,
             document_degraded,
             has_syntax_errors: false,
             syntax_diagnostics: Vec::new(),
@@ -209,7 +217,8 @@ impl FileProcessor {
             .as_ref()
             .unwrap_or(&self.chunking_config);
 
-        let (chunks, _, degraded) = self.process_doc(source, path, output_mode, chunking_config)?;
+        let (chunks, _, degraded, _) =
+            self.process_doc(source, path, output_mode, chunking_config)?;
         if degraded {
             tracing::warn!(
                 path,
@@ -359,6 +368,7 @@ impl FileProcessor {
             processing_result: Some(processing_result),
             doc_summary: None,
             dropped_blank_segments,
+            vocabulary: cce_plugin::vocabulary::VocabularyStats::default(),
             document_degraded: false,
             has_syntax_errors: false,
             syntax_diagnostics: Vec::new(),

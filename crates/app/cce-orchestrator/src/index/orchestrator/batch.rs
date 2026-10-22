@@ -825,6 +825,13 @@ impl IndexOrchestrator {
                     if let Some(doc_summary) = &process_result.doc_summary {
                         batch_result.doc_summaries.push(doc_summary.clone());
                     }
+                    if let Some(metrics) = &self.quality_metrics {
+                        metrics.record_vocabulary(
+                            process_result.vocabulary.injected,
+                            process_result.vocabulary.truncated,
+                            process_result.vocabulary.overflow,
+                        );
+                    }
                     let produced_chunks = !process_result.chunks.is_empty();
                     batch_result.chunks.extend(process_result.chunks);
                     batch_result.success_count += 1;

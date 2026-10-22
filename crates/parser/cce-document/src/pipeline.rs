@@ -13,12 +13,17 @@
 
 use tracing::{debug, warn};
 
-use cce_config::modules::ChunkingConfig;
-use cce_text::Bm25TextCleaner;
+use cce_config::modules::{ChunkingConfig, GlossaryScope};
+use cce_plugin::vocabulary::{
+    ExpandedTerms, FileVocabulary, InjectionBudget, InjectionStyle, TerminologyIndex,
+    VocabularyStats, inject,
+};
+use cce_types::ChunkPath;
 use cce_types::ChunkedResult;
 use cce_types::ParseError;
 use cce_types::TestInfo;
 use cce_types::ast_to_nl::options::OutputMode;
+use cce_utils::token_estimation::estimate_tokens;
 
 use super::types::{DocSummary, DocType, DocumentClassification};
 
@@ -341,7 +346,7 @@ impl PipelineRouter {
         output_mode: OutputMode,
         registry: &cce_plugin::PluginRegistry,
     ) -> Result<(Vec<ChunkedResult>, Option<DocSummary>), ParseError> {
-        let (chunks, summary, _) = self.process_with_plugins_degraded_flag(
+        let (chunks, summary, _, _) = self.process_with_plugins_degraded_flag(
             content,
             file_path,
             config,
@@ -359,7 +364,15 @@ impl PipelineRouter {
         config: &ChunkingConfig,
         output_mode: OutputMode,
         registry: &cce_plugin::PluginRegistry,
-    ) -> Result<(Vec<ChunkedResult>, Option<DocSummary>, bool), ParseError> {
+    ) -> Result<
+        (
+            Vec<ChunkedResult>,
+            Option<DocSummary>,
+            bool,
+            VocabularyStats,
+        ),
+        ParseError,
+    > {
         // Documents carry no language; plugins are filtered by file pattern only.
         let (above, below) = registry.get_override_plugins(
             cce_plugin::PluginCapability::FormatParse,
@@ -367,28 +380,39 @@ impl PipelineRouter {
             None,
         );
 
+        // A file that carries a terminology table reserves a share of the
+        // chunk limits for the injected expansions: the chunks the
+        // pipelines produce leave exactly that much room, so the injection
+        // can never push a chunk over its limit.
+        let vocabulary = registry.vocabulary_for(file_path, None);
+        let effective = match &vocabulary {
+            Some(table) if !table.is_empty() => config.with_glossary_reserve(),
+            _ => config.clone(),
+        };
+
         if let Some(parsed) =
-            self.process_with_plugin_list(content, file_path, config, output_mode, &above)
+            self.process_with_plugin_list(content, file_path, &effective, output_mode, &above)
         {
             let (mut chunks, summary) = parsed;
-            append_glossary(&mut chunks, file_path, registry);
-            return Ok((chunks, summary, false));
+            let stats = inject_terminology(&mut chunks, vocabulary.as_deref(), &effective);
+            return Ok((chunks, summary, false, stats));
         }
 
         let (mut chunks, summary, degraded) =
-            self.process_with_degraded_flag(content, file_path, config, output_mode)?;
-        append_glossary(&mut chunks, file_path, registry);
+            self.process_with_degraded_flag(content, file_path, &effective, output_mode)?;
+        let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), &effective);
 
         if chunks.is_empty() {
             if let Some(parsed) =
-                self.process_with_plugin_list(content, file_path, config, output_mode, &below)
+                self.process_with_plugin_list(content, file_path, &effective, output_mode, &below)
             {
                 let (mut chunks, summary) = parsed;
-                append_glossary(&mut chunks, file_path, registry);
-                return Ok((chunks, summary, degraded));
+                let fallback = inject_terminology(&mut chunks, vocabulary.as_deref(), &effective);
+                stats.absorb(fallback);
+                return Ok((chunks, summary, degraded, stats));
             }
         }
-        Ok((chunks, summary, degraded))
+        Ok((chunks, summary, degraded, stats))
     }
 
     /// Run a pre-filtered `FormatParse` plugin list; returns `None` when no
@@ -436,36 +460,97 @@ impl Default for PipelineRouter {
     }
 }
 
-/// Append the domain glossary line to every document chunk that uses a term.
+/// Inject the domain terminology into the document chunks.
 ///
-/// The chunk is the unit that is actually retrieved, so matching the chunk's
-/// own text puts exactly the expansions the chunk needs in front of the
-/// retriever. Documents carry no language, so the contributing plugins are
-/// selected by file pattern only.
-fn append_glossary(
+/// The chunk is the unit that is actually retrieved, so the expansion of a
+/// term is placed in the chunk that mentions the term for the first time.
+/// Documents carry no language, so the contributing plugins are selected by
+/// file pattern only.
+///
+/// Documents have no entity stage, so the entity scope of the terminology
+/// injection does not apply to them: the expansion is always placed per
+/// chunk.
+fn inject_terminology(
     chunks: &mut [ChunkedResult],
-    file_path: &str,
-    registry: &cce_plugin::PluginRegistry,
-) {
-    let Some(vocabulary) = registry.vocabulary_for(file_path, None) else {
-        return;
+    vocabulary: Option<&FileVocabulary>,
+    config: &ChunkingConfig,
+) -> VocabularyStats {
+    let mut stats = VocabularyStats::default();
+    let Some(table) = vocabulary else {
+        return stats;
     };
-    if vocabulary.is_empty() {
-        return;
+    if table.is_empty() {
+        return stats;
     }
-    let bm25_cleaner = Bm25TextCleaner::new();
+    let index = TerminologyIndex::new(&table.matches());
+    if index.is_empty() {
+        return stats;
+    }
+    // The entity scope expands a term once per entity, in the chunk that
+    // holds the first occurrence, so the expansion does not repeat across
+    // the chunks of one group.
+    let per_entity = config.glossary_scope == GlossaryScope::Entity;
+    let mut expanded = ExpandedTerms::default();
+    let mut group = String::new();
     for chunk in chunks.iter_mut() {
-        let matched = vocabulary.matched_entries(&[chunk.text.as_str()]);
-        let Some(line) = cce_plugin::vocabulary::FileVocabulary::glossary_line(&matched) else {
-            continue;
+        if per_entity {
+            if chunk.source_group_id != group {
+                group = chunk.source_group_id.clone();
+                expanded = ExpandedTerms::default();
+            }
+        } else {
+            expanded = ExpandedTerms::default();
+        }
+        let (style, reserve) = match chunk.path {
+            ChunkPath::Bm25 => (
+                InjectionStyle::Bm25,
+                config.glossary_reserve(ChunkPath::Bm25),
+            ),
+            ChunkPath::Embedding => (
+                InjectionStyle::Embedding,
+                config.glossary_reserve(ChunkPath::Embedding),
+            ),
         };
-        let text = bm25_cleaner.clean(&line);
-        if text.is_empty() {
+        let budget = InjectionBudget {
+            max_entries: config.glossary_max_entries,
+            max_cost: reserve,
+        };
+        let injection = inject(&chunk.text, &index, style, &budget, &mut expanded);
+        stats.injected += injection.injected;
+        stats.truncated += injection.truncated;
+        if injection.injected == 0 {
             continue;
         }
-        chunk.text.push('\n');
-        chunk.text.push_str(&text);
+        chunk.text = injection.text;
+        let words = chunk
+            .text
+            .split_whitespace()
+            .filter(|word| !word.is_empty())
+            .count();
+        chunk.token_count = match chunk.path {
+            ChunkPath::Bm25 => words,
+            ChunkPath::Embedding => estimate_tokens(&chunk.text),
+        };
+        if chunk.metadata.bm25_word_count.is_some() {
+            chunk.metadata.bm25_word_count = Some(words);
+        }
+        // The reserved room bounds the injection, so the chunk keeps the
+        // budget it was split under.
+        let over_budget = config.exceeds_limit(&chunk.text, chunk.path);
+        debug_assert!(
+            !over_budget,
+            "glossary injection must respect the chunk budget"
+        );
+        if over_budget {
+            stats.overflow += 1;
+            tracing::warn!(
+                chunk_id = %chunk.chunk_id,
+                path = ?chunk.path,
+                "Glossary injection exceeded the chunk budget; raise chunking.glossary_reserve_ratio"
+            );
+        }
     }
+    stats
 }
 
 #[cfg(test)]
@@ -831,7 +916,7 @@ mod tests {
     /// Documents carry no language, so the contributing plugins are selected
     /// by file pattern only.
     #[test]
-    fn test_vocabulary_appends_glossary_to_document_chunks() {
+    fn test_vocabulary_injects_terminology_into_document_chunks() {
         struct VocabularyPlugin {
             meta: PluginMetadata,
         }
@@ -884,7 +969,7 @@ mod tests {
         assert!(
             chunks
                 .iter()
-                .any(|c| c.text.contains("Glossary: stts = sync time-to-sample")),
+                .any(|c| c.text.contains("stts = sync time-to-sample")),
             "the document chunk must carry the terminology expansion, got: {:?}",
             chunks.iter().map(|c| &c.text).collect::<Vec<_>>()
         );
@@ -907,8 +992,8 @@ mod tests {
 
         assert!(!chunks.is_empty());
         assert!(
-            chunks.iter().all(|c| !c.text.contains("Glossary:")),
-            "no plugin means no glossary line"
+            chunks.iter().all(|c| !c.text.contains("stts =")),
+            "no plugin means no terminology expansion"
         );
     }
 }

@@ -16,6 +16,7 @@ use cce_types::ParsedFile;
 use cce_types::ast_to_nl::options::OutputMode;
 use cce_types::grouper::{EntityGroup, GroupType, ProcessingResult};
 use cce_types::language::Language;
+use cce_types::plugin::VocabularyMatch;
 use cce_types::{EntityId, EntityKind, GroupedEntity, Span};
 
 fn pattern_extract_plugin(script: &str) -> Arc<dyn cce_plugin::CodePlugin> {
@@ -537,30 +538,41 @@ fn convert_header_with_registry_and_path(
         .expect("the group must produce a header conversion")
 }
 
-/// The entity-level glossary line of a converted group.
+/// The domain terminology of a converted group.
 fn glossary_with_registry(
     registry: PluginRegistry,
     group: &EntityGroup,
     source: &str,
-) -> Option<String> {
+) -> Vec<VocabularyMatch> {
     let conversion = convert_header_with_registry_and_path(registry, group, source, "src/media.c");
     conversion.glossary
 }
 
-/// `Vocabulary`: the plugin table is turned into a `Glossary:` line that
-/// travels with the conversion result.
+/// The rendered terminology of a converted group, as `token = expansion`.
+fn glossary_pairs(matches: &[VocabularyMatch]) -> Vec<String> {
+    matches
+        .iter()
+        .map(|entry| format!("{} = {}", entry.token, entry.expansion))
+        .collect()
+}
+
+/// `Vocabulary`: the plugin table becomes the terminology that travels with
+/// the conversion result.
 #[test]
-fn test_vocabulary_produces_glossary_line() {
+fn test_vocabulary_produces_terminology() {
     let mut registry = PluginRegistry::new();
     registry.register(pattern_extract_plugin(MEDIA_VOCABULARY_SCRIPT));
 
     let source = "int parse(sdp) {\n    int stts = 1;\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
-    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
+    let glossary = glossary_with_registry(registry, &group, source);
 
     assert_eq!(
-        glossary,
-        "Glossary: stts = sync time-to-sample; sdp = session description protocol"
+        glossary_pairs(&glossary),
+        vec![
+            "stts = sync time-to-sample".to_string(),
+            "sdp = session description protocol".to_string(),
+        ]
     );
 }
 
@@ -585,11 +597,15 @@ fn test_vocabulary_merges_multiple_plugins() {
 
     let source = "int parse(sdp) {\n    int stts = 1;\n    int avcc = 2;\n    return stts;\n}\n";
     let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
-    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
+    let glossary = glossary_with_registry(registry, &group, source);
 
     assert_eq!(
-        glossary,
-        "Glossary: stts = sync time-to-sample; sdp = session description protocol; avcc = AVC configuration"
+        glossary_pairs(&glossary),
+        vec![
+            "stts = sync time-to-sample".to_string(),
+            "sdp = session description protocol".to_string(),
+            "avcc = AVC configuration".to_string(),
+        ]
     );
 }
 
@@ -607,7 +623,7 @@ fn test_vocabulary_respects_language_filter() {
     let conversion = convert_header_with_registry_and_path(registry, &group, source, "src/media.c");
 
     assert!(
-        conversion.glossary.is_none(),
+        conversion.glossary.is_empty(),
         "a plugin of another language must not contribute"
     );
 }
@@ -621,7 +637,7 @@ fn test_vocabulary_absent_without_plugin() {
     let group = vocabulary_group("parse", "int parse(sdp)", Language::C);
     let conversion = convert_header_with_registry_and_path(registry, &group, source, "src/media.c");
 
-    assert!(conversion.glossary.is_none());
+    assert!(conversion.glossary.is_empty());
 }
 
 /// `Vocabulary`: a language alias in the plugin declaration addresses the
@@ -640,8 +656,11 @@ fn test_vocabulary_accepts_language_alias() {
         convert_header_with_registry_and_path(registry, &group, source, "src/media.cpp");
 
     assert_eq!(
-        conversion.glossary.as_deref(),
-        Some("Glossary: stts = sync time-to-sample; sdp = session description protocol")
+        glossary_pairs(&conversion.glossary),
+        vec![
+            "stts = sync time-to-sample".to_string(),
+            "sdp = session description protocol".to_string(),
+        ]
     );
 }
 
@@ -654,11 +673,12 @@ fn test_vocabulary_matches_identifier_segments() {
 
     let source = "int parse_stts(int stts_count) {\n    return stts_count;\n}\n";
     let group = vocabulary_group("parse_stts", "int parse_stts(int)", Language::C);
-    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
+    let glossary = glossary_with_registry(registry, &group, source);
 
     assert!(
-        glossary.contains("Glossary: stts = sync time-to-sample"),
-        "a compound identifier must match through its segment, got: {glossary}"
+        glossary_pairs(&glossary).contains(&"stts = sync time-to-sample".to_string()),
+        "a compound identifier must match through its segment, got: {:?}",
+        glossary_pairs(&glossary)
     );
 }
 
@@ -671,11 +691,12 @@ fn test_vocabulary_matching_ignores_case() {
 
     let source = "int parse(int STTS) {\n    return STTS;\n}\n";
     let group = vocabulary_group("parse", "int parse(int)", Language::C);
-    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
+    let glossary = glossary_with_registry(registry, &group, source);
 
     assert!(
-        glossary.contains("Glossary: stts = sync time-to-sample"),
-        "an upper-case identifier must match the term, got: {glossary}"
+        glossary_pairs(&glossary).contains(&"stts = sync time-to-sample".to_string()),
+        "an upper-case identifier must match the term, got: {:?}",
+        glossary_pairs(&glossary)
     );
 }
 
@@ -698,7 +719,7 @@ fn test_vocabulary_short_token_does_not_match_inside_a_word() {
     let conversion = convert_header_with_registry_and_path(registry, &group, source, "src/media.c");
 
     assert!(
-        conversion.glossary.is_none(),
+        conversion.glossary.is_empty(),
         "a short term must not match inside a longer word"
     );
 }
@@ -722,11 +743,12 @@ fn test_vocabulary_scans_the_doc_comment() {
     group.header.as_mut().expect("header").doc_comment =
         Some("/// Parses an SDP packet.".to_string());
     let source = "int parse(int value) {\n    return value;\n}\n";
-    let glossary = glossary_with_registry(registry, &group, source).expect("glossary line");
+    let glossary = glossary_with_registry(registry, &group, source);
 
     assert!(
-        glossary.contains("Glossary: sdp = session description protocol"),
-        "a term in the doc comment must reach the glossary, got: {glossary}"
+        glossary_pairs(&glossary).contains(&"sdp = session description protocol".to_string()),
+        "a term in the doc comment must reach the terminology, got: {:?}",
+        glossary_pairs(&glossary)
     );
 }
 
@@ -771,17 +793,15 @@ fn test_vocabulary_table_is_reused_across_files() {
             .as_ref()
             .expect("the group must produce a header conversion");
         assert!(
-            header
-                .glossary
-                .as_deref()
-                .is_some_and(|text| text.contains("Glossary: stts")),
-            "every file of the provider set must carry the glossary line"
+            glossary_pairs(&header.glossary).contains(&"stts = sync time-to-sample".to_string()),
+            "every file of the provider set must carry the terminology"
         );
     }
 }
 
-/// `Vocabulary`: every chunk of a group carries the glossary line, so the
-/// expansions stay retrievable no matter which chunk the retriever picks.
+/// `Vocabulary`: every chunk of a group carries the expansion of the term
+/// it mentions, so the meaning stays retrievable no matter which chunk the
+/// retriever picks.
 #[test]
 fn test_vocabulary_reaches_every_chunk_of_a_group() {
     let mut registry = PluginRegistry::new();
@@ -828,8 +848,13 @@ fn test_vocabulary_reaches_every_chunk_of_a_group() {
     assert!(!output.chunks.is_empty(), "the group must produce chunks");
     for chunk in &output.chunks {
         assert!(
-            chunk.text.contains("Glossary: stts = sync time-to-sample"),
-            "every chunk must carry the glossary line, got: {}",
+            chunk.text.contains("sync time-to-sample"),
+            "every chunk must carry the expansion, got: {}",
+            chunk.text
+        );
+        assert!(
+            !chunk.text.contains("Glossary:"),
+            "the expansion is placed at the term, not in a trailing line, got: {}",
             chunk.text
         );
     }
@@ -866,10 +891,8 @@ fn test_example_media_vocabulary_plugin_routes_declared_languages() {
         let group = vocabulary_group("parse", "int parse(int)", language);
         let conversion = convert_header_with_registry_and_path(registry, &group, source, path);
         assert!(
-            conversion
-                .glossary
-                .as_deref()
-                .is_some_and(|text| text.contains("Glossary: stts =")),
+            glossary_pairs(&conversion.glossary)
+                .contains(&"stts = decoding time to sample box".to_string()),
             "the example plugin must contribute for {language}"
         );
     }
@@ -905,8 +928,8 @@ fn test_vocabulary_scope_gives_each_package_its_own_meaning() {
         registry.register(pattern_extract_plugin(SCOPED_VOCABULARY_SCRIPT));
         let conversion = convert_header_with_registry_and_path(registry, &group, source, path);
         assert_eq!(
-            conversion.glossary.as_deref(),
-            Some(format!("Glossary: track = {expected}").as_str()),
+            glossary_pairs(&conversion.glossary),
+            vec![format!("track = {expected}")],
             "the file {path} must carry the meaning of its own package"
         );
     }
@@ -923,7 +946,7 @@ fn test_vocabulary_scope_leaves_unrelated_files_untouched() {
     let conversion =
         convert_header_with_registry_and_path(registry, &group, source, "packages/tools/play.c");
     assert!(
-        conversion.glossary.is_none(),
+        conversion.glossary.is_empty(),
         "a file outside every scope must not receive a terminology line"
     );
 }
@@ -937,7 +960,7 @@ fn indexed_output_with_registry(
     group: &EntityGroup,
     source: &str,
     file_path: &str,
-) -> (Vec<String>, Option<String>) {
+) -> (Vec<String>, Vec<VocabularyMatch>) {
     let registry = Arc::new(registry);
     let converter =
         cce_parser::ast_to_nl::AstToNlConverter::with_config(&cce_config::AstToNlConfig::both())
@@ -971,7 +994,8 @@ fn indexed_output_with_registry(
     let glossary = conversions
         .first()
         .and_then(|group| group.header_conversion.as_ref())
-        .and_then(|conversion| conversion.glossary.clone());
+        .map(|conversion| conversion.glossary.clone())
+        .unwrap_or_default();
     (chunks, glossary)
 }
 
@@ -995,8 +1019,8 @@ fn test_vocabulary_outside_every_scope_matches_the_baseline() {
         "the group must produce chunks for the comparison to mean anything"
     );
     assert!(
-        baseline.1.is_none(),
-        "a project without a terminology plugin carries no glossary line"
+        baseline.1.is_empty(),
+        "a project without a terminology plugin carries no terminology"
     );
     assert_eq!(
         scoped.0, baseline.0,
