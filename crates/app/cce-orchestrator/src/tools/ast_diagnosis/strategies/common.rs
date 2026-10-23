@@ -129,7 +129,10 @@ fn generate_message(kind: &DiagnosticKind, candidate: &ErrorCandidate) -> String
         DiagnosticKind::SyntaxError => {
             if let Some(ref text) = candidate.text {
                 if text.len() > 50 {
-                    format!("syntax error near '{}...'", &text[..50])
+                    format!(
+                        "syntax error near '{}...'",
+                        cce_utils::truncate_to_byte_len(text, 50)
+                    )
                 } else {
                     format!("syntax error near '{}'", text)
                 }
@@ -455,5 +458,24 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].position.row, 0);
         assert_eq!(result[1].position.row, 2);
+    }
+
+    #[test]
+    fn test_generate_message_multibyte_syntax_error_text() {
+        // A long CJK candidate: byte index 50 lands inside a multi-byte char,
+        // so the message must truncate at a char boundary instead of panicking.
+        let candidate = ErrorCandidate {
+            kind: ErrorCandidateKind::Error,
+            start: Position::new(0, 0),
+            end: Position::new(0, 100),
+            start_byte: 0,
+            end_byte: 300,
+            text: Some("解析".repeat(60)),
+            node_kind: None,
+        };
+
+        let message = generate_message(&DiagnosticKind::SyntaxError, &candidate);
+        assert!(message.starts_with("syntax error near '"));
+        assert!(message.ends_with("...'"));
     }
 }

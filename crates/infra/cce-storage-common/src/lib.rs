@@ -39,6 +39,7 @@ use cce_types::{FileCategory, PointKind, TestSource, normalize_project_path};
 
 pub mod fulltext;
 pub mod metadb;
+pub mod process;
 
 pub use fulltext::{
     FulltextDocument, FulltextError, FulltextHit, FulltextSearchOptions, FulltextStorage,
@@ -47,6 +48,7 @@ pub use fulltext::{
 pub use metadb::{
     RelationChunk, RelationEntity, RelationFile, RelationStorage, assert_relation_storage,
 };
+pub use process::QdrantProcessStatus;
 
 /// Search filter options for vector retrieval.
 ///

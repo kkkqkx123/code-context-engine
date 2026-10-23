@@ -60,18 +60,12 @@ impl SharedHttpClient {
     }
 
     /// Check a response status and read the body for error context.
-    async fn checked(
-        response: reqwest::Response,
-        method: &str,
-        url: &str,
-    ) -> Result<reqwest::Response> {
+    async fn checked(response: reqwest::Response) -> Result<reqwest::Response> {
         let status = response.status();
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
             anyhow::bail!("Request failed with status {status}: {text}");
         }
-        let _ = method;
-        let _ = url;
         // The caller holds the URL context in its own error wrapper.
         Ok(response)
     }
@@ -84,7 +78,7 @@ impl SharedHttpClient {
             .send()
             .await
             .context(format!("Failed to GET {url}"))?;
-        Self::checked(response, "GET", &url)
+        Self::checked(response)
             .await?
             .json()
             .await
@@ -99,7 +93,7 @@ impl SharedHttpClient {
             .send()
             .await
             .context(format!("Failed to GET {url}"))?;
-        Self::checked(response, "GET", &url)
+        Self::checked(response)
             .await?
             .text()
             .await
@@ -118,7 +112,7 @@ impl SharedHttpClient {
             .send()
             .await
             .context(format!("Failed to POST {url}"))?;
-        Self::checked(response, "POST", &url)
+        Self::checked(response)
             .await?
             .json()
             .await
@@ -137,7 +131,7 @@ impl SharedHttpClient {
             .send()
             .await
             .context(format!("Failed to PUT {url}"))?;
-        Self::checked(response, "PUT", &url)
+        Self::checked(response)
             .await?
             .json()
             .await
@@ -152,7 +146,7 @@ impl SharedHttpClient {
             .send()
             .await
             .context(format!("Failed to DELETE {url}"))?;
-        Self::checked(response, "DELETE", &url)
+        Self::checked(response)
             .await?
             .json()
             .await
@@ -171,7 +165,7 @@ impl SharedHttpClient {
             .send()
             .await
             .context(format!("Failed to DELETE {url}"))?;
-        Self::checked(response, "DELETE", &url)
+        Self::checked(response)
             .await?
             .json()
             .await

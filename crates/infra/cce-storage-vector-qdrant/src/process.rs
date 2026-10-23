@@ -106,7 +106,7 @@ impl QdrantProcessConfig {
 }
 
 /// Status of the managed Qdrant process
-pub use cce_api::models::QdrantProcessStatus;
+pub use cce_storage_common::QdrantProcessStatus;
 
 /// Manager for Qdrant child process lifecycle
 pub struct QdrantProcessManager {

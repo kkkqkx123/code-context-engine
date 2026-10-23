@@ -57,24 +57,20 @@ impl GatewayMetricsSink {
 }
 
 impl llm_suite_client::TokenUsageSink for GatewayMetricsSink {
-    fn record_token_usage(
-        &self,
-        usage: &llm_suite_types::llm::TokenUsageStats,
-        model: Option<&str>,
-    ) {
-        let model = model.unwrap_or("unknown");
+    fn record_token_usage(&self, report: &llm_suite_client::LlmUsageReport) {
+        let model = report.context.model.as_deref().unwrap_or("unknown");
         self.registry
             .counter("llm_gateway_tokens_prompt_total", &[("model", model)])
-            .add(usage.prompt_tokens as u64);
+            .add(report.usage.prompt_tokens as u64);
         self.registry
             .counter("llm_gateway_tokens_completion_total", &[("model", model)])
-            .add(usage.completion_tokens as u64);
+            .add(report.usage.completion_tokens as u64);
     }
 }
 
 impl llm_suite_client::LlmMetricsSink for GatewayMetricsSink {
-    fn record_first_byte(&self, duration_ms: f64, model: Option<&str>) {
-        let model = model.unwrap_or("unknown");
+    fn record_first_byte(&self, duration_ms: f64, context: &llm_suite_client::LlmCallContext) {
+        let model = context.model.as_deref().unwrap_or("unknown");
         self.registry
             .histogram(
                 "llm_gateway_first_byte_latency_ms",
@@ -89,9 +85,9 @@ impl llm_suite_client::LlmMetricsSink for GatewayMetricsSink {
         duration_ms: f64,
         success: bool,
         error_kind: Option<&str>,
-        model: Option<&str>,
+        context: &llm_suite_client::LlmCallContext,
     ) {
-        let model = model.unwrap_or("unknown");
+        let model = context.model.as_deref().unwrap_or("unknown");
         let status = if success {
             "ok"
         } else {
@@ -112,8 +108,8 @@ impl llm_suite_client::LlmMetricsSink for GatewayMetricsSink {
             .observe(duration_ms);
     }
 
-    fn record_retry(&self, model: Option<&str>) {
-        let model = model.unwrap_or("unknown");
+    fn record_retry(&self, context: &llm_suite_client::LlmCallContext) {
+        let model = context.model.as_deref().unwrap_or("unknown");
         self.registry
             .counter("llm_gateway_retries_total", &[("model", model)])
             .increment();
