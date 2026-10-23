@@ -11,41 +11,16 @@ export default defineConfig(({ mode }) => {
 			isProd &&
 				visualizer({
 					open: false,
-					filename: 'stats.html',
+					filename: 'stats.md',
+					emitFile: true,
 					gzipSize: true,
 					brotliSize: true,
-					template: 'treemap',
+					template: 'markdown',
 				}),
 		].filter(Boolean),
 		build: {
 			sourcemap: !isProd,
 			minify: isProd, // Use default minifier (esbuild for client, terser if needed)
-			rollupOptions: {
-				output: {
-					manualChunks(id) {
-						// Extract Svelte core runtime
-						if (id.includes('node_modules/svelte/')) {
-							return 'svelte-core';
-						}
-						// Extract SvelteKit client runtime
-						if (id.includes('node_modules/@sveltejs/kit/')) {
-							return 'sveltekit-client';
-						}
-						// Extract UI components
-						if (id.includes('/src/lib/components/ui/')) {
-							return 'ui-components';
-						}
-						// Extract API utilities
-						if (id.includes('/src/lib/api/')) {
-							return 'api-utils';
-						}
-						// Extract stores
-						if (id.includes('/src/lib/stores/')) {
-							return 'stores';
-						}
-					},
-				},
-			},
 		},
 		server: {
 			port: 3001,

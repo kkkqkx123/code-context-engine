@@ -7,8 +7,8 @@
 	import { entityState, entityActions } from '$lib/stores/entities';
 	import { onProjectChange } from '$lib/stores/project';
 	import Card from '$lib/components/ui/Card.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+	import CallChainList from '$lib/components/entities/CallChainList.svelte';
 
 	// Lazy load all heavy components
 	let EntityDetail: Component | null = $state(null);
@@ -101,13 +101,6 @@
 		if (!from || !to) return;
 		const depth = Number.isInteger(pathDepth) && pathDepth > 0 ? pathDepth : 10;
 		entityActions.loadCallPath(from, to, depth);
-	}
-
-	function handleChainKeydown(event: KeyboardEvent, id: string) {
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
-			handleNavigate(String(id));
-		}
 	}
 
 	async function loadCallGraphComponent() {
@@ -330,32 +323,7 @@
 			{:else if currentTab === 'call-chain'}
 				<Card title="Call Chain" subtitle="Linear execution path">
 					{#if $entityState.callChain.length > 0}
-						<div class="call-chain-list">
-							{#each $entityState.callChain as node, i (node.function_id)}
-								<div
-									class="chain-item"
-									role="button"
-									tabindex="0"
-									onclick={() => handleNavigate(String(node.function_id))}
-									onkeydown={(e) => handleChainKeydown(e, node.function_id)}
-								>
-									<span class="chain-number">{i + 1}</span>
-									<div class="chain-content">
-										<h4 class="chain-name">{node.function_name}</h4>
-										<p class="chain-location">
-											{node.file_path}{#if node.call_line}:{node.call_line}{/if}
-										</p>
-									</div>
-									<Badge
-										variant={node.relation_type === 'caller'
-											? 'default'
-											: 'active'}
-									>
-										{node.relation_type === 'caller' ? 'CALLER' : 'CALLEE'}
-									</Badge>
-								</div>
-							{/each}
-						</div>
+						<CallChainList nodes={$entityState.callChain} />
 					{:else}
 						<p class="placeholder-text">No call chain data available</p>
 					{/if}
@@ -404,32 +372,7 @@
 					{/if}
 
 					{#if $entityState.callPath.length > 0}
-						<div class="call-chain-list">
-							{#each $entityState.callPath as node, i (node.function_id)}
-								<div
-									class="chain-item"
-									role="button"
-									tabindex="0"
-									onclick={() => handleNavigate(String(node.function_id))}
-									onkeydown={(e) => handleChainKeydown(e, node.function_id)}
-								>
-									<span class="chain-number">{i + 1}</span>
-									<div class="chain-content">
-										<h4 class="chain-name">{node.function_name}</h4>
-										<p class="chain-location">
-											{node.file_path}{#if node.call_line}:{node.call_line}{/if}
-										</p>
-									</div>
-									<Badge
-										variant={node.relation_type === 'caller'
-											? 'default'
-											: 'active'}
-									>
-										{node.relation_type === 'caller' ? 'CALLER' : 'CALLEE'}
-									</Badge>
-								</div>
-							{/each}
-						</div>
+						<CallChainList nodes={$entityState.callPath} />
 						<p class="path-meta">{$entityState.callPathLength} hop(s)</p>
 					{:else if !$entityState.callPathFound && !$entityState.isLoading}
 						<p class="placeholder-text">
@@ -548,11 +491,6 @@
 		height: 30px;
 	}
 
-	.call-chain-list {
-		display: grid;
-		gap: 1rem;
-	}
-
 	.graph-actions {
 		display: flex;
 		justify-content: flex-end;
@@ -574,49 +512,6 @@
 
 	.graph-action-btn:hover {
 		background: var(--gray-900);
-	}
-
-	.chain-item {
-		display: grid;
-		grid-template-columns: auto 1fr auto;
-		gap: 1rem;
-		align-items: center;
-		padding: 1rem;
-		border: 1px solid var(--black);
-		cursor: pointer;
-		transition: background-color 0.2s;
-	}
-
-	.chain-item:hover {
-		background-color: var(--gray-100);
-	}
-
-	.chain-number {
-		font-family: 'Space Mono', monospace;
-		font-size: 1.25rem;
-		font-weight: 700;
-		color: var(--gray-400);
-		width: 40px;
-		text-align: center;
-	}
-
-	.chain-content {
-		display: grid;
-		gap: 0.25rem;
-	}
-
-	.chain-name {
-		font-family: 'Space Grotesk', sans-serif;
-		font-size: 1rem;
-		font-weight: 700;
-		margin: 0;
-	}
-
-	.chain-location {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.75rem;
-		color: var(--gray-600);
-		margin: 0;
 	}
 
 	.placeholder-text {

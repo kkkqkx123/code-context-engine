@@ -126,7 +126,7 @@
 
 	let {
 		elements = [],
-		layout = 'cose-bilkent',
+		layout = 'cose',
 		focusId = null,
 		selectedId = null,
 		visibleDomains = RELATION_DOMAIN_ORDER,
@@ -143,6 +143,30 @@
 
 	let container: HTMLDivElement | null = null;
 	let bilkentRegistered = false;
+	let bilkentLoading: Promise<boolean> | null = null;
+
+	/** Load and register the CoseBilkent extension on demand. Resolves to
+	 *  whether registration succeeded; repeated calls share one in-flight load. */
+	function ensureBilkent(): Promise<boolean> {
+		if (bilkentRegistered) return Promise.resolve(true);
+		if (!bilkentLoading) {
+			bilkentLoading = Promise.all([
+				import('cytoscape'),
+				import('cytoscape-cose-bilkent'),
+			])
+				.then(([cyModule, bilkentModule]) => {
+					try {
+						cyModule.default.use(bilkentModule.default);
+						bilkentRegistered = true;
+					} catch {
+						bilkentRegistered = false;
+					}
+					return bilkentRegistered;
+				})
+				.catch(() => false);
+		}
+		return bilkentLoading;
+	}
 
 	/** Resolve the requested layout to a registered one. Falls back to plain `cose`
 	 *  when the CoseBilkent extension did not load, so cy.layout() never receives a
@@ -263,23 +287,23 @@
 		if (!container) return;
 
 		let mounted = true;
-		// The renderer and the layout extension touch the DOM at import time, so
-		// they are loaded lazily and only inside the browser lifecycle to keep
-		// server rendering untouched.
-		Promise.all([import('cytoscape'), import('cytoscape-cose-bilkent')])
-			.then(([cyModule, bilkentModule]) => {
+		// The renderer touches the DOM at import time, so it is loaded lazily
+		// and only inside the browser lifecycle to keep server rendering
+		// untouched. The bilkent layout extension (~150 KiB with its transitive
+		// layout-base/cose-base deps) is fetched only when that layout is
+		// actually selected; built-in layouts skip the download entirely.
+		const initialLayout =
+			layout === 'cose-bilkent' ? ensureBilkent() : Promise.resolve(false);
+		initialLayout
+			.then(() => {
 				if (!mounted || !container) return;
-				const cytoscape = cyModule.default;
-				try {
-					cytoscape.use(bilkentModule.default);
-					bilkentRegistered = true;
-				} catch {
-					bilkentRegistered = false;
-				}
-				createInstance(cytoscape);
+				import('cytoscape').then((module) => {
+					if (!mounted || !container) return;
+					createInstance(module.default);
+				});
 			})
 			.catch(() => {
-				// If the layout extension fails to load, fall back to plain cytoscape.
+				// If any module fails to load, fall back to plain cytoscape.
 				if (!mounted || !container) return;
 				import('cytoscape').then((module) => {
 					if (!mounted || !container) return;
@@ -327,10 +351,19 @@
 		applyDecorations();
 	});
 
-	// Re-run layout when the layout strategy changes.
+	// Re-run layout when the layout strategy changes. Selecting cose-bilkent
+	// before the extension is registered triggers the on-demand load first;
+	// until it resolves the effective layout falls back to plain cose.
 	$effect(() => {
 		const name = layout;
 		if (!cy) return;
+		if (name === 'cose-bilkent' && !bilkentRegistered) {
+			ensureBilkent().then((registered) => {
+				if (cy && registered && layout === 'cose-bilkent') {
+					cy.layout(layoutOptions(name)).run();
+				}
+			});
+		}
 		cy.layout(layoutOptions(effectiveLayoutName(name))).run();
 	});
 
