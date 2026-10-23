@@ -394,20 +394,24 @@ impl PipelineRouter {
             self.process_with_plugin_list(content, file_path, &effective, output_mode, &above)
         {
             let (mut chunks, summary) = parsed;
-            let stats = inject_terminology(&mut chunks, vocabulary.as_deref(), &effective);
+            // Splitting ran on `effective` (reduced limits); the injection
+            // budget and the final limit check must run on the original
+            // `config`, otherwise the check would compare post-injection text
+            // against the reduced limit and always report overflow.
+            let stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config);
             return Ok((chunks, summary, false, stats));
         }
 
         let (mut chunks, summary, degraded) =
             self.process_with_degraded_flag(content, file_path, &effective, output_mode)?;
-        let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), &effective);
+        let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config);
 
         if chunks.is_empty() {
             if let Some(parsed) =
                 self.process_with_plugin_list(content, file_path, &effective, output_mode, &below)
             {
                 let (mut chunks, summary) = parsed;
-                let fallback = inject_terminology(&mut chunks, vocabulary.as_deref(), &effective);
+                let fallback = inject_terminology(&mut chunks, vocabulary.as_deref(), config);
                 stats.absorb(fallback);
                 return Ok((chunks, summary, degraded, stats));
             }

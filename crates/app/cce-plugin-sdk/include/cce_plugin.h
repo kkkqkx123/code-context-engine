@@ -430,8 +430,10 @@ char *cce_plugin_filter_file(void *ctx, const char *file_path, bool is_directory
  * narrowest, then the one of the plugin with the higher priority.
  *
  * The host merges the tables of all matching plugins, matches the tokens
- * against identifier tokens and their segments in the indexed text and
- * renders the matched expansions as a glossary line.
+ * against identifier runs and their segments in the indexed text and
+ * injects the matched expansions next to the term: inline parentheses for
+ * embedding text, a trailing block at the end of the line for keyword
+ * text. The identifier itself is never modified.
  *
  * Matching ignores case: the index tokenizer lowercases every token, so a
  * term written "stts" matches a source identifier written "STTS".

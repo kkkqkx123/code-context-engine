@@ -401,13 +401,31 @@ impl GroupChunker {
             splitter: &splitter,
         };
         let mut tracker = GroupTracker::new();
-        crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
+        let mut output = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
             &infra,
             &mut tracker,
             group,
             group_conversions,
             file_path,
-        )
+        )?;
+        // The header path owns no injection of its own: the single-group
+        // entry point must place expansions exactly like `chunk_group` and
+        // `chunk_groups_builtin` do — after splitting, before overlap — or a
+        // caller that chunks one group at a time silently loses terminology.
+        if let Some(vocabulary) = self.terminology(file_path, Some(&language)) {
+            let stats = self.inject_vocabulary(&mut output.chunks, &vocabulary);
+            output.vocabulary.absorb(stats);
+        }
+        let first_emb = output
+            .chunks
+            .iter()
+            .position(|c| c.path == ChunkPath::Embedding)
+            .unwrap_or(output.chunks.len());
+        if first_emb < output.chunks.len() {
+            self.overlap_manager
+                .apply_overlap(&mut output.chunks[first_emb..], ChunkPath::Embedding);
+        }
+        Ok(output)
     }
 
     /// Batch process groups

@@ -204,7 +204,7 @@ cargo build --release
 - **Fusion**：覆写混合融合权重与算法（覆盖档，首个非 `None` 生效）。返回 `FusionWeights { vector_weight, bm25_weight, min_score, algorithm, rrf_k }`，权重由宿主校验至 `[0, 1]`；`algorithm` 为算法名（`weighted_min_max` / `rrf` / `borda_count`，未知名忽略），`rrf_k` 仅配合 `rrf` 使用（缺省 60，零值拒绝）。
 - **ResultFilter**：重排后按 id 移除 / 增益 / 标注候选（链式档）。返回 `ResultFilterEntry { id, remove, boost, note }` 数组。
 - **FileFilter**：扫描期文件纳入 / 排除决策（覆盖档，首个非 `Neutral` 生效）。返回 `FileFilterDecision`（`include` / `exclude` / `neutral`）；`Neutral` 交由内置 `PatternMatcher`。
-- **Vocabulary**：领域术语表（加法档，多个插件的表按 token 与作用域合并去重）。实现 `vocabulary()`，返回 `VocabularyEntry { token, expansion, scope? }` 数组；宿主负责匹配（标识符 token 及其下划线、驼峰分段，`stts` 命中 `parse_stts`，而 `ts` 不命中 `stts`；匹配忽略大小写，与索引分词器的小写化策略一致）并按分块向 BM25 与 Embedding 文本追加一行 `Glossary: stts = sync time-to-sample`。条目可带作用域 `scope { include, exclude, priority }`：作用域按项目相对路径匹配，模式语言与插件级 `file_patterns` 一致；无作用域的条目对插件路由到的所有文件生效，同名条目按作用域优先级、作用域窄度、插件优先级依次决出胜者。宿主在插件边界限制条目数量（单表 1024、合并后 4096）与单条长度（200 字符），并丢弃缺少 token 或释义、以及作用域无法读取或无法满足的条目；插件只提供数据。SDK 始终导出词汇入口，未实现术语表的插件返回空表。
+- **Vocabulary**：领域术语表（加法档，多个插件的表按 token 与作用域合并去重）。实现 `vocabulary()`，返回 `VocabularyEntry { token, expansion, scope? }` 数组；宿主负责匹配（标识符 token 及其下划线、驼峰分段，`stts` 命中 `parse_stts`，而 `ts` 不命中 `stts`；匹配忽略大小写，与索引分词器的小写化策略一致）并按分块就地注入：Embedding 文本在标识符 run 后插入 `(expansion)`，BM25 文本在首次出现行尾追加 `[token = expansion; ...]`，标识符原样保留。条目可带作用域 `scope { include, exclude, priority }`：作用域按项目相对路径匹配，模式语言与插件级 `file_patterns` 一致；无作用域的条目对插件路由到的所有文件生效，同名条目按作用域优先级、作用域窄度、插件优先级依次决出胜者。宿主在插件边界限制条目数量（单表 1024、合并后 4096）与单条长度（200 字符），并丢弃缺少 token 或释义、以及作用域无法读取或无法满足的条目；插件只提供数据。SDK 始终导出词汇入口，未实现术语表的插件返回空表。
 
 跨 FFI 的实体 / 文档 / 分块 / 重排 JSON schema 见 `include/cce_plugin.h` 注释。
 

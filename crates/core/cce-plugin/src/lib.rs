@@ -737,8 +737,10 @@ pub trait CodePlugin: Send + Sync {
     ///
     /// The plugin owns the terminology: each entry maps an identifier token
     /// to its human-readable expansion. The host merges the tables of all
-    /// matching plugins, matches the tokens against whole identifiers in the
-    /// indexed text, and renders the matched expansions as a glossary line.
+    /// matching plugins, matches the tokens against identifier runs in the
+    /// indexed text, and injects the matched expansions next to the term:
+    /// inline parentheses for embedding text, a trailing block at the end of
+    /// the line for keyword text. The identifier itself is never modified.
     ///
     /// An empty table (the default) means the plugin contributes nothing.
     fn vocabulary(&self) -> Result<Vec<cce_types::plugin::VocabularyEntry>, PluginError> {

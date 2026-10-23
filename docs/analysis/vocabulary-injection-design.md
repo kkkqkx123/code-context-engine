@@ -16,27 +16,27 @@
 | D5 | 注入粒度 | 默认"每 chunk 首次出现"；提供 `glossary_scope = chunk | entity` 开关 | 检索单元是 chunk；每实体首次会牺牲后段 chunk 的释义 |
 | D6 | 单 chunk 上限 | `max_entries_per_chunk = 4` + 字符预算，超限截断并计数 | 现有只有"单条 200 字符"（`types/plugin.rs:413`），没有总量约束 |
 | D7 | 导出 | 保留内联释义（不再保留尾部整行 `Glossary:`）；`strip_index_context` 继续只剥 sidecar | 导出有两条路径都消费 chunk 文本，见 §8.4 |
-| D8 | 版本 | `PIPELINE_VERSION` `"1"` → `"2"` | 输出形状变化，缓存与漂移检测必须失效（`ast_to_nl.rs:50`） |
+| D8 | 版本 | `PIPELINE_VERSION` 保持 `"1"`，不 bump | 开发阶段不提供向后兼容（仓库 `AGENTS.md` 约束：开发期不升版本、统一为 1）；输出形状变化由调用方重建索引消化，不做缓存迁移 |
 
 ---
 
-## 1. 事实基线（代码位置，逐条可核）
+## 1. 事实基线（代码位置，逐条可核；已按本次落地更新）
 
 | 事实 | 位置 |
 |---|---|
-| 词表合并/匹配/渲染唯一实现 | `crates/core/cce-plugin/src/vocabulary.rs`（405 行，`glossary_line` 在 108-117） |
-| 当前注入点（代码索引，单组） | `crates/parser/cce-parser/src/ast_to_nl/chunker/chunker.rs:180-206`，调用在 `301`（`chunk_group`）与 `387`（`chunk_groups`） |
-| 当前注入点（文档索引） | `crates/parser/cce-document/src/pipeline.rs:445-468`，调用在 `374/380/387` |
-| 切分预算判定 | `crates/core/cce-config/src/modules/ast_to_nl.rs:211-226`（`exceeds_limit`），默认 `max_tokens=512`、`max_bm25_words=150`（`:302`、`:330`） |
-| 单段强制合规 | `chunker/segment_limit.rs:23-47`（`split_range` 保证每段 ≤ 上限） |
-| 跨组合并由上限保护 | `chunker/boundary.rs:35-42`（`merge_limits`），`merge.rs:306+` |
-| 重叠不写 `text`，只写 `prev_overlap` | `chunker/overlap.rs:217-266`（BM25）、`273+`（Emb），2× 上限告警在 `265-283` |
-| 分块文本计数 | `chunker/boundary.rs:21-26`（`cost`）
-| BM25 字段与权重 | `crates/infra/cce-storage-bm25/src/schema.rs:13-29`；查询权重 `retrieval.rs:278-280`（title 2.0 / content 1.0 / keywords 2.0） |
-| BM25 短语查询确实启用 | `retrieval.rs:311-316`（`extract_phrases` → `build_phrase_query`），位置索引 `schema.rs:54,63` |
-| 导出消费 chunk 文本并做"剥离" | `crates/app/cce-orchestrator/src/export/nl_exporter.rs:292-313`；剥离函数 `export/path_utils.rs:78-82`（当前是 no-op，只 `trim_end`） |
-| 实体级释义字段 | `crates/core/cce-types/src/types/ast_to_nl/result.rs:139-149`（`glossary: Option<String>`） |
-| 流水线版本 | `crates/parser/cce-parser/src/ast_to_nl.rs:50` |
+| 词表合并/匹配唯一实现 | `crates/core/cce-plugin/src/vocabulary.rs`（合并、`FileVocabulary`、`CompiledScope`）+ `crates/core/cce-plugin/src/vocabulary/injection.rs`（`inject`、`TerminologyIndex`、`ExpandedTerms`、`InjectionStyle/Budget`） |
+| 代码索引注入 | `crates/parser/cce-parser/src/ast_to_nl/chunker/chunker.rs`：`effective_config`（~188）、`inject_vocabulary`（~211）、`chunk_group`（~292，先注入后重叠）、`chunk_groups_builtin`（~494，合并→注入→重叠）、`chunk_group_with_conversions`（~389，单组入口同样先注入后重叠） |
+| 文档索引注入 | `crates/parser/cce-document/src/pipeline.rs`：`process_with_plugins_degraded_flag`（~360，切分走 `effective` 影子配置、注入走原始 `config`，见 §8.3），`inject_terminology`（~473） |
+| 切分预算判定 | `crates/core/cce-config/src/modules/ast_to_nl.rs:253`（`exceeds_limit`），默认 `max_tokens=512`、`max_bm25_words=150`；预留 `glossary_reserve`（~273）、影子配置 `with_glossary_reserve`（~292，overlap 尺寸不缩减） |
+| 单段强制合规 | `chunker/segment_limit.rs`（`enforce_segment_max_limit` 保证每段 ≤ 上限） |
+| 跨组合并由上限保护 | `chunker/boundary.rs`（`merge_limits`），`merge.rs` |
+| 重叠不写 `text`，只写 `prev_overlap` | `chunker/overlap.rs:217`（通用）、`273`（Emb 专用），2× 上限告警在同文件尾部 |
+| 分块文本计数 | `chunker/boundary.rs`（`cost`）；注入后重算 `token_count` / `bm25_word_count`（`chunker.rs:253-263`，文档侧 `pipeline.rs:525-536`） |
+| BM25 字段与权重 | `crates/infra/cce-storage-bm25/src/schema.rs`；查询权重 `retrieval.rs:278-280`（title 2.0 / content 1.0 / keywords 2.0） |
+| BM25 短语查询确实启用 | `retrieval.rs:311-316`（`extract_phrases` → `build_phrase_query`），位置索引见 `schema.rs` |
+| 导出消费 chunk 文本并做"剥离" | `crates/app/cce-orchestrator/src/export/nl_exporter.rs:293`（`prepare_export_chunks`）；剥离函数 `export/path_utils.rs:86`（sidecar/terminology 分界见注释）；直接导出 `export/direct_generator.rs:121`（`with_terminology`，同形状内联渲染） |
+| 实体级释义字段 | `crates/core/cce-types/src/types/ast_to_nl/result.rs:139-150`（`glossary: Vec<VocabularyMatch>`，转换阶段只携带、切分阶段才渲染，见 `index_enrichment.rs:83-103`） |
+| 流水线版本 | `crates/parser/cce-parser/src/ast_to_nl.rs:59`（`PIPELINE_VERSION = "1"`，本次不 bump，见 D8） |
 
 ---
 
@@ -199,115 +199,85 @@ debug_assert!(
 - release 下不 panic，改为 `warn!` + 计数 `vocabulary_budget_overflow_total`（应恒为 0，出现即说明预留比例配小了）；
 - 指标：`vocabulary_entries_injected_total` / `vocabulary_entries_truncated_total` / `vocabulary_files_with_table_total`。
 
-### 7.4 `glossary_scope = entity` 备选
+### 7.4 `glossary_scope = entity` 的实际语义（已落地，非转换前注入）
 
-把注入放在转换阶段（`index_enrichment.rs` 之后、切分之前）对整段文本做一次，天然满足预算（切分看到的就是注入后的文本），代价是"同一术语只在该实体首次出现的那一个 chunk 里有释义"。留给在意 DF 稀释的场景，默认不开。
+ entity 粒度**不是**"转换阶段先注入再切分"，而是"切分后注入 + 跨 chunk 去重"：`inject` 每次调用只扫描当前 chunk 文本（无级联，I4），但调用方持有一个跨 chunk 的 `ExpandedTerms`，`chunk_scope` 逐 chunk 清空、`entity_scope` 按 `source_group_id` 切换时才清空（代码侧 `chunker.rs:221-232`，文档侧 `pipeline.rs:492-503`，文档无实体阶段故按 `source_group_id` 近似）。
+
+ 效果：同一术语在同一实体的后段 chunk 里不再解释，索引更紧凑；代价是后段 chunk 独立被检出时无释义。预算模型与 chunk 粒度完全一致（同一预留、同一终检），不存在"注入后再切"的半截括号问题。原方案中"转换后切分前做一次"的描述已作废。
 
 ---
 
 ## 8. 实现改动清单
 
-### 8.1 `cce-plugin`：新增注入 API（不引入新依赖）
+### 8.1 `cce-plugin`：注入 API（已落地，以实现为准）
 
 ```rust
-// crates/core/cce-plugin/src/vocabulary.rs
+// crates/core/cce-plugin/src/vocabulary/injection.rs（实际签名）
 
-/// 一次标识符 run：整段 token 及其分段，均带字节区间。
-struct TokenRun<'a> { text: &'a str, start: usize, end: usize, segments: Vec<(String, usize, usize)> }
+pub enum InjectionStyle { Embedding, Bm25 }
 
-/// 注入形状。
-pub enum InjectionStyle {
-    /// 就地括号，供 Embedding 文本使用。
-    Embedding,
-    /// 行尾术语块，供 BM25 文本使用。
-    Bm25,
-}
-
-/// 单 chunk 注入预算。
-pub struct InjectionBudget { pub max_entries: usize, pub path: ChunkPath }
+pub struct InjectionBudget { pub max_entries: usize, pub max_cost: usize }
+// max_cost 单位：BM25=词数，Embedding=token 数；调用方用 glossary_reserve(path) 换算。
 
 pub struct Injection { pub text: String, pub injected: usize, pub truncated: usize }
 
-/// 在 `text` 中按首次出现注入术语。
-///
-/// 匹配只发生在传入的原文本上；注入结果不再参与匹配（I4）。
-pub fn inject(text: &str, table: &VocabularyTable, style: InjectionStyle, budget: InjectionBudget) -> Injection
+pub fn inject(
+    text: &str,
+    index: &TerminologyIndex,      // 由 FileVocabulary::matches() 一次建成，match_key 去重
+    style: InjectionStyle,
+    budget: &InjectionBudget,
+    expanded: &mut ExpandedTerms,  // 跨 chunk 去重状态（entity 粒度用，chunk 粒度逐 chunk 清空）
+) -> Injection
 ```
 
-要点：
+要点（与初版方案的差异已对齐实现）：
 
-1. 新增 `VocabularyTable::get(&self, token: &str) -> Option<&VocabularyEntry>`（当前只有 `matched_entries` 全量扫描）。
-2. 新增 span 版分词 `identifier_runs(text)`：现 `identifier_tokens`（`:192-205`）只产出 `String`，无位置信息，无法定位插入点。
-3. 插入按**字节偏移降序**执行，避免偏移失效。
-4. 每个 run 只插一次（`seen: HashSet<&str>`），run 内多命中合并为一个括号/一段行列。
-5. 预算按实际渲染长度累计，到顶即停止并返回 `truncated`。
+1. 不再设 `VocabularyTable::get`：查找走 `TerminologyIndex::get(match_key)`，每文件一次建成，每 chunk 只扫标识符 run。
+2. 位置信息来自 `identifier_runs(text) -> Vec<TokenRun { end, keys }>`：`identifier_tokens` 已改为其薄封装；锚点是 run 尾（`sttsCount` 不劈标识符），BM25 侧再按 `line_ranges` 收敛为"行尾一个锚点"。
+3. 插入按锚点出现序一次组装（`apply` 单遍拷贝），不做字节降序补丁；`mentioned` 保证每 chunk 首次，`expanded` 保证 entity 粒度跨 chunk 只一次，且已注入文本不再参与匹配（I4）。
+4. 预算按整块渲染长度计量（`fitting_prefix` 整块试算，`measure` 按风格取词数/token 数），到顶即停并返回 `truncated`；同一 run 多命中合并为一段（`; ` 分隔），同行多命中（BM25）合并为一段。
 
-### 8.2 `chunker`：影子配置 + 注入钩子，删除尾部追加
+### 8.2 `chunker`：影子配置 + 注入钩子（已落地；本次补单组入口）
 
-`chunker/chunker.rs`：
+`chunker/chunker.rs` 实际形状：`effective_config()`（有表才 `with_glossary_reserve()`，否则克隆原配置，保证 I5）、`inject_vocabulary(&mut chunks, &FileVocabulary)`（风格按 `chunk.path` 选择，`reserve = self.config.glossary_reserve(path)` 取**原始**上限、`budget.max_cost` 即此值；注入后重算 `token_count` / `bm25_word_count`，终检用**原始** `self.config.exceeds_limit`）、`inject_into_output()`（`Chunk` 插件覆盖路径的统一注入点）。
 
-```diff
--    fn append_glossary(&self, output: &mut ChunkOutput, file_path: &str, language: &str) {
-+    /// The per-path headroom reserved for glossary injection.
-+    fn glossary_reserve(&self, file_path: &str, language: &str) -> Option<ChunkingConfig> {
-+        let registry = self.plugin_registry.as_ref()?;
-+        let table = registry.vocabulary_table(file_path, Some(language))?;
-+        if table.is_empty() || self.config.glossary_reserve_ratio <= 0.0 {
-+            return None;
-+        }
-+        Some(self.config.with_glossary_reserve())
-+    }
-+
-+    /// Inject the glossary into every chunk (I1/I2: budget first, injection second).
-+    fn inject_vocabulary(&self, chunks: &mut [ChunkedResult], file_path: &str, language: &str) { ... }
-```
+调用顺序（均为"合并 → 注入 → 重叠 → 关系/已在内部处理"）：
 
-调用点重排（三处）：
+| 位置 | 现状（已落地） |
+|---|---|
+| `chunk_group` | 切分（影子）→ 注入 → 重叠（仅 Emb 切片）→ 关系 |
+| `chunk_groups_builtin` | 切分（影子）→ 跨组合并 → 注入（Emb/BM25 各一次）→ 重叠（仅 Emb） |
+| `chunk_group_with_conversions` | 切分（影子）→ 注入 → 重叠（仅 Emb 切片）；此前缺注入与重叠，本次已补（否则单组直调路径静默丢失术语，违反 I1/I2 的"所有入口一致"） |
+| `Chunk` 插件覆盖 | 插件产出 chunks → `inject_into_output` 统一注入（插件文本同样受预留约束；终检同上） |
 
-| 位置 | 现状 | 改为 |
-|---|---|---|
-| `chunk_group`（`:216-304`） | 重叠（293）→ 关系（298）→ 追加词表（301） | 注入 → **然后**重叠 → 关系；删除 301 |
-| `chunk_groups_builtin`（`:393-476`） | 合并（455）→ 重叠（465） | 合并 → 注入 → 重叠；`infra.config` 换成影子配置；删除 387 的尾部追加 |
-| `chunk_group_with_conversions`（`:312-331`） | 无词表 | 由 `chunk_groups_builtin` 统一覆盖，方法内不需再处理 |
+- `chunk_single_path` 的 `needs_split` 读到影子配置，切分即带预留；**不改** `TextSplitter` 签名（`ChunkInfrastructure.config` 传入影子实例即可）。
+- `ChunkInfrastructure` 仍持有 `&ChunkingConfig`，指向影子实例；`OverlapManager` 仍用原始配置（overlap 尺寸不缩减，`with_glossary_reserve` 注释已明确）。
 
-同时：
-
-- `chunk_single_path`（`:574-631`）的 `needs_split`（589）与 `word_count`（587）自然读到影子配置，切分即带预留；**不需要**改 `TextSplitter` 签名（`ChunkInfrastructure.config` 传入影子配置即可），这是本方案改动面最小的地方。
-- `ChunkInfrastructure`（`:529-533`）继续持有 `Option<&ChunkingConfig>` 的语义不变，只是指向影子实例。
-
-### 8.3 文档管线：同一套钩子
+### 8.3 文档管线：同一套钩子（已落地；本次修预算基准 bug）
 
 `crates/parser/cce-document/src/pipeline.rs`：
 
-```diff
--            append_glossary(&mut chunks, file_path, registry);
-+            inject_glossary(&mut chunks, file_path, registry, config);
-```
+- 入口 `process_with_plugins_degraded_flag` 构造一次影子配置 `effective`（有表才 `with_glossary_reserve()`，否则克隆原配置，保证 I5），切分（`process_with_plugin_list` / `process_with_degraded_flag`）走 `&effective`；
+- **注入必须走原始 `config`**：`inject_terminology(&mut chunks, vocab, config)`。此前三处调用误传 `&effective`，导致 `glossary_reserve` 被二次打折（Emb 约少 2 token）且终检 `exceeds_limit` 对的是缩减后上限——任何正常使用预留的 chunk 都会被误判 `overflow`。本次已改为传原始 `config`，与代码侧 `self.config` 基准一致；
+- 注入后重算 `token_count`（Emb 用 `estimate_tokens`，BM25 用词数）与 `meta.bm25_word_count`（有值才重算），终检 `debug_assert! + warn! + overflow` 计数；
+- 文档无语言概念，`vocabulary_for(file, None)` 按文件模式筛选；`glossary_scope=entity` 时按 `source_group_id` 近似分组（文档无实体阶段，见 §7.4）。
 
-- 三处调用（`374/380/387`）统一替换；`append_glossary`（`:445-468`）删除；
-- 文档切分用的 `config` 需换成影子配置（`process_with_plugin_list` / `process_with_degraded_flag` 都接收 `&ChunkingConfig`，在入口构造一次影子配置传入）；
-- 文档 chunker 的分段点：`common/chunker.rs:264-271`（Emb，`split_by_tokens`）、`300-303`（BM25，`split_bm25_by_words`），影子配置在此生效；
-- 注入后必须重算 `meta.bm25_word_count` 与 `token_count`（现有断言 `common/chunker.rs:663-665` 会抓住不一致）。
+### 8.4 导出侧（已落地；本次补 SDK 残留）
 
-### 8.4 导出侧
+导出有**两条**消费路径，已统一为内联形状：
 
-导出有**两条**消费路径，必须一起改，否则同一条目两处渲染不一致：
+| 路径 | 数据来源 | 现状（已落地） |
+|---|---|---|
+| `nl_exporter` | 存储里的 Embedding chunk 文本 | 注入已是内联括号，直接带释义；`strip_index_context` 只剥 sidecar（**不**剥术语，`path_utils.rs:76-88` 注释已明确分界） |
+| `direct_generator` | `ConversionResult.embedding_text` + `glossary: Vec<VocabularyMatch>` | `with_terminology`（`:121`）对文本做一次 `InjectionStyle::Embedding` 内联注入（上限 `MAX_EXPORTED_TERMS=8`，`max_cost=usize::MAX`，面向人读不做预算），已无尾部整行 |
 
-| 路径 | 数据来源 | 现状 | 改造 |
-|---|---|---|---|
-| `nl_exporter` | 存储里的 Embedding chunk 文本 | 尾部带 `Glossary:` 行（若注入过的 chunk 被导出） | 注入改为内联后自动带释义；`strip_index_context` 保持只剥 sidecar（**不要**剥 glossary） |
-| `direct_generator` | `ConversionResult.embedding_text` + `glossary` 字段 | 尾部追加整行（`:104-118`） | 改为对文本做一次 `InjectionStyle::Embedding` 内联注入，删除 `with_glossary` |
-
-`export/path_utils.rs:78-82` 需补文档注释，明确两类增强的分界：
-
-- **sidecar（索引专用，导出剥离）**：控制流/行为片段 → `strip_index_context` 负责；
-- **glossary（索引 + 展示共用）**：内联释义 → 导出保留。
+本次另修三处残留"尾部一行 `Glossary:`"表述（行为早已是内联，文档未跟上）：`cce-plugin-sdk/docs/guide.md:207`、`cce_plugin.h:432-434`、`cce-plugin/src/lib.rs:740-741`，统一改为"Embedding 内联括号 / BM25 行尾块"。
 
 ### 8.5 版本与文档
 
-PIPELINE_VERSION不必改，因为开发阶段不提供向后兼容，当前也从未产生过任何旧数据
+`PIPELINE_VERSION` 保持 `"1"`（`ast_to_nl.rs:59`），不 bump：开发阶段不提供向后兼容、当前也无已发布的旧数据需要失效，版本统一为 1（仓库约束）。
 
-`docs/user-guide/plugin/plugin-capabilities.md:431-492` 的"落点"整节需重写：删除"每个实体最多一行 `Glossary:`"，改为"BM25 行尾术语块 / Embedding 内联括号 / 每 chunk 首次出现 / 预留预算"。
+`docs/user-guide/plugin/plugin-capabilities.md:431-549` 已是新形状（BM25 行尾块 / Embedding 内联括号 / 每 chunk 首次 / 预留预算 / 导出保留），本次无需再改；`cce-plugin-sdk` 侧三处残留见 §8.4，已同步。
 
 ---
 
@@ -362,5 +332,27 @@ PIPELINE_VERSION不必改，因为开发阶段不提供向后兼容，当前也�
 | 3 | 单 chunk 条目上限 | 3 / 4 / 6 | 4（一行 4 条 × 平均 5 词 ≈ 20 词，已接近 9 词额度的边界，需实测收敛） |
 | 4 | 粒度默认 chunk 还是 entity | chunk / entity | chunk |
 | 5 | 导出是否保留释义 | 保留（内联）/ 剥离 | 保留：导出面向人读，"不必查缩写"是能力初衷 |
-| 6 | `glossary` 字段是否改结构化 | 保持 `Option<String>` / 改 `Vec<VocabularyMatch>` | 改结构化（导出要做内联渲染，需要 token+expansion 分开）；需同步改 serde 默认与测试 |
+| 6 | `glossary` 字段是否改结构化 | 保持 `Option<String>` / 改 `Vec<VocabularyMatch>` | **已定：结构化**（`result.rs:150` 为 `Vec<VocabularyMatch>`，转换阶段携带、切分/导出各渲染一次；`with_glossary/set_glossary` 同步） |
 | 7 | BM25 keywords 实验 | 做 / 不做 | 先不做，留 A/B 开关位 |
+
+---
+
+## 11. 本次评审结论与修改方向（新增）
+
+总体判定：D1–D7 合理并已落地，D8 原"1→2"不合理（违反开发期版本约束），已改为保持 `"1"`。
+
+设计合理性逐条复核：
+
+- D1（注入前移到切分后、重叠前）：成立。`chunk.text` 写入点已收敛为切分阶段，重叠只写 `prev_overlap` 侧字段（`overlap.rs`），I2 成立。
+- D2（影子预留 + 终检、不做注入后再切）：成立。避免括号被切断与 `chunk_id` 漂移；预留 6%（Emb 31 token / BM25 9 词）配合 `fitting_prefix` 整块试算，I1 由"有效上限切分 + 预算内注入 + 原始上限终检"三段保证。拒绝"注入后再切"正确。
+- D3（Embedding 内联）：成立。向量对符号邻域敏感，内联是唯一把释义放进符号上下文的形状；不碰 BM25 短语与签名展示。
+- D4（BM25 行尾块）：成立。词袋召回等价、相邻性保留；内联会破坏 `extract_phrases` 短语（`retrieval.rs:311-316`）且制造"expansion 内部相邻"误召回；keywords 字段权重 2.0 与 `field_doc_freq` 耦合，不应进 keywords（D 否决正确）。
+- D5（默认 chunk）：成立。检索单元是 chunk；entity 粒度已保留为开关（实现为跨 chunk `ExpandedTerms` 去重，见 §7.4 修正）。
+- D6（4 条 + 额度双约束）：成立。单条 200 字符上界下，4 条仍可远超 9 词预留，必须取 `min(条数, 额度)`；`truncated/overflow` 计数完整。
+- D7（导出保留）：成立。两条导出路径已同形（`nl_exporter` 直接带内联、`direct_generator::with_terminology` 同形状重渲染），`strip_index_context` 只剥 sidecar。
+
+本次发现并已修复的三个实现偏差：
+
+1. 文档管线预算基准错误（bug）：`inject_terminology` 误用影子配置做 `glossary_reserve` 与 `exceeds_limit`，导致预留被二次打折、终检恒报 `overflow`。已改为切分走 `effective`、注入走原始 `config`（`pipeline.rs:393-410`）。
+2. 单组入口缺注入与重叠（遗漏）：`GroupChunker::chunk_group_with_conversions` 直调 `header_chunk` 即返回，术语静默丢失。已补"注入→Emb 重叠"，与 `chunk_group` / `chunk_groups_builtin` 一致（`chunker.rs:389-425`）。
+3. 文档残留（过期表述）：`§1/§8.1/§7.4` 行号与 API 已过期，按实现重写；SDK 三处"glossary line"已改为双形状；`§8.5` 版本改为不 bump；待拍板 #6 标记已定。
