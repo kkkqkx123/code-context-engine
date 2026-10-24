@@ -5,7 +5,6 @@
 
 use crate::GenericGroup;
 use crate::yaml::types::{YamlGroup, YamlGroupType, YamlNode, YamlNodeType};
-use cce_text::MixedTokenizer;
 use cce_types::ParseError;
 use cce_utils::token_estimation::TokenEstimator;
 
@@ -353,8 +352,7 @@ impl YamlGrouper {
 
         for group in groups {
             let should_split = if self.max_bm25_terms > 0 {
-                let tokenizer = MixedTokenizer::new();
-                let word_count = tokenizer.tokenize(&group.bm25_text).len();
+                let word_count = cce_text::ChunkUnit::Terms.cost(&group.bm25_text);
                 word_count > self.max_bm25_terms
             } else if self.max_tokens > 0 {
                 group.token_count > self.max_tokens
@@ -379,21 +377,20 @@ impl YamlGrouper {
         let mut result = Vec::new();
         let mut current_members = Vec::new();
         let mut current_word_count = 0;
-        let tokenizer = MixedTokenizer::new();
 
         for member in group.members {
             let member_bm25 = member.to_bm25_text();
-            let member_words = tokenizer.tokenize(&member_bm25).len();
+            let member_words = cce_text::ChunkUnit::Terms.cost(&member_bm25);
 
             let should_split = if self.max_bm25_terms > 0 {
                 current_word_count + member_words > self.max_bm25_terms
                     && !current_members.is_empty()
             } else if self.max_tokens > 0 {
-                let member_tokens = self.estimator.estimate_text(&member_bm25);
+                let member_tokens = cce_text::ChunkUnit::Tokens.cost(&member_bm25);
                 let current_tokens: usize = current_members
                     .iter()
                     .map(|m: &crate::yaml::types::YamlNode| {
-                        self.estimator.estimate_text(&m.to_bm25_text())
+                        cce_text::ChunkUnit::Tokens.cost(&m.to_bm25_text())
                     })
                     .sum();
                 current_tokens + member_tokens > self.max_tokens && !current_members.is_empty()

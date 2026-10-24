@@ -394,7 +394,7 @@ impl XmlGroup {
     }
 
     /// Finalize group (compute combined text and token count)
-    pub fn finalize(&mut self, estimator: &cce_utils::token_estimation::TokenEstimator) {
+    pub fn finalize(&mut self, _estimator: &cce_utils::token_estimation::TokenEstimator) {
         let mut embedding_parts = Vec::new();
         let mut bm25_parts = Vec::new();
 
@@ -460,7 +460,7 @@ impl XmlGroup {
         }
         self.bm25_text = enhanced_bm25;
 
-        self.token_count = estimator.estimate_text(&self.bm25_text);
+        self.token_count = cce_text::ChunkUnit::Tokens.cost(&self.bm25_text);
 
         // Update span if we have members
         if let (Some(start), Some(end)) = (min_start, max_end) {

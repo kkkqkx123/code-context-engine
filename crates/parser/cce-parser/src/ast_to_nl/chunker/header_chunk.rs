@@ -532,6 +532,9 @@ mod tests {
             splitter,
             pre_injection_embedding: cfg.max_tokens,
             pre_injection_bm25: cfg.max_bm25_terms,
+            emb_budget: cfg.budget(super::super::result::ChunkPath::Embedding, false, 0),
+            bm25_budget: cfg.budget(super::super::result::ChunkPath::Bm25, false, 0),
+            has_vocabulary: false,
         }
     }
 
@@ -828,19 +831,20 @@ mod tests {
 
     #[test]
     fn test_create_chunk_with_header_exceeds_limit_entity_bounds() {
-        let cfg = ChunkingConfig {
-            max_bm25_terms: 3,
+        let base = ChunkingConfig {
+            max_bm25_terms: 150,
             ..Default::default()
         };
         let est = TokenEstimator::default();
-        let splitter = TextSplitter::new(cfg.clone());
         let tracker = GroupTracker::new();
         let group = test_group();
 
         let header_text = "entity one";
+        let long_member = "entity two ".to_string() + &n_words(200);
+        let member_len = long_member.len();
         let member = ConversionResult {
             entity_id: EntityId(2),
-            bm25_text: Some("entity two very long exceeds limit three".to_string()),
+            bm25_text: Some(long_member),
             ..Default::default()
         };
         let members = vec![member];
@@ -853,11 +857,30 @@ mod tests {
             NlEntityBoundary {
                 entity_id: EntityId(2),
                 start_byte: header_text.len() + 2,
-                end_byte: header_text.len() + 2 + 42,
+                end_byte: header_text.len() + 2 + member_len,
             },
         ];
         let (combined, member_ids) = assemble_combined_text(header_text, &members, ChunkPath::Bm25);
-        let infra = infra(&cfg, &est, &splitter);
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
+        let body_cfg = base.body_config(false, emb_dec, bm25_dec);
+        let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
+        let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
+        let splitter = TextSplitter::with_pre_limits(
+            body_cfg.clone(),
+            emb_budget.pre_injection_limit,
+            bm25_budget.pre_injection_limit,
+        );
+        let infra = super::super::chunker::ChunkInfrastructure {
+            config: &body_cfg,
+            estimator: &est,
+            splitter: &splitter,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: false,
+        };
         let input = header_input(&infra, &group, &combined, &nlb, &tracker, &member_ids, 0);
 
         let results = super::super::chunker::chunk_single_path(input)
@@ -869,19 +892,37 @@ mod tests {
 
     #[test]
     fn test_create_chunk_with_header_exceeds_limit_no_boundaries() {
-        let cfg = ChunkingConfig {
-            max_bm25_terms: 3,
+        let base = ChunkingConfig {
+            max_bm25_terms: 150,
             ..Default::default()
         };
         let est = TokenEstimator::default();
-        let splitter = TextSplitter::new(cfg.clone());
         let tracker = GroupTracker::new();
         let group = test_group();
         let nlb: [NlEntityBoundary; 0] = [];
         let empty: [ConversionResult; 0] = [];
-        let text = n_words(25);
+        let text = n_words(300);
         let (combined, member_ids) = assemble_combined_text(&text, &empty, ChunkPath::Bm25);
-        let infra = infra(&cfg, &est, &splitter);
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
+        let body_cfg = base.body_config(false, emb_dec, bm25_dec);
+        let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
+        let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
+        let splitter = TextSplitter::with_pre_limits(
+            body_cfg.clone(),
+            emb_budget.pre_injection_limit,
+            bm25_budget.pre_injection_limit,
+        );
+        let infra = super::super::chunker::ChunkInfrastructure {
+            config: &body_cfg,
+            estimator: &est,
+            splitter: &splitter,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: false,
+        };
         let input = header_input(&infra, &group, &combined, &nlb, &tracker, &member_ids, 0);
 
         let results = super::super::chunker::chunk_single_path(input)
@@ -1110,7 +1151,10 @@ mod tests {
 
     #[test]
     fn test_merged_fragments_keep_full_header_body_on_embedding_path() {
-        let cfg = ChunkingConfig::default();
+        let cfg = ChunkingConfig {
+            max_tokens: 2048,
+            ..Default::default()
+        };
         let est = TokenEstimator::default();
         let splitter = TextSplitter::new(cfg.clone());
         let infra = infra(&cfg, &est, &splitter);

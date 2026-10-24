@@ -81,7 +81,7 @@ pub trait GenericGroup<Node> {
     }
 
     /// Finalize group (compute combined text and token count)
-    fn finalize(&mut self, estimator: &TokenEstimator) {
+    fn finalize(&mut self, _estimator: &TokenEstimator) {
         let mut embedding_parts = Vec::new();
         let mut bm25_parts = Vec::new();
 
@@ -128,7 +128,7 @@ pub trait GenericGroup<Node> {
 
         *self.embedding_text_mut() = embedding_parts.join("\n");
         *self.bm25_text_mut() = bm25_parts.join("\n");
-        *self.token_count_mut() = estimator.estimate_text(self.bm25_text());
+        *self.token_count_mut() = cce_text::ChunkUnit::Tokens.cost(self.bm25_text());
 
         if let Some(span) = combined_span {
             *self.span_mut() = span;

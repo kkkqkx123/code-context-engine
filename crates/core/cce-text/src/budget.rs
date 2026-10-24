@@ -104,6 +104,43 @@ pub fn suffix_start_for_cost(text: &str, unit: ChunkUnit, limit: usize) -> usize
     best
 }
 
+/// Split `text` into char-aligned ranges that each fit `limit`.
+///
+/// The terminal budget primitive shared by every chunking path: each
+/// returned range is non-empty, contiguous, fully covers `text`, stays on
+/// character boundaries and costs at most `limit`. Callers only choose
+/// where to prefer boundaries inside the guaranteed-to-fit prefix; the
+/// budget enforcement itself lives here. A single character that still
+/// exceeds the limit signals an unsatisfiable configuration.
+pub fn split_to_fit(text: &str, unit: ChunkUnit, limit: usize) -> Vec<(usize, usize)> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    if limit == 0 {
+        return vec![(0, text.len())];
+    }
+    let mut ranges = Vec::new();
+    let mut start = 0usize;
+    while start < text.len() {
+        let remaining = &text[start..];
+        let prefix = truncate_to_cost(remaining, unit, limit);
+        let mut end = start + prefix.len();
+        if end <= start {
+            end = remaining
+                .chars()
+                .next()
+                .map(|character| start + character.len_utf8())
+                .unwrap_or(text.len());
+        }
+        ranges.push((start, end));
+        if end >= text.len() {
+            break;
+        }
+        start = end;
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

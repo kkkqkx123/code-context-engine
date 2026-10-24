@@ -101,7 +101,7 @@ mod tests {
     fn test_chunk_large_bm25_triggers_split() {
         let config = ChunkingConfig {
             max_tokens: 1024,
-            max_bm25_terms: 10,
+            max_bm25_terms: 100,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -729,10 +729,11 @@ mod tests {
     #[test]
     fn test_chunk_single_path_with_split() {
         let config = ChunkingConfig {
-            max_tokens: 5,
+            max_tokens: 100,
+            max_bm25_terms: 100,
             ..Default::default()
         };
-        let text = "A B C D E F G H I J K L M N O P";
+        let text = "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 AA BB CC DD EE FF GG HH II JJ KK LL MM NN OO PP QQ RR SS TT";
         let group = create_test_group(text);
         let conversion = create_test_conversion(text);
 
@@ -788,6 +789,9 @@ mod tests {
             splitter: &splitter,
             pre_injection_embedding: config.max_tokens,
             pre_injection_bm25: config.max_bm25_terms,
+            emb_budget: config.budget(ChunkPath::Embedding, false, 0),
+            bm25_budget: config.budget(ChunkPath::Bm25, false, 0),
+            has_vocabulary: false,
         };
         let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
             &infra,
@@ -810,12 +814,11 @@ mod tests {
         // of that text therefore carries the function's code and must claim
         // the function's range, not the narrow range of a local variable
         // whose name happens to appear inside the text.
-        let config = ChunkingConfig {
-            max_bm25_terms: 20,
+        let base = ChunkingConfig {
+            max_bm25_terms: 150,
             ..Default::default()
         };
         let estimator = TokenEstimator::default();
-        let splitter = TextSplitter::new(config.clone());
         let mut tracker = GroupTracker::new();
 
         let mut group = create_test_group("body");
@@ -837,7 +840,7 @@ mod tests {
         let body =
             "mov_writer_move body line with ptr inside it and more words to overflow the budget \
                     so the group text is split into several fragments that all carry function code"
-                .repeat(3);
+                .repeat(6);
         let header_conv = ConversionResult {
             entity_id: EntityId(0),
             kind: EntityKind::Function,
@@ -862,12 +865,25 @@ mod tests {
             member_conversions: vec![],
         };
 
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
+        let body_cfg = base.body_config(false, emb_dec, bm25_dec);
+        let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
+        let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
+        let splitter = TextSplitter::with_pre_limits(
+            body_cfg.clone(),
+            emb_budget.pre_injection_limit,
+            bm25_budget.pre_injection_limit,
+        );
         let infra = ChunkInfrastructure {
-            config: &config,
+            config: &body_cfg,
             estimator: &estimator,
             splitter: &splitter,
-            pre_injection_embedding: config.max_tokens,
-            pre_injection_bm25: config.max_bm25_terms,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: false,
         };
         let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
             &infra,

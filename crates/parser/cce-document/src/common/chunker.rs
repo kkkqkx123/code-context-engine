@@ -246,7 +246,7 @@ pub fn two_tier_chunking(p: TwoTierParams<'_>) -> Vec<ChunkedResult> {
         source_group_id,
         file_path,
         config,
-        estimator,
+        estimator: _estimator,
         group_type,
         bm25_title,
         output_mode,
@@ -264,7 +264,6 @@ pub fn two_tier_chunking(p: TwoTierParams<'_>) -> Vec<ChunkedResult> {
                 embedding_text,
                 ChunkPath::Embedding,
                 config,
-                estimator,
             )
             .into_iter()
             .map(|b| embedding_text[b.start_byte..b.end_byte].to_string())
@@ -456,11 +455,11 @@ mod tests {
         let text = "word word word word word word word word word word word word";
         let result = split_bm25_by_terms(text, 5, 1);
         assert!(result.len() >= 2);
-        // First segment: 5 words
-        assert_eq!(result[0].split_whitespace().count(), 5);
+        // First segment: 5 terms in index tokenizer units
+        assert_eq!(cce_text::ChunkUnit::Terms.cost(&result[0]), 5);
         // All segments share the same term count
         for seg in &result {
-            assert!(seg.split_whitespace().count() <= 5);
+            assert!(cce_text::ChunkUnit::Terms.cost(seg) <= 5);
         }
     }
 

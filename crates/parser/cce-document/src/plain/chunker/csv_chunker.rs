@@ -43,6 +43,8 @@ pub(crate) fn chunk_csv(
     if chunker.config.limit(ChunkPath::Embedding) > 0
         && chunker.config.cost(header, ChunkPath::Embedding)
             > chunker.config.limit(ChunkPath::Embedding)
+        || chunker.config.limit(ChunkPath::Bm25) > 0
+            && chunker.config.cost(header, ChunkPath::Bm25) > chunker.config.limit(ChunkPath::Bm25)
     {
         let header_line = lines.iter().position(|l| l.trim() == header).unwrap_or(0);
         if let Some(span) = Span::from_byte_range(
@@ -66,7 +68,15 @@ pub(crate) fn chunk_csv(
     let mut batch_start_line = first_data_idx
         .saturating_sub(1)
         .min(lines.len().saturating_sub(1));
-    let _header_tokens = chunker.estimator.estimate_text(header);
+
+    let exceeds_either = |text: &str| -> bool {
+        let emb_over = chunker.config.limit(ChunkPath::Embedding) > 0
+            && chunker.config.cost(text, ChunkPath::Embedding)
+                > chunker.config.limit(ChunkPath::Embedding);
+        let bm25_over = chunker.config.limit(ChunkPath::Bm25) > 0
+            && chunker.config.cost(text, ChunkPath::Bm25) > chunker.config.limit(ChunkPath::Bm25);
+        emb_over || bm25_over
+    };
 
     for (line_idx, line) in lines.iter().enumerate().skip(first_data_idx) {
         let line = line.trim();
@@ -74,10 +84,7 @@ pub(crate) fn chunk_csv(
             continue;
         }
 
-        if chunker.config.limit(ChunkPath::Embedding) > 0
-            && chunker.config.cost(line, ChunkPath::Embedding)
-                > chunker.config.limit(ChunkPath::Embedding)
-        {
+        if exceeds_either(line) {
             if batch.len() > 1 {
                 let batch_end = line_idx;
                 if let Some(span) = Span::from_byte_range(
@@ -123,13 +130,7 @@ pub(crate) fn chunk_csv(
             format!("{}\n{}", batch.join("\n"), line)
         };
 
-        if chunker.config.limit(ChunkPath::Embedding) > 0
-            && chunker
-                .config
-                .cost(&current_batch_text, ChunkPath::Embedding)
-                > chunker.config.limit(ChunkPath::Embedding)
-            && batch.len() > 1
-        {
+        if exceeds_either(&current_batch_text) && batch.len() > 1 {
             let batch_end = line_idx - 1;
             if let Some(span) = Span::from_byte_range(
                 content,

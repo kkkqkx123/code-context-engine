@@ -99,12 +99,12 @@ fn locate_nested_spans_in_nl_text(
     for nested in &group.nested_groups {
         let name = nested.name.as_str();
 
-        let (rel, len) = if let Some(found) = cce_utils::text::find_case_insensitive(sub, name) {
+        let (rel, len) = if let Some(found) = cce_text::find_case_insensitive(sub, name) {
             found
         } else {
             let semantic = split_camel_case(name);
             if !semantic.is_empty() && semantic != name {
-                if let Some(found) = cce_utils::text::find_case_insensitive(sub, &semantic) {
+                if let Some(found) = cce_text::find_case_insensitive(sub, &semantic) {
                     found
                 } else {
                     continue;
@@ -112,7 +112,7 @@ fn locate_nested_spans_in_nl_text(
             } else if let Some(last) = name.rsplit("::").next()
                 && last != name
             {
-                match cce_utils::text::find_case_insensitive(sub, last) {
+                match cce_text::find_case_insensitive(sub, last) {
                     Some(found) => found,
                     None => continue,
                 }

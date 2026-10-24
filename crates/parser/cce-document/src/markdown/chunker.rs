@@ -207,7 +207,7 @@ impl DocChunker {
         let mut pending_indices: Vec<usize> = Vec::new();
 
         for (i, group) in groups.iter().enumerate() {
-            let group_tokens = self.estimator.estimate_text(&group.bm25_text);
+            let group_tokens = cce_text::ChunkUnit::Tokens.cost(&group.bm25_text);
 
             if group_tokens < self.merging_config.min_chunk_tokens {
                 pending_indices.push(i);
@@ -279,9 +279,9 @@ impl DocChunker {
 
         let total_tokens: usize = small_groups
             .iter()
-            .map(|g| self.estimator.estimate_text(&g.bm25_text))
+            .map(|g| cce_text::ChunkUnit::Tokens.cost(&g.bm25_text))
             .sum::<usize>()
-            + self.estimator.estimate_text(&context_group.bm25_text);
+            + cce_text::ChunkUnit::Tokens.cost(&context_group.bm25_text);
 
         let max_allowed = (self.config.max_tokens as f32
             * self.merging_config.max_merge_expansion_factor) as usize;

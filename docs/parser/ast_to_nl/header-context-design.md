@@ -153,14 +153,7 @@ fn smart_chunk_with_header(&mut self, group, header_conv, member_convs, file_pat
 
 ### 预算计算
 
-成员预算需要预留 header 空间：
-
-```rust
-let bm25_member_budget = max_bm25_terms - header_bm25.word_count();
-let emb_member_budget = max_tokens - header_embedding.token_count();
-```
-
-由于 brief header 远短于 full header，后续 chunk 实际可用空间会更大，但预算仍按 full header 计算，确保首个 chunk 不会超限。
+成员预算需要预留首块头文本空间：用索引分词器的词项数计量头文本，从对应路径上限中扣除，得到成员可用预算。后续块使用精简头，实际可用空间更大，但预算仍按完整头计算，确保首个块不超限。
 
 ## 输出示例
 

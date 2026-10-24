@@ -7,7 +7,9 @@ use cce_utils::token_estimation::TokenEstimator;
 
 use crate::grouper::EntityGroup;
 
-use super::boundary::{ChunkBoundary, ChunkSegment, NlEntityBoundary, can_merge, cost};
+use super::boundary::{
+    ChunkBoundary, ChunkSegment, NlEntityBoundary, can_merge_with_ceiling, cost,
+};
 use super::result::ChunkPath;
 use super::strategies;
 use super::strategy::SplitStrategy;
@@ -98,6 +100,8 @@ impl BoundaryLevel {
 pub struct TextSplitter {
     config: ChunkingConfig,
     estimator: TokenEstimator,
+    pre_embedding: Option<usize>,
+    pre_bm25: Option<usize>,
 }
 
 impl TextSplitter {
@@ -106,6 +110,34 @@ impl TextSplitter {
         Self {
             config,
             estimator: TokenEstimator::default(),
+            pre_embedding: None,
+            pre_bm25: None,
+        }
+    }
+
+    /// Create a splitter that merges up to the pre-injection limits.
+    pub fn with_pre_limits(config: ChunkingConfig, pre_embedding: usize, pre_bm25: usize) -> Self {
+        Self {
+            config,
+            estimator: TokenEstimator::default(),
+            pre_embedding: Some(pre_embedding),
+            pre_bm25: Some(pre_bm25),
+        }
+    }
+
+    fn merge_ceiling(&self, path: ChunkPath) -> (usize, usize) {
+        let (min, default_ceiling) = super::boundary::merge_limits(path, &self.config);
+        let pre = match path {
+            ChunkPath::Embedding => self.pre_embedding,
+            ChunkPath::Bm25 => self.pre_bm25,
+        };
+        match pre {
+            Some(limit) if limit != 0 && limit != usize::MAX => {
+                let ceiling = default_ceiling.min(limit);
+                (min, ceiling)
+            }
+            Some(_) => (min, default_ceiling),
+            None => (min, default_ceiling),
         }
     }
 
@@ -427,10 +459,13 @@ impl TextSplitter {
         segments: Vec<ChunkSegment>,
         path: ChunkPath,
     ) -> Vec<ChunkSegment> {
+        let (min_threshold, ceiling) = self.merge_ceiling(path);
         let mut merged: Vec<ChunkSegment> = Vec::with_capacity(segments.len());
         for segment in segments {
             if let Some(last) = merged.last_mut() {
-                if can_merge(&last.text, &segment.text, path, &self.config) {
+                let mergeable =
+                    can_merge_with_ceiling(&last.text, &segment.text, path, min_threshold, ceiling);
+                if mergeable {
                     last.text.push_str(&segment.text);
                     last.boundary.end_byte = segment.boundary.end_byte;
                     last.boundary.end_line = segment.boundary.end_line;

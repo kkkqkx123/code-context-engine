@@ -260,6 +260,8 @@ pub struct ChunkBudget {
     pub hard_limit: usize,
     /// The room planned for terminology expansion.
     pub reserve: usize,
+    /// The decoration appended after splitting, in the same unit.
+    pub decoration_cost: usize,
     /// The limit a chunk must satisfy before terminology injection.
     pub pre_injection_limit: usize,
     /// The limit the body splitter works with.
@@ -280,6 +282,11 @@ impl ChunkBudget {
     /// Whether `text` fits the body limit.
     pub fn fits_body(&self, text: &str) -> bool {
         self.unit.fits(text, self.body_limit)
+    }
+
+    /// The ceiling a merge may produce on this path.
+    pub fn merge_limit(&self) -> usize {
+        self.pre_injection_limit
     }
 }
 
@@ -349,6 +356,7 @@ impl ChunkingConfig {
                 unit: self.unit(path),
                 hard_limit: 0,
                 reserve: 0,
+                decoration_cost: 0,
                 pre_injection_limit: usize::MAX,
                 body_limit: usize::MAX,
             };
@@ -359,9 +367,23 @@ impl ChunkingConfig {
             unit: self.unit(path),
             hard_limit: limit,
             reserve,
+            decoration_cost,
             pre_injection_limit,
             body_limit,
         }
+    }
+
+    /// The merge ceiling for one path: the pre-injection limit.
+    pub fn merge_limit(&self, path: cce_types::ChunkPath, has_vocabulary: bool) -> usize {
+        self.pre_injection_limit(path, has_vocabulary)
+    }
+
+    /// Raw reserve before clamping, used for validation.
+    fn raw_glossary_reserve(&self, limit: usize) -> usize {
+        if limit == 0 || self.glossary_reserve_ratio <= 0.0 {
+            return 0;
+        }
+        ((limit as f32) * self.glossary_reserve_ratio).ceil() as usize
     }
 
     /// A configuration whose path limits are the body limits for the given
@@ -385,9 +407,10 @@ impl ChunkingConfig {
             );
             body.max_tokens = embedding.body_limit;
             body.cross_group_merge_threshold = if self.cross_group_merge_threshold == 0 {
-                embedding.body_limit
+                embedding.pre_injection_limit
             } else {
-                self.cross_group_merge_threshold.min(embedding.body_limit)
+                self.cross_group_merge_threshold
+                    .min(embedding.pre_injection_limit)
             };
         }
         if self.max_bm25_terms > 0 {
@@ -467,19 +490,12 @@ impl Validate for ChunkingConfig {
             ));
         }
         if self.glossary_reserve_ratio > 0.0 {
-            for (reserve, limit, field) in [
-                (
-                    self.glossary_reserve(cce_types::ChunkPath::Embedding),
-                    self.max_tokens,
-                    "chunking.max_tokens",
-                ),
-                (
-                    self.glossary_reserve(cce_types::ChunkPath::Bm25),
-                    self.max_bm25_terms,
-                    "chunking.max_bm25_terms",
-                ),
+            for (limit, field) in [
+                (self.max_tokens, "chunking.max_tokens"),
+                (self.max_bm25_terms, "chunking.max_bm25_terms"),
             ] {
-                if limit > 0 && reserve >= limit {
+                let raw = self.raw_glossary_reserve(limit);
+                if limit > 0 && raw >= limit {
                     errors.push(ConfigValidationError::invalid_field(
                         field,
                         "must leave room for the glossary reserve",

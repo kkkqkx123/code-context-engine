@@ -187,20 +187,45 @@ impl GroupChunker {
         group: &EntityGroup,
         file_path: &str,
         language: Option<&str>,
-    ) -> (ChunkingConfig, usize, usize) {
+    ) -> Result<
+        (
+            ChunkingConfig,
+            cce_config::modules::ChunkBudget,
+            cce_config::modules::ChunkBudget,
+        ),
+        ParseError,
+    > {
+        use cce_config::modules::ChunkBudget;
         let has_vocabulary = self.terminology(file_path, language).is_some();
         let embedding_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding);
         let bm25_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Bm25);
+        let emb_budget: ChunkBudget =
+            self.config
+                .budget(ChunkPath::Embedding, has_vocabulary, embedding_decoration);
+        let bm25_budget: ChunkBudget =
+            self.config
+                .budget(ChunkPath::Bm25, has_vocabulary, bm25_decoration);
+        for (budget, name) in [(&emb_budget, "embedding"), (&bm25_budget, "bm25")] {
+            if budget.hard_limit > 0
+                && budget.pre_injection_limit != usize::MAX
+                && budget.decoration_cost >= budget.pre_injection_limit
+            {
+                return Err(ParseError::code_splitting(format!(
+                    "decoration leaves no body room (file={}, group={}, path={}, decoration={}, pre={}, hard={}, reserve={})",
+                    file_path,
+                    group.group_id,
+                    name,
+                    budget.decoration_cost,
+                    budget.pre_injection_limit,
+                    budget.hard_limit,
+                    budget.reserve,
+                )));
+            }
+        }
         let config = self
             .config
             .body_config(has_vocabulary, embedding_decoration, bm25_decoration);
-        let embedding_limit = self
-            .config
-            .pre_injection_limit(ChunkPath::Embedding, has_vocabulary);
-        let bm25_limit = self
-            .config
-            .pre_injection_limit(ChunkPath::Bm25, has_vocabulary);
-        (config, embedding_limit, bm25_limit)
+        Ok((config, emb_budget, bm25_budget))
     }
 
     /// Inject the domain terminology into every chunk that uses a term.
@@ -260,15 +285,22 @@ impl GroupChunker {
         let mut all_chunks = ChunkOutput::default();
 
         let language = group.language.to_string();
-        let (config, embedding_limit, bm25_limit) =
-            self.group_config(group, file_path, Some(&language));
-        let splitter = TextSplitter::new(config.clone());
+        let (config, emb_budget, bm25_budget) =
+            self.group_config(group, file_path, Some(&language))?;
+        let splitter = TextSplitter::with_pre_limits(
+            config.clone(),
+            emb_budget.pre_injection_limit,
+            bm25_budget.pre_injection_limit,
+        );
         let infra = ChunkInfrastructure {
             config: &config,
             estimator: &self.estimator,
             splitter: &splitter,
-            pre_injection_embedding: embedding_limit,
-            pre_injection_bm25: bm25_limit,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: emb_budget.reserve > 0 || bm25_budget.reserve > 0,
         };
 
         if !bm25_text.trim().is_empty() {
@@ -327,7 +359,14 @@ impl GroupChunker {
             let stats = self.inject_vocabulary(&mut all_chunks.chunks, &vocabulary);
             all_chunks.vocabulary.absorb(stats);
         }
-        enforce_hard_limit(&mut all_chunks.chunks, &self.config)?;
+        enforce_hard_limit(
+            &mut all_chunks.chunks,
+            &self.config,
+            file_path,
+            infra.has_vocabulary,
+            infra.emb_budget.decoration_cost,
+            infra.bm25_budget.decoration_cost,
+        )?;
 
         let total = all_chunks.chunks.len();
         if bm25_count < total {
@@ -353,15 +392,22 @@ impl GroupChunker {
         file_path: &str,
     ) -> Result<ChunkOutput, ParseError> {
         let language = group.language.to_string();
-        let (config, embedding_limit, bm25_limit) =
-            self.group_config(group, file_path, Some(&language));
-        let splitter = TextSplitter::new(config.clone());
+        let (config, emb_budget, bm25_budget) =
+            self.group_config(group, file_path, Some(&language))?;
+        let splitter = TextSplitter::with_pre_limits(
+            config.clone(),
+            emb_budget.pre_injection_limit,
+            bm25_budget.pre_injection_limit,
+        );
         let infra = ChunkInfrastructure {
             config: &config,
             estimator: &self.estimator,
             splitter: &splitter,
-            pre_injection_embedding: embedding_limit,
-            pre_injection_bm25: bm25_limit,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: emb_budget.reserve > 0 || bm25_budget.reserve > 0,
         };
         let mut tracker = GroupTracker::new();
         let mut output = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
@@ -379,7 +425,14 @@ impl GroupChunker {
             let stats = self.inject_vocabulary(&mut output.chunks, &vocabulary);
             output.vocabulary.absorb(stats);
         }
-        enforce_hard_limit(&mut output.chunks, &self.config)?;
+        enforce_hard_limit(
+            &mut output.chunks,
+            &self.config,
+            file_path,
+            infra.has_vocabulary,
+            infra.emb_budget.decoration_cost,
+            infra.bm25_budget.decoration_cost,
+        )?;
         let first_emb = output
             .chunks
             .iter()
@@ -450,7 +503,27 @@ impl GroupChunker {
         } else {
             self.chunk_groups_builtin(group_conversions, file_path)?
         };
-        enforce_hard_limit(&mut output.chunks, &self.config)?;
+        let has_vocabulary = self.terminology(file_path, language.as_deref()).is_some();
+        let mut emb_dec = 0usize;
+        let mut bm25_dec = 0usize;
+        for gc in group_conversions {
+            emb_dec = emb_dec.max(ChunkBuilder::decoration_allowance(
+                &gc.group,
+                ChunkPath::Embedding,
+            ));
+            bm25_dec = bm25_dec.max(ChunkBuilder::decoration_allowance(
+                &gc.group,
+                ChunkPath::Bm25,
+            ));
+        }
+        enforce_hard_limit(
+            &mut output.chunks,
+            &self.config,
+            file_path,
+            has_vocabulary,
+            emb_dec,
+            bm25_dec,
+        )?;
 
         Ok(output)
     }
@@ -499,15 +572,22 @@ impl GroupChunker {
         }
 
         for gc in group_conversions {
-            let (config, embedding_limit, bm25_limit) =
-                self.group_config(&gc.group, file_path, language.as_deref());
-            let splitter = TextSplitter::new(config.clone());
+            let (config, emb_budget, bm25_budget) =
+                self.group_config(&gc.group, file_path, language.as_deref())?;
+            let splitter = TextSplitter::with_pre_limits(
+                config.clone(),
+                emb_budget.pre_injection_limit,
+                bm25_budget.pre_injection_limit,
+            );
             let infra = ChunkInfrastructure {
                 config: &config,
                 estimator: &self.estimator,
                 splitter: &splitter,
-                pre_injection_embedding: embedding_limit,
-                pre_injection_bm25: bm25_limit,
+                pre_injection_embedding: emb_budget.pre_injection_limit,
+                pre_injection_bm25: bm25_budget.pre_injection_limit,
+                emb_budget,
+                bm25_budget,
+                has_vocabulary,
             };
             let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
                 &infra,
@@ -639,13 +719,19 @@ pub struct ChunkInfrastructure<'a> {
     pub pre_injection_embedding: usize,
     /// The limit a BM25 chunk must satisfy before terminology injection.
     pub pre_injection_bm25: usize,
+    /// Per-path budgets carrying hard limit, reserve and decoration.
+    pub emb_budget: cce_config::modules::ChunkBudget,
+    /// Per-path budgets carrying hard limit, reserve and decoration.
+    pub bm25_budget: cce_config::modules::ChunkBudget,
+    /// Whether the file carries a terminology table.
+    pub has_vocabulary: bool,
 }
 
 impl ChunkInfrastructure<'_> {
-    fn pre_injection_limit(&self, path: ChunkPath) -> usize {
+    fn budget(&self, path: ChunkPath) -> cce_config::modules::ChunkBudget {
         match path {
-            ChunkPath::Bm25 => self.pre_injection_bm25,
-            ChunkPath::Embedding => self.pre_injection_embedding,
+            ChunkPath::Bm25 => self.bm25_budget,
+            ChunkPath::Embedding => self.emb_budget,
         }
     }
 }
@@ -733,10 +819,9 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
         };
         return Ok(ChunkOutput::with_chunks(enforce_pre_injection_limit(
             chunks,
-            infra.pre_injection_limit(path),
-            path,
-            infra.config,
-            infra.estimator,
+            infra.budget(path),
+            file_path,
+            group.group_id.as_str(),
         )?));
     }
 
@@ -819,10 +904,9 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
     Ok(ChunkOutput {
         chunks: enforce_pre_injection_limit(
             chunks,
-            infra.pre_injection_limit(path),
-            path,
-            infra.config,
-            infra.estimator,
+            infra.budget(path),
+            file_path,
+            group.group_id.as_str(),
         )?,
         dropped_blank_segments: blank_count,
         vocabulary: VocabularyStats::default(),
@@ -831,100 +915,78 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
 
 /// Enforce the pre-injection limit after decoration has been appended.
 ///
-/// The splitter works on the body limit, so the identity and topic lines
-/// added during assembly normally fit the remaining room. A signature that
-/// is longer than the allowance, or a configuration whose allowance is
-/// exhausted, can still produce an over-limit chunk. The final text is
-/// then split at token/term granularity: correctness of the hard limit is
-/// not negotiable, and a safe chunk with a less natural boundary is better
-/// than an over-limit chunk that the embedding provider rejects.
+/// The splitter works on the body limit, so compliant assembly fits the
+/// remaining room. An over-limit chunk means the decoration estimate was
+/// wrong or a future assembly path bypassed the body budget. The failure is
+/// reported as a deterministic splitting error with full budget context
+/// instead of a silent re-split that would change chunk boundaries.
 fn enforce_pre_injection_limit(
     chunks: Vec<ChunkedResult>,
-    limit: usize,
-    path: ChunkPath,
-    config: &ChunkingConfig,
-    estimator: &TokenEstimator,
+    budget: cce_config::modules::ChunkBudget,
+    file_path: &str,
+    group_id: &str,
 ) -> Result<Vec<ChunkedResult>, ParseError> {
-    if limit == 0 || limit == usize::MAX {
+    if budget.pre_injection_limit == usize::MAX || budget.hard_limit == 0 {
         return Ok(chunks);
     }
-    let unit = config.unit(path);
-    let mut split_config = config.clone();
-    match path {
-        ChunkPath::Bm25 => split_config.max_bm25_terms = limit,
-        ChunkPath::Embedding => split_config.max_tokens = limit,
-    }
-
-    let mut output = Vec::with_capacity(chunks.len());
-    for chunk in chunks {
-        if unit.cost(&chunk.text) <= limit {
-            output.push(chunk);
-            continue;
-        }
-        let boundaries = super::strategies::tokens::split_by_tokens_in_range(
-            &chunk.text,
-            0..chunk.text.len(),
-            path,
-            &split_config,
-            estimator,
-        );
-        super::splitter::validate_partition(&boundaries, &chunk.text, 0..chunk.text.len())?;
-        if boundaries.is_empty() {
+    for chunk in &chunks {
+        let actual = budget.unit.cost(&chunk.text);
+        if actual > budget.pre_injection_limit {
             return Err(ParseError::code_splitting(format!(
-                "over-limit chunk produced no replacement pieces (path={path}, chunk={})",
-                chunk.chunk_id
+                "chunk exceeds the pre-injection limit (file={}, group={}, path={}, chunk={}, cost={}, pre={}, hard={}, reserve={}, decoration={})",
+                file_path,
+                group_id,
+                chunk.path,
+                chunk.chunk_id,
+                actual,
+                budget.pre_injection_limit,
+                budget.hard_limit,
+                budget.reserve,
+                budget.decoration_cost,
             )));
         }
-        for boundary in boundaries {
-            let mut piece = chunk.clone();
-            piece.text = chunk.text[boundary.start_byte..boundary.end_byte].to_string();
-            piece.token_count = unit.cost(&piece.text);
-            if piece.metadata.bm25_word_count.is_some() {
-                piece.metadata.bm25_word_count = Some(config.cost(&piece.text, ChunkPath::Bm25));
-            }
-            if piece.token_count > limit {
-                return Err(ParseError::code_splitting(format!(
-                    "pre-injection split could not fit the limit (path={path}, chunk={}, cost={}, limit={limit})",
-                    piece.chunk_id, piece.token_count
-                )));
-            }
-            piece.prev_overlap = None;
-            piece.next_overlap = None;
-            output.push(piece);
-        }
     }
-
-    let total = output.len();
-    for (index, chunk) in output.iter_mut().enumerate() {
-        chunk.chunk_index = index;
-        chunk.total_chunks = total;
-        chunk.chunk_id = format!("{}_{}_{}", chunk.source_group_id, path, index);
-        if let Some(code) = chunk.metadata.as_code_mut() {
-            code.is_fragment = total > 1;
-            code.fragment_index = (total > 1).then_some(index);
-            code.total_fragments = (total > 1).then_some(total);
-        }
-    }
-    Ok(output)
+    Ok(chunks)
 }
 
 /// Reject any chunk that still exceeds its configured hard limit.
 ///
 /// Injection is bounded by the absolute final text, so this is a guard
 /// against a plugin-produced chunk, an incorrect budget, or a future
-/// assembly path that bypasses the pre-injection repair. It runs in release
+/// assembly path that bypasses the pre-injection check. It runs in release
 /// builds as well; a silent overflow is not an acceptable degradation.
 fn enforce_hard_limit(
     chunks: &mut [ChunkedResult],
     config: &ChunkingConfig,
+    file_path: &str,
+    has_vocabulary: bool,
+    emb_decoration: usize,
+    bm25_decoration: usize,
 ) -> Result<(), ParseError> {
     for chunk in chunks {
         let limit = config.limit(chunk.path);
         let actual = config.cost(&chunk.text, chunk.path);
         if limit > 0 && actual > limit {
+            let reserve = if has_vocabulary {
+                config.glossary_reserve(chunk.path)
+            } else {
+                0
+            };
+            let pre = config.pre_injection_limit(chunk.path, has_vocabulary);
+            let decoration = match chunk.path {
+                ChunkPath::Bm25 => bm25_decoration,
+                ChunkPath::Embedding => emb_decoration,
+            };
             return Err(ParseError::code_splitting(format!(
-                "chunk exceeds the hard limit (path={}, chunk={}, cost={}, limit={limit})",
-                chunk.path, chunk.chunk_id, actual
+                "chunk exceeds the hard limit (file={}, group={}, path={}, chunk={}, cost={}, hard={}, reserve={}, decoration={}, pre={pre})",
+                file_path,
+                chunk.source_group_id,
+                chunk.path,
+                chunk.chunk_id,
+                actual,
+                limit,
+                reserve,
+                decoration,
             )));
         }
         chunk.token_count = actual;

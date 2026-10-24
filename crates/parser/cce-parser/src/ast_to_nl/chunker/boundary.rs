@@ -51,6 +51,30 @@ pub fn merge_limits(path: ChunkPath, config: &ChunkingConfig) -> (usize, usize) 
     }
 }
 
+/// Whether `prev` may absorb `next` under an explicit merge ceiling.
+///
+/// The ceiling is the pre-injection limit of the path. Callers that split on
+/// a body limit must pass the pre-injection limit here so a merge never
+/// consumes the reserve kept for terminology injection.
+pub fn can_merge_with_ceiling(
+    prev: &str,
+    next: &str,
+    path: ChunkPath,
+    min_threshold: usize,
+    ceiling: usize,
+) -> bool {
+    let prev_cost = cost(prev, path);
+    let next_cost = cost(next, path);
+    let combined = cost(&format!("{prev}{next}"), path);
+    if ceiling > 0 && combined > ceiling {
+        return false;
+    }
+    if ceiling == 0 {
+        return prev_cost < min_threshold || next_cost < min_threshold;
+    }
+    prev_cost < min_threshold || next_cost < min_threshold
+}
+
 /// Whether `prev` may absorb `next` in a merge.
 ///
 /// The single merge decision shared by the intra-splitter pass

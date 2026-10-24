@@ -3,7 +3,6 @@ use std::ops::Range;
 use cce_config::modules::ChunkingConfig;
 use cce_types::ChunkPath;
 use cce_utils::text::floor_char_boundary;
-use cce_utils::token_estimation::TokenEstimator;
 
 #[derive(Debug, Clone)]
 pub struct ChunkBoundary {
@@ -20,13 +19,8 @@ impl ChunkBoundary {
     }
 }
 
-pub fn split_by_tokens(
-    text: &str,
-    path: ChunkPath,
-    config: &ChunkingConfig,
-    estimator: &TokenEstimator,
-) -> Vec<ChunkBoundary> {
-    split_by_tokens_in_range(text, 0..text.len(), path, config, estimator)
+pub fn split_by_tokens(text: &str, path: ChunkPath, config: &ChunkingConfig) -> Vec<ChunkBoundary> {
+    split_by_tokens_in_range(text, 0..text.len(), path, config)
 }
 
 pub fn split_by_tokens_in_range(
@@ -34,7 +28,6 @@ pub fn split_by_tokens_in_range(
     range: Range<usize>,
     path: ChunkPath,
     config: &ChunkingConfig,
-    _estimator: &TokenEstimator,
 ) -> Vec<ChunkBoundary> {
     let mut boundaries = Vec::new();
     let mut current_pos = range.start;
@@ -70,7 +63,10 @@ pub fn split_by_tokens_in_range(
 }
 
 fn find_good_split_point(text: &str, start: usize, target: usize) -> usize {
-    debug_assert!(text.is_char_boundary(start));
+    let start = floor_char_boundary(text, start.min(text.len()));
+    if !text.is_char_boundary(start) {
+        return target.clamp(start, text.len());
+    }
 
     let target = floor_char_boundary(text, target.clamp(start, text.len()));
     if target >= text.len() {

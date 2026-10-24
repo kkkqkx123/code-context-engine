@@ -125,6 +125,8 @@ pub trait TextPipeline {
             chunk.metadata.test_info = chunk.metadata.test_info.merge(&file_test_info);
         }
 
+        enforce_document_hard_limit(&mut chunks, config, file_path, false)?;
+
         Ok((chunks, summary))
     }
 }
@@ -315,7 +317,7 @@ impl PipelineRouter {
             }
             other => other.map(|(chunks, summary)| (chunks, summary, false))?,
         };
-        enforce_document_hard_limit(&mut output.0, config)?;
+        enforce_document_hard_limit(&mut output.0, config, file_path, false)?;
         Ok(output)
     }
 
@@ -387,25 +389,26 @@ impl PipelineRouter {
         let effective = config.pre_injection_config(has_vocabulary);
 
         if let Some(parsed) =
-            self.process_with_plugin_list(content, file_path, &effective, output_mode, &above)
+            self.process_with_plugin_list(content, file_path, &effective, output_mode, &above)?
         {
             let (mut chunks, summary) = parsed;
             // Splitting ran on the pre-injection limits; the injection and
             // the final check run on the hard limits.
-            let stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config)?;
+            let stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config, file_path)?;
             return Ok((chunks, summary, false, stats));
         }
 
         let (mut chunks, summary, degraded) =
             self.process_with_degraded_flag(content, file_path, &effective, output_mode)?;
-        let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config)?;
+        let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config, file_path)?;
 
         if chunks.is_empty() {
             if let Some(parsed) =
-                self.process_with_plugin_list(content, file_path, &effective, output_mode, &below)
+                self.process_with_plugin_list(content, file_path, &effective, output_mode, &below)?
             {
                 let (mut chunks, summary) = parsed;
-                let fallback = inject_terminology(&mut chunks, vocabulary.as_deref(), config)?;
+                let fallback =
+                    inject_terminology(&mut chunks, vocabulary.as_deref(), config, file_path)?;
                 stats.absorb(fallback);
                 return Ok((chunks, summary, degraded, stats));
             }
@@ -415,6 +418,7 @@ impl PipelineRouter {
 
     /// Run a pre-filtered `FormatParse` plugin list; returns `None` when no
     /// plugin produced a non-empty document.
+    #[allow(clippy::type_complexity)]
     fn process_with_plugin_list(
         &self,
         content: &str,
@@ -422,12 +426,13 @@ impl PipelineRouter {
         config: &ChunkingConfig,
         output_mode: OutputMode,
         parsers: &[&std::sync::Arc<dyn cce_plugin::CodePlugin>],
-    ) -> Option<(Vec<ChunkedResult>, Option<DocSummary>)> {
+    ) -> Result<Option<(Vec<ChunkedResult>, Option<DocSummary>)>, ParseError> {
         for plugin in parsers {
             match plugin.parse_document(content, file_path) {
                 Ok(Some(doc)) if !doc.entities.is_empty() => {
                     let pipeline = super::plugin::PluginDocumentPipeline::new(config.clone());
                     let mut chunks = pipeline.process(&doc, file_path, output_mode);
+                    enforce_document_hard_limit(&mut chunks, config, file_path, false)?;
 
                     // Same file-level test-info rule the built-in pipelines apply.
                     let file_test_info = TestInfo::from_path(None, file_path);
@@ -435,7 +440,7 @@ impl PipelineRouter {
                         chunk.metadata.test_info = chunk.metadata.test_info.merge(&file_test_info);
                     }
 
-                    return Some((chunks, None));
+                    return Ok(Some((chunks, None)));
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -448,7 +453,7 @@ impl PipelineRouter {
                 }
             }
         }
-        None
+        Ok(None)
     }
 }
 
@@ -472,13 +477,14 @@ fn inject_terminology(
     chunks: &mut [ChunkedResult],
     vocabulary: Option<&FileVocabulary>,
     config: &ChunkingConfig,
+    file_path: &str,
 ) -> Result<VocabularyStats, ParseError> {
     let Some(table) = vocabulary else {
-        enforce_document_hard_limit(chunks, config)?;
+        enforce_document_hard_limit(chunks, config, file_path, false)?;
         return Ok(VocabularyStats::default());
     };
     if table.is_empty() {
-        enforce_document_hard_limit(chunks, config)?;
+        enforce_document_hard_limit(chunks, config, file_path, false)?;
         return Ok(VocabularyStats::default());
     }
     // Documents have no entity stage, so the entity scope of the
@@ -498,7 +504,7 @@ fn inject_terminology(
     // `GlossaryScope::Entity` is meaningless without entity ids, but the
     // configuration still carries the scope. Documents always expand per
     // chunk.
-    enforce_document_hard_limit(chunks, config)?;
+    enforce_document_hard_limit(chunks, config, file_path, true)?;
     Ok(stats)
 }
 
@@ -506,14 +512,28 @@ fn inject_terminology(
 fn enforce_document_hard_limit(
     chunks: &mut [ChunkedResult],
     config: &ChunkingConfig,
+    file_path: &str,
+    has_vocabulary: bool,
 ) -> Result<(), ParseError> {
     for chunk in chunks {
         let limit = config.limit(chunk.path);
         let actual = config.cost(&chunk.text, chunk.path);
         if limit > 0 && actual > limit {
+            let reserve = if has_vocabulary {
+                config.glossary_reserve(chunk.path)
+            } else {
+                0
+            };
+            let pre = config.pre_injection_limit(chunk.path, has_vocabulary);
             return Err(ParseError::code_splitting(format!(
-                "document chunk exceeds the hard limit (path={}, chunk={}, cost={}, limit={limit})",
-                chunk.path, chunk.chunk_id, actual
+                "document chunk exceeds the hard limit (file={}, group={}, path={}, chunk={}, cost={}, hard={}, reserve={}, decoration=0, pre={pre})",
+                file_path,
+                chunk.source_group_id,
+                chunk.path,
+                chunk.chunk_id,
+                actual,
+                limit,
+                reserve
             )));
         }
         chunk.token_count = actual;

@@ -4,7 +4,6 @@
 
 use crate::GenericGroup;
 use crate::types::{DocGroup, DocGroupType, DocNode, DocNodeType};
-use cce_text::MixedTokenizer;
 use cce_types::ParseError;
 use cce_utils::token_estimation::TokenEstimator;
 
@@ -175,11 +174,10 @@ impl DocGrouper {
 
                         // Check if group exceeds limits (both BM25 terms and embedding tokens)
                         let should_split = if self.config.max_bm25_terms > 0 {
-                            let tokenizer = MixedTokenizer::new();
-                            let word_count = tokenizer.tokenize(&group.bm25_text).len();
+                            let word_count = cce_text::ChunkUnit::Terms.cost(&group.bm25_text);
                             word_count > self.config.max_bm25_terms && !group.members.is_empty()
                         } else if self.config.max_tokens > 0 {
-                            let tokens = self.estimator.estimate_text(&group.bm25_text);
+                            let tokens = cce_text::ChunkUnit::Tokens.cost(&group.bm25_text);
                             tokens > self.config.max_tokens && !group.members.is_empty()
                         } else {
                             false
@@ -232,9 +230,8 @@ impl DocGrouper {
         match &node.node_type {
             DocNodeType::CodeBlock { .. } => {
                 // Check both token count and BM25 term count
-                let token_count = self.estimator.estimate_text(&node.content);
-                let tokenizer = MixedTokenizer::new();
-                let bm25_term_count = tokenizer.tokenize(&node.content).len();
+                let token_count = cce_text::ChunkUnit::Tokens.cost(&node.content);
+                let bm25_term_count = cce_text::ChunkUnit::Terms.cost(&node.content);
 
                 // Standalone if either threshold is met
                 token_count >= self.config.min_standalone_tokens
