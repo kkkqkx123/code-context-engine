@@ -39,27 +39,28 @@ impl AppConfig {
             }
         }
 
-        // --- Whole-section replacement ---
+        // --- Field patches: absent fields inherit the global value, only
+        // --- explicitly given fields override it.
         if let Some(ref scanner) = project.scanner {
-            merged.scanner = scanner.clone();
+            merged.scanner.merge(scanner);
         }
         if let Some(ref grouper) = project.grouper {
-            merged.grouper = grouper.clone();
+            merged.grouper.merge(grouper);
         }
         if let Some(ref relation) = project.relation {
-            merged.relation = relation.clone();
+            merged.relation.merge(relation);
         }
         if let Some(ref ast_to_nl) = project.ast_to_nl {
-            merged.ast_to_nl = ast_to_nl.clone();
+            merged.ast_to_nl.merge(ast_to_nl);
         }
         if let Some(ref license_header) = project.license_header {
-            merged.license_header = license_header.clone();
+            merged.license_header.merge(license_header);
         }
         if let Some(ref summary) = project.summary {
-            merged.summary = summary.clone();
+            merged.summary.merge(summary);
         }
 
-        // --- Orchestrator: deep merge via Mergeable trait ---
+        // --- Orchestrator: patch merge via Mergeable trait ---
         if let Some(ref project_orchestrator) = project.orchestrator {
             merged.orchestrator.merge(project_orchestrator);
         }

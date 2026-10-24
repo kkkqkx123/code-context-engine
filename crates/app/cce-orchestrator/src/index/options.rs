@@ -13,9 +13,17 @@ use std::path::PathBuf;
 pub struct IndexOptions {
     /// Root directory to index
     pub root_dir: PathBuf,
-    /// File extensions to include
+    /// File extensions to include.
+    ///
+    /// Empty means "no request override": the engine fills the effective
+    /// value from the merged project configuration. Non-empty values are
+    /// explicit request overrides and win over the effective configuration.
     pub extensions: Vec<String>,
-    /// Directories to exclude
+    /// Directories to exclude.
+    ///
+    /// Empty means "no request override": the engine fills the effective
+    /// value from the merged project configuration. Non-empty values are
+    /// explicit request overrides and win over the effective configuration.
     pub exclude_dirs: Vec<String>,
     /// Maximum concurrent file processing
     ///

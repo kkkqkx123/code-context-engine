@@ -85,54 +85,28 @@ impl SqliteClient {
         client.with_transaction(|tx| {
             use rusqlite::params;
             let now = crate::utils::current_timestamp();
-            let (
-                name,
-                root_path,
-                config_file_path,
-                language,
-                extensions,
-                exclude_dirs,
-                respect_gitignore,
-                ignore_patterns,
-            ) = match registry_row {
+            // Seed only the identity columns so the foreign key parent row
+            // exists. Scan configuration lives exclusively in the registry
+            // profile document and is never copied here.
+            let (name, root_path, config_file_path, language) = match registry_row {
                 Some(ref record) => (
                     record.name.clone(),
                     record.root_path.clone(),
                     record.config_file_path.clone(),
                     record.language.clone(),
-                    record.extensions.clone(),
-                    record.exclude_dirs.clone(),
-                    record.respect_gitignore.map(|b| if b { 1 } else { 0 }),
-                    record.ignore_patterns.clone(),
                 ),
                 None => (
                     format!("project-{project_id}"),
                     format!("/projects/{project_id}"),
                     ".cce/config.json".to_string(),
                     None,
-                    None,
-                    None,
-                    None,
-                    None,
                 ),
             };
             tx.execute(
                 "INSERT OR IGNORE INTO projects
-                    (id, name, root_path, config_file_path, language, extensions,
-                     exclude_dirs, respect_gitignore, ignore_patterns, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
-                params![
-                    project_id,
-                    name,
-                    root_path,
-                    config_file_path,
-                    language,
-                    extensions,
-                    exclude_dirs,
-                    respect_gitignore,
-                    ignore_patterns,
-                    now,
-                ],
+                    (id, name, root_path, config_file_path, language, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+                params![project_id, name, root_path, config_file_path, language, now,],
             )
             .map_err(|e| {
                 StorageError::insert("projects", format!("Failed to seed project row: {e}"))

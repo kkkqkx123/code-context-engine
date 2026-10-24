@@ -59,6 +59,25 @@ where
     }
 }
 
+/// Deserialize an explicit JSON null as `Some(None)`.
+///
+/// Used for patch fields whose global counterpart is itself optional
+/// (for example `max_file_size` or `document_chunking`). A missing field
+/// means "inherit the global value" (`None`), while an explicit null means
+/// "override the global value with nothing" (`Some(None)`). Plain
+/// `Option<Option<T>>` cannot express this: serde maps null to the outer
+/// `None`, collapsing the two intents.
+///
+/// Must be paired with `skip_serializing_if = "Option::is_none"` so an
+/// absent field is omitted rather than serialized as null.
+pub fn explicit_null_as_some_none<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

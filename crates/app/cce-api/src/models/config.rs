@@ -56,7 +56,10 @@ pub struct ConfigWarningInfo {
 /// Request body for updating project config
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ProjectConfigUpdateRequest {
-    /// Project-level configuration (partial config, free-form)
+    /// Project profile document (ProjectAppConfig as JSON). Only
+    /// project-effective fields are accepted; global-only sections such as
+    /// `server`, `database`, `logger`, `metrics`, `export`, `mcp`,
+    /// `search`, `cache` or `symbol_resolution` are rejected.
     pub config: serde_json::Value,
 }
 
@@ -66,15 +69,22 @@ pub struct ProjectConfigUpdateResponse {
     pub success: bool,
     pub hot_reload_applied: bool,
     pub message: String,
+    /// Combined profile/global version after the write. Advances when either
+    /// the profile or the global configuration changes. Observe the same
+    /// value through GET.
+    #[serde(default)]
+    pub config_version: u64,
 }
 
-/// Response for reading the merged project configuration
+/// Response for reading the stored project profile
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ProjectConfigGetResponse {
     pub success: bool,
     pub project_id: i64,
     pub config_version: u64,
-    /// Merged runtime configuration (global defaults plus project overrides)
+    /// Stored project profile (ProjectAppConfig as JSON), not the merged
+    /// runtime configuration. Combine with the global configuration to
+    /// derive the effective values.
     pub config: serde_json::Value,
 }
 

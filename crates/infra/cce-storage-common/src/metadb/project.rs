@@ -9,13 +9,23 @@ pub struct ProjectRecord {
     pub root_path: String,
     pub config_file_path: String,
     pub language: Option<String>,
-    pub extensions: Option<String>,
-    pub exclude_dirs: Option<String>,
-    pub respect_gitignore: Option<bool>,
-    pub ignore_patterns: Option<String>,
+    /// Canonical project profile document (ProjectAppConfig as JSON).
+    ///
+    /// This is the single source of truth for project-level effective
+    /// configuration. Scan lists are derived from the profile at read time
+    /// and never stored as separate columns.
+    pub profile_json: String,
+    /// Monotonic profile version, bumped on every profile write.
+    pub profile_version: i64,
     pub last_indexed: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+impl ProjectRecord {
+    pub fn profile_version_u64(&self) -> u64 {
+        self.profile_version.max(0) as u64
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,10 +34,8 @@ pub struct NewProjectRecord {
     pub root_path: String,
     pub config_file_path: Option<String>,
     pub language: Option<String>,
-    pub extensions: Option<String>,
-    pub exclude_dirs: Option<String>,
-    pub respect_gitignore: Option<bool>,
-    pub ignore_patterns: Option<String>,
+    /// Initial profile document. None means empty profile (`{}`).
+    pub profile_json: Option<String>,
 }
 
 impl NewProjectRecord {
@@ -37,11 +45,13 @@ impl NewProjectRecord {
             root_path,
             config_file_path: Some(".cce/config.json".to_string()),
             language: None,
-            extensions: None,
-            exclude_dirs: None,
-            respect_gitignore: None,
-            ignore_patterns: None,
+            profile_json: None,
         }
+    }
+
+    pub fn with_profile_json(mut self, profile_json: String) -> Self {
+        self.profile_json = Some(profile_json);
+        self
     }
 
     pub fn build(self) -> ProjectRecord {
@@ -56,10 +66,8 @@ impl NewProjectRecord {
                 .config_file_path
                 .unwrap_or_else(|| ".cce/config.json".to_string()),
             language: self.language,
-            extensions: self.extensions,
-            exclude_dirs: self.exclude_dirs,
-            respect_gitignore: self.respect_gitignore,
-            ignore_patterns: self.ignore_patterns,
+            profile_json: self.profile_json.unwrap_or_else(|| "{}".to_string()),
+            profile_version: 0,
             last_indexed: None,
             created_at: now,
             updated_at: now,
@@ -73,10 +81,9 @@ pub struct ProjectUpdateRecord {
     pub root_path: Option<String>,
     pub config_file_path: Option<String>,
     pub language: Option<String>,
-    pub extensions: Option<String>,
-    pub exclude_dirs: Option<String>,
-    pub respect_gitignore: Option<bool>,
-    pub ignore_patterns: Option<String>,
+    /// Replacement profile document. When set, the repository must also
+    /// bump `profile_version` atomically in the same statement.
+    pub profile_json: Option<String>,
     pub last_indexed: Option<String>,
 }
 
@@ -101,23 +108,8 @@ impl ProjectUpdateRecord {
         self
     }
 
-    pub fn with_extensions(mut self, extensions: String) -> Self {
-        self.extensions = Some(extensions);
-        self
-    }
-
-    pub fn with_exclude_dirs(mut self, exclude_dirs: String) -> Self {
-        self.exclude_dirs = Some(exclude_dirs);
-        self
-    }
-
-    pub fn with_respect_gitignore(mut self, respect_gitignore: bool) -> Self {
-        self.respect_gitignore = Some(respect_gitignore);
-        self
-    }
-
-    pub fn with_ignore_patterns(mut self, ignore_patterns: String) -> Self {
-        self.ignore_patterns = Some(ignore_patterns);
+    pub fn with_profile_json(mut self, profile_json: String) -> Self {
+        self.profile_json = Some(profile_json);
         self
     }
 

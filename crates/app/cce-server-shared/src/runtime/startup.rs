@@ -241,26 +241,37 @@ impl StartupCoordinator {
                     }
                     continue;
                 }
-                let config_path = {
+                let Some(config_path) = ({
                     let raw = std::path::PathBuf::from(&checkpoint.root_dir);
                     if raw.extension().is_some_and(|ext| ext == "toml")
                         || (raw.is_absolute() && raw.exists())
                     {
-                        raw
+                        Some(raw)
                     } else {
-                        // Legacy checkpoint stored watch_root: fall back to project's .cce/config.toml
-                        match self
-                            .engine
-                            .project_registry()
-                            .get_or_load(*project_id)
-                            .await
-                        {
-                            Ok(entry) => std::path::PathBuf::from(&entry.metadata.root_path)
-                                .join(".cce")
-                                .join("config.toml"),
-                            Err(_) => raw.join("config.toml"),
-                        }
+                        warn!(
+                            project_id = *project_id,
+                            operation_id = %checkpoint.operation_id,
+                            "Skipping ConfigChange checkpoint without an explicit file path; project configuration now arrives only through explicit API calls"
+                        );
+                        None
                     }
+                }) else {
+                    if let Err(error) = operation_coordinator
+                        .checkpoint_manager()
+                        .mark_operation_failed(
+                            &checkpoint.operation_id,
+                            "skipped legacy watch-root config path",
+                        )
+                        .await
+                    {
+                        warn!(
+                            project_id = *project_id,
+                            operation_id = %checkpoint.operation_id,
+                            error = %error,
+                            "Failed to mark skipped ConfigChange checkpoint failed"
+                        );
+                    }
+                    continue;
                 };
                 hot_coordinator
                     .lock()

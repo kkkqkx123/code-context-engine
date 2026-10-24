@@ -595,6 +595,86 @@ async fn project_config_update_accepts_empty_object() {
 }
 
 #[tokio::test]
+async fn project_config_rejects_global_sections() {
+    let env = test_env().await;
+    let root = tempfile::TempDir::new().expect("project root");
+    let id = create_project(&env.state, &root.path().to_string_lossy()).await;
+    match project::config::handle_update_project_config(
+        State(env.state),
+        Path(id),
+        Json(ProjectConfigUpdateRequest {
+            config: serde_json::json!({"server": {"host": "0.0.0.0"}}),
+        }),
+    )
+    .await
+    {
+        ApiResult::Error(err) => assert_eq!(err.error.code, error_codes::INVALID_INPUT),
+        ApiResult::Success(_) => panic!("global section must be rejected"),
+    }
+}
+
+#[tokio::test]
+async fn project_profile_persists_across_cache_invalidation() {
+    let env = test_env().await;
+    let root = tempfile::TempDir::new().expect("project root");
+    let id = create_project(&env.state, &root.path().to_string_lossy()).await;
+    let profile = serde_json::json!({
+        "scanner": {"respect_gitignore": false, "gitignore_patterns": ["target/"]},
+        "orchestrator": {"indexer": {"extensions": ["rs"], "exclude_dirs": ["target"]}},
+    });
+    let version = match project::config::handle_update_project_config(
+        State(env.state.clone()),
+        Path(id),
+        Json(ProjectConfigUpdateRequest {
+            config: profile.clone(),
+        }),
+    )
+    .await
+    {
+        ApiResult::Success(response) => {
+            assert!(response.success);
+            response.config_version
+        }
+        ApiResult::Error(err) => panic!("profile update must succeed: {}", err.error.message),
+    };
+    let stored = match project::config::handle_get_project_config(
+        State(env.state.clone()),
+        Path(id),
+    )
+    .await
+    {
+        ApiResult::Success(response) => {
+            assert_eq!(response.project_id, id);
+            assert_eq!(response.config_version, version);
+            assert!(version > 0, "profile write must bump version");
+            response.config
+        }
+        ApiResult::Error(err) => panic!("get profile must succeed: {}", err.error.message),
+    };
+    assert_eq!(
+        stored["scanner"]["respect_gitignore"],
+        serde_json::json!(false)
+    );
+    assert_eq!(
+        stored["orchestrator"]["indexer"]["extensions"],
+        serde_json::json!(["rs"])
+    );
+    env.state
+        .engine
+        .project_registry()
+        .invalidate_cache(Some(id))
+        .await
+        .expect("cache invalidation must succeed");
+    match project::config::handle_get_project_config(State(env.state), Path(id)).await {
+        ApiResult::Success(response) => {
+            assert_eq!(response.config_version, version);
+            assert_eq!(response.config, stored);
+        }
+        ApiResult::Error(err) => panic!("profile must survive reload: {}", err.error.message),
+    }
+}
+
+#[tokio::test]
 async fn stateless_compress_and_batch_succeed_on_real_files() {
     let (_env, root, _id) = seeded_project().await;
     let file = root

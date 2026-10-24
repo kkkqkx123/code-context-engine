@@ -155,22 +155,39 @@ impl CodeContextEngine {
 
     /// Create engine from an already-initialized AppConfig
     pub async fn from_config(config: AppConfig) -> Result<Self, EngineError> {
-        // Initialize global settings if not already done
+        // The passed config always drives this engine instance. The global
+        // singleton is only seeded when empty so unrelated readers keep a
+        // stable view; an existing global is never overwritten here.
         if !Settings::is_initialized() {
             Settings::init(config.clone()).map_err(|e| EngineError::Config(e.to_string()))?;
+        } else {
+            tracing::warn!(
+                "Settings already initialized; from_config uses the passed config for this engine without overwriting the global"
+            );
         }
 
-        let engine_config = Settings::global().map_err(|e| EngineError::Config(e.to_string()))?;
-        Self::init_components(engine_config.clone()).await
+        Self::init_components(config).await
     }
 
     /// Create engine from a config file path
     pub async fn from_config_file(path: &Path) -> Result<Self, EngineError> {
-        Settings::init_from_file(Some(path)).map_err(|e| EngineError::Config(e.to_string()))?;
+        if !Settings::is_initialized() {
+            Settings::init_from_file(Some(path)).map_err(|e| EngineError::Config(e.to_string()))?;
 
-        let config = Settings::global()
-            .map_err(|e| EngineError::Config(e.to_string()))?
-            .clone();
+            let config = Settings::global()
+                .map_err(|e| EngineError::Config(e.to_string()))?
+                .clone();
+            return Self::init_components(config).await;
+        }
+
+        tracing::warn!(
+            path = %path.display(),
+            "Settings already initialized; from_config_file loads the file for this engine only"
+        );
+        let config = cce_config::ConfigLoader::new()
+            .with_path(path)
+            .load()
+            .map_err(|e| EngineError::Config(e.to_string()))?;
         Self::init_components(config).await
     }
 
@@ -375,18 +392,35 @@ impl EngineBuilder {
 
     /// Build the engine
     pub async fn build(self) -> Result<CodeContextEngine, EngineError> {
-        // Initialize settings from config
+        // The resolved config drives this engine instance only. Overrides
+        // below are per-engine and intentionally not written back to the
+        // global singleton.
         let config = if let Some(config) = self.config {
             if !Settings::is_initialized() {
                 Settings::init(config.clone()).map_err(|e| EngineError::Config(e.to_string()))?;
+            } else {
+                tracing::warn!(
+                    "Settings already initialized; EngineBuilder uses the supplied config for this engine only"
+                );
             }
             config
         } else if let Some(ref path) = self.config_path {
-            Settings::init_from_file(Some(path.as_path()))
-                .map_err(|e| EngineError::Config(e.to_string()))?;
-            Settings::global()
-                .map_err(|e| EngineError::Config(e.to_string()))?
-                .clone()
+            if !Settings::is_initialized() {
+                Settings::init_from_file(Some(path.as_path()))
+                    .map_err(|e| EngineError::Config(e.to_string()))?;
+                Settings::global()
+                    .map_err(|e| EngineError::Config(e.to_string()))?
+                    .clone()
+            } else {
+                tracing::warn!(
+                    path = %path.display(),
+                    "Settings already initialized; EngineBuilder loads the file for this engine only"
+                );
+                cce_config::ConfigLoader::new()
+                    .with_path(path.as_path())
+                    .load()
+                    .map_err(|e| EngineError::Config(e.to_string()))?
+            }
         } else {
             // Use default config
             let config = AppConfig::default();

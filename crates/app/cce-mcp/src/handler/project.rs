@@ -114,10 +114,15 @@ pub async fn index_project(
     state: &Arc<AppState>,
     args: IndexProjectArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
+    // Only explicit request overrides are passed through; empty lists mean
+    // "use the effective project configuration", which the engine resolves
+    // from the merged registry configuration.
     let mut options = match args.root_dir.clone() {
         Some(dir) => IndexOptions::new(PathBuf::from(dir)),
         None => IndexOptions::default(),
-    };
+    }
+    .with_extensions(Vec::new())
+    .with_exclude_dirs(Vec::new());
     if let Some(extensions) = args.extensions.clone()
         && !extensions.is_empty()
     {

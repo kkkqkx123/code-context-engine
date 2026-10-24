@@ -1,37 +1,33 @@
 //! Project-level configuration
 //!
-//! This module defines project-specific configuration that can override
-//! selected global settings. Project config focuses on indexing, scanning,
-//! and processing options, while sensitive settings (API keys, URLs) remain
-//! in global configuration.
+//! This module defines the project profile that a client submits through
+//! explicit API calls. The server persists the profile in the metadata
+//! database and merges it with the global configuration at request time.
+//! The server never reads project configuration files.
 //!
 //! # Configuration Hierarchy
 //!
 //! ```text
-//! Global Config (~/.cce/config.toml)
+//! Global Config (server config.toml)
 //!     ↓ inherits
-//! Project Config (<project>/.cce/config.toml)
+//! Project profile (metadata database, supplied by client)
 //!     ↓ merges
 //! Runtime Config
 //! ```
 //!
 //! # Design Principles
 //!
-//! - Project config only overrides indexing/scanning/processing options
+//! - Project profile only overrides indexing/scanning/processing options
 //! - API keys and URLs are defined globally and referenced by name
 //! - Sensitive data stays in global config or environment variables
-//! - Project config is optional; global config provides defaults
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::validation::{Validate, ValidationResult};
 use cce_types::error::config::ConfigValidationError;
 
-use super::modules::{
-    AstToNlConfig, IndexerConfig, LicenseHeaderConfig, NestProcessorConfig, RelationConfig,
-    ScannerConfig, SummaryConfig,
-};
+use super::modules::{GlossaryScope, LicenseHeaderRule, SummaryGenerationStrategy};
 
 // Re-use shared default value functions
 use super::modules::defaults::default_true;
@@ -48,6 +44,7 @@ pub use super::modules::storage::{
 /// to customize per-project. Sensitive settings (API keys, URLs) are
 /// referenced from global configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProjectAppConfig {
     /// Project name (for display purposes)
     #[serde(default)]
@@ -68,32 +65,50 @@ pub struct ProjectAppConfig {
     pub llm: Option<ProjectLlmConfig>,
 
     /// Scanner configuration (file scanning, filtering)
+    ///
+    /// Patch form: every field is optional. Absent fields inherit the global
+    /// value; only explicitly given fields override it.
     #[serde(default)]
-    pub scanner: Option<ScannerConfig>,
+    pub scanner: Option<ProjectScannerPatch>,
 
     /// Grouper configuration (entity grouping, pattern detection)
+    ///
+    /// Patch form: every field is optional. Absent fields inherit the global
+    /// value; only explicitly given fields override it.
     #[serde(default)]
-    pub grouper: Option<NestProcessorConfig>,
+    pub grouper: Option<ProjectGrouperPatch>,
 
     /// Orchestrator configuration (indexing, hot update)
     #[serde(default)]
     pub orchestrator: Option<ProjectOrchestratorConfig>,
 
     /// Relation configuration (call chains, dependencies)
+    ///
+    /// Patch form: every field is optional. Absent fields inherit the global
+    /// value; only explicitly given fields override it.
     #[serde(default)]
-    pub relation: Option<RelationConfig>,
+    pub relation: Option<ProjectRelationPatch>,
 
     /// AST to NL configuration (chunking, conversion)
+    ///
+    /// Patch form: every field is optional. Absent fields inherit the global
+    /// value; only explicitly given fields override it.
     #[serde(default)]
-    pub ast_to_nl: Option<AstToNlConfig>,
+    pub ast_to_nl: Option<ProjectAstToNlPatch>,
 
     /// License header filtering configuration
+    ///
+    /// Patch form: every field is optional. Absent fields inherit the global
+    /// value; only explicitly given fields override it.
     #[serde(default)]
-    pub license_header: Option<LicenseHeaderConfig>,
+    pub license_header: Option<ProjectLicenseHeaderPatch>,
 
     /// Summary configuration
+    ///
+    /// Patch form: every field is optional. Absent fields inherit the global
+    /// value; only explicitly given fields override it.
     #[serde(default)]
-    pub summary: Option<SummaryConfig>,
+    pub summary: Option<ProjectSummaryPatch>,
 
     /// Storage configuration (Qdrant, BM25)
     /// Allows project-specific storage tuning without exposing sensitive data
@@ -199,28 +214,302 @@ pub struct ProjectLlmConfig {
 ///
 /// Focuses on indexing and hot update settings, excluding
 /// infrastructure concerns.
+///
+/// Every section is a patch: absent sections and absent fields inherit the
+/// global value; only explicitly given fields override it.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectOrchestratorConfig {
-    /// Batch processing configuration
+    /// Batch processing configuration patch
     #[serde(default)]
-    pub batch: Option<super::modules::BatchConfig>,
+    pub batch: Option<ProjectBatchPatch>,
 
-    /// Hot update configuration
+    /// Hot update configuration patch
     #[serde(default)]
-    pub hot_update: Option<super::modules::HotUpdateConfig>,
+    pub hot_update: Option<ProjectHotUpdatePatch>,
 
-    /// Indexer configuration (file processing, storage options)
+    /// Indexer configuration patch (file processing, storage options)
     #[serde(default)]
-    pub indexer: Option<IndexerConfig>,
+    pub indexer: Option<ProjectIndexerPatch>,
 
-    /// Cache configuration
+    /// Cache configuration patch
     #[serde(default)]
-    pub cache: Option<super::modules::CacheConfig>,
+    pub cache: Option<ProjectCachePatch>,
 
     /// Checkpoint recovery freshness window and cleanup TTL in seconds
     /// (overrides the global `orchestrator.checkpoint_ttl_seconds`)
     #[serde(default)]
     pub checkpoint_ttl_seconds: Option<u64>,
+}
+
+/// Project-level scanner patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it. This keeps partial profile submissions from resetting
+/// sibling fields to defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectScannerPatch {
+    pub follow_symlinks: Option<bool>,
+    pub respect_gitignore: Option<bool>,
+    pub exclude_patterns: Option<Vec<String>>,
+    pub include_patterns: Option<Vec<String>>,
+    pub gitignore_patterns: Option<Vec<String>>,
+    pub binary_check_size: Option<usize>,
+    pub max_hash_file_size: Option<u64>,
+    pub default_max_content_size: Option<u64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_helpers::explicit_null_as_some_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_file_size: Option<Option<u64>>,
+    pub plugin_filter_enabled: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_helpers::explicit_null_as_some_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parallelism: Option<Option<usize>>,
+}
+
+/// Project-level indexer patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectIndexerPatch {
+    pub extensions: Option<Vec<String>>,
+    pub exclude_dirs: Option<Vec<String>>,
+    pub store_vectors: Option<bool>,
+    pub store_bm25: Option<bool>,
+    pub store_summaries: Option<bool>,
+    pub embed_summaries: Option<bool>,
+    pub build_relations: Option<bool>,
+    pub dead_letter_truncate_retry: Option<bool>,
+    pub embed_input_token_limit: Option<usize>,
+}
+
+/// Project-level batch processing patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectBatchPatch {
+    pub scan_batch_size: Option<usize>,
+    pub parse_concurrency: Option<usize>,
+    pub process_concurrency: Option<usize>,
+    pub store_batch_size: Option<usize>,
+    pub embedding_batch_size: Option<usize>,
+    pub embedding_batch_delay_ms: Option<u64>,
+    pub embedding_stage_timeout_secs: Option<u64>,
+}
+
+/// Project-level debounce patch.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectDebouncePatch {
+    pub pending_interval_secs: Option<u64>,
+    pub max_wait_time_secs: Option<u64>,
+}
+
+/// Project-level file watch patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectFileWatchPatch {
+    pub enabled: Option<bool>,
+    pub event_threshold: Option<usize>,
+    pub fallback_interval_secs: Option<u64>,
+    pub verification_interval_secs: Option<u64>,
+    pub watch_config_files: Option<bool>,
+    pub storm_duration_secs: Option<u64>,
+    pub recovery_threshold: Option<usize>,
+    pub recovery_duration_secs: Option<u64>,
+}
+
+/// Project-level hot update patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectHotUpdatePatch {
+    pub enabled: Option<bool>,
+    pub debounce: Option<ProjectDebouncePatch>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_helpers::explicit_null_as_some_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub scanner: Option<Option<ProjectScannerPatch>>,
+    pub build_relations: Option<bool>,
+    pub store_summaries: Option<bool>,
+    pub store_vectors: Option<bool>,
+    pub store_bm25: Option<bool>,
+    pub batch_size: Option<usize>,
+    pub embedding_batch_size: Option<usize>,
+    pub storage_batch_size: Option<usize>,
+    pub file_watch: Option<ProjectFileWatchPatch>,
+}
+
+/// Project-level cache patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectCachePatch {
+    pub chunk_cache_size: Option<usize>,
+    pub enabled: Option<bool>,
+}
+
+/// Project-level grouper patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectGrouperPatch {
+    pub small_class_threshold: Option<usize>,
+    pub simple_call_merge_threshold: Option<usize>,
+    pub enable_class_method_association: Option<bool>,
+    pub enable_call_merging: Option<bool>,
+    pub enable_getter_setter_merging: Option<bool>,
+    pub getter_setter_complexity_threshold: Option<usize>,
+    pub enable_test_entity_grouping: Option<bool>,
+    pub include_assertions_in_groups: Option<bool>,
+    pub max_test_suite_nesting: Option<usize>,
+    pub enable_nested_entity_grouping: Option<bool>,
+    pub max_nesting_depth: Option<usize>,
+    pub min_nested_size: Option<usize>,
+    pub enable_impl_association: Option<bool>,
+    pub enable_plugin_pattern_detection: Option<bool>,
+    pub enable_function_member_grouping: Option<bool>,
+    pub enable_small_fragment_merging: Option<bool>,
+    pub small_fragment_max_span_lines: Option<usize>,
+    pub enable_group_hierarchy: Option<bool>,
+    pub near_merge_proximity_bytes: Option<usize>,
+    pub getter_setter: Option<ProjectGetterSetterPatch>,
+}
+
+/// Project-level getter/setter detection patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectGetterSetterPatch {
+    pub strict_mode: Option<bool>,
+    pub max_simple_lines: Option<usize>,
+    pub kotlin_accessor_support: Option<bool>,
+}
+
+/// Project-level relation index patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectRelationIndexPatch {
+    pub enabled: Option<bool>,
+    pub max_relations_per_file: Option<usize>,
+    pub resolve_call_chains: Option<bool>,
+    pub filter_stdlib_calls: Option<bool>,
+}
+
+/// Project-level relation patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectRelationPatch {
+    pub max_call_depth: Option<usize>,
+    pub analyze_imports: Option<bool>,
+    pub track_cross_file_deps: Option<bool>,
+    pub max_propagation_depth: Option<usize>,
+    pub max_fingerprint_scope_ratio: Option<f64>,
+    pub plugin_symbols_enabled: Option<bool>,
+    pub plugin_symbol_extract_enabled: Option<bool>,
+    pub manifest_scan_depth: Option<usize>,
+    pub index: Option<ProjectRelationIndexPatch>,
+}
+
+/// Project-level BM25 generator patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectBm25GeneratorPatch {
+    pub max_keywords: Option<usize>,
+}
+
+/// Project-level embedding generator patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectEmbeddingGeneratorPatch {
+    pub max_summary_words: Option<usize>,
+    pub include_docstring: Option<bool>,
+}
+
+/// Project-level chunking patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectChunkingPatch {
+    pub max_tokens: Option<usize>,
+    pub overlap_tokens: Option<usize>,
+    pub max_bm25_terms: Option<usize>,
+    pub overlap_bm25_terms: Option<usize>,
+    pub max_overlap_ratio: Option<f32>,
+    pub min_chunk_tokens: Option<usize>,
+    pub min_chunk_bm25_terms: Option<usize>,
+    pub respect_boundaries: Option<bool>,
+    pub cross_group_merge_threshold: Option<usize>,
+    pub glossary_reserve_ratio: Option<f32>,
+    pub glossary_max_entries: Option<usize>,
+    pub glossary_scope: Option<GlossaryScope>,
+}
+
+/// Project-level BM25 text cleaner patch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectTextCleanerPatch {
+    pub redundant_patterns: Option<Vec<String>>,
+}
+
+/// Project-level AST to NL patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectAstToNlPatch {
+    pub default_mode: Option<cce_types::OutputMode>,
+    pub bm25: Option<ProjectBm25GeneratorPatch>,
+    pub embedding: Option<ProjectEmbeddingGeneratorPatch>,
+    pub chunking: Option<ProjectChunkingPatch>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_helpers::explicit_null_as_some_none",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub document_chunking: Option<Option<ProjectChunkingPatch>>,
+    pub text_cleaner: Option<ProjectTextCleanerPatch>,
+}
+
+/// Project-level license header patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectLicenseHeaderPatch {
+    pub enabled: Option<bool>,
+    pub max_comments: Option<usize>,
+    pub rules: Option<Vec<LicenseHeaderRule>>,
+}
+
+/// Project-level summary patch.
+///
+/// Every field is optional: `None` inherits the global value, `Some`
+/// overrides it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectSummaryPatch {
+    pub strategy: Option<SummaryGenerationStrategy>,
+    pub max_summary_length: Option<usize>,
+    pub max_entities: Option<usize>,
+    pub max_imports: Option<usize>,
+    pub max_concurrent: Option<usize>,
+    pub max_retries: Option<usize>,
+    pub request_timeout_secs: Option<u64>,
 }
 
 /// Project-level storage configuration
@@ -369,64 +658,6 @@ pub struct IndexManagerConfigOverride {
     pub reload_policy: String,
 }
 
-/// Project configuration file locations
-///
-/// Defines where to look for project configuration files.
-pub struct ProjectConfigPaths;
-
-impl ProjectConfigPaths {
-    /// Get default project config file name
-    pub const fn config_file_name() -> &'static str {
-        ".cce.toml"
-    }
-
-    /// Get local override config file name
-    pub const fn local_config_file_name() -> &'static str {
-        ".cce.local.toml"
-    }
-
-    /// Get project config directory name
-    pub const fn config_dir_name() -> &'static str {
-        ".cce"
-    }
-
-    /// Find project config file starting from a directory
-    ///
-    /// Searches upward from the given directory for a `.cce/.cce.toml` file.
-    /// Returns the first config file found, using the directory containing
-    /// the `.cce` directory as the project root.
-    ///
-    /// Direct `.cce.toml` in the root directory is not supported — all project
-    /// configuration must reside under the `.cce/` directory for consistency
-    /// with local override discovery (`.cce/.cce.local.toml`).
-    pub fn find_project_config(start_dir: &Path) -> Option<PathBuf> {
-        let mut current = Some(start_dir);
-
-        while let Some(dir) = current {
-            let config_path = dir
-                .join(Self::config_dir_name())
-                .join(Self::config_file_name());
-            if config_path.exists() {
-                return Some(config_path);
-            }
-
-            current = dir.parent();
-        }
-
-        None
-    }
-
-    /// Find local override config file
-    ///
-    /// Returns the path to `config.local.toml` in the same directory as the project config.
-    pub fn find_local_config(project_config_path: &Path) -> Option<PathBuf> {
-        project_config_path
-            .parent()
-            .map(|dir| dir.join(Self::local_config_file_name()))
-            .filter(|path| path.exists())
-    }
-}
-
 impl Validate for ProjectStorageConfig {
     fn validate_structured(&self) -> ValidationResult {
         let mut errors = Vec::new();
@@ -476,6 +707,442 @@ impl Validate for ProjectQdrantConfig {
 impl Validate for HnswConfigOverride {
     fn validate_structured(&self) -> ValidationResult {
         HnswConfig::default().apply(self).validate_structured()
+    }
+}
+
+impl Validate for ProjectAppConfig {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Some(ref storage) = self.storage {
+            if let Err(error) = storage.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if let Some(ref orchestrator) = self.orchestrator {
+            if let Some(ref batch) = orchestrator.batch {
+                if let Err(error) = batch.validate_structured() {
+                    errors.push(error);
+                }
+            }
+            if let Some(ref hot_update) = orchestrator.hot_update {
+                if let Err(error) = hot_update.validate_structured() {
+                    errors.push(error);
+                }
+            }
+        }
+        if let Some(ref relation) = self.relation {
+            if let Err(error) = relation.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if let Some(ref ast_to_nl) = self.ast_to_nl {
+            if let Err(error) = ast_to_nl.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+fn require_positive(field: &str, value: usize, errors: &mut Vec<ConfigValidationError>) {
+    if value == 0 {
+        errors.push(ConfigValidationError::invalid_field(
+            field,
+            "must be greater than 0",
+        ));
+    }
+}
+
+fn require_positive_u64(field: &str, value: u64, errors: &mut Vec<ConfigValidationError>) {
+    if value == 0 {
+        errors.push(ConfigValidationError::invalid_field(
+            field,
+            "must be greater than 0",
+        ));
+    }
+}
+
+impl Validate for ProjectBatchPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Some(value) = self.scan_batch_size {
+            require_positive("scan_batch_size", value, &mut errors);
+        }
+        if let Some(value) = self.parse_concurrency {
+            require_positive("parse_concurrency", value, &mut errors);
+        }
+        if let Some(value) = self.process_concurrency {
+            require_positive("process_concurrency", value, &mut errors);
+        }
+        if let Some(value) = self.store_batch_size {
+            require_positive("store_batch_size", value, &mut errors);
+        }
+        if let Some(value) = self.embedding_batch_size {
+            require_positive("embedding_batch_size", value, &mut errors);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectDebouncePatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Some(value) = self.pending_interval_secs {
+            require_positive_u64("pending_interval_secs", value, &mut errors);
+        }
+        if let Some(value) = self.max_wait_time_secs {
+            require_positive_u64("max_wait_time_secs", value, &mut errors);
+        }
+        if let (Some(pending), Some(max)) = (self.pending_interval_secs, self.max_wait_time_secs)
+            && pending > max
+        {
+            errors.push(ConfigValidationError::dependency_conflict(
+                "pending_interval_secs cannot be greater than max_wait_time_secs",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectFileWatchPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Some(value) = self.event_threshold {
+            require_positive("event_threshold", value, &mut errors);
+        }
+        if let Some(value) = self.fallback_interval_secs {
+            require_positive_u64("fallback_interval_secs", value, &mut errors);
+        }
+        if let Some(value) = self.verification_interval_secs {
+            require_positive_u64("verification_interval_secs", value, &mut errors);
+        }
+        if let Some(value) = self.storm_duration_secs {
+            require_positive_u64("storm_duration_secs", value, &mut errors);
+        }
+        if let Some(value) = self.recovery_duration_secs {
+            require_positive_u64("recovery_duration_secs", value, &mut errors);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectHotUpdatePatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Some(value) = self.batch_size {
+            require_positive("batch_size", value, &mut errors);
+        }
+        if let Some(value) = self.embedding_batch_size {
+            require_positive("embedding_batch_size", value, &mut errors);
+        }
+        if let Some(value) = self.storage_batch_size {
+            require_positive("storage_batch_size", value, &mut errors);
+        }
+        if let Some(ref debounce) = self.debounce {
+            if let Err(error) = debounce.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if let Some(ref file_watch) = self.file_watch {
+            if let Err(error) = file_watch.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectRelationIndexPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        Ok(())
+    }
+}
+
+impl Validate for ProjectRelationPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Err(error) = self
+            .index
+            .as_ref()
+            .map(|index| index.validate_structured())
+            .unwrap_or(Ok(()))
+        {
+            errors.push(error);
+        }
+        if let Some(0) = self.max_call_depth
+            && self.index.as_ref().and_then(|index| index.enabled) != Some(false)
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "max_call_depth",
+                "must be greater than 0 when index is enabled",
+            ));
+        }
+        if let Some(ratio) = self.max_fingerprint_scope_ratio
+            && !(0.0..=1.0).contains(&ratio)
+        {
+            errors.push(ConfigValidationError::out_of_range(
+                "max_fingerprint_scope_ratio",
+                ratio.to_string(),
+                "0.0",
+                "1.0",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectBm25GeneratorPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        if let Some(0) = self.max_keywords {
+            return Err(ConfigValidationError::invalid_field(
+                "bm25.max_keywords",
+                "must be greater than 0",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for ProjectEmbeddingGeneratorPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        if let Some(0) = self.max_summary_words {
+            return Err(ConfigValidationError::invalid_field(
+                "embedding.max_summary_words",
+                "must be greater than 0",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Validate for ProjectChunkingPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Some(0) = self.max_tokens {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.max_tokens",
+                "must be greater than 0",
+            ));
+        }
+        if let Some(0) = self.max_bm25_terms {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.max_bm25_terms",
+                "must be greater than 0",
+            ));
+        }
+        if let Some(0) = self.min_chunk_tokens {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.min_chunk_tokens",
+                "must be greater than 0",
+            ));
+        }
+        if let Some(0) = self.min_chunk_bm25_terms {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.min_chunk_bm25_terms",
+                "must be greater than 0",
+            ));
+        }
+        if let Some(overlap) = self.overlap_tokens
+            && let Some(max) = self.max_tokens
+            && overlap >= max
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.overlap_tokens",
+                "must be less than max_tokens",
+            ));
+        }
+        if let Some(overlap) = self.overlap_bm25_terms
+            && let Some(max) = self.max_bm25_terms
+            && overlap >= max
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.overlap_bm25_terms",
+                "must be less than max_bm25_terms",
+            ));
+        }
+        if let Some(min) = self.min_chunk_tokens
+            && let Some(max) = self.max_tokens
+            && min > max
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.min_chunk_tokens",
+                "must be no greater than max_tokens",
+            ));
+        }
+        if let Some(min) = self.min_chunk_bm25_terms
+            && let Some(max) = self.max_bm25_terms
+            && min > max
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.min_chunk_bm25_terms",
+                "must be no greater than max_bm25_terms",
+            ));
+        }
+        if let Some(ratio) = self.max_overlap_ratio
+            && (ratio <= 0.0 || ratio > 1.0)
+        {
+            errors.push(ConfigValidationError::out_of_range(
+                "chunking.max_overlap_ratio",
+                ratio.to_string(),
+                "0",
+                "1",
+            ));
+        }
+        if let Some(ratio) = self.glossary_reserve_ratio
+            && !(0.0..1.0).contains(&ratio)
+        {
+            errors.push(ConfigValidationError::out_of_range(
+                "chunking.glossary_reserve_ratio",
+                ratio.to_string(),
+                "0",
+                "1",
+            ));
+        }
+        if let Some(threshold) = self.cross_group_merge_threshold
+            && let Some(max) = self.max_tokens
+            && threshold != 0
+            && threshold > max
+        {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.cross_group_merge_threshold",
+                "must be 0 or no greater than max_tokens",
+            ));
+        }
+        if let Some(0) = self.glossary_max_entries {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.glossary_max_entries",
+                "must be greater than 0",
+            ));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl Validate for ProjectTextCleanerPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        Ok(())
+    }
+}
+
+impl Validate for ProjectAstToNlPatch {
+    fn validate_structured(&self) -> ValidationResult {
+        let mut errors = Vec::new();
+        if let Some(ref bm25) = self.bm25 {
+            if let Err(error) = bm25.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if let Some(ref embedding) = self.embedding {
+            if let Err(error) = embedding.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if let Some(ref chunking) = self.chunking {
+            if let Err(error) = chunking.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if let Some(Some(ref chunking)) = self.document_chunking {
+            if let Err(error) = chunking.validate_structured() {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ConfigValidationError::multiple(errors))
+        }
+    }
+}
+
+impl ProjectAppConfig {
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none()
+            && self.root_path.is_none()
+            && self.embedder.is_none()
+            && self.llm.is_none()
+            && self.scanner.is_none()
+            && self.grouper.is_none()
+            && self.orchestrator.is_none()
+            && self.relation.is_none()
+            && self.ast_to_nl.is_none()
+            && self.license_header.is_none()
+            && self.summary.is_none()
+            && self.storage.is_none()
+            && self.plugins.is_none()
+    }
+
+    pub fn to_canonical_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    pub fn from_json_str(raw: &str) -> Result<Self, String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed == "{}" {
+            return Ok(Self::default());
+        }
+        serde_json::from_str(trimmed).map_err(|error| format!("Invalid project profile: {error}"))
+    }
+
+    pub fn from_scan_lists(
+        extensions: Option<Vec<String>>,
+        exclude_dirs: Option<Vec<String>>,
+        respect_gitignore: Option<bool>,
+        ignore_patterns: Option<Vec<String>>,
+    ) -> Self {
+        let mut profile = Self::default();
+        if extensions.is_some() || exclude_dirs.is_some() {
+            let mut indexer = ProjectIndexerPatch::default();
+            if let Some(value) = extensions {
+                indexer.extensions = Some(value);
+            }
+            if let Some(value) = exclude_dirs {
+                indexer.exclude_dirs = Some(value);
+            }
+            profile.orchestrator = Some(ProjectOrchestratorConfig {
+                indexer: Some(indexer),
+                ..Default::default()
+            });
+        }
+        if respect_gitignore.is_some() || ignore_patterns.is_some() {
+            let mut scanner = ProjectScannerPatch::default();
+            if let Some(value) = respect_gitignore {
+                scanner.respect_gitignore = Some(value);
+            }
+            if let Some(value) = ignore_patterns {
+                scanner.gitignore_patterns = Some(value);
+            }
+            profile.scanner = Some(scanner);
+        }
+        profile
     }
 }
 
@@ -564,6 +1231,61 @@ max_file_size = 512000
     }
 
     #[test]
+    fn test_partial_scanner_patch_keeps_other_fields_absent() {
+        let config: ProjectAppConfig = toml::from_str(
+            r#"[scanner]
+respect_gitignore = false
+"#,
+        )
+        .expect("partial patch must parse");
+        let scanner = config.scanner.expect("scanner patch must be present");
+        assert_eq!(scanner.respect_gitignore, Some(false));
+        assert_eq!(scanner.follow_symlinks, None);
+        assert_eq!(scanner.exclude_patterns, None);
+        assert_eq!(scanner.max_file_size, None);
+    }
+
+    #[test]
+    fn test_explicit_null_clears_nullable_patch_field() {
+        let config: ProjectAppConfig = toml::from_str(
+            r#"[scanner]
+max_file_size = 512000
+"#,
+        )
+        .expect("valued patch must parse");
+        let scanner = config.scanner.expect("scanner patch must be present");
+        assert_eq!(scanner.max_file_size, Some(Some(512000)));
+
+        let cleared: ProjectAppConfig =
+            serde_json::from_str(r#"{"scanner": {"max_file_size": null}}"#)
+                .expect("explicit null must parse");
+        let scanner = cleared.scanner.expect("scanner patch must be present");
+        assert_eq!(scanner.max_file_size, Some(None));
+
+        let omitted: ProjectAppConfig =
+            serde_json::from_str(r#"{"scanner": {}}"#).expect("empty patch must parse");
+        let scanner = omitted.scanner.expect("scanner patch must be present");
+        assert_eq!(scanner.max_file_size, None);
+    }
+
+    #[test]
+    fn test_patch_json_roundtrip_preserves_explicit_null() {
+        let profile = ProjectAppConfig {
+            scanner: Some(ProjectScannerPatch {
+                max_file_size: Some(None),
+                respect_gitignore: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let raw = profile.to_canonical_json();
+        let restored = ProjectAppConfig::from_json_str(&raw).expect("canonical JSON must parse");
+        let scanner = restored.scanner.expect("scanner patch must survive");
+        assert_eq!(scanner.max_file_size, Some(None));
+        assert_eq!(scanner.respect_gitignore, Some(true));
+    }
+
+    #[test]
     fn test_project_orchestrator_config_default() {
         let config = ProjectOrchestratorConfig::default();
         assert!(config.batch.is_none());
@@ -641,27 +1363,6 @@ max_file_size = 512000
         let embedder = config.embedder.unwrap();
         assert_eq!(embedder.model, Some("all-MiniLM-L6-v2".to_string()));
         // Note: vector_dimension is no longer part of ProjectEmbedderConfig
-    }
-
-    #[test]
-    fn test_find_project_config_in_cce_dir() {
-        use std::fs::{self, File};
-        use std::io::Write;
-        use tempfile::TempDir;
-
-        // Create a temporary directory structure
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let cce_dir = temp_dir.path().join(".cce");
-        fs::create_dir(&cce_dir).expect("Failed to create .cce dir");
-
-        let config_path = cce_dir.join(ProjectConfigPaths::config_file_name());
-        let mut file = File::create(&config_path).expect("Failed to create config");
-        writeln!(file, "name = \"test\"").unwrap();
-
-        // Should find config in .cce directory
-        let found = ProjectConfigPaths::find_project_config(temp_dir.path());
-        assert!(found.is_some());
-        assert_eq!(found.unwrap(), config_path);
     }
 
     #[test]

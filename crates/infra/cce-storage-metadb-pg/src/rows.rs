@@ -10,25 +10,24 @@ use cce_storage_common::metadb::{
 use crate::error::classify_pg;
 
 pub fn project_from_row(row: &Row) -> Result<ProjectRecord, StorageError> {
-    let respect_gitignore: Option<i64> = row.try_get("respect_gitignore").map_err(classify_pg)?;
+    let profile_json: Option<String> = row.try_get("profile_json").map_err(classify_pg)?;
+    let profile_version: Option<i64> = row.try_get("profile_version").map_err(classify_pg)?;
     Ok(ProjectRecord {
         id: row.try_get("id").map_err(classify_pg)?,
         name: row.try_get("name").map_err(classify_pg)?,
         root_path: row.try_get("root_path").map_err(classify_pg)?,
         config_file_path: row.try_get("config_file_path").map_err(classify_pg)?,
         language: row.try_get("language").map_err(classify_pg)?,
-        extensions: row.try_get("extensions").map_err(classify_pg)?,
-        exclude_dirs: row.try_get("exclude_dirs").map_err(classify_pg)?,
-        respect_gitignore: respect_gitignore.map(|flag| flag != 0),
-        ignore_patterns: row.try_get("ignore_patterns").map_err(classify_pg)?,
+        profile_json: profile_json.unwrap_or_else(|| "{}".to_string()),
+        profile_version: profile_version.unwrap_or(0),
         last_indexed: row.try_get("last_indexed").map_err(classify_pg)?,
         created_at: row.try_get("created_at").map_err(classify_pg)?,
         updated_at: row.try_get("updated_at").map_err(classify_pg)?,
     })
 }
 
-pub const PROJECT_COLUMNS: &str = "id, name, root_path, config_file_path, language, extensions, \
-     exclude_dirs, respect_gitignore, ignore_patterns, last_indexed, created_at, updated_at";
+pub const PROJECT_COLUMNS: &str = "id, name, root_path, config_file_path, language, \
+     profile_json, profile_version, last_indexed, created_at, updated_at";
 
 pub fn manifest_state_from(value: &str) -> Result<ProjectIndexManifestState, StorageError> {
     match value {

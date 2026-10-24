@@ -124,9 +124,21 @@ impl PostgresClient {
         }
         if applied < schema::POSTGRES_SCHEMA_VERSION {
             let tx = client.transaction().await.map_err(error::classify_pg)?;
-            tx.batch_execute(schema::V2_DDL)
-                .await
-                .map_err(error::classify_pg)?;
+            if applied < 2 {
+                tx.batch_execute(schema::V2_DDL)
+                    .await
+                    .map_err(error::classify_pg)?;
+            }
+            if applied < 3 {
+                tx.batch_execute(schema::V3_DDL)
+                    .await
+                    .map_err(error::classify_pg)?;
+            }
+            if applied < 4 {
+                tx.batch_execute(schema::V4_DDL)
+                    .await
+                    .map_err(error::classify_pg)?;
+            }
             tx.execute(
                 "INSERT INTO schema_migrations (version) VALUES ($1)",
                 &[&schema::POSTGRES_SCHEMA_VERSION],

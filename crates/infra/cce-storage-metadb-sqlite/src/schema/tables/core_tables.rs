@@ -12,10 +12,8 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
             root_path TEXT NOT NULL UNIQUE,
             config_file_path TEXT NOT NULL DEFAULT '.cce/config.json',
             language TEXT,
-            extensions TEXT,
-            exclude_dirs TEXT,
-            respect_gitignore INTEGER,
-            ignore_patterns TEXT,
+            profile_json TEXT NOT NULL DEFAULT '{}',
+            profile_version INTEGER NOT NULL DEFAULT 0,
             last_indexed TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
@@ -23,6 +21,15 @@ pub fn create_tables(conn: &Connection) -> Result<(), StorageError> {
         [],
     )
     .map_err(|e| StorageError::Table(format!("Failed to create projects table: {}", e)))?;
+
+    let _ = conn.execute(
+        "ALTER TABLE projects ADD COLUMN profile_json TEXT NOT NULL DEFAULT '{}'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE projects ADD COLUMN profile_version INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS files (

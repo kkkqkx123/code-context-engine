@@ -52,8 +52,14 @@ pub struct ProjectEntry {
     pub config: AppConfig,
     /// When this entry was loaded
     pub loaded_at: Instant,
-    /// Version number (incremented on each update)
+    /// Combined version: profile version in the low 32 bits, global
+    /// configuration version in the high bits. Advances when either side
+    /// changes. See `Settings::combine_versions`.
     pub version: u64,
+    /// Global configuration version this entry was built from. A cached
+    /// entry whose global version lags the current one is stale even when
+    /// the profile version matches.
+    pub global_version: u64,
 }
 
 /// Error type for project registry operations

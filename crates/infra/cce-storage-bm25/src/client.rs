@@ -576,10 +576,11 @@ impl Bm25Client {
         let start_time = Instant::now();
         let manager = self.index_manager.as_ref().ok_or(Bm25Error::Disabled)?;
 
-        let index_path = match &self.config.index_path {
+        let index_root = match &self.config.index_path {
             Some(path) => PathBuf::from(path),
             None => PathBuf::from("./data/bm25"),
         };
+        let index_path = IndexManager::versioned_path(&index_root);
 
         if index_path.exists() {
             std::fs::remove_dir_all(&index_path)?;

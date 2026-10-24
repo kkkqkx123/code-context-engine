@@ -1,10 +1,29 @@
-pub const POSTGRES_SCHEMA_VERSION: i64 = 2;
+pub const POSTGRES_SCHEMA_VERSION: i64 = 4;
 
 /// Incremental migration bringing pre-V2 databases to the current shape.
 /// Fresh databases get the column from `V1_DDL` directly.
 pub const V2_DDL: &str = r#"
 ALTER TABLE chunks ADD COLUMN IF NOT EXISTS entity_kinds TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE chunks ADD COLUMN IF NOT EXISTS group_title TEXT NOT NULL DEFAULT '';
+"#;
+
+/// Incremental migration bringing pre-V3 databases to the current shape.
+/// Adds the project profile document columns used as the single source of
+/// truth for project-level effective configuration.
+pub const V3_DDL: &str = r#"
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS profile_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS profile_version BIGINT NOT NULL DEFAULT 0;
+"#;
+
+/// Incremental migration bringing pre-V4 databases to the current shape.
+/// Drops the scan-cache columns superseded by the profile document.
+/// Scan lists are derived from the profile at read time and never stored
+/// as separate columns.
+pub const V4_DDL: &str = r#"
+ALTER TABLE projects DROP COLUMN IF EXISTS extensions;
+ALTER TABLE projects DROP COLUMN IF EXISTS exclude_dirs;
+ALTER TABLE projects DROP COLUMN IF EXISTS respect_gitignore;
+ALTER TABLE projects DROP COLUMN IF EXISTS ignore_patterns;
 "#;
 
 pub const V1_DDL: &str = r#"
@@ -14,10 +33,8 @@ CREATE TABLE IF NOT EXISTS projects (
     root_path TEXT NOT NULL UNIQUE,
     config_file_path TEXT NOT NULL DEFAULT '.cce/config.json',
     language TEXT,
-    extensions TEXT,
-    exclude_dirs TEXT,
-    respect_gitignore BIGINT,
-    ignore_patterns TEXT,
+    profile_json TEXT NOT NULL DEFAULT '{}',
+    profile_version BIGINT NOT NULL DEFAULT 0,
     last_indexed TEXT,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL

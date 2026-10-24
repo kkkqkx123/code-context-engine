@@ -6,7 +6,6 @@ use cce_storage_common::VectorStorage;
 use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 use super::staging::{INGEST_STAGING_RETENTION, clear_project_staging, sweep_project_staging};
-use crate::api::handlers::project::management::record_to_config;
 use crate::api::response::ApiResult;
 use crate::api::state::AppState;
 
@@ -57,15 +56,15 @@ pub async fn handle_ingest_commit(
             ));
         }
     };
-    let config = record_to_config(&record);
+    // The effective scan parameters are decided inside the engine from the
+    // merged registry configuration. Only the root path is passed here; scan
+    // lists stay empty so the engine fills them from the effective config.
     // Reclaim expired version staging before indexing so abandoned chunks
     // from interrupted pushes do not survive until the next push.
     sweep_project_staging(id, INGEST_STAGING_RETENTION);
-    let index_options = cce_orchestrator::IndexOptions::new(&config.root_path)
-        .with_extensions(config.extensions)
-        .with_exclude_dirs(config.exclude_dirs)
-        .with_gitignore(config.respect_gitignore)
-        .with_ignore_patterns(config.ignore_patterns);
+    let index_options = cce_orchestrator::IndexOptions::new(&record.root_path)
+        .with_extensions(Vec::new())
+        .with_exclude_dirs(Vec::new());
 
     state
         .engine

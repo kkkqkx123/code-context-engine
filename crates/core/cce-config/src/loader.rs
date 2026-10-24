@@ -1,6 +1,6 @@
 //! Configuration loader
 //!
-//! This module provides functionality for loading configuration from:
+//! This module provides functionality for loading global configuration from:
 //! - TOML files
 //! - Environment variables
 //! - .env files
@@ -11,10 +11,15 @@
 //! 1. Configuration file (highest for infrastructure settings: host, port, db path)
 //! 2. Environment variables (CCE_*) for API keys, DB URLs, and logging
 //! 3. .env file variables (provides defaults for sensitive values)
-//! 4. Project local config (.cce/config.local.toml)
-//! 5. Project config (.cce/config.toml)
-//! 6. Global configuration file (config.toml)
-//! 7. Default values
+//! 4. Global configuration file (config.toml)
+//! 5. Default values
+//!
+//! # Responsibility boundary
+//!
+//! This loader owns only the global server configuration. Project-level
+//! effective configuration is built by the project registry from the global
+//! configuration plus the project record in the metadata database. The
+//! server never discovers or reads project configuration files.
 //!
 //! # Infrastructure Settings Policy
 //!
@@ -40,7 +45,6 @@ use tracing::{debug, info, warn};
 
 use super::env_loader;
 use super::global::AppConfig;
-use super::project::{ProjectAppConfig, ProjectConfigPaths};
 use super::validation::Validate;
 use cce_types::error::ConfigError;
 
@@ -51,6 +55,63 @@ pub struct ConfigLoader {
 }
 
 impl ConfigLoader {
+    /// Default candidate files probed when no explicit path is given.
+    ///
+    /// Shared by the loader and the global singleton so every entry
+    /// point resolves the same sequence.
+    pub fn default_config_candidates() -> Vec<PathBuf> {
+        ["config.toml", "config/config.toml", ".config/config.toml"]
+            .iter()
+            .map(PathBuf::from)
+            .collect()
+    }
+
+    /// Anchor relative filesystem paths to the config file directory.
+    ///
+    /// Absolute paths, in-memory markers and URLs are left untouched.
+    /// Must run right after file parsing and before env overrides so
+    /// explicit environment values keep working-directory semantics.
+    pub fn anchor_relative_paths(config: &mut AppConfig, base_dir: &Path) {
+        fn anchored(value: &str, base_dir: &Path) -> Option<String> {
+            let trimmed = value.trim();
+            if trimmed.is_empty()
+                || trimmed == ":memory:"
+                || Path::new(trimmed).is_absolute()
+                || trimmed.contains("://")
+            {
+                return None;
+            }
+            Some(base_dir.join(trimmed).to_string_lossy().to_string())
+        }
+
+        if base_dir.as_os_str().is_empty() {
+            return;
+        }
+        if let Some(next) = anchored(&config.database.sqlite.path, base_dir) {
+            config.database.sqlite.path = next;
+        }
+        for slot in [
+            &mut config.database.vector_local.data_dir,
+            &mut config.database.qdrant.data_dir,
+            &mut config.database.qdrant.binary_path,
+            &mut config.database.bm25.index_path,
+            &mut config.logger.file,
+        ] {
+            if let Some(current) = slot.as_ref()
+                && let Some(next) = anchored(current, base_dir)
+            {
+                *slot = Some(next);
+            }
+        }
+        for provider in config.llm.providers.values_mut() {
+            if let Some(ref current) = provider.api_key_file
+                && let Some(next) = anchored(current, base_dir)
+            {
+                provider.api_key_file = Some(next);
+            }
+        }
+    }
+
     /// Create a new configuration loader
     pub fn new() -> Self {
         Self { config_path: None }
@@ -85,10 +146,12 @@ impl ConfigLoader {
         debug!("Loaded .env file (if exists)");
 
         // Load from file if specified
+        let mut loaded_path: Option<PathBuf> = None;
         if let Some(path) = &self.config_path {
             if path.exists() {
                 info!("Loading configuration from: {:?}", path);
                 config = self.load_from_file(path)?;
+                loaded_path = Some(path.clone());
                 debug!("Successfully loaded configuration from specified path");
             } else {
                 warn!("Configuration file not found: {:?}, using defaults", path);
@@ -96,19 +159,25 @@ impl ConfigLoader {
         } else {
             // Try default config paths
             debug!("No config path specified, trying default locations");
-            let mut loaded = false;
-            for default_path in &["config.toml", "config/config.toml", ".config/config.toml"] {
-                let path = Path::new(default_path);
+            for default_path in Self::default_config_candidates() {
+                let path = Path::new(&default_path);
                 if path.exists() {
                     info!("Loading configuration from default path: {:?}", path);
                     config = self.load_from_file(path)?;
-                    loaded = true;
+                    loaded_path = Some(default_path);
                     break;
                 }
             }
-            if !loaded {
+            if loaded_path.is_none() {
                 debug!("No configuration file found in default locations, using defaults");
             }
+        }
+
+        if let Some(ref source) = loaded_path
+            && let Some(parent) = source.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            Self::anchor_relative_paths(&mut config, parent);
         }
 
         // Resolve environment variable placeholders in config values
@@ -144,106 +213,6 @@ impl ConfigLoader {
 
         info!("Configuration loading completed successfully");
         Ok(config)
-    }
-
-    /// Load configuration for a specific project
-    ///
-    /// This method loads global configuration and merges it with project-specific
-    /// configuration found in the project root directory.
-    ///
-    /// # Arguments
-    ///
-    /// * `project_root` - Path to the project root directory
-    ///
-    /// # Returns
-    ///
-    /// Merged configuration with project overrides applied to global defaults.
-    pub fn load_for_project(self, project_root: &Path) -> Result<AppConfig, ConfigError> {
-        info!(
-            project_root = %project_root.display(),
-            "Starting project configuration loading"
-        );
-
-        // First, load global configuration
-        let global_config = self.load()?;
-        debug!("Loaded global configuration");
-
-        // Find project configuration file
-        let project_config_path = ProjectConfigPaths::find_project_config(project_root);
-
-        if let Some(config_path) = project_config_path {
-            info!("Loading project configuration from: {:?}", config_path);
-
-            // Load project config
-            let project_config = Self::load_project_config_static(&config_path)?;
-            debug!("Successfully loaded project configuration");
-
-            // Merge with global config
-            let mut merged_config = global_config.merge_with_project(&project_config);
-            debug!("Merged project configuration with global defaults");
-
-            // Check for local override config
-            if let Some(local_config_path) = ProjectConfigPaths::find_local_config(&config_path) {
-                info!(
-                    "Loading local project configuration from: {:?}",
-                    local_config_path
-                );
-                let local_config = Self::load_project_config_static(&local_config_path)?;
-                merged_config = merged_config.merge_with_project(&local_config);
-                debug!("Applied local configuration overrides");
-            }
-
-            // Re-apply environment variables (API keys, DB URLs, logging only)
-            // Infrastructure settings (host, port) are not overridable via env vars
-            debug!("Re-applying environment variable overrides");
-            env_loader::apply_env_vars(&mut merged_config)?;
-
-            // Validate merged configuration
-            debug!("Validating merged configuration");
-            Self::validate_static(&merged_config)?;
-
-            info!("Project configuration loading completed successfully");
-            Ok(merged_config)
-        } else {
-            info!("No project configuration found, using global config only");
-            Ok(global_config)
-        }
-    }
-
-    /// Load project-level configuration from a TOML file (static version)
-    fn load_project_config_static(path: &Path) -> Result<ProjectAppConfig, ConfigError> {
-        debug!("Reading project config file: {:?}", path);
-        let content = std::fs::read_to_string(path).map_err(|e| {
-            ConfigError::Other(format!("Failed to read project config file: {}", e))
-        })?;
-
-        debug!(
-            content_length = content.len(),
-            "Parsing project config TOML"
-        );
-        let result = toml::from_str(&content)
-            .map_err(|e| ConfigError::Other(format!("Failed to parse project config file: {}", e)));
-
-        if result.is_ok() {
-            debug!("Successfully parsed project config file");
-        }
-
-        result
-    }
-
-    /// Load project-level configuration from a TOML file
-    ///
-    /// This method loads only the project configuration without merging with global config.
-    /// Useful for testing or when you need to inspect project config separately.
-    pub fn load_project_config(self, path: &Path) -> Result<ProjectAppConfig, ConfigError> {
-        Self::load_project_config_static(path)
-    }
-
-    /// Validate configuration (static version)
-    fn validate_static(config: &AppConfig) -> Result<(), ConfigError> {
-        config.validate_structured()?;
-        config.validate_for_current_environment()?;
-        Ok(())
     }
 
     /// Load configuration from a TOML file
@@ -287,6 +256,7 @@ impl Default for ConfigLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project::ProjectAppConfig;
 
     #[test]
     fn test_default_config() {
@@ -387,32 +357,9 @@ filter_stdlib_calls = true
         assert!(config.orchestrator.is_some());
 
         let scanner = config.scanner.as_ref().expect("Scanner should be present");
-        assert_eq!(scanner.exclude_patterns, vec!["node_modules", "dist"]);
-    }
-
-    #[test]
-    fn test_load_for_project_no_config() {
-        // Test loading for a project without project config
-        // Should return global config from config.minimal.toml
-        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-
-        let config_path = Path::new("config.minimal.toml");
-        if !config_path.exists() {
-            eprintln!("Skipping test: config.minimal.toml not found");
-            return;
-        }
-
-        // Load with config.minimal.toml as the global config
-        let config = ConfigLoader::new()
-            .with_path(config_path)
-            .load_for_project(temp_dir.path())
-            .expect("Failed to load config");
-
-        // Should have valid config
-        assert!(!config.server.host.is_empty());
-        assert!(config.server.port > 0);
-        // Verify embedder is configured
-        assert!(!config.llm.providers.is_empty());
-        assert!(!config.embedder.default_model.is_empty());
+        assert_eq!(
+            scanner.exclude_patterns,
+            Some(vec!["node_modules".to_string(), "dist".to_string()])
+        );
     }
 }

@@ -15,10 +15,35 @@ use cce_api::models::{
     ProjectConfigUpdateRequest, ProjectConfigUpdateResponse, ProjectLlmOverviewResponse,
     ProjectLlmUpdateRequest, ProjectLlmUpdateResponse, RerankModelView,
 };
+use cce_config::ProjectAppConfig;
 use cce_config::global::AppConfig;
 use cce_config::project_registry::RegistryError;
 use cce_config::validation::Validate;
 use cce_llm::LlmClient;
+
+/// Top-level keys that belong to the global configuration and must never be
+/// accepted as part of a project profile update.
+const FORBIDDEN_PROFILE_KEYS: &[&str] = &[
+    "server",
+    "database",
+    "logger",
+    "metrics",
+    "export",
+    "mcp",
+    "search",
+    "cache",
+    "symbol_resolution",
+];
+
+fn reject_forbidden_profile_keys(value: &serde_json::Value) -> Option<String> {
+    let object = value.as_object()?;
+    for key in FORBIDDEN_PROFILE_KEYS {
+        if object.contains_key(*key) {
+            return Some((*key).to_string());
+        }
+    }
+    None
+}
 
 /// Handle update project config request
 #[utoipa::path(
@@ -41,83 +66,92 @@ pub async fn handle_update_project_config(
     let registry = state.engine.project_registry();
     let registry = &**registry;
 
-    // Validate the submitted config against the application schema
-    let config = match serde_json::from_value::<AppConfig>(payload.config) {
-        Ok(config) => config,
+    if let Some(forbidden) = reject_forbidden_profile_keys(&payload.config) {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_INPUT,
+            format!(
+                "Field '{forbidden}' belongs to global configuration and cannot be set per project"
+            ),
+        ));
+    }
+    let profile = match serde_json::from_value::<ProjectAppConfig>(payload.config) {
+        Ok(profile) => profile,
         Err(e) => {
             return ApiResult::Error(ErrorResponse::new(
                 error_codes::INVALID_INPUT,
-                format!("Invalid configuration format: {}", e),
+                format!("Invalid project profile format: {}", e),
             ));
         }
     };
-
-    // `update_config` mutates the in-memory entry, so the project must be
-    // resident first: loading also surfaces a genuine not-found as 404
-    // instead of silently reporting a cache miss as a missing project.
-    if let Err(e) = registry.get_or_load(project_id).await {
-        let (code, message) = match &e {
-            RegistryError::ProjectNotFound(id) => (
-                error_codes::ENTITY_NOT_FOUND,
-                format!("Project {} not found", id),
-            ),
-            other => (
-                error_codes::STORAGE_ERROR,
-                format!("Failed to load project: {}", other),
-            ),
-        };
-        return ApiResult::Error(ErrorResponse::new(code, message));
+    if let Err(error) = profile.validate_structured() {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_INPUT,
+            format!("Configuration validation failed: {}", error),
+        ));
     }
 
-    // 1. Update configuration
-    if let Err(e) = registry.update_config(project_id, config).await {
-        // Log the error with context
-        tracing::error!(
-            project_id,
-            error = %e,
-            "Failed to update project config"
-        );
+    // Persist the profile; the write bumps `profile_version` atomically and
+    // invalidates the cached effective configuration.
+    let version = match registry.update_profile(project_id, profile).await {
+        Ok(version) => version,
+        Err(e) => {
+            tracing::error!(
+                project_id,
+                error = %e,
+                "Failed to update project profile"
+            );
 
-        let (code, message) = match &e {
-            RegistryError::ProjectNotFound(id) => (
-                error_codes::ENTITY_NOT_FOUND,
-                format!("Project {} not found", id),
-            ),
-            RegistryError::PathNotFound(path) => (
-                error_codes::INVALID_INPUT,
-                format!("Path does not exist: {:?}", path),
-            ),
-            RegistryError::DuplicatePath(path) => (
-                error_codes::CONFLICT,
-                format!("Path already registered: {:?}", path),
-            ),
-            RegistryError::Validation(msg) => (
-                error_codes::INVALID_INPUT,
-                format!("Configuration validation failed: {}", msg),
-            ),
-            RegistryError::Configuration(msg) => (
-                error_codes::INVALID_INPUT,
-                format!("Configuration error: {}", msg),
-            ),
-            RegistryError::Serialization(msg) => (
-                error_codes::INVALID_INPUT,
-                format!("Invalid configuration format: {}", msg),
-            ),
-            RegistryError::Deserialization(msg) => (
-                error_codes::INVALID_INPUT,
-                format!("Invalid configuration format: {}", msg),
-            ),
-            RegistryError::Io(err) => (error_codes::STORAGE_ERROR, format!("IO error: {}", err)),
-            RegistryError::Database(err) => (
-                error_codes::STORAGE_ERROR,
-                format!("Database error: {}", err),
-            ),
-        };
+            let (code, message) = match &e {
+                RegistryError::ProjectNotFound(id) => (
+                    error_codes::ENTITY_NOT_FOUND,
+                    format!("Project {} not found", id),
+                ),
+                RegistryError::PathNotFound(path) => (
+                    error_codes::INVALID_INPUT,
+                    format!("Path does not exist: {:?}", path),
+                ),
+                RegistryError::DuplicatePath(path) => (
+                    error_codes::CONFLICT,
+                    format!("Path already registered: {:?}", path),
+                ),
+                RegistryError::Validation(msg) => (
+                    error_codes::INVALID_INPUT,
+                    format!("Configuration validation failed: {}", msg),
+                ),
+                RegistryError::Configuration(msg) => (
+                    error_codes::INVALID_INPUT,
+                    format!("Configuration error: {}", msg),
+                ),
+                RegistryError::Serialization(msg) => (
+                    error_codes::INVALID_INPUT,
+                    format!("Invalid configuration format: {}", msg),
+                ),
+                RegistryError::Deserialization(msg) => (
+                    error_codes::INVALID_INPUT,
+                    format!("Invalid configuration format: {}", msg),
+                ),
+                RegistryError::Io(err) => {
+                    (error_codes::STORAGE_ERROR, format!("IO error: {}", err))
+                }
+                RegistryError::Database(err) => (
+                    error_codes::STORAGE_ERROR,
+                    format!("Database error: {}", err),
+                ),
+            };
 
-        return ApiResult::Error(ErrorResponse::new(code, message));
-    }
+            return ApiResult::Error(ErrorResponse::new(code, message));
+        }
+    };
 
-    // 2. Notify HotUpdateCoordinator to reload (if exists)
+    // 2. Clear stale component caches so orchestrators, searchers and
+    // coordinators are rebuilt from the freshly stored profile on next use.
+    // The registry entry repopulated by update_profile survives this.
+    state
+        .engine
+        .clear_project_component_caches(project_id)
+        .await;
+
+    // 3. Notify HotUpdateCoordinator to reload (if exists)
     let mut hot_reload_success = true;
     let engine = &state.engine;
     match engine.get_hot_update_coordinator(project_id).await {
@@ -143,7 +177,7 @@ pub async fn handle_update_project_config(
         }
     }
 
-    // 3. Return success response with hot reload status
+    // 4. Return success response with hot reload status
     ApiResult::Success(ProjectConfigUpdateResponse {
         success: true,
         hot_reload_applied: hot_reload_success,
@@ -152,10 +186,11 @@ pub async fn handle_update_project_config(
         } else {
             "Configuration updated, but hot reload failed. Manual restart may be required for some components.".to_string()
         },
+        config_version: version,
     })
 }
 
-/// Handle read merged project config request
+/// Handle read stored project profile request
 #[utoipa::path(
     get, path = "/api/project/{project_id}/config", tag = "Project",
     params(("project_id" = i64, Path, description = "Project id")),
@@ -171,13 +206,13 @@ pub async fn handle_get_project_config(
     Path(project_id): Path<i64>,
 ) -> ApiResult<ProjectConfigGetResponse> {
     let registry = state.engine.project_registry();
-    match registry.get_or_load(project_id).await {
-        Ok(entry) => {
-            let config = serde_json::to_value(&entry.config).unwrap_or_default();
+    match registry.get_profile(project_id).await {
+        Ok((profile, version)) => {
+            let config = serde_json::to_value(&profile).unwrap_or_default();
             ApiResult::Success(ProjectConfigGetResponse {
                 success: true,
                 project_id,
-                config_version: entry.version,
+                config_version: version,
                 config,
             })
         }
@@ -240,7 +275,7 @@ pub async fn handle_reload_project_config(
     match project_registry.get_or_load(id).await {
         Ok(entry) => ApiResult::Success(ProjectConfigReloadResponse {
             success: true,
-            message: "Configuration cache invalidated. Will reload from file on next access."
+            message: "Configuration cache invalidated. Effective configuration is rebuilt from the global configuration plus the project record on next access."
                 .to_string(),
             project_id: id,
             config_version: entry.version,
@@ -501,15 +536,16 @@ pub async fn handle_get_project_llm_overview(
         dimension,
         missing_api_key_providers,
         unknown_provider_refs,
-        ephemeral_note: "Project LLM edits apply to in-memory runtime state and are discarded on reload from file or restart. Provider connection details stay global.".to_string(),
+        ephemeral_note: "Project LLM selections are persisted in the project profile; provider connection details stay global.".to_string(),
     })
 }
 
 /// Handle typed project LLM update request.
 ///
-/// Only project-effective chat and rerank fields are accepted. The update is
-/// validated, stored in memory and component caches are cleared without
-/// invalidating the registry entry.
+/// Only project-effective chat and rerank selections are accepted. The update
+/// is validated and persisted as part of the project profile document, so a
+/// restart keeps the values. Provider connection details and per-model
+/// tuning stay global and are rejected here.
 #[utoipa::path(
     put, path = "/api/project/{project_id}/llm/config", tag = "Project",
     params(("project_id" = i64, Path, description = "Project id")),
@@ -526,9 +562,55 @@ pub async fn handle_update_project_llm_config(
     Path(project_id): Path<i64>,
     Json(payload): Json<ProjectLlmUpdateRequest>,
 ) -> ApiResult<ProjectLlmUpdateResponse> {
+    if payload
+        .chat_model_params
+        .as_ref()
+        .is_some_and(|params| !params.is_empty())
+    {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_INPUT,
+            "chat_model_params belongs to the global model registry; change it in the server configuration file"
+                .to_string(),
+        ));
+    }
+    if let Some(max_candidates) = payload.rerank_max_candidates {
+        if !(1..=1000).contains(&max_candidates) {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_INPUT,
+                "rerank_max_candidates must be within 1..=1000".to_string(),
+            ));
+        }
+    }
+    let global = match cce_config::Settings::global() {
+        Ok(global) => global,
+        Err(error) => {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::STORAGE_ERROR,
+                format!("Failed to load global config: {}", error),
+            ));
+        }
+    };
+    if let Some(ref default_chat) = payload.default_chat {
+        if !global.llm.chat_models.contains_key(default_chat) {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_INPUT,
+                format!("Unknown chat model '{default_chat}'"),
+            ));
+        }
+    }
+    if let Some(ref default_rerank) = payload.default_rerank {
+        if !global.llm.rerank_models.contains_key(default_rerank) {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_INPUT,
+                format!("Unknown rerank model '{default_rerank}'"),
+            ));
+        }
+    }
+
     let registry = state.engine.project_registry();
-    let entry = match registry.get_or_load(project_id).await {
-        Ok(entry) => entry,
+    let registry_ref = &**registry;
+    let (mut profile, _) = match registry_ref.get_profile(project_id).await {
+        Ok(loaded) => loaded,
         Err(e) => {
             let (code, message) = match &e {
                 RegistryError::ProjectNotFound(id) => (
@@ -543,126 +625,40 @@ pub async fn handle_update_project_llm_config(
             return ApiResult::Error(ErrorResponse::new(code, message));
         }
     };
-    let mut config = entry.config.clone();
-
-    if let Some(ref default_chat) = payload.default_chat {
-        if !config.llm.chat_models.contains_key(default_chat) {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_INPUT,
-                format!("Unknown chat model '{default_chat}'"),
-            ));
-        }
+    let mut llm = profile.llm.take().unwrap_or_default();
+    if payload.default_chat.is_some() {
+        llm.chat_model = payload.default_chat.clone();
     }
-    if let Some(ref default_rerank) = payload.default_rerank {
-        if !config.llm.rerank_models.contains_key(default_rerank) {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_INPUT,
-                format!("Unknown rerank model '{default_rerank}'"),
-            ));
-        }
-    }
-    if let Some(max_candidates) = payload.rerank_max_candidates {
-        if !(1..=1000).contains(&max_candidates) {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_INPUT,
-                "rerank_max_candidates must be within 1..=1000".to_string(),
-            ));
-        }
-    }
-    if let Some(ref params) = payload.chat_model_params {
-        for (key, patch) in params {
-            let model = match config.llm.chat_models.get(key) {
-                Some(model) => model,
-                None => {
-                    return ApiResult::Error(ErrorResponse::new(
-                        error_codes::INVALID_INPUT,
-                        format!("Unknown chat model '{key}'"),
-                    ));
-                }
-            };
-            let temperature = patch.temperature.unwrap_or(model.temperature);
-            let max_tokens = patch.max_tokens.unwrap_or(model.max_tokens);
-            let top_p = patch.top_p.unwrap_or(model.top_p);
-            let max_input_tokens = patch.max_input_tokens.unwrap_or(model.max_input_tokens);
-            if !(0.0..=2.0).contains(&temperature) {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_INPUT,
-                    format!("chat model '{key}' temperature must be within 0.0..=2.0"),
-                ));
-            }
-            if !(1..=128000).contains(&max_tokens) {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_INPUT,
-                    format!("chat model '{key}' max_tokens must be within 1..=128000"),
-                ));
-            }
-            if !(0.0..=1.0).contains(&top_p) {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_INPUT,
-                    format!("chat model '{key}' top_p must be within 0.0..=1.0"),
-                ));
-            }
-            if !(1..=1000000).contains(&max_input_tokens) {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_INPUT,
-                    format!("chat model '{key}' max_input_tokens must be within 1..=1000000"),
-                ));
-            }
-        }
-    }
-
-    if let Some(default_chat) = payload.default_chat {
-        config.llm.defaults.chat = Some(default_chat);
-    }
-    if let Some(default_rerank) = payload.default_rerank {
-        config.llm.defaults.rerank = Some(default_rerank);
+    if payload.default_rerank.is_some() {
+        llm.rerank_model = payload.default_rerank.clone();
     }
     if let Some(enabled) = payload.rerank_enabled {
-        config.rerank.enabled = enabled;
+        llm.enable_rerank = Some(enabled);
     }
     if let Some(max_candidates) = payload.rerank_max_candidates {
-        config.rerank.max_candidates = max_candidates;
+        llm.rerank_max_candidates = Some(max_candidates);
     }
-    if let Some(params) = payload.chat_model_params {
-        for (key, patch) in params {
-            if let Some(model) = config.llm.chat_models.get_mut(&key) {
-                if let Some(temperature) = patch.temperature {
-                    model.temperature = temperature;
+    profile.llm = Some(llm);
+
+    let version = match registry_ref.update_profile(project_id, profile).await {
+        Ok(version) => version,
+        Err(e) => {
+            let (code, message) = match &e {
+                RegistryError::ProjectNotFound(id) => (
+                    error_codes::ENTITY_NOT_FOUND,
+                    format!("Project {} not found", id),
+                ),
+                RegistryError::Validation(msg) | RegistryError::Configuration(msg) => {
+                    (error_codes::INVALID_INPUT, msg.clone())
                 }
-                if let Some(max_tokens) = patch.max_tokens {
-                    model.max_tokens = max_tokens;
-                }
-                if let Some(top_p) = patch.top_p {
-                    model.top_p = top_p;
-                }
-                if let Some(max_input_tokens) = patch.max_input_tokens {
-                    model.max_input_tokens = max_input_tokens;
-                }
-            }
+                other => (
+                    error_codes::STORAGE_ERROR,
+                    format!("Failed to update project LLM config: {}", other),
+                ),
+            };
+            return ApiResult::Error(ErrorResponse::new(code, message));
         }
-    }
-
-    if let Err(e) = config.validate_structured() {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_INPUT,
-            format!("Configuration validation failed: {}", e),
-        ));
-    }
-
-    let registry_ref = &**registry;
-    if let Err(e) = registry_ref.update_config(project_id, config).await {
-        let (code, message) = match &e {
-            RegistryError::ProjectNotFound(id) => (
-                error_codes::ENTITY_NOT_FOUND,
-                format!("Project {} not found", id),
-            ),
-            other => (
-                error_codes::STORAGE_ERROR,
-                format!("Failed to update project LLM config: {}", other),
-            ),
-        };
-        return ApiResult::Error(ErrorResponse::new(code, message));
-    }
+    };
 
     state
         .engine
@@ -692,23 +688,16 @@ pub async fn handle_update_project_llm_config(
         }
     }
 
-    let version = registry_ref
-        .get_or_load(project_id)
-        .await
-        .map(|entry| entry.version)
-        .unwrap_or(0);
-
     ApiResult::Success(ProjectLlmUpdateResponse {
         success: true,
         project_id,
         config_version: version,
         hot_reload_applied,
-        ephemeral: true,
+        ephemeral: false,
         message: if hot_reload_applied {
-            "Project LLM config updated in memory; reload from file or restart discards it"
-                .to_string()
+            "Project LLM profile persisted and hot reload triggered successfully".to_string()
         } else {
-            "Project LLM config updated in memory; hot reload skipped and restart may be needed for some components".to_string()
+            "Project LLM profile persisted, but hot reload failed. Manual restart may be required for some components".to_string()
         },
     })
 }

@@ -20,20 +20,17 @@ impl ProjectRepository {
             .config_file_path
             .as_deref()
             .unwrap_or(".cce/config.json");
+        let profile_json = project.profile_json.as_deref().unwrap_or("{}");
 
         tx.execute(
-            "INSERT INTO projects (name, root_path, config_file_path, language, extensions, exclude_dirs, respect_gitignore, ignore_patterns, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO projects (name, root_path, config_file_path, language, profile_json, profile_version, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6)",
             params![
                 project.name,
                 project.root_path,
                 config_file_path,
                 project.language,
-                project.extensions,
-                project.exclude_dirs,
-                project.respect_gitignore.map(|b| if b { 1 } else { 0 }),
-                project.ignore_patterns,
-                now,
+                profile_json,
                 now,
             ],
         )
@@ -66,7 +63,7 @@ impl ProjectRepository {
     pub fn get_by_id(conn: &Connection, id: i64) -> Result<Option<ProjectRecord>, StorageError> {
         execute_query_optional(
             conn,
-            "SELECT id, name, root_path, config_file_path, language, extensions, exclude_dirs, respect_gitignore, ignore_patterns, last_indexed, created_at, updated_at
+            "SELECT id, name, root_path, config_file_path, language, profile_json, profile_version, last_indexed, created_at, updated_at
              FROM projects WHERE id = ?1",
             params![id],
             Self::from_row,
@@ -77,7 +74,7 @@ impl ProjectRepository {
     pub fn get_all(conn: &Connection) -> Result<Vec<ProjectRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, root_path, config_file_path, language, extensions, exclude_dirs, respect_gitignore, ignore_patterns, last_indexed, created_at, updated_at
+            "SELECT id, name, root_path, config_file_path, language, profile_json, profile_version, last_indexed, created_at, updated_at
              FROM projects ORDER BY created_at DESC",
             params![],
             Self::from_row,
@@ -88,7 +85,7 @@ impl ProjectRepository {
     pub fn get_by_name(conn: &Connection, name: &str) -> Result<Vec<ProjectRecord>, StorageError> {
         execute_query(
             conn,
-            "SELECT id, name, root_path, config_file_path, language, extensions, exclude_dirs, respect_gitignore, ignore_patterns, last_indexed, created_at, updated_at
+            "SELECT id, name, root_path, config_file_path, language, profile_json, profile_version, last_indexed, created_at, updated_at
              FROM projects WHERE name = ?1",
             params![name],
             Self::from_row,
@@ -130,7 +127,7 @@ impl ProjectRepository {
     ) -> Result<Option<ProjectRecord>, StorageError> {
         execute_query_optional(
             conn,
-            "SELECT id, name, root_path, config_file_path, language, extensions, exclude_dirs, respect_gitignore, ignore_patterns, last_indexed, created_at, updated_at
+            "SELECT id, name, root_path, config_file_path, language, profile_json, profile_version, last_indexed, created_at, updated_at
              FROM projects WHERE root_path = ?1",
             params![root_path],
             Self::from_row,
@@ -179,21 +176,10 @@ impl ProjectRepository {
             sets.push("language = ?");
             params_vec.push(Box::new(language.clone()));
         }
-        if let Some(ref extensions) = updates.extensions {
-            sets.push("extensions = ?");
-            params_vec.push(Box::new(extensions.clone()));
-        }
-        if let Some(ref exclude_dirs) = updates.exclude_dirs {
-            sets.push("exclude_dirs = ?");
-            params_vec.push(Box::new(exclude_dirs.clone()));
-        }
-        if let Some(ref respect_gitignore) = updates.respect_gitignore {
-            sets.push("respect_gitignore = ?");
-            params_vec.push(Box::new(if *respect_gitignore { 1i32 } else { 0i32 }));
-        }
-        if let Some(ref ignore_patterns) = updates.ignore_patterns {
-            sets.push("ignore_patterns = ?");
-            params_vec.push(Box::new(ignore_patterns.clone()));
+        if let Some(ref profile_json) = updates.profile_json {
+            sets.push("profile_json = ?");
+            params_vec.push(Box::new(profile_json.clone()));
+            sets.push("profile_version = profile_version + 1");
         }
         if let Some(ref last_indexed) = updates.last_indexed {
             sets.push("last_indexed = ?");
@@ -228,13 +214,13 @@ impl ProjectRepository {
             root_path: row.get(2)?,
             config_file_path: row.get(3)?,
             language: row.get(4)?,
-            extensions: row.get(5)?,
-            exclude_dirs: row.get(6)?,
-            respect_gitignore: row.get::<_, Option<i32>>(7)?.map(|v| v != 0),
-            ignore_patterns: row.get(8)?,
-            last_indexed: row.get(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
+            profile_json: row
+                .get::<_, Option<String>>(5)?
+                .unwrap_or_else(|| "{}".to_string()),
+            profile_version: row.get::<_, Option<i64>>(6)?.unwrap_or(0),
+            last_indexed: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     }
 

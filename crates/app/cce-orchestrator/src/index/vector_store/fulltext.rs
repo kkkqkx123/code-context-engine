@@ -96,7 +96,7 @@ impl FulltextStore {
                 Ok(Self::Local(Arc::new(client)))
             }
             cce_config::modules::FulltextBackend::Remote => Err(StorageError::validation(
-                "remote fulltext backend is not supported yet: the supported matrix is local-only; remote branches are forward scaffolding",
+                "remote fulltext backend is not wired yet: supported matrices are local/local/local and qdrant/local/local; set fulltext_backend = \"local\"",
             )),
         }
     }
@@ -471,7 +471,7 @@ mod tests {
         let err = FulltextStore::from_database_config(&database)
             .expect_err("remote branch must fail at startup");
         assert!(
-            err.to_string().contains("not supported yet"),
+            err.to_string().contains("not wired yet"),
             "unexpected error: {err}"
         );
     }

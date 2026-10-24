@@ -104,21 +104,16 @@ pub async fn handle_create_project(
         _ => generate_project_name(&root_path_str),
     };
 
-    // Create new project record with all fields
+    // Create new project record. The profile document is the single source
+    // of truth for scan configuration; legacy list columns are left untouched.
     let mut new_project = NewProjectRecord::new(name.clone(), root_path_str.clone());
-    if !request.extensions.is_empty() {
-        new_project.extensions =
-            Some(serde_json::to_string(&request.extensions).unwrap_or_default());
-    }
-    if !request.exclude_dirs.is_empty() {
-        new_project.exclude_dirs =
-            Some(serde_json::to_string(&request.exclude_dirs).unwrap_or_default());
-    }
-    new_project.respect_gitignore = Some(request.respect_gitignore);
-    if !request.ignore_patterns.is_empty() {
-        new_project.ignore_patterns =
-            Some(serde_json::to_string(&request.ignore_patterns).unwrap_or_default());
-    }
+    let initial_profile = cce_config::ProjectAppConfig::from_scan_lists(
+        (!request.extensions.is_empty()).then(|| request.extensions.clone()),
+        (!request.exclude_dirs.is_empty()).then(|| request.exclude_dirs.clone()),
+        Some(request.respect_gitignore),
+        (!request.ignore_patterns.is_empty()).then(|| request.ignore_patterns.clone()),
+    );
+    new_project.profile_json = Some(initial_profile.to_canonical_json());
 
     // Insert into database
     let client = metadata_store.as_ref();
@@ -245,24 +240,70 @@ pub async fn handle_update_project(
         }
     };
 
-    // Build update record with all provided fields
+    // Build update record. Scan-list changes patch the stored profile
+    // document so the profile stays the single source of truth.
     let mut updates = ProjectUpdateRecord::default();
     if let Some(name) = request.name {
         updates = updates.with_name(name);
     }
-    if let Some(extensions) = request.extensions {
-        updates = updates.with_extensions(serde_json::to_string(&extensions).unwrap_or_default());
-    }
-    if let Some(exclude_dirs) = request.exclude_dirs {
-        updates =
-            updates.with_exclude_dirs(serde_json::to_string(&exclude_dirs).unwrap_or_default());
-    }
-    if let Some(respect_gitignore) = request.respect_gitignore {
-        updates = updates.with_respect_gitignore(respect_gitignore);
-    }
-    if let Some(ignore_patterns) = request.ignore_patterns {
-        updates = updates
-            .with_ignore_patterns(serde_json::to_string(&ignore_patterns).unwrap_or_default());
+    if request.extensions.is_some()
+        || request.exclude_dirs.is_some()
+        || request.respect_gitignore.is_some()
+        || request.ignore_patterns.is_some()
+    {
+        let client_for_profile = metadata_store.as_ref();
+        let patched = client_for_profile.with_transaction(|tx| {
+            let record = ProjectRepository::get_by_id(tx, id)?.ok_or_else(|| {
+                cce_types::StorageError::not_found(format!("Project {id} not found"))
+            })?;
+            let mut profile = cce_config::ProjectAppConfig::from_json_str(&record.profile_json)
+                .map_err(|e| {
+                    cce_types::StorageError::query(format!("Corrupt project profile: {e}"))
+                })?;
+            if let Some(extensions) = request.extensions.clone() {
+                let mut orchestrator = profile.orchestrator.take().unwrap_or_default();
+                let mut indexer = orchestrator.indexer.take().unwrap_or_default();
+                indexer.extensions = Some(extensions);
+                orchestrator.indexer = Some(indexer);
+                profile.orchestrator = Some(orchestrator);
+            }
+            if let Some(exclude_dirs) = request.exclude_dirs.clone() {
+                let mut orchestrator = profile.orchestrator.take().unwrap_or_default();
+                let mut indexer = orchestrator.indexer.take().unwrap_or_default();
+                indexer.exclude_dirs = Some(exclude_dirs);
+                orchestrator.indexer = Some(indexer);
+                profile.orchestrator = Some(orchestrator);
+            }
+            if request.respect_gitignore.is_some() || request.ignore_patterns.is_some() {
+                let mut scanner = profile.scanner.take().unwrap_or_default();
+                if let Some(respect) = request.respect_gitignore {
+                    scanner.respect_gitignore = Some(respect);
+                }
+                if let Some(patterns) = request.ignore_patterns.clone() {
+                    scanner.gitignore_patterns = Some(patterns);
+                }
+                profile.scanner = Some(scanner);
+            }
+            Ok::<String, cce_types::StorageError>(profile.to_canonical_json())
+        });
+        match patched {
+            Ok(canonical) => {
+                updates = updates.with_profile_json(canonical);
+            }
+            Err(error) => {
+                let message = error.to_string();
+                if message.contains("not found") {
+                    return ApiResult::Error(ErrorResponse::new(
+                        error_codes::ENTITY_NOT_FOUND,
+                        "Project does not exist",
+                    ));
+                }
+                return ApiResult::Error(ErrorResponse::new(
+                    error_codes::STORAGE_ERROR,
+                    format!("Failed to patch project profile: {}", message),
+                ));
+            }
+        }
     }
     // Note: root_path is not allowed to be updated
     // If needed, add root_path field to UpdateProjectRequest
@@ -275,6 +316,12 @@ pub async fn handle_update_project(
             format!("Failed to update project: {}", e),
         ));
     }
+    let _ = state.engine.clear_project_component_caches(id).await;
+    let _ = state
+        .engine
+        .project_registry()
+        .invalidate_cache(Some(id))
+        .await;
     if let Some(supply_mode) = request.supply_mode.as_deref() {
         let normalized = supply_mode.trim().to_lowercase();
         if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
@@ -398,27 +445,53 @@ pub async fn handle_delete_project(
 
 /// Convert ProjectRecord to ProjectConfig
 ///
-/// The list columns are optional JSON arrays written by this module; a column
-/// that is absent or unreadable is treated as an empty list.
+/// This is a display and request-prefill view only. The profile document is
+/// the single source of truth for scan lists. A section absent from the
+/// profile is reported as empty so callers can tell that no explicit value
+/// was registered. Effective indexing values always come from the merged
+/// registry configuration, not from this view.
 pub(crate) fn record_to_config(
     record: &cce_storage_metadb_sqlite::ProjectRecord,
 ) -> cce_api::models::ProjectConfig {
     use cce_api::models::ProjectConfig;
 
-    let parse_json_list = |val: &Option<String>| -> Vec<String> {
-        val.as_ref().map_or_else(Vec::new, |v| {
-            serde_json::from_str(v).unwrap_or_else(|_| Vec::new())
-        })
+    let profile = cce_config::ProjectAppConfig::from_json_str(&record.profile_json).ok();
+    let (extensions, exclude_dirs, respect_gitignore, ignore_patterns) = match profile {
+        Some(profile) => (
+            profile
+                .orchestrator
+                .as_ref()
+                .and_then(|orchestrator| orchestrator.indexer.as_ref())
+                .and_then(|indexer| indexer.extensions.clone())
+                .unwrap_or_default(),
+            profile
+                .orchestrator
+                .as_ref()
+                .and_then(|orchestrator| orchestrator.indexer.as_ref())
+                .and_then(|indexer| indexer.exclude_dirs.clone())
+                .unwrap_or_default(),
+            profile
+                .scanner
+                .as_ref()
+                .and_then(|scanner| scanner.respect_gitignore)
+                .unwrap_or(true),
+            profile
+                .scanner
+                .as_ref()
+                .and_then(|scanner| scanner.gitignore_patterns.clone())
+                .unwrap_or_default(),
+        ),
+        None => (Vec::new(), Vec::new(), true, Vec::new()),
     };
 
     ProjectConfig {
         id: record.id.to_string(),
         name: record.name.clone(),
         root_path: record.root_path.clone(),
-        extensions: parse_json_list(&record.extensions),
-        exclude_dirs: parse_json_list(&record.exclude_dirs),
-        respect_gitignore: record.respect_gitignore.unwrap_or(true),
-        ignore_patterns: parse_json_list(&record.ignore_patterns),
+        extensions,
+        exclude_dirs,
+        respect_gitignore,
+        ignore_patterns,
         created_at: record.created_at.to_string(),
         last_indexed: record.last_indexed.clone(),
     }

@@ -309,12 +309,12 @@ impl super::CodeContextEngine {
         // Override with project-specific settings if configured
         let project_config = &project_entry.config;
 
-        // Apply project orchestrator config
-        let orchestrator_config = &project_config.orchestrator;
-
         // Apply project indexer config
-        let indexer_config = &orchestrator_config.indexer;
-        if !indexer_config.extensions.is_empty() {
+        let indexer_config = &project_config.orchestrator.indexer;
+        // The merged effective configuration decides the file universe.
+        // Non-empty caller values are explicit request overrides and win;
+        // empty values fall back to the effective configuration.
+        if options.extensions.is_empty() {
             options.extensions = indexer_config.extensions.clone();
             tracing::debug!(
                 project_id,
@@ -322,7 +322,7 @@ impl super::CodeContextEngine {
                 "Applied project-specific file extensions"
             );
         }
-        if !indexer_config.exclude_dirs.is_empty() {
+        if options.exclude_dirs.is_empty() {
             options.exclude_dirs = indexer_config.exclude_dirs.clone();
             tracing::debug!(
                 project_id,
@@ -336,6 +336,10 @@ impl super::CodeContextEngine {
         options.embed_summaries = indexer_config.embed_summaries;
         options.build_relations =
             indexer_config.build_relations && project_config.relation.index.enabled;
+        // Scanner behavior always follows the effective configuration.
+        options.respect_gitignore = project_config.scanner.respect_gitignore;
+        options.additional_ignore_patterns = project_config.scanner.gitignore_patterns.clone();
+        options.parallelism = project_config.scanner.parallelism;
 
         // Get project-specific orchestrator (with project batch config)
         let orchestrator = self.get_orchestrator(project_id).await?;

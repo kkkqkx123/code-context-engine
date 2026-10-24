@@ -131,13 +131,13 @@ impl FromRow for ProjectRecord {
             root_path: row.get(2)?,
             config_file_path: row.get(3)?,
             language: row.get(4)?,
-            extensions: row.get(5)?,
-            exclude_dirs: row.get(6)?,
-            respect_gitignore: row.get::<_, Option<i32>>(7)?.map(|v| v != 0),
-            ignore_patterns: row.get(8)?,
-            last_indexed: row.get(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
+            profile_json: row
+                .get::<_, Option<String>>(5)?
+                .unwrap_or_else(|| "{}".to_string()),
+            profile_version: row.get::<_, Option<i64>>(6)?.unwrap_or(0),
+            last_indexed: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     }
 }

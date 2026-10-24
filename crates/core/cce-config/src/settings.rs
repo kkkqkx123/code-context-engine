@@ -1,15 +1,23 @@
 //! Application settings
 //!
 //! This module provides global configuration access through a singleton pattern.
-//! It also supports project-specific configuration that can override global settings.
 //!
 //! # Thread Safety
 //!
 //! Uses `std::sync::RwLock` for thread-safe read/write access to configuration.
 //! Multiple readers can access simultaneously, but writers have exclusive access.
+//!
+//! # Responsibility boundary
+//!
+//! The server owns only the global configuration. Project-level effective
+//! configuration is resolved per request from the project registry, which
+//! combines the global configuration with the project record stored in the
+//! metadata database. The server never reads project configuration files.
 
-use std::collections::HashMap;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{
+    OnceLock, RwLock,
+    atomic::{AtomicU64, Ordering},
+};
 
 use super::global::AppConfig;
 use super::loader::ConfigLoader;
@@ -18,8 +26,13 @@ use cce_types::error::ConfigError;
 /// Global configuration singleton
 static GLOBAL_CONFIG: OnceLock<RwLock<AppConfig>> = OnceLock::new();
 
-/// Project-specific configurations
-static PROJECT_CONFIGS: OnceLock<RwLock<HashMap<String, AppConfig>>> = OnceLock::new();
+/// Monotonic global configuration version.
+///
+/// Bumped every time the global configuration is (re)initialized or mutated
+/// at runtime. The project registry snapshots this version with each cached
+/// entry so a global change invalidates cached effective configurations even
+/// when the project profile itself is untouched.
+static GLOBAL_CONFIG_VERSION: AtomicU64 = AtomicU64::new(0);
 
 /// Application settings manager
 pub struct Settings;
@@ -34,6 +47,7 @@ impl Settings {
             return Err(ConfigError::AlreadyInitialized);
         }
         let _ = GLOBAL_CONFIG.set(RwLock::new(config));
+        GLOBAL_CONFIG_VERSION.store(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -68,55 +82,35 @@ impl Settings {
     /// Loads the file at the resolved path and falls back to defaults when
     /// the file cannot be read. When global configuration is already present
     /// the existing value is returned so repeated entry calls stay harmless.
+    /// Without an explicit path or `CCE_CONFIG`, every default candidate
+    /// from the loader is probed in order.
     pub fn init_with_fallback(explicit: Option<&str>) -> AppConfig {
         if let Ok(config) = Self::global() {
             return config;
         }
-        let path = Self::resolve_config_path(explicit);
-        match Self::init_from_file(Some(std::path::Path::new(&path))) {
-            Ok(()) => Self::global().unwrap_or_default(),
-            Err(_) => {
-                eprintln!("Failed to load config from {path}; using defaults");
-                let default_config = AppConfig::default();
-                let _ = Self::init(default_config.clone());
-                Self::global().unwrap_or(default_config)
+        if let Some(path) = explicit
+            .map(str::to_string)
+            .or_else(|| std::env::var("CCE_CONFIG").ok())
+        {
+            match Self::init_from_file(Some(std::path::Path::new(&path))) {
+                Ok(()) => return Self::global().unwrap_or_default(),
+                Err(_) => {
+                    eprintln!("Failed to load config from {path}; using defaults");
+                    let default_config = AppConfig::default();
+                    let _ = Self::init(default_config.clone());
+                    return Self::global().unwrap_or(default_config);
+                }
             }
         }
-    }
-
-    /// Initialize configuration for a specific project
-    ///
-    /// This loads global configuration and merges it with project-specific
-    /// configuration. The result is cached for subsequent access.
-    ///
-    /// # Arguments
-    ///
-    /// * `project_id` - Unique identifier for the project
-    /// * `project_root` - Path to the project root directory
-    pub fn init_for_project(
-        project_id: &str,
-        project_root: &std::path::Path,
-    ) -> Result<(), ConfigError> {
-        let config = ConfigLoader::new().load_for_project(project_root)?;
-
-        // Initialize global config if not already done
-        if !Self::is_initialized() {
-            // Use the merged config as global for now
-            // (in production, global should be loaded separately)
-            Self::init(config.clone())?;
+        for candidate in ConfigLoader::default_config_candidates() {
+            if candidate.exists() && Self::init_from_file(Some(candidate.as_path())).is_ok() {
+                return Self::global().unwrap_or_default();
+            }
         }
-
-        // Store project-specific config
-        let configs = PROJECT_CONFIGS.get_or_init(|| RwLock::new(HashMap::new()));
-        let mut configs_write = configs.write().map_err(|e| {
-            ConfigError::Other(format!(
-                "Failed to acquire write lock for project configs: {}",
-                e
-            ))
-        })?;
-        configs_write.insert(project_id.to_string(), config);
-
-        Ok(())
+        eprintln!("No config file found in default locations; using defaults");
+        let default_config = AppConfig::default();
+        let _ = Self::init(default_config.clone());
+        Self::global().unwrap_or(default_config)
     }
 
     /// Get global configuration
@@ -134,28 +128,6 @@ impl Settings {
             ))
         })?;
         Ok(config.clone())
-    }
-
-    /// Get configuration for a specific project
-    ///
-    /// Returns project-specific configuration if available, otherwise global config.
-    /// Returns an error if neither project nor global configuration is initialized.
-    pub fn for_project(project_id: &str) -> Result<AppConfig, ConfigError> {
-        // Try to get project-specific config first
-        if let Some(configs_lock) = PROJECT_CONFIGS.get() {
-            let configs = configs_lock.read().map_err(|e| {
-                ConfigError::Other(format!(
-                    "Failed to acquire read lock for project configs: {}",
-                    e
-                ))
-            })?;
-            if let Some(config) = configs.get(project_id) {
-                return Ok(config.clone());
-            }
-        }
-
-        // Fall back to global config
-        Self::global()
     }
 
     /// Check if configuration is initialized
@@ -184,6 +156,23 @@ impl Settings {
         Ok(Self::global()?.logger)
     }
 
+    /// Current global configuration version.
+    ///
+    /// Starts at 1 once initialized and advances on every runtime mutation.
+    /// Returns 0 when the global configuration is not initialized yet.
+    pub fn global_version() -> u64 {
+        GLOBAL_CONFIG_VERSION.load(Ordering::SeqCst)
+    }
+
+    /// Combine a profile version with a global version.
+    ///
+    /// The high bits carry the global version and the low 32 bits the
+    /// profile version, so a change on either side advances the combined
+    /// version while both components stay recoverable.
+    pub fn combine_versions(profile_version: u64, global_version: u64) -> u64 {
+        (global_version << 32) | (profile_version & 0xFFFF_FFFF)
+    }
+
     /// Update logging configuration at runtime.
     pub fn set_logger(config: super::global::LoggingConfig) -> Result<(), ConfigError> {
         let lock = GLOBAL_CONFIG
@@ -193,6 +182,7 @@ impl Settings {
             .write()
             .map_err(|e| ConfigError::Other(format!("Failed to acquire write lock: {}", e)))?;
         guard.logger = config;
+        GLOBAL_CONFIG_VERSION.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 

@@ -224,10 +224,12 @@ fn test_merge_with_project_checkpoint_ttl() {
 
 #[test]
 fn test_merge_with_project_scanner() {
+    use crate::project::ProjectScannerPatch;
+
     let global = AppConfig::default();
     let project = ProjectAppConfig {
-        scanner: Some(ScannerConfig {
-            respect_gitignore: false,
+        scanner: Some(ProjectScannerPatch {
+            respect_gitignore: Some(false),
             ..Default::default()
         }),
         ..Default::default()
@@ -258,9 +260,7 @@ fn test_merge_with_project_preserves_sensitive() {
     global.llm.providers = providers;
 
     let project = ProjectAppConfig {
-        scanner: Some(ScannerConfig {
-            ..Default::default()
-        }),
+        scanner: Some(crate::project::ProjectScannerPatch::default()),
         ..Default::default()
     };
 

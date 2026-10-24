@@ -17,8 +17,7 @@ pub use global::{
 };
 pub use loader::ConfigLoader;
 pub use project::{
-    ProjectAppConfig, ProjectConfigPaths, ProjectEmbedderConfig, ProjectLlmConfig,
-    ProjectOrchestratorConfig,
+    ProjectAppConfig, ProjectEmbedderConfig, ProjectLlmConfig, ProjectOrchestratorConfig,
 };
 pub use settings::Settings;
 pub use validation::{
