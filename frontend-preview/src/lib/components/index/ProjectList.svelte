@@ -212,7 +212,7 @@
 					<div class="project-info">
 						<div class="project-header">
 							<h4>{project.name}</h4>
-							<Badge variant="active">Active</Badge>
+							<Badge variant="success">Active</Badge>
 						</div>
 						<p class="project-path">{project.root_path}</p>
 						{#if project.extensions && project.extensions.length > 0}

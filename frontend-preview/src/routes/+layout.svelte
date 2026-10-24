@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import ToastContainer from '$lib/components/ui/ToastContainer.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import ProjectSelector from '$lib/components/ui/ProjectSelector.svelte';
 	import { isOnline } from '$lib/stores/network';
 	import { healthActions } from '$lib/stores/health';
@@ -26,7 +27,11 @@
 		| '/ops/retry-queue'
 		| '/metrics'
 		| '/tools'
-		| '/config';
+		| '/config'
+		| '/logs/realtime'
+		| '/logs/search'
+		| '/logs/files'
+		| '/logs/config';
 
 	interface NavItem {
 		href: NavHref;
@@ -54,6 +59,15 @@
 				{ href: '/entities', label: 'Entities' },
 				{ href: '/graph', label: 'Graph' },
 				{ href: '/summary', label: 'Summary' },
+			],
+		},
+		{
+			title: 'Logs',
+			items: [
+				{ href: '/logs/realtime', label: 'Realtime' },
+				{ href: '/logs/search', label: 'Search' },
+				{ href: '/logs/files', label: 'Files' },
+				{ href: '/logs/config', label: 'Config' },
 			],
 		},
 		{
@@ -194,7 +208,7 @@
 		<div class="sidebar-footer">
 			<span class="version">v0.1.0</span>
 			{#if !isOnline}
-				<span class="offline">⚠ Offline</span>
+				<span class="offline"><Icon name="warning" /> Offline</span>
 			{/if}
 		</div>
 	</aside>

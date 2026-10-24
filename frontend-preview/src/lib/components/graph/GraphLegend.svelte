@@ -61,7 +61,7 @@
 		font-size: 0.6rem;
 		text-transform: uppercase;
 		letter-spacing: 0.1em;
-		color: var(--gray-400);
+		color: var(--gray-500);
 	}
 
 	/* Mirrors the Cytoscape silhouettes closely enough to read as the same

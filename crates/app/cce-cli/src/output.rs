@@ -5,20 +5,21 @@ use comfy_table::{presets::UTF8_FULL, Cell, Table};
 use serde::Serialize;
 
 use crate::cli::OutputFormat;
+use crate::icons;
 
 /// Print success message
 pub fn print_success(message: &str) {
-    println!("{} {}", "✓".green(), message);
+    println!("{} {}", icons::SUCCESS.green(), message);
 }
 
 /// Print error message
 pub fn print_error(message: &str) {
-    eprintln!("{} {}", "✗".red(), message);
+    eprintln!("{} {}", icons::ERROR.red(), message);
 }
 
 /// Print warning message
 pub fn print_warning(message: &str) {
-    println!("{} {}", "⚠".yellow(), message);
+    println!("{} {}", icons::WARNING.yellow(), message);
 }
 
 /// Print a table with headers and rows

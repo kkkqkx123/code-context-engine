@@ -9,6 +9,7 @@
 	 */
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import { onMount } from 'svelte';
 	import ConfigTokenCard from '$lib/components/config/ConfigTokenCard.svelte';
 	import ConfigGlobalCard from '$lib/components/config/ConfigGlobalCard.svelte';
@@ -274,7 +275,7 @@
 		{#if error}
 			<ErrorBanner>
 				<span>{error}</span>
-				<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
+				<button class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
 			</ErrorBanner>
 		{/if}
 

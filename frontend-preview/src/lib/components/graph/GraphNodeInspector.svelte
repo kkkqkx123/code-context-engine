@@ -364,13 +364,13 @@
 		font-size: 0.6rem;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
-		color: var(--gray-400);
+		color: var(--gray-500);
 	}
 
 	.relation-guard {
 		margin: 0.15rem 0 0;
 		font-size: 0.6rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		word-break: break-all;
 	}
 
@@ -383,14 +383,14 @@
 
 	.kind-note {
 		display: block;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		font-size: 0.7rem;
 	}
 
 	.relation-empty,
 	.inspector-empty {
 		font-size: 0.78rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		font-style: italic;
 	}
 
@@ -442,7 +442,7 @@
 
 	.structural-hint {
 		font-size: 0.7rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		margin: 0 0 0.5rem;
 	}
 
@@ -464,7 +464,7 @@
 
 	.panel-empty {
 		font-size: 0.78rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		font-style: italic;
 		margin: 0;
 	}

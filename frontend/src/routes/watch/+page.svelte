@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import type { Component } from 'svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -77,7 +78,7 @@
 				<button
 					class="dismiss-btn"
 					onclick={() => watchState.update((s) => ({ ...s, error: null }))}
-					>×</button
+					><Icon name="close" /></button
 				>
 			</ErrorBanner>
 		{/if}

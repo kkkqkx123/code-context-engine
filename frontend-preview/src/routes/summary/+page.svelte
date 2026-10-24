@@ -2,10 +2,12 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Input from '$lib/components/ui/Input.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import {
 		summaryApi,
 		type SummaryResponse,
@@ -96,7 +98,7 @@
 		{#if error}
 			<ErrorBanner>
 				<span>{error}</span>
-				<button class="dismiss-btn" onclick={() => (error = null)}>×</button>
+				<button class="dismiss-btn" onclick={() => (error = null)}><Icon name="close" /></button>
 			</ErrorBanner>
 		{/if}
 
@@ -254,10 +256,7 @@
 								</summary>
 								<div class="summary-body">
 									{#if !item.success && item.error}
-										<div class="error-message">
-											<strong>Error:</strong>
-											{item.error}
-										</div>
+										<InlineError message={`Error: ${item.error}`} />
 									{:else}
 										<p class="summary-text">{item.summary}</p>
 										<div class="summary-meta">
@@ -505,15 +504,6 @@
 	.summary-body {
 		padding: 1rem;
 		border-top: 1px solid var(--gray-200);
-	}
-
-	.summary-body .error-message {
-		padding: 0.75rem;
-		background: var(--danger-bg, #fff2f0);
-		border: 1px solid var(--danger, #ff4d4f);
-		font-family: 'Space Mono', monospace;
-		font-size: 0.8rem;
-		color: var(--danger-text, #cf1322);
 	}
 
 	.summary-text {

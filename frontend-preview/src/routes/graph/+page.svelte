@@ -25,14 +25,6 @@
 		type GraphLayoutName,
 	} from '$lib/components/graph/GraphCanvas.svelte';
 	import GraphToolbar from '$lib/components/graph/GraphToolbar.svelte';
-	import GraphFilterPanel from '$lib/components/graph/GraphFilterPanel.svelte';
-	import GraphSeedBar from '$lib/components/graph/GraphSeedBar.svelte';
-	import GraphCandidatePanel from '$lib/components/graph/GraphCandidatePanel.svelte';
-	import GraphNodeInspector from '$lib/components/graph/GraphNodeInspector.svelte';
-	import GraphCommunitiesPanel from '$lib/components/graph/GraphCommunitiesPanel.svelte';
-	import GraphCyclesPanel from '$lib/components/graph/GraphCyclesPanel.svelte';
-	import GraphModulePanel from '$lib/components/graph/GraphModulePanel.svelte';
-	import GraphLegend from '$lib/components/graph/GraphLegend.svelte';
 	import { graphState, graphActions, activeDomains } from '$lib/stores/graph';
 	import { StaleQuery } from '$lib/stores/stale-query.svelte';
 	import { onProjectChange } from '$lib/stores/project';
@@ -53,7 +45,83 @@
 	} from '$lib/utils/graph-viewport';
 
 	let cy = $state<Core | null>(null);
-	let layout: GraphLayoutName = $state('cose-bilkent');
+	let layout: GraphLayoutName = $state('cose');
+	let resultTab: 'communities' | 'cycles' | 'module' = $state('communities');
+
+	// Secondary panels load after the canvas mounts so the explorer's first
+	// paint is dominated by the renderer, not the surrounding forms.
+	type ComponentOf<T> = T extends { default: infer C } ? C : never;
+	type GraphSeedBarC = ComponentOf<typeof import('$lib/components/graph/GraphSeedBar.svelte')>;
+	type GraphFilterPanelC = ComponentOf<
+		typeof import('$lib/components/graph/GraphFilterPanel.svelte')
+	>;
+	type GraphLegendC = ComponentOf<typeof import('$lib/components/graph/GraphLegend.svelte')>;
+	type GraphCandidatePanelC = ComponentOf<
+		typeof import('$lib/components/graph/GraphCandidatePanel.svelte')
+	>;
+	type GraphNodeInspectorC = ComponentOf<
+		typeof import('$lib/components/graph/GraphNodeInspector.svelte')
+	>;
+	type GraphCommunitiesPanelC = ComponentOf<
+		typeof import('$lib/components/graph/GraphCommunitiesPanel.svelte')
+	>;
+	type GraphCyclesPanelC = ComponentOf<
+		typeof import('$lib/components/graph/GraphCyclesPanel.svelte')
+	>;
+	type GraphModulePanelC = ComponentOf<
+		typeof import('$lib/components/graph/GraphModulePanel.svelte')
+	>;
+
+	let GraphSeedBar: GraphSeedBarC | null = $state(null);
+	let GraphFilterPanel: GraphFilterPanelC | null = $state(null);
+	let GraphLegend: GraphLegendC | null = $state(null);
+	let GraphCandidatePanel: GraphCandidatePanelC | null = $state(null);
+	let GraphNodeInspector: GraphNodeInspectorC | null = $state(null);
+	let GraphCommunitiesPanel: GraphCommunitiesPanelC | null = $state(null);
+	let GraphCyclesPanel: GraphCyclesPanelC | null = $state(null);
+	let GraphModulePanel: GraphModulePanelC | null = $state(null);
+	let activePanelsLoaded = $state(false);
+
+	/** Load the always-visible panels plus the default result tab. */
+	async function loadActivePanels() {
+		if (activePanelsLoaded) return;
+		activePanelsLoaded = true;
+		const [seed, filter, legend, inspector, communities, candidatePanel] =
+			await Promise.all([
+				import('$lib/components/graph/GraphSeedBar.svelte'),
+				import('$lib/components/graph/GraphFilterPanel.svelte'),
+				import('$lib/components/graph/GraphLegend.svelte'),
+				import('$lib/components/graph/GraphNodeInspector.svelte'),
+				import('$lib/components/graph/GraphCommunitiesPanel.svelte'),
+				import('$lib/components/graph/GraphCandidatePanel.svelte'),
+			]);
+		GraphSeedBar = seed.default;
+		GraphFilterPanel = filter.default;
+		GraphLegend = legend.default;
+		GraphNodeInspector = inspector.default;
+		GraphCommunitiesPanel = communities.default;
+		GraphCandidatePanel = candidatePanel.default;
+	}
+
+	/** Load a result-tab panel the first time its tab becomes active. */
+	async function loadResultTab(tab: 'communities' | 'cycles' | 'module') {
+		resultTab = tab;
+		if (tab === 'communities') {
+			if (!GraphCommunitiesPanel)
+				GraphCommunitiesPanel = (
+					await import('$lib/components/graph/GraphCommunitiesPanel.svelte')
+				).default;
+		} else if (tab === 'cycles') {
+			if (!GraphCyclesPanel)
+				GraphCyclesPanel = (
+					await import('$lib/components/graph/GraphCyclesPanel.svelte')
+				).default;
+		} else if (!GraphModulePanel) {
+			GraphModulePanel = (
+				await import('$lib/components/graph/GraphModulePanel.svelte')
+			).default;
+		}
+	}
 	let seedMode: 'focus' | 'overview' | 'path' | 'subgraph' = $state('focus');
 	let seedId = $state('');
 	let selectedId: string | null = $state(null);
@@ -89,6 +157,16 @@
 	let nodes = $derived(store.nodes);
 	let edges = $derived(store.edges);
 	let availableDomains = $derived([...activeDomains(edges)]);
+	let searchNeedle = $derived(store.filters.search.trim().toLowerCase());
+	let searchMatchCount = $derived(
+		searchNeedle.length >= 2
+			? nodes.filter((node) =>
+					String(node.label ?? '')
+						.toLowerCase()
+						.includes(searchNeedle),
+				).length
+			: 0,
+	);
 
 	let selectedNode = $derived(
 		nodes.find((node) => node.id === selectedId) ?? null,
@@ -106,32 +184,23 @@
 		if (queryEntity) {
 			seedMode = 'focus';
 			seedId = queryEntity;
-			await graphActions.loadEgo(
-				queryEntity,
-				egoDepth,
-				egoDirection,
-				undefined,
-				serverFilter(),
-			);
 			selectedId = queryEntity;
 		} else {
 			// Nothing seeded from the URL: show the whole project graph and keep
 			// the seed mode in sync so a project switch re-loads the same view.
 			seedMode = 'overview';
-			await graphActions.loadOverview(
-				clampOverviewLimit(overviewLimit),
-				undefined,
-				serverFilter(),
-			);
 		}
 		if (queryFile) {
 			impactFile = queryFile;
+		}
+		await runSeed();
+		if (queryFile) {
 			await graphActions.loadImpact(queryFile);
 		}
-		await graphActions.loadComponentsIfStale(undefined, serverFilter());
 	}
 
 	onMount(async () => {
+		void loadActivePanels();
 		await loadInitialGraph();
 		await watchActions.loadStatus();
 		watchActions.startVersionPoll();
@@ -191,7 +260,8 @@
 	let candidates: SymbolCandidate[] = $derived(store.error?.candidates ?? []);
 
 	// The backend advanced past the epoch this working set was built from.
-	// Banner only: reload stays explicit so in-progress expansion is never lost.
+	// Banner only: reload stays explicit so in-progress expansion is never lost;
+	// reloading rebuilds the current view from the seed and discards expansion.
 	let watchEpoch = $derived($watchState.status?.relation_epoch ?? null);
 	let isStale = $derived(
 		watchEpoch !== null &&
@@ -338,6 +408,24 @@
 	function relayout() {
 		cy?.layout(layoutOptions(layout)).run();
 	}
+
+	function focusSearchMatches() {
+		if (!cy) return;
+		const needle = searchNeedle;
+		if (needle.length < 2) return;
+		const matched = nodes.filter((node) =>
+			String(node.label ?? '')
+				.toLowerCase()
+				.includes(needle),
+		);
+		if (matched.length === 0) return;
+		const eles = cy.collection();
+		for (const node of matched) {
+			const el = cy.getElementById(node.id);
+			if (el.length > 0) eles.merge(el);
+		}
+		if (eles.length > 0) cy.fit(eles, 60);
+	}
 </script>
 
 <svelte:head>
@@ -351,32 +439,34 @@
 			subtitle="Explore calls, dependencies, structure and references as one graph"
 		/>
 
-		<GraphSeedBar
-			bind:seedMode
-			bind:seedId
-			bind:pathStart
-			bind:pathEnd
-			bind:pathDepth
-			bind:subgraphIds
-			bind:overviewLimit
-			bind:egoDepth
-			bind:egoDirection
-			bind:impactFile
-			bind:impactMode
-			bind:impactEntity
-			bind:impactScope
-			bind:impactDepth
-			bind:serverRelationTypes
-			bind:serverIncludeExternal
-			loading={store.loading}
-			{impactBusy}
-			moduleLoading={moduleQuery.loading}
-			showClear={Boolean(store.meta.impactFile)}
-			onRunSeed={runSeed}
-			onRunImpact={runImpact}
-			onRunModule={runModule}
-			onClearImpact={clearImpact}
-		/>
+		{#if GraphSeedBar}
+			<GraphSeedBar
+				bind:seedMode
+				bind:seedId
+				bind:pathStart
+				bind:pathEnd
+				bind:pathDepth
+				bind:subgraphIds
+				bind:overviewLimit
+				bind:egoDepth
+				bind:egoDirection
+				bind:impactFile
+				bind:impactMode
+				bind:impactEntity
+				bind:impactScope
+				bind:impactDepth
+				bind:serverRelationTypes
+				bind:serverIncludeExternal
+				loading={store.loading}
+				{impactBusy}
+				moduleLoading={moduleQuery.loading}
+				showClear={Boolean(store.meta.impactFile)}
+				onRunSeed={runSeed}
+				onRunImpact={runImpact}
+				onRunModule={runModule}
+				onClearImpact={clearImpact}
+			/>
+		{/if}
 
 		{#if impactMessage}
 			<div class="info-banner" aria-label="Impact result">
@@ -384,11 +474,63 @@
 			</div>
 		{/if}
 
+		{#if store.meta.impactDirect.length || store.meta.impactTransitive.length}
+			<div class="impact-dependents">
+				{#if store.meta.impactDirect.length}
+					<details open>
+						<summary
+							>Direct dependents ({store.meta.impactDirect.length})</summary
+						>
+						<ul class="impact-list">
+							{#each store.meta.impactDirect as id (id)}
+								<li>
+									<button
+										type="button"
+										class="impact-item-btn"
+										onclick={() => {
+											selectedId = id;
+											centerGraphOn(cy, id);
+										}}
+									>
+										{id}
+									</button>
+								</li>
+							{/each}
+						</ul>
+					</details>
+				{/if}
+				{#if store.meta.impactTransitive.length}
+					<details>
+						<summary
+							>Indirect dependents ({store.meta.impactTransitive
+								.length})</summary
+						>
+						<ul class="impact-list">
+							{#each store.meta.impactTransitive as id (id)}
+								<li>
+									<button
+										type="button"
+										class="impact-item-btn"
+										onclick={() => {
+											selectedId = id;
+											centerGraphOn(cy, id);
+										}}
+									>
+										{id}
+									</button>
+								</li>
+							{/each}
+						</ul>
+					</details>
+				{/if}
+			</div>
+		{/if}
+
 		{#if store.error}
 			<div class="error-banner">
 				<span>{store.error.message}</span>
 			</div>
-			{#if candidates.length > 0}
+			{#if candidates.length > 0 && GraphCandidatePanel}
 				<GraphCandidatePanel {candidates} onPick={useCandidate} />
 			{/if}
 		{/if}
@@ -397,7 +539,7 @@
 			<div class="warn-banner">
 				<span
 					>Relation index advanced to epoch {watchEpoch} (showing {store.meta
-						.epoch}).</span
+						.epoch}). Reload rebuilds the current view from the seed.</span
 				>
 				<button type="button" class="ghost-btn" onclick={runSeed}>Reload</button
 				>
@@ -411,17 +553,26 @@
 		{/if}
 
 		<div class="workspace">
-			<GraphFilterPanel
-				domains={store.filters.domains}
-				{availableDomains}
-				search={store.filters.search}
-				{showEdgeLabels}
-				onToggleDomain={(domain) => {
-					graphActions.toggleDomain(domain);
-				}}
-				onSearch={(value) => graphActions.setSearch(value)}
-				onToggleEdgeLabels={() => (showEdgeLabels = !showEdgeLabels)}
-			/>
+			<div class="filter-column">
+				{#if GraphFilterPanel}
+					<GraphFilterPanel
+						domains={store.filters.domains}
+						{availableDomains}
+						search={store.filters.search}
+						{showEdgeLabels}
+						{searchMatchCount}
+						onToggleDomain={(domain) => {
+							graphActions.toggleDomain(domain);
+						}}
+						onSearch={(value) => graphActions.setSearch(value)}
+						onToggleEdgeLabels={() => (showEdgeLabels = !showEdgeLabels)}
+						onFocusMatches={focusSearchMatches}
+					/>
+				{/if}
+				{#if GraphLegend}
+					<GraphLegend />
+				{/if}
+			</div>
 
 			<div class="canvas-column">
 				<GraphToolbar
@@ -441,6 +592,7 @@
 					bind:cy
 					elements={$graphState.elements}
 					{layout}
+					loading={store.loading}
 					focusId={store.meta.focusId}
 					{selectedId}
 					visibleDomains={store.filters.domains}
@@ -457,31 +609,66 @@
 				</p>
 			</div>
 
-			<GraphNodeInspector
-				node={selectedNode}
-				edges={selectedEdges}
-				communities={store.meta.communities}
-				onExpand={handleNodeActivate}
-				onCenter={(nodeId) => centerGraphOn(cy, nodeId)}
-				onFocusEntity={focusPeer}
-			/>
+			{#if GraphNodeInspector}
+				<GraphNodeInspector
+					node={selectedNode}
+					edges={selectedEdges}
+					communities={store.meta.communities}
+					onExpand={handleNodeActivate}
+					onCenter={(nodeId) => centerGraphOn(cy, nodeId)}
+					onFocusEntity={focusPeer}
+				/>
+			{/if}
 		</div>
 
-		<GraphCommunitiesPanel {communities} onLoad={openAsSubgraph} />
+		<div class="result-tabs" role="tablist" aria-label="Graph results">
+			<button
+				type="button"
+				role="tab"
+				class="result-tab"
+				class:active={resultTab === 'communities'}
+				aria-selected={resultTab === 'communities'}
+				onclick={() => loadResultTab('communities')}
+			>
+				Communities
+			</button>
+			<button
+				type="button"
+				role="tab"
+				class="result-tab"
+				class:active={resultTab === 'cycles'}
+				aria-selected={resultTab === 'cycles'}
+				onclick={() => loadResultTab('cycles')}
+			>
+				Cycles
+			</button>
+			<button
+				type="button"
+				role="tab"
+				class="result-tab"
+				class:active={resultTab === 'module'}
+				aria-selected={resultTab === 'module'}
+				onclick={() => loadResultTab('module')}
+			>
+				Module
+			</button>
+		</div>
 
-		<GraphCyclesPanel onLoadSubgraph={openAsSubgraph} />
-
-		<GraphModulePanel
-			data={moduleQuery.data}
-			loading={moduleQuery.loading}
-			error={moduleQuery.error}
-			stale={moduleQuery.stale}
-			{watchEpoch}
-			onFocusEntity={focusPeer}
-			onImpactFile={impactCallerFile}
-		/>
-
-		<GraphLegend />
+		{#if resultTab === 'communities' && GraphCommunitiesPanel}
+			<GraphCommunitiesPanel {communities} onLoad={openAsSubgraph} />
+		{:else if resultTab === 'cycles' && GraphCyclesPanel}
+			<GraphCyclesPanel onLoadSubgraph={openAsSubgraph} />
+		{:else if resultTab === 'module' && GraphModulePanel}
+			<GraphModulePanel
+				data={moduleQuery.data}
+				loading={moduleQuery.loading}
+				error={moduleQuery.error}
+				stale={moduleQuery.stale}
+				{watchEpoch}
+				onFocusEntity={focusPeer}
+				onImpactFile={impactCallerFile}
+			/>
+		{/if}
 	</div>
 </div>
 
@@ -534,9 +721,15 @@
 
 	.workspace {
 		display: grid;
-		grid-template-columns: 220px minmax(0, 1fr) 280px;
+		grid-template-columns: 240px minmax(0, 1fr) 300px;
 		gap: 1rem;
 		align-items: start;
+	}
+
+	.filter-column {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
 	}
 
 	.canvas-column {
@@ -557,9 +750,95 @@
 		color: var(--gray-500);
 	}
 
+	.result-tabs {
+		display: flex;
+		gap: 0;
+		margin-bottom: 1rem;
+		border: 1px solid var(--black);
+		border-bottom: none;
+		background: var(--white);
+	}
+
+	.result-tab {
+		flex: 1;
+		height: 32px;
+		padding: 0 0.75rem;
+		border: none;
+		border-right: 1px solid var(--gray-300);
+		background: var(--white);
+		cursor: pointer;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--gray-600);
+	}
+
+	.result-tab:last-child {
+		border-right: none;
+	}
+
+	.result-tab.active {
+		background: var(--black);
+		color: var(--white);
+	}
+
+	.impact-dependents {
+		margin-bottom: 1rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid var(--gray-300);
+		background: var(--gray-50);
+		font-family: 'Space Mono', monospace;
+		font-size: 0.7rem;
+	}
+
+	.impact-dependents details {
+		margin: 0.25rem 0;
+	}
+
+	.impact-dependents summary {
+		cursor: pointer;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-600);
+	}
+
+	.impact-list {
+		list-style: none;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin: 0.4rem 0 0;
+		padding: 0;
+	}
+
+	.impact-item-btn {
+		height: 24px;
+		padding: 0 0.5rem;
+		border: 1px solid var(--gray-300);
+		background: var(--white);
+		cursor: pointer;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		color: var(--black);
+		word-break: break-all;
+	}
+
+	.impact-item-btn:hover {
+		border-color: var(--black);
+		background: var(--gray-100);
+	}
+
 	@media (max-width: 1200px) {
 		.workspace {
 			grid-template-columns: 1fr;
+		}
+
+		.canvas-column {
+			position: sticky;
+			top: 0;
+			z-index: 2;
 		}
 	}
 </style>

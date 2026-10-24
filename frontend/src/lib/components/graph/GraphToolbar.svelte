@@ -7,6 +7,7 @@
 	 * readout so the user can tell how much of the graph is loaded.
 	 */
 	import type { GraphLayoutName } from './GraphCanvas.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 
 	interface Props {
 		nodeCount?: number;
@@ -59,7 +60,7 @@
 			class="tool-btn"
 			onclick={onZoomOut}
 			aria-label="Zoom out"
-			title="Zoom out">−</button
+			title="Zoom out"><Icon name="minus" /></button
 		>
 		<button
 			type="button"

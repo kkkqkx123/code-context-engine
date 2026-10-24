@@ -2,6 +2,7 @@
 	import { errorMessage } from '$lib/utils/errors';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import { onMount } from 'svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -92,7 +93,7 @@
 			<ErrorBanner>
 				<span>{$storageState.error}</span>
 				<button class="dismiss-btn" onclick={storageActions.clearError}
-					>×</button
+					><Icon name="close" /></button
 				>
 			</ErrorBanner>
 		{/if}

@@ -3,6 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import { toolsApi, type BatchFoldResponse } from '$lib/api/tools';
 
 	interface DraftItem {
@@ -113,7 +114,7 @@
 					disabled={items.length <= 1}
 					onclick={() => removeItem(i)}
 				>
-					×
+					<Icon name="close" />
 				</button>
 			</div>
 			<textarea

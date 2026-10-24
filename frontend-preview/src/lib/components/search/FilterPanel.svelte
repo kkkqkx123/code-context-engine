@@ -8,6 +8,7 @@
 		MAX_SUB_QUERIES,
 		type SubQueryDraft,
 	} from '$lib/stores/search';
+	import Icon from '$lib/components/ui/Icon.svelte';
 
 	function addSubQuery() {
 		if ($searchState.subQueries.length >= MAX_SUB_QUERIES) return;
@@ -195,7 +196,7 @@
 						aria-label="Remove sub-query"
 						onclick={() => removeSubQuery(i)}
 					>
-						×
+						<Icon name="close" />
 					</button>
 				</div>
 			{/each}

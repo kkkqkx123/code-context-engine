@@ -6,6 +6,7 @@
 	 * through the on* callbacks; the page executes the loads.
 	 */
 	import type { GraphDirection } from '$lib/api/graph';
+	import Icon from '$lib/components/ui/Icon.svelte';
 
 	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
 	type ExternalEdgesMode = 'default' | 'on' | 'off';
@@ -156,7 +157,7 @@
 			onkeydown={handleSeedKeydown}
 			aria-label="Path start entity id"
 		/>
-		<span class="path-arrow" aria-hidden="true">→</span>
+		<span class="path-arrow" aria-hidden="true"><Icon name="arrow-right" /></span>
 		<input
 			class="seed-input"
 			type="text"

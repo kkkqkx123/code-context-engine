@@ -5,6 +5,7 @@
 	import { metricsState, metricsActions } from '$lib/stores/metrics';
 	import { projects } from '$lib/stores/project';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
 
 	onMount(() => {
 		metricsActions.startAutoRefresh(30000);
@@ -58,7 +59,10 @@
 		</div>
 		<div class="kpi-card">
 			<span class="kpi-label">Server</span>
-			<span class="kpi-value">{serverOk ? 'OK' : 'DOWN'}</span>
+			<Badge
+				label={serverOk ? 'OK' : 'DOWN'}
+				variant={serverOk ? 'success' : 'danger'}
+			/>
 			<span class="kpi-meta">updated {lastUpdatedText}</span>
 		</div>
 	</div>

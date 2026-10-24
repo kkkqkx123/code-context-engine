@@ -158,14 +158,14 @@
 
 	.panel-empty {
 		font-size: 0.78rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		font-style: italic;
 		margin: 0;
 	}
 
 	.communities-hint {
 		font-size: 0.7rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		margin: 0 0 0.75rem;
 	}
 

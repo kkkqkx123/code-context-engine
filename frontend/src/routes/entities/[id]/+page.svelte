@@ -8,6 +8,7 @@
 	import { onProjectChange } from '$lib/stores/project';
 	import Card from '$lib/components/ui/Card.svelte';
 	import LoadingState from '$lib/components/ui/LoadingState.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import CallChainList from '$lib/components/entities/CallChainList.svelte';
 
 	// Lazy load all heavy components
@@ -341,7 +342,7 @@
 							bind:value={pathFrom}
 							aria-label="Path start function id"
 						/>
-						<span class="path-arrow" aria-hidden="true">→</span>
+						<span class="path-arrow" aria-hidden="true"><Icon name="arrow-right" /></span>
 						<input
 							class="path-input"
 							type="text"

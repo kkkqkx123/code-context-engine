@@ -109,6 +109,8 @@
 		impactTransitive?: string[];
 		/** Case-insensitive substring used to highlight matching nodes. */
 		search?: string;
+		/** Whether a load/expand is in progress; shows a canvas overlay. */
+		loading?: boolean;
 		/** Whether to render the relation label on each edge. */
 		showEdgeLabels?: boolean;
 		/** Minimum canvas height in pixels; entity tabs use a compact value. */
@@ -124,7 +126,7 @@
 
 	let {
 		elements = [],
-		layout = 'cose-bilkent',
+		layout = 'cose',
 		focusId = null,
 		selectedId = null,
 		visibleDomains = RELATION_DOMAIN_ORDER,
@@ -132,6 +134,7 @@
 		impactTransitive = [],
 		search = '',
 		showEdgeLabels = false,
+		loading = false,
 		minHeight = 520,
 		onNodeSelect = () => {},
 		onNodeActivate = () => {},
@@ -140,6 +143,30 @@
 
 	let container: HTMLDivElement | null = null;
 	let bilkentRegistered = false;
+	let bilkentLoading: Promise<boolean> | null = null;
+
+	/** Load and register the CoseBilkent extension on demand. Resolves to
+	 *  whether registration succeeded; repeated calls share one in-flight load. */
+	function ensureBilkent(): Promise<boolean> {
+		if (bilkentRegistered) return Promise.resolve(true);
+		if (!bilkentLoading) {
+			bilkentLoading = Promise.all([
+				import('cytoscape'),
+				import('cytoscape-cose-bilkent'),
+			])
+				.then(([cyModule, bilkentModule]) => {
+					try {
+						cyModule.default.use(bilkentModule.default);
+						bilkentRegistered = true;
+					} catch {
+						bilkentRegistered = false;
+					}
+					return bilkentRegistered;
+				})
+				.catch(() => false);
+		}
+		return bilkentLoading;
+	}
 
 	/** Resolve the requested layout to a registered one. Falls back to plain `cose`
 	 *  when the CoseBilkent extension did not load, so cy.layout() never receives a
@@ -260,23 +287,23 @@
 		if (!container) return;
 
 		let mounted = true;
-		// The renderer and the layout extension touch the DOM at import time, so
-		// they are loaded lazily and only inside the browser lifecycle to keep
-		// server rendering untouched.
-		Promise.all([import('cytoscape'), import('cytoscape-cose-bilkent')])
-			.then(([cyModule, bilkentModule]) => {
+		// The renderer touches the DOM at import time, so it is loaded lazily
+		// and only inside the browser lifecycle to keep server rendering
+		// untouched. The bilkent layout extension (~150 KiB with its transitive
+		// layout-base/cose-base deps) is fetched only when that layout is
+		// actually selected; built-in layouts skip the download entirely.
+		const initialLayout =
+			layout === 'cose-bilkent' ? ensureBilkent() : Promise.resolve(false);
+		initialLayout
+			.then(() => {
 				if (!mounted || !container) return;
-				const cytoscape = cyModule.default;
-				try {
-					cytoscape.use(bilkentModule.default);
-					bilkentRegistered = true;
-				} catch {
-					bilkentRegistered = false;
-				}
-				createInstance(cytoscape);
+				import('cytoscape').then((module) => {
+					if (!mounted || !container) return;
+					createInstance(module.default);
+				});
 			})
 			.catch(() => {
-				// If the layout extension fails to load, fall back to plain cytoscape.
+				// If any module fails to load, fall back to plain cytoscape.
 				if (!mounted || !container) return;
 				import('cytoscape').then((module) => {
 					if (!mounted || !container) return;
@@ -324,10 +351,19 @@
 		applyDecorations();
 	});
 
-	// Re-run layout when the layout strategy changes.
+	// Re-run layout when the layout strategy changes. Selecting cose-bilkent
+	// before the extension is registered triggers the on-demand load first;
+	// until it resolves the effective layout falls back to plain cose.
 	$effect(() => {
 		const name = layout;
 		if (!cy) return;
+		if (name === 'cose-bilkent' && !bilkentRegistered) {
+			ensureBilkent().then((registered) => {
+				if (cy && registered && layout === 'cose-bilkent') {
+					cy.layout(layoutOptions(name)).run();
+				}
+			});
+		}
 		cy.layout(layoutOptions(effectiveLayoutName(name))).run();
 	});
 
@@ -353,14 +389,41 @@
 	});
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
 	class="graph-canvas"
 	bind:this={container}
 	role="application"
 	aria-label="Relation graph canvas"
+	tabindex="0"
+	onkeydown={(event) => {
+		if (!cy) return;
+		if (event.key === '+' || event.key === '=') {
+			event.preventDefault();
+			cy.zoom({
+				level: Math.min(GRAPH_MAX_ZOOM, cy.zoom() * 1.25),
+				renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+			});
+		} else if (event.key === '-') {
+			event.preventDefault();
+			cy.zoom({
+				level: Math.max(GRAPH_MIN_ZOOM, cy.zoom() / 1.25),
+				renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+			});
+		} else if (event.key === '0') {
+			event.preventDefault();
+			cy.fit(undefined, 40);
+		}
+	}}
 	style="min-height: {minHeight}px"
 >
-	{#if elements.length === 0}
+	{#if loading}
+		<div class="canvas-loading" role="status" aria-live="polite">
+			<span>Loading graph…</span>
+		</div>
+	{/if}
+	{#if elements.length === 0 && !loading}
 		<div class="canvas-empty">
 			<p>No graph data</p>
 			<span>Select an entity to explore its relationships</span>
@@ -404,6 +467,21 @@
 	.canvas-empty span {
 		font-family: 'Space Grotesk', sans-serif;
 		font-size: 0.85rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
+	}
+
+	.canvas-loading {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.6);
+		pointer-events: none;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
 	}
 </style>

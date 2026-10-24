@@ -1,5 +1,6 @@
 <script lang="ts">
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import type {
 		ClassInheritanceResponse,
 		ClassImplementationsResponse,
@@ -93,7 +94,7 @@
 								onclick={() => onNavigate(baseClass.class_id)}
 								onkeydown={(e) => handleItemKeydown(e, baseClass.class_id)}
 							>
-								<span class="item-icon">▲</span>
+								<span class="item-icon"><Icon name="arrow-up" /></span>
 								<span class="item-name">{baseClass.class_name}</span>
 								<span class="item-location"
 									>{baseClass.file_path.split('/').pop()}</span
@@ -116,7 +117,7 @@
 								onclick={() => onNavigate(derivedClass.class_id)}
 								onkeydown={(e) => handleItemKeydown(e, derivedClass.class_id)}
 							>
-								<span class="item-icon">▼</span>
+								<span class="item-icon"><Icon name="arrow-down" /></span>
 								<span class="item-name">{derivedClass.class_name}</span>
 								<span class="item-location"
 									>{derivedClass.file_path.split('/').pop()}</span
@@ -139,7 +140,7 @@
 								onclick={() => onNavigate(iface.interface_id)}
 								onkeydown={(e) => handleItemKeydown(e, iface.interface_id)}
 							>
-								<span class="item-icon">◆</span>
+								<span class="item-icon"><Icon name="diamond" /></span>
 								<span class="item-name">{iface.interface_name}</span>
 								<span class="item-location"
 									>{iface.file_path.split('/').pop()}</span
@@ -162,7 +163,7 @@
 								onclick={() => onNavigate(impl.class_id)}
 								onkeydown={(e) => handleItemKeydown(e, impl.class_id)}
 							>
-								<span class="item-icon">◆</span>
+								<span class="item-icon"><Icon name="diamond" /></span>
 								<span class="item-name">{impl.class_name}</span>
 								<span class="item-location"
 									>{impl.file_path.split('/').pop()}</span

@@ -6,6 +6,7 @@
 	 * through the on* callbacks; the page executes the loads.
 	 */
 	import type { GraphDirection } from '$lib/api/graph';
+	import Icon from '$lib/components/ui/Icon.svelte';
 
 	type SeedMode = 'focus' | 'overview' | 'path' | 'subgraph';
 	type ExternalEdgesMode = 'default' | 'on' | 'off';
@@ -79,6 +80,7 @@
 </script>
 
 <div class="seed-bar">
+	<span class="group-label">Load</span>
 	<div class="seed-mode">
 		<button
 			type="button"
@@ -155,7 +157,7 @@
 			onkeydown={handleSeedKeydown}
 			aria-label="Path start entity id"
 		/>
-		<span class="path-arrow" aria-hidden="true">→</span>
+		<span class="path-arrow" aria-hidden="true"><Icon name="arrow-right" /></span>
 		<input
 			class="seed-input"
 			type="text"
@@ -198,12 +200,18 @@
 		</label>
 	{/if}
 
-	<button type="button" class="primary-btn" onclick={onRunSeed} disabled={loading}>
+	<button
+		type="button"
+		class="primary-btn"
+		onclick={onRunSeed}
+		disabled={loading}
+	>
 		{loading ? 'Loading…' : 'Load'}
 	</button>
 
 	<div class="seed-spacer"></div>
 
+	<span class="group-label">Impact</span>
 	<div class="impact-mode" role="group" aria-label="Impact mode">
 		<button
 			type="button"
@@ -263,16 +271,28 @@
 			/>
 		</label>
 	{/if}
-	<button type="button" class="ghost-btn" onclick={onRunImpact} disabled={impactBusy}>
+	<button
+		type="button"
+		class="ghost-btn"
+		onclick={onRunImpact}
+		disabled={impactBusy}
+	>
 		{impactBusy ? 'Analyzing…' : 'Impact'}
 	</button>
 	{#if impactMode === 'file'}
-		<button type="button" class="ghost-btn" onclick={onRunModule} disabled={moduleLoading}>
+		<button
+			type="button"
+			class="ghost-btn"
+			onclick={onRunModule}
+			disabled={moduleLoading}
+		>
 			{moduleLoading ? 'Querying…' : 'Module'}
 		</button>
 	{/if}
 	{#if showClear}
-		<button type="button" class="ghost-btn" onclick={onClearImpact}>Clear</button>
+		<button type="button" class="ghost-btn" onclick={onClearImpact}
+			>Clear</button
+		>
 	{/if}
 </div>
 
@@ -302,13 +322,26 @@
 			</select>
 		</label>
 		<span class="adv-filter-hint">
-			Applies on the next Load and replaces the working set. Domain toggles
-			stay client-side only.
+			Applies on the next Load and replaces the working set. Domain toggles stay
+			client-side only.
 		</span>
 	</div>
 </details>
 
 <style>
+	.group-label {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-500);
+		padding: 0 0.25rem;
+		align-self: center;
+		border-right: 1px solid var(--gray-300);
+		padding-right: 0.5rem;
+		margin-right: 0.25rem;
+	}
+
 	.seed-bar {
 		display: flex;
 		align-items: center;
@@ -410,7 +443,7 @@
 
 	.adv-filter-hint {
 		font-size: 0.62rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 	}
 
 	.inline-field {

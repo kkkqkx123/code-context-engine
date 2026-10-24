@@ -1,16 +1,19 @@
 <script lang="ts">
 	import { toasts, toastActions } from '$lib/stores/toast';
+	import Icon from '$lib/components/ui/Icon.svelte';
 
-	function getIcon(type: string): string {
+	type ToastIcon = 'success' | 'error' | 'warning' | 'info';
+
+	function getIcon(type: string): ToastIcon {
 		switch (type) {
 			case 'success':
-				return '✓';
+				return 'success';
 			case 'error':
-				return '✕';
+				return 'error';
 			case 'warning':
-				return '⚠';
+				return 'warning';
 			default:
-				return 'ℹ';
+				return 'info';
 		}
 	}
 </script>
@@ -18,14 +21,16 @@
 <div class="toast-container" aria-live="polite" aria-atomic="true">
 	{#each $toasts as toast (toast.id)}
 		<div class="toast toast-{toast.type}" role="alert">
-			<span class="toast-icon" aria-hidden="true">{getIcon(toast.type)}</span>
+			<span class="toast-icon" aria-hidden="true">
+				<Icon name={getIcon(toast.type)} />
+			</span>
 			<span class="toast-message">{toast.message}</span>
 			<button
 				class="toast-dismiss"
 				onclick={() => toastActions.dismiss(toast.id)}
 				aria-label="Dismiss notification"
 			>
-				×
+				<Icon name="close" />
 			</button>
 		</div>
 	{/each}

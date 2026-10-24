@@ -6,6 +6,7 @@ use anyhow::Result;
 use colored::Colorize;
 
 use crate::client::ApiClient;
+use crate::icons;
 use crate::output::{print_error, print_output, print_success, print_warning};
 use cce_api::models::{
     AdmissionStatsResponse, Bm25HealthResponse, EmbeddingHealthResponse, HealthStatus,
@@ -76,7 +77,7 @@ async fn health_check(
                 print_output(format, &response);
             } else {
                 println!("{}", "Unified Health Status".bold());
-                println!("{}", "═".repeat(50));
+                println!("{}", icons::SEPARATOR.repeat(50));
                 println!();
                 print_service_status("Qdrant", &response.qdrant);
                 print_service_status("BM25", &response.bm25);
@@ -107,7 +108,7 @@ async fn health_check(
 
 /// Print individual service status
 fn print_service_status(name: &str, status: &cce_api::models::ServiceStatus) {
-    let icon = if status.reachable { "✓" } else { "✗" };
+    let icon = if status.reachable { icons::SUCCESS } else { icons::ERROR };
     let colored_name = if status.reachable {
         format!("{} {}", icon, name).green()
     } else {
@@ -129,7 +130,7 @@ async fn health_qdrant(client: &ApiClient, verbose: bool) -> Result<()> {
     {
         Ok(response) => {
             println!("{}", "Qdrant Health".bold());
-            println!("{}", "═".repeat(50));
+            println!("{}", icons::SEPARATOR.repeat(50));
             println!();
             print_health_bool("Healthy", response.healthy);
             print_value("Circuit Breaker", &response.circuit_breaker);
@@ -168,7 +169,7 @@ async fn health_embedding(client: &ApiClient, verbose: bool) -> Result<()> {
     {
         Ok(response) => {
             println!("{}", "Embedding Health".bold());
-            println!("{}", "═".repeat(50));
+            println!("{}", icons::SEPARATOR.repeat(50));
             println!();
             print_health_bool("Healthy", response.healthy);
             if let Some(model_name) = &response.model_name {
@@ -196,7 +197,7 @@ async fn health_bm25(client: &ApiClient, verbose: bool) -> Result<()> {
     {
         Ok(response) => {
             println!("{}", "BM25 Health".bold());
-            println!("{}", "═".repeat(50));
+            println!("{}", icons::SEPARATOR.repeat(50));
             println!();
             print_health_bool("Enabled", response.enabled);
             print_health_bool("Connected", response.connected);
@@ -224,7 +225,7 @@ async fn retry_queue_status(client: &ApiClient, verbose: bool) -> Result<()> {
     {
         Ok(response) => {
             println!("{}", "Retry Queue Status".bold());
-            println!("{}", "═".repeat(50));
+            println!("{}", icons::SEPARATOR.repeat(50));
             println!();
             print_value("Pending Count", &response.pending_count.to_string());
             if response.is_empty {

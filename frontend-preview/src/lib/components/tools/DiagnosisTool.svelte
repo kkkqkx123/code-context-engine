@@ -5,6 +5,7 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import ErrorBanner from '$lib/components/ui/ErrorBanner.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import { toolsApi } from '$lib/api/tools';
 	import type { Diagnostic } from '$lib/api/tools';
 
@@ -130,7 +131,7 @@
 			<div class="tool-output">
 				{#if result}
 					{#if result.diagnostics.length === 0}
-						<div class="no-issues">No issues found ✓</div>
+						<div class="no-issues">No issues found <Icon name="check" /></div>
 					{:else}
 						<div class="issues-list">
 							{#each result.diagnostics as diagnostic (diagnostic.message + diagnostic.position.row + ':' + diagnostic.position.column)}

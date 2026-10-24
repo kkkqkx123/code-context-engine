@@ -5,6 +5,7 @@ use colored::Colorize;
 use serde::Serialize;
 
 use crate::client::ApiClient;
+use crate::icons;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::{HealthStatus, StorageComponentStatus, StorageStatus, StorageStatusResponse};
 
@@ -109,9 +110,9 @@ pub async fn execute(server: &str, verbose: bool, format: crate::cli::OutputForm
 /// Print component status with formatting
 fn print_component_status(prefix: &str, component: &StorageComponentStatus) {
     let status_icon = if component.connected {
-        "✓".to_string()
+        icons::SUCCESS.to_string()
     } else {
-        "✗".to_string()
+        icons::ERROR.to_string()
     };
 
     let status_color = if component.connected {
@@ -131,7 +132,7 @@ fn print_component_status(prefix: &str, component: &StorageComponentStatus) {
 
 /// Print individual service status
 fn print_service_status(name: &str, reachable: bool, message: &str) {
-    let icon = if reachable { "✓" } else { "✗" };
+    let icon = if reachable { icons::SUCCESS } else { icons::ERROR };
     let colored_name = if reachable {
         format!("{} {}", icon, name).green()
     } else {

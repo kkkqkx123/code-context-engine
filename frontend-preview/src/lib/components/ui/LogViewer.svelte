@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 
 	interface WatchEvent {
 		timestamp: Date;
@@ -68,7 +69,7 @@
 					[{event.eventType.toUpperCase()}]
 				</span>
 				<span class="log-file-path">{event.filePath}</span>
-				<span class="log-action">→ {event.action}</span>
+				<span class="log-action"><Icon name="arrow-right" /> {event.action}</span>
 			</div>
 		{/each}
 	{/if}

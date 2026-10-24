@@ -4,6 +4,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import {
 		deadLetterApi,
 		type DeadLetterFileEntry,
@@ -273,7 +274,7 @@
 											{#if m.truncated}<em title="already truncate-retried"
 													>T</em
 												>{/if}
-											{#if m.acknowledged}<em title="acknowledged">✓</em>{/if}
+											{#if m.acknowledged}<em title="acknowledged"><Icon name="check" /></em>{/if}
 										</span>
 									{/each}
 								</td>

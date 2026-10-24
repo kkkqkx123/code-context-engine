@@ -56,7 +56,7 @@
 
 	.communities-hint {
 		font-size: 0.7rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		margin: 0 0 0.75rem;
 	}
 

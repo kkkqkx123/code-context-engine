@@ -18,9 +18,11 @@
 		availableDomains?: RelationDomain[];
 		search?: string;
 		showEdgeLabels?: boolean;
+		searchMatchCount?: number;
 		onToggleDomain?: (domain: RelationDomain) => void;
 		onSearch?: (value: string) => void;
 		onToggleEdgeLabels?: () => void;
+		onFocusMatches?: () => void;
 	}
 
 	let {
@@ -28,9 +30,11 @@
 		availableDomains = RELATION_DOMAIN_ORDER,
 		search = $bindable(''),
 		showEdgeLabels = $bindable(false),
+		searchMatchCount = 0,
 		onToggleDomain = () => {},
 		onSearch = () => {},
 		onToggleEdgeLabels = () => {},
+		onFocusMatches = () => {},
 	}: Props = $props();
 
 	let available = $derived(new Set(availableDomains));
@@ -53,6 +57,21 @@
 			oninput={handleSearchInput}
 			aria-label="Highlight nodes by name"
 		/>
+		{#if search.trim().length >= 2}
+			<div class="search-meta">
+				<span class="search-count"
+					>{searchMatchCount} match{searchMatchCount === 1 ? '' : 'es'}</span
+				>
+				<button
+					type="button"
+					class="search-focus-btn"
+					onclick={() => onFocusMatches?.()}
+					disabled={searchMatchCount === 0}
+				>
+					Focus matches
+				</button>
+			</div>
+		{/if}
 	</div>
 
 	<div class="panel-section">
@@ -120,8 +139,8 @@
 		<p class="hint">
 			Faded flat edges sit behind a conditional-compilation guard, so they only
 			exist under that predicate. Dashed node outlines mark symbols resolved
-			outside the project; transitive impact uses a solid outline so the two
-			are never confused.
+			outside the project; transitive impact uses a solid outline so the two are
+			never confused.
 		</p>
 	</div>
 </aside>
@@ -166,6 +185,35 @@
 	.search-input:focus {
 		outline: none;
 		border-color: var(--black);
+	}
+
+	.search-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+	}
+
+	.search-count {
+		color: var(--gray-500);
+	}
+
+	.search-focus-btn {
+		height: 24px;
+		padding: 0 0.5rem;
+		border: 1px solid var(--gray-300);
+		background: var(--white);
+		cursor: pointer;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.6rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.search-focus-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
 	}
 
 	.domain-list {
@@ -231,7 +279,7 @@
 
 	.hint {
 		font-size: 0.7rem;
-		color: var(--gray-400);
+		color: var(--gray-500);
 		margin: 0;
 		line-height: 1.4;
 	}
