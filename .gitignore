@@ -28,8 +28,10 @@ Cargo.lock
 .env.local
 .qdrant-initialized
 
-# Logs
-logs/
+# Logs (only at repository root; do not ignore source directories such as frontend/src/lib/components/logs)
+/logs/
+# Generated application logs under the project data directory
+/.cce/logs/
 *.log
 
 # Database

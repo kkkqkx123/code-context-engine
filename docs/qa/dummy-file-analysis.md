@@ -104,7 +104,7 @@ CCE_LOG_OUTPUT=stdout
 
 ```env
 CCE_LOG_OUTPUT=file
-CCE_LOG_FILE=logs/app.log
+CCE_LOG_FILE=.cce/logs/app.log
 ```
 
 **优点**：

@@ -225,8 +225,8 @@ async fn handle_cleanup(
 ### 第一阶段：基础补全与日志分离
 1. **补全路由**: 在 `router.rs` 中添加 `/api/metrics/json` 端点，绑定到现有的 `ExporterManager`。
 2. **实现独立日志器**: 
-   - 创建 `MetricsLogger` 模块，使用独立的 `tracing_subscriber` 配置，输出到 `logs/metrics.log`。
-   - 确保与主应用的 `tracing` 日志（如 `logs/app.log`）物理隔离。
+   - 创建 `MetricsLogger` 模块，使用独立的 `tracing_subscriber` 配置，输出到 `.cce/logs/metrics.log`。
+   - 确保与主应用的 `tracing` 日志（如 `.cce/logs/app.log`）物理隔离。
 3. **定义 SQLite 表结构**: 
    ```sql
    CREATE TABLE metrics_aggregated (
