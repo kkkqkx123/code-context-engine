@@ -175,18 +175,78 @@ impl GroupChunker {
         Some(vocabulary)
     }
 
+    /// Whether the group needs room reserved for terminology.
+    ///
+    /// A file-level table alone does not consume room. Only groups whose
+    /// text actually mentions a table term pay the reserve, so groups
+    /// without terms keep the full body limit.
+    fn group_mentions_vocabulary(
+        &self,
+        file_path: &str,
+        language: Option<&str>,
+        texts: &[&str],
+    ) -> bool {
+        let Some(vocabulary) = self.terminology(file_path, language) else {
+            return false;
+        };
+        if texts.is_empty() {
+            return true;
+        }
+        !vocabulary.matched_entries(texts).is_empty()
+    }
+
+    /// Whether any conversion in the batch mentions the file terminology.
+    ///
+    /// Used for the shared cross-group merge config, which must stay
+    /// conservative when at least one group needs the reserve.
+    fn batch_mentions_vocabulary(
+        &self,
+        group_conversions: &[crate::ast_to_nl::converter::GroupConversions],
+        file_path: &str,
+        language: Option<&str>,
+    ) -> bool {
+        let Some(vocabulary) = self.terminology(file_path, language) else {
+            return false;
+        };
+        for gc in group_conversions {
+            let mut texts: Vec<&str> = Vec::new();
+            if let Some(header) = gc.header_conversion.as_ref() {
+                if let Some(text) = header.bm25_text.as_deref() {
+                    texts.push(text);
+                }
+                if let Some(text) = header.embedding_text.as_deref() {
+                    texts.push(text);
+                }
+            }
+            for member in &gc.member_conversions {
+                if let Some(text) = member.bm25_text.as_deref() {
+                    texts.push(text);
+                }
+                if let Some(text) = member.embedding_text.as_deref() {
+                    texts.push(text);
+                }
+            }
+            if !vocabulary.matched_entries(&texts).is_empty() {
+                return true;
+            }
+        }
+        false
+    }
+
     /// The configuration used to split one group.
     ///
     /// Files that carry a terminology table reserve room for the injected
-    /// expansions. Every group additionally reserves the decoration its
-    /// chunks will carry (identity lines, topic lines, synthetic block
-    /// heads), so the splitter works on a body limit and the assembly does
-    /// not push the final chunk over the pre-injection limit.
+    /// expansions only when the group actually mentions a term. Every group
+    /// additionally reserves the decoration its chunks will carry (identity
+    /// lines, topic lines, synthetic block heads), so the splitter works on
+    /// a body limit and the assembly does not push the final chunk over the
+    /// pre-injection limit.
     fn group_config(
         &self,
         group: &EntityGroup,
         file_path: &str,
         language: Option<&str>,
+        texts: &[&str],
     ) -> Result<
         (
             ChunkingConfig,
@@ -196,7 +256,7 @@ impl GroupChunker {
         ParseError,
     > {
         use cce_config::modules::ChunkBudget;
-        let has_vocabulary = self.terminology(file_path, language).is_some();
+        let has_vocabulary = self.group_mentions_vocabulary(file_path, language, texts);
         let embedding_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding);
         let bm25_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Bm25);
         let emb_budget: ChunkBudget =
@@ -210,16 +270,16 @@ impl GroupChunker {
                 && budget.pre_injection_limit != usize::MAX
                 && budget.decoration_cost >= budget.pre_injection_limit
             {
-                return Err(ParseError::code_splitting(format!(
-                    "decoration leaves no body room (file={}, group={}, path={}, decoration={}, pre={}, hard={}, reserve={})",
-                    file_path,
-                    group.group_id,
-                    name,
-                    budget.decoration_cost,
-                    budget.pre_injection_limit,
-                    budget.hard_limit,
-                    budget.reserve,
-                )));
+                tracing::warn!(
+                    file_path = %file_path,
+                    group = %group.group_id,
+                    path = %name,
+                    decoration = budget.decoration_cost,
+                    pre = budget.pre_injection_limit,
+                    hard = budget.hard_limit,
+                    reserve = budget.reserve,
+                    "Decoration estimate leaves no body room; splitting with minimal body"
+                );
             }
         }
         let config = self
@@ -285,8 +345,9 @@ impl GroupChunker {
         let mut all_chunks = ChunkOutput::default();
 
         let language = group.language.to_string();
+        let group_texts = [bm25_text.as_str(), embedding_text.as_str()];
         let (config, emb_budget, bm25_budget) =
-            self.group_config(group, file_path, Some(&language))?;
+            self.group_config(group, file_path, Some(&language), &group_texts)?;
         let splitter = TextSplitter::with_pre_limits(
             config.clone(),
             emb_budget.pre_injection_limit,
@@ -392,8 +453,25 @@ impl GroupChunker {
         file_path: &str,
     ) -> Result<ChunkOutput, ParseError> {
         let language = group.language.to_string();
+        let mut conversion_texts: Vec<&str> = Vec::new();
+        if let Some(header) = group_conversions.header_conversion.as_ref() {
+            if let Some(text) = header.bm25_text.as_deref() {
+                conversion_texts.push(text);
+            }
+            if let Some(text) = header.embedding_text.as_deref() {
+                conversion_texts.push(text);
+            }
+        }
+        for member in &group_conversions.member_conversions {
+            if let Some(text) = member.bm25_text.as_deref() {
+                conversion_texts.push(text);
+            }
+            if let Some(text) = member.embedding_text.as_deref() {
+                conversion_texts.push(text);
+            }
+        }
         let (config, emb_budget, bm25_budget) =
-            self.group_config(group, file_path, Some(&language))?;
+            self.group_config(group, file_path, Some(&language), &conversion_texts)?;
         let splitter = TextSplitter::with_pre_limits(
             config.clone(),
             emb_budget.pre_injection_limit,
@@ -503,7 +581,8 @@ impl GroupChunker {
         } else {
             self.chunk_groups_builtin(group_conversions, file_path)?
         };
-        let has_vocabulary = self.terminology(file_path, language.as_deref()).is_some();
+        let has_vocabulary =
+            self.batch_mentions_vocabulary(group_conversions, file_path, language.as_deref());
         let mut emb_dec = 0usize;
         let mut bm25_dec = 0usize;
         for gc in group_conversions {
@@ -555,7 +634,8 @@ impl GroupChunker {
         let language = group_conversions
             .first()
             .map(|gc| gc.group.language.to_string());
-        let has_vocabulary = self.terminology(file_path, language.as_deref()).is_some();
+        let has_vocabulary =
+            self.batch_mentions_vocabulary(group_conversions, file_path, language.as_deref());
         let merge_config = self.config.pre_injection_config(has_vocabulary);
         let mut tracker = GroupTracker::new();
         let mut all_chunks = ChunkOutput::default();
@@ -572,8 +652,29 @@ impl GroupChunker {
         }
 
         for gc in group_conversions {
-            let (config, emb_budget, bm25_budget) =
-                self.group_config(&gc.group, file_path, language.as_deref())?;
+            let mut conversion_texts: Vec<&str> = Vec::new();
+            if let Some(header) = gc.header_conversion.as_ref() {
+                if let Some(text) = header.bm25_text.as_deref() {
+                    conversion_texts.push(text);
+                }
+                if let Some(text) = header.embedding_text.as_deref() {
+                    conversion_texts.push(text);
+                }
+            }
+            for member in &gc.member_conversions {
+                if let Some(text) = member.bm25_text.as_deref() {
+                    conversion_texts.push(text);
+                }
+                if let Some(text) = member.embedding_text.as_deref() {
+                    conversion_texts.push(text);
+                }
+            }
+            let (config, emb_budget, bm25_budget) = self.group_config(
+                &gc.group,
+                file_path,
+                language.as_deref(),
+                &conversion_texts,
+            )?;
             let splitter = TextSplitter::with_pre_limits(
                 config.clone(),
                 emb_budget.pre_injection_limit,
@@ -587,7 +688,7 @@ impl GroupChunker {
                 pre_injection_bm25: bm25_budget.pre_injection_limit,
                 emb_budget,
                 bm25_budget,
-                has_vocabulary,
+                has_vocabulary: emb_budget.reserve > 0 || bm25_budget.reserve > 0,
             };
             let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
                 &infra,

@@ -373,9 +373,27 @@ impl ChunkingConfig {
         }
     }
 
-    /// The merge ceiling for one path: the pre-injection limit.
+    /// The merge ceiling for one path.
+    ///
+    /// The ceiling is the pre-injection limit, additionally capped by the
+    /// custom cross-group threshold on the embedding path. It is the single
+    /// semantic source for every merge decision; derived configs carry the
+    /// capped value in their thresholds so boundary checks observe it
+    /// without recomputing the reserve.
     pub fn merge_limit(&self, path: cce_types::ChunkPath, has_vocabulary: bool) -> usize {
-        self.pre_injection_limit(path, has_vocabulary)
+        let pre = self.pre_injection_limit(path, has_vocabulary);
+        match path {
+            cce_types::ChunkPath::Bm25 => pre,
+            cce_types::ChunkPath::Embedding => {
+                if self.cross_group_merge_threshold == 0 {
+                    pre
+                } else if pre == usize::MAX {
+                    self.cross_group_merge_threshold
+                } else {
+                    self.cross_group_merge_threshold.min(pre)
+                }
+            }
+        }
     }
 
     /// Raw reserve before clamping, used for validation.
@@ -406,12 +424,8 @@ impl ChunkingConfig {
                 embedding_decoration,
             );
             body.max_tokens = embedding.body_limit;
-            body.cross_group_merge_threshold = if self.cross_group_merge_threshold == 0 {
-                embedding.pre_injection_limit
-            } else {
-                self.cross_group_merge_threshold
-                    .min(embedding.pre_injection_limit)
-            };
+            body.cross_group_merge_threshold =
+                self.merge_limit(cce_types::ChunkPath::Embedding, has_vocabulary);
         }
         if self.max_bm25_terms > 0 {
             let bm25 = self.budget(cce_types::ChunkPath::Bm25, has_vocabulary, bm25_decoration);

@@ -33,10 +33,11 @@ pub fn cost(text: &str, path: ChunkPath) -> usize {
 /// Resolve the `(min, ceiling)` merge thresholds for `path`.
 ///
 /// The min threshold is the undersized-chunk trigger; the ceiling is the
-/// largest combined cost a merge may produce. BM25 is hard-capped at
-/// `max_bm25_terms`; the Embedding ceiling is `cross_group_merge_threshold`
-/// (0 = `max_tokens`). Shared by both merge layers so their limits can never
-/// drift apart.
+/// largest combined cost a merge may produce. The config carries derived
+/// limits, so callers pass the config that already encodes the reserve:
+/// body configs for the intra-splitter pass, pre-injection configs for the
+/// cross-group pass. The ceiling semantics follow the unified merge limit
+/// defined on the chunking config.
 pub fn merge_limits(path: ChunkPath, config: &ChunkingConfig) -> (usize, usize) {
     match path {
         ChunkPath::Bm25 => (config.min_chunk_bm25_terms, config.max_bm25_terms),
