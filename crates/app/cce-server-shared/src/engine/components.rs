@@ -93,41 +93,7 @@ impl super::CodeContextEngine {
     /// a reload from disk. Components will be recreated on next use with
     /// the new configuration.
     pub async fn reload_project_config(&self, project_id: i64) -> Result<(), EngineError> {
-        tracing::info!(project_id, "Reloading project configuration");
-
-        // Clear orchestrator cache
-        if self.orchestrator_cache.remove(project_id).await.is_some() {
-            tracing::debug!(project_id, "Cleared IndexOrchestrator cache");
-        }
-
-        // Clear searcher cache
-        if self.searcher_cache.remove(project_id).await.is_some() {
-            tracing::debug!(project_id, "Cleared Searcher cache");
-        }
-
-        // Clear hot update coordinator cache
-        if self.hot_update_cache.remove(project_id).await.is_some() {
-            tracing::debug!(project_id, "Cleared HotUpdateCoordinator cache");
-        }
-
-        // Clear operation coordinator cache
-        if self
-            .operation_coordinator_cache
-            .remove(project_id)
-            .await
-            .is_some()
-        {
-            tracing::debug!(project_id, "Cleared OperationCoordinator cache");
-        }
-
-        // Clear relation runtime cache
-        self.remove_relation_runtime(project_id).await;
-
-        // Clear progress tracker for this project
-        self.progress_tracker.remove(project_id).await;
-
-        // Clear retry queue for this project
-        self.retry_queue.remove(project_id).await;
+        self.clear_project_component_caches(project_id).await;
 
         // Invalidate project registry cache to force reload from disk
         let _ = self
@@ -137,6 +103,41 @@ impl super::CodeContextEngine {
 
         tracing::info!(project_id, "Project configuration reloaded successfully");
         Ok(())
+    }
+
+    /// Clear cached engine components for a project without touching the
+    /// project registry entry.
+    ///
+    /// Typed in-memory configuration updates use this so the freshly stored
+    /// entry survives while stale orchestrators, searchers and coordinators
+    /// are rebuilt from it on next use.
+    pub async fn clear_project_component_caches(&self, project_id: i64) {
+        if self.orchestrator_cache.remove(project_id).await.is_some() {
+            tracing::debug!(project_id, "Cleared IndexOrchestrator cache");
+        }
+
+        if self.searcher_cache.remove(project_id).await.is_some() {
+            tracing::debug!(project_id, "Cleared Searcher cache");
+        }
+
+        if self.hot_update_cache.remove(project_id).await.is_some() {
+            tracing::debug!(project_id, "Cleared HotUpdateCoordinator cache");
+        }
+
+        if self
+            .operation_coordinator_cache
+            .remove(project_id)
+            .await
+            .is_some()
+        {
+            tracing::debug!(project_id, "Cleared OperationCoordinator cache");
+        }
+
+        self.remove_relation_runtime(project_id).await;
+
+        self.progress_tracker.remove(project_id).await;
+
+        self.retry_queue.remove(project_id).await;
     }
 
     /// Get the per-project progress tracker cache

@@ -839,6 +839,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/project/{project_id}/llm/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Handle typed project LLM update request.
+         * @description Only project-effective chat and rerank fields are accepted. The update is
+         *     validated, stored in memory and component caches are cleared without
+         *     invalidating the registry entry.
+         */
+        put: operations["handle_update_project_llm_config"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/llm/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Handle read project LLM overview request.
+         * @description Returns masked provider summaries, typed model views and dimension
+         *     diagnostics derived from the merged runtime configuration. Secrets are
+         *     never returned.
+         */
+        get: operations["handle_get_project_llm_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/project/{project_id}/llm/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Handle project LLM connectivity probe.
+         * @description Uses the stored project configuration and discards all transient client
+         *     state afterwards. No secrets are accepted or returned.
+         */
+        post: operations["handle_test_project_llm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/project/{project_id}/relations/classification/stats": {
         parameters: {
             query?: never;
@@ -1042,7 +1107,7 @@ export interface paths {
     };
     "/api/retry-queue": {
         parameters: {
-            query?: { project_id?: number };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -1060,7 +1125,7 @@ export interface paths {
     };
     "/api/retry-queue/dead": {
         parameters: {
-            query?: { project_id?: number };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -1078,7 +1143,7 @@ export interface paths {
     };
     "/api/retry-queue/process": {
         parameters: {
-            query?: { project_id?: number };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -1590,6 +1655,34 @@ export interface components {
             /** @description Entity name */
             name: string;
         };
+        /**
+         * @description Per-model chat parameter patch. All fields are optional; absent fields
+         *     keep their current values.
+         */
+        ChatModelParamPatch: {
+            max_input_tokens?: number | null;
+            /** Format: int32 */
+            max_tokens?: number | null;
+            /** Format: float */
+            temperature?: number | null;
+            /** Format: float */
+            top_p?: number | null;
+        };
+        /** @description Chat model entry in the project LLM overview. */
+        ChatModelView: {
+            is_default: boolean;
+            key: string;
+            max_input_tokens: number;
+            /** Format: int32 */
+            max_tokens: number;
+            model: string;
+            provider_id: string;
+            provider_name: string;
+            /** Format: float */
+            temperature: number;
+            /** Format: float */
+            top_p: number;
+        };
         /** @description Class implementations response */
         ClassImplementationsResponse: {
             class_id: string;
@@ -1883,6 +1976,17 @@ export interface components {
             healthy: boolean;
             message: string;
             model_name?: string | null;
+        };
+        /** @description Embedding model entry in the project LLM overview. */
+        EmbeddingModelView: {
+            is_default: boolean;
+            key: string;
+            max_batch_tokens: number;
+            max_item_tokens: number;
+            model: string;
+            provider_id: string;
+            provider_name: string;
+            vector_dimension: number;
         };
         /** @description Entity info from parse */
         EntityInfo: {
@@ -2489,6 +2593,63 @@ export interface components {
          * @enum {string}
          */
         KeywordTermOperator: "or" | "and";
+        /** @description Effective vector dimension compared against the default embedding model. */
+        LlmDimensionStatus: {
+            default_embedding_dimension?: number | null;
+            default_embedding_model?: string | null;
+            effective_vector_size: number;
+            matches: boolean;
+            message: string;
+            requires_reindex: boolean;
+            vector_backend: string;
+        };
+        /**
+         * @description Masked provider summary for the project LLM overview.
+         *
+         *     Secrets are never returned. Key state is expressed as counts and flags.
+         */
+        LlmProviderSummary: {
+            api_key_file_set: boolean;
+            base_url: string;
+            chat_model_count: number;
+            embedding_model_count: number;
+            enabled: boolean;
+            has_api_keys: boolean;
+            has_unresolved_placeholder: boolean;
+            /** @description Provider id as used by model registries */
+            id: string;
+            key_count: number;
+            /** Format: int32 */
+            max_retries: number;
+            name: string;
+            /** @description Provider type as string ("local" or "remote") */
+            provider_type: string;
+            /** Format: int32 */
+            rate_limit: number;
+            rerank_model_count: number;
+            /** Format: int64 */
+            timeout_secs: number;
+        };
+        /** @description Connectivity probe request for a configured model. */
+        LlmTestRequest: {
+            /** @description Model key in the corresponding registry */
+            model_key: string;
+            /** @description Service to probe: "embedding" or "chat" */
+            service: string;
+        };
+        /**
+         * @description Connectivity probe result. The probe uses the stored configuration and
+         *     discards all transient state afterwards.
+         */
+        LlmTestResponse: {
+            dimension?: number | null;
+            /** Format: int64 */
+            latency_ms: number;
+            message: string;
+            model_key: string;
+            service: string;
+            success: boolean;
+        };
         /** @description Metrics cleanup response */
         MetricsCleanupResponse: {
             deleted_count: number;
@@ -2614,6 +2775,60 @@ export interface components {
             success: boolean;
             total: number;
         };
+        /**
+         * @description Read-only project LLM overview.
+         *
+         *     Merged runtime configuration rendered as typed views. All secrets stay
+         *     masked. Embedding and provider globals are read-only here; only chat and
+         *     rerank selection are project-effective and editable through the typed
+         *     update endpoint.
+         */
+        ProjectLlmOverviewResponse: {
+            chat_models: components["schemas"]["ChatModelView"][];
+            /** Format: int64 */
+            config_version: number;
+            default_chat?: string | null;
+            default_embedding?: string | null;
+            default_rerank?: string | null;
+            dimension: components["schemas"]["LlmDimensionStatus"];
+            embedding_models: components["schemas"]["EmbeddingModelView"][];
+            ephemeral_note: string;
+            llm_enabled: boolean;
+            missing_api_key_providers: string[];
+            /** Format: int64 */
+            project_id: number;
+            providers: components["schemas"]["LlmProviderSummary"][];
+            rerank_enabled: boolean;
+            rerank_max_candidates: number;
+            rerank_models: components["schemas"]["RerankModelView"][];
+            success: boolean;
+            unknown_provider_refs: string[];
+        };
+        /**
+         * @description Typed project LLM update. Only project-effective chat and rerank fields
+         *     are accepted. Provider connection details and embedding model membership
+         *     stay global and are changed through the server configuration file.
+         */
+        ProjectLlmUpdateRequest: {
+            chat_model_params?: {
+                [key: string]: components["schemas"]["ChatModelParamPatch"];
+            } | null;
+            default_chat?: string | null;
+            default_rerank?: string | null;
+            rerank_enabled?: boolean | null;
+            rerank_max_candidates?: number | null;
+        };
+        /** @description Response for the typed project LLM update. */
+        ProjectLlmUpdateResponse: {
+            /** Format: int64 */
+            config_version: number;
+            ephemeral: boolean;
+            hot_reload_applied: boolean;
+            message: string;
+            /** Format: int64 */
+            project_id: number;
+            success: boolean;
+        };
         /** @description Qdrant process action response */
         QdrantActionResponse: {
             message: string;
@@ -2704,6 +2919,15 @@ export interface components {
             /** Format: int32 */
             line: number;
             relation_type: string;
+        };
+        /** @description Rerank model entry in the project LLM overview. */
+        RerankModelView: {
+            is_default: boolean;
+            key: string;
+            mode: string;
+            model: string;
+            provider_id: string;
+            provider_name: string;
         };
         /** @description Retry queue clear response */
         RetryQueueClearResponse: {
@@ -5713,6 +5937,164 @@ export interface operations {
             };
         };
     };
+    handle_update_project_llm_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectLlmUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLlmUpdateResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_get_project_llm_overview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLlmOverviewResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    handle_test_project_llm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project id */
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmTestResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_classification_stats: {
         parameters: {
             query?: never;
@@ -6228,11 +6610,17 @@ export interface operations {
     };
     handle_retry_queue_status: {
         parameters: {
-            query?: { project_id?: number };
+            query?: {
+                /**
+                 * @description Optional project ID to scope retry-queue operations to one project.
+                 *     When omitted, operations aggregate across all projects.
+                 */
+                project_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
-        }
+        };
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6275,11 +6663,17 @@ export interface operations {
     };
     handle_retry_queue_clear: {
         parameters: {
-            query?: { project_id?: number };
+            query?: {
+                /**
+                 * @description Optional project ID to scope retry-queue operations to one project.
+                 *     When omitted, operations aggregate across all projects.
+                 */
+                project_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
-        }
+        };
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6322,11 +6716,17 @@ export interface operations {
     };
     handle_retry_queue_dead_list: {
         parameters: {
-            query?: { project_id?: number };
+            query?: {
+                /**
+                 * @description Optional project ID to scope retry-queue operations to one project.
+                 *     When omitted, operations aggregate across all projects.
+                 */
+                project_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
-        }
+        };
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6351,11 +6751,17 @@ export interface operations {
     };
     handle_retry_queue_dead_clear: {
         parameters: {
-            query?: { project_id?: number };
+            query?: {
+                /**
+                 * @description Optional project ID to scope retry-queue operations to one project.
+                 *     When omitted, operations aggregate across all projects.
+                 */
+                project_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
-        }
+        };
         requestBody?: never;
         responses: {
             /** @description Success */
@@ -6380,11 +6786,17 @@ export interface operations {
     };
     handle_retry_queue_process: {
         parameters: {
-            query?: { project_id?: number };
+            query?: {
+                /**
+                 * @description Optional project ID to scope retry-queue operations to one project.
+                 *     When omitted, operations aggregate across all projects.
+                 */
+                project_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
-        }
+        };
         requestBody?: never;
         responses: {
             /** @description Success */

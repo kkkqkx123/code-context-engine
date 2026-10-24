@@ -4,7 +4,8 @@
     "title": "CCE API",
     "description": "Code context engine: indexing, search, relations and tool endpoints",
     "license": {
-      "name": ""
+      "name": "GPL-3.0-only",
+      "identifier": "GPL-3.0-only"
     },
     "version": "1.0.0"
   },
@@ -4138,6 +4139,218 @@
         }
       }
     },
+    "/api/project/{project_id}/llm/config": {
+      "put": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle typed project LLM update request.",
+        "description": "Only project-effective chat and rerank fields are accepted. The update is\nvalidated, stored in memory and component caches are cleared without\ninvalidating the registry entry.",
+        "operationId": "handle_update_project_llm_config",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectLlmUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectLlmUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/llm/overview": {
+      "get": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle read project LLM overview request.",
+        "description": "Returns masked provider summaries, typed model views and dimension\ndiagnostics derived from the merged runtime configuration. Secrets are\nnever returned.",
+        "operationId": "handle_get_project_llm_overview",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectLlmOverviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project/{project_id}/llm/test": {
+      "post": {
+        "tags": [
+          "Project"
+        ],
+        "summary": "Handle project LLM connectivity probe.",
+        "description": "Uses the stored project configuration and discards all transient client\nstate afterwards. No secrets are accepted or returned.",
+        "operationId": "handle_test_project_llm",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "description": "Project id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmTestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/project/{project_id}/relations/classification/stats": {
       "get": {
         "tags": [
@@ -4778,6 +4991,18 @@
         ],
         "summary": "GET /api/retry-queue — View retry queue status (aggregated across all projects)",
         "operationId": "handle_retry_queue_status",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4827,6 +5052,18 @@
         ],
         "summary": "DELETE /api/retry-queue — Clear all retry queues across all projects",
         "operationId": "handle_retry_queue_clear",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4878,6 +5115,18 @@
         ],
         "summary": "GET /api/retry-queue/dead — Snapshot of dead-lettered queries",
         "operationId": "handle_retry_queue_dead_list",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4907,6 +5156,18 @@
         ],
         "summary": "DELETE /api/retry-queue/dead — Discard the dead-letter lists",
         "operationId": "handle_retry_queue_dead_clear",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -4939,6 +5200,18 @@
         "summary": "POST /api/retry-queue/process — Manually trigger retry queue processing",
         "description": "Drains all queries that are ready for retry (cooldown expired)\nand re-executes them. Returns the number of queries re-attempted.",
         "operationId": "handle_retry_queue_process",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Optional project ID to scope retry-queue operations to one project.\nWhen omitted, operations aggregate across all projects.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -6323,6 +6596,90 @@
           }
         }
       },
+      "ChatModelParamPatch": {
+        "type": "object",
+        "description": "Per-model chat parameter patch. All fields are optional; absent fields\nkeep their current values.",
+        "properties": {
+          "max_input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "max_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "top_p": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          }
+        }
+      },
+      "ChatModelView": {
+        "type": "object",
+        "description": "Chat model entry in the project LLM overview.",
+        "required": [
+          "key",
+          "provider_id",
+          "provider_name",
+          "model",
+          "temperature",
+          "max_tokens",
+          "top_p",
+          "max_input_tokens",
+          "is_default"
+        ],
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "max_input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_tokens": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "temperature": {
+            "type": "number",
+            "format": "float"
+          },
+          "top_p": {
+            "type": "number",
+            "format": "float"
+          }
+        }
+      },
       "ClassImplementationsResponse": {
         "type": "object",
         "description": "Class implementations response",
@@ -7216,6 +7573,49 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "EmbeddingModelView": {
+        "type": "object",
+        "description": "Embedding model entry in the project LLM overview.",
+        "required": [
+          "key",
+          "provider_id",
+          "provider_name",
+          "model",
+          "vector_dimension",
+          "max_batch_tokens",
+          "max_item_tokens",
+          "is_default"
+        ],
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "max_batch_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_item_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "vector_dimension": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -9352,6 +9752,183 @@
           "and"
         ]
       },
+      "LlmDimensionStatus": {
+        "type": "object",
+        "description": "Effective vector dimension compared against the default embedding model.",
+        "required": [
+          "vector_backend",
+          "effective_vector_size",
+          "matches",
+          "requires_reindex",
+          "message"
+        ],
+        "properties": {
+          "default_embedding_dimension": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "default_embedding_model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effective_vector_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "matches": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requires_reindex": {
+            "type": "boolean"
+          },
+          "vector_backend": {
+            "type": "string"
+          }
+        }
+      },
+      "LlmProviderSummary": {
+        "type": "object",
+        "description": "Masked provider summary for the project LLM overview.\n\nSecrets are never returned. Key state is expressed as counts and flags.",
+        "required": [
+          "id",
+          "name",
+          "provider_type",
+          "base_url",
+          "enabled",
+          "has_api_keys",
+          "key_count",
+          "has_unresolved_placeholder",
+          "api_key_file_set",
+          "timeout_secs",
+          "max_retries",
+          "rate_limit",
+          "embedding_model_count",
+          "chat_model_count",
+          "rerank_model_count"
+        ],
+        "properties": {
+          "api_key_file_set": {
+            "type": "boolean"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "chat_model_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "embedding_model_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_api_keys": {
+            "type": "boolean"
+          },
+          "has_unresolved_placeholder": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "description": "Provider id as used by model registries"
+          },
+          "key_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_retries": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider_type": {
+            "type": "string",
+            "description": "Provider type as string (\"local\" or \"remote\")"
+          },
+          "rate_limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "rerank_model_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "timeout_secs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "LlmTestRequest": {
+        "type": "object",
+        "description": "Connectivity probe request for a configured model.",
+        "required": [
+          "service",
+          "model_key"
+        ],
+        "properties": {
+          "model_key": {
+            "type": "string",
+            "description": "Model key in the corresponding registry"
+          },
+          "service": {
+            "type": "string",
+            "description": "Service to probe: \"embedding\" or \"chat\""
+          }
+        }
+      },
+      "LlmTestResponse": {
+        "type": "object",
+        "description": "Connectivity probe result. The probe uses the stored configuration and\ndiscards all transient state afterwards.",
+        "required": [
+          "success",
+          "service",
+          "model_key",
+          "latency_ms",
+          "message"
+        ],
+        "properties": {
+          "dimension": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "latency_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          },
+          "model_key": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
       "MetricsCleanupResponse": {
         "type": "object",
         "description": "Metrics cleanup response",
@@ -9764,6 +10341,188 @@
           }
         }
       },
+      "ProjectLlmOverviewResponse": {
+        "type": "object",
+        "description": "Read-only project LLM overview.\n\nMerged runtime configuration rendered as typed views. All secrets stay\nmasked. Embedding and provider globals are read-only here; only chat and\nrerank selection are project-effective and editable through the typed\nupdate endpoint.",
+        "required": [
+          "success",
+          "project_id",
+          "config_version",
+          "llm_enabled",
+          "providers",
+          "embedding_models",
+          "chat_models",
+          "rerank_models",
+          "rerank_enabled",
+          "rerank_max_candidates",
+          "dimension",
+          "missing_api_key_providers",
+          "unknown_provider_refs",
+          "ephemeral_note"
+        ],
+        "properties": {
+          "chat_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatModelView"
+            }
+          },
+          "config_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "default_chat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_embedding": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_rerank": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dimension": {
+            "$ref": "#/components/schemas/LlmDimensionStatus"
+          },
+          "embedding_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingModelView"
+            }
+          },
+          "ephemeral_note": {
+            "type": "string"
+          },
+          "llm_enabled": {
+            "type": "boolean"
+          },
+          "missing_api_key_providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LlmProviderSummary"
+            }
+          },
+          "rerank_enabled": {
+            "type": "boolean"
+          },
+          "rerank_max_candidates": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rerank_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RerankModelView"
+            }
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "unknown_provider_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ProjectLlmUpdateRequest": {
+        "type": "object",
+        "description": "Typed project LLM update. Only project-effective chat and rerank fields\nare accepted. Provider connection details and embedding model membership\nstay global and are changed through the server configuration file.",
+        "properties": {
+          "chat_model_params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ChatModelParamPatch"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "default_chat": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_rerank": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rerank_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "rerank_max_candidates": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "ProjectLlmUpdateResponse": {
+        "type": "object",
+        "description": "Response for the typed project LLM update.",
+        "required": [
+          "success",
+          "project_id",
+          "config_version",
+          "hot_reload_applied",
+          "ephemeral",
+          "message"
+        ],
+        "properties": {
+          "config_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "ephemeral": {
+            "type": "boolean"
+          },
+          "hot_reload_applied": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
       "QdrantActionResponse": {
         "type": "object",
         "description": "Qdrant process action response",
@@ -10083,6 +10842,38 @@
             "minimum": 0
           },
           "relation_type": {
+            "type": "string"
+          }
+        }
+      },
+      "RerankModelView": {
+        "type": "object",
+        "description": "Rerank model entry in the project LLM overview.",
+        "required": [
+          "key",
+          "provider_id",
+          "provider_name",
+          "model",
+          "mode",
+          "is_default"
+        ],
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_name": {
             "type": "string"
           }
         }

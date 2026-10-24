@@ -27,6 +27,9 @@ pub const PROJECT_DEAD_LETTERS_ACK_TEMPLATE: &str =
     "/api/project/{project_id}/dead-letters/acknowledge";
 pub const PROJECT_RELOAD_TEMPLATE: &str = "/api/project/{project_id}/reload";
 pub const PROJECT_CONFIG_TEMPLATE: &str = "/api/project/{project_id}/config";
+pub const PROJECT_LLM_OVERVIEW_TEMPLATE: &str = "/api/project/{project_id}/llm/overview";
+pub const PROJECT_LLM_CONFIG_TEMPLATE: &str = "/api/project/{project_id}/llm/config";
+pub const PROJECT_LLM_TEST_TEMPLATE: &str = "/api/project/{project_id}/llm/test";
 
 pub const FUNCTION_DETAIL_TEMPLATE: &str = "/api/project/{project_id}/function/{id}";
 pub const FUNCTION_CALLS_TEMPLATE: &str = "/api/project/{project_id}/function/{id}/calls";
@@ -155,6 +158,21 @@ pub fn project_config(project_id: i64) -> String {
     expand_project(PROJECT_CONFIG_TEMPLATE, project_id)
 }
 
+/// Concrete project LLM overview path.
+pub fn project_llm_overview(project_id: i64) -> String {
+    expand_project(PROJECT_LLM_OVERVIEW_TEMPLATE, project_id)
+}
+
+/// Concrete project LLM config path.
+pub fn project_llm_config(project_id: i64) -> String {
+    expand_project(PROJECT_LLM_CONFIG_TEMPLATE, project_id)
+}
+
+/// Concrete project LLM test path.
+pub fn project_llm_test(project_id: i64) -> String {
+    expand_project(PROJECT_LLM_TEST_TEMPLATE, project_id)
+}
+
 /// Concrete ingest manifest path.
 pub fn ingest_manifest(project_id: i64) -> String {
     expand_project(INGEST_MANIFEST_TEMPLATE, project_id)
@@ -205,6 +223,9 @@ mod tests {
             PROJECT_DEAD_LETTERS_ACK_TEMPLATE,
             PROJECT_RELOAD_TEMPLATE,
             PROJECT_CONFIG_TEMPLATE,
+            PROJECT_LLM_OVERVIEW_TEMPLATE,
+            PROJECT_LLM_CONFIG_TEMPLATE,
+            PROJECT_LLM_TEST_TEMPLATE,
             FUNCTION_DETAIL_TEMPLATE,
             GRAPH_EGO_TEMPLATE,
             WATCH_START_TEMPLATE,

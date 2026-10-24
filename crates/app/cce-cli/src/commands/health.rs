@@ -108,7 +108,11 @@ async fn health_check(
 
 /// Print individual service status
 fn print_service_status(name: &str, status: &cce_api::models::ServiceStatus) {
-    let icon = if status.reachable { icons::SUCCESS } else { icons::ERROR };
+    let icon = if status.reachable {
+        icons::SUCCESS
+    } else {
+        icons::ERROR
+    };
     let colored_name = if status.reachable {
         format!("{} {}", icon, name).green()
     } else {

@@ -132,7 +132,11 @@ fn print_component_status(prefix: &str, component: &StorageComponentStatus) {
 
 /// Print individual service status
 fn print_service_status(name: &str, reachable: bool, message: &str) {
-    let icon = if reachable { icons::SUCCESS } else { icons::ERROR };
+    let icon = if reachable {
+        icons::SUCCESS
+    } else {
+        icons::ERROR
+    };
     let colored_name = if reachable {
         format!("{} {}", icon, name).green()
     } else {

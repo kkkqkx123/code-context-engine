@@ -105,6 +105,18 @@ pub(crate) fn api_routes() -> Router<AppState> {
             get(handlers::project::handle_get_project_config)
                 .put(handlers::project::handle_update_project_config),
         )
+        .route(
+            api_paths::PROJECT_LLM_OVERVIEW_TEMPLATE,
+            get(handlers::project::handle_get_project_llm_overview),
+        )
+        .route(
+            api_paths::PROJECT_LLM_CONFIG_TEMPLATE,
+            put(handlers::project::handle_update_project_llm_config),
+        )
+        .route(
+            api_paths::PROJECT_LLM_TEST_TEMPLATE,
+            post(handlers::project::handle_test_project_llm),
+        )
         // Project-scoped entity queries
         .route(
             api_paths::FUNCTION_DETAIL_TEMPLATE,

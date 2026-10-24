@@ -16,12 +16,21 @@
 	import ConfigValidationCard from '$lib/components/config/ConfigValidationCard.svelte';
 	import ConfigProjectBasicsCard from '$lib/components/config/ConfigProjectBasicsCard.svelte';
 	import ConfigRuntimeCard from '$lib/components/config/ConfigRuntimeCard.svelte';
+	import ConfigLlmCard from '$lib/components/config/ConfigLlmCard.svelte';
 	import {
 		configApi,
+		llmApi,
 		type ConfigInfoResponse,
 		type ConfigValidateResponse,
+		type ProjectLlmOverviewResponse,
+		type ProjectLlmUpdateResponse,
+		type LlmTestResponse,
 	} from '$lib/api/config';
-	import { projectApi, type ProjectConfigUpdateResponse } from '$lib/api';
+	import {
+		projectApi,
+		indexApi,
+		type ProjectConfigUpdateResponse,
+	} from '$lib/api';
 	import { currentProjectId, onProjectChange } from '$lib/stores/project';
 	import {
 		apiToken,
@@ -70,6 +79,28 @@
 	let tokenDraft = $state('');
 	let tokenMessage = $state<string | null>(null);
 	let tokenSaving = $state(false);
+
+	// ─── Project LLM overview + typed edit + probe (via /llm/*) ──
+	let llmOverview = $state<ProjectLlmOverviewResponse | null>(null);
+	let llmLoaded = $state(false);
+	let llmLoading = $state(false);
+	let llmLoadError = $state<string | null>(null);
+	let llmSaving = $state(false);
+	let llmSaveError = $state<string | null>(null);
+	let llmSaveResult = $state<ProjectLlmUpdateResponse | null>(null);
+	let llmDefaultChat = $state('');
+	let llmDefaultRerank = $state('');
+	let llmRerankEnabled = $state(true);
+	let llmRerankMaxCandidates = $state('');
+	let llmChatTemperature = $state('');
+	let llmChatMaxTokens = $state('');
+	let llmChatTopP = $state('');
+	let llmChatMaxInputTokens = $state('');
+	let llmTesting = $state(false);
+	let llmTestResult = $state<LlmTestResponse | null>(null);
+	let llmTestError = $state<string | null>(null);
+	let reindexBusy = $state(false);
+	let reindexMessage = $state<string | null>(null);
 
 	async function loadInfo() {
 		loading = true;
@@ -136,6 +167,149 @@
 	function ensureProjectLoaded() {
 		if (!basicLoaded && !basicLoading) void loadProjectBasics();
 		if (!runtimeLoaded && !runtimeLoading) void loadProjectRuntime();
+		if (!llmLoaded && !llmLoading) void loadLlmOverview();
+	}
+
+	async function loadLlmOverview() {
+		llmLoading = true;
+		llmLoadError = null;
+		try {
+			const response = await llmApi.getOverview(String(get(currentProjectId)));
+			llmOverview = response;
+			llmLoaded = true;
+			llmDefaultChat = response.default_chat ?? '';
+			llmDefaultRerank = response.default_rerank ?? '';
+			llmRerankEnabled = response.rerank_enabled;
+			llmRerankMaxCandidates = String(response.rerank_max_candidates ?? '');
+			const activeChat = response.chat_models.find(
+				(model) => model.key === (response.default_chat ?? ''),
+			);
+			llmChatTemperature = activeChat ? String(activeChat.temperature) : '';
+			llmChatMaxTokens = activeChat ? String(activeChat.max_tokens) : '';
+			llmChatTopP = activeChat ? String(activeChat.top_p) : '';
+			llmChatMaxInputTokens = activeChat ? String(activeChat.max_input_tokens) : '';
+			llmSaveResult = null;
+			llmTestResult = null;
+			llmTestError = null;
+		} catch (e) {
+			llmLoadError = errorMessage(e);
+		} finally {
+			llmLoading = false;
+		}
+	}
+
+	function parseOptionalNumber(text: string): number | undefined {
+		const trimmed = text.trim();
+		if (!trimmed) return undefined;
+		const value = Number(trimmed);
+		return Number.isFinite(value) ? value : undefined;
+	}
+
+	async function saveLlmConfig() {
+		llmSaveError = null;
+		llmSaveResult = null;
+		const trimmedChat = llmDefaultChat.trim();
+		const trimmedRerank = llmDefaultRerank.trim();
+		const maxCandidates = parseOptionalNumber(llmRerankMaxCandidates);
+		if (llmRerankMaxCandidates.trim() && maxCandidates === undefined) {
+			llmSaveError = 'Rerank max candidates must be a number';
+			return;
+		}
+		const temperature = llmChatTemperature.trim() ? Number(llmChatTemperature.trim()) : undefined;
+		const maxTokens = parseOptionalNumber(llmChatMaxTokens);
+		const topP = llmChatTopP.trim() ? Number(llmChatTopP.trim()) : undefined;
+		const maxInputTokens = parseOptionalNumber(llmChatMaxInputTokens);
+		if (llmChatTemperature.trim() && (temperature === undefined || !Number.isFinite(temperature))) {
+			llmSaveError = 'Temperature must be a number';
+			return;
+		}
+		if (llmChatMaxTokens.trim() && maxTokens === undefined) {
+			llmSaveError = 'Max tokens must be a number';
+			return;
+		}
+		if (llmChatTopP.trim() && (topP === undefined || !Number.isFinite(topP))) {
+			llmSaveError = 'Top P must be a number';
+			return;
+		}
+		if (llmChatMaxInputTokens.trim() && maxInputTokens === undefined) {
+			llmSaveError = 'Max input tokens must be a number';
+			return;
+		}
+		const chatModelParams =
+			trimmedChat &&
+			(temperature !== undefined ||
+				maxTokens !== undefined ||
+				topP !== undefined ||
+				maxInputTokens !== undefined)
+				? {
+						[trimmedChat]: {
+							...(temperature !== undefined ? { temperature } : {}),
+							...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+							...(topP !== undefined ? { top_p: topP } : {}),
+							...(maxInputTokens !== undefined
+								? { max_input_tokens: maxInputTokens }
+								: {}),
+						},
+					}
+				: undefined;
+		llmSaving = true;
+		try {
+			llmSaveResult = await llmApi.updateConfig(String($currentProjectId), {
+				default_chat: trimmedChat ? trimmedChat : null,
+				default_rerank: trimmedRerank ? trimmedRerank : null,
+				rerank_enabled: llmRerankEnabled,
+				rerank_max_candidates: maxCandidates ?? null,
+				chat_model_params: chatModelParams ?? null,
+			});
+			void loadLlmOverview();
+			void loadValidate();
+		} catch (e) {
+			llmSaveError = errorMessage(e);
+		} finally {
+			llmSaving = false;
+		}
+	}
+
+	async function testLlmModel(service: string, modelKey: string) {
+		llmTesting = true;
+		llmTestError = null;
+		llmTestResult = null;
+		try {
+			llmTestResult = await llmApi.testModel(String(get(currentProjectId)), {
+				service,
+				model_key: modelKey,
+			});
+		} catch (e) {
+			llmTestError = errorMessage(e);
+		} finally {
+			llmTesting = false;
+		}
+	}
+
+	async function clearProjectVectors() {
+		reindexBusy = true;
+		reindexMessage = null;
+		try {
+			const response = await indexApi.clearIndex(Number(get(currentProjectId)));
+			reindexMessage = response.message ?? `Clear finished (success=${response.success})`;
+		} catch (e) {
+			reindexMessage = errorMessage(e);
+		} finally {
+			reindexBusy = false;
+		}
+	}
+
+	async function reindexProject() {
+		reindexBusy = true;
+		reindexMessage = null;
+		try {
+			const response = await projectApi.indexProject(String(get(currentProjectId)));
+			reindexMessage = `Reindex started for project ${response.project_id ?? get(currentProjectId)}`;
+		} catch (e) {
+			reindexMessage = errorMessage(e);
+		} finally {
+			reindexBusy = false;
+		}
 	}
 
 	async function saveProjectBasics() {
@@ -215,6 +389,7 @@
 			// Reloading from disk can change both panes, refresh them together.
 			void loadProjectBasics();
 			void loadProjectRuntime();
+			void loadLlmOverview();
 		} catch (e) {
 			runtimeError = errorMessage(e);
 		} finally {
@@ -257,6 +432,7 @@
 		onProjectChange(() => {
 			if (basicLoaded) void loadProjectBasics();
 			if (runtimeLoaded) void loadProjectRuntime();
+			if (llmLoaded) void loadLlmOverview();
 		}),
 	);
 </script>
@@ -328,6 +504,35 @@
 				{basicError}
 				{basicResult}
 				onSave={saveProjectBasics}
+			/>
+
+			<ConfigLlmCard
+				overview={llmOverview}
+				loaded={llmLoaded}
+				loading={llmLoading}
+				saving={llmSaving}
+				loadError={llmLoadError}
+				saveError={llmSaveError}
+				saveResult={llmSaveResult}
+				bind:defaultChat={llmDefaultChat}
+				bind:defaultRerank={llmDefaultRerank}
+				bind:rerankEnabled={llmRerankEnabled}
+				bind:rerankMaxCandidates={llmRerankMaxCandidates}
+				bind:chatTemperature={llmChatTemperature}
+				bind:chatMaxTokens={llmChatMaxTokens}
+				bind:chatTopP={llmChatTopP}
+				bind:chatMaxInputTokens={llmChatMaxInputTokens}
+				testing={llmTesting}
+				testResult={llmTestResult}
+				testError={llmTestError}
+				{reindexBusy}
+				{reindexMessage}
+				projectId={$currentProjectId}
+				onReload={() => void loadLlmOverview()}
+				onSave={() => void saveLlmConfig()}
+				onTest={(service, modelKey) => void testLlmModel(service, modelKey)}
+				onClearVectors={() => void clearProjectVectors()}
+				onReindex={() => void reindexProject()}
 			/>
 
 			<ConfigRuntimeCard

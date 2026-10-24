@@ -669,12 +669,8 @@ impl GroupChunker {
                     conversion_texts.push(text);
                 }
             }
-            let (config, emb_budget, bm25_budget) = self.group_config(
-                &gc.group,
-                file_path,
-                language.as_deref(),
-                &conversion_texts,
-            )?;
+            let (config, emb_budget, bm25_budget) =
+                self.group_config(&gc.group, file_path, language.as_deref(), &conversion_texts)?;
             let splitter = TextSplitter::with_pre_limits(
                 config.clone(),
                 emb_budget.pre_injection_limit,
