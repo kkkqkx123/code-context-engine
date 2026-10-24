@@ -11,9 +11,9 @@
 //!
 //! # Environment Variables
 //!
-//! ## Infrastructure (set in config.toml, NOT overrideable via env vars)
-//! - `CCE_SERVER_HOST` - Server host address (use config.toml)
-//! - `CCE_SERVER_PORT` - Server port number (use config.toml)
+//! ## Infrastructure (file-explicit value wins, env fallback when default)
+//! - `CCE_SERVER_HOST` - Server host address
+//! - `CCE_SERVER_PORT` - Server port number
 //!
 //! ## Database
 //! - `CCE_DB_QDRANT_URL` - Qdrant server URL
@@ -153,14 +153,49 @@ fn find_dotenv_candidates() -> Vec<std::path::PathBuf> {
 /// - API keys (sensitive, never stored in config files)
 /// - Database URLs (for environment-specific targets)
 /// - Logging settings (for runtime debugging)
+/// - Server bind (only when the file value is still the default)
 ///
-/// Infrastructure settings (server host/port) are NOT overridable via env vars.
-/// They must be configured in config.toml, which serves as the single source
-/// of truth for deployment topology.
+/// File-explicit infrastructure values win over env vars.
 pub fn apply_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
+    apply_server_env_vars(config)?;
     apply_database_env_vars(config)?;
     apply_logger_env_vars(config)?;
 
+    Ok(())
+}
+
+/// Apply server bind environment variables with file-explicit-wins semantics.
+///
+/// Each field only falls back to the environment when the loaded file value
+/// is still the default, so explicit file configuration always wins over
+/// container defaults.
+fn apply_server_env_vars(config: &mut AppConfig) -> Result<(), ConfigError> {
+    let default_server = crate::global::ServerConfig::default();
+    if config.server.host == default_server.host {
+        if let Ok(val) = std::env::var("CCE_SERVER_HOST") {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                config.server.host = trimmed.to_string();
+            }
+        }
+    }
+    if config.server.port == default_server.port {
+        if let Ok(val) = std::env::var("CCE_SERVER_PORT") {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                let port: u16 = trimmed
+                    .parse()
+                    .map_err(|_| ConfigError::invalid_env_var("CCE_SERVER_PORT", "invalid port"))?;
+                if port == 0 {
+                    return Err(ConfigError::invalid_env_var(
+                        "CCE_SERVER_PORT",
+                        "must be greater than 0",
+                    ));
+                }
+                config.server.port = port;
+            }
+        }
+    }
     Ok(())
 }
 

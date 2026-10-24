@@ -205,7 +205,7 @@ pub async fn upload_paths(
             continue;
         }
         if let Some(expected) = file.content_hash.as_deref()
-            && cce_utils::hash::calculate_hash(&bytes) != expected
+            && cce_supply::chunk_hash(&bytes) != expected
         {
             errors.push(format!(
                 "{identity}: changed between manifest and upload; a fresh manifest is required"
@@ -297,23 +297,14 @@ async fn flush_batch(
 }
 
 /// Hash one chunk of raw bytes for per-chunk verification.
-///
-/// Delegates to the shared hash domain so gateway and server verify the same
-/// digest for the same bytes.
 pub fn chunk_hash(bytes: &[u8]) -> String {
-    cce_utils::hash::calculate_hash(bytes)
+    cce_supply::chunk_hash(bytes)
 }
 
 /// Optionally compress chunk bytes. Compression stays off unless the
 /// gateway explicitly enables it; the server decompresses before hashing.
 pub fn maybe_compress(bytes: &[u8], compress: bool) -> (Vec<u8>, bool) {
-    if !compress || bytes.is_empty() {
-        return (bytes.to_vec(), false);
-    }
-    match zstd::encode_all(bytes, 3) {
-        Ok(encoded) if (encoded.len() as u64) < (bytes.len() as u64) => (encoded, true),
-        _ => (bytes.to_vec(), false),
-    }
+    cce_supply::maybe_compress(bytes, compress)
 }
 
 #[cfg(test)]
@@ -321,17 +312,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chunk_hash_is_stable() {
-        assert_eq!(chunk_hash(b"hello"), chunk_hash(b"hello"));
-        assert!(chunk_hash(b"hello") != chunk_hash(b"world"));
-    }
-
-    #[test]
-    fn chunk_hash_shares_common_hash_domain() {
-        assert_eq!(
-            chunk_hash(b"hello"),
-            cce_utils::hash::calculate_hash(b"hello")
-        );
+    fn supply_wrappers_delegate_to_shared_kernel() {
+        assert_eq!(chunk_hash(b"hello"), cce_supply::chunk_hash(b"hello"));
+        let repetitive = vec![b'a'; 64];
+        let (plain, compressed) = maybe_compress(&repetitive, false);
+        assert!(!compressed);
+        assert_eq!(plain.len(), repetitive.len());
     }
 
     #[test]

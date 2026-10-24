@@ -1,0 +1,19 @@
+[package]
+name = "cce-supply"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Shared supply domain for gateway pushes and server ingest"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cce-config = { version = "0.1.0", path = "../../core/cce-config" }
+cce-types = { version = "0.1.0", path = "../../core/cce-types" }
+cce-utils = { version = "0.1.0", path = "../../core/cce-utils" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zstd = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

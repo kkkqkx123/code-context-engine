@@ -14,6 +14,8 @@ impl AppConfig {
     ///
     /// - Project config can override: scanner, grouper, orchestrator, relation, ast_to_nl, license_header, summary, embedder (model only), llm (chat/rerank models)
     /// - Project config CANNOT override: server, database, logger, export
+    /// - Storage location (data_dir, index_path, collection) stays global for the shared engine;
+    ///   per-project storage tuning applies globally and is not isolated
     /// - Embedder override is limited to model selection and preprocessing; API keys and base_url remain from global
     /// - LLM override allows projects to specify different chat/rerank models while keeping provider credentials global
     /// - Sensitive settings (API keys, URLs) remain in global config
@@ -131,9 +133,6 @@ fn merge_storage(merged: &mut AppConfig, project: &ProjectAppConfig) {
         if let Some(ref project_bm25) = project_storage.bm25 {
             if let Some(enabled) = project_bm25.enabled {
                 merged.database.bm25.enabled = enabled;
-            }
-            if let Some(ref index_path) = project_bm25.index_path {
-                merged.database.bm25.index_path = Some(index_path.clone());
             }
             if let Some(ref algorithm) = project_bm25.algorithm {
                 merged.database.bm25.algorithm = algorithm.clone();

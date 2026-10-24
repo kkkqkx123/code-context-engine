@@ -233,7 +233,7 @@ fn read_event(
         return None;
     }
     if let Some(expected) = file.content_hash.as_deref()
-        && cce_utils::hash::calculate_hash(&bytes) != expected
+        && cce_supply::chunk_hash(&bytes) != expected
     {
         eprintln!("warning: {identity} changed after scanning and is skipped");
         return None;

@@ -42,32 +42,54 @@ pub async fn handle_create_project(
         ));
     }
 
-    // Validate root_path exists and is a directory
-    let root_path = PathBuf::from(&request.root_path);
-    if !root_path.exists() {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Root path does not exist",
-        ));
-    }
-    if !root_path.is_dir() {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Root path is not a directory",
-        ));
-    }
-
-    // Get canonical path
-    let canonical_path = match root_path.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
+    // Root path semantics: registry stores the logical identifier used for
+    // display and de-duplication. Local supply requires a server-side
+    // physical directory; gateway supply allows a logical-only path since
+    // content arrives via ingest and the server never touches the filesystem.
+    let supply_is_gateway = request
+        .supply_mode
+        .as_deref()
+        .map(|mode| mode.trim().to_lowercase() == cce_api::models::SUPPLY_MODE_GATEWAY)
+        .unwrap_or(false);
+    let root_path_str = if supply_is_gateway {
+        let logical = request.root_path.trim();
+        if logical.is_empty() {
             return ApiResult::Error(ErrorResponse::new(
                 error_codes::INVALID_REQUEST,
-                format!("Failed to resolve path: {}", e),
+                "Root path cannot be empty",
             ));
         }
+        let trimmed = logical.trim_end_matches('/').trim_end_matches('\\');
+        if trimmed.is_empty() {
+            "/".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        let root_path = PathBuf::from(&request.root_path);
+        if !root_path.exists() {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                "Root path does not exist",
+            ));
+        }
+        if !root_path.is_dir() {
+            return ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                "Root path is not a directory",
+            ));
+        }
+        let canonical_path = match root_path.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                return ApiResult::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    format!("Failed to resolve path: {}", e),
+                ));
+            }
+        };
+        canonical_path.to_string_lossy().to_string()
     };
-    let root_path_str = canonical_path.to_string_lossy().to_string();
 
     // Check if metadata store is available
     let metadata_store = match state.engine.metadata_store() {
@@ -105,13 +127,14 @@ pub async fn handle_create_project(
     };
 
     // Create new project record. The profile document is the single source
-    // of truth for scan configuration; legacy list columns are left untouched.
+    // of truth for scan configuration; supply filter arguments become a
+    // one-shot profile patch through the shared supply kernel.
     let mut new_project = NewProjectRecord::new(name.clone(), root_path_str.clone());
-    let initial_profile = cce_config::ProjectAppConfig::from_scan_lists(
-        (!request.extensions.is_empty()).then(|| request.extensions.clone()),
-        (!request.exclude_dirs.is_empty()).then(|| request.exclude_dirs.clone()),
+    let initial_profile = cce_supply::profile_patch_from_supply_filter(
+        request.extensions.clone(),
+        request.exclude_dirs.clone(),
         Some(request.respect_gitignore),
-        (!request.ignore_patterns.is_empty()).then(|| request.ignore_patterns.clone()),
+        request.ignore_patterns.clone(),
     );
     new_project.profile_json = Some(initial_profile.to_canonical_json());
 

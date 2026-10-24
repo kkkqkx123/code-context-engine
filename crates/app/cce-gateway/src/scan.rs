@@ -1,4 +1,4 @@
-//! Local directory scanning and the snapshot/fingerprint domain types.
+//! Local directory scanning over the shared supply domain.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -104,38 +104,26 @@ impl From<&ScannedFile> for BaselineFingerprint {
 /// Hashed entries compare by hash only. Hash-less entries fall back to the
 /// size plus modification time comparison.
 pub fn fingerprints_match(previous: &BaselineFingerprint, current: &ScannedFile) -> bool {
-    if previous.content_hash.is_some() || current.content_hash.is_some() {
-        return previous.content_hash == current.content_hash;
-    }
-    previous.size == current.size && previous.modified_secs == current.modified_secs
+    cce_supply::fingerprints_match(
+        previous.content_hash.as_deref(),
+        previous.size,
+        previous.modified_secs,
+        current.content_hash.as_deref(),
+        current.size,
+        current.modified_secs,
+    )
 }
 
 /// Stable manifest version for a snapshot. The same file set yields the
 /// same version so an interrupted push can resume without retransmitting
 /// received chunks; any content change yields a new version.
 pub fn manifest_version_for_snapshot(snapshot: &ScanSnapshot) -> u64 {
-    let mut identities: Vec<&String> = snapshot.files.keys().collect();
-    identities.sort();
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for identity in identities {
-        if let Some(file) = snapshot.files.get(identity) {
-            for byte in identity.as_bytes() {
-                hash ^= *byte as u64;
-                hash = hash.wrapping_mul(0x100000001b3);
-            }
-            for byte in file.size.to_le_bytes() {
-                hash ^= byte as u64;
-                hash = hash.wrapping_mul(0x100000001b3);
-            }
-            if let Some(content_hash) = file.content_hash.as_deref() {
-                for byte in content_hash.as_bytes() {
-                    hash ^= *byte as u64;
-                    hash = hash.wrapping_mul(0x100000001b3);
-                }
-            }
-        }
-    }
-    hash.max(1)
+    let entries: Vec<(&str, u64, Option<&str>)> = snapshot
+        .files
+        .iter()
+        .map(|(identity, file)| (identity.as_str(), file.size, file.content_hash.as_deref()))
+        .collect();
+    cce_supply::manifest_version_for_entries(&entries)
 }
 
 /// One scan pass: usable files plus the entries the next pass reuses.
@@ -165,20 +153,8 @@ pub async fn scan_local(
     params: &SyncParams,
     previous: Option<&HashMap<PathBuf, FileEntry>>,
 ) -> Result<ScanOutcome> {
-    let exclude_patterns: Vec<String> = params
-        .exclude
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect();
-    let wanted: Vec<String> = params
-        .extensions
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.trim_start_matches('.').to_lowercase())
-        .collect();
+    let exclude_patterns = cce_supply::parse_exclude_filter(&params.exclude);
+    let wanted = cce_supply::parse_extension_filter(&params.extensions);
     let options = ScanOptions {
         root_path: params.path.clone(),
         include_patterns: Vec::new(),
@@ -213,15 +189,9 @@ pub async fn scan_local(
         } else if !entry.is_text() {
             skipped_binary += 1;
         } else {
-            let matches = wanted.is_empty()
-                || entry
-                    .relative_path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| wanted.contains(&ext.to_lowercase()))
-                    .unwrap_or(false);
+            let identity = cce_types::path::normalize_project_path(&entry.identity_key());
+            let matches = cce_supply::extension_matches(&identity, &wanted);
             if matches {
-                let identity = cce_types::path::normalize_project_path(&entry.identity_key());
                 files.insert(
                     identity,
                     ScannedFile {

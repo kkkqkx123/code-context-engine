@@ -306,19 +306,15 @@ pub(crate) fn decode_chunk_payload(
     let raw = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|e| format!("{relative}: content is not valid base64: {e}"))?;
-    let bytes = if compressed {
-        zstd::decode_all(raw.as_slice())
-            .map_err(|e| format!("{relative}: chunk decompression failed: {e}"))?
-    } else {
-        raw
-    };
+    let bytes = cce_supply::decompress_chunk(raw.as_slice(), compressed)
+        .map_err(|e| format!("{relative}: {e}"))?;
     if bytes.len() > INGEST_CHUNK_BYTES + 1024 {
         return Err(format!(
             "{relative}: chunk exceeds the {INGEST_CHUNK_BYTES} byte bound"
         ));
     }
     if let Some(expected) = expected_chunk_hash {
-        let actual = cce_utils::hash::calculate_hash(&bytes);
+        let actual = cce_supply::chunk_hash(&bytes);
         if actual != expected {
             return Err(format!(
                 "{relative}: chunk hash mismatch; a fresh upload of the piece is required"
@@ -341,7 +337,7 @@ pub(crate) async fn stage_bytes(
         ));
     }
     if let Some(expected) = expected_hash {
-        let actual = cce_utils::hash::calculate_hash(bytes);
+        let actual = cce_supply::chunk_hash(bytes);
         if actual != expected {
             return Err(format!(
                 "{relative} changed between manifest and upload; a fresh manifest is required"

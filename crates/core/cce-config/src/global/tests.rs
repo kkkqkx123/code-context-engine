@@ -385,7 +385,6 @@ fn test_merge_with_project_storage_bm25() {
         storage: Some(ProjectStorageConfig {
             bm25: Some(ProjectBm25Config {
                 enabled: Some(true),
-                index_path: Some("./.cce/bm25".to_string()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -396,10 +395,6 @@ fn test_merge_with_project_storage_bm25() {
     let merged = global.merge_with_project(&project);
 
     assert!(merged.database.bm25.enabled);
-    assert_eq!(
-        merged.database.bm25.index_path,
-        Some("./.cce/bm25".to_string())
-    );
 }
 
 #[test]
@@ -434,7 +429,6 @@ fn test_merge_with_project_storage_full_config() {
             bm25: Some(ProjectBm25Config {
                 enabled: Some(true),
                 algorithm: Some(Bm25AlgorithmConfig { k1: 2.0, b: 0.3 }),
-                ..Default::default()
             }),
             vector_local: None,
             index_manager: None,

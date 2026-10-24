@@ -42,6 +42,7 @@ cce-storage-bm25 = { version = "0.1.0", path = "../../infra/cce-storage-bm25" }
 cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage-vector-qdrant" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
+cce-supply = { version = "0.1.0", path = "../../infra/cce-supply" }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-server-shared = { version = "0.1.0", path = "../cce-server-shared" }
 async-trait = { workspace = true }

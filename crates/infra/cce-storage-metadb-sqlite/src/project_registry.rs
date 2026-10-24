@@ -228,11 +228,13 @@ impl ProjectRegistry {
         }
     }
 
-    /// Find a project by its path
+    /// Find a project by its path (local supply only).
     ///
-    /// The lookup path is normalized the same way as at creation time so
-    /// symlinks, relative paths and trailing slashes resolve to the stored
-    /// canonical root. Falls back to the raw input when it cannot be resolved.
+    /// Remote gateway projects use logical-only roots the server cannot
+    /// canonicalize, so callers must address them by id. The lookup path is
+    /// normalized the same way as at creation time so symlinks, relative
+    /// paths and trailing slashes resolve to the stored canonical root.
+    /// Falls back to the raw input when it cannot be resolved.
     pub async fn find_by_path(&self, path: &Path) -> Result<ProjectEntry, RegistryError> {
         let normalized = normalize_lookup_path(path);
         // Check cache first (fast path)

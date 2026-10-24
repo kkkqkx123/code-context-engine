@@ -9,7 +9,7 @@
 //! # Loading Priority (highest to lowest)
 //!
 //! 1. Configuration file (highest for infrastructure settings: host, port, db path)
-//! 2. Environment variables (CCE_*) for API keys, DB URLs, and logging
+//! 2. Environment variables (CCE_*) for API keys, DB URLs, logging, and server bind fallback
 //! 3. .env file variables (provides defaults for sensitive values)
 //! 4. Global configuration file (config.toml)
 //! 5. Default values
@@ -23,7 +23,7 @@
 //!
 //! # Infrastructure Settings Policy
 //!
-//! Server host/port are ONLY settable via config.toml, never via environment variables.
+//! File-explicit server host/port win; env vars only fill defaults.
 //! API keys and database URLs can be overridden via env vars for flexibility.
 //!
 //! # Environment Variable Placeholders
@@ -131,8 +131,7 @@ impl ConfigLoader {
     /// 3. .env file (provides defaults for sensitive values)
     /// 4. Default values
     ///
-    /// Infrastructure settings (server host/port) are ONLY settable via config.toml,
-    /// never via environment variables. This ensures consistent deployment topology.
+    /// File-explicit server host/port win; env vars only fill defaults.
     pub fn load(self) -> Result<AppConfig, ConfigError> {
         info!("Starting configuration loading process");
 

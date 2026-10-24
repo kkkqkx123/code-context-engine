@@ -51,6 +51,10 @@ pub struct ProjectAppConfig {
     pub name: Option<String>,
 
     /// Project root path (optional, defaults to config file directory)
+    ///
+    /// Server-side physical path for local supply mode. Remote gateway
+    /// projects leave this empty since the server never touches the
+    /// filesystem; the registry root_path remains the logical identifier.
     #[serde(default)]
     pub root_path: Option<PathBuf>,
 
@@ -515,6 +519,8 @@ pub struct ProjectSummaryPatch {
 /// Project-level storage configuration
 ///
 /// Allows projects to override storage settings without exposing sensitive data.
+/// Storage location stays global for the shared engine; tuning knobs apply
+/// globally and are not isolated per project.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectStorageConfig {
     /// Qdrant vector storage configuration override
@@ -629,16 +635,16 @@ pub struct WalConfigOverride {
     pub segments: Option<u32>,
 }
 
-/// Project-level BM25 configuration override
+/// Project-level BM25 configuration override.
+///
+/// Index location stays global so one shared index serves all projects via
+/// project isolation. Only algorithm and enable flag are overridable per
+/// project; per-project tuning applies globally to the shared engine.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectBm25Config {
     /// Enable/disable BM25 indexing
     #[serde(default)]
     pub enabled: Option<bool>,
-
-    /// Index path override (project-specific index location)
-    #[serde(default)]
-    pub index_path: Option<String>,
 
     /// BM25 algorithm parameters (k1, b)
     #[serde(default)]
@@ -1494,7 +1500,6 @@ always_ram = false
     fn test_project_bm25_config_serialization() {
         let toml_str = r#"
 enabled = true
-index_path = "./.cce/bm25"
 
 [algorithm]
 k1 = 2.0
@@ -1502,7 +1507,6 @@ b = 0.3
 "#;
         let config: ProjectBm25Config = toml::from_str(toml_str).expect("Failed to parse");
         assert_eq!(config.enabled, Some(true));
-        assert_eq!(config.index_path, Some("./.cce/bm25".to_string()));
         assert!(config.algorithm.is_some());
     }
 
@@ -1540,7 +1544,6 @@ always_ram = false
 
 [storage.bm25]
 enabled = true
-index_path = "./.cce/bm25"
 "#;
         let config: ProjectAppConfig = toml::from_str(toml_str).expect("Failed to parse");
         assert_eq!(config.name, Some("test-project".to_string()));
