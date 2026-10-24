@@ -25,50 +25,47 @@ pub fn split_by_tokens_in_range(
     range: Range<usize>,
     path: ChunkPath,
     config: &ChunkingConfig,
-    estimator: &TokenEstimator,
+    _estimator: &TokenEstimator,
 ) -> Vec<ChunkBoundary> {
     let mut boundaries = Vec::new();
     let mut current_pos = range.start;
+    let limit = config.limit(path);
+    if limit == 0 {
+        if current_pos < range.end {
+            boundaries.push(
+                ChunkBoundary::new(current_pos, range.end, SplitReason::HardLimit)
+                    .with_token_count(cost(&text[current_pos..range.end], path)),
+            );
+        }
+        return boundaries;
+    }
 
     while current_pos < range.end {
-        let target = match path {
-            ChunkPath::Bm25 => {
-                find_bm25_split_point(text, current_pos, config.max_bm25_words).min(range.end)
-            }
-            ChunkPath::Embedding => {
-                let relative =
-                    estimator.find_split_point(&text[current_pos..range.end], config.max_tokens);
-                (current_pos + relative).min(range.end)
-            }
-        };
-        let safe_end = find_good_split_point(text, current_pos, target).min(range.end);
-
+        let remaining = &text[current_pos..range.end];
+        let prefix =
+            cce_text::truncate_to_cost(remaining, super::super::boundary::unit(path), limit);
+        let mut safe_end = current_pos + prefix.len();
         if safe_end <= current_pos {
-            // Invalid configuration (for example, a zero token limit) must not
-            // make the splitter drop the remainder of valid UTF-8 input.
-            let next_char_end = text[current_pos..range.end]
+            // The limit is smaller than one character in this unit. Emit one
+            // character so the remainder is never lost; the caller's hard
+            // gate reports the configuration/content contradiction.
+            safe_end = remaining
                 .chars()
                 .next()
-                .map(|ch| current_pos + ch.len_utf8())
+                .map(|character| current_pos + character.len_utf8())
                 .unwrap_or(range.end);
-            if next_char_end <= current_pos {
-                break;
-            }
-            boundaries.push(
-                ChunkBoundary::new(current_pos, next_char_end, SplitReason::HardLimit)
-                    .with_token_count(cost(&text[current_pos..next_char_end], path)),
-            );
-            current_pos = next_char_end;
-            continue;
         }
-
-        let chunk_tokens = cost(&text[current_pos..safe_end], path);
+        // Prefer a natural boundary inside the guaranteed-to-fit prefix.
+        let target = find_good_split_point(text, current_pos, safe_end);
+        let target = target.clamp(current_pos, safe_end);
+        if target > current_pos && target <= safe_end {
+            safe_end = target;
+        }
 
         boundaries.push(
             ChunkBoundary::new(current_pos, safe_end, SplitReason::HardLimit)
-                .with_token_count(chunk_tokens),
+                .with_token_count(cost(&text[current_pos..safe_end], path)),
         );
-
         current_pos = safe_end;
     }
 
@@ -84,11 +81,11 @@ fn find_good_split_point(text: &str, start: usize, target: usize) -> usize {
     }
 
     let search_window = target.saturating_sub(start).max(50);
-    let window_start = floor_char_boundary(text, target.saturating_sub(search_window));
+    let window_start = floor_char_boundary(text, target.saturating_sub(search_window).max(start));
 
     // Look for code fence boundary (preferred: never split inside a code block)
     if let Some(fence_pos) = find_preceding_line_start(text, window_start, target, "```") {
-        return fence_pos;
+        return fence_pos.clamp(start, target);
     }
 
     // Iterate by Unicode scalar values. A byte-by-byte loop cannot safely use
@@ -180,30 +177,6 @@ fn avoid_incomplete_expression(text: &str, chunk_start: usize, split: usize) -> 
     split
 }
 
-fn find_bm25_split_point(text: &str, start: usize, max_words: usize) -> usize {
-    if max_words == 0 {
-        return text.len();
-    }
-
-    let mut words = 0;
-    let mut in_word = false;
-    for (relative, ch) in text[start..].char_indices() {
-        if ch.is_whitespace() {
-            if in_word {
-                words += 1;
-                if words >= max_words {
-                    return start + relative + ch.len_utf8();
-                }
-                in_word = false;
-            }
-        } else {
-            in_word = true;
-        }
-    }
-
-    text.len()
-}
-
 #[cfg(test)]
 mod tests {
     use cce_config::modules::ChunkingConfig;
@@ -259,7 +232,7 @@ mod tests {
     #[test]
     fn test_split_by_tokens_bm25_path() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         let estimator = TokenEstimator::default();
@@ -279,7 +252,7 @@ mod tests {
     #[test]
     fn test_split_by_tokens_zero_bm25_limit() {
         let config = ChunkingConfig {
-            max_bm25_words: 0,
+            max_bm25_terms: 0,
             ..Default::default()
         };
         let estimator = TokenEstimator::default();

@@ -76,7 +76,7 @@ mod tests {
     fn test_chunk_small_group_no_split() {
         let config = ChunkingConfig {
             max_tokens: 512,
-            max_bm25_words: 200,
+            max_bm25_terms: 200,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -101,7 +101,7 @@ mod tests {
     fn test_chunk_large_bm25_triggers_split() {
         let config = ChunkingConfig {
             max_tokens: 1024,
-            max_bm25_words: 10,
+            max_bm25_terms: 10,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -120,7 +120,7 @@ mod tests {
     fn test_chunk_with_header_and_members() {
         let config = ChunkingConfig {
             max_tokens: 512,
-            max_bm25_words: 200,
+            max_bm25_terms: 200,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -208,7 +208,7 @@ mod tests {
     fn test_bm25_and_embedding_paths_both_produced() {
         let config = ChunkingConfig {
             max_tokens: 512,
-            max_bm25_words: 200,
+            max_bm25_terms: 200,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -296,7 +296,7 @@ mod tests {
     fn test_chunk_metadata_contains_correct_fields() {
         let config = ChunkingConfig {
             max_tokens: 512,
-            max_bm25_words: 200,
+            max_bm25_terms: 200,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -431,8 +431,8 @@ mod tests {
     #[test]
     fn test_cross_group_no_merge_bm25_chunks_stay_independent() {
         let config = ChunkingConfig {
-            min_chunk_bm25_words: 80,
-            max_bm25_words: 150,
+            min_chunk_bm25_terms: 80,
+            max_bm25_terms: 150,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -554,9 +554,9 @@ mod tests {
     fn test_cross_group_merge_both_paths_produced() {
         let config = ChunkingConfig {
             min_chunk_tokens: 150,
-            min_chunk_bm25_words: 80,
+            min_chunk_bm25_terms: 80,
             max_tokens: 512,
-            max_bm25_words: 150,
+            max_bm25_terms: 150,
             ..Default::default()
         };
         let chunker = GroupChunker::new(config);
@@ -786,6 +786,8 @@ mod tests {
             config: &config,
             estimator: &estimator,
             splitter: &splitter,
+            pre_injection_embedding: config.max_tokens,
+            pre_injection_bm25: config.max_bm25_terms,
         };
         let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
             &infra,
@@ -809,7 +811,7 @@ mod tests {
         // the function's range, not the narrow range of a local variable
         // whose name happens to appear inside the text.
         let config = ChunkingConfig {
-            max_bm25_words: 20,
+            max_bm25_terms: 20,
             ..Default::default()
         };
         let estimator = TokenEstimator::default();
@@ -864,6 +866,8 @@ mod tests {
             config: &config,
             estimator: &estimator,
             splitter: &splitter,
+            pre_injection_embedding: config.max_tokens,
+            pre_injection_bm25: config.max_bm25_terms,
         };
         let chunks = crate::ast_to_nl::chunker::header_chunk::chunk_group_with_conversions(
             &infra,

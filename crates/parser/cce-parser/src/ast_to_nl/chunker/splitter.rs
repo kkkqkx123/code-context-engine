@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use cce_config::modules::ChunkingConfig;
+use cce_types::ParseError;
 use cce_types::entity::EntityId;
 use cce_utils::token_estimation::TokenEstimator;
 
@@ -114,7 +115,7 @@ impl TextSplitter {
         group: &EntityGroup,
         strategy: SplitStrategy,
         path: ChunkPath,
-    ) -> Vec<ChunkSegment> {
+    ) -> Result<Vec<ChunkSegment>, ParseError> {
         self.split_with_boundaries(text, group, strategy, path, None)
     }
 
@@ -125,7 +126,7 @@ impl TextSplitter {
         strategy: SplitStrategy,
         path: ChunkPath,
         nl_boundaries: &[NlEntityBoundary],
-    ) -> Vec<ChunkSegment> {
+    ) -> Result<Vec<ChunkSegment>, ParseError> {
         self.split_with_boundaries(text, group, strategy, path, Some(nl_boundaries))
     }
 
@@ -136,11 +137,11 @@ impl TextSplitter {
         strategy: SplitStrategy,
         path: ChunkPath,
         nl_boundaries: Option<&[NlEntityBoundary]>,
-    ) -> Vec<ChunkSegment> {
+    ) -> Result<Vec<ChunkSegment>, ParseError> {
         let boundaries =
-            self.split_range(text, group, strategy, path, nl_boundaries, 0..text.len());
-        let segments = self.boundaries_to_segments(boundaries, text);
-        self.maybe_merge_segments(segments, path)
+            self.try_split_range(text, group, strategy, path, nl_boundaries, 0..text.len())?;
+        let segments = self.boundaries_to_segments(boundaries, text)?;
+        Ok(self.maybe_merge_segments(segments, path))
     }
 
     /// Split `text[range]` by a single data-driven recursion over boundary
@@ -148,7 +149,32 @@ impl TextSplitter {
     /// to coarser sources when a level has no boundary data, and oversized
     /// pieces are sub-divided recursively. `split_by_tokens` is the
     /// guaranteed-to-succeed terminal.
-    pub(crate) fn split_range(
+    pub(crate) fn try_split_range(
+        &self,
+        text: &str,
+        group: &EntityGroup,
+        strategy: SplitStrategy,
+        path: ChunkPath,
+        nl_boundaries: Option<&[NlEntityBoundary]>,
+        range: Range<usize>,
+    ) -> Result<Vec<ChunkBoundary>, ParseError> {
+        validate_range(text, &range)?;
+        let boundaries = self.split_range_at(
+            text,
+            group,
+            path,
+            nl_boundaries,
+            range.clone(),
+            BoundaryLevel::from_strategy(strategy),
+            &[],
+        )?;
+        validate_partition(&boundaries, text, range)?;
+        Ok(boundaries)
+    }
+
+    /// Test-only convenience wrapper around [`Self::try_split_range`].
+    #[cfg(test)]
+    fn split_range(
         &self,
         text: &str,
         group: &EntityGroup,
@@ -157,15 +183,8 @@ impl TextSplitter {
         nl_boundaries: Option<&[NlEntityBoundary]>,
         range: Range<usize>,
     ) -> Vec<ChunkBoundary> {
-        self.split_range_at(
-            text,
-            group,
-            path,
-            nl_boundaries,
-            range,
-            BoundaryLevel::from_strategy(strategy),
-            &[],
-        )
+        self.try_split_range(text, group, strategy, path, nl_boundaries, range)
+            .expect("test splitter input must be valid")
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -178,10 +197,19 @@ impl TextSplitter {
         range: Range<usize>,
         level: BoundaryLevel,
         inherit_entity_ids: &[EntityId],
-    ) -> Vec<ChunkBoundary> {
-        debug_assert!(range.start <= range.end && range.end <= text.len());
-        debug_assert!(text.is_char_boundary(range.start));
-        debug_assert!(text.is_char_boundary(range.end));
+    ) -> Result<Vec<ChunkBoundary>, ParseError> {
+        if range.start > range.end
+            || range.end > text.len()
+            || !text.is_char_boundary(range.start)
+            || !text.is_char_boundary(range.end)
+        {
+            return Err(ParseError::code_splitting(format!(
+                "splitter received an invalid range [{}, {}) for text of length {}",
+                range.start,
+                range.end,
+                text.len()
+            )));
+        }
 
         if level == BoundaryLevel::Tokens {
             let mut boundaries = strategies::tokens::split_by_tokens_in_range(
@@ -198,14 +226,16 @@ impl TextSplitter {
                     }
                 }
             }
-            return boundaries;
+            return Ok(boundaries);
         }
 
         let boundaries = self.partition_at(level, text, group, path, nl_boundaries, range.clone());
 
         // No boundary data at this level → descend to the next coarser
-        // boundary source.
-        if boundaries.len() < 2 {
+        // boundary source. A single boundary is data, not absence: it carries
+        // the entity ids of the whole range and must survive when the piece
+        // fits. Only an oversized single piece needs a deeper level.
+        if boundaries.is_empty() {
             return self.split_range_at(
                 text,
                 group,
@@ -216,59 +246,65 @@ impl TextSplitter {
                 inherit_entity_ids,
             );
         }
+        if boundaries.len() == 1 {
+            let Some(mut boundary) = boundaries.into_iter().next() else {
+                return Ok(Vec::new());
+            };
+            validate_boundary(&boundary, &range, text)?;
+            if boundary.start_byte != range.start || boundary.end_byte != range.end {
+                return Err(ParseError::code_splitting(format!(
+                    "single boundary [{}, {}) does not cover the split range [{}, {})",
+                    boundary.start_byte, boundary.end_byte, range.start, range.end
+                )));
+            }
+            if boundary.entity_ids.is_empty() {
+                boundary.entity_ids = inherit_entity_ids.to_vec();
+            }
+            let piece_ids = boundary.entity_ids.clone();
+            if self.config.limit(path) == 0
+                || self
+                    .config
+                    .cost(&text[boundary.start_byte..boundary.end_byte], path)
+                    <= self.config.limit(path)
+            {
+                return Ok(vec![boundary]);
+            }
+            return self.split_range_at(
+                text,
+                group,
+                path,
+                nl_boundaries,
+                boundary.start_byte..boundary.end_byte,
+                level.subdivide_for_path(path),
+                &piece_ids,
+            );
+        }
 
         let mut result = Vec::with_capacity(boundaries.len());
         for mut b in boundaries {
-            debug_assert!(
-                b.start_byte >= range.start && b.end_byte <= range.end,
-                "strategy boundary escapes its range"
-            );
+            validate_boundary(&b, &range, text)?;
             if b.entity_ids.is_empty() {
                 b.entity_ids = inherit_entity_ids.to_vec();
             }
             let piece_ids = b.entity_ids.clone();
 
-            if self
-                .config
-                .exceeds_limit(&text[b.start_byte..b.end_byte], path)
+            if self.config.limit(path) > 0
+                && self.config.cost(&text[b.start_byte..b.end_byte], path) > self.config.limit(path)
             {
-                // Single-entity oversize tolerance: a method whose NL text
-                // modestly exceeds the limit stays whole instead of being
-                // subdivided into a large piece plus a tiny trailing fragment.
-                // Large oversize (e.g. 2x limit) still subdivides.
-                if level == BoundaryLevel::Entities
-                    && piece_ids.len() == 1
-                    && self.is_within_oversize_tolerance(&text[b.start_byte..b.end_byte], path)
-                {
-                    result.push(b);
-                } else {
-                    result.extend(self.split_range_at(
-                        text,
-                        group,
-                        path,
-                        nl_boundaries,
-                        b.start_byte..b.end_byte,
-                        level.subdivide_for_path(path),
-                        &piece_ids,
-                    ));
-                }
+                result.extend(self.split_range_at(
+                    text,
+                    group,
+                    path,
+                    nl_boundaries,
+                    b.start_byte..b.end_byte,
+                    level.subdivide_for_path(path),
+                    &piece_ids,
+                )?);
             } else {
                 result.push(b);
             }
         }
-        result
-    }
-
-    fn is_within_oversize_tolerance(&self, text: &str, path: ChunkPath) -> bool {
-        let limit = match path {
-            ChunkPath::Bm25 => self.config.max_bm25_words,
-            ChunkPath::Embedding => self.config.max_tokens,
-        };
-        if limit == 0 {
-            return false;
-        }
-        let cost = super::boundary::cost(text, path);
-        cost <= ((limit as f32 * 1.25) as usize)
+        Ok(result)
     }
 
     /// Partition `text[range]` at `level`'s boundary source (pure strategies).
@@ -340,43 +376,40 @@ impl TextSplitter {
         &self,
         boundaries: Vec<ChunkBoundary>,
         text: &str,
-    ) -> Vec<ChunkSegment> {
+    ) -> Result<Vec<ChunkSegment>, ParseError> {
         let mut segments = Vec::with_capacity(boundaries.len());
         let mut prev_end = 0usize;
         for boundary in boundaries {
-            debug_assert!(
-                boundary.start_byte == prev_end,
-                "boundary gap/overlap: previous end {} vs start {}",
-                prev_end,
-                boundary.start_byte
-            );
-            debug_assert!(
-                boundary.start_byte < boundary.end_byte && boundary.end_byte <= text.len(),
-                "invalid boundary range [{}, {}) for text of length {}",
-                boundary.start_byte,
-                boundary.end_byte,
-                text.len()
-            );
-            debug_assert!(
-                text.is_char_boundary(boundary.start_byte),
-                "start byte {} is not a char boundary",
-                boundary.start_byte
-            );
-            debug_assert!(
-                text.is_char_boundary(boundary.end_byte),
-                "end byte {} is not a char boundary",
-                boundary.end_byte
-            );
+            if boundary.start_byte != prev_end {
+                return Err(ParseError::code_splitting(format!(
+                    "boundary gap/overlap: previous end {} vs start {}",
+                    prev_end, boundary.start_byte
+                )));
+            }
+            if boundary.start_byte >= boundary.end_byte
+                || boundary.end_byte > text.len()
+                || !text.is_char_boundary(boundary.start_byte)
+                || !text.is_char_boundary(boundary.end_byte)
+            {
+                return Err(ParseError::code_splitting(format!(
+                    "invalid boundary range [{}, {}) for text of length {}",
+                    boundary.start_byte,
+                    boundary.end_byte,
+                    text.len()
+                )));
+            }
             let segment_text = text[boundary.start_byte..boundary.end_byte].to_string();
             prev_end = boundary.end_byte;
             segments.push(ChunkSegment::new(boundary, segment_text));
         }
-        debug_assert!(
-            prev_end == text.len(),
-            "boundaries do not cover the full text (covered up to {})",
-            prev_end
-        );
-        segments
+        if prev_end != text.len() {
+            return Err(ParseError::code_splitting(format!(
+                "boundaries do not cover the full text (covered up to {}, length {})",
+                prev_end,
+                text.len()
+            )));
+        }
+        Ok(segments)
     }
 
     /// Merge adjacent small segments whose combined cost fits within the
@@ -412,6 +445,77 @@ impl TextSplitter {
     }
 }
 
+/// Validate that `range` is a char-aligned sub-range of `text`.
+pub(crate) fn validate_range(text: &str, range: &Range<usize>) -> Result<(), ParseError> {
+    if range.start > range.end
+        || range.end > text.len()
+        || !text.is_char_boundary(range.start)
+        || !text.is_char_boundary(range.end)
+    {
+        return Err(ParseError::code_splitting(format!(
+            "invalid split range [{}, {}) for text of length {}",
+            range.start,
+            range.end,
+            text.len()
+        )));
+    }
+    Ok(())
+}
+
+/// Validate that `boundaries` form a complete, contiguous, char-aligned
+/// partition of `text[range]`.
+///
+/// The splitter's contract is that no source byte is dropped or duplicated.
+/// This check lives in the splitter (not only in tests) because assembly
+/// slices the returned boundaries directly and a gap would silently lose
+/// content.
+pub(crate) fn validate_partition(
+    boundaries: &[ChunkBoundary],
+    text: &str,
+    range: Range<usize>,
+) -> Result<(), ParseError> {
+    validate_range(text, &range)?;
+
+    let mut prev_end = range.start;
+    for boundary in boundaries {
+        validate_boundary(boundary, &range, text)?;
+        if boundary.start_byte != prev_end {
+            return Err(ParseError::code_splitting(format!(
+                "split partition gap/overlap: previous end {} vs start {}",
+                prev_end, boundary.start_byte
+            )));
+        }
+        prev_end = boundary.end_byte;
+    }
+    if prev_end != range.end {
+        return Err(ParseError::code_splitting(format!(
+            "split partition does not cover the range (covered up to {}, range end {})",
+            prev_end, range.end
+        )));
+    }
+    Ok(())
+}
+
+fn validate_boundary(
+    boundary: &ChunkBoundary,
+    range: &Range<usize>,
+    text: &str,
+) -> Result<(), ParseError> {
+    if boundary.start_byte < range.start
+        || boundary.end_byte > range.end
+        || boundary.start_byte >= boundary.end_byte
+        || boundary.end_byte > text.len()
+        || !text.is_char_boundary(boundary.start_byte)
+        || !text.is_char_boundary(boundary.end_byte)
+    {
+        return Err(ParseError::code_splitting(format!(
+            "strategy boundary [{}, {}) escapes [{}, {}) or is not char-aligned",
+            boundary.start_byte, boundary.end_byte, range.start, range.end
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use cce_config::modules::ChunkingConfig;
@@ -434,15 +538,17 @@ mod tests {
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
-        splitter.split_range_at(
-            text,
-            &EntityGroup::default(),
-            ChunkPath::Embedding,
-            None,
-            0..text.len(),
-            level,
-            &[],
-        )
+        splitter
+            .split_range_at(
+                text,
+                &EntityGroup::default(),
+                ChunkPath::Embedding,
+                None,
+                0..text.len(),
+                level,
+                &[],
+            )
+            .expect("test splitter input must be valid")
     }
 
     fn split_at_level(
@@ -452,16 +558,20 @@ mod tests {
         config: ChunkingConfig,
     ) -> Vec<ChunkSegment> {
         let splitter = TextSplitter::new(config);
-        let boundaries = splitter.split_range_at(
-            text,
-            &EntityGroup::default(),
-            path,
-            None,
-            0..text.len(),
-            level,
-            &[],
-        );
-        let segments = splitter.boundaries_to_segments(boundaries, text);
+        let boundaries = splitter
+            .split_range_at(
+                text,
+                &EntityGroup::default(),
+                path,
+                None,
+                0..text.len(),
+                level,
+                &[],
+            )
+            .expect("test splitter input must be valid");
+        let segments = splitter
+            .boundaries_to_segments(boundaries, text)
+            .expect("test partition must be valid");
         splitter.maybe_merge_segments(segments, path)
     }
 
@@ -487,11 +597,9 @@ mod tests {
         let text = "Hello 世界 World";
         let boundaries =
             vec![ChunkBoundary::new(0, 7, SplitReason::SentenceBoundary).with_token_count(2)];
-        // A non-char-aligned boundary violates the splitter contract: the
-        // invariant is asserted (debug builds panic), never silently repaired.
-        assert!(
-            std::panic::catch_unwind(|| splitter.boundaries_to_segments(boundaries, text)).is_err()
-        );
+        // A non-char-aligned boundary violates the splitter contract: it is
+        // reported as an error in every build profile, never silently repaired.
+        assert!(splitter.boundaries_to_segments(boundaries, text).is_err());
     }
 
     #[test]
@@ -501,7 +609,9 @@ mod tests {
         let text = "世界你好";
         let boundaries =
             vec![ChunkBoundary::new(0, 12, SplitReason::SentenceBoundary).with_token_count(4)];
-        let segments = splitter.boundaries_to_segments(boundaries, text);
+        let segments = splitter
+            .boundaries_to_segments(boundaries, text)
+            .expect("test partition must be valid");
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, text);
     }
@@ -542,7 +652,7 @@ mod tests {
     fn test_split_range_with_text_within_other_limits() {
         let config = ChunkingConfig {
             max_tokens: 512,
-            max_bm25_words: 200,
+            max_bm25_terms: 200,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -583,7 +693,7 @@ mod tests {
     #[test]
     fn test_split_range_entity_boundaries_attributed_through_recursion() {
         let config = ChunkingConfig {
-            max_bm25_words: 2,
+            max_bm25_terms: 2,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -666,20 +776,22 @@ mod tests {
     #[test]
     fn test_split_range_oversized_pieces_all_within_limit() {
         let config = ChunkingConfig {
-            max_bm25_words: 4,
+            max_bm25_terms: 4,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
         let text = "one two three four five six seven eight nine ten";
-        let boundaries = splitter.split_range_at(
-            text,
-            &EntityGroup::default(),
-            ChunkPath::Bm25,
-            None,
-            0..text.len(),
-            BoundaryLevel::Sentences,
-            &[],
-        );
+        let boundaries = splitter
+            .split_range_at(
+                text,
+                &EntityGroup::default(),
+                ChunkPath::Bm25,
+                None,
+                0..text.len(),
+                BoundaryLevel::Sentences,
+                &[],
+            )
+            .expect("test splitter input must be valid");
         assert!(boundaries.len() >= 2);
         assert_partition(text, &boundaries);
         for b in &boundaries {
@@ -693,7 +805,7 @@ mod tests {
     #[test]
     fn test_split_range_oversized_paragraph_subdivides_by_hard_cut_on_bm25() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -731,15 +843,17 @@ mod tests {
         };
         let splitter = TextSplitter::new(config);
         let text = "这是一段用于测试分块器不变量保证的中文文本，包含一些标点符号。以及换行\n测试。";
-        let boundaries = splitter.split_range_at(
-            text,
-            &EntityGroup::default(),
-            ChunkPath::Embedding,
-            None,
-            0..text.len(),
-            BoundaryLevel::Sentences,
-            &[],
-        );
+        let boundaries = splitter
+            .split_range_at(
+                text,
+                &EntityGroup::default(),
+                ChunkPath::Embedding,
+                None,
+                0..text.len(),
+                BoundaryLevel::Sentences,
+                &[],
+            )
+            .expect("test splitter input must be valid");
         assert!(boundaries.len() >= 2);
         assert_partition(text, &boundaries);
     }
@@ -807,7 +921,7 @@ mod tests {
             let limit = 3 + rng.range(10);
             let cfg = match path {
                 ChunkPath::Bm25 => ChunkingConfig {
-                    max_bm25_words: limit,
+                    max_bm25_terms: limit,
                     ..Default::default()
                 },
                 ChunkPath::Embedding => ChunkingConfig {
@@ -817,15 +931,17 @@ mod tests {
             };
             let level = levels[rng.range(levels.len())];
             let splitter = TextSplitter::new(cfg);
-            let boundaries = splitter.split_range_at(
-                &text,
-                &EntityGroup::default(),
-                path,
-                None,
-                0..text.len(),
-                level,
-                &[],
-            );
+            let boundaries = splitter
+                .split_range_at(
+                    &text,
+                    &EntityGroup::default(),
+                    path,
+                    None,
+                    0..text.len(),
+                    level,
+                    &[],
+                )
+                .expect("test splitter input must be valid");
 
             // Invariants: monotonic + contiguous, non-zero, full coverage,
             // char-aligned, and every piece within the path limit.
@@ -873,8 +989,8 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_both_below_threshold() {
         let config = ChunkingConfig {
-            max_bm25_words: 512,
-            min_chunk_bm25_words: 60,
+            max_bm25_terms: 512,
+            min_chunk_bm25_terms: 60,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -890,8 +1006,8 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_one_above_threshold() {
         let config = ChunkingConfig {
-            max_bm25_words: 512,
-            min_chunk_bm25_words: 60,
+            max_bm25_terms: 512,
+            min_chunk_bm25_terms: 60,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -909,8 +1025,8 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_assimilates_small_fragments() {
         let config = ChunkingConfig {
-            max_bm25_words: 512,
-            min_chunk_bm25_words: 60,
+            max_bm25_terms: 512,
+            min_chunk_bm25_terms: 60,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -933,8 +1049,8 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_cascading() {
         let config = ChunkingConfig {
-            max_bm25_words: 512,
-            min_chunk_bm25_words: 60,
+            max_bm25_terms: 512,
+            min_chunk_bm25_terms: 60,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -997,8 +1113,8 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_respect_boundaries_disabled() {
         let config = ChunkingConfig {
-            max_bm25_words: 2,
-            min_chunk_bm25_words: 3,
+            max_bm25_terms: 2,
+            min_chunk_bm25_terms: 3,
             respect_boundaries: false,
             ..Default::default()
         };
@@ -1010,7 +1126,7 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_applied_in_split() {
         let config = ChunkingConfig {
-            max_bm25_words: 512,
+            max_bm25_terms: 512,
             ..Default::default()
         };
         let text = "one two. three four. five six. seven eight.";
@@ -1023,8 +1139,8 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_trailing() {
         let config = ChunkingConfig {
-            max_bm25_words: 512,
-            min_chunk_bm25_words: 60,
+            max_bm25_terms: 512,
+            min_chunk_bm25_terms: 60,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
@@ -1042,8 +1158,8 @@ mod tests {
     #[test]
     fn test_merge_small_chunks_rescues_undersized_leading_chunk() {
         let config = ChunkingConfig {
-            max_bm25_words: 512,
-            min_chunk_bm25_words: 60,
+            max_bm25_terms: 512,
+            min_chunk_bm25_terms: 60,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);

@@ -34,38 +34,34 @@ pub fn split_by_tokens_in_range(
     range: Range<usize>,
     path: ChunkPath,
     config: &ChunkingConfig,
-    estimator: &TokenEstimator,
+    _estimator: &TokenEstimator,
 ) -> Vec<ChunkBoundary> {
     let mut boundaries = Vec::new();
     let mut current_pos = range.start;
+    let limit = config.limit(path);
+    if limit == 0 {
+        if current_pos < range.end {
+            boundaries.push(ChunkBoundary::new(current_pos, range.end));
+        }
+        return boundaries;
+    }
 
     while current_pos < range.end {
-        let target = match path {
-            ChunkPath::Bm25 => {
-                find_bm25_split_point(text, current_pos, config.max_bm25_words).min(range.end)
-            }
-            ChunkPath::Embedding => {
-                let relative =
-                    estimator.find_split_point(&text[current_pos..range.end], config.max_tokens);
-                (current_pos + relative).min(range.end)
-            }
-        };
-        let safe_end = find_good_split_point(text, current_pos, target).min(range.end);
-
+        let remaining = &text[current_pos..range.end];
+        let prefix = cce_text::truncate_to_cost(remaining, config.unit(path), limit);
+        let mut safe_end = current_pos + prefix.len();
         if safe_end <= current_pos {
-            let next_char_end = text[current_pos..range.end]
+            safe_end = remaining
                 .chars()
                 .next()
-                .map(|ch| current_pos + ch.len_utf8())
+                .map(|character| current_pos + character.len_utf8())
                 .unwrap_or(range.end);
-            if next_char_end <= current_pos {
-                break;
-            }
-            boundaries.push(ChunkBoundary::new(current_pos, next_char_end));
-            current_pos = next_char_end;
-            continue;
         }
-
+        let target = find_good_split_point(text, current_pos, safe_end);
+        let target = target.clamp(current_pos, safe_end);
+        if target > current_pos && target <= safe_end {
+            safe_end = target;
+        }
         boundaries.push(ChunkBoundary::new(current_pos, safe_end));
         current_pos = safe_end;
     }
@@ -82,10 +78,10 @@ fn find_good_split_point(text: &str, start: usize, target: usize) -> usize {
     }
 
     let search_window = target.saturating_sub(start).max(50);
-    let window_start = floor_char_boundary(text, target.saturating_sub(search_window));
+    let window_start = floor_char_boundary(text, target.saturating_sub(search_window).max(start));
 
     if let Some(fence_pos) = find_preceding_line_start(text, window_start, target, "```") {
-        return fence_pos;
+        return fence_pos.clamp(start, target);
     }
 
     let preferred_start = window_start;
@@ -156,28 +152,4 @@ fn avoid_incomplete_expression(text: &str, chunk_start: usize, split: usize) -> 
     }
 
     split
-}
-
-fn find_bm25_split_point(text: &str, start: usize, max_words: usize) -> usize {
-    if max_words == 0 {
-        return text.len();
-    }
-
-    let mut words = 0;
-    let mut in_word = false;
-    for (relative, ch) in text[start..].char_indices() {
-        if ch.is_whitespace() {
-            if in_word {
-                words += 1;
-                if words >= max_words {
-                    return start + relative + ch.len_utf8();
-                }
-                in_word = false;
-            }
-        } else {
-            in_word = true;
-        }
-    }
-
-    text.len()
 }

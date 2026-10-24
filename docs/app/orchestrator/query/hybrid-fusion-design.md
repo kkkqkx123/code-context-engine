@@ -3,7 +3,7 @@
 ## Problem Statement
 
 During indexing, each entity group produces two independent text representations:
-- **BM25 path**: keyword-rich text, split by `max_bm25_words`
+- **BM25 path**: keyword-rich text, split by `max_bm25_terms`
 - **Embedding path**: semantic NL text, split by `max_tokens`
 
 These two paths chunk independently, producing different chunk counts and boundaries for the same logical entity. At query time, both paths are searched in parallel, and their results must be merged into a single ranked list.
@@ -22,7 +22,7 @@ The system avoids chunk-to-chunk alignment entirely. Instead, it aligns at the *
 ### Why Entity-Level?
 
 Chunk-level alignment between BM25 and Embedding paths is unsolvable in general:
-- BM25 splits by word count; Embedding splits by token count
+- BM25 splits by index term count; Embedding splits by token count
 - The same entity may produce 2 chunks in BM25 but 3 in Embedding
 - There is no deterministic mapping between chunk N of path A and chunk M of path B
 

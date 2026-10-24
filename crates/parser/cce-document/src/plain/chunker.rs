@@ -2,7 +2,7 @@
 //!
 //! Chunks plain text content using two-tier approach:
 //! 1. Logical units (paragraphs, lines, sections) become raw groups
-//! 2. Each unit produces one embedding chunk (truncated) + N BM25 sub-chunks (by word count)
+//! 2. Each unit produces one embedding chunk (truncated) + N BM25 sub-chunks (by term count)
 
 mod csv_chunker;
 mod docker_chunker;
@@ -113,7 +113,7 @@ impl PlainTextChunker {
     ///
     /// Each logical unit (paragraph / line / section / row-group) produces:
     /// - 1 Embedding chunk (truncated if exceeding max_tokens)
-    /// - N BM25 sub-chunks (split by max_bm25_words, all sharing source_group_id)
+    /// - N BM25 sub-chunks (split by max_bm25_terms, all sharing source_group_id)
     pub fn chunk(
         &self,
         content: &str,
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn test_chunk_text_bm25_sub_split() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             max_tokens: 500,
             ..Default::default()
         };

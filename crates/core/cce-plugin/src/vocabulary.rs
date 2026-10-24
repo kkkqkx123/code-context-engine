@@ -42,8 +42,8 @@ use cce_types::plugin::{
 use injection::identifier_tokens;
 
 pub use injection::{
-    ExpandedTerms, Injection, InjectionBudget, InjectionStyle, TerminologyIndex, VocabularyStats,
-    inject,
+    ExpandedTerms, Injection, InjectionBudget, InjectionLimits, InjectionStyle, TerminologyIndex,
+    VocabularyStats, inject, inject_chunks,
 };
 
 /// A merged glossary table collected from the matching `Vocabulary` plugins.

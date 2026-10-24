@@ -3,38 +3,43 @@
 //! Defines chunk boundaries and split reasons for text segmentation.
 
 use cce_config::modules::ChunkingConfig;
+use cce_text::ChunkUnit;
 use cce_types::ConversionResult;
 use cce_types::entity::EntityId;
-use cce_utils::token_estimation::estimate_tokens;
 
 use super::result::ChunkPath;
 
 /// Split reason (cross-layer contract, defined in `cce_core`).
 pub use cce_types::ast_to_nl::SplitReason;
 
+/// The measurement unit of `path`.
+pub fn unit(path: ChunkPath) -> ChunkUnit {
+    match path {
+        ChunkPath::Bm25 => ChunkUnit::Terms,
+        ChunkPath::Embedding => ChunkUnit::Tokens,
+    }
+}
+
 /// Compute the cost of `text` for `path`.
 ///
-/// BM25 costs actual word count; Embedding costs estimated tokens. All
-/// strategies, merge layers and chunk assembly use this single metric so
-/// limit checks and accumulation are always measured against the path's own
-/// unit.
+/// BM25 costs the terms the index tokenizer produces; Embedding costs
+/// estimated tokens. All strategies, merge layers and chunk assembly use
+/// this single metric so limit checks and accumulation are always measured
+/// against the path's own unit.
 pub fn cost(text: &str, path: ChunkPath) -> usize {
-    match path {
-        ChunkPath::Bm25 => text.split_whitespace().filter(|w| !w.is_empty()).count(),
-        ChunkPath::Embedding => estimate_tokens(text),
-    }
+    unit(path).cost(text)
 }
 
 /// Resolve the `(min, ceiling)` merge thresholds for `path`.
 ///
 /// The min threshold is the undersized-chunk trigger; the ceiling is the
 /// largest combined cost a merge may produce. BM25 is hard-capped at
-/// `max_bm25_words`; the Embedding ceiling is `cross_group_merge_threshold`
+/// `max_bm25_terms`; the Embedding ceiling is `cross_group_merge_threshold`
 /// (0 = `max_tokens`). Shared by both merge layers so their limits can never
 /// drift apart.
 pub fn merge_limits(path: ChunkPath, config: &ChunkingConfig) -> (usize, usize) {
     match path {
-        ChunkPath::Bm25 => (config.min_chunk_bm25_words, config.max_bm25_words),
+        ChunkPath::Bm25 => (config.min_chunk_bm25_terms, config.max_bm25_terms),
         ChunkPath::Embedding => (
             config.min_chunk_tokens,
             if config.cross_group_merge_threshold == 0 {
@@ -59,7 +64,11 @@ pub fn can_merge(prev: &str, next: &str, path: ChunkPath, config: &ChunkingConfi
     let (min_threshold, merge_threshold) = merge_limits(path, config);
     let prev_cost = cost(prev, path);
     let next_cost = cost(next, path);
-    let combined = prev_cost + next_cost;
+    // The intra-splitter pass concatenates the two segment texts directly.
+    // Measuring the actual concatenation avoids under-counting text that is
+    // glued together and avoids the separator that belongs to the
+    // cross-group merge layer.
+    let combined = cost(&format!("{prev}{next}"), path);
     if combined > merge_threshold {
         return false;
     }

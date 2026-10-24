@@ -40,7 +40,10 @@ pub(crate) fn chunk_csv(
     let mut chunks = Vec::new();
     let mut unit_idx = 0;
 
-    if chunker.config.exceeds_limit(header, ChunkPath::Embedding) {
+    if chunker.config.limit(ChunkPath::Embedding) > 0
+        && chunker.config.cost(header, ChunkPath::Embedding)
+            > chunker.config.limit(ChunkPath::Embedding)
+    {
         let header_line = lines.iter().position(|l| l.trim() == header).unwrap_or(0);
         if let Some(span) = Span::from_byte_range(
             content,
@@ -71,7 +74,10 @@ pub(crate) fn chunk_csv(
             continue;
         }
 
-        if chunker.config.exceeds_limit(line, ChunkPath::Embedding) {
+        if chunker.config.limit(ChunkPath::Embedding) > 0
+            && chunker.config.cost(line, ChunkPath::Embedding)
+                > chunker.config.limit(ChunkPath::Embedding)
+        {
             if batch.len() > 1 {
                 let batch_end = line_idx;
                 if let Some(span) = Span::from_byte_range(
@@ -117,9 +123,11 @@ pub(crate) fn chunk_csv(
             format!("{}\n{}", batch.join("\n"), line)
         };
 
-        if chunker
-            .config
-            .exceeds_limit(&current_batch_text, ChunkPath::Embedding)
+        if chunker.config.limit(ChunkPath::Embedding) > 0
+            && chunker
+                .config
+                .cost(&current_batch_text, ChunkPath::Embedding)
+                > chunker.config.limit(ChunkPath::Embedding)
             && batch.len() > 1
         {
             let batch_end = line_idx - 1;

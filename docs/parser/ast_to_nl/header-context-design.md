@@ -156,7 +156,7 @@ fn smart_chunk_with_header(&mut self, group, header_conv, member_convs, file_pat
 成员预算需要预留 header 空间：
 
 ```rust
-let bm25_member_budget = max_bm25_words - header_bm25.word_count();
+let bm25_member_budget = max_bm25_terms - header_bm25.word_count();
 let emb_member_budget = max_tokens - header_embedding.token_count();
 ```
 

@@ -1,7 +1,7 @@
 //! Markdown chunker
 //!
 //! Converts DocGroups to ChunkedResults for storage.
-//! Uses a two-tier chunking scheme: embedding paths are guaranteed not to be too long (truncated), and BM25 is sub-chunked by word count.
+//! Uses a two-tier chunking scheme: embedding paths are guaranteed not to be too long (truncated), and BM25 is sub-chunked by term count.
 
 use crate::GenericGroup;
 use crate::common::{GenericChunker, MergingConfig, TwoTierParams, two_tier_chunking};
@@ -455,9 +455,9 @@ mod tests {
     #[test]
     fn test_chunk_group_bm25_sub_split() {
         // Use Both mode to produce BM25 + Embedding chunks
-        // Test that BM25 is split by word count when max_bm25_words is low
+        // Test that BM25 is split by term count when max_bm25_terms is low
         let config = ChunkingConfig {
-            max_bm25_words: 5,
+            max_bm25_terms: 5,
             max_tokens: 500,
             ..Default::default()
         };

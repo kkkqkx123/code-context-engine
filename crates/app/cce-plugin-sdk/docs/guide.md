@@ -190,7 +190,7 @@ cargo build --release
 - **EntityExtract**：在代码实体流中补充框架特定实体（如 Flask 路由）。返回 `PluginEntity` 数组；宿主将其注入分组 → 文本生成 → 分块流水线。
 - **Group**：内置分组完成后回调，可合并 / 拆分 / 重命名分组。入参为 `EntityGroup` 数组 + `GroupPluginContext { file_path, language, source }`。
 - **GroupOverride**：完全替换内置分组。入参为扩展 `GroupPluginContext`（含序列化的实体与原始关系），返回 `EntityGroup` 数组；返回非空数组时跳过内置分组，下游 `post_group` 钩子与 combined-source 生成仍照常执行。
-- **Chunk**：完全替换内置分块，返回标准 `ChunkedResult` 形状。入参为 `GroupConversions` 数组 + `file_path`。
+- **Chunk**：完全替换内置分块，返回标准 `ChunkedResult` 形状。入参为 `GroupConversions` 数组 + `file_path`。插件产出的每个 chunk 必须满足配置的硬上限：Embedding 按 token 数、BM25 按索引分词器产生的 term 数。host 在插件返回后逐块校验；超限直接返回永久性 `CodeSplitting` 错误，不截断、不自动回退到内置分块。该约束属于 host 与插件的契约，不新增 ABI 符号。
 - **Rerank**：查询结果重排（全局能力，无文件 / 语言过滤）。入参为查询 + `RerankCandidate` 数组，返回 `RerankResult`（重排顺序 + 分数 + 可选理由）。
 - **AstLanguage**：自定义语言解析（仅 Native），提供 tree-sitter grammar 指针 + 查询方案字符串 + 语言名与扩展名。宿主在注册时校验 grammar 的 ABI 版本（`plugins.grammar_abi_policy`，默认 `deny` 拒绝区间外 grammar，可配 `warn`）；缺失 / 空指针 grammar 一律跳过并告警。
 - **LanguageRemap**：自定义语言直接复用宿主内置 grammar（Lua 与 Native 均可，无 FFI 指针）。声明 `language_name` / `language_extensions` / `remap_grammar_language`（指向宿主内置语言名），8 类查询方案可选——未提供时回落被引用语言的方案。适用于既有语言超集 / 子集形态的 DSL（模板方言、配置扩展等）。

@@ -2,10 +2,11 @@ use std::path::Path;
 
 use crate::grouper::EntityGroup;
 use crate::grouper::types::GroupType;
+use cce_text::truncate_to_cost;
 use cce_types::ConversionResult;
 use cce_types::entity::{EntityId, EntityKind};
 
-use super::boundary::{ChunkSegment, NlEntityBoundary, SplitReason, cost};
+use super::boundary::{ChunkSegment, NlEntityBoundary, SplitReason, cost, unit};
 use super::result::{
     ChunkMetadata, ChunkPath, ChunkedResult, CodeSpecificMetadata, SourceSpanKind,
 };
@@ -74,6 +75,15 @@ const TOPIC_LINE_PREFIXES: [&str; 3] = ["branches on: ", "control flow: ", "call
 
 /// Maximum number of topic lines an entity contributes to a block head.
 const MAX_TOPIC_LINES: usize = 3;
+
+/// Maximum cost of one topic line in a continuation head.
+const TOPIC_LINE_COST_CAP: usize = 24;
+
+/// Maximum cost of a signature identity line.
+const IDENTITY_COST_CAP: usize = 80;
+
+/// Maximum cost of a synthetic block head.
+pub(crate) const SYNTHETIC_HEAD_COST_CAP: usize = 32;
 
 /// Whether a line states an entity's subject.
 ///
@@ -188,9 +198,11 @@ impl ChunkBuilder {
         segment_text: &str,
         parent: Option<&str>,
         topic_lines: &[(EntityId, Vec<String>)],
+        path: ChunkPath,
     ) -> Option<String> {
         let first_line = segment_text.lines().next().unwrap_or_default();
         let owner = Self::resolve_owner(group, parent);
+        let unit = unit(path);
         let mut seen = std::collections::HashSet::new();
         let mut parts = Vec::new();
         for id in Self::sorted_content_ids(group, entity_ids) {
@@ -210,22 +222,73 @@ impl ChunkBuilder {
             if first_line.contains(&qualified) {
                 continue;
             }
-            parts.push(Self::signature_identity(group, id, &name, &qualified, kind));
+            let identity = Self::signature_identity(group, id, &name, &qualified, kind);
+            let identity = truncate_to_cost(&identity, unit, IDENTITY_COST_CAP);
+            if !identity.trim().is_empty() {
+                parts.push(identity.to_string());
+            }
             // The entity's own topic travels with the continuation: a block
             // that holds the tail of an entity says nothing about what the
-            // entity is about without it.
+            // entity is about without it. The line set is capped so a long
+            // topic cannot consume the whole chunk budget.
             if let Some(lines) = topic_lines
                 .iter()
                 .find(|(topic_id, _)| *topic_id == id)
                 .map(|(_, lines)| lines)
             {
-                parts.push(lines.join("\n"));
+                let joined = lines.join("\n");
+                let joined = truncate_to_cost(&joined, unit, TOPIC_LINE_COST_CAP);
+                if !joined.trim().is_empty() {
+                    parts.push(joined.to_string());
+                }
             }
         }
         if parts.is_empty() {
             return None;
         }
         Some(parts.join("\n") + "\n\n")
+    }
+
+    /// Upper bound of the text appended after splitting for one group.
+    ///
+    /// The splitter works on a body limit; this allowance protects the
+    /// identity, topic and synthetic-head lines that assembly adds back.
+    /// The estimate is intentionally conservative: an underestimate is
+    /// repaired by the pre-injection limit check, while an overestimate
+    /// only produces a slightly smaller body.
+    pub(crate) fn decoration_allowance(group: &EntityGroup, path: ChunkPath) -> usize {
+        let unit = unit(path);
+        let identity_line = format!("{} ({}).\n", group.name, group.kind.kind_label());
+        let first = if path == ChunkPath::Embedding {
+            cost(&identity_line, path)
+        } else {
+            0
+        };
+        let mut continuation = 0usize;
+        for id in group.all_entity_ids() {
+            let Some((name, kind)) = Self::entity_name_and_kind(group, id) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            let qualified = if group.name.is_empty() || name == group.name {
+                name.clone()
+            } else {
+                format!("{}.{}", group.name, name)
+            };
+            let identity = Self::signature_identity(group, id, &name, &qualified, kind);
+            let identity = truncate_to_cost(&identity, unit, IDENTITY_COST_CAP);
+            continuation = continuation.max(
+                cost(identity, path)
+                    .saturating_add(TOPIC_LINE_COST_CAP)
+                    .saturating_add(2),
+            );
+        }
+        continuation = continuation.max(cost(&identity_line, path).saturating_add(2));
+        first
+            .max(continuation)
+            .saturating_add(SYNTHETIC_HEAD_COST_CAP)
     }
 
     /// Identity line for one continued entity.
@@ -287,8 +350,13 @@ impl ChunkBuilder {
                 out.push_str(qualified);
                 rest = &rest[pos + name.len()..];
             } else {
-                out.push_str(&rest[..pos + 1]);
-                rest = &rest[pos + 1..];
+                let advance = rest[pos..]
+                    .chars()
+                    .next()
+                    .map(|character| character.len_utf8())
+                    .unwrap_or(name.len());
+                out.push_str(&rest[..pos + advance]);
+                rest = &rest[pos + advance..];
             }
         }
         out.push_str(rest);
@@ -539,7 +607,7 @@ impl ChunkBuilder {
             (Some(ctx.group.name.to_string()), ctx.keywords.to_vec())
         };
         let text_len = text.len();
-        let word_count = text.split_whitespace().filter(|w| !w.is_empty()).count();
+        let word_count = cost(&text, ChunkPath::Bm25);
         let token_count = cost(&text, ctx.path);
 
         ChunkedResult {
@@ -690,6 +758,7 @@ impl ChunkBuilder {
                             .as_ref()
                             .map(|ctx| ctx.topic_lines)
                             .unwrap_or_default(),
+                        path,
                     ) {
                         segment_text = prefix + &segment_text;
                     } else {
@@ -728,10 +797,7 @@ impl ChunkBuilder {
                         source_kind,
                     );
 
-                let word_count = segment_text
-                    .split_whitespace()
-                    .filter(|w| !w.is_empty())
-                    .count();
+                let word_count = cost(&segment_text, ChunkPath::Bm25);
                 let token_count = cost(&segment_text, path);
 
                 let self_contained = path == ChunkPath::Embedding
@@ -1227,6 +1293,7 @@ mod tests {
             "body fragment without the signature line",
             Some("Processor"),
             &[],
+            ChunkPath::Embedding,
         )
         .expect("covered method repeats its identity");
         assert!(
@@ -1250,6 +1317,7 @@ mod tests {
             "body fragment",
             Some("Processor"),
             &[],
+            ChunkPath::Embedding,
         )
         .expect("identity without signature falls back to kind plus name");
         assert!(
@@ -1273,6 +1341,7 @@ mod tests {
             "loop body fragment",
             Some("mpeg-pat"),
             &[],
+            ChunkPath::Embedding,
         )
         .expect("pointer-return function repeats its signature");
         assert!(

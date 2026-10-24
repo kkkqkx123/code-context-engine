@@ -829,7 +829,6 @@ impl IndexOrchestrator {
                         metrics.record_vocabulary(
                             process_result.vocabulary.injected,
                             process_result.vocabulary.truncated,
-                            process_result.vocabulary.overflow,
                         );
                     }
                     let produced_chunks = !process_result.chunks.is_empty();

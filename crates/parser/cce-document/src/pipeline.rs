@@ -13,17 +13,13 @@
 
 use tracing::{debug, warn};
 
-use cce_config::modules::{ChunkingConfig, GlossaryScope};
-use cce_plugin::vocabulary::{
-    ExpandedTerms, FileVocabulary, InjectionBudget, InjectionStyle, TerminologyIndex,
-    VocabularyStats, inject,
-};
+use cce_config::modules::ChunkingConfig;
+use cce_plugin::vocabulary::{FileVocabulary, InjectionLimits, VocabularyStats, inject_chunks};
 use cce_types::ChunkPath;
 use cce_types::ChunkedResult;
 use cce_types::ParseError;
 use cce_types::TestInfo;
 use cce_types::ast_to_nl::options::OutputMode;
-use cce_utils::token_estimation::estimate_tokens;
 
 use super::types::{DocSummary, DocType, DocumentClassification};
 
@@ -305,7 +301,7 @@ impl PipelineRouter {
 
         // A malformed structured document must not lose the file entirely:
         // degrade to the plain-text pipeline instead of failing indexing.
-        match result {
+        let mut output = match result {
             Err(e) if !matches!(doc_type, DocType::PlainText) => {
                 warn!(
                     file_path = %file_path,
@@ -315,10 +311,12 @@ impl PipelineRouter {
                 );
                 self.plain
                     .process(content, file_path, config, output_mode)
-                    .map(|(chunks, summary)| (chunks, summary, true))
+                    .map(|(chunks, summary)| (chunks, summary, true))?
             }
-            other => other.map(|(chunks, summary)| (chunks, summary, false)),
-        }
+            other => other.map(|(chunks, summary)| (chunks, summary, false))?,
+        };
+        enforce_document_hard_limit(&mut output.0, config)?;
+        Ok(output)
     }
 
     /// Process document and return only chunks (for backward compatibility)
@@ -381,37 +379,33 @@ impl PipelineRouter {
         );
 
         // A file that carries a terminology table reserves a share of the
-        // chunk limits for the injected expansions: the chunks the
-        // pipelines produce leave exactly that much room, so the injection
-        // can never push a chunk over its limit.
+        // chunk limits for the injected expansions. The reserve guides the
+        // splitter; the injection itself measures the absolute final text
+        // against the hard limit.
         let vocabulary = registry.vocabulary_for(file_path, None);
-        let effective = match &vocabulary {
-            Some(table) if !table.is_empty() => config.with_glossary_reserve(),
-            _ => config.clone(),
-        };
+        let has_vocabulary = vocabulary.as_ref().is_some_and(|table| !table.is_empty());
+        let effective = config.pre_injection_config(has_vocabulary);
 
         if let Some(parsed) =
             self.process_with_plugin_list(content, file_path, &effective, output_mode, &above)
         {
             let (mut chunks, summary) = parsed;
-            // Splitting ran on `effective` (reduced limits); the injection
-            // budget and the final limit check must run on the original
-            // `config`, otherwise the check would compare post-injection text
-            // against the reduced limit and always report overflow.
-            let stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config);
+            // Splitting ran on the pre-injection limits; the injection and
+            // the final check run on the hard limits.
+            let stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config)?;
             return Ok((chunks, summary, false, stats));
         }
 
         let (mut chunks, summary, degraded) =
             self.process_with_degraded_flag(content, file_path, &effective, output_mode)?;
-        let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config);
+        let mut stats = inject_terminology(&mut chunks, vocabulary.as_deref(), config)?;
 
         if chunks.is_empty() {
             if let Some(parsed) =
                 self.process_with_plugin_list(content, file_path, &effective, output_mode, &below)
             {
                 let (mut chunks, summary) = parsed;
-                let fallback = inject_terminology(&mut chunks, vocabulary.as_deref(), config);
+                let fallback = inject_terminology(&mut chunks, vocabulary.as_deref(), config)?;
                 stats.absorb(fallback);
                 return Ok((chunks, summary, degraded, stats));
             }
@@ -478,83 +472,56 @@ fn inject_terminology(
     chunks: &mut [ChunkedResult],
     vocabulary: Option<&FileVocabulary>,
     config: &ChunkingConfig,
-) -> VocabularyStats {
-    let mut stats = VocabularyStats::default();
+) -> Result<VocabularyStats, ParseError> {
     let Some(table) = vocabulary else {
-        return stats;
+        enforce_document_hard_limit(chunks, config)?;
+        return Ok(VocabularyStats::default());
     };
     if table.is_empty() {
-        return stats;
+        enforce_document_hard_limit(chunks, config)?;
+        return Ok(VocabularyStats::default());
     }
-    let index = TerminologyIndex::new(&table.matches());
-    if index.is_empty() {
-        return stats;
-    }
-    // The entity scope expands a term once per entity, in the chunk that
-    // holds the first occurrence, so the expansion does not repeat across
-    // the chunks of one group.
-    let per_entity = config.glossary_scope == GlossaryScope::Entity;
-    let mut expanded = ExpandedTerms::default();
-    let mut group = String::new();
-    for chunk in chunks.iter_mut() {
-        if per_entity {
-            if chunk.source_group_id != group {
-                group = chunk.source_group_id.clone();
-                expanded = ExpandedTerms::default();
-            }
-        } else {
-            expanded = ExpandedTerms::default();
+    // Documents have no entity stage, so the entity scope of the
+    // terminology injection does not apply to them: the expansion is always
+    // placed per chunk.
+    let per_entity = false;
+    let stats = inject_chunks(
+        chunks,
+        table,
+        per_entity,
+        config.glossary_max_entries,
+        InjectionLimits {
+            bm25: config.limit(ChunkPath::Bm25),
+            embedding: config.limit(ChunkPath::Embedding),
+        },
+    );
+    // `GlossaryScope::Entity` is meaningless without entity ids, but the
+    // configuration still carries the scope. Documents always expand per
+    // chunk.
+    enforce_document_hard_limit(chunks, config)?;
+    Ok(stats)
+}
+
+/// Reject a document chunk that exceeds its hard limit.
+fn enforce_document_hard_limit(
+    chunks: &mut [ChunkedResult],
+    config: &ChunkingConfig,
+) -> Result<(), ParseError> {
+    for chunk in chunks {
+        let limit = config.limit(chunk.path);
+        let actual = config.cost(&chunk.text, chunk.path);
+        if limit > 0 && actual > limit {
+            return Err(ParseError::code_splitting(format!(
+                "document chunk exceeds the hard limit (path={}, chunk={}, cost={}, limit={limit})",
+                chunk.path, chunk.chunk_id, actual
+            )));
         }
-        let (style, reserve) = match chunk.path {
-            ChunkPath::Bm25 => (
-                InjectionStyle::Bm25,
-                config.glossary_reserve(ChunkPath::Bm25),
-            ),
-            ChunkPath::Embedding => (
-                InjectionStyle::Embedding,
-                config.glossary_reserve(ChunkPath::Embedding),
-            ),
-        };
-        let budget = InjectionBudget {
-            max_entries: config.glossary_max_entries,
-            max_cost: reserve,
-        };
-        let injection = inject(&chunk.text, &index, style, &budget, &mut expanded);
-        stats.injected += injection.injected;
-        stats.truncated += injection.truncated;
-        if injection.injected == 0 {
-            continue;
-        }
-        chunk.text = injection.text;
-        let words = chunk
-            .text
-            .split_whitespace()
-            .filter(|word| !word.is_empty())
-            .count();
-        chunk.token_count = match chunk.path {
-            ChunkPath::Bm25 => words,
-            ChunkPath::Embedding => estimate_tokens(&chunk.text),
-        };
+        chunk.token_count = actual;
         if chunk.metadata.bm25_word_count.is_some() {
-            chunk.metadata.bm25_word_count = Some(words);
-        }
-        // The reserved room bounds the injection, so the chunk keeps the
-        // budget it was split under.
-        let over_budget = config.exceeds_limit(&chunk.text, chunk.path);
-        debug_assert!(
-            !over_budget,
-            "glossary injection must respect the chunk budget"
-        );
-        if over_budget {
-            stats.overflow += 1;
-            tracing::warn!(
-                chunk_id = %chunk.chunk_id,
-                path = ?chunk.path,
-                "Glossary injection exceeded the chunk budget; raise chunking.glossary_reserve_ratio"
-            );
+            chunk.metadata.bm25_word_count = Some(config.cost(&chunk.text, ChunkPath::Bm25));
         }
     }
-    stats
+    Ok(())
 }
 
 #[cfg(test)]

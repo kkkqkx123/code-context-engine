@@ -1,7 +1,7 @@
 //! TOML chunker
 //!
 //! This module provides chunking functionality for TOML groups.
-//! Uses GenericChunker's default two-layer chunking (embedding truncation + BM25 word-based sub-chunking).
+//! Uses GenericChunker's default two-layer chunking (embedding truncation + BM25 term-based sub-chunking).
 
 use crate::common::{GenericChunker, MergingConfig};
 use crate::toml::types::{TomlGroup, TomlGroupType, TomlNode};

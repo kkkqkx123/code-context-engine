@@ -18,14 +18,17 @@
 //!   matches, while every adjacency the line originally had stays intact.
 //!
 //! The injection is bounded: a chunk carries at most a fixed number of
-//! expansions, and the expansions together may not cost more than the room
-//! the chunk reserved for them. The terms that do not fit are reported as
-//! truncated instead of being silently dropped.
+//! expansions, and the final chunk text may not exceed the path's hard
+//! limit. The reserve is a planning target for the splitter, not a spending
+//! permission: every candidate is measured against the actual final text.
+//! The terms that do not fit are reported as truncated instead of being
+//! silently dropped.
 
 use std::collections::{HashMap, HashSet};
 
+use cce_text::ChunkUnit;
 use cce_types::plugin::VocabularyMatch;
-use cce_utils::token_estimation::estimate_tokens;
+use cce_types::{ChunkPath, ChunkedResult};
 
 use super::split_identifier_segments;
 
@@ -54,9 +57,29 @@ pub enum InjectionStyle {
 pub struct InjectionBudget {
     /// The maximum number of terminology entries one chunk may carry.
     pub max_entries: usize,
-    /// The maximum number of words (BM25) or tokens (Embedding) the
-    /// injected text may add to one chunk.
-    pub max_cost: usize,
+    /// The absolute limit of the final chunk text, in `unit`.
+    /// Zero disables the limit.
+    pub max_total: usize,
+    /// The unit the limit is expressed in.
+    pub unit: ChunkUnit,
+}
+
+/// The absolute limits of the two chunk paths.
+#[derive(Debug, Clone, Copy)]
+pub struct InjectionLimits {
+    /// The BM25 term limit.
+    pub bm25: usize,
+    /// The embedding token limit.
+    pub embedding: usize,
+}
+
+impl InjectionLimits {
+    fn for_path(self, path: ChunkPath) -> usize {
+        match path {
+            ChunkPath::Bm25 => self.bm25,
+            ChunkPath::Embedding => self.embedding,
+        }
+    }
 }
 
 /// The result of one terminology injection.
@@ -79,11 +102,6 @@ pub struct VocabularyStats {
     /// The number of matched terminology entries that did not fit into the
     /// budget of their chunk.
     pub truncated: usize,
-    /// The number of chunks whose injected text exceeded the chunk limit.
-    ///
-    /// The reserved room makes this impossible; a non-zero count means the
-    /// reserve is configured too small for the expansions that were placed.
-    pub overflow: usize,
 }
 
 impl VocabularyStats {
@@ -91,7 +109,6 @@ impl VocabularyStats {
     pub fn absorb(&mut self, other: VocabularyStats) {
         self.injected += other.injected;
         self.truncated += other.truncated;
-        self.overflow += other.overflow;
     }
 }
 
@@ -180,14 +197,18 @@ pub fn inject(
     let mut insertions: Vec<(usize, String)> = Vec::new();
     let mut injected = 0usize;
     let mut truncated = 0usize;
-    let mut spent = 0usize;
-    let mut exhausted = false;
     // The terms this text already mentions; the first occurrence of a term
     // is the only one that carries the expansion.
     let mut mentioned: HashSet<String> = HashSet::new();
 
     for anchor in anchors(text, style) {
-        // The terms this anchor mentions, in the order they appear.
+        if !text.is_char_boundary(anchor.offset) {
+            truncated += anchor.keys.len();
+            continue;
+        }
+        // The terms this anchor mentions, in the order they appear. A term
+        // is considered once per text: repeating it at a later anchor cannot
+        // change whether its expansion fits.
         let mut fresh: Vec<&VocabularyMatch> = Vec::new();
         for key in &anchor.keys {
             let Some(entry) = index.get(key) else {
@@ -202,21 +223,33 @@ pub fn inject(
         if fresh.is_empty() {
             continue;
         }
-        if exhausted {
-            truncated += fresh.len();
-            continue;
-        }
 
         let separator = separator_before(text, anchor.offset);
-        let (fitted, cost) = fitting_prefix(&fresh, style, separator, budget, injected, spent);
+        // Measure the absolute final text, not the growth of the block.
+        // The block may start with a separator and may be inserted in the
+        // middle of a tokenizer run; only the final text is relevant.
+        let mut fitted = 0usize;
+        for count in 1..=fresh.len() {
+            if injected + count > budget.max_entries {
+                break;
+            }
+            let mut candidate_insertions = insertions.clone();
+            candidate_insertions.push((
+                anchor.offset,
+                format!("{separator}{}", render(&fresh[..count], style)),
+            ));
+            let candidate = apply(text, &candidate_insertions);
+            if budget.max_total != 0 && budget.unit.cost(&candidate) > budget.max_total {
+                break;
+            }
+            fitted = count;
+        }
         if fitted == 0 {
             truncated += fresh.len();
-            exhausted = true;
             continue;
         }
         truncated += fresh.len() - fitted;
         injected += fitted;
-        spent += cost;
         for entry in &fresh[..fitted] {
             expanded.keys.insert(entry.match_key());
         }
@@ -224,9 +257,6 @@ pub fn inject(
             anchor.offset,
             format!("{separator}{}", render(&fresh[..fitted], style)),
         ));
-        if fitted < fresh.len() {
-            exhausted = true;
-        }
     }
 
     Injection {
@@ -236,35 +266,59 @@ pub fn inject(
     }
 }
 
-/// The longest prefix of `entries` whose rendered block fits into the
-/// remaining budget, and the cost of that block.
+/// Inject terminology into every chunk of a file.
 ///
-/// The block is rendered as a whole, so the entries that share an anchor
-/// are measured together: a block that does not fit is never split in the
-/// middle.
-fn fitting_prefix(
-    entries: &[&VocabularyMatch],
-    style: InjectionStyle,
-    separator: &str,
-    budget: &InjectionBudget,
-    used: usize,
-    spent: usize,
-) -> (usize, usize) {
-    let mut count = 0usize;
-    let mut cost = 0usize;
-    for _ in entries {
-        if used + count + 1 > budget.max_entries {
-            break;
-        }
-        let candidate = format!("{separator}{}", render(&entries[..count + 1], style));
-        let candidate_cost = measure(&candidate, style);
-        if spent + candidate_cost > budget.max_cost {
-            break;
-        }
-        count += 1;
-        cost = candidate_cost;
+/// This is the single chunk-level loop shared by the AST and document
+/// pipelines. The injected text is checked against the chunk's absolute
+/// hard limit, so an expansion can never push a chunk over the budget even
+/// when the body was split without a reserve.
+pub fn inject_chunks(
+    chunks: &mut [ChunkedResult],
+    vocabulary: &super::FileVocabulary,
+    per_entity: bool,
+    max_entries: usize,
+    limits: InjectionLimits,
+) -> VocabularyStats {
+    let mut stats = VocabularyStats::default();
+    let index = TerminologyIndex::new(&vocabulary.matches());
+    if index.is_empty() {
+        return stats;
     }
-    (count, cost)
+
+    let mut expanded = ExpandedTerms::default();
+    let mut entity = String::new();
+    for chunk in chunks.iter_mut() {
+        if per_entity {
+            if chunk.source_group_id != entity {
+                entity = chunk.source_group_id.clone();
+                expanded = ExpandedTerms::default();
+            }
+        } else {
+            expanded = ExpandedTerms::default();
+        }
+
+        let (style, unit) = match chunk.path {
+            ChunkPath::Bm25 => (InjectionStyle::Bm25, ChunkUnit::Terms),
+            ChunkPath::Embedding => (InjectionStyle::Embedding, ChunkUnit::Tokens),
+        };
+        let budget = InjectionBudget {
+            max_entries,
+            max_total: limits.for_path(chunk.path),
+            unit,
+        };
+        let injection = inject(&chunk.text, &index, style, &budget, &mut expanded);
+        stats.injected += injection.injected;
+        stats.truncated += injection.truncated;
+        if injection.injected == 0 {
+            continue;
+        }
+        chunk.text = injection.text;
+        chunk.token_count = unit.cost(&chunk.text);
+        if chunk.metadata.bm25_word_count.is_some() {
+            chunk.metadata.bm25_word_count = Some(ChunkUnit::Terms.cost(&chunk.text));
+        }
+    }
+    stats
 }
 
 /// The expansion block of `entries`.
@@ -284,18 +338,6 @@ fn render(entries: &[&VocabularyMatch], style: InjectionStyle) -> String {
                 .collect();
             format!("[{}]", parts.join("; "))
         }
-    }
-}
-
-/// The cost an injected text adds to a chunk: words for the keyword index,
-/// tokens for the semantic index.
-fn measure(text: &str, style: InjectionStyle) -> usize {
-    match style {
-        InjectionStyle::Embedding => estimate_tokens(text),
-        InjectionStyle::Bm25 => text
-            .split_whitespace()
-            .filter(|word| !word.is_empty())
-            .count(),
     }
 }
 
@@ -495,10 +537,11 @@ mod tests {
         inject(text, index, style, budget, &mut ExpandedTerms::default())
     }
 
-    fn budget(max_entries: usize, max_cost: usize) -> InjectionBudget {
+    fn budget(max_entries: usize, max_total: usize) -> InjectionBudget {
         InjectionBudget {
             max_entries,
-            max_cost,
+            max_total,
+            unit: ChunkUnit::Tokens,
         }
     }
 
@@ -597,6 +640,17 @@ mod tests {
         assert_eq!(injection.injected, 0);
         assert_eq!(injection.truncated, 1);
         assert_eq!(injection.text, "stts opens the table");
+    }
+
+    #[test]
+    fn the_budget_is_the_absolute_final_text_not_the_growth() {
+        let index = index(&[("stts", "decoding time to sample box")]);
+        let text = "stts opens the table and keeps the original spelling";
+        let limit = ChunkUnit::Tokens.cost(text) + 2;
+        let injection = inject_once(text, &index, InjectionStyle::Embedding, &budget(4, limit));
+        assert_eq!(injection.injected, 0);
+        assert_eq!(injection.truncated, 1);
+        assert!(ChunkUnit::Tokens.cost(&injection.text) <= limit);
     }
 
     #[test]

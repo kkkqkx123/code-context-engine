@@ -143,7 +143,7 @@ pub fn find_sentence_boundaries(text: &str) -> Vec<usize> {
 
 fn path_limit(path: ChunkPath, config: &ChunkingConfig) -> usize {
     match path {
-        ChunkPath::Bm25 => config.max_bm25_words,
+        ChunkPath::Bm25 => config.max_bm25_terms,
         ChunkPath::Embedding => config.max_tokens,
     }
 }

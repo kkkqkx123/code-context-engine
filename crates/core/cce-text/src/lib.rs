@@ -1,9 +1,11 @@
 //! Text processing utilities for the code context engine
 
+pub mod budget;
 pub mod segment;
 pub mod text_cleaner;
 pub mod tokenizer;
 
+pub use budget::{ChunkUnit, suffix_start_for_cost, truncate_to_cost};
 pub use segment::{
     MAX_TOKENIZE_CHARS, MixedToken, segment_text, shared_jieba, truncated_input_count,
 };

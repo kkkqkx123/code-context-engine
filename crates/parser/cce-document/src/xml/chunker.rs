@@ -271,7 +271,7 @@ mod tests {
     fn test_chunk_group_with_split() {
         let config = ChunkingConfig {
             max_tokens: 5,     // Very small to force splitting
-            max_bm25_words: 2, // Also force BM25 path splitting (each line ~3 words)
+            max_bm25_terms: 2, // Also force BM25 path splitting (each line ~3 words)
             ..Default::default()
         };
         let chunker = XmlChunker::new(config);

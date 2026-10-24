@@ -8,6 +8,7 @@
 //! a separate count-based fallthrough chain.
 
 use crate::grouper::EntityGroup;
+use cce_types::ParseError;
 
 use super::boundary::{ChunkSegment, NlEntityBoundary};
 use super::chunker::ChunkInfrastructure;
@@ -26,24 +27,21 @@ pub(crate) fn enforce_segment_max_limit(
     infra: &ChunkInfrastructure,
     group: &EntityGroup,
     nl_boundaries: &[NlEntityBoundary],
-) -> Vec<ChunkSegment> {
-    let limit = match path {
-        ChunkPath::Bm25 => infra.config.max_bm25_words,
-        ChunkPath::Embedding => infra.config.max_tokens,
-    };
+) -> Result<Vec<ChunkSegment>, ParseError> {
+    let limit = infra.config.limit(path);
     if limit == 0 {
-        return segments;
+        return Ok(segments);
     }
 
     let mut validated = Vec::with_capacity(segments.len());
     for seg in segments {
-        if !infra.config.exceeds_limit(&seg.text, path) {
+        if infra.config.cost(&seg.text, path) <= limit {
             validated.push(seg);
             continue;
         }
-        validated.extend(re_split_segment(&seg, path, infra, group, nl_boundaries));
+        validated.extend(re_split_segment(&seg, path, infra, group, nl_boundaries)?);
     }
-    validated
+    Ok(validated)
 }
 
 /// Re-split a single oversized segment through `split_range`.
@@ -57,7 +55,7 @@ fn re_split_segment(
     infra: &ChunkInfrastructure,
     group: &EntityGroup,
     nl_boundaries: &[NlEntityBoundary],
-) -> Vec<ChunkSegment> {
+) -> Result<Vec<ChunkSegment>, ParseError> {
     let base = seg.boundary.start_byte;
     let seg_end = base + seg.text.len();
 
@@ -71,26 +69,35 @@ fn re_split_segment(
         })
         .collect();
 
-    let boundaries = infra.splitter.split_range(
+    let boundaries = infra.splitter.try_split_range(
         &seg.text,
         group,
         SplitStrategy::ByNlEntityBoundaries,
         path,
         Some(&shifted),
         0..seg.text.len(),
-    );
+    )?;
 
-    boundaries
-        .into_iter()
-        .map(|mut b| {
-            let start = b.start_byte;
-            let end = b.end_byte.min(seg.text.len());
-            if b.entity_ids.is_empty() {
-                b.entity_ids = seg.boundary.entity_ids.clone();
-            }
-            b.start_byte = base + start;
-            b.end_byte = base + end;
-            ChunkSegment::new(b, seg.text[start..end].to_string())
-        })
-        .collect()
+    let mut result = Vec::with_capacity(boundaries.len());
+    for mut b in boundaries {
+        let start = b.start_byte;
+        let end = b.end_byte;
+        if start >= end
+            || end > seg.text.len()
+            || !seg.text.is_char_boundary(start)
+            || !seg.text.is_char_boundary(end)
+        {
+            return Err(ParseError::code_splitting(format!(
+                "re-split boundary [{start}, {end}) is invalid for segment of length {}",
+                seg.text.len()
+            )));
+        }
+        if b.entity_ids.is_empty() {
+            b.entity_ids = seg.boundary.entity_ids.clone();
+        }
+        b.start_byte = base + start;
+        b.end_byte = base + end;
+        result.push(ChunkSegment::new(b, seg.text[start..end].to_string()));
+    }
+    Ok(result)
 }

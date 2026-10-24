@@ -266,7 +266,8 @@ pub struct ChunkedResult {
     #[serde(default)]
     pub bm25_keywords: Vec<String>,
 
-    /// Token count (estimated tokens for Embedding path, word count for BM25 path)
+    /// Path cost (estimated tokens for the Embedding path, index terms for
+    /// the BM25 path).
     pub token_count: usize,
     /// Byte range
     pub start_byte: usize,
@@ -391,7 +392,8 @@ pub struct ChunkMetadata {
     pub source_ranges: Vec<Span>,
     /// Precision of `source_ranges`.
     pub source_span_kind: SourceSpanKind,
-    /// Word count for BM25 length normalization (actual words, not tokens)
+    /// BM25 term count for length normalization (index tokenizer terms,
+    /// not whitespace words).
     #[serde(default)]
     pub bm25_word_count: Option<usize>,
     /// Alignment key for hybrid fusion. Always populated.
@@ -766,30 +768,6 @@ impl ChunkedResult {
             bm25_keywords: Vec::new(),
             metadata: ChunkMetadata::default(),
         }
-    }
-
-    /// Get full text with overlap
-    pub fn full_text_with_overlap(&self) -> String {
-        let mut result = String::new();
-
-        // Add previous overlap
-        if let Some(ref overlap) = self.prev_overlap {
-            result.push_str(&overlap.text);
-            result.push(' ');
-        }
-
-        // Add main text
-        if !self.text.is_empty() {
-            result.push_str(&self.text);
-        }
-
-        // Add next overlap
-        if let Some(ref overlap) = self.next_overlap {
-            result.push(' ');
-            result.push_str(&overlap.text);
-        }
-
-        result
     }
 
     /// Get pure text (without overlap)

@@ -2,9 +2,10 @@
 //!
 //! Manages overlap regions between adjacent chunks.
 
+use cce_text::{ChunkUnit, suffix_start_for_cost, truncate_to_cost};
 use cce_utils::text::floor_char_boundary;
-use cce_utils::token_estimation::TokenEstimator;
 
+use super::boundary::cost;
 use super::config::ChunkingConfig;
 use super::result::{ChunkPath, ChunkedResult, OverlapRegion, OverlapType};
 
@@ -22,16 +23,12 @@ struct OverlapInfo {
 /// Overlap manager
 pub struct OverlapManager {
     config: ChunkingConfig,
-    estimator: TokenEstimator,
 }
 
 impl OverlapManager {
     /// Create new overlap manager
     pub fn new(config: ChunkingConfig) -> Self {
-        Self {
-            config,
-            estimator: TokenEstimator::default(),
-        }
+        Self { config }
     }
 
     /// Calculate overlap between two chunks
@@ -47,7 +44,7 @@ impl OverlapManager {
             return None;
         }
 
-        let token_count = self.estimator.estimate_text(&info.text);
+        let token_count = cost(&info.text, path);
 
         Some(OverlapRegion {
             text: info.text,
@@ -69,30 +66,18 @@ impl OverlapManager {
             };
         }
 
-        let target_byte = match path {
-            ChunkPath::Bm25 => {
-                // Find byte position after overlap_bm25_words words
-                let limit = self.config.overlap_bm25_words;
-                let word_end = text
-                    .split_whitespace()
-                    .take(limit)
-                    .map(|w| w.len() + 1) // +1 for the space
-                    .sum::<usize>()
-                    .min(text.len());
-                floor_char_boundary(text, word_end)
-            }
-            ChunkPath::Embedding => {
-                let max_chars = self.config.overlap_tokens * 4; // ~4 chars per token
-                if text.len() <= max_chars {
-                    return OverlapInfo {
-                        text: text.to_string(),
-                        start_byte: 0,
-                        end_byte: text.len(),
-                    };
-                }
-                max_chars
-            }
+        let (unit, limit) = match path {
+            ChunkPath::Bm25 => (ChunkUnit::Terms, self.config.overlap_bm25_terms),
+            ChunkPath::Embedding => (ChunkUnit::Tokens, self.config.overlap_tokens),
         };
+        if limit == 0 {
+            return OverlapInfo {
+                text: String::new(),
+                start_byte: 0,
+                end_byte: 0,
+            };
+        }
+        let target_byte = truncate_to_cost(text, unit, limit).len();
 
         if text.len() <= target_byte {
             return OverlapInfo {
@@ -102,9 +87,10 @@ impl OverlapManager {
             };
         }
 
-        // Find sentence boundary near target_byte
+        // Search only inside the guaranteed-to-fit prefix: a boundary past
+        // `target_byte` would make the overlap exceed its own budget.
         let search_start = floor_char_boundary(text, target_byte.saturating_sub(50));
-        let search_end = floor_char_boundary(text, (target_byte + 100).min(text.len()));
+        let search_end = floor_char_boundary(text, target_byte);
 
         if let Some(pos) = self.find_sentence_boundary(&text[search_start..search_end]) {
             let end = floor_char_boundary(text, search_start + pos);
@@ -134,43 +120,29 @@ impl OverlapManager {
             };
         }
 
-        let target_byte = match path {
-            ChunkPath::Bm25 => {
-                // Find byte position overlap_bm25_words words from the end
-                let limit = self.config.overlap_bm25_words;
-                let words: Vec<&str> = text.split_whitespace().collect();
-                if words.len() <= limit {
-                    return OverlapInfo {
-                        text: text.to_string(),
-                        start_byte: 0,
-                        end_byte: text.len(),
-                    };
-                }
-                // Byte position after (words.len() - limit) words → overlap is everything after
-                let keep_count = words.len() - limit;
-                let byte_pos: usize = words
-                    .iter()
-                    .take(keep_count)
-                    .map(|w| w.len() + 1) // +1 for the space
-                    .sum::<usize>()
-                    .min(text.len());
-                floor_char_boundary(text, byte_pos)
-            }
-            ChunkPath::Embedding => {
-                let max_chars = self.config.overlap_tokens * 4; // ~4 chars per token
-                if text.len() <= max_chars {
-                    return OverlapInfo {
-                        text: text.to_string(),
-                        start_byte: 0,
-                        end_byte: text.len(),
-                    };
-                }
-                text.len().saturating_sub(max_chars)
-            }
+        let (unit, limit) = match path {
+            ChunkPath::Bm25 => (ChunkUnit::Terms, self.config.overlap_bm25_terms),
+            ChunkPath::Embedding => (ChunkUnit::Tokens, self.config.overlap_tokens),
         };
+        if limit == 0 {
+            return OverlapInfo {
+                text: String::new(),
+                start_byte: text.len(),
+                end_byte: text.len(),
+            };
+        }
+        let target_byte = suffix_start_for_cost(text, unit, limit);
+        if target_byte == 0 {
+            return OverlapInfo {
+                text: text.to_string(),
+                start_byte: 0,
+                end_byte: text.len(),
+            };
+        }
 
-        // Find sentence boundary near target_byte
-        let search_start = floor_char_boundary(text, target_byte.saturating_sub(50));
+        // Search only forward from `target_byte`: a sentence boundary before
+        // it would make the overlap longer than its budget.
+        let search_start = floor_char_boundary(text, target_byte);
         let search_end = floor_char_boundary(text, (target_byte + 100).min(text.len()));
 
         if search_start < search_end && search_end <= text.len() {
@@ -224,7 +196,7 @@ impl OverlapManager {
             let prev_text = chunks[i - 1].pure_text();
             let info = self.extract_overlap_from_end(prev_text, path);
             if !info.text.is_empty() {
-                let token_count = self.estimator.estimate_text(&info.text);
+                let token_count = cost(&info.text, path);
 
                 // Validate overlap doesn't exceed max ratio
                 if self.validate_overlap(chunks[i].token_count, token_count) {
@@ -279,7 +251,7 @@ impl OverlapManager {
             let prev_text = chunks[i - 1].inner().pure_text();
             let info = self.extract_overlap_from_end(prev_text, ChunkPath::Embedding);
             if !info.text.is_empty() {
-                let token_count = self.estimator.estimate_text(&info.text);
+                let token_count = cost(&info.text, ChunkPath::Embedding);
 
                 if self.validate_overlap(chunks[i].inner().token_count, token_count) {
                     let prev_id = chunks[i - 1].inner().chunk_id.clone();

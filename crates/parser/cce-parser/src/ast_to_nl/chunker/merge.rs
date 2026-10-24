@@ -13,9 +13,11 @@ use std::collections::HashMap;
 use cce_types::Span;
 use cce_types::entity::EntityId;
 
-use super::boundary::SplitReason;
+use super::boundary::{SplitReason, cost};
 use super::config::ChunkingConfig;
-use super::result::{ChunkMetadata, ChunkedResult, CodeSpecificMetadata, SourceSpanKind};
+use super::result::{
+    ChunkMetadata, ChunkPath, ChunkedResult, CodeSpecificMetadata, SourceSpanKind,
+};
 
 /// Remove duplicates while preserving the first-occurrence order.
 ///
@@ -224,10 +226,7 @@ pub(crate) fn merge_two_chunks(
     bm25_keywords.extend_from_slice(&b.bm25_keywords);
     bm25_keywords.dedup();
 
-    let bm25_word_count = merged_text
-        .split_whitespace()
-        .filter(|w| !w.is_empty())
-        .count();
+    let bm25_word_count = cost(&merged_text, ChunkPath::Bm25);
 
     let code_metadata = CodeSpecificMetadata {
         content_entity_ids,
@@ -298,7 +297,7 @@ pub(crate) fn merge_two_chunks(
 /// Cost is path-dependent: the Embedding path measures estimated tokens
 /// (re-estimated on the combined text), the BM25 path measures actual word
 /// counts (exact sum, since the separator adds no words). The BM25 merge
-/// ceiling is hard-capped at `max_bm25_words`: `cross_group_merge_threshold`
+/// ceiling is hard-capped at `max_bm25_terms`: `cross_group_merge_threshold`
 /// (an embedding-token setting) must never widen the BM25 limit.
 ///
 /// Uses a stack-based approach to enable chain merging: after merging two chunks,

@@ -1,7 +1,6 @@
 use std::ops::Range;
 
 use cce_config::modules::ChunkingConfig;
-use cce_utils::text::{ceil_char_boundary, floor_char_boundary};
 
 use super::super::boundary::{ChunkBoundary, SplitReason, cost};
 use super::super::result::ChunkPath;
@@ -136,48 +135,50 @@ pub fn force_split_line(
     config: &ChunkingConfig,
 ) -> Vec<ChunkBoundary> {
     let mut boundaries = Vec::new();
-    let max_chars = path_limit(path, config) * 6;
+    let limit = path_limit(path, config);
+    if limit == 0 {
+        if !line.is_empty() {
+            boundaries.push(
+                ChunkBoundary::new(line_start, line_start + line.len(), SplitReason::NotSplit)
+                    .with_token_count(cost(line, path)),
+            );
+        }
+        return boundaries;
+    }
+    let unit = super::super::boundary::unit(path);
     let mut current_pos = 0;
 
     while current_pos < line.len() {
-        let target_pos = (current_pos + max_chars).min(line.len());
-
-        let end_pos = if target_pos < line.len() {
-            let floored = floor_char_boundary(line, target_pos);
-            if floored > current_pos {
-                floored
-            } else {
-                ceil_char_boundary(line, target_pos)
-            }
+        let remaining = &line[current_pos..];
+        let prefix = cce_text::truncate_to_cost(remaining, unit, limit);
+        let end_pos = if prefix.is_empty() {
+            remaining
+                .chars()
+                .next()
+                .map(|character| current_pos + character.len_utf8())
+                .unwrap_or(line.len())
         } else {
-            target_pos
+            current_pos + prefix.len()
         };
-
         if end_pos <= current_pos {
             break;
         }
-
-        let chunk = &line[current_pos..end_pos];
-        let tokens = cost(chunk, path);
-
         boundaries.push(
             ChunkBoundary::new(
                 line_start + current_pos,
                 line_start + end_pos,
                 SplitReason::TokenLimit,
             )
-            .with_token_count(tokens),
+            .with_token_count(cost(&line[current_pos..end_pos], path)),
         );
-
         current_pos = end_pos;
     }
-
     boundaries
 }
 
 fn path_limit(path: ChunkPath, config: &ChunkingConfig) -> usize {
     match path {
-        ChunkPath::Bm25 => config.max_bm25_words,
+        ChunkPath::Bm25 => config.max_bm25_terms,
         ChunkPath::Embedding => config.max_tokens,
     }
 }
@@ -202,7 +203,7 @@ mod tests {
     #[test]
     fn test_force_split_line_basic() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         let line = "word1 word2 word3 word4 word5 word6 word7";
@@ -217,7 +218,7 @@ mod tests {
     #[test]
     fn test_split_text_by_lines_first_line_oversized() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         // Single line with no '\n' — must force-split even though current_tokens==0
@@ -244,7 +245,7 @@ mod tests {
     #[test]
     fn test_split_text_by_lines_oversized_followed_by_blank_lines() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         // Oversized line followed by blank lines (simulates keyword-hybrid + appended code)
@@ -267,7 +268,7 @@ mod tests {
     #[test]
     fn test_split_text_by_lines_no_zero_length_boundaries() {
         let config = ChunkingConfig {
-            max_bm25_words: 10,
+            max_bm25_terms: 10,
             ..Default::default()
         };
         // First line accumulates above half the limit; the second line then
@@ -293,7 +294,7 @@ mod tests {
     #[test]
     fn test_split_text_by_lines_trailing_whitespace_absorbed() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         // Trailing blank lines after the last flushed chunk must be absorbed
@@ -318,7 +319,7 @@ mod tests {
     #[test]
     fn test_split_text_by_lines_blank_lines_between_oversized_lines_are_covered() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         // Blank lines (zero-cost) accumulate between two oversized lines.
@@ -350,7 +351,7 @@ mod tests {
         use super::super::paragraphs::split_text_by_paragraphs;
 
         let config = ChunkingConfig {
-            max_bm25_words: 5,
+            max_bm25_terms: 5,
             ..Default::default()
         };
         // First paragraph is oversized (keyword-hybrid style), followed by blank lines and code
@@ -367,19 +368,21 @@ mod tests {
         use crate::grouper::EntityGroup;
 
         let config = ChunkingConfig {
-            max_bm25_words: 5,
+            max_bm25_terms: 5,
             ..Default::default()
         };
         let splitter = TextSplitter::new(config);
 
         // Oversized first line followed by blank lines
         let text = "word1 word2 word3 word4 word5 word6 word7 word8\n\n\nmatch printer standard\n";
-        let segments = splitter.split(
-            text,
-            &EntityGroup::default(),
-            SplitStrategy::ByParagraphs,
-            ChunkPath::Bm25,
-        );
+        let segments = splitter
+            .split(
+                text,
+                &EntityGroup::default(),
+                SplitStrategy::ByParagraphs,
+                ChunkPath::Bm25,
+            )
+            .expect("test split must succeed");
 
         // Verify no segment is whitespace-only
         for seg in &segments {

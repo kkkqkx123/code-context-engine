@@ -753,11 +753,11 @@ mod tests {
         let config = ChunkingConfig {
             max_tokens: 0,
             overlap_tokens: 0,
-            max_bm25_words: 0,
-            overlap_bm25_words: 0,
+            max_bm25_terms: 0,
+            overlap_bm25_terms: 0,
             max_overlap_ratio: 2.0,
             min_chunk_tokens: 0,
-            min_chunk_bm25_words: 0,
+            min_chunk_bm25_terms: 0,
             cross_group_merge_threshold: 0,
             respect_boundaries: true,
             ..Default::default()
@@ -766,7 +766,7 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("max_tokens"));
         assert!(msg.contains("overlap_tokens"));
-        assert!(msg.contains("max_bm25_words"));
+        assert!(msg.contains("max_bm25_terms"));
         assert!(msg.contains("max_overlap_ratio"));
     }
 

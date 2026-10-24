@@ -17,7 +17,7 @@ pub struct JsonGrouper {
     /// Maximum tokens per group for embedding path (0 = no limit)
     max_tokens: usize,
     /// Maximum words per group for BM25 path (0 = no limit)
-    max_bm25_words: usize,
+    max_bm25_terms: usize,
 }
 
 impl JsonGrouper {
@@ -27,7 +27,7 @@ impl JsonGrouper {
             estimator: TokenEstimator::default(),
             min_object_members: 2,
             max_tokens: 0,
-            max_bm25_words: 200,
+            max_bm25_terms: 200,
         }
     }
 
@@ -44,8 +44,8 @@ impl JsonGrouper {
     }
 
     /// Set maximum words per group for BM25 path
-    pub fn with_max_bm25_words(mut self, max_words: usize) -> Self {
-        self.max_bm25_words = max_words;
+    pub fn with_max_bm25_terms(mut self, max_words: usize) -> Self {
+        self.max_bm25_terms = max_words;
         self
     }
 
@@ -207,7 +207,7 @@ impl JsonGrouper {
         }
 
         // Check for groups exceeding limits and split if necessary
-        if self.max_tokens > 0 || self.max_bm25_words > 0 {
+        if self.max_tokens > 0 || self.max_bm25_terms > 0 {
             groups = self.split_large_groups(groups, file_path);
         }
 
@@ -392,10 +392,10 @@ impl JsonGrouper {
         let mut group_counter = groups.len();
 
         for group in groups {
-            let should_split = if self.max_bm25_words > 0 {
+            let should_split = if self.max_bm25_terms > 0 {
                 let tokenizer = MixedTokenizer::new();
                 let word_count = tokenizer.tokenize(&group.bm25_text).len();
-                word_count > self.max_bm25_words
+                word_count > self.max_bm25_terms
             } else if self.max_tokens > 0 {
                 group.token_count > self.max_tokens
             } else {
@@ -430,8 +430,8 @@ impl JsonGrouper {
             let member_bm25 = member.to_bm25_text();
             let member_words = tokenizer.tokenize(&member_bm25).len();
 
-            let should_split = if self.max_bm25_words > 0 {
-                current_word_count + member_words > self.max_bm25_words
+            let should_split = if self.max_bm25_terms > 0 {
+                current_word_count + member_words > self.max_bm25_terms
                     && !current_members.is_empty()
             } else if self.max_tokens > 0 {
                 let member_tokens = self.estimator.estimate_text(&member_bm25);

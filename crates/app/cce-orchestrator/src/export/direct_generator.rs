@@ -126,7 +126,8 @@ impl DirectExportGenerator {
         let index = TerminologyIndex::new(glossary);
         let budget = InjectionBudget {
             max_entries: MAX_EXPORTED_TERMS,
-            max_cost: usize::MAX,
+            max_total: 0,
+            unit: cce_text::ChunkUnit::Tokens,
         };
         let injection = inject(
             &text,

@@ -102,7 +102,7 @@ pub fn split_by_members_with_nl(
 
         if chunk_cost + entity_cost > limit && !chunk_entities.is_empty() {
             let min_cost: usize = match path {
-                ChunkPath::Bm25 => config.min_chunk_bm25_words,
+                ChunkPath::Bm25 => config.min_chunk_bm25_terms,
                 ChunkPath::Embedding => config.min_chunk_tokens,
             };
 
@@ -156,7 +156,7 @@ pub fn split_by_members_with_nl(
 
 fn path_limit(path: ChunkPath, config: &ChunkingConfig) -> usize {
     match path {
-        ChunkPath::Bm25 => config.max_bm25_words,
+        ChunkPath::Bm25 => config.max_bm25_terms,
         ChunkPath::Embedding => config.max_tokens,
     }
 }
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn test_split_by_members_with_nl_basic() {
         let config = ChunkingConfig {
-            max_bm25_words: 2,
+            max_bm25_terms: 2,
             ..Default::default()
         };
         let text = "alpha one two beta three four gamma five";

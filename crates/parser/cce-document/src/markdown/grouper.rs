@@ -14,11 +14,11 @@ pub struct MarkdownGrouperConfig {
     /// Maximum tokens per group for embedding path (0 = no limit)
     pub max_tokens: usize,
     /// Maximum words per group for BM25 path (0 = no limit)
-    pub max_bm25_words: usize,
+    pub max_bm25_terms: usize,
     /// Minimum tokens for standalone code block (embedding path)
     pub min_standalone_tokens: usize,
-    /// Minimum BM25 words for standalone code block (BM25 path)
-    pub min_standalone_bm25_words: usize,
+    /// Minimum BM25 terms for standalone code block (BM25 path)
+    pub min_standalone_bm25_terms: usize,
     /// Merge adjacent paragraphs without headings
     pub merge_adjacent_paragraphs: bool,
     /// Keep code blocks with their preceding context
@@ -29,9 +29,9 @@ impl Default for MarkdownGrouperConfig {
     fn default() -> Self {
         Self {
             max_tokens: 0,
-            max_bm25_words: 200,
+            max_bm25_terms: 200,
             min_standalone_tokens: 100,
-            min_standalone_bm25_words: 80,
+            min_standalone_bm25_terms: 80,
             merge_adjacent_paragraphs: true,
             preserve_code_context: true,
         }
@@ -67,8 +67,8 @@ impl DocGrouper {
     }
 
     /// Set maximum words per group for BM25 path
-    pub fn with_max_bm25_words(mut self, max_words: usize) -> Self {
-        self.config.max_bm25_words = max_words;
+    pub fn with_max_bm25_terms(mut self, max_words: usize) -> Self {
+        self.config.max_bm25_terms = max_words;
         self
     }
 
@@ -78,9 +78,9 @@ impl DocGrouper {
         self
     }
 
-    /// Set minimum BM25 words for standalone code blocks (BM25 path)
-    pub fn with_min_standalone_bm25_words(mut self, min_words: usize) -> Self {
-        self.config.min_standalone_bm25_words = min_words;
+    /// Set minimum BM25 terms for standalone code blocks (BM25 path)
+    pub fn with_min_standalone_bm25_terms(mut self, min_terms: usize) -> Self {
+        self.config.min_standalone_bm25_terms = min_terms;
         self
     }
 
@@ -173,11 +173,11 @@ impl DocGrouper {
                         // Add to current group
                         group.add_member(node);
 
-                        // Check if group exceeds limits (both BM25 words and embedding tokens)
-                        let should_split = if self.config.max_bm25_words > 0 {
+                        // Check if group exceeds limits (both BM25 terms and embedding tokens)
+                        let should_split = if self.config.max_bm25_terms > 0 {
                             let tokenizer = MixedTokenizer::new();
                             let word_count = tokenizer.tokenize(&group.bm25_text).len();
-                            word_count > self.config.max_bm25_words && !group.members.is_empty()
+                            word_count > self.config.max_bm25_terms && !group.members.is_empty()
                         } else if self.config.max_tokens > 0 {
                             let tokens = self.estimator.estimate_text(&group.bm25_text);
                             tokens > self.config.max_tokens && !group.members.is_empty()
@@ -231,14 +231,14 @@ impl DocGrouper {
     fn should_be_standalone(&self, node: &DocNode) -> bool {
         match &node.node_type {
             DocNodeType::CodeBlock { .. } => {
-                // Check both token count and BM25 word count
+                // Check both token count and BM25 term count
                 let token_count = self.estimator.estimate_text(&node.content);
                 let tokenizer = MixedTokenizer::new();
-                let bm25_word_count = tokenizer.tokenize(&node.content).len();
+                let bm25_term_count = tokenizer.tokenize(&node.content).len();
 
                 // Standalone if either threshold is met
                 token_count >= self.config.min_standalone_tokens
-                    || bm25_word_count >= self.config.min_standalone_bm25_words
+                    || bm25_term_count >= self.config.min_standalone_bm25_terms
             }
             DocNodeType::Table | DocNodeType::TableRow => {
                 // Tables with multiple rows could be standalone

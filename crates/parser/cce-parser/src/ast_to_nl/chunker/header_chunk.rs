@@ -1,9 +1,11 @@
 use crate::grouper::EntityGroup;
 use crate::grouper::types::GroupType;
+use cce_text::truncate_to_cost;
 use cce_types::ConversionResult;
 use cce_types::ParseError;
 use cce_types::entity::EntityId;
 
+use super::boundary::unit;
 use super::chunk_builder::ChunkBuilder;
 use super::chunker::{ChunkInfrastructure, ChunkOutput};
 use super::header::HeaderHelper;
@@ -316,6 +318,21 @@ fn process_path(
         } else {
             &input.texts.continuation
         };
+        // A synthetic head names the members of a continuation block. It is
+        // decoration, not body: cap it in the path's unit so a group with
+        // many members cannot push the block over the budget.
+        let capped_head;
+        let header_text = if idx == 0 {
+            header_text
+        } else {
+            capped_head = truncate_to_cost(
+                header_text,
+                unit(input.path),
+                super::chunk_builder::SYNTHETIC_HEAD_COST_CAP,
+            )
+            .to_string();
+            capped_head.as_str()
+        };
         // The first member group carries the group's own header text; every
         // later group starts with a synthetic head that names the members
         // this block holds. That head belongs to no group header, so the
@@ -513,6 +530,8 @@ mod tests {
             config: cfg,
             estimator: est,
             splitter,
+            pre_injection_embedding: cfg.max_tokens,
+            pre_injection_bm25: cfg.max_bm25_terms,
         }
     }
 
@@ -554,7 +573,7 @@ mod tests {
     #[test]
     fn test_enforce_segment_limit_passthrough() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 100,
+            max_bm25_terms: 100,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -578,7 +597,8 @@ mod tests {
             &infra,
             &group,
             &nlb,
-        );
+        )
+        .expect("segment split must succeed");
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].text, "small segment");
         assert_eq!(result[1].text, "another seg");
@@ -587,7 +607,7 @@ mod tests {
     #[test]
     fn test_enforce_segment_limit_descends_entity_boundaries() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 2,
+            max_bm25_terms: 2,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -622,7 +642,8 @@ mod tests {
             &infra,
             &group,
             &nlb,
-        );
+        )
+        .expect("segment split must succeed");
         assert!(result.len() > 1);
         assert!(
             result
@@ -634,7 +655,7 @@ mod tests {
     #[test]
     fn test_enforce_segment_limit_descends_sentences() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 4,
+            max_bm25_terms: 4,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -653,7 +674,8 @@ mod tests {
             &infra,
             &group,
             &nlb,
-        );
+        )
+        .expect("segment split must succeed");
         assert!(result.len() >= 2);
         assert!(
             result
@@ -666,7 +688,7 @@ mod tests {
     #[test]
     fn test_enforce_segment_limit_hard_splits_at_chain_end() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -686,10 +708,14 @@ mod tests {
             &infra,
             &group,
             &nlb,
-        );
+        )
+        .expect("segment split must succeed");
         assert!(result.len() >= 2);
         for s in &result {
-            assert_eq!(s.boundary.split_reason, SplitReason::HardLimit);
+            assert!(matches!(
+                s.boundary.split_reason,
+                SplitReason::HardLimit | SplitReason::TokenLimit
+            ));
             assert!(s.boundary.entity_ids.contains(&EntityId(42)));
         }
         assert_eq!(result.first().unwrap().boundary.start_byte, 0);
@@ -698,7 +724,7 @@ mod tests {
     #[test]
     fn test_enforce_segment_limit_rebases_offsets() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -723,7 +749,8 @@ mod tests {
             &infra,
             &group,
             &nlb,
-        );
+        )
+        .expect("segment split must succeed");
         assert_eq!(result.first().unwrap().boundary.start_byte, base_offset);
         assert_eq!(
             result.last().unwrap().boundary.end_byte,
@@ -734,7 +761,7 @@ mod tests {
     #[test]
     fn test_enforce_segment_limit_intersects_entity_ids() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 4,
+            max_bm25_terms: 4,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -764,7 +791,8 @@ mod tests {
             &infra,
             &group,
             &nlb,
-        );
+        )
+        .expect("segment split must succeed");
         assert!(result.len() >= 2);
         assert!(
             result
@@ -776,7 +804,7 @@ mod tests {
     #[test]
     fn test_create_chunk_with_header_within_limit() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 100,
+            max_bm25_terms: 100,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -801,7 +829,7 @@ mod tests {
     #[test]
     fn test_create_chunk_with_header_exceeds_limit_entity_bounds() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         let est = TokenEstimator::default();
@@ -842,7 +870,7 @@ mod tests {
     #[test]
     fn test_create_chunk_with_header_exceeds_limit_no_boundaries() {
         let cfg = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         let est = TokenEstimator::default();

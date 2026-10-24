@@ -82,7 +82,7 @@ pub fn split_text_by_paragraphs(
 
 fn path_limit(path: ChunkPath, config: &ChunkingConfig) -> usize {
     match path {
-        ChunkPath::Bm25 => config.max_bm25_words,
+        ChunkPath::Bm25 => config.max_bm25_terms,
         ChunkPath::Embedding => config.max_tokens,
     }
 }
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn test_split_by_paragraphs_no_zero_length_boundaries() {
         let config = ChunkingConfig {
-            max_bm25_words: 5,
+            max_bm25_terms: 5,
             ..Default::default()
         };
 
@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn test_split_by_paragraphs_blank_lines_between_oversized_paragraphs_are_covered() {
         let config = ChunkingConfig {
-            max_bm25_words: 3,
+            max_bm25_terms: 3,
             ..Default::default()
         };
         // Oversized paragraphs separated by "\n\n" separators and a blank
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn test_split_by_paragraphs_partition_is_contiguous() {
         let config = ChunkingConfig {
-            max_bm25_words: 5,
+            max_bm25_terms: 5,
             ..Default::default()
         };
         let text = "alpha beta\n\n\n\ngamma delta epsilon zeta\n\ntail";

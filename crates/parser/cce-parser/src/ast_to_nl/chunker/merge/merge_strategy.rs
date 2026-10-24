@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use cce_types::Span;
 
 use crate::ast_to_nl::chunker::SplitReason;
-use crate::ast_to_nl::chunker::boundary::{can_merge, cost, merge_limits};
+use crate::ast_to_nl::chunker::boundary::{cost, merge_limits};
 use crate::ast_to_nl::chunker::chunk_builder::ChunkBuilder;
 use crate::ast_to_nl::chunker::config::ChunkingConfig;
 use crate::ast_to_nl::chunker::result::{ChunkPath, ChunkedResult};
@@ -19,7 +19,7 @@ use crate::ast_to_nl::chunker::result::{ChunkPath, ChunkedResult};
 ///
 /// The merged text is `a.text + "\n\n" + b.text`, identical to the text
 /// produced by `merge_two_chunks`. Cost is path-dependent:
-/// - BM25: word count
+/// - BM25: terms produced by the index tokenizer
 /// - Embedding: estimated tokens
 pub(crate) fn combined_cost(a: &ChunkedResult, b: &ChunkedResult, path: ChunkPath) -> usize {
     cost(&format!("{}\n\n{}", a.text, b.text), path)
@@ -96,7 +96,11 @@ pub(crate) fn should_merge(
             return true;
         }
     }
-    can_merge(&prev.text, &next.text, path, config)
+    let (min_threshold, ceiling) = merge_limits(path, config);
+    let prev_cost = cost(&prev.text, path);
+    let next_cost = cost(&next.text, path);
+    let combined = combined_cost(prev, next, path);
+    combined <= ceiling && (prev_cost < min_threshold || next_cost < min_threshold)
 }
 
 /// Whether two chunks describe the same kind of entity.

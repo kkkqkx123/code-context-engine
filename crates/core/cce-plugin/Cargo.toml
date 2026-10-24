@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 cce-types = { version = "0.1.0", path = "../cce-types" }
 cce-utils = { version = "0.1.0", path = "../cce-utils" }
+cce-text = { version = "0.1.0", path = "../cce-text" }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

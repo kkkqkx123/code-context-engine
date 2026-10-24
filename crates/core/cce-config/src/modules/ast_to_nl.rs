@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::validation::{Validate, ValidationResult};
-use cce_text::Bm25TextCleanerConfig;
+use cce_text::{Bm25TextCleanerConfig, ChunkUnit};
 use cce_types::OutputMode;
 use cce_types::error::config::ConfigValidationError;
 
@@ -175,13 +175,14 @@ pub struct ChunkingConfig {
     #[serde(default = "default_overlap_tokens")]
     pub overlap_tokens: usize,
 
-    /// Maximum word count for BM25 (default: 150)
-    /// BM25 length normalization should be based on actual word count, not tokens
-    #[serde(default = "default_max_bm25_words")]
-    pub max_bm25_words: usize,
-    /// Overlap word count for BM25 (default: 5)
-    #[serde(default = "default_overlap_bm25_words")]
-    pub overlap_bm25_words: usize,
+    /// Maximum term count for BM25 (default: 150)
+    /// Measured by the same tokenizer the keyword index uses, so CJK text is
+    /// counted as terms rather than as one whitespace-separated word.
+    #[serde(default = "default_max_bm25_terms")]
+    pub max_bm25_terms: usize,
+    /// Overlap term count for BM25 (default: 5)
+    #[serde(default = "default_overlap_bm25_terms")]
+    pub overlap_bm25_terms: usize,
 
     /// Maximum overlap ratio (default: 0.2 = 20%)
     #[serde(default = "default_max_overlap_ratio")]
@@ -189,9 +190,9 @@ pub struct ChunkingConfig {
     /// Minimum chunk token count (default: 150)
     #[serde(default = "default_min_chunk_tokens")]
     pub min_chunk_tokens: usize,
-    /// Minimum chunk BM25 word count (default: 80)
-    #[serde(default = "default_min_chunk_bm25_words")]
-    pub min_chunk_bm25_words: usize,
+    /// Minimum chunk BM25 term count (default: 80)
+    #[serde(default = "default_min_chunk_bm25_terms")]
+    pub min_chunk_bm25_terms: usize,
     /// Whether to respect entity boundaries when splitting (default: true)
     #[serde(default = "default_respect_boundaries")]
     pub respect_boundaries: bool,
@@ -199,19 +200,19 @@ pub struct ChunkingConfig {
     /// (0 = use per-path max limit).
     ///
     /// Guards any merge from combining chunks beyond the path's hard limit
-    /// (max_tokens / max_bm25_words). The BM25 path is always hard-capped at
-    /// `max_bm25_words` regardless of this setting, so it can never exceed
-    /// its word limit.
+    /// (max_tokens / max_bm25_terms). The BM25 path is always hard-capped at
+    /// `max_bm25_terms` regardless of this setting, so it can never exceed
+    /// its term limit.
     #[serde(default = "default_cross_group_merge_threshold")]
     pub cross_group_merge_threshold: usize,
 
     /// The share of the chunk limit reserved for domain terminology
     /// (default: 0.06).
     ///
-    /// The reserve is taken out of the limits the splitter works with, so
-    /// every chunk it produces leaves exactly this much room for the
-    /// injected expansions. A reserve of 0 disables the room and lets the
-    /// injection push a chunk over its limit.
+    /// The reserve is a planning target for the splitter. It is not a
+    /// permission to exceed the hard limit: injection is checked against
+    /// the absolute final chunk text and stops before the hard limit is
+    /// crossed.
     #[serde(default = "default_glossary_reserve_ratio")]
     pub glossary_reserve_ratio: f32,
 
@@ -230,11 +231,11 @@ impl Default for ChunkingConfig {
         Self {
             max_tokens: default_max_tokens(),
             overlap_tokens: default_overlap_tokens(),
-            max_bm25_words: default_max_bm25_words(),
-            overlap_bm25_words: default_overlap_bm25_words(),
+            max_bm25_terms: default_max_bm25_terms(),
+            overlap_bm25_terms: default_overlap_bm25_terms(),
             max_overlap_ratio: default_max_overlap_ratio(),
             min_chunk_tokens: default_min_chunk_tokens(),
-            min_chunk_bm25_words: default_min_chunk_bm25_words(),
+            min_chunk_bm25_terms: default_min_chunk_bm25_terms(),
             respect_boundaries: default_respect_boundaries(),
             cross_group_merge_threshold: default_cross_group_merge_threshold(),
             glossary_reserve_ratio: default_glossary_reserve_ratio(),
@@ -244,76 +245,165 @@ impl Default for ChunkingConfig {
     }
 }
 
-impl ChunkingConfig {
-    /// Check whether `text` exceeds the configured limit for `path`.
-    ///
-    /// The BM25 path compares actual word count against `max_bm25_words`;
-    /// the Embedding path compares estimated tokens (default estimator)
-    /// against `max_tokens`. A limit of 0 disables the check.
-    pub fn exceeds_limit(&self, text: &str, path: cce_types::ChunkPath) -> bool {
-        match path {
-            cce_types::ChunkPath::Bm25 => {
-                self.max_bm25_words > 0
-                    && text.split_whitespace().filter(|w| !w.is_empty()).count()
-                        > self.max_bm25_words
-            }
-            cce_types::ChunkPath::Embedding => {
-                self.max_tokens > 0
-                    && cce_utils::token_estimation::estimate_tokens(text) > self.max_tokens
-            }
-        }
+/// The hard limit and the derived room for one path.
+///
+/// The hard limit is the only threshold a final chunk is checked against.
+/// The reserve is a planning target: it keeps room for terminology
+/// expansions, but it is never a permission to exceed the hard limit. The
+/// body limit additionally subtracts the decoration that will be appended
+/// after splitting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkBudget {
+    /// The unit all values are measured in.
+    pub unit: ChunkUnit,
+    /// The configured hard limit; zero disables the limit.
+    pub hard_limit: usize,
+    /// The room planned for terminology expansion.
+    pub reserve: usize,
+    /// The limit a chunk must satisfy before terminology injection.
+    pub pre_injection_limit: usize,
+    /// The limit the body splitter works with.
+    pub body_limit: usize,
+}
+
+impl ChunkBudget {
+    /// Whether `text` fits the hard limit.
+    pub fn fits_hard(&self, text: &str) -> bool {
+        self.unit.fits(text, self.hard_limit)
     }
 
-    /// The room one chunk reserves for domain terminology, in the unit of
-    /// `path` (words for BM25, tokens for Embedding).
-    ///
-    /// The reserve is the share of the chunk limit the terminology injection
-    /// may spend. It is computed from the limits the caller configured, so
-    /// the splitter can run on limits reduced by exactly this amount.
-    pub fn glossary_reserve(&self, path: cce_types::ChunkPath) -> usize {
-        let (limit, ratio) = match path {
-            cce_types::ChunkPath::Bm25 => (self.max_bm25_words, self.glossary_reserve_ratio),
-            cce_types::ChunkPath::Embedding => (self.max_tokens, self.glossary_reserve_ratio),
-        };
-        if limit == 0 || ratio <= 0.0 {
-            return 0;
-        }
-        ((limit as f32) * ratio).ceil() as usize
+    /// Whether `text` fits the pre-injection limit.
+    pub fn fits_pre_injection(&self, text: &str) -> bool {
+        self.unit.fits(text, self.pre_injection_limit)
     }
 
-    /// The chunk limits reduced by the terminology reserve.
-    ///
-    /// The splitter runs on these limits, so the chunks it produces leave
-    /// exactly the reserved room for the injected expansions and can never
-    /// grow past the configured limit once the expansions are in place.
-    ///
-    /// The overlap size is never reduced: an overlap that reaches into the
-    /// reserved room would defeat the reserve.
-    pub fn with_glossary_reserve(&self) -> Self {
-        let mut reserved = self.clone();
-        let token_reserve = self.glossary_reserve(cce_types::ChunkPath::Embedding);
-        let word_reserve = self.glossary_reserve(cce_types::ChunkPath::Bm25);
-
-        reserved.max_tokens = reduced_limit(self.max_tokens, token_reserve, self.overlap_tokens);
-        reserved.max_bm25_words =
-            reduced_limit(self.max_bm25_words, word_reserve, self.overlap_bm25_words);
-        if self.cross_group_merge_threshold != 0 {
-            reserved.cross_group_merge_threshold =
-                reduced_limit(self.cross_group_merge_threshold, token_reserve, 0);
-        }
-        reserved
+    /// Whether `text` fits the body limit.
+    pub fn fits_body(&self, text: &str) -> bool {
+        self.unit.fits(text, self.body_limit)
     }
 }
 
-/// The limit reduced by `reserve`, never below `floor`.
-///
-/// The floor keeps the limit above the overlap size, so the reduced limit
-/// stays a valid configuration.
-fn reduced_limit(limit: usize, reserve: usize, floor: usize) -> usize {
-    limit
-        .saturating_sub(reserve)
-        .max(floor.saturating_add(1))
-        .min(limit)
+impl ChunkingConfig {
+    /// The unit the path is measured in.
+    pub fn unit(&self, path: cce_types::ChunkPath) -> ChunkUnit {
+        match path {
+            cce_types::ChunkPath::Bm25 => ChunkUnit::Terms,
+            cce_types::ChunkPath::Embedding => ChunkUnit::Tokens,
+        }
+    }
+
+    /// The configured hard limit for `path`.
+    pub fn limit(&self, path: cce_types::ChunkPath) -> usize {
+        match path {
+            cce_types::ChunkPath::Bm25 => self.max_bm25_terms,
+            cce_types::ChunkPath::Embedding => self.max_tokens,
+        }
+    }
+
+    /// Measure `text` in the path's unit.
+    pub fn cost(&self, text: &str, path: cce_types::ChunkPath) -> usize {
+        self.unit(path).cost(text)
+    }
+
+    /// The room one chunk reserves for domain terminology, in the unit of
+    /// `path`.
+    pub fn glossary_reserve(&self, path: cce_types::ChunkPath) -> usize {
+        let limit = self.limit(path);
+        if limit == 0 || self.glossary_reserve_ratio <= 0.0 {
+            return 0;
+        }
+        (((limit as f32) * self.glossary_reserve_ratio).ceil() as usize)
+            .min(limit.saturating_sub(1))
+    }
+
+    /// The limit a chunk must satisfy before terminology injection.
+    pub fn pre_injection_limit(&self, path: cce_types::ChunkPath, has_vocabulary: bool) -> usize {
+        let limit = self.limit(path);
+        if limit == 0 {
+            return usize::MAX;
+        }
+        let reserve = if has_vocabulary {
+            self.glossary_reserve(path)
+        } else {
+            0
+        };
+        limit.saturating_sub(reserve)
+    }
+
+    /// The budget for one path, given the decoration that will be appended
+    /// to a chunk after splitting.
+    pub fn budget(
+        &self,
+        path: cce_types::ChunkPath,
+        has_vocabulary: bool,
+        decoration_cost: usize,
+    ) -> ChunkBudget {
+        let limit = self.limit(path);
+        let reserve = if has_vocabulary {
+            self.glossary_reserve(path)
+        } else {
+            0
+        };
+        if limit == 0 {
+            return ChunkBudget {
+                unit: self.unit(path),
+                hard_limit: 0,
+                reserve: 0,
+                pre_injection_limit: usize::MAX,
+                body_limit: usize::MAX,
+            };
+        }
+        let pre_injection_limit = limit.saturating_sub(reserve);
+        let body_limit = pre_injection_limit.saturating_sub(decoration_cost).max(1);
+        ChunkBudget {
+            unit: self.unit(path),
+            hard_limit: limit,
+            reserve,
+            pre_injection_limit,
+            body_limit,
+        }
+    }
+
+    /// A configuration whose path limits are the body limits for the given
+    /// decoration allowances.
+    ///
+    /// The hard limits stay available on the original configuration. This
+    /// derived configuration is only used to drive splitting, header packing
+    /// and merge thresholds.
+    pub fn body_config(
+        &self,
+        has_vocabulary: bool,
+        embedding_decoration: usize,
+        bm25_decoration: usize,
+    ) -> Self {
+        let mut body = self.clone();
+        if self.max_tokens > 0 {
+            let embedding = self.budget(
+                cce_types::ChunkPath::Embedding,
+                has_vocabulary,
+                embedding_decoration,
+            );
+            body.max_tokens = embedding.body_limit;
+            body.cross_group_merge_threshold = if self.cross_group_merge_threshold == 0 {
+                embedding.body_limit
+            } else {
+                self.cross_group_merge_threshold.min(embedding.body_limit)
+            };
+        }
+        if self.max_bm25_terms > 0 {
+            let bm25 = self.budget(cce_types::ChunkPath::Bm25, has_vocabulary, bm25_decoration);
+            body.max_bm25_terms = bm25.body_limit;
+        }
+        body
+    }
+
+    /// A configuration reduced only by the terminology reserve.
+    ///
+    /// Documents have no identity or header decoration appended after
+    /// splitting, so the pre-injection limit is also the body limit.
+    pub fn pre_injection_config(&self, has_vocabulary: bool) -> Self {
+        self.body_config(has_vocabulary, 0, 0)
+    }
 }
 
 impl Validate for ChunkingConfig {
@@ -332,16 +422,16 @@ impl Validate for ChunkingConfig {
                 "must be less than max_tokens",
             ));
         }
-        if self.max_bm25_words == 0 {
+        if self.max_bm25_terms == 0 {
             errors.push(ConfigValidationError::invalid_field(
-                "chunking.max_bm25_words",
+                "chunking.max_bm25_terms",
                 "must be greater than 0",
             ));
         }
-        if self.overlap_bm25_words >= self.max_bm25_words {
+        if self.overlap_bm25_terms >= self.max_bm25_terms {
             errors.push(ConfigValidationError::invalid_field(
-                "chunking.overlap_bm25_words",
-                "must be less than max_bm25_words",
+                "chunking.overlap_bm25_terms",
+                "must be less than max_bm25_terms",
             ));
         }
         if self.max_overlap_ratio <= 0.0 || self.max_overlap_ratio > 1.0 {
@@ -358,11 +448,44 @@ impl Validate for ChunkingConfig {
                 "must be greater than 0",
             ));
         }
-        if self.min_chunk_bm25_words == 0 {
+        if self.min_chunk_bm25_terms == 0 {
             errors.push(ConfigValidationError::invalid_field(
-                "chunking.min_chunk_bm25_words",
+                "chunking.min_chunk_bm25_terms",
                 "must be greater than 0",
             ));
+        }
+        if self.min_chunk_tokens > self.max_tokens {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.min_chunk_tokens",
+                "must be no greater than max_tokens",
+            ));
+        }
+        if self.min_chunk_bm25_terms > self.max_bm25_terms {
+            errors.push(ConfigValidationError::invalid_field(
+                "chunking.min_chunk_bm25_terms",
+                "must be no greater than max_bm25_terms",
+            ));
+        }
+        if self.glossary_reserve_ratio > 0.0 {
+            for (reserve, limit, field) in [
+                (
+                    self.glossary_reserve(cce_types::ChunkPath::Embedding),
+                    self.max_tokens,
+                    "chunking.max_tokens",
+                ),
+                (
+                    self.glossary_reserve(cce_types::ChunkPath::Bm25),
+                    self.max_bm25_terms,
+                    "chunking.max_bm25_terms",
+                ),
+            ] {
+                if limit > 0 && reserve >= limit {
+                    errors.push(ConfigValidationError::invalid_field(
+                        field,
+                        "must leave room for the glossary reserve",
+                    ));
+                }
+            }
         }
         if self.cross_group_merge_threshold != 0
             && self.cross_group_merge_threshold > self.max_tokens
@@ -423,7 +546,7 @@ fn default_respect_boundaries() -> bool {
     true
 }
 
-fn default_min_chunk_bm25_words() -> usize {
+fn default_min_chunk_bm25_terms() -> usize {
     80
 }
 
@@ -431,11 +554,11 @@ fn default_max_summary_words() -> usize {
     1024
 }
 
-fn default_max_bm25_words() -> usize {
+fn default_max_bm25_terms() -> usize {
     150
 }
 
-fn default_overlap_bm25_words() -> usize {
+fn default_overlap_bm25_terms() -> usize {
     5
 }
 
@@ -458,10 +581,10 @@ mod tests {
         assert_eq!(config.bm25.max_keywords, 10);
         assert_eq!(config.embedding.max_summary_words, 1024);
         assert_eq!(config.chunking.max_tokens, 512);
-        assert_eq!(config.chunking.max_bm25_words, 150);
-        assert_eq!(config.chunking.overlap_bm25_words, 5);
+        assert_eq!(config.chunking.max_bm25_terms, 150);
+        assert_eq!(config.chunking.overlap_bm25_terms, 5);
         assert_eq!(config.chunking.min_chunk_tokens, 150);
-        assert_eq!(config.chunking.min_chunk_bm25_words, 80);
+        assert_eq!(config.chunking.min_chunk_bm25_terms, 80);
     }
 
     #[test]
@@ -495,20 +618,20 @@ mod tests {
         assert!(invalid_overlap.validate_structured().is_err());
 
         let invalid_bm25_max = ChunkingConfig {
-            max_bm25_words: 0,
+            max_bm25_terms: 0,
             ..Default::default()
         };
         assert!(invalid_bm25_max.validate_structured().is_err());
 
         let invalid_bm25_overlap = ChunkingConfig {
-            overlap_bm25_words: 200,
-            max_bm25_words: 150,
+            overlap_bm25_terms: 200,
+            max_bm25_terms: 150,
             ..Default::default()
         };
         assert!(invalid_bm25_overlap.validate_structured().is_err());
 
         let invalid_bm25_min = ChunkingConfig {
-            min_chunk_bm25_words: 0,
+            min_chunk_bm25_terms: 0,
             ..Default::default()
         };
         assert!(invalid_bm25_min.validate_structured().is_err());
@@ -536,14 +659,14 @@ mod tests {
         // A chunking table that only overrides one field must load, and every
         // omitted field must take the value its documentation states.
         let chunking: ChunkingConfig =
-            toml::from_str("max_bm25_words = 200").expect("partial chunking table must parse");
-        assert_eq!(chunking.max_bm25_words, 200);
+            toml::from_str("max_bm25_terms = 200").expect("partial chunking table must parse");
+        assert_eq!(chunking.max_bm25_terms, 200);
         assert_eq!(chunking.max_tokens, 512);
         assert_eq!(chunking.overlap_tokens, 50);
-        assert_eq!(chunking.overlap_bm25_words, 5);
+        assert_eq!(chunking.overlap_bm25_terms, 5);
         assert_eq!(chunking.max_overlap_ratio, 0.2);
         assert_eq!(chunking.min_chunk_tokens, 150);
-        assert_eq!(chunking.min_chunk_bm25_words, 80);
+        assert_eq!(chunking.min_chunk_bm25_terms, 80);
         assert!(chunking.respect_boundaries);
         assert_eq!(chunking.cross_group_merge_threshold, 0);
     }
@@ -553,11 +676,11 @@ mod tests {
         let defaults = ChunkingConfig::default();
         assert_eq!(defaults.max_tokens, 512);
         assert_eq!(defaults.overlap_tokens, 50);
-        assert_eq!(defaults.max_bm25_words, 150);
-        assert_eq!(defaults.overlap_bm25_words, 5);
+        assert_eq!(defaults.max_bm25_terms, 150);
+        assert_eq!(defaults.overlap_bm25_terms, 5);
         assert_eq!(defaults.max_overlap_ratio, 0.2);
         assert_eq!(defaults.min_chunk_tokens, 150);
-        assert_eq!(defaults.min_chunk_bm25_words, 80);
+        assert_eq!(defaults.min_chunk_bm25_terms, 80);
         assert!(defaults.respect_boundaries);
     }
 }

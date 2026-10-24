@@ -15,7 +15,7 @@ impl<'a> HeaderHelper<'a> {
 
     pub fn path_limit(&self, path: ChunkPath) -> usize {
         match path {
-            ChunkPath::Bm25 => self.config.max_bm25_words,
+            ChunkPath::Bm25 => self.config.max_bm25_terms,
             ChunkPath::Embedding => self.config.max_tokens,
         }
     }
@@ -62,7 +62,17 @@ impl<'a> HeaderHelper<'a> {
             result = candidate;
         }
         if result.is_empty() {
-            preferred.chars().take(header_limit).collect()
+            let truncated =
+                cce_text::truncate_to_cost(preferred, super::boundary::unit(path), header_limit);
+            if truncated.is_empty() {
+                preferred
+                    .chars()
+                    .next()
+                    .map(|character| character.to_string())
+                    .unwrap_or_default()
+            } else {
+                truncated.to_string()
+            }
         } else {
             result
         }
@@ -135,24 +145,24 @@ impl<'a> HeaderHelper<'a> {
         }
 
         let min_cost = match path {
-            ChunkPath::Bm25 => self.config.min_chunk_bm25_words,
+            ChunkPath::Bm25 => self.config.min_chunk_bm25_terms,
             ChunkPath::Embedding => self.config.min_chunk_tokens,
         };
 
         let max_limit = match path {
-            ChunkPath::Bm25 => self.config.max_bm25_words,
+            ChunkPath::Bm25 => self.config.max_bm25_terms,
             ChunkPath::Embedding => self.config.max_tokens,
         };
 
         let mut groups = Vec::new();
         let mut current_group = Vec::new();
+        let mut current_text = String::new();
         let mut current_cost = 0;
         for (idx, member) in members.iter().enumerate() {
             let member_text = match path {
                 ChunkPath::Bm25 => member.bm25_text.as_deref().unwrap_or(""),
                 ChunkPath::Embedding => member.embedding_text.as_deref().unwrap_or(""),
             };
-            let member_cost = self.unit_count(member_text, path);
 
             let may_stand_alone = match path {
                 ChunkPath::Embedding => member_self_contained.get(idx).copied().unwrap_or(false),
@@ -164,7 +174,7 @@ impl<'a> HeaderHelper<'a> {
             if may_stand_alone {
                 if !current_group.is_empty() {
                     groups.push(std::mem::take(&mut current_group));
-                    current_cost = 0;
+                    current_text.clear();
                 }
                 groups.push(vec![member.clone()]);
                 continue;
@@ -175,16 +185,24 @@ impl<'a> HeaderHelper<'a> {
             } else {
                 continuation_budget
             };
-            let would_exceed_max = current_cost + member_cost > max_limit;
-            let would_exceed_budget = current_cost + member_cost > budget;
-            let below_min = current_cost < min_cost;
-            if !current_group.is_empty()
-                && (would_exceed_max || (!below_min && would_exceed_budget))
-            {
-                groups.push(std::mem::take(&mut current_group));
-                current_cost = 0;
+            if !current_group.is_empty() {
+                let mut candidate = current_text.clone();
+                candidate.push_str("\n\n");
+                candidate.push_str(member_text);
+                let candidate_cost = self.unit_count(&candidate, path);
+                let below_min = current_cost < min_cost;
+                if candidate_cost > max_limit || (!below_min && candidate_cost > budget) {
+                    groups.push(std::mem::take(&mut current_group));
+                    current_text.clear();
+                }
             }
-            current_cost += member_cost;
+            if current_group.is_empty() {
+                current_text.push_str(member_text);
+            } else {
+                current_text.push_str("\n\n");
+                current_text.push_str(member_text);
+            }
+            current_cost = self.unit_count(&current_text, path);
             current_group.push(member.clone());
         }
         if !current_group.is_empty() {
@@ -198,9 +216,9 @@ impl<'a> HeaderHelper<'a> {
 mod tests {
     use super::*;
 
-    fn with_helper<R>(max_bm25_words: usize, f: impl FnOnce(&HeaderHelper) -> R) -> R {
+    fn with_helper<R>(max_bm25_terms: usize, f: impl FnOnce(&HeaderHelper) -> R) -> R {
         let cfg = ChunkingConfig {
-            max_bm25_words,
+            max_bm25_terms,
             max_tokens: 512,
             ..Default::default()
         };
@@ -253,7 +271,7 @@ mod tests {
         with_helper(15, |helper| {
             let long = "foo.bar baz qux quux corge grault garply";
             let result = helper.compact_header(long, "", ChunkPath::Bm25);
-            assert_eq!(result, "foo.bar baz qux quux corge");
+            assert_eq!(result, "foo.bar baz qux");
         });
     }
 

@@ -88,6 +88,42 @@ pub fn ceil_char_boundary(text: &str, position: usize) -> usize {
     position
 }
 
+/// Find `needle` in `haystack` without case sensitivity.
+///
+/// Returns `(start, length)` in bytes of the original `haystack`. Lowercasing
+/// can change the byte length of a character (for example `İ` lowercases to
+/// `i` plus a combining dot), so the offsets of a lowercased copy can never
+/// be reused on the original text. The comparison is done character by
+/// character and the returned length covers the original characters that
+/// matched.
+pub fn find_case_insensitive(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+    if needle.is_empty() {
+        return Some((0, 0));
+    }
+
+    let needle_lower: Vec<char> = needle
+        .chars()
+        .flat_map(|character| character.to_lowercase())
+        .collect();
+
+    for (start, _) in haystack.char_indices() {
+        let mut matched = 0usize;
+        for (relative, character) in haystack[start..].char_indices() {
+            let lowered: Vec<char> = character.to_lowercase().collect();
+            let next = matched + lowered.len();
+            if next > needle_lower.len() || needle_lower[matched..next] != lowered[..] {
+                break;
+            }
+            matched = next;
+            let end = start + relative + character.len_utf8();
+            if matched == needle_lower.len() {
+                return Some((start, end - start));
+            }
+        }
+    }
+    None
+}
+
 /// Truncate `text` to at most `max_bytes` bytes without splitting a char.
 ///
 /// Returns the longest char-boundary-aligned prefix within the budget.
@@ -376,6 +412,27 @@ mod tests {
         assert_eq!(truncate_to_byte_len(inverted, 2), "a");
         // Out-of-range input clamps instead of panicking.
         assert_eq!(floor_char_boundary(inverted, 100), inverted.len());
+    }
+
+    #[test]
+    fn test_find_case_insensitive_returns_original_offsets() {
+        assert_eq!(find_case_insensitive("Hello World", "world"), Some((6, 5)));
+        assert_eq!(find_case_insensitive("前缀 Hello", "hello"), Some((7, 5)));
+        assert_eq!(find_case_insensitive("abc", "z"), None);
+        assert_eq!(find_case_insensitive("abc", ""), Some((0, 0)));
+    }
+
+    #[test]
+    fn test_find_case_insensitive_handles_length_changing_lowercase() {
+        // `İ` is two bytes, while its lowercase form is three bytes
+        // (`i` plus a combining dot). The returned length must still cover
+        // the original character.
+        let haystack = "İstanbul";
+        let needle = "i\u{307}stanbul";
+        assert_eq!(
+            find_case_insensitive(haystack, needle),
+            Some((0, haystack.len()))
+        );
     }
 
     #[test]

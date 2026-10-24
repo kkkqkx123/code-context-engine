@@ -672,8 +672,8 @@ fn test_merge_small_chunks_fragment_fields_cleared() {
 #[test]
 fn test_merge_small_chunks_bm25_path() {
     let config = ChunkingConfig {
-        min_chunk_bm25_words: 80,
-        max_bm25_words: 150,
+        min_chunk_bm25_terms: 80,
+        max_bm25_terms: 150,
         ..Default::default()
     };
     let group_spans = HashMap::from([
@@ -878,8 +878,8 @@ fn test_merge_small_chunks_sentence_fragment_has_no_topic_purity() {
 #[test]
 fn test_merge_small_chunks_self_contained_bm25_unaffected() {
     let config = ChunkingConfig {
-        min_chunk_bm25_words: 80,
-        max_bm25_words: 150,
+        min_chunk_bm25_terms: 80,
+        max_bm25_terms: 150,
         ..Default::default()
     };
     let group_spans = HashMap::from([
@@ -1030,8 +1030,8 @@ fn test_merge_small_chunks_partial_merge() {
 #[test]
 fn test_merge_bm25_uses_word_counts_not_tokens() {
     let config = ChunkingConfig {
-        min_chunk_bm25_words: 80,
-        max_bm25_words: 150,
+        min_chunk_bm25_terms: 80,
+        max_bm25_terms: 150,
         // A high embedding ceiling (cross_group_merge_threshold) must NOT widen the BM25 limit.
         ..Default::default()
     };
@@ -1066,15 +1066,15 @@ fn test_merge_bm25_uses_word_counts_not_tokens() {
     assert_eq!(
         result.len(),
         2,
-        "90+90 words exceeds max_bm25_words, must not merge"
+        "90+90 words exceeds max_bm25_terms, must not merge"
     );
 }
 
 #[test]
 fn test_merge_bm25_merges_when_combined_within_word_limit() {
     let config = ChunkingConfig {
-        min_chunk_bm25_words: 80,
-        max_bm25_words: 150,
+        min_chunk_bm25_terms: 80,
+        max_bm25_terms: 150,
         ..Default::default()
     };
     let group_spans = HashMap::from([
@@ -1104,7 +1104,7 @@ fn test_merge_bm25_merges_when_combined_within_word_limit() {
 
     let result = merge_small_chunks_cross_group(chunks, &group_spans, &config);
 
-    assert_eq!(result.len(), 1, "60+60 words fits within max_bm25_words");
+    assert_eq!(result.len(), 1, "60+60 words fits within max_bm25_terms");
     assert_eq!(result[0].metadata.bm25_word_count, Some(120));
     assert_eq!(
         result[0].token_count, 120,

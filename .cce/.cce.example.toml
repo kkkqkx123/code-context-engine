@@ -241,11 +241,11 @@ max_tokens = 512
 # Overlap token count for embedding (default: 50)
 overlap_tokens = 50
 
-# Maximum word count for BM25 (default: 150)
-# max_bm25_words = 150
+# Maximum term count for BM25 (default: 150)
+# max_bm25_terms = 150
 
-# Overlap word count for BM25 (default: 5)
-# overlap_bm25_words = 5
+# Overlap term count for BM25 (default: 5)
+# overlap_bm25_terms = 5
 
 # Maximum overlap ratio (default: 0.2 = 20%)
 # max_overlap_ratio = 0.2
@@ -253,8 +253,8 @@ overlap_tokens = 50
 # Minimum chunk token count (default: 150)
 # min_chunk_tokens = 150
 
-# Minimum chunk BM25 word count (default: 80)
-# min_chunk_bm25_words = 80
+# Minimum chunk BM25 term count (default: 80)
+# min_chunk_bm25_terms = 80
 
 # Whether to respect entity boundaries when splitting (default: true)
 respect_boundaries = true

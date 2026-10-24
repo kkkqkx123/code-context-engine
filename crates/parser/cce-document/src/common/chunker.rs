@@ -154,7 +154,7 @@ where
     /// **Embedding path**: Each group produces an embedding chunk.
     ///   If the text exceeds `max_tokens`, truncate to the token limit.
     ///
-    /// **BM25 path**: BM25 text is divided into sub-blocks by `max_bm25_words`.
+    /// **BM25 path**: BM25 text is divided into sub-blocks by `max_bm25_terms`.
     ///   All sub-blocks share the same `source_group_id` for alignment.
     ///   This replaces the original token-driven paragraph/sentence segmentation - pure token hard segmentation
     ///   should not affect the alignment of the chunk.
@@ -233,7 +233,7 @@ pub struct TwoTierParams<'a> {
 ///
 /// **Embedding path**: 1 chunk when within `config.max_tokens`, otherwise N
 /// sub-chunks split at token-estimated boundaries (shared `source_group_id`).
-/// **BM25 path**: N sub-chunks, split by `config.max_bm25_words` with inline
+/// **BM25 path**: N sub-chunks, split by `config.max_bm25_terms` with inline
 /// word overlap.
 ///
 /// The caller is responsible for any pre-processing (context path prefixes, etc.)
@@ -273,7 +273,7 @@ pub fn two_tier_chunking(p: TwoTierParams<'_>) -> Vec<ChunkedResult> {
         let total = segments.len();
 
         for (i, text) in segments.iter().enumerate() {
-            let token_count = estimator.estimate_text(text);
+            let token_count = config.cost(text, ChunkPath::Embedding);
             let mut meta = metadata_for(&content_type, file_category, file_path, source_span);
             meta.bm25_word_count = None;
             meta.segment_id = source_group_id.to_string();
@@ -303,20 +303,17 @@ pub fn two_tier_chunking(p: TwoTierParams<'_>) -> Vec<ChunkedResult> {
 
     // === BM25 path: possibly multiple sub-chunks (all share group_id) ===
     if output_mode.produces_bm25() {
-        let max_words = config.max_bm25_words;
-        let overlap = config.overlap_bm25_words;
+        let max_terms = config.max_bm25_terms;
+        let overlap = config.overlap_bm25_terms;
 
-        let sub_texts = split_bm25_by_words(bm25_text, max_words, overlap);
+        let sub_texts = split_bm25_by_terms(bm25_text, max_terms, overlap);
         let total = sub_texts.len();
 
         for (i, sub_text) in sub_texts.iter().enumerate() {
-            let word_count = sub_text
-                .split_whitespace()
-                .filter(|w| !w.is_empty())
-                .count();
+            let term_count = config.cost(sub_text, ChunkPath::Bm25);
 
             let mut meta = metadata_for(&content_type, file_category, file_path, source_span);
-            meta.bm25_word_count = Some(word_count);
+            meta.bm25_word_count = Some(term_count);
             meta.segment_id = source_group_id.to_string();
 
             results.push(ChunkedResult {
@@ -327,7 +324,7 @@ pub fn two_tier_chunking(p: TwoTierParams<'_>) -> Vec<ChunkedResult> {
                 chunk_index: i,
                 total_chunks: total,
                 text: sub_text.clone(),
-                token_count: word_count,
+                token_count: term_count,
                 start_byte: source_span.start_byte,
                 end_byte: source_span.end_byte,
                 prev_overlap: None,
@@ -392,35 +389,53 @@ pub(crate) fn merged_span(spans: &[Span]) -> Span {
     Span::from_lines(min_start_row, max_end_row)
 }
 
-/// Split text by word count into sub-chunks (BM25 sub-chunking).
+/// Split text by term count into sub-chunks (BM25 sub-chunking).
 ///
-/// If `max_words` is 0 or text fits within the limit, returns the full text as one segment.
-/// Otherwise splits at word boundaries with optional overlap.
-pub fn split_bm25_by_words(text: &str, max_words: usize, overlap_words: usize) -> Vec<String> {
-    if max_words == 0 {
+/// If `max_terms` is 0 or the text fits within the limit, returns the full
+/// text as one segment. Otherwise splits at whitespace boundaries when
+/// possible, with optional term overlap.
+pub fn split_bm25_by_terms(text: &str, max_terms: usize, overlap_terms: usize) -> Vec<String> {
+    if max_terms == 0 {
         return vec![text.to_string()];
     }
-
-    let words: Vec<&str> = text.split_whitespace().collect();
-    let total = words.len();
-    if total <= max_words {
+    let unit = cce_text::ChunkUnit::Terms;
+    if unit.cost(text) <= max_terms {
         return vec![text.to_string()];
     }
 
     let mut segments = Vec::new();
     let mut start = 0usize;
-
-    while start < total {
-        let end = (start + max_words).min(total);
-        segments.push(words[start..end].join(" "));
-
-        if end >= total {
+    while start < text.len() {
+        let remaining = &text[start..];
+        let prefix = cce_text::truncate_to_cost(remaining, unit, max_terms);
+        let mut end = start + prefix.len();
+        if end <= start {
+            end = remaining
+                .chars()
+                .next()
+                .map(|character| start + character.len_utf8())
+                .unwrap_or(text.len());
+        } else if end < text.len() {
+            // Prefer a whitespace boundary inside the guaranteed-to-fit
+            // prefix. The shortened piece only costs less, so the limit is
+            // still respected; CJK text without whitespace keeps the
+            // measured character boundary.
+            if let Some(relative) = text[start..end].rfind(char::is_whitespace) {
+                let candidate = start + relative + 1;
+                if candidate > start {
+                    end = candidate;
+                }
+            }
+        }
+        segments.push(text[start..end].to_string());
+        if end >= text.len() {
             break;
         }
-        let advance = max_words.saturating_sub(overlap_words).max(1);
-        start += advance;
+        let overlap_limit = overlap_terms.min(max_terms.saturating_sub(1));
+        let overlap_len = cce_text::suffix_start_for_cost(&text[start..end], unit, overlap_limit);
+        let next_start = start + overlap_len;
+        start = if next_start <= start { end } else { next_start };
     }
-
     segments
 }
 
@@ -429,21 +444,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_split_bm25_by_words_no_split() {
+    fn test_split_bm25_by_terms_no_split() {
         let text = "short text";
-        let result = split_bm25_by_words(text, 10, 2);
+        let result = split_bm25_by_terms(text, 10, 2);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "short text");
     }
 
     #[test]
-    fn test_split_bm25_by_words_with_split() {
+    fn test_split_bm25_by_terms_with_split() {
         let text = "word word word word word word word word word word word word";
-        let result = split_bm25_by_words(text, 5, 1);
+        let result = split_bm25_by_terms(text, 5, 1);
         assert!(result.len() >= 2);
         // First segment: 5 words
         assert_eq!(result[0].split_whitespace().count(), 5);
-        // All segments share same word count
+        // All segments share the same term count
         for seg in &result {
             assert!(seg.split_whitespace().count() <= 5);
         }
@@ -504,8 +519,8 @@ mod tests {
     #[test]
     fn test_two_tier_chunking_bm25_sub_chunks_share_segment_id() {
         let config = ChunkingConfig {
-            max_bm25_words: 5,
-            overlap_bm25_words: 1,
+            max_bm25_terms: 5,
+            overlap_bm25_terms: 1,
             ..Default::default()
         };
         let estimator = TokenEstimator::default();
@@ -628,7 +643,7 @@ mod tests {
     #[test]
     fn test_two_tier_chunking_bm25_metrics_use_word_counts() {
         let config = ChunkingConfig {
-            max_bm25_words: 5,
+            max_bm25_terms: 5,
             ..Default::default()
         };
         let estimator = TokenEstimator::default();
@@ -654,19 +669,15 @@ mod tests {
         assert!(results.len() > 1, "BM25 text should split into sub-chunks");
         for chunk in &results {
             assert_eq!(chunk.path, ChunkPath::Bm25);
-            let words = chunk
-                .text
-                .split_whitespace()
-                .filter(|w| !w.is_empty())
-                .count();
+            let terms = config.cost(&chunk.text, ChunkPath::Bm25);
             assert_eq!(
                 chunk.metadata.bm25_word_count,
-                Some(words),
-                "bm25_word_count must equal the actual word count"
+                Some(terms),
+                "bm25_word_count must equal the actual term count"
             );
             assert_eq!(
-                chunk.token_count, words,
-                "token_count must equal the actual word count for BM25 chunks"
+                chunk.token_count, terms,
+                "token_count must equal the actual term count for BM25 chunks"
             );
         }
     }

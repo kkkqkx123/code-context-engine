@@ -94,30 +94,26 @@ fn locate_nested_spans_in_nl_text(
     use cce_utils::text::split_camel_case;
 
     let sub = &text[range.clone()];
-    let lower_sub = sub.to_lowercase();
 
     let mut spans = Vec::new();
     for nested in &group.nested_groups {
         let name = nested.name.as_str();
-        let lower_name = name.to_lowercase();
 
-        let (rel, len) = if let Some(rel) = lower_sub.find(&lower_name) {
-            (rel, name.len())
+        let (rel, len) = if let Some(found) = cce_utils::text::find_case_insensitive(sub, name) {
+            found
         } else {
             let semantic = split_camel_case(name);
-            let lower_semantic = semantic.to_lowercase();
-            if !lower_semantic.is_empty() && lower_semantic != lower_name {
-                if let Some(rel) = lower_sub.find(&lower_semantic) {
-                    (rel, semantic.len())
+            if !semantic.is_empty() && semantic != name {
+                if let Some(found) = cce_utils::text::find_case_insensitive(sub, &semantic) {
+                    found
                 } else {
                     continue;
                 }
             } else if let Some(last) = name.rsplit("::").next()
                 && last != name
             {
-                let lower_last = last.to_lowercase();
-                match lower_sub.find(&lower_last) {
-                    Some(rel) => (rel, last.len()),
+                match cce_utils::text::find_case_insensitive(sub, last) {
+                    Some(found) => found,
                     None => continue,
                 }
             } else {
