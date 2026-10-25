@@ -5,7 +5,7 @@ use clap::Subcommand;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::AggregatedMetric;
 
@@ -14,7 +14,7 @@ pub enum MetricsFormat {
     Json,
 }
 
-pub async fn execute(format: MetricsFormat, server: &str, verbose: bool) -> Result<()> {
+pub async fn execute_with_client(format: MetricsFormat, client: &SharedHttpClient, verbose: bool) -> Result<()> {
     let path = match format {
         MetricsFormat::Prometheus => cce_api::paths::METRICS,
         MetricsFormat::Json => cce_api::paths::METRICS_JSON,
@@ -24,7 +24,6 @@ pub async fn execute(format: MetricsFormat, server: &str, verbose: bool) -> Resu
         println!("Fetching metrics from: {}", path);
     }
 
-    let client = ApiClient::new(server)?;
     let content = match client.get_text(path).await {
         Ok(content) => content,
         Err(error) => {
@@ -43,17 +42,15 @@ fn default_history_window() -> (String, String) {
     (from.to_rfc3339(), to.to_rfc3339())
 }
 
-pub async fn execute_history(
+pub async fn execute_history_with_client(
     from: Option<&str>,
     to: Option<&str>,
     metric: Option<&str>,
     project_id: Option<i64>,
     operation_type: Option<&str>,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
     let (default_from, default_to) = default_history_window();
     let from = from.unwrap_or(&default_from);
     let to = to.unwrap_or(&default_to);
@@ -129,15 +126,13 @@ pub async fn execute_history(
     Ok(())
 }
 
-pub async fn execute_cleanup(
+pub async fn execute_cleanup_with_client(
     all: bool,
     before: Option<&str>,
     keep_days: u64,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
     if verbose {
         if all {
             println!("Cleaning up all metrics records...");

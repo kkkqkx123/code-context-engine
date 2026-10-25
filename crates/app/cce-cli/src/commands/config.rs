@@ -7,13 +7,14 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
+use crate::client::CliApi;
 use crate::output::{print_error, print_success, print_warning};
 use cce_api::models::{ConfigInfoResponse, ConfigValidateResponse};
 
 /// Execute configuration reload through the client abstraction.
 pub async fn execute_reload_with_client(
-    client: &crate::client::ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     verbose: bool,
 ) -> Result<()> {
@@ -47,9 +48,7 @@ pub async fn execute_reload_with_client(
 }
 
 /// Execute config info
-pub async fn execute_info(server: &str, verbose: bool) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
+pub async fn execute_info_with_client(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("Fetching configuration info...");
     }
@@ -79,9 +78,7 @@ pub async fn execute_info(server: &str, verbose: bool) -> Result<()> {
 }
 
 /// Execute config validation
-pub async fn execute_validate(server: &str, verbose: bool) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
+pub async fn execute_validate_with_client(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("Validating configuration...");
     }

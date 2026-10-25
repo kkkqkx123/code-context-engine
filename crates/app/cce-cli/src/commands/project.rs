@@ -4,7 +4,8 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
+use crate::client::CliApi;
 use crate::output::{print_error, print_success, print_table, truncate};
 use cce_api::models::{
     CreateProjectRequest, ProjectConfig, ProjectConfigUpdateRequest, ProjectConfigUpdateResponse,
@@ -18,8 +19,7 @@ fn project_path(id: &str) -> String {
 /// Execute project commands through the client abstraction.
 pub async fn execute_with_client(
     cmd: &ProjectCommands,
-    client: &crate::client::ApiClient,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
     match cmd {
@@ -126,8 +126,7 @@ pub async fn execute_with_client(
             Ok(())
         }
         ProjectCommands::Index { id } => {
-            let client = ApiClient::new(server)?;
-            index_project(&client, id, verbose).await
+            index_project(client, id, verbose).await
         }
         ProjectCommands::Reload { id } => {
             let project_id: i64 = id.parse().unwrap_or(-1);
@@ -148,18 +147,16 @@ pub async fn execute_with_client(
             Ok(())
         }
         ProjectCommands::Config { id } => {
-            let client = ApiClient::new(server)?;
-            update_project_config(&client, id, verbose).await
+            update_project_config(client, id, verbose).await
         }
         ProjectCommands::Update { id, name } => {
-            let client = ApiClient::new(server)?;
-            update_project(&client, id, name, verbose).await
+            update_project(client, id, name, verbose).await
         }
     }
 }
 
 async fn update_project(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     id: &str,
     name: &Option<String>,
     verbose: bool,
@@ -187,7 +184,7 @@ async fn update_project(
     Ok(())
 }
 
-async fn index_project(client: &ApiClient, id: &str, verbose: bool) -> Result<()> {
+async fn index_project(client: &SharedHttpClient, id: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Indexing project: {}", id);
     }
@@ -222,7 +219,7 @@ fn print_project_details(project: &ProjectConfig) {
     }
 }
 
-async fn update_project_config(client: &ApiClient, id: &str, verbose: bool) -> Result<()> {
+async fn update_project_config(client: &SharedHttpClient, id: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Updating project config: {}", id);
     }

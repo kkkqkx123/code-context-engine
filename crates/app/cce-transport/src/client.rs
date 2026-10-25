@@ -39,10 +39,35 @@ pub fn normalize_base_url(base_url: &str) -> String {
 
 /// Build the shared request client with the common timeout.
 pub fn build_client() -> Result<reqwest::Client> {
+    build_client_with_timeout(std::time::Duration::from_secs(SHARED_HTTP_TIMEOUT_SECS))
+}
+
+/// Build the shared request client with an explicit timeout.
+///
+/// Per-command overrides use this so long-running commands do not inherit
+/// the shared default.
+pub fn build_client_with_timeout(timeout: std::time::Duration) -> Result<reqwest::Client> {
     reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(SHARED_HTTP_TIMEOUT_SECS))
+        .timeout(timeout)
         .build()
         .context("Failed to create HTTP client")
+}
+
+/// Map a transport failure to a user-facing error without string sniffing.
+///
+/// 404 becomes `not found`, 5xx becomes `server error`, anything else with
+/// a status stays `transport error`. Non-HTTP failures pass through
+/// unchanged so their anyhow chain is preserved.
+pub fn map_transport_error(error: anyhow::Error) -> anyhow::Error {
+    if let Some(http) = error.downcast_ref::<HttpTransportError>() {
+        let text = http.to_string();
+        return match http.status {
+            Some(404) => anyhow::anyhow!("not found: {text}"),
+            Some(status) if status >= 500 => anyhow::anyhow!("server error: {text}"),
+            _ => anyhow::anyhow!("transport error: {text}"),
+        };
+    }
+    error
 }
 
 /// Minimal shared transport carrying the admission token.
@@ -61,8 +86,19 @@ impl SharedHttpClient {
 
     /// Build a transport with an explicit token outranking the environment.
     pub fn new_with_token(base_url: &str, explicit_token: Option<String>) -> Result<Self> {
+        Self::new_with_token_and_timeout(base_url, explicit_token, std::time::Duration::from_secs(
+            SHARED_HTTP_TIMEOUT_SECS,
+        ))
+    }
+
+    /// Build a transport with an explicit token and a per-command timeout.
+    pub fn new_with_token_and_timeout(
+        base_url: &str,
+        explicit_token: Option<String>,
+        timeout: std::time::Duration,
+    ) -> Result<Self> {
         Ok(Self {
-            client: build_client()?,
+            client: build_client_with_timeout(timeout)?,
             base_url: normalize_base_url(base_url),
             token: crate::resolve_gateway_token(explicit_token),
         })
@@ -264,5 +300,51 @@ mod tests {
     #[test]
     fn shared_timeout_matches_existing_clients() {
         assert_eq!(SHARED_HTTP_TIMEOUT_SECS, 300);
+    }
+
+    #[test]
+    fn map_404_becomes_not_found() {
+        let err = anyhow::anyhow!(HttpTransportError {
+            status: Some(404),
+            message: "missing".to_string(),
+        });
+        let mapped = map_transport_error(err);
+        let text = format!("{mapped:#}");
+        assert!(text.starts_with("not found:"), "unexpected: {text}");
+        assert!(text.contains("404"));
+    }
+
+    #[test]
+    fn map_5xx_becomes_server_error() {
+        for status in [500, 502, 503] {
+            let err = anyhow::anyhow!(HttpTransportError {
+                status: Some(status),
+                message: "boom".to_string(),
+            });
+            let mapped = map_transport_error(err);
+            let text = format!("{mapped:#}");
+            assert!(text.starts_with("server error:"), "unexpected: {text}");
+        }
+    }
+
+    #[test]
+    fn map_other_status_stays_transport_error() {
+        for status in [Some(400), Some(429), None] {
+            let err = anyhow::anyhow!(HttpTransportError {
+                status,
+                message: "denied".to_string(),
+            });
+            let mapped = map_transport_error(err);
+            let text = format!("{mapped:#}");
+            assert!(text.starts_with("transport error:"), "unexpected: {text}");
+        }
+    }
+
+    #[test]
+    fn map_non_http_error_passes_through() {
+        let err = anyhow::anyhow!("plain failure without status wording");
+        let text_before = format!("{err:#}");
+        let mapped = map_transport_error(err);
+        assert_eq!(format!("{mapped:#}"), text_before);
     }
 }

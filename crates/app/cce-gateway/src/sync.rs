@@ -113,6 +113,7 @@ pub async fn sync_once(
         &manifest_response.upload,
         &manifest_response.missing_chunks,
         manifest_response.manifest_version.max(manifest_version),
+        verbose,
     )
     .await?;
     if !errors.is_empty() {
@@ -156,6 +157,10 @@ pub async fn sync_once(
 }
 
 /// Upload the requested paths in bounded chunk batches.
+///
+/// Each batch is a separate HTTP request that returns immediately; callers
+/// with `verbose` (or `json_progress`) observe per-batch progress while the
+/// overall pass still ends with a single commit.
 pub async fn upload_paths(
     client: &GatewayClient,
     params: &SyncParams,
@@ -163,6 +168,7 @@ pub async fn upload_paths(
     upload: &[String],
     missing_chunks: &[MissingChunk],
     manifest_version: u64,
+    verbose: bool,
 ) -> Result<(usize, Vec<String>)> {
     let mut wanted: HashMap<String, HashSet<u32>> = HashMap::new();
     for identity in upload {
@@ -236,6 +242,7 @@ pub async fn upload_paths(
                 compressed,
             });
             if crate::policy::should_flush_batch(batch.len(), batch.len(), batch_bytes) {
+                let before = staged;
                 flush_batch(
                     client,
                     params.project_id,
@@ -246,6 +253,7 @@ pub async fn upload_paths(
                     &mut errors,
                 )
                 .await;
+                emit_batch_progress(params, verbose, staged - before, staged);
             }
         }
     }
@@ -255,6 +263,7 @@ pub async fn upload_paths(
         }
     }
     if !batch.is_empty() {
+        let before = staged;
         flush_batch(
             client,
             params.project_id,
@@ -265,8 +274,25 @@ pub async fn upload_paths(
             &mut errors,
         )
         .await;
+        emit_batch_progress(params, verbose, staged - before, staged);
     }
     Ok((staged, errors))
+}
+
+/// Emit per-batch progress immediately after a batch returns.
+fn emit_batch_progress(params: &SyncParams, verbose: bool, batch_staged: usize, total_staged: usize) {
+    if params.json_progress {
+        println!(
+            "{}",
+            serde_json::json!({
+                "kind": "batch",
+                "batch_staged": batch_staged,
+                "total_staged": total_staged,
+            })
+        );
+    } else if verbose {
+        println!("batch: +{batch_staged} files staged (total {total_staged})");
+    }
 }
 
 /// Send one upload batch to the remote ingest entry.

@@ -8,7 +8,7 @@ use clap::Subcommand;
 use anyhow::Result;
 use cce_api::models::{SummaryRequest, SummaryResponse};
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success, print_warning};
 
 /// Input paths configuration
@@ -53,11 +53,10 @@ impl SummaryOptions {
     }
 }
 
-pub async fn execute(options: SummaryOptions) -> Result<()> {
-    let client = ApiClient::new(&options.execution.server)?;
-
+pub async fn execute_with_client(options: SummaryOptions, client: &SharedHttpClient) -> Result<()> {
     if options.execution.verbose {
         println!("Generating summaries...");
+        println!("  Server: {}", options.execution.server);
         println!("  Files: {}", options.input.files.len());
         println!("  Directories: {}", options.input.directories.len());
         println!("  Extensions: {:?}", options.filters.extensions);

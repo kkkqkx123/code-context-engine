@@ -4,13 +4,14 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
+use crate::client::CliApi;
 use crate::output::{print_error, print_success};
 use cce_api::models::StartWatchRequest;
 
 /// Execute watch commands through the client abstraction.
 pub async fn execute_with_client(
     cmd: &WatchCommands,
-    client: &crate::client::ApiClient,
+    client: &cce_transport::SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
     match cmd {

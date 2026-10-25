@@ -2,6 +2,7 @@
 
 use clap::Subcommand;
 
+use crate::client::CliApi;
 use crate::output::truncate;
 use cce_api::models::SearchResultItem;
 
@@ -36,7 +37,7 @@ fn print_result_item(index: usize, item: &SearchResultItem) {
 /// Execute search commands through the client abstraction.
 pub async fn execute_with_client(
     cmd: &SearchCommands,
-    client: &crate::client::ApiClient,
+    client: &cce_transport::SharedHttpClient,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> anyhow::Result<()> {

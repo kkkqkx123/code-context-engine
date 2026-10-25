@@ -4,6 +4,7 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
+use crate::client::CliApi;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::GraphSubgraphResponse;
 
@@ -13,8 +14,7 @@ use cce_api::models::GraphSubgraphResponse;
 /// client's typed domain methods.
 pub async fn execute_with_client(
     cmd: &GraphCommands,
-    client: &crate::client::ApiClient,
-    _server: &str,
+    client: &cce_transport::SharedHttpClient,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {

@@ -4,19 +4,17 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
     BatchDeleteRequest, ClearIndexRequest, ClearIndexResponse, DeleteEntityResponse,
     DeleteFileResponse, IndexStatsResponse, StorageStatusResponse,
 };
 
-pub async fn execute(cmd: &StorageCommands, server: &str, verbose: bool) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
+pub async fn execute_with_client(cmd: &StorageCommands, client: &SharedHttpClient, verbose: bool) -> Result<()> {
     match cmd {
-        StorageCommands::Status => storage_status(&client, verbose).await,
-        StorageCommands::Stats { project_id } => index_stats(*project_id, &client, verbose).await,
+        StorageCommands::Status => storage_status(client, verbose).await,
+        StorageCommands::Stats { project_id } => index_stats(*project_id, client, verbose).await,
         StorageCommands::Clear {
             project_id,
             vectors,
@@ -26,7 +24,7 @@ pub async fn execute(cmd: &StorageCommands, server: &str, verbose: bool) -> Resu
         } => {
             clear_index(
                 *project_id,
-                &client,
+                client,
                 *vectors,
                 *bm25,
                 *relations,
@@ -36,20 +34,20 @@ pub async fn execute(cmd: &StorageCommands, server: &str, verbose: bool) -> Resu
             .await
         }
         StorageCommands::DeleteFile { project_id, path } => {
-            delete_file(*project_id, &client, path, verbose).await
+            delete_file(*project_id, client, path, verbose).await
         }
         StorageCommands::DeleteEntity { project_id, id } => {
-            delete_entity(*project_id, &client, id, verbose).await
+            delete_entity(*project_id, client, id, verbose).await
         }
         StorageCommands::BatchDelete {
             project_id,
             files,
             entities,
-        } => batch_delete(*project_id, &client, files, entities, verbose).await,
+        } => batch_delete(*project_id, client, files, entities, verbose).await,
     }
 }
 
-async fn storage_status(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn storage_status(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("Fetching storage status...");
     }
@@ -106,7 +104,7 @@ fn print_component_status(component: &cce_api::models::StorageComponentStatus) {
     }
 }
 
-async fn index_stats(project_id: i64, client: &ApiClient, verbose: bool) -> Result<()> {
+async fn index_stats(project_id: i64, client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("Fetching index statistics...");
     }
@@ -136,7 +134,7 @@ async fn index_stats(project_id: i64, client: &ApiClient, verbose: bool) -> Resu
 
 async fn clear_index(
     project_id: i64,
-    client: &ApiClient,
+    client: &SharedHttpClient,
     vectors: bool,
     bm25: bool,
     relations: bool,
@@ -177,7 +175,7 @@ async fn clear_index(
     Ok(())
 }
 
-async fn delete_file(project_id: i64, client: &ApiClient, path: &str, verbose: bool) -> Result<()> {
+async fn delete_file(project_id: i64, client: &SharedHttpClient, path: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Deleting file: {}", path);
     }
@@ -206,7 +204,7 @@ async fn delete_file(project_id: i64, client: &ApiClient, path: &str, verbose: b
     Ok(())
 }
 
-async fn delete_entity(project_id: i64, client: &ApiClient, id: &str, verbose: bool) -> Result<()> {
+async fn delete_entity(project_id: i64, client: &SharedHttpClient, id: &str, verbose: bool) -> Result<()> {
     if verbose {
         println!("Deleting entity: {}", id);
     }
@@ -238,7 +236,7 @@ async fn delete_entity(project_id: i64, client: &ApiClient, id: &str, verbose: b
 
 async fn batch_delete(
     project_id: i64,
-    client: &ApiClient,
+    client: &SharedHttpClient,
     files: &Option<String>,
     entities: &Option<String>,
     verbose: bool,

@@ -4,20 +4,18 @@
 
 use anyhow::Result;
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{BatchCompressRequest, BatchCompressResponse};
 
-pub async fn execute(
+pub async fn execute_with_client(
     file_paths: &[String],
     include_entities: bool,
     include_groups: bool,
     max_concurrency: usize,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
     if verbose {
         println!("Compressing {} files...", file_paths.len());
     }

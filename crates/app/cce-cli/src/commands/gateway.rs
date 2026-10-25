@@ -78,24 +78,26 @@ fn params_for(cmd: &GatewayCommands, format: OutputFormat) -> SyncParams {
     }
 }
 
-fn explicit_token(cmd: &GatewayCommands) -> Option<String> {
+pub fn explicit_token(cmd: &GatewayCommands) -> Option<String> {
     match cmd {
         GatewayCommands::Sync { token, .. } | GatewayCommands::Watch { token, .. } => token.clone(),
     }
 }
 
-/// Execute the gateway subcommand.
-pub async fn execute(
+/// Execute the gateway subcommand with a caller-provided client.
+///
+/// The entry layer builds the client so token and base URL handling stays in
+/// one place; this handler only translates the command into sync params.
+pub async fn execute_with_client(
     cmd: &GatewayCommands,
-    server: &str,
+    client: &GatewayClient,
     verbose: bool,
     format: OutputFormat,
 ) -> Result<()> {
-    let client = GatewayClient::new_with_token(server, explicit_token(cmd))?;
     let params = params_for(cmd, format);
     match cmd {
-        GatewayCommands::Sync { .. } => sync_once(&client, &params, verbose).await.map(|_| ()),
-        GatewayCommands::Watch { .. } => watch_loop(&client, &params, verbose).await,
+        GatewayCommands::Sync { .. } => sync_once(client, &params, verbose).await.map(|_| ()),
+        GatewayCommands::Watch { .. } => watch_loop(client, &params, verbose).await,
     }
 }
 

@@ -238,6 +238,12 @@ cce-cli server restart --config config.toml
 - Qdrant 进程仍由服务端管理，CLI 只通过 `qdrant process` 命令远程控制。
 - `watch` 是服务端监听器（要求服务端可访问目标路径），`gateway watch` 是客户端驻留同步循环，两者语义不同。
 
+后台进程健壮性说明：
+
+- `server start` 在 spawn 后通过 `tokio::spawn` 后台等待子进程退出，仅用于回收退出状态，不阻塞 CLI 退出，服务进程依靠标准 IO 重定向（stdin 为 null，stdout/stderr 追加到日志文件）脱离 CLI 生命周期继续运行。
+- PID 文件为两行文本：第一行 PID，第二行该 PID 在启动时刻的进程启动时间（秒级时间戳）。启动时间通过 `sysinfo` 查询（Linux 对应 `/proc/<pid>/stat`，其他平台为等价实现），`stop`/`status` 在判定存活前会校验记录时间与当前实际启动时间一致；不一致按 PID 复用处理为 stale 文件并移除，不会误杀无关进程。
+- 兼容性：仅含 PID 的旧文件仍可读取，此时退化为仅校验 PID 存活；建议重新 `start` 以写入带启动时间的新格式。
+
 ## 输出格式
 
 ### 表格格式（默认）

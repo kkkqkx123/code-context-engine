@@ -9,7 +9,7 @@
 pub mod client;
 pub mod query;
 
-pub use client::{HttpTransportError, SharedHttpClient, build_client, normalize_base_url};
+pub use client::{HttpTransportError, SharedHttpClient, build_client, build_client_with_timeout, map_transport_error, normalize_base_url};
 pub use query::{GraphQuery, QueryParam, urlencoding_sanitize};
 
 /// Read the admission token from the environment.

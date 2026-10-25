@@ -5,7 +5,7 @@ use clap::Subcommand;
 use anyhow::Result;
 use colored::Colorize;
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
 use crate::icons;
 use crate::output::{print_error, print_output, print_success, print_warning};
 use cce_api::models::{
@@ -39,31 +39,29 @@ pub enum HealthCommand {
 }
 
 /// Execute a health command
-pub async fn execute(
+pub async fn execute_with_client(
     cmd: &HealthCommand,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
     match cmd {
-        HealthCommand::Check => health_check(&client, verbose, format).await,
-        HealthCommand::Qdrant => health_qdrant(&client, verbose).await,
-        HealthCommand::Embedding => health_embedding(&client, verbose).await,
-        HealthCommand::Bm25 => health_bm25(&client, verbose).await,
-        HealthCommand::QueueStatus => retry_queue_status(&client, verbose).await,
-        HealthCommand::QueueProcess => retry_queue_process(&client, verbose).await,
-        HealthCommand::QueueClear => retry_queue_clear(&client, verbose).await,
-        HealthCommand::DeadList => retry_queue_dead_list(&client, verbose).await,
-        HealthCommand::DeadClear => retry_queue_dead_clear(&client, verbose).await,
-        HealthCommand::AdmissionStats => admission_stats(&client, verbose).await,
+        HealthCommand::Check => health_check(client, verbose, format).await,
+        HealthCommand::Qdrant => health_qdrant(client, verbose).await,
+        HealthCommand::Embedding => health_embedding(client, verbose).await,
+        HealthCommand::Bm25 => health_bm25(client, verbose).await,
+        HealthCommand::QueueStatus => retry_queue_status(client, verbose).await,
+        HealthCommand::QueueProcess => retry_queue_process(client, verbose).await,
+        HealthCommand::QueueClear => retry_queue_clear(client, verbose).await,
+        HealthCommand::DeadList => retry_queue_dead_list(client, verbose).await,
+        HealthCommand::DeadClear => retry_queue_dead_clear(client, verbose).await,
+        HealthCommand::AdmissionStats => admission_stats(client, verbose).await,
     }
 }
 
 /// Full health check
 async fn health_check(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
@@ -123,7 +121,7 @@ fn print_service_status(name: &str, status: &cce_api::models::ServiceStatus) {
 }
 
 /// Qdrant health check
-async fn health_qdrant(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn health_qdrant(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching Qdrant health...".cyan());
     }
@@ -162,7 +160,7 @@ async fn health_qdrant(client: &ApiClient, verbose: bool) -> Result<()> {
 }
 
 /// Embedding health check
-async fn health_embedding(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn health_embedding(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching Embedding health...".cyan());
     }
@@ -190,7 +188,7 @@ async fn health_embedding(client: &ApiClient, verbose: bool) -> Result<()> {
 }
 
 /// BM25 health check
-async fn health_bm25(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn health_bm25(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching BM25 health...".cyan());
     }
@@ -218,7 +216,7 @@ async fn health_bm25(client: &ApiClient, verbose: bool) -> Result<()> {
 }
 
 /// Get retry queue status
-async fn retry_queue_status(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn retry_queue_status(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching retry queue status...".cyan());
     }
@@ -250,7 +248,7 @@ async fn retry_queue_status(client: &ApiClient, verbose: bool) -> Result<()> {
 }
 
 /// Process retry queue
-async fn retry_queue_process(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn retry_queue_process(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Processing retry queue...".cyan());
     }
@@ -274,7 +272,7 @@ async fn retry_queue_process(client: &ApiClient, verbose: bool) -> Result<()> {
 }
 
 /// Clear retry queue
-async fn retry_queue_clear(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn retry_queue_clear(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Clearing retry queue...".cyan());
     }
@@ -298,7 +296,7 @@ async fn retry_queue_clear(client: &ApiClient, verbose: bool) -> Result<()> {
 }
 
 /// List dead retry-queue entries
-async fn retry_queue_dead_list(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn retry_queue_dead_list(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching dead retry queue entries...".cyan());
     }
@@ -317,7 +315,7 @@ async fn retry_queue_dead_list(client: &ApiClient, verbose: bool) -> Result<()> 
 }
 
 /// Clear dead retry-queue entries
-async fn retry_queue_dead_clear(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn retry_queue_dead_clear(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Clearing dead retry queue entries...".cyan());
     }
@@ -336,7 +334,7 @@ async fn retry_queue_dead_clear(client: &ApiClient, verbose: bool) -> Result<()>
 }
 
 /// Show admission counters and per-token audit
-async fn admission_stats(client: &ApiClient, verbose: bool) -> Result<()> {
+async fn admission_stats(client: &SharedHttpClient, verbose: bool) -> Result<()> {
     if verbose {
         println!("{}", "Fetching admission stats...".cyan());
     }

@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 
+use crate::client::CliApi;
 use crate::output::{format_duration, print_error, print_success, truncate};
 use cce_api::models::{AggregatedSearchRequest, SearchResponse, SearchResultItem, SubQueryRequest};
 
@@ -118,7 +119,7 @@ impl AggSearchCommand {
     /// Execute through the domain service abstraction with identical semantics.
     pub async fn execute_with_client(
         &self,
-        client: &crate::client::ApiClient,
+        client: &cce_transport::SharedHttpClient,
         verbose: bool,
     ) -> Result<()> {
         let request = self.build_request()?;

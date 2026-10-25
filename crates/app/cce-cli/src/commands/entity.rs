@@ -4,25 +4,24 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::ApiClient;
 use crate::output::{print_error, print_output, print_success, truncate};
+use cce_transport::SharedHttpClient;
 use cce_api::models::{
     CallChainResponse, CallPathResponse, ClassImplementationsResponse, ClassInheritanceResponse,
     EntitySearchRequest, EntitySearchResponse, FunctionCallersResponse, FunctionCallsResponse,
     FunctionDetailResponse,
 };
 
-pub async fn execute(
+pub async fn execute_with_client(
     cmd: &EntityCommands,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
 
     match cmd {
         EntityCommands::Function { id, project_id } => {
-            get_function(&client, *project_id, id, verbose).await
+            get_function(client, *project_id, id, verbose).await
         }
         EntityCommands::Calls {
             id,
@@ -46,7 +45,7 @@ pub async fn execute(
                 domains: domains.clone(),
                 include_external: *include_external,
             };
-            get_function_calls(&client, *project_id, id, &filter, verbose).await
+            get_function_calls(client, *project_id, id, &filter, verbose).await
         }
         EntityCommands::Callers {
             id,
@@ -70,7 +69,7 @@ pub async fn execute(
                 domains: domains.clone(),
                 include_external: *include_external,
             };
-            get_function_callers(&client, *project_id, id, &filter, verbose).await
+            get_function_callers(client, *project_id, id, &filter, verbose).await
         }
         EntityCommands::CallChain {
             id,
@@ -95,19 +94,19 @@ pub async fn execute(
                 domains: domains.clone(),
                 include_external: *include_external,
             };
-            get_call_chain(&client, *project_id, id, direction, &filter, verbose).await
+            get_call_chain(client, *project_id, id, direction, &filter, verbose).await
         }
         EntityCommands::CallPath {
             from,
             to,
             depth,
             project_id,
-        } => get_call_path(&client, *project_id, from, to, *depth, verbose).await,
+        } => get_call_path(client, *project_id, from, to, *depth, verbose).await,
         EntityCommands::Inheritance { id, project_id } => {
-            get_class_inheritance(&client, *project_id, id, verbose).await
+            get_class_inheritance(client, *project_id, id, verbose).await
         }
         EntityCommands::Implementations { id, project_id } => {
-            get_class_implementations(&client, *project_id, id, verbose).await
+            get_class_implementations(client, *project_id, id, verbose).await
         }
         EntityCommands::Search {
             query,
@@ -123,7 +122,7 @@ pub async fn execute(
                 limit: *limit,
                 kind,
             };
-            search_entities(&client, &search, verbose, format).await
+            search_entities(client, &search, verbose, format).await
         }
     }
 }
@@ -176,7 +175,7 @@ fn relation_filter_query(filter: &RelationFilterArgs) -> String {
 }
 
 async fn get_function(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     function_id: &str,
     verbose: bool,
@@ -229,7 +228,7 @@ async fn get_function(
 }
 
 async fn get_function_calls(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     function_id: &str,
     filter: &RelationFilterArgs,
@@ -275,7 +274,7 @@ async fn get_function_calls(
 }
 
 async fn get_function_callers(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     function_id: &str,
     filter: &RelationFilterArgs,
@@ -321,7 +320,7 @@ async fn get_function_callers(
 }
 
 async fn get_call_chain(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     function_id: &str,
     direction: &str,
@@ -382,7 +381,7 @@ async fn get_call_chain(
 }
 
 async fn get_call_path(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     from: &str,
     to: &str,
@@ -436,7 +435,7 @@ async fn get_call_path(
 }
 
 async fn get_class_inheritance(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     class_id: &str,
     verbose: bool,
@@ -492,7 +491,7 @@ async fn get_class_inheritance(
 }
 
 async fn get_class_implementations(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     project_id: i64,
     class_id: &str,
     verbose: bool,
@@ -546,7 +545,7 @@ async fn get_class_implementations(
 }
 
 async fn search_entities(
-    client: &ApiClient,
+    client: &SharedHttpClient,
     search: &EntitySearchParams<'_>,
     verbose: bool,
     format: crate::cli::OutputFormat,

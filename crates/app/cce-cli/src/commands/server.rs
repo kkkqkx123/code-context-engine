@@ -217,12 +217,12 @@ async fn start_background(
 ) -> Result<()> {
     let pid_path = proc::resolve_override(pid_file.as_deref(), proc::default_pid_file(server_url));
     let log_path = proc::resolve_override(log_file.as_deref(), proc::default_log_file(server_url));
-    if let Some(existing) = proc::read_pid_file(&pid_path)? {
-        if proc::process_alive(existing) {
-            anyhow::bail!("server is already running (pid {existing})");
+    if let Some(existing) = proc::read_pid_record(&pid_path)? {
+        if proc::process_alive_checked(existing.pid, existing.start_time) {
+            anyhow::bail!("server is already running (pid {})", existing.pid);
         }
     }
-    if proc::read_pid_file(&pid_path)?.is_some() {
+    if proc::read_pid_record(&pid_path)?.is_some() {
         print_warning("removing stale PID file");
         let _ = std::fs::remove_file(&pid_path);
     }
@@ -245,19 +245,21 @@ async fn start_background(
     if let Some(path) = config {
         command.env("CCE_CONFIG", path);
     }
-    let child = command
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(stdout)
         .stderr(stderr)
         .spawn()
         .with_context(|| format!("failed to launch {}", binary_path.display()))?;
     let pid = child.id().context("spawned server has no process id")?;
-    std::mem::forget(child);
-    if let Some(parent) = pid_path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    std::fs::write(&pid_path, format!("{pid}\n"))
-        .with_context(|| format!("failed to write PID file {}", pid_path.display()))?;
+    // Reap the child exit status without keeping the server tied to the CLI
+    // lifecycle. The background task only waits; stdio is already redirected
+    // to the log file and stdin is null, so the server survives CLI exit and
+    // no zombie is left to init.
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
+    proc::write_pid_file(&pid_path, pid)?;
     if verbose {
         println!("started server pid {pid}; waiting for {server_url}");
     }
@@ -289,7 +291,7 @@ async fn stop_background(
     verbose: bool,
 ) -> Result<()> {
     let pid_path = proc::resolve_override(pid_file.as_deref(), proc::default_pid_file(server_url));
-    match proc::read_pid_file(&pid_path)? {
+    match proc::read_pid_record(&pid_path)? {
         None => {
             if is_reachable(server_url).await {
                 print_warning(&format!(
@@ -301,11 +303,12 @@ async fn stop_background(
             }
             Ok(())
         }
-        Some(pid) => {
-            if !proc::process_alive(pid) {
+        Some(record) => {
+            let pid = record.pid;
+            if !proc::process_alive_checked(pid, record.start_time) {
                 let _ = std::fs::remove_file(&pid_path);
                 if verbose {
-                    println!("removed stale PID file for dead pid {pid}");
+                    println!("removed stale PID file for pid {pid}");
                 }
                 print_success("server is already stopped (stale PID file removed)");
                 return Ok(());
@@ -336,8 +339,11 @@ async fn status(
 ) -> Result<()> {
     let pid_path = proc::resolve_override(pid_file.as_deref(), proc::default_pid_file(server_url));
     let log_path = proc::default_log_file(server_url);
-    let pid = proc::read_pid_file(&pid_path)?;
-    let pid_alive = pid.map(proc::process_alive).unwrap_or(false);
+    let record = proc::read_pid_record(&pid_path)?;
+    let pid = record.map(|entry| entry.pid);
+    let pid_alive = record
+        .map(|entry| proc::process_alive_checked(entry.pid, entry.start_time))
+        .unwrap_or(false);
     let health_opt = probe_health(server_url).await?;
     let reachable = health_opt.is_some();
     let healthy = health_opt.map(|h| h.healthy);
@@ -473,7 +479,7 @@ async fn wait_for_ready(
 async fn probe_once(
     server_url: &str,
 ) -> std::result::Result<cce_api::models::HealthStatus, String> {
-    let client = crate::client::ApiClient::new(server_url).map_err(|e| format!("{e:#}"))?;
+    let client = cce_transport::SharedHttpClient::new(server_url).map_err(|e| format!("{e:#}"))?;
     match tokio::time::timeout(Duration::from_secs(2), client.get(cce_api::paths::HEALTH)).await {
         Ok(Ok(health)) => Ok(health),
         Ok(Err(e)) => Err(format!("{e:#}")),
@@ -483,7 +489,7 @@ async fn probe_once(
 
 /// Best-effort reachability used by stop and status paths.
 async fn probe_health(server_url: &str) -> Result<Option<cce_api::models::HealthStatus>> {
-    let client = crate::client::ApiClient::new(server_url)?;
+    let client = cce_transport::SharedHttpClient::new(server_url)?;
     match tokio::time::timeout(
         Duration::from_secs(5),
         client.get::<cce_api::models::HealthStatus>(cce_api::paths::HEALTH),

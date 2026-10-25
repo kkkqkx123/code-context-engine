@@ -4,7 +4,7 @@ use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
 use crate::icons;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::{HealthStatus, StorageComponentStatus, StorageStatus, StorageStatusResponse};
@@ -17,11 +17,9 @@ struct CombinedStatus {
     storage: Option<StorageStatus>,
 }
 
-pub async fn execute(server: &str, verbose: bool, format: crate::cli::OutputFormat) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
+pub async fn execute_with_client(client: &SharedHttpClient, verbose: bool, format: crate::cli::OutputFormat) -> Result<()> {
     if verbose {
-        println!("Checking server status: {}", server);
+        println!("Checking server status: {}", client.base_url());
     }
 
     let healthy: bool;
@@ -33,9 +31,9 @@ pub async fn execute(server: &str, verbose: bool, format: crate::cli::OutputForm
 
             if !matches!(format, crate::cli::OutputFormat::Json) {
                 if health.healthy {
-                    print_success(&format!("Server is healthy at {}", server));
+                    print_success(&format!("Server is healthy at {}", client.base_url()));
                 } else {
-                    print_error(&format!("Server is unhealthy at {}", server));
+                    print_error(&format!("Server is unhealthy at {}", client.base_url()));
                 }
 
                 println!();
@@ -83,7 +81,7 @@ pub async fn execute(server: &str, verbose: bool, format: crate::cli::OutputForm
         Err(e) => {
             if matches!(format, crate::cli::OutputFormat::Json) {
                 let status = CombinedStatus {
-                    server_url: server.to_string(),
+                    server_url: client.base_url().to_string(),
                     healthy: false,
                     storage: None,
                 };
@@ -97,7 +95,7 @@ pub async fn execute(server: &str, verbose: bool, format: crate::cli::OutputForm
 
     if matches!(format, crate::cli::OutputFormat::Json) {
         let status = CombinedStatus {
-            server_url: server.to_string(),
+            server_url: client.base_url().to_string(),
             healthy,
             storage: storage_status,
         };

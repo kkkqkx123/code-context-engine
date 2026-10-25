@@ -124,18 +124,46 @@ pub fn resolve_override(override_path: Option<&str>, default: PathBuf) -> PathBu
         .unwrap_or(default)
 }
 
+/// PID file record coupling the process id with its start time.
+///
+/// The second line guards against PID reuse: an OS may recycle a PID for an
+/// unrelated process after the server exits. Comparing the recorded start
+/// time (seconds since epoch via `sysinfo`, backed by `/proc` on Linux)
+/// with the live process start time distinguishes a real server from a
+/// recycled PID. Legacy files contain only the PID line; their `start_time`
+/// is `None` and validation falls back to PID-only liveness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PidRecord {
+    /// Process id recorded at server start.
+    pub pid: u32,
+    /// Process start time in seconds since epoch, when known.
+    pub start_time: Option<u64>,
+}
+
 /// Read a PID file, returning `None` when it does not exist.
-pub fn read_pid_file(path: &Path) -> Result<Option<u32>> {
+///
+/// Accepts both the current two-line form (`pid\\nstart_time\\n`) and legacy
+/// single-line files (`pid\\n`).
+pub fn read_pid_record(path: &Path) -> Result<Option<PidRecord>> {
     match std::fs::read_to_string(path) {
         Ok(content) => {
-            let trimmed = content.trim();
-            if trimmed.is_empty() {
+            let mut lines = content.lines();
+            let first = lines.next().unwrap_or("").trim();
+            if first.is_empty() {
                 anyhow::bail!("PID file is empty: {}", path.display());
             }
-            let pid: u32 = trimmed
+            let pid: u32 = first
                 .parse()
                 .with_context(|| format!("PID file is corrupt: {}", path.display()))?;
-            Ok(Some(pid))
+            let start_time = match lines.next().map(str::trim) {
+                None | Some("") => None,
+                Some(second) => Some(
+                    second
+                        .parse::<u64>()
+                        .with_context(|| format!("PID file is corrupt: {}", path.display()))?,
+                ),
+            };
+            Ok(Some(PidRecord { pid, start_time }))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(anyhow::anyhow!(
@@ -145,6 +173,34 @@ pub fn read_pid_file(path: &Path) -> Result<Option<u32>> {
     }
 }
 
+/// Persist a PID file together with the live process start time.
+///
+/// The start time is read back through `sysinfo` so a later liveness check
+/// can reject recycled PIDs. When the process is not yet visible to
+/// `sysinfo` (spawn race), only the PID line is written and validation
+/// degrades to PID-only liveness.
+pub fn write_pid_file(path: &Path, pid: u32) -> Result<()> {
+    let content = match pid_start_time(pid) {
+        Some(start) => format!("{pid}\n{start}\n"),
+        None => format!("{pid}\n"),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(path, content)
+        .with_context(|| format!("failed to write PID file {}", path.display()))?;
+    Ok(())
+}
+
+/// Query the start time of a live process in seconds since epoch.
+pub fn pid_start_time(pid: u32) -> Option<u64> {
+    use sysinfo::ProcessesToUpdate;
+    let target = sysinfo::Pid::from_u32(pid);
+    let mut system = sysinfo::System::new();
+    system.refresh_processes(ProcessesToUpdate::Some(&[target]), true);
+    system.process(target).map(|process| process.start_time())
+}
+
 /// Check whether a PID currently maps to a live process.
 pub fn process_alive(pid: u32) -> bool {
     use sysinfo::ProcessesToUpdate;
@@ -152,6 +208,25 @@ pub fn process_alive(pid: u32) -> bool {
     let mut system = sysinfo::System::new();
     system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
     system.process(pid).is_some()
+}
+
+/// Check liveness plus PID identity.
+///
+/// A stored start time that disagrees with the live process means the PID
+/// was recycled for an unrelated process; the file is treated as stale.
+/// Records without a start time (legacy files) fall back to PID-only
+/// liveness so existing deployments keep working.
+pub fn process_alive_checked(pid: u32, expected_start: Option<u64>) -> bool {
+    if !process_alive(pid) {
+        return false;
+    }
+    match expected_start {
+        None => true,
+        Some(expected) => match pid_start_time(pid) {
+            Some(live) => live == expected,
+            None => false,
+        },
+    }
 }
 
 /// Terminate a process gracefully, escalating to force after the grace period.
@@ -275,7 +350,7 @@ mod tests {
     fn corrupt_pid_file_reports_instead_of_panicking() {
         let path = std::env::temp_dir().join(format!("cce-pid-{}.tmp", std::process::id()));
         std::fs::write(&path, "not-a-pid\n").expect("pid fixture writes");
-        assert!(read_pid_file(&path).is_err());
+        assert!(read_pid_record(&path).is_err());
         std::fs::remove_file(&path).ok();
     }
 
@@ -283,7 +358,7 @@ mod tests {
     fn missing_pid_file_maps_to_none() {
         let path = std::env::temp_dir().join(format!("cce-missing-{}.pid", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        assert_eq!(read_pid_file(&path).expect("missing maps to none"), None);
+        assert_eq!(read_pid_record(&path).expect("missing maps to none"), None);
     }
 
     #[test]
@@ -297,5 +372,48 @@ mod tests {
     #[test]
     fn current_process_counts_as_alive() {
         assert!(process_alive(std::process::id()));
+    }
+
+    #[test]
+    fn pid_record_round_trips_with_start_time() {
+        let path = std::env::temp_dir().join(format!(
+            "cce-pid-record-{}.pid",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let pid = std::process::id();
+        write_pid_file(&path, pid).expect("pid file writes");
+        let record = read_pid_record(&path)
+            .expect("pid record reads")
+            .expect("pid record present");
+        assert_eq!(record.pid, pid);
+        assert!(process_alive_checked(pid, record.start_time));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn mismatched_start_time_counts_as_stale() {
+        let pid = std::process::id();
+        let live = pid_start_time(pid).expect("live start time exists");
+        let bogus = live.wrapping_add(1).max(live + 1);
+        assert!(!process_alive_checked(pid, Some(bogus)));
+        assert!(process_alive_checked(pid, Some(live)));
+    }
+
+    #[test]
+    fn legacy_pid_file_without_start_time_stays_compatible() {
+        let path = std::env::temp_dir().join(format!(
+            "cce-pid-legacy-{}.pid",
+            std::process::id()
+        ));
+        let pid = std::process::id();
+        std::fs::write(&path, format!("{pid}\n")).expect("legacy writes");
+        let record = read_pid_record(&path)
+            .expect("legacy reads")
+            .expect("legacy present");
+        assert_eq!(record.pid, pid);
+        assert_eq!(record.start_time, None);
+        assert!(process_alive_checked(record.pid, record.start_time));
+        std::fs::remove_file(&path).ok();
     }
 }

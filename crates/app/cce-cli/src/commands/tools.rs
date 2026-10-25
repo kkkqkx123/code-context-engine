@@ -5,7 +5,7 @@ use clap::Subcommand;
 use anyhow::Result;
 use colored::Colorize;
 
-use crate::client::ApiClient;
+use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{
     BatchFoldRequest, BatchFoldResponse, CompressApiResponse, CompressRequest, DiagnoseApiResponse,
@@ -20,22 +20,21 @@ pub(crate) struct LocationParams {
     line: usize,
     column: Option<usize>,
     symbol: Option<String>,
-    server: String,
     verbose: bool,
 }
 
-pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<()> {
+pub async fn execute_with_client(cmd: &ToolCommands, client: &SharedHttpClient, verbose: bool) -> Result<()> {
     match cmd {
         ToolCommands::Compress {
             file_path,
             include_entities,
             include_groups,
         } => {
-            execute_compress(
+            execute_compress_with_client(
                 file_path,
                 *include_entities,
                 *include_groups,
-                server,
+                client,
                 verbose,
             )
             .await
@@ -46,12 +45,12 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             include_groups,
             max_concurrency,
         } => {
-            crate::commands::batch_compress::execute(
+            crate::commands::batch_compress::execute_with_client(
                 file_paths,
                 *include_entities,
                 *include_groups,
                 max_concurrency.unwrap_or(4),
-                server,
+                client,
                 verbose,
             )
             .await
@@ -62,18 +61,18 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             file_name,
             include_ast,
         } => {
-            execute_diagnose(
+            execute_diagnose_with_client(
                 code,
                 language.as_deref(),
                 file_name.as_deref(),
                 *include_ast,
-                server,
+                client,
                 verbose,
             )
             .await
         }
         ToolCommands::Symbols { paths, project_id } => {
-            execute_get_symbols(*project_id, paths, server, verbose).await
+            execute_get_symbols_with_client(*project_id, paths, client, verbose).await
         }
         ToolCommands::References {
             path,
@@ -85,14 +84,14 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             include_entity_info,
             project_id,
         } => {
-            execute_find_references(
+            execute_find_references_with_client(
+                client,
                 LocationParams {
                     project_id: *project_id,
                     path: path.clone(),
                     line: *line,
                     column: *column,
                     symbol: symbol.clone(),
-                    server: server.to_string(),
                     verbose,
                 },
                 *context_lines,
@@ -109,14 +108,14 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             include_body,
             project_id,
         } => {
-            execute_goto_definition(
+            execute_goto_definition_with_client(
+                client,
                 LocationParams {
                     project_id: *project_id,
                     path: path.clone(),
                     line: *line,
                     column: *column,
                     symbol: symbol.clone(),
-                    server: server.to_string(),
                     verbose,
                 },
                 *include_body,
@@ -131,16 +130,18 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             term_operator,
             epoch,
         } => {
-            execute_keyword_search(&KeywordSearchParams {
-                project_id: *project_id,
-                query,
-                top_n: *top_n,
-                offset: *offset,
-                term_operator: Some(term_operator.as_str()),
-                epoch: *epoch,
-                server,
-                verbose,
-            })
+            execute_keyword_search_with_client(
+                client,
+                &KeywordSearchParams {
+                    project_id: *project_id,
+                    query,
+                    top_n: *top_n,
+                    offset: *offset,
+                    term_operator: Some(term_operator.as_str()),
+                    epoch: *epoch,
+                    verbose,
+                },
+            )
             .await
         }
         ToolCommands::Fold {
@@ -150,13 +151,13 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             max_tokens,
             mode,
         } => {
-            execute_fold(
+            execute_fold_with_client(
                 text,
                 language.as_deref(),
                 file_name.as_deref(),
                 *max_tokens,
                 mode.as_deref(),
-                server,
+                client,
                 verbose,
             )
             .await
@@ -172,7 +173,8 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
             mode,
             max_concurrency,
         } => {
-            execute_fold_batch(
+            execute_fold_batch_with_client(
+                client,
                 &FoldBatchCliParams {
                     items,
                     languages,
@@ -184,7 +186,6 @@ pub async fn execute(cmd: &ToolCommands, server: &str, verbose: bool) -> Result<
                     mode,
                     max_concurrency: *max_concurrency,
                 },
-                server,
                 verbose,
             )
             .await
@@ -211,18 +212,16 @@ pub(crate) struct KeywordSearchParams<'a> {
     offset: usize,
     term_operator: Option<&'a str>,
     epoch: Option<i64>,
-    server: &'a str,
     verbose: bool,
 }
 
-pub async fn execute_compress(
+pub async fn execute_compress_with_client(
     file_path: &str,
     include_entities: bool,
     include_groups: bool,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
 
     let request = CompressRequest {
         file_path: file_path.to_string(),
@@ -268,15 +267,14 @@ pub async fn execute_compress(
     Ok(())
 }
 
-pub async fn execute_diagnose(
+pub async fn execute_diagnose_with_client(
     code: &str,
     language: Option<&str>,
     file_name: Option<&str>,
     include_ast: bool,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
 
     let request = DiagnoseRequest {
         code: code.to_string(),
@@ -322,13 +320,12 @@ pub async fn execute_diagnose(
     Ok(())
 }
 
-pub async fn execute_get_symbols(
+pub async fn execute_get_symbols_with_client(
     project_id: i64,
     paths: &[String],
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
 
     let request = GetSymbolsRequest {
         project_id,
@@ -387,14 +384,13 @@ pub async fn execute_get_symbols(
     Ok(())
 }
 
-pub async fn execute_find_references(
+pub async fn execute_find_references_with_client(
+    client: &SharedHttpClient,
     params: LocationParams,
     context_lines: Option<usize>,
     include_snippet: Option<bool>,
     include_entity_info: Option<bool>,
 ) -> Result<()> {
-    let client = ApiClient::new(&params.server)?;
-
     let request = FindReferencesRequest {
         project_id: params.project_id,
         path: params.path,
@@ -456,8 +452,7 @@ pub async fn execute_find_references(
     Ok(())
 }
 
-pub async fn execute_goto_definition(params: LocationParams, include_body: bool) -> Result<()> {
-    let client = ApiClient::new(&params.server)?;
+pub async fn execute_goto_definition_with_client(client: &SharedHttpClient, params: LocationParams, include_body: bool) -> Result<()> {
 
     let request = GotoDefinitionRequest {
         project_id: params.project_id,
@@ -508,8 +503,7 @@ pub async fn execute_goto_definition(params: LocationParams, include_body: bool)
     Ok(())
 }
 
-pub async fn execute_keyword_search(params: &KeywordSearchParams<'_>) -> Result<()> {
-    let client = ApiClient::new(params.server)?;
+pub async fn execute_keyword_search_with_client(client: &SharedHttpClient, params: &KeywordSearchParams<'_>) -> Result<()> {
 
     let operator = match params.term_operator.map(str::to_ascii_lowercase).as_deref() {
         Some("and") => KeywordTermOperator::And,
@@ -560,16 +554,15 @@ pub async fn execute_keyword_search(params: &KeywordSearchParams<'_>) -> Result<
     Ok(())
 }
 
-pub async fn execute_fold(
+pub async fn execute_fold_with_client(
     text: &str,
     language: Option<&str>,
     file_name: Option<&str>,
     max_tokens: Option<usize>,
     mode: Option<&str>,
-    server: &str,
+    client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
     let request = FoldRequest {
         text: text.to_string(),
         language: language.map(str::to_string),
@@ -591,12 +584,11 @@ pub async fn execute_fold(
     Ok(())
 }
 
-pub async fn execute_fold_batch(
+pub async fn execute_fold_batch_with_client(
+    client: &SharedHttpClient,
     params: &FoldBatchCliParams<'_>,
-    server: &str,
     verbose: bool,
 ) -> Result<()> {
-    let client = ApiClient::new(server)?;
     let request_items = params
         .items
         .iter()

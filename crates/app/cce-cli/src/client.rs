@@ -1,10 +1,11 @@
-//! HTTP client for communicating with CCE server
+//! Typed domain methods over the shared HTTP transport.
 //!
-//! Single client layer for the CLI: generic transport methods plus typed
-//! domain methods encoding request parameters onto the wire contract paths.
+//! Business commands use [`SharedHttpClient`] directly for generic requests.
+//! Domain methods live here as the [`CliApi`] extension trait so every
+//! command shares one error mapping without a thin wrapper struct.
 
 use anyhow::Result;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use cce_api::models::*;
 use cce_api::service_params::{
@@ -12,127 +13,132 @@ use cce_api::service_params::{
     GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
     GraphStructuralParams, GraphSubgraphParams,
 };
-use cce_transport::{GraphQuery, HttpTransportError, QueryParam, SharedHttpClient};
+use cce_transport::{GraphQuery, QueryParam, SharedHttpClient, map_transport_error};
 
-/// API client
-pub struct ApiClient {
-    inner: SharedHttpClient,
-}
-
-impl ApiClient {
-    /// Create a new API client
-    pub fn new(base_url: &str) -> Result<Self> {
-        Self::new_with_token(base_url, None)
-    }
-
-    /// Create a client with an explicit token outranking the environment.
-    pub fn new_with_token(base_url: &str, explicit_token: Option<String>) -> Result<Self> {
-        Ok(Self {
-            inner: SharedHttpClient::new_with_token(base_url, explicit_token)?,
-        })
-    }
-
-    /// Make a GET request
-    pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        self.inner.get(path).await
-    }
-
-    /// Make a GET request returning raw text.
-    pub async fn get_text(&self, path: &str) -> Result<String> {
-        self.inner.get_text(path).await
-    }
-
-    /// Make a POST request
-    pub async fn post<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
-        self.inner.post(path, body).await
-    }
-
-    /// Make a DELETE request
-    pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        self.inner.delete(path).await
-    }
-
-    /// Make a PUT request
-    pub async fn put<T: Serialize, R: DeserializeOwned>(&self, path: &str, body: &T) -> Result<R> {
-        self.inner.put(path, body).await
-    }
-
-    /// Make a DELETE request with body
-    pub async fn delete_with_body<T: Serialize, R: DeserializeOwned>(
+/// Typed domain API shared by CLI business commands.
+pub trait CliApi {
+    async fn list_projects(&self) -> Result<ProjectListResponse>;
+    async fn create_project(&self, request: CreateProjectRequest) -> Result<ProjectDetailResponse>;
+    async fn get_project(&self, project_id: i64) -> Result<ProjectDetailResponse>;
+    async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse>;
+    async fn index(&self, request: IndexRequest) -> Result<IndexResponse>;
+    async fn search(&self, request: SearchRequest) -> Result<SearchResponse>;
+    async fn search_aggregated(
         &self,
-        path: &str,
-        body: &T,
-    ) -> Result<R> {
-        self.inner.delete_with_body(path, body).await
-    }
-
-    fn map(error: anyhow::Error) -> anyhow::Error {
-        if let Some(http) = error.downcast_ref::<HttpTransportError>() {
-            let text = http.to_string();
-            return if http.status == Some(404) {
-                anyhow::anyhow!("not found: {text}")
-            } else {
-                anyhow::anyhow!("transport error: {text}")
-            };
-        }
-        let text = format!("{error:#}");
-        if text.contains("404") || text.contains("not found") {
-            anyhow::anyhow!("not found: {text}")
-        } else {
-            anyhow::anyhow!("transport error: {text}")
-        }
-    }
+        request: AggregatedSearchRequest,
+    ) -> Result<SearchResponse>;
+    async fn graph_ego(
+        &self,
+        project_id: i64,
+        params: GraphEgoParams,
+    ) -> Result<GraphSubgraphResponse>;
+    async fn graph_path(
+        &self,
+        project_id: i64,
+        params: GraphPathParams,
+    ) -> Result<GraphPathResponse>;
+    async fn graph_subgraph(
+        &self,
+        project_id: i64,
+        params: GraphSubgraphParams,
+    ) -> Result<GraphSubgraphResponse>;
+    async fn graph_components(
+        &self,
+        project_id: i64,
+        params: GraphComponentsParams,
+    ) -> Result<GraphComponentsResponse>;
+    async fn graph_export(
+        &self,
+        project_id: i64,
+        params: GraphExportParams,
+    ) -> Result<GraphSubgraphResponse>;
+    async fn graph_impact(
+        &self,
+        project_id: i64,
+        params: GraphImpactParams,
+    ) -> Result<GraphImpactResponse>;
+    async fn graph_entity_impact(
+        &self,
+        project_id: i64,
+        params: GraphEntityImpactParams,
+    ) -> Result<GraphEntityImpactResponse>;
+    async fn graph_cycles(
+        &self,
+        project_id: i64,
+        params: GraphCyclesParams,
+    ) -> Result<GraphCyclesResponse>;
+    async fn graph_structural(
+        &self,
+        project_id: i64,
+        params: GraphStructuralParams,
+    ) -> Result<GraphStructuralResponse>;
+    async fn graph_module(
+        &self,
+        project_id: i64,
+        params: GraphModuleParams,
+    ) -> Result<GraphModuleResponse>;
+    async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse>;
+    async fn watch_start(
+        &self,
+        project_id: i64,
+        request: StartWatchRequest,
+    ) -> Result<StartWatchResponse>;
+    async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse>;
+    async fn reload_project(&self, project_id: i64) -> Result<ProjectConfigReloadResponse>;
 }
 
-impl ApiClient {
-    pub async fn list_projects(&self) -> Result<ProjectListResponse> {
-        self.get(cce_api::paths::PROJECT).await.map_err(Self::map)
+async fn mapped_post<T: Serialize, R: DeserializeOwned>(
+    client: &SharedHttpClient,
+    path: &str,
+    body: &T,
+) -> Result<R> {
+    client.post(path, body).await.map_err(map_transport_error)
+}
+
+async fn mapped_get<R: DeserializeOwned>(client: &SharedHttpClient, path: &str) -> Result<R> {
+    client.get(path).await.map_err(map_transport_error)
+}
+
+impl CliApi for SharedHttpClient {
+    async fn list_projects(&self) -> Result<ProjectListResponse> {
+        mapped_get(self, cce_api::paths::PROJECT).await
     }
 
-    pub async fn create_project(
+    async fn create_project(
         &self,
         request: CreateProjectRequest,
     ) -> Result<ProjectDetailResponse> {
-        self.post(cce_api::paths::PROJECT, &request)
-            .await
-            .map_err(Self::map)
+        mapped_post(self, cce_api::paths::PROJECT, &request).await
     }
 
-    pub async fn get_project(&self, project_id: i64) -> Result<ProjectDetailResponse> {
-        self.get(&cce_api::paths::project_detail(project_id))
-            .await
-            .map_err(Self::map)
+    async fn get_project(&self, project_id: i64) -> Result<ProjectDetailResponse> {
+        mapped_get(self, &cce_api::paths::project_detail(project_id)).await
     }
 
-    pub async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse> {
+    async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse> {
         self.delete(&cce_api::paths::project_detail(project_id))
             .await
-            .map_err(Self::map)
+            .map_err(map_transport_error)
     }
 
-    pub async fn index(&self, request: IndexRequest) -> Result<IndexResponse> {
-        self.post(cce_api::paths::INDEX, &request)
-            .await
-            .map_err(Self::map)
+    async fn index(&self, request: IndexRequest) -> Result<IndexResponse> {
+        mapped_post(self, cce_api::paths::INDEX, &request).await
     }
 
-    pub async fn search(&self, request: SearchRequest) -> Result<SearchResponse> {
-        self.post(cce_api::paths::SEARCH, &request)
-            .await
-            .map_err(Self::map)
+    async fn search(&self, request: SearchRequest) -> Result<SearchResponse> {
+        mapped_post(self, cce_api::paths::SEARCH, &request).await
     }
 
-    pub async fn search_aggregated(
+    async fn search_aggregated(
         &self,
         request: AggregatedSearchRequest,
     ) -> Result<SearchResponse> {
-        self.inner
-            .post_aggregated_search(&request)
+        self.post_aggregated_search(&request)
             .await
-            .map_err(Self::map)
+            .map_err(map_transport_error)
     }
 
-    pub async fn graph_ego(
+    async fn graph_ego(
         &self,
         project_id: i64,
         params: GraphEgoParams,
@@ -154,10 +160,10 @@ impl ApiClient {
                 QueryParam::Bool(params.include_external),
             )
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_path(
+    async fn graph_path(
         &self,
         project_id: i64,
         params: GraphPathParams,
@@ -177,10 +183,10 @@ impl ApiClient {
                 QueryParam::Bool(params.include_external),
             )
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_subgraph(
+    async fn graph_subgraph(
         &self,
         project_id: i64,
         params: GraphSubgraphParams,
@@ -200,10 +206,10 @@ impl ApiClient {
                 QueryParam::Bool(params.include_external),
             )
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_components(
+    async fn graph_components(
         &self,
         project_id: i64,
         params: GraphComponentsParams,
@@ -222,10 +228,10 @@ impl ApiClient {
                 QueryParam::Bool(params.include_external),
             )
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_export(
+    async fn graph_export(
         &self,
         project_id: i64,
         params: GraphExportParams,
@@ -244,10 +250,10 @@ impl ApiClient {
                 QueryParam::Bool(params.include_external),
             )
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_impact(
+    async fn graph_impact(
         &self,
         project_id: i64,
         params: GraphImpactParams,
@@ -259,10 +265,10 @@ impl ApiClient {
         let path = GraphQuery::new(path_template)
             .param("file", QueryParam::Text(params.file))
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_entity_impact(
+    async fn graph_entity_impact(
         &self,
         project_id: i64,
         params: GraphEntityImpactParams,
@@ -276,10 +282,10 @@ impl ApiClient {
             .param("max_depth", QueryParam::Number(params.max_depth))
             .param("scope", QueryParam::Text(params.scope))
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_cycles(
+    async fn graph_cycles(
         &self,
         project_id: i64,
         params: GraphCyclesParams,
@@ -292,10 +298,10 @@ impl ApiClient {
             .param("level", QueryParam::Text(params.level))
             .param("limit", QueryParam::Number(params.limit))
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_structural(
+    async fn graph_structural(
         &self,
         project_id: i64,
         params: GraphStructuralParams,
@@ -310,10 +316,10 @@ impl ApiClient {
             .param("direction", QueryParam::Text(params.direction))
             .param("limit", QueryParam::Number(params.limit))
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn graph_module(
+    async fn graph_module(
         &self,
         project_id: i64,
         params: GraphModuleParams,
@@ -325,41 +331,37 @@ impl ApiClient {
         let path = GraphQuery::new(path_template)
             .param("file", QueryParam::Text(params.file))
             .build();
-        self.get(&path).await.map_err(Self::map)
+        mapped_get(self, &path).await
     }
 
-    pub async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse> {
-        self.get(&cce_api::paths::watch_status(project_id))
-            .await
-            .map_err(Self::map)
+    async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse> {
+        mapped_get(self, &cce_api::paths::watch_status(project_id)).await
     }
 
-    pub async fn watch_start(
+    async fn watch_start(
         &self,
         project_id: i64,
         request: StartWatchRequest,
     ) -> Result<StartWatchResponse> {
-        self.post(&cce_api::paths::watch_start(project_id), &request)
-            .await
-            .map_err(Self::map)
+        mapped_post(self, &cce_api::paths::watch_start(project_id), &request).await
     }
 
-    pub async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse> {
-        self.post(
+    async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse> {
+        mapped_post(
+            self,
             &cce_api::paths::watch_stop(project_id),
             &serde_json::json!({}),
         )
         .await
-        .map_err(Self::map)
     }
 
-    pub async fn reload_project(&self, project_id: i64) -> Result<ProjectConfigReloadResponse> {
-        self.post(
+    async fn reload_project(&self, project_id: i64) -> Result<ProjectConfigReloadResponse> {
+        mapped_post(
+            self,
             &cce_api::paths::project_reload(project_id),
             &serde_json::json!({}),
         )
         .await
-        .map_err(Self::map)
     }
 }
 
@@ -493,7 +495,7 @@ mod tests {
     #[tokio::test]
     async fn get_hits_contract_path_verbatim() {
         let stub = Stub::spawn(serde_json::json!({"ok": true}));
-        let client = ApiClient::new(&stub.url).expect("client builds");
+        let client = SharedHttpClient::new(&stub.url).expect("client builds");
         let value: serde_json::Value = client
             .get("/api/project/3/graph/ego?entity_id=x")
             .await
@@ -508,7 +510,7 @@ mod tests {
     #[tokio::test]
     async fn post_sends_json_body_to_contract_path() {
         let stub = Stub::spawn(serde_json::json!({"success": true}));
-        let client = ApiClient::new(&stub.url).expect("client builds");
+        let client = SharedHttpClient::new(&stub.url).expect("client builds");
         let value: serde_json::Value = client
             .post("/api/search", &serde_json::json!({"query": "fold"}))
             .await
@@ -526,7 +528,7 @@ mod tests {
     #[tokio::test]
     async fn explicit_token_outranks_environment_as_bearer() {
         let stub = Stub::spawn(serde_json::json!({"ok": true}));
-        let client = ApiClient::new_with_token(&stub.url, Some("explicit-1".to_string()))
+        let client = SharedHttpClient::new_with_token(&stub.url, Some("explicit-1".to_string()))
             .expect("client builds");
         let _: serde_json::Value = client.get("/api/status").await.expect("stub get succeeds");
         let recorded = stub.recorded();
@@ -536,9 +538,18 @@ mod tests {
     #[tokio::test]
     async fn trailing_slash_base_url_does_not_double_slash() {
         let stub = Stub::spawn(serde_json::json!({"ok": true}));
-        let client = ApiClient::new(&format!("{}/", stub.url)).expect("client builds");
+        let client = SharedHttpClient::new(&format!("{}/", stub.url)).expect("client builds");
         let _: serde_json::Value = client.get("/api/status").await.expect("stub get succeeds");
         let recorded = stub.recorded();
         assert_eq!(recorded[0].1, "/api/status");
+    }
+
+    #[tokio::test]
+    async fn mapped_helpers_preserve_contract_paths() {
+        let stub = Stub::spawn(serde_json::json!({"success": true, "total": 0, "projects": []}));
+        let client = SharedHttpClient::new(&stub.url).expect("client builds");
+        let _: ProjectListResponse = mapped_get(&client, "/api/project").await.expect("mapped get");
+        let recorded = stub.recorded();
+        assert_eq!(recorded[0].1, "/api/project");
     }
 }
