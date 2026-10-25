@@ -4,7 +4,7 @@
  * Wire types come from the generated OpenAPI contract (schema.d.ts).
  */
 
-import { ApiError, BASE_URL, call, client } from './client';
+import { ApiError, BASE_URL, call, client } from '#api/client';
 import type { components } from './schema';
 
 export type MetricsData = Record<string, unknown>;

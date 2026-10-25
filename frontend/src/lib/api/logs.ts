@@ -1,4 +1,4 @@
-import { BASE_URL } from './client';
+import { BASE_URL } from '#api/client';
 
 export interface LogEntry {
 	timestamp: string;

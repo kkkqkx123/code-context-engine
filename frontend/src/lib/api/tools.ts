@@ -6,7 +6,7 @@
  * so each call unwraps the envelope and throws on failure.
  */
 
-import { ApiError, call, client } from './client';
+import { ApiError, call, client } from '#api/client';
 import type { components } from './schema';
 
 export type CompressRequest = components['schemas']['CompressRequest'];

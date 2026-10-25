@@ -9,7 +9,7 @@
  * invalidation. Wire types come from the generated OpenAPI contract.
  */
 
-import { call, client } from './client';
+import { call, client } from '#api/client';
 import type { components } from './schema';
 
 export type GraphNode = components['schemas']['GraphNode'];

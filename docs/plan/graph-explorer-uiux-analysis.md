@@ -3,8 +3,8 @@
 分析对象：`frontend/src/routes/graph/+page.svelte` 及其组件、`frontend/src/lib/stores/graph.ts`、
 `frontend/src/lib/utils/graph-*.ts`、`frontend/src/lib/api/graph.ts`。
 
-`frontend-preview` 是从 `frontend` 镜像而来（见 `docs/frontend/preview-design.md`），其图查询页与
-`frontend` 逐字节一致，因此本分析以 `frontend` 为准。
+预览能力已内化为 `frontend` 的运行模式（见 `docs/frontend/preview-design.md`），本分析以
+`frontend` 为准。
 
 ---
 

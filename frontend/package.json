@@ -4,9 +4,12 @@
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build",
+		"dev:preview": "vite dev --mode preview",
+		"build": "vite build && node scripts/check-build-isolation.mjs",
+		"build:preview": "vite build --mode preview",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:preview": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.preview.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"contract:check": "node scripts/check-contract.mjs",
 		"test": "node --test tests/*.test.mjs",

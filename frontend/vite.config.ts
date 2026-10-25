@@ -1,9 +1,14 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
 import { visualizer } from 'rollup-plugin-visualizer';
 
 export default defineConfig(({ mode }) => {
 	const isProd = mode === 'production';
+	// Preview mode swaps the API client to the mock-backed implementation.
+	// The default resolution goes through the tsconfig paths to client.ts,
+	// so mock code never enters the module graph of default builds.
+	const isPreview = mode === 'preview';
 
 	return {
 		plugins: [
@@ -18,6 +23,18 @@ export default defineConfig(({ mode }) => {
 					template: 'markdown',
 				}),
 		].filter(Boolean),
+		resolve: {
+			alias: isPreview
+				? [
+						{
+							find: '#api/client',
+							replacement: fileURLToPath(
+								new URL('./src/lib/api/client.preview.ts', import.meta.url),
+							),
+						},
+					]
+				: [],
+		},
 		build: {
 			sourcemap: !isProd,
 			minify: isProd, // Use default minifier (esbuild for client, terser if needed)

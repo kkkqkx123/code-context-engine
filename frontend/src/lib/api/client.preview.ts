@@ -1,0 +1,197 @@
+/**
+ * Preview API client: same call surface as the real client (`client` with
+ * GET/POST/PUT/DELETE plus `call`/`ApiError`/`BASE_URL`), but loosely typed.
+ *
+ * This module is only referenced in preview builds: the Vite config aliases
+ * `#api/client` to this file when `--mode preview` is used, so in default
+ * builds neither this file nor the mock payloads it pulls in ever enter the
+ * module graph.
+ *
+ * In mock mode (`VITE_USE_MOCK=true`) requests are answered from the static
+ * payloads in `../preview/mock`; otherwise they delegate to the real
+ * openapi-fetch client.
+ */
+
+import createClient from 'openapi-fetch';
+import type { paths } from './schema';
+import { readStoredToken } from '../stores/auth';
+import { isMockMode, mockDelay } from '../preview/mock/data';
+import { mockClient } from '../preview/mock/client';
+
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:9000';
+
+if (import.meta.env.MODE === 'preview' && !isMockMode) {
+	// Preview build without mock data enabled: requests would fall through to
+	// the real backend, which is almost always a misconfigured .env.
+	console.warn(
+		'[preview] VITE_USE_MOCK is not "true" — falling back to the real backend. Did you forget .env.preview?',
+	);
+}
+
+export class ApiError extends Error {
+	status: number;
+	/** Backend error code (e.g. AMBIGUOUS_SYMBOL), when present. */
+	code: string | null;
+	/** Raw backend error payload, for structured details such as candidates. */
+	payload: unknown;
+
+	constructor(message: string, status: number, code?: string, payload?: unknown) {
+		super(message);
+		this.name = 'ApiError';
+		this.status = status;
+		this.code = code ?? null;
+		this.payload = payload;
+	}
+
+	/** Parse `details` as a JSON array of symbol candidates (AMBIGUOUS_SYMBOL). */
+	symbolCandidates(): SymbolCandidate[] {
+		const detail = (this.payload as BackendError | undefined)?.error?.details;
+		if (typeof detail !== 'string' || detail.length === 0) return [];
+		try {
+			const parsed = JSON.parse(detail);
+			if (!Array.isArray(parsed)) return [];
+			return parsed.filter(
+				(c): c is SymbolCandidate =>
+					c && typeof c === 'object' && typeof (c as SymbolCandidate).stable_id === 'string',
+			);
+		} catch {
+			return [];
+		}
+	}
+}
+
+/** A disambiguation candidate returned for an AMBIGUOUS_SYMBOL error. */
+export interface SymbolCandidate {
+	stable_id: string;
+	file_path: string;
+	scoped_name: string;
+	kind: string;
+}
+
+/** Error payload returned by the backend on failure. */
+interface BackendError {
+	error?: {
+		code?: string;
+		message?: string;
+		details?: string;
+	};
+	message?: string;
+}
+
+function errorPayload(error: unknown): BackendError | undefined {
+	return typeof error === 'object' && error !== null
+		? (error as BackendError)
+		: undefined;
+}
+
+function errorCode(error: unknown): string | undefined {
+	return errorPayload(error)?.error?.code;
+}
+
+function errorMessage(error: unknown, status: number): string {
+	const body = errorPayload(error);
+	if (typeof body?.error?.message === 'string' && body.error.message) {
+		return body.error.message;
+	}
+	if (typeof body?.message === 'string' && body.message) {
+		return body.message;
+	}
+	return `HTTP ${status}`;
+}
+
+/**
+ * Await an openapi-fetch call: throw ApiError on transport or backend
+ * failure, otherwise return the bare success payload.
+ */
+export async function call<T>(
+	promise: Promise<{
+		data?: unknown;
+		error?: unknown;
+		response?: Response;
+	}>,
+): Promise<T> {
+	const res = await promise;
+	if (res.error !== undefined && res.error !== null) {
+		const status = res.response?.status ?? 0;
+		throw new ApiError(
+			errorMessage(res.error, status),
+			status,
+			errorCode(res.error),
+			res.error,
+		);
+	}
+	return res.data as T;
+}
+
+const realClient = createClient<paths>({
+	baseUrl: BASE_URL,
+	headers: { 'Content-Type': 'application/json' },
+});
+
+// Mirror the main app: attach the admission token when one is stored, so
+// non-mock runs against a protected backend behave identically.
+realClient.use({
+	async onRequest({ request }) {
+		const token = readStoredToken();
+		if (!token) return undefined;
+		const headers = new Headers(request.headers);
+		if (!headers.has('authorization')) {
+			headers.set('authorization', `Bearer ${token}`);
+		}
+		return new Request(request, { headers });
+	},
+});
+
+interface CallOptions {
+	params?: {
+		path?: Record<string, string | number>;
+		query?: Record<string, unknown>;
+	};
+	body?: unknown;
+}
+
+/** Fill a `{param}` path template with concrete values. */
+function concretePath(template: string, pathParams?: Record<string, string | number>): string {
+	let out = template;
+	for (const [key, value] of Object.entries(pathParams ?? {})) {
+		out = out.replace(`{${key}}`, encodeURIComponent(String(value)));
+	}
+	return out;
+}
+
+/**
+ * Dispatch one call: mock data in mock mode, real backend otherwise.
+ * Mock handlers ignore query values and return static payloads.
+ */
+async function dispatch(
+	method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+	path: string,
+	opts?: CallOptions,
+): Promise<{ data?: unknown; error?: unknown }> {
+	const real = (
+		realClient as unknown as Record<string, (p: string, o?: object) => Promise<unknown>>
+	)[method];
+	if (!isMockMode) {
+		return (await real(path, opts ?? {})) as { data?: unknown; error?: unknown };
+	}
+	await mockDelay();
+	const endpoint = concretePath(path, opts?.params?.path);
+	const mock = mockClient as unknown as Record<
+		string,
+		(e: string, b?: unknown) => Promise<unknown>
+	>;
+	const handler = mock[method.toLowerCase()] ?? mock.get;
+	const data = await handler.call(mockClient, endpoint, opts?.body);
+	return { data };
+}
+
+export const client = {
+	GET: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('GET', path, opts),
+	POST: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('POST', path, opts),
+	PUT: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('PUT', path, opts),
+	DELETE: (path: string, opts?: CallOptions): Promise<{ data?: unknown; error?: unknown }> =>
+		dispatch('DELETE', path, opts),
+};
