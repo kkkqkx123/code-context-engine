@@ -33,7 +33,6 @@ fn print_result_item(index: usize, item: &SearchResultItem) {
     println!();
 }
 
-
 /// Execute search commands through the domain service abstraction.
 pub async fn execute_with_service(
     cmd: &SearchCommands,

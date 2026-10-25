@@ -7,9 +7,8 @@ use anyhow::Result;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success, print_table, truncate};
 use cce_api::models::{
-    CreateProjectRequest, ProjectConfig, ProjectConfigUpdateRequest,
-    ProjectConfigUpdateResponse, ProjectDetailResponse,
-    ProjectIndexResponse, UpdateProjectRequest,
+    CreateProjectRequest, ProjectConfig, ProjectConfigUpdateRequest, ProjectConfigUpdateResponse,
+    ProjectDetailResponse, ProjectIndexResponse, UpdateProjectRequest,
 };
 
 fn project_path(id: &str) -> String {

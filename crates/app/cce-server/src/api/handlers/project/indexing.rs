@@ -25,7 +25,7 @@ use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
     )
 )]
 pub async fn handle_project_index(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectIndexResponse> {
     // Check if metadata store is available
@@ -112,7 +112,7 @@ pub async fn handle_project_index(
     )
 )]
 pub async fn handle_dead_letter_files_retry(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
     axum::Json(body): axum::Json<DeadLetterRetryRequest>,
 ) -> ApiResult<DeadLetterActionResponse> {
@@ -148,7 +148,7 @@ pub async fn handle_dead_letter_files_retry(
     )
 )]
 pub async fn handle_dead_letter_acknowledge(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
     axum::Json(body): axum::Json<DeadLetterAcknowledgeRequest>,
 ) -> ApiResult<DeadLetterActionResponse> {
@@ -196,7 +196,7 @@ pub async fn handle_dead_letter_acknowledge(
     )
 )]
 pub async fn handle_dead_letter_list(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
 ) -> ApiResult<DeadLetterListResponse> {
     match state.engine.dead_letters(id).await {

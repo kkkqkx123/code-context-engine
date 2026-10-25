@@ -27,7 +27,7 @@ use super::{graph_context, stale_relation_info};
     )
 )]
 pub async fn handle_graph_impact(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<ImpactQuery>,
 ) -> ApiResult<GraphImpactResponse> {
@@ -69,7 +69,7 @@ pub async fn handle_graph_impact(
     )
 )]
 pub async fn handle_graph_entity_impact(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<EntityImpactQuery>,
 ) -> ApiResult<GraphEntityImpactResponse> {
@@ -138,7 +138,7 @@ pub async fn handle_graph_entity_impact(
     )
 )]
 pub async fn handle_graph_cycles(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<CyclesQuery>,
 ) -> ApiResult<GraphCyclesResponse> {
@@ -225,7 +225,7 @@ pub async fn handle_graph_cycles(
     )
 )]
 pub async fn handle_graph_structural(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<StructuralQuery>,
 ) -> ApiResult<GraphStructuralResponse> {
@@ -319,7 +319,7 @@ pub async fn handle_graph_structural(
     )
 )]
 pub async fn handle_graph_module(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<ModuleQuery>,
 ) -> ApiResult<GraphModuleResponse> {

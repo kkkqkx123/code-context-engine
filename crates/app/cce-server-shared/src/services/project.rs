@@ -1,9 +1,11 @@
 //! Shared project-creation orchestration for local and HTTP transports.
 
-use cce_api::models::{CreateProjectRequest, SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, SUPPLY_MODE_LOCAL};
+use cce_api::models::{
+    CreateProjectRequest, SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, SUPPLY_MODE_LOCAL,
+};
 use cce_config::ProjectAppConfig;
 use cce_storage_metadb_sqlite::{
-    NewProjectRecord, ProjectRepository, generate_project_name, SqliteClient,
+    NewProjectRecord, ProjectRepository, SqliteClient, generate_project_name,
 };
 use std::path::PathBuf;
 use std::sync::Arc;

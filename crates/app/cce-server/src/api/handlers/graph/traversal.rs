@@ -30,7 +30,7 @@ use super::{
     )
 )]
 pub async fn handle_graph_ego(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<EgoQuery>,
 ) -> ApiResult<GraphSubgraphResponse> {
@@ -102,7 +102,7 @@ pub async fn handle_graph_ego(
     )
 )]
 pub async fn handle_graph_path(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<GraphPathQuery>,
 ) -> ApiResult<GraphPathResponse> {
@@ -172,7 +172,7 @@ pub async fn handle_graph_path(
     )
 )]
 pub async fn handle_graph_subgraph(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<SubgraphQuery>,
 ) -> ApiResult<GraphSubgraphResponse> {
@@ -247,7 +247,7 @@ pub async fn handle_graph_subgraph(
     )
 )]
 pub async fn handle_graph_components(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<ComponentsQuery>,
 ) -> ApiResult<GraphComponentsResponse> {
@@ -316,7 +316,7 @@ pub async fn handle_graph_components(
     )
 )]
 pub async fn handle_graph_export(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<ExportQuery>,
 ) -> ApiResult<GraphSubgraphResponse> {

@@ -9,18 +9,18 @@ pub mod middleware;
 pub mod openapi;
 pub mod response;
 pub mod router;
-pub mod state;
 pub mod validation;
 
 use std::sync::Arc;
 
-use crate::engine::CodeContextEngine;
-use crate::runtime::StartupCoordinator;
+use cce_server_shared::context::SharedContext;
+use cce_server_shared::engine::CodeContextEngine;
+use cce_server_shared::runtime::StartupCoordinator;
 use cce_storage_metadb_sqlite::ProjectRepository;
 
 /// Start the HTTP server
 ///
-/// Accepts an Engine instance, builds AppState, starts background tasks,
+/// Accepts an Engine instance, builds SharedContext, starts background tasks,
 /// runs startup recovery for all projects, and starts the axum server.
 ///
 /// The `shutdown` future is supplied by the caller (process-level lifecycle
@@ -126,7 +126,7 @@ pub async fn serve(
     engine = Arc::into_inner(engine_arc)
         .expect("engine Arc must have exactly one reference after coordinator drops");
 
-    let app_state = state::AppState::from_engine(&engine, qdrant_handle).await;
+    let app_state = SharedContext::from_engine(&engine, qdrant_handle).await;
     spawn_config_watcher();
     #[cfg(feature = "admission")]
     let app = admission_app(app_state, host)?;
@@ -145,15 +145,12 @@ pub async fn serve(
     Ok(())
 }
 
-// Re-export for convenience
-pub use state::AppState;
-
-/// Spawn the optional global config file watcher.
-///
-/// Disabled by default; enabled with `CCE_CONFIG_WATCH=1`. Polls the
-/// resolved config file for modification time changes and applies safe
-/// section reloads. Dangerous changes log a warning and keep serving the
-/// previous configuration until a restart.
+// Spawn the optional global config file watcher.
+//
+// Disabled by default; enabled with `CCE_CONFIG_WATCH=1`. Polls the
+// resolved config file for modification time changes and applies safe
+// section reloads. Dangerous changes log a warning and keep serving the
+// previous configuration until a restart.
 fn spawn_config_watcher() {
     if !cce_config::Settings::config_watch_enabled() {
         return;
@@ -189,7 +186,7 @@ fn spawn_config_watcher() {
 /// A loopback bind without configured tokens keeps the local router so
 /// single-host use is unaffected; any other bind requires configured tokens
 /// and serves the admission router with the gateway ingest entries.
-fn admission_app(app_state: state::AppState, host: &str) -> anyhow::Result<axum::Router> {
+fn admission_app(app_state: SharedContext, host: &str) -> anyhow::Result<axum::Router> {
     use cce_metrics::HttpMetrics;
 
     let config = cce_admission::AdmissionConfig::from_env()

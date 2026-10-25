@@ -19,9 +19,9 @@ use crate::api::response::ApiResult;
 
 /// Helper: get relation snapshot for a project
 pub(crate) async fn get_snapshot(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
-) -> Result<Arc<crate::runtime::PublishedSnapshot>, ErrorResponse> {
+) -> Result<Arc<cce_server_shared::runtime::PublishedSnapshot>, ErrorResponse> {
     if project_id <= 0 {
         return Err(ErrorResponse::new(
             error_codes::INVALID_REQUEST,
@@ -64,7 +64,7 @@ pub(crate) async fn get_snapshot(
 /// snapshot is fresh. Lets the API layer hint that the answered data may
 /// lag the latest published epoch.
 async fn stale_relation_info(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
 ) -> Option<serde_json::Value> {
     let runtime = state.engine.get_relation_runtime(project_id).await.ok()?;
@@ -73,7 +73,7 @@ async fn stale_relation_info(
 }
 
 async fn relation_query_config(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
 ) -> Result<cce_config::RelationConfig, ErrorResponse> {
     state
@@ -131,7 +131,7 @@ fn parse_domains(raw: &str) -> Vec<String> {
     )
 )]
 pub async fn handle_call_chain(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
     QueryParams(params): QueryParams<CallChainDirectionParams>,
 ) -> ApiResult<CallChainResponse> {
@@ -240,7 +240,7 @@ pub async fn handle_call_chain(
     )
 )]
 pub async fn handle_call_path(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     QueryParams(params): QueryParams<CallPathQuery>,
 ) -> ApiResult<CallPathResponse> {
@@ -339,7 +339,7 @@ pub async fn handle_call_path(
     )
 )]
 pub async fn handle_class_inheritance(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
 ) -> ApiResult<ClassInheritanceResponse> {
     let snapshot = match get_snapshot(&state, project_id).await {
@@ -420,7 +420,7 @@ pub async fn handle_class_inheritance(
     )
 )]
 pub async fn handle_class_implementations(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
 ) -> ApiResult<ClassImplementationsResponse> {
     let snapshot = match get_snapshot(&state, project_id).await {

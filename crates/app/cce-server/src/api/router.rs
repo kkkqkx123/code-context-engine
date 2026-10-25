@@ -10,9 +10,9 @@ use axum::{
 use super::handlers;
 use super::middleware::metrics_middleware;
 use super::openapi::openapi_json;
-use super::state::AppState;
 use cce_api::paths as api_paths;
 use cce_metrics::HttpMetrics;
+use cce_server_shared::context::SharedContext;
 
 /// Serve the OpenAPI document (debug builds only).
 async fn serve_openapi() -> ([(&'static str, &'static str); 1], String) {
@@ -23,7 +23,7 @@ async fn serve_openapi() -> ([(&'static str, &'static str); 1], String) {
 ///
 /// Neither state nor layers are applied here so both shapes serve the same
 /// endpoints and differ only in middleware.
-pub(crate) fn api_routes() -> Router<AppState> {
+pub(crate) fn api_routes() -> Router<SharedContext> {
     let mut router = Router::new()
         // Index operations
         .route(api_paths::INDEX, post(handlers::index::handle_index))
@@ -373,7 +373,7 @@ pub(crate) fn api_routes() -> Router<AppState> {
 }
 
 /// Create API router with all routes
-pub fn create_router(state: AppState) -> Router {
+pub fn create_router(state: SharedContext) -> Router {
     // Create HTTP metrics wrapper for middleware. The metrics layer stays
     // outermost so it also observes admission rejections on the remote
     // router assembled beside this one.

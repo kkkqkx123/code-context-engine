@@ -4,7 +4,7 @@
 //! call-domain filter: only call edges qualify, and unresolved external
 //! targets are excluded.
 
-use cce_server_shared::state::AppState;
+use cce_server_shared::context::SharedContext;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -52,7 +52,7 @@ pub struct CallChainArgs {
 
 /// Run the entity callees tool call.
 pub async fn entity_callees(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: EntityArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let searcher = match state.get_relation_searcher(args.project_id).await {
@@ -96,7 +96,7 @@ pub async fn entity_callees(
 
 /// Run the entity callers tool call.
 pub async fn entity_callers(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: EntityArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let searcher = match state.get_relation_searcher(args.project_id).await {
@@ -137,7 +137,7 @@ pub async fn entity_callers(
 
 /// Run the call chain traversal tool call.
 pub async fn call_chain(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: CallChainArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let searcher = match state.get_relation_searcher(args.project_id).await {

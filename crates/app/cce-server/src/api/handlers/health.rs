@@ -8,13 +8,13 @@
 use axum::extract::{Query, State};
 
 use crate::api::response::ApiResult;
-use crate::api::state::AppState;
 use cce_api::models::{
     Bm25HealthResponse, EmbeddingHealthResponse, ErrorResponse, HealthStatus, QdrantDiagnostic,
     QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
     RetryQueueDeadEntry, RetryQueueDeadResponse, RetryQueueProcessResponse, RetryQueueQuery,
     RetryQueueStatusResponse, ServiceStatus, error_codes,
 };
+use cce_server_shared::context::SharedContext;
 
 // --- Handlers ---
 
@@ -29,7 +29,7 @@ use cce_api::models::{
         (status = 500, body = ErrorResponse, description = "Internal error")
     )
 )]
-pub async fn handle_health(State(state): State<AppState>) -> ApiResult<HealthStatus> {
+pub async fn handle_health(State(state): State<SharedContext>) -> ApiResult<HealthStatus> {
     let qdrant_health = check_qdrant(&state).await;
     let bm25_health = check_bm25(&state).await;
     let embedding_health = check_embedding(&state);
@@ -57,7 +57,7 @@ pub async fn handle_health(State(state): State<AppState>) -> ApiResult<HealthSta
     )
 )]
 pub async fn handle_qdrant_health(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
 ) -> ApiResult<QdrantHealthResponse> {
     let vector = state.engine.vector();
     let circuit_breaker = vector.circuit_breaker_summary();
@@ -92,7 +92,7 @@ pub async fn handle_qdrant_health(
     )
 )]
 pub async fn handle_embedding_health(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
 ) -> ApiResult<EmbeddingHealthResponse> {
     let (healthy, model_name, message) = {
         let embedder = state.engine.embedder();
@@ -127,7 +127,9 @@ pub async fn handle_embedding_health(
         (status = 500, body = ErrorResponse, description = "Internal error")
     )
 )]
-pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25HealthResponse> {
+pub async fn handle_bm25_health(
+    State(state): State<SharedContext>,
+) -> ApiResult<Bm25HealthResponse> {
     // Status stays branch-free: reachability comes from the diagnostics
     // snapshot, enablement from the contract, and the configured index name
     // from the active branch configuration.
@@ -156,7 +158,7 @@ pub async fn handle_bm25_health(State(state): State<AppState>) -> ApiResult<Bm25
     )
 )]
 pub async fn handle_retry_queue_status(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueStatusResponse> {
     if let Some(project_id) = query.project_id {
@@ -202,7 +204,7 @@ pub async fn handle_retry_queue_status(
     )
 )]
 pub async fn handle_retry_queue_process(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueProcessResponse> {
     let count = if let Some(project_id) = query.project_id {
@@ -264,7 +266,7 @@ pub async fn handle_retry_queue_process(
     )
 )]
 pub async fn handle_retry_queue_clear(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueClearResponse> {
     if let Some(project_id) = query.project_id {
@@ -300,7 +302,7 @@ pub async fn handle_retry_queue_clear(
     )
 )]
 pub async fn handle_retry_queue_dead_list(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueDeadResponse> {
     let entries = if let Some(project_id) = query.project_id {
@@ -337,7 +339,7 @@ pub async fn handle_retry_queue_dead_list(
     )
 )]
 pub async fn handle_retry_queue_dead_clear(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Query(query): Query<RetryQueueQuery>,
 ) -> ApiResult<RetryQueueDeadClearResponse> {
     let cleared = if let Some(project_id) = query.project_id {
@@ -365,7 +367,7 @@ pub async fn handle_retry_queue_dead_clear(
 
 // --- Internal helpers ---
 
-async fn check_qdrant(state: &AppState) -> ServiceStatus {
+async fn check_qdrant(state: &SharedContext) -> ServiceStatus {
     let vector = state.engine.vector();
     let backend = vector.backend_name();
     let diag = vector.diagnose_summary().await;
@@ -385,7 +387,7 @@ async fn check_qdrant(state: &AppState) -> ServiceStatus {
     }
 }
 
-async fn check_bm25(state: &AppState) -> ServiceStatus {
+async fn check_bm25(state: &SharedContext) -> ServiceStatus {
     let diag = state.engine.fulltext().diagnose_summary().await;
     if diag.reachable {
         ServiceStatus {
@@ -403,7 +405,7 @@ async fn check_bm25(state: &AppState) -> ServiceStatus {
     }
 }
 
-fn check_embedding(state: &AppState) -> ServiceStatus {
+fn check_embedding(state: &SharedContext) -> ServiceStatus {
     let embedder = state.engine.embedder();
     let healthy = embedder.is_healthy();
     let model_name = Some(embedder.model_name().to_string());

@@ -13,7 +13,6 @@ use axum::{
 
 use crate::api::response::ApiResult;
 use crate::api::validation::validate_project_id;
-use crate::maintenance::ProjectIndexMaintenanceService;
 use cce_api::models::{
     BackendResultInfo, BatchDeleteRequest, BatchDeleteResponse, ClearIndexRequest,
     ClearIndexResponse, DeleteEntityResponse, DeleteFileResponse, ErrorResponse, IndexStatistics,
@@ -21,6 +20,7 @@ use cce_api::models::{
     StorageQuery, StorageStatus, StorageStatusResponse, error_codes,
 };
 use cce_codegraph::index::{SnapshotEntityQueryOps, SnapshotFileQueryOps};
+use cce_server_shared::maintenance::ProjectIndexMaintenanceService;
 use cce_storage_common::{FulltextStorage, VectorStorage};
 
 // ============================================================================
@@ -43,7 +43,7 @@ use cce_storage_common::{FulltextStorage, VectorStorage};
     )
 )]
 pub async fn handle_clear_index(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Json(request): Json<ClearIndexRequest>,
 ) -> ApiResult<ClearIndexResponse> {
     let start = std::time::Instant::now();
@@ -106,7 +106,7 @@ pub async fn handle_clear_index(
     )
 )]
 pub async fn handle_delete_file(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(file_path): Path<String>,
     Query(query): Query<StorageQuery>,
 ) -> ApiResult<DeleteFileResponse> {
@@ -268,7 +268,7 @@ pub async fn handle_delete_file(
     )
 )]
 pub async fn handle_delete_entity(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(entity_id): Path<u64>,
     Query(query): Query<StorageQuery>,
 ) -> ApiResult<DeleteEntityResponse> {
@@ -384,7 +384,7 @@ pub async fn handle_delete_entity(
     )
 )]
 pub async fn handle_batch_delete(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Query(query): Query<StorageQuery>,
     Json(request): Json<BatchDeleteRequest>,
 ) -> ApiResult<BatchDeleteResponse> {
@@ -537,7 +537,7 @@ pub async fn handle_batch_delete(
     )
 )]
 pub async fn handle_index_stats(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Query(query): Query<StorageQuery>,
 ) -> ApiResult<IndexStatsResponse> {
     let start = std::time::Instant::now();
@@ -613,7 +613,7 @@ pub async fn handle_index_stats(
     )
 )]
 pub async fn handle_storage_status(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
 ) -> ApiResult<StorageStatusResponse> {
     // Check vector store with comprehensive diagnostics
     let vector_storage = {
@@ -706,7 +706,7 @@ pub async fn handle_storage_status(
 ///
 /// Returns `None` if the project is not found or has no root_path configured.
 pub(crate) async fn resolve_group_id(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
 ) -> Option<String> {
     let registry = state.engine.project_registry();
@@ -734,7 +734,7 @@ pub(crate) async fn resolve_group_id(
 /// Prefers the orchestrator's last published snapshot, falling back to the
 /// process-local relation runtime. Returns zeros when neither is available.
 async fn read_published_relation_counts(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
 ) -> (usize, usize) {
     if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
@@ -756,7 +756,7 @@ async fn read_published_relation_counts(
 
 /// Resolve an entity's file path through the published snapshot or runtime.
 async fn resolve_entity_file_path(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
     entity_id: cce_types::EntityId,
 ) -> Option<String> {
@@ -778,7 +778,7 @@ async fn resolve_entity_file_path(
 
 /// Estimate a file's relation count from the published snapshot for delete responses.
 async fn estimate_file_relation_count(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
     file_path: &str,
 ) -> usize {

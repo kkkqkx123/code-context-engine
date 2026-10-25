@@ -64,7 +64,7 @@ fn params_to_options(params: CallChainQueryParams) -> RelationQueryOptions {
 /// snapshot is fresh. Lets the API layer hint that the answered data may
 /// lag the latest published epoch.
 async fn stale_relation_info(
-    runtime: &crate::runtime::RelationRuntime,
+    runtime: &cce_server_shared::runtime::RelationRuntime,
 ) -> Option<serde_json::Value> {
     let info = runtime.get_capability_info().await;
     info.stale.then(|| info.to_json_map())
@@ -83,7 +83,7 @@ async fn stale_relation_info(
     )
 )]
 pub async fn handle_function_calls(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
     QueryParams(params): QueryParams<CallChainQueryParams>,
 ) -> ApiResult<FunctionCallsResponse> {
@@ -234,7 +234,7 @@ pub async fn handle_function_calls(
     )
 )]
 pub async fn handle_function_callers(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
     QueryParams(params): QueryParams<CallChainQueryParams>,
 ) -> ApiResult<FunctionCallersResponse> {

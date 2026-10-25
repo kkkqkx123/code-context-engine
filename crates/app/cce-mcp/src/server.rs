@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use cce_config::modules::McpHttpConfig;
-use cce_server_shared::state::AppState;
+use cce_server_shared::context::SharedContext;
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
@@ -19,7 +19,7 @@ use crate::handler::McpServerHandler;
 
 /// Build a handler factory bound to the shared application state.
 fn handler_factory(
-    state: Arc<AppState>,
+    state: Arc<SharedContext>,
     enabled_tools: Option<Vec<String>>,
 ) -> impl Fn() -> Result<McpServerHandler, std::io::Error> + Send + Sync + 'static {
     move || Ok(McpServerHandler::new(state.clone(), enabled_tools.clone()))
@@ -28,9 +28,9 @@ fn handler_factory(
 /// Initialize the shared engine state from an already-resolved configuration.
 ///
 /// Convenience for callers (e.g. the CLI) that only have an `AppConfig`.
-pub async fn build_state(config: cce_config::AppConfig) -> anyhow::Result<Arc<AppState>> {
+pub async fn build_state(config: cce_config::AppConfig) -> anyhow::Result<Arc<SharedContext>> {
     let engine = cce_server_shared::engine::CodeContextEngine::from_config(config).await?;
-    Ok(Arc::new(AppState::from_engine(&engine, None).await))
+    Ok(Arc::new(SharedContext::from_engine(&engine, None).await))
 }
 
 /// Serve MCP over stdio, building the state from `config`.
@@ -60,7 +60,7 @@ pub async fn run_http_from_config(
 /// Callers must ensure the process's stdout is reserved for MCP frames; all
 /// logging must go to stderr.
 pub async fn run_stdio(
-    state: Arc<AppState>,
+    state: Arc<SharedContext>,
     enabled_tools: Option<Vec<String>>,
 ) -> anyhow::Result<()> {
     let handler = McpServerHandler::new(state, enabled_tools);
@@ -74,7 +74,7 @@ pub async fn run_stdio(
 /// The listener binds to `http.host` (loopback by default); `allowed_hosts`
 /// guards against DNS-rebinding. Shuts down when `cancellation_token` fires.
 pub async fn run_http(
-    state: Arc<AppState>,
+    state: Arc<SharedContext>,
     http: McpHttpConfig,
     enabled_tools: Option<Vec<String>>,
     cancellation_token: CancellationToken,

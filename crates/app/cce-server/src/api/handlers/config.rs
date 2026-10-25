@@ -41,7 +41,7 @@ use crate::api::response::ApiResult;
     )
 )]
 pub async fn handle_config_reload(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Query(query): Query<ConfigReloadQuery>,
 ) -> ApiResult<ConfigReloadResponse> {
     // Without a project id this is a global safe reload. Dangerous section

@@ -7,7 +7,7 @@ use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 use super::staging::{INGEST_STAGING_RETENTION, clear_project_staging, sweep_project_staging};
 use crate::api::response::ApiResult;
-use crate::api::state::AppState;
+use cce_server_shared::context::SharedContext;
 
 /// Apply staged project files through the hot-update incremental path.
 ///
@@ -26,7 +26,7 @@ use crate::api::state::AppState;
     )
 )]
 pub async fn handle_ingest_commit(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     AxumPath(id): AxumPath<i64>,
 ) -> ApiResult<IngestCommitResponse> {
     let store = match state.engine.metadata_store() {
@@ -211,7 +211,7 @@ pub async fn handle_ingest_commit(
 
 /// Bootstrap path running the full index to establish the baseline.
 async fn run_full_commit(
-    state: &AppState,
+    state: &SharedContext,
     store: &cce_storage_metadb_sqlite::SqliteClient,
     record: &cce_storage_metadb_sqlite::ProjectRecord,
     index_options: cce_orchestrator::IndexOptions,
@@ -269,7 +269,7 @@ async fn run_full_commit(
 }
 
 /// Authoritative post-run totals matching the incremental index handler.
-async fn read_index_totals(state: &AppState, project_id: i64) -> (usize, usize) {
+async fn read_index_totals(state: &SharedContext, project_id: i64) -> (usize, usize) {
     let mut total_entities = 0usize;
     if let Ok(orchestrator) = state.engine.get_orchestrator(project_id).await {
         let orchestrator = orchestrator.lock().await;

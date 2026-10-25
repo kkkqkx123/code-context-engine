@@ -22,7 +22,7 @@ use cce_storage_common::VectorStorage;
     )
 )]
 pub async fn handle_incremental(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Json(request): Json<IncrementalIndexRequest>,
 ) -> impl IntoResponse {
     let start = std::time::Instant::now();

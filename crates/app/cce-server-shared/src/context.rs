@@ -1,7 +1,7 @@
-//! HTTP server state management
+//! Shared application context management
 //!
-//! Provides AppState construction from the Engine facade,
-//! eliminating duplicated initialization logic.
+//! Provides `SharedContext` — the engine plus watch status, progress
+//! trackers, and caches — shared by the HTTP, MCP, and CLI surfaces.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ type RelationSearcherCache = Arc<RwLock<HashMap<i64, RelationSearcherEntry>>>;
 
 /// Shared application state for HTTP handlers
 #[derive(Clone)]
-pub struct AppState {
+pub struct SharedContext {
     /// Code Context Engine - provides unified access to all components
     pub engine: Arc<CodeContextEngine>,
     /// Watch status tracker (per-project)
@@ -32,7 +32,7 @@ pub struct AppState {
     pub relation_searcher_cache: RelationSearcherCache,
 }
 
-impl AppState {
+impl SharedContext {
     /// Create a new application state from Engine (preferred method)
     ///
     /// This ensures all components are initialized consistently through
@@ -220,8 +220,8 @@ mod tests {
             "CodeContextEngine should have a metadata_store after construction"
         );
 
-        // Create AppState - it delegates to engine for component access
-        let _state = AppState::from_engine(&engine, None).await;
+        // Create SharedContext - it delegates to engine for component access
+        let _state = SharedContext::from_engine(&engine, None).await;
 
         // Metadata store is accessible through the engine
         let store = engine

@@ -11,9 +11,8 @@ use cce_api::models::{
     GraphEntityImpactResponse, GraphImpactResponse, GraphModuleResponse, GraphNode,
     GraphPathResponse, GraphStructuralResponse, GraphSubgraphResponse, IndexRequest, IndexResponse,
     ModuleRelation, ProjectConfig, ProjectConfigReloadResponse, ProjectDeleteResponse,
-    ProjectDetailResponse, ProjectIndexResponse, ProjectListResponse, SearchRequest,
-    SearchResponse, StartWatchRequest, StartWatchResponse, StopWatchResponse, StructuralRelation,
-    WatchStatusResponse,
+    ProjectDetailResponse, ProjectListResponse, SearchRequest, SearchResponse, StartWatchRequest,
+    StartWatchResponse, StopWatchResponse, StructuralRelation, WatchStatusResponse,
 };
 use cce_api::service_params::{
     GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
@@ -21,11 +20,11 @@ use cce_api::service_params::{
     GraphStructuralParams, GraphSubgraphParams,
 };
 
+use crate::context::SharedContext;
 use crate::engine::CodeContextEngine;
 use crate::services::search::{
     AggregatedQuerySpec, SearchService, SharedQueryFields, SingleQuerySpec, SubQuerySpec,
 };
-use crate::state::AppState;
 use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
 
 /// Domain service failure.
@@ -45,21 +44,86 @@ pub enum ServiceError {
     Engine(String),
 }
 
+impl From<crate::services::project::ProjectCreateError> for ServiceError {
+    fn from(e: crate::services::project::ProjectCreateError) -> Self {
+        use crate::services::project::ProjectCreateError as E;
+        match e {
+            E::Invalid(m) => ServiceError::Invalid(m),
+            E::MetadataUnavailable => {
+                ServiceError::Engine("metadata store not initialized".to_string())
+            }
+            E::PathExists => {
+                ServiceError::Invalid("project already exists at this path".to_string())
+            }
+            E::Conflict(m) => ServiceError::Engine(m),
+            E::Storage(m) => ServiceError::Engine(m),
+        }
+    }
+}
+
+impl From<crate::services::watch::WatchStatusError> for ServiceError {
+    fn from(e: crate::services::watch::WatchStatusError) -> Self {
+        use crate::services::watch::WatchStatusError as E;
+        match e {
+            E::InvalidProjectId => ServiceError::Invalid("project_id must be positive".to_string()),
+        }
+    }
+}
+
+impl From<crate::services::watch::WatchStartError> for ServiceError {
+    fn from(e: crate::services::watch::WatchStartError) -> Self {
+        use crate::services::watch::WatchStartError as E;
+        match e {
+            E::InvalidProjectId => ServiceError::Invalid("project_id must be positive".to_string()),
+            E::GatewaySupplied => ServiceError::Invalid(
+                "project is gateway-supplied; local watching is disabled".to_string(),
+            ),
+            E::ProjectLoad(m) => ServiceError::Engine(m),
+            E::RootNotAccessible(m) => {
+                ServiceError::Invalid(format!("project root is not accessible: {m}"))
+            }
+            E::WatchNotAccessible(m) => {
+                ServiceError::Invalid(format!("watch path is not accessible: {m}"))
+            }
+            E::NotWithinRoot { .. } => {
+                ServiceError::Invalid("watch path is not within project root".to_string())
+            }
+            E::PathNotFound(m) => {
+                ServiceError::Invalid(format!("watch path is not accessible: {m}"))
+            }
+            E::HotCoordinator(m) => ServiceError::Engine(m),
+            E::StartWatch(m) => ServiceError::Engine(m),
+            E::EventLoop(m) => ServiceError::Engine(m),
+        }
+    }
+}
+
+impl From<crate::services::watch::WatchStopError> for ServiceError {
+    fn from(e: crate::services::watch::WatchStopError) -> Self {
+        use crate::services::watch::WatchStopError as E;
+        match e {
+            E::InvalidProjectId => ServiceError::Invalid("project_id must be positive".to_string()),
+            E::HotCoordinator(m) => ServiceError::Engine(m),
+            E::StopWatch(m) => ServiceError::Engine(m),
+        }
+    }
+}
+
 /// Local service holding shared application state.
 pub struct LocalService {
-    state: AppState,
+    state: SharedContext,
 }
 
 impl LocalService {
     /// Build from an engine instance.
     pub async fn from_engine(engine: &CodeContextEngine) -> Self {
         Self {
-            state: AppState::from_engine(engine, None).await,
+            state: SharedContext::from_engine(engine, None).await,
         }
     }
 
     /// Build from existing shared state.
-    pub fn from_state(state: AppState) -> Self {
+    pub fn from_state(state: SharedContext) -> Self {
         Self { state }
     }
 
@@ -514,20 +578,12 @@ impl LocalService {
         &self,
         request: CreateProjectRequest,
     ) -> Result<ProjectDetailResponse, ServiceError> {
-        let store = self.state.engine.metadata_store().ok_or_else(|| {
-            ServiceError::Engine("metadata store not initialized".to_string())
-        })?;
-        let created = crate::create_project(store, &request).map_err(|e| match e {
-            crate::ProjectCreateError::Invalid(m) => ServiceError::Invalid(m),
-            crate::ProjectCreateError::MetadataUnavailable => {
+        let store =
+            self.state.engine.metadata_store().ok_or_else(|| {
                 ServiceError::Engine("metadata store not initialized".to_string())
-            }
-            crate::ProjectCreateError::PathExists => {
-                ServiceError::Invalid("project already exists at this path".to_string())
-            }
-            crate::ProjectCreateError::Conflict(m) => ServiceError::Engine(m),
-            crate::ProjectCreateError::Storage(m) => ServiceError::Engine(m),
-        })?;
+            })?;
+        let created = crate::services::project::create_project(store, &request)
+            .map_err(ServiceError::from)?;
         Ok(ProjectDetailResponse {
             success: true,
             project: ProjectConfig {
@@ -544,7 +600,10 @@ impl LocalService {
         })
     }
 
-    pub async fn get_project(&self, project_id: i64) -> Result<ProjectDetailResponse, ServiceError> {
+    pub async fn get_project(
+        &self,
+        project_id: i64,
+    ) -> Result<ProjectDetailResponse, ServiceError> {
         if project_id <= 0 {
             return Err(ServiceError::Invalid(
                 "project_id must be positive".to_string(),
@@ -567,7 +626,10 @@ impl LocalService {
         })
     }
 
-    pub async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse, ServiceError> {
+    pub async fn delete_project(
+        &self,
+        project_id: i64,
+    ) -> Result<ProjectDeleteResponse, ServiceError> {
         if project_id <= 0 {
             return Err(ServiceError::Invalid(
                 "project_id must be positive".to_string(),
@@ -587,7 +649,7 @@ impl LocalService {
         if !existed {
             return Err(ServiceError::NotFound("project does not exist".to_string()));
         }
-        cce_server_shared_maintenance_delete(&self.state, project_id).await?;
+        self.maintenance_delete(project_id).await?;
         Ok(ProjectDeleteResponse {
             success: true,
             message: format!("project {project_id} deleted"),
@@ -614,7 +676,7 @@ impl LocalService {
                 request.path
             )));
         }
-        let options = crate::build_index_options(&request);
+        let options = crate::services::index::build_index_options(&request);
         let result = self
             .state
             .engine
@@ -1189,13 +1251,9 @@ impl LocalService {
     }
 
     pub async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse, ServiceError> {
-        crate::watch_status(&self.state, project_id)
+        crate::services::watch::watch_status(&self.state, project_id)
             .await
-            .map_err(|e| match e {
-                crate::WatchStatusError::InvalidProjectId => {
-                    ServiceError::Invalid("project_id must be positive".to_string())
-                }
-            })
+            .map_err(ServiceError::from)
     }
 
     pub async fn watch_start(
@@ -1203,44 +1261,15 @@ impl LocalService {
         project_id: i64,
         request: StartWatchRequest,
     ) -> Result<StartWatchResponse, ServiceError> {
-        crate::watch_start(&self.state, project_id, &request)
+        crate::services::watch::watch_start(&self.state, project_id, &request)
             .await
-            .map_err(|e| match e {
-                crate::WatchStartError::InvalidProjectId => {
-                    ServiceError::Invalid("project_id must be positive".to_string())
-                }
-                crate::WatchStartError::GatewaySupplied => ServiceError::Invalid(
-                    "project is gateway-supplied; local watching is disabled".to_string(),
-                ),
-                crate::WatchStartError::ProjectLoad(m) => ServiceError::Engine(m),
-                crate::WatchStartError::RootNotAccessible(m) => {
-                    ServiceError::Invalid(format!("project root is not accessible: {m}"))
-                }
-                crate::WatchStartError::WatchNotAccessible(m) => {
-                    ServiceError::Invalid(format!("watch path is not accessible: {m}"))
-                }
-                crate::WatchStartError::NotWithinRoot { .. } => {
-                    ServiceError::Invalid("watch path is not within project root".to_string())
-                }
-                crate::WatchStartError::PathNotFound(m) => {
-                    ServiceError::Invalid(format!("watch path is not accessible: {m}"))
-                }
-                crate::WatchStartError::HotCoordinator(m) => ServiceError::Engine(m),
-                crate::WatchStartError::StartWatch(m) => ServiceError::Engine(m),
-                crate::WatchStartError::EventLoop(m) => ServiceError::Engine(m),
-            })
+            .map_err(ServiceError::from)
     }
 
     pub async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse, ServiceError> {
-        crate::watch_stop(&self.state, project_id)
+        crate::services::watch::watch_stop(&self.state, project_id)
             .await
-            .map_err(|e| match e {
-                crate::WatchStopError::InvalidProjectId => {
-                    ServiceError::Invalid("project_id must be positive".to_string())
-                }
-                crate::WatchStopError::HotCoordinator(m) => ServiceError::Engine(m),
-                crate::WatchStopError::StopWatch(m) => ServiceError::Engine(m),
-            })
+            .map_err(ServiceError::from)
     }
 
     pub async fn reload_project(
@@ -1271,66 +1300,35 @@ impl LocalService {
             config_version: entry.version,
         })
     }
-}
-
-async fn cce_server_shared_maintenance_delete(
-    state: &AppState,
-    project_id: i64,
-) -> Result<(), ServiceError> {
-    {
-        let mut map = state.watch_status.write().await;
-        map.remove(&project_id);
+    /// Remove watch state, delete all backend indexes, and invalidate caches
+    /// for a project. Idempotent across backends; fails if any backend delete
+    /// fails.
+    async fn maintenance_delete(&self, project_id: i64) -> Result<(), ServiceError> {
+        {
+            let mut map = self.state.watch_status.write().await;
+            map.remove(&project_id);
+        }
+        let maintenance = crate::maintenance::ProjectIndexMaintenanceService::new(
+            self.state.engine.clone(),
+            Some(self.state.engine.vector_clone()),
+            Some(self.state.engine.fulltext_clone()),
+            self.state.engine.metadata_store_clone(),
+        );
+        let result = maintenance.delete_project(project_id).await;
+        if !result.success {
+            let detail = result
+                .backends
+                .iter()
+                .filter(|b| !b.ok)
+                .map(|b| format!("{}: {}", b.backend, b.detail))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(ServiceError::Engine(format!(
+                "project deletion failed: {detail}"
+            )));
+        }
+        self.state.invalidate_relation_searcher(project_id).await;
+        self.state.engine.invalidate_query_cache(project_id).await;
+        Ok(())
     }
-    let maintenance = crate::maintenance::ProjectIndexMaintenanceService::new(
-        state.engine.clone(),
-        Some(state.engine.vector_clone()),
-        Some(state.engine.fulltext_clone()),
-        state.engine.metadata_store_clone(),
-    );
-    let result = maintenance.delete_project(project_id).await;
-    if !result.success {
-        let detail = result
-            .backends
-            .iter()
-            .filter(|b| !b.ok)
-            .map(|b| format!("{}: {}", b.backend, b.detail))
-            .collect::<Vec<_>>()
-            .join("; ");
-        return Err(ServiceError::Engine(format!(
-            "project deletion failed: {detail}"
-        )));
-    }
-    state.invalidate_relation_searcher(project_id).await;
-    state.engine.invalidate_query_cache(project_id).await;
-    Ok(())
-}
-
-/// Project index trigger response helper for CLI parity.
-pub async fn local_index_project(
-    state: &AppState,
-    project_id: i64,
-) -> Result<ProjectIndexResponse, ServiceError> {
-    let entry = state
-        .engine
-        .project_registry()
-        .get_or_load(project_id)
-        .await
-        .map_err(|e| ServiceError::Engine(e.to_string()))?;
-    let result = state
-        .engine
-        .index(
-            project_id,
-            cce_orchestrator::IndexOptions::new(&entry.metadata.root_path),
-        )
-        .await
-        .map_err(|e| ServiceError::Engine(e.to_string()))?;
-    Ok(ProjectIndexResponse {
-        success: result.is_success(),
-        project_id,
-        project_name: entry.metadata.name,
-        indexed_files: result.indexed_files,
-        total_entities: result.total_entities,
-        total_vectors: result.total_vectors,
-        elapsed_ms: result.elapsed_ms,
-    })
 }

@@ -17,7 +17,7 @@ const FILE_COUNT: usize = 10;
 
 /// Create a project over `root` indexing `rs` sources, so the commit
 /// handler's full index and the incremental path scan the same set.
-async fn create_rust_project(state: &cce_server::api::state::AppState, root: &str) -> i64 {
+async fn create_rust_project(state: &cce_server_shared::context::SharedContext, root: &str) -> i64 {
     let request = CreateProjectRequest {
         name: Some("shadow-evidence".to_string()),
         root_path: root.to_string(),
@@ -38,7 +38,7 @@ async fn create_rust_project(state: &cce_server::api::state::AppState, root: &st
     }
 }
 
-async fn commit(state: &cce_server::api::state::AppState, id: i64) -> usize {
+async fn commit(state: &cce_server_shared::context::SharedContext, id: i64) -> usize {
     match ingest::commit::handle_ingest_commit(State(state.clone()), Path(id)).await {
         ApiResult::Success(response) => {
             assert!(response.success, "commit must succeed");
@@ -48,7 +48,7 @@ async fn commit(state: &cce_server::api::state::AppState, id: i64) -> usize {
     }
 }
 
-async fn stored_files(state: &cce_server::api::state::AppState, id: i64) -> usize {
+async fn stored_files(state: &cce_server_shared::context::SharedContext, id: i64) -> usize {
     let coordinator = state
         .engine
         .get_hot_update_coordinator(id)

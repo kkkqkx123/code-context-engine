@@ -30,7 +30,7 @@ pub type DetailApiResponse = ApiResult<FunctionDetailResponse>;
     )
 )]
 pub async fn handle_function_detail(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, id)): Path<(i64, String)>,
 ) -> DetailApiResponse {
     // Validate project_id
@@ -117,7 +117,7 @@ pub async fn handle_function_detail(
 /// snapshot is fresh. Lets the API layer hint that the answered data may
 /// lag the latest published epoch.
 async fn stale_relation_info(
-    runtime: &crate::runtime::RelationRuntime,
+    runtime: &cce_server_shared::runtime::RelationRuntime,
 ) -> Option<serde_json::Value> {
     let info = runtime.get_capability_info().await;
     info.stale.then(|| info.to_json_map())

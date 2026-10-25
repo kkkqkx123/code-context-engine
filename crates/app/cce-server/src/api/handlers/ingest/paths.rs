@@ -9,10 +9,13 @@ use std::path::{Component, Path, PathBuf};
 use cce_api::models::{ErrorResponse, error_codes};
 use cce_storage_metadb_sqlite::ProjectRepository;
 
-use crate::api::state::AppState;
+use cce_server_shared::context::SharedContext;
 
 /// Resolve the registered root directory of a project.
-pub(crate) fn project_root(state: &AppState, project_id: i64) -> Result<PathBuf, ErrorResponse> {
+pub(crate) fn project_root(
+    state: &SharedContext,
+    project_id: i64,
+) -> Result<PathBuf, ErrorResponse> {
     let store = state.engine.metadata_store().ok_or_else(|| {
         ErrorResponse::new(error_codes::STORAGE_ERROR, "Metadata store not initialized")
     })?;

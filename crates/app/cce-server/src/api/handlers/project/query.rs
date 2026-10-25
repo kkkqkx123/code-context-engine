@@ -21,7 +21,7 @@ use cce_storage_metadb_sqlite::ProjectRepository;
     )
 )]
 pub async fn handle_list_projects(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
 ) -> ApiResult<ProjectListResponse> {
     // Check if metadata store is available
     let metadata_store = match state.engine.metadata_store() {
@@ -72,7 +72,7 @@ pub async fn handle_list_projects(
     )
 )]
 pub async fn handle_get_project(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available

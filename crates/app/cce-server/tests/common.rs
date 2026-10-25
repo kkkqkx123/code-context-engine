@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use cce_config::AppConfig;
 use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
-use cce_server::api::state::AppState;
-use cce_server::engine::CodeContextEngine;
+use cce_server_shared::engine::CodeContextEngine;
+use cce_server_shared::context::SharedContext;
 
 pub struct TestEnv {
-    pub state: AppState,
+    pub state: SharedContext,
     pub _data_dir: tempfile::TempDir,
 }
 
@@ -218,7 +218,7 @@ pub async fn test_env() -> TestEnv {
         .build()
         .await
         .expect("engine builds with temp sqlite and mock provider");
-    let state = AppState::from_engine(&engine, None).await;
+    let state = SharedContext::from_engine(&engine, None).await;
     TestEnv {
         state,
         _data_dir: data_dir,
@@ -246,12 +246,12 @@ pub fn create_request_named(root: &str, name: &str) -> cce_api::models::CreatePr
 }
 
 #[allow(dead_code)]
-pub async fn create_project(state: &AppState, root: &str) -> i64 {
+pub async fn create_project(state: &SharedContext, root: &str) -> i64 {
     create_project_named(state, root, "contract-probe").await
 }
 
 #[allow(dead_code)]
-pub async fn create_project_named(state: &AppState, root: &str, name: &str) -> i64 {
+pub async fn create_project_named(state: &SharedContext, root: &str, name: &str) -> i64 {
     use axum::Json;
     use axum::extract::State;
     use cce_server::api::handlers::project;
@@ -292,7 +292,7 @@ pub fn write_code_fixture(root: &std::path::Path) {
 /// must come back clean; callers assert that through `seeded_project`.
 #[allow(dead_code)]
 pub async fn index_fixture_project(
-    state: &AppState,
+    state: &SharedContext,
     project_id: i64,
     root: &std::path::Path,
 ) -> cce_api::models::IndexResponse {

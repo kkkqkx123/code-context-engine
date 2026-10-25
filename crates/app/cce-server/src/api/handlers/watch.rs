@@ -31,7 +31,7 @@ use crate::api::response::ApiResult;
     )
 )]
 pub async fn handle_start_watch(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     Json(request): Json<StartWatchRequest>,
 ) -> ApiResult<StartWatchResponse> {
@@ -42,61 +42,83 @@ pub async fn handle_start_watch(
         ));
     }
 
-    match cce_server_shared::watch_start(&state, project_id, &request).await {
+    match cce_server_shared::services::watch::watch_start(&state, project_id, &request).await {
         Ok(response) => ApiResult::Success(response),
         Err(err) => match err {
-            cce_server_shared::WatchStartError::InvalidProjectId => {
-                ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Invalid project_id"))
+            cce_server_shared::services::watch::WatchStartError::InvalidProjectId => {
+                ApiResult::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Invalid project_id",
+                ))
             }
-            cce_server_shared::WatchStartError::GatewaySupplied => ApiResult::Error(
-                ErrorResponse::with_details(
+            cce_server_shared::services::watch::WatchStartError::GatewaySupplied => {
+                ApiResult::Error(ErrorResponse::with_details(
                     error_codes::INVALID_REQUEST,
                     "Project is gateway-supplied; local watching is disabled",
                     format!(
                         "Project {project_id} receives changes through POST /api/project/{project_id}/ingest/event; use the gateway watch loop instead of local watching"
                     ),
-                ),
-            ),
-            cce_server_shared::WatchStartError::ProjectLoad(m) => ApiResult::Error(
-                ErrorResponse::with_details(error_codes::ENTITY_NOT_FOUND, "Failed to load project", m),
-            ),
-            cce_server_shared::WatchStartError::RootNotAccessible(m) => ApiResult::Error(
-                ErrorResponse::with_details(
+                ))
+            }
+            cce_server_shared::services::watch::WatchStartError::ProjectLoad(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::ENTITY_NOT_FOUND,
+                    "Failed to load project",
+                    m,
+                ))
+            }
+            cce_server_shared::services::watch::WatchStartError::RootNotAccessible(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
                     error_codes::INVALID_REQUEST,
                     "Project root is not accessible",
                     format!("Failed to canonicalize project root: {m}"),
-                ),
-            ),
-            cce_server_shared::WatchStartError::WatchNotAccessible(m) => ApiResult::Error(
-                ErrorResponse::with_details(
+                ))
+            }
+            cce_server_shared::services::watch::WatchStartError::WatchNotAccessible(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
                     error_codes::INVALID_REQUEST,
                     "Watch path is not accessible",
                     format!("Failed to canonicalize watch path: {m}"),
-                ),
-            ),
-            cce_server_shared::WatchStartError::NotWithinRoot { watch, root } => {
+                ))
+            }
+            cce_server_shared::services::watch::WatchStartError::NotWithinRoot { watch, root } => {
                 ApiResult::Error(ErrorResponse::with_details(
                     error_codes::INVALID_REQUEST,
                     "Watch path is not within project root",
-                    format!("Watch path '{}' is not within project root '{}'", watch, root),
+                    format!(
+                        "Watch path '{}' is not within project root '{}'",
+                        watch, root
+                    ),
                 ))
             }
-            cce_server_shared::WatchStartError::PathNotFound(path) => ApiResult::Error(
-                ErrorResponse::with_details(error_codes::INVALID_REQUEST, "Path does not exist", path),
-            ),
-            cce_server_shared::WatchStartError::HotCoordinator(m) => ApiResult::Error(
-                ErrorResponse::with_details(
+            cce_server_shared::services::watch::WatchStartError::PathNotFound(path) => {
+                ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::INVALID_REQUEST,
+                    "Path does not exist",
+                    path,
+                ))
+            }
+            cce_server_shared::services::watch::WatchStartError::HotCoordinator(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
                     error_codes::INTERNAL_ERROR,
                     "Failed to get hot update coordinator",
                     m,
-                ),
-            ),
-            cce_server_shared::WatchStartError::StartWatch(m) => ApiResult::Error(
-                ErrorResponse::with_details(error_codes::INTERNAL_ERROR, "Failed to start watching", m),
-            ),
-            cce_server_shared::WatchStartError::EventLoop(m) => ApiResult::Error(
-                ErrorResponse::with_details(error_codes::INTERNAL_ERROR, "Failed to start event loop", m),
-            ),
+                ))
+            }
+            cce_server_shared::services::watch::WatchStartError::StartWatch(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::INTERNAL_ERROR,
+                    "Failed to start watching",
+                    m,
+                ))
+            }
+            cce_server_shared::services::watch::WatchStartError::EventLoop(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::INTERNAL_ERROR,
+                    "Failed to start event loop",
+                    m,
+                ))
+            }
         },
     }
 }
@@ -115,7 +137,7 @@ pub async fn handle_start_watch(
     )
 )]
 pub async fn handle_stop_watch(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
 ) -> ApiResult<StopWatchResponse> {
     if project_id <= 0 {
@@ -124,22 +146,29 @@ pub async fn handle_stop_watch(
             "Invalid project_id",
         ));
     }
-    match cce_server_shared::watch_stop(&state, project_id).await {
+    match cce_server_shared::services::watch::watch_stop(&state, project_id).await {
         Ok(response) => ApiResult::Success(response),
         Err(err) => match err {
-            cce_server_shared::WatchStopError::InvalidProjectId => {
-                ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Invalid project_id"))
+            cce_server_shared::services::watch::WatchStopError::InvalidProjectId => {
+                ApiResult::Error(ErrorResponse::new(
+                    error_codes::INVALID_REQUEST,
+                    "Invalid project_id",
+                ))
             }
-            cce_server_shared::WatchStopError::HotCoordinator(m) => ApiResult::Error(
-                ErrorResponse::with_details(
+            cce_server_shared::services::watch::WatchStopError::HotCoordinator(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
                     error_codes::INTERNAL_ERROR,
                     "Failed to get hot update coordinator",
                     m,
-                ),
-            ),
-            cce_server_shared::WatchStopError::StopWatch(m) => ApiResult::Error(
-                ErrorResponse::with_details(error_codes::INTERNAL_ERROR, "Failed to stop watching", m),
-            ),
+                ))
+            }
+            cce_server_shared::services::watch::WatchStopError::StopWatch(m) => {
+                ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::INTERNAL_ERROR,
+                    "Failed to stop watching",
+                    m,
+                ))
+            }
         },
     }
 }
@@ -158,7 +187,7 @@ pub async fn handle_stop_watch(
     )
 )]
 pub async fn handle_watch_status(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
 ) -> ApiResult<WatchStatusResponse> {
     if project_id <= 0 {
@@ -167,10 +196,13 @@ pub async fn handle_watch_status(
             "Invalid project_id",
         ));
     }
-    match cce_server_shared::watch_status(&state, project_id).await {
+    match cce_server_shared::services::watch::watch_status(&state, project_id).await {
         Ok(response) => ApiResult::Success(response),
-        Err(cce_server_shared::WatchStatusError::InvalidProjectId) => {
-            ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Invalid project_id"))
+        Err(cce_server_shared::services::watch::WatchStatusError::InvalidProjectId) => {
+            ApiResult::Error(ErrorResponse::new(
+                error_codes::INVALID_REQUEST,
+                "Invalid project_id",
+            ))
         }
     }
 }

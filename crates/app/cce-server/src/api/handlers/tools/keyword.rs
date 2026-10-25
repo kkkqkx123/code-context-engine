@@ -6,7 +6,7 @@ use cce_orchestrator::KeywordSearchTool;
 use cce_storage_bm25::TermOperator;
 
 use super::keyword_result_from_orch;
-use crate::api::AppState;
+use crate::api::SharedContext;
 
 #[utoipa::path(
     post, path = "/api/tools/keyword-search", tag = "Tools",
@@ -16,7 +16,7 @@ use crate::api::AppState;
     )
 )]
 pub async fn handle_keyword_search(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Json(request): Json<KeywordSearchRequest>,
 ) -> Json<KeywordSearchApiResponse> {
     // The relation store supplies chunk metadata and raw source snippets for

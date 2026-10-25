@@ -28,7 +28,7 @@ use crate::api::response::ApiResult;
     )
 )]
 pub async fn handle_get_metrics(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
 ) -> impl IntoResponse {
     // Serve from the single-core render cache when available
     if let Some(cache) = state.engine.render_cache().await {
@@ -74,7 +74,7 @@ pub async fn handle_get_metrics(
     )
 )]
 pub async fn handle_get_metrics_json(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
 ) -> impl IntoResponse {
     // Serve from the single-core render cache when available
     if let Some(cache) = state.engine.render_cache().await {
@@ -131,7 +131,7 @@ pub async fn handle_get_metrics_json(
     )
 )]
 pub async fn handle_get_metrics_history(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     axum::extract::Query(params): axum::extract::Query<MetricsHistoryQuery>,
 ) -> ApiResult<Vec<ApiAggregatedMetric>> {
     // Parse timestamps
@@ -224,7 +224,7 @@ pub async fn handle_get_metrics_history(
     )
 )]
 pub async fn handle_cleanup_metrics(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     axum::extract::Query(params): axum::extract::Query<MetricsCleanupQuery>,
 ) -> ApiResult<MetricsCleanupResponse> {
     // Get aggregator from engine

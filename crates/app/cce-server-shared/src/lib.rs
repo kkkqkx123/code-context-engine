@@ -1,20 +1,17 @@
-//! Shared engine/runtime/state/maintenance for the Code Context Engine.
+//! Shared engine/runtime/context/maintenance for the Code Context Engine.
 //!
 //! This crate holds the engine facade (`CodeContextEngine`), the runtime
-//! support modules, the HTTP `AppState`, and the index maintenance service.
-//! Both the HTTP server (`cce-server`) and the MCP server (`cce-mcp`) depend
-//! on this crate so that MCP is an independent compile target that does not
-//! drag in the axum/HTTP layer.
+//! support modules, the shared application context (`SharedContext`), and the
+//! index maintenance service. Both the HTTP server (`cce-server`) and the MCP
+//! server (`cce-mcp`) depend on this crate so that MCP is an independent
+//! compile target that does not drag in the axum/HTTP layer.
+//!
+//! Public items are reachable only through their module paths; no top-level
+//! re-exports are provided.
 
+pub mod context;
 pub mod engine;
 pub mod maintenance;
 pub mod runtime;
 pub mod service_local;
 pub mod services;
-pub mod state;
-
-pub use service_local::{LocalService, ServiceError};
-pub use services::build_index_options;
-pub use services::{watch_start, watch_status, watch_stop};
-pub use services::{WatchStartError, WatchStatusError, WatchStopError};
-pub use services::{CreatedProject, ProjectCreateError, create_project};

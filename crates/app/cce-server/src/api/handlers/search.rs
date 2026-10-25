@@ -53,7 +53,7 @@ fn service_error(error: SearchServiceError) -> ErrorResponse {
     )
 )]
 pub async fn handle_search(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Json(request): Json<SearchRequest>,
 ) -> SearchApiResponse {
     let start = std::time::Instant::now();
@@ -189,7 +189,7 @@ pub async fn handle_search(
     )
 )]
 pub async fn handle_aggregated_search(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Json(request): Json<AggregatedSearchRequest>,
 ) -> SearchApiResponse {
     let start = std::time::Instant::now();

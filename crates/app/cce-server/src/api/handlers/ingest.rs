@@ -20,7 +20,7 @@ mod staging_tests;
 use axum::Router;
 use axum::routing::{get, post};
 
-use crate::api::state::AppState;
+use cce_server_shared::context::SharedContext;
 
 pub use admission::handle_admission_stats;
 pub use batch::handle_ingest_batch;
@@ -30,7 +30,9 @@ pub use manifest::handle_ingest_manifest;
 pub use staging::{INGEST_STAGING_RETENTION, sweep_expired_staging};
 
 /// Routes served only when the admission feature is enabled.
-pub fn ingest_routes(metrics: std::sync::Arc<cce_admission::AdmissionMetrics>) -> Router<AppState> {
+pub fn ingest_routes(
+    metrics: std::sync::Arc<cce_admission::AdmissionMetrics>,
+) -> Router<SharedContext> {
     Router::new()
         .route(
             cce_api::paths::INGEST_MANIFEST_TEMPLATE,

@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use cce_config::Settings;
 use cce_config::modules::McpTransport;
+use cce_server_shared::context::SharedContext;
 use cce_server_shared::engine::CodeContextEngine;
-use cce_server_shared::state::AppState;
 use tokio_util::sync::CancellationToken;
 
 fn main() -> anyhow::Result<()> {
@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
         let engine = CodeContextEngine::from_config(config.clone()).await?;
-        let state = Arc::new(AppState::from_engine(&engine, None).await);
+        let state = Arc::new(SharedContext::from_engine(&engine, None).await);
         let enabled_tools = mcp_config.enabled_tools.clone();
 
         match mcp_config.transport {

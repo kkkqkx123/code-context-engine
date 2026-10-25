@@ -6,8 +6,8 @@
 
 use cce_api::models::KeywordTermOperator;
 use cce_orchestrator::KeywordSearchTool;
+use cce_server_shared::context::SharedContext;
 use cce_server_shared::services::search::{SearchService, SharedQueryFields, SingleQuerySpec};
-use cce_server_shared::state::AppState;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -80,7 +80,7 @@ pub struct KeywordSearchArgs {
 
 /// Run a hybrid search tool call.
 pub async fn search(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: SearchArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     // Query assembly, execution, and conversion live in the shared query
@@ -179,7 +179,7 @@ pub async fn search(
 
 /// Run a keyword (BM25) search tool call.
 pub async fn keyword_search(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: KeywordSearchArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let Some(sqlite) = state.engine.metadata_store_clone() else {

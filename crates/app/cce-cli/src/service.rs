@@ -5,11 +5,11 @@
 //! directly with zero-copy filesystem access. Remote mode encodes the same
 //! parameters onto HTTP.
 
+use crate::remote::RemoteService;
 use anyhow::{Context, Result};
 use cce_api::models::*;
 use cce_api::service_params::*;
-use cce_server_shared::LocalService;
-use crate::remote::RemoteService;
+use cce_server_shared::service_local::LocalService;
 
 /// CLI execution mode flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
@@ -64,7 +64,8 @@ impl CliService {
                 let engine = cce_server_shared::engine::CodeContextEngine::from_config(config)
                     .await
                     .context("failed to build local engine")?;
-                let local = cce_server_shared::LocalService::from_engine(&engine).await;
+                let local =
+                    cce_server_shared::service_local::LocalService::from_engine(&engine).await;
                 Ok(Self::Local(local))
             }
         }
@@ -75,15 +76,18 @@ impl CliService {
         self
     }
 
-// Dispatch methods (replacing the former CodeContextService trait).
-    pub async fn list_projects(&self, ) -> anyhow::Result<ProjectListResponse> {
+    // Dispatch methods (replacing the former CodeContextService trait).
+    pub async fn list_projects(&self) -> anyhow::Result<ProjectListResponse> {
         match self {
             Self::Remote(s) => s.list_projects().await,
             Self::Local(s) => s.list_projects().await.map_err(Into::into),
         }
     }
 
-    pub async fn create_project(&self, request: CreateProjectRequest) -> anyhow::Result<ProjectDetailResponse> {
+    pub async fn create_project(
+        &self,
+        request: CreateProjectRequest,
+    ) -> anyhow::Result<ProjectDetailResponse> {
         match self {
             Self::Remote(s) => s.create_project(request).await,
             Self::Local(s) => s.create_project(request).await.map_err(Into::into),
@@ -118,77 +122,132 @@ impl CliService {
         }
     }
 
-    pub async fn search_aggregated(&self, request: AggregatedSearchRequest) -> anyhow::Result<SearchResponse> {
+    pub async fn search_aggregated(
+        &self,
+        request: AggregatedSearchRequest,
+    ) -> anyhow::Result<SearchResponse> {
         match self {
             Self::Remote(s) => s.search_aggregated(request).await,
             Self::Local(s) => s.search_aggregated(request).await.map_err(Into::into),
         }
     }
 
-    pub async fn graph_ego(&self, project_id: i64, params: GraphEgoParams) -> anyhow::Result<GraphSubgraphResponse> {
+    pub async fn graph_ego(
+        &self,
+        project_id: i64,
+        params: GraphEgoParams,
+    ) -> anyhow::Result<GraphSubgraphResponse> {
         match self {
             Self::Remote(s) => s.graph_ego(project_id, params).await,
             Self::Local(s) => s.graph_ego(project_id, params).await.map_err(Into::into),
         }
     }
 
-    pub async fn graph_path(&self, project_id: i64, params: GraphPathParams) -> anyhow::Result<GraphPathResponse> {
+    pub async fn graph_path(
+        &self,
+        project_id: i64,
+        params: GraphPathParams,
+    ) -> anyhow::Result<GraphPathResponse> {
         match self {
             Self::Remote(s) => s.graph_path(project_id, params).await,
             Self::Local(s) => s.graph_path(project_id, params).await.map_err(Into::into),
         }
     }
 
-    pub async fn graph_subgraph(&self, project_id: i64, params: GraphSubgraphParams) -> anyhow::Result<GraphSubgraphResponse> {
+    pub async fn graph_subgraph(
+        &self,
+        project_id: i64,
+        params: GraphSubgraphParams,
+    ) -> anyhow::Result<GraphSubgraphResponse> {
         match self {
             Self::Remote(s) => s.graph_subgraph(project_id, params).await,
-            Self::Local(s) => s.graph_subgraph(project_id, params).await.map_err(Into::into),
+            Self::Local(s) => s
+                .graph_subgraph(project_id, params)
+                .await
+                .map_err(Into::into),
         }
     }
 
-    pub async fn graph_components(&self, project_id: i64, params: GraphComponentsParams) -> anyhow::Result<GraphComponentsResponse> {
+    pub async fn graph_components(
+        &self,
+        project_id: i64,
+        params: GraphComponentsParams,
+    ) -> anyhow::Result<GraphComponentsResponse> {
         match self {
             Self::Remote(s) => s.graph_components(project_id, params).await,
-            Self::Local(s) => s.graph_components(project_id, params).await.map_err(Into::into),
+            Self::Local(s) => s
+                .graph_components(project_id, params)
+                .await
+                .map_err(Into::into),
         }
     }
 
-    pub async fn graph_export(&self, project_id: i64, params: GraphExportParams) -> anyhow::Result<GraphSubgraphResponse> {
+    pub async fn graph_export(
+        &self,
+        project_id: i64,
+        params: GraphExportParams,
+    ) -> anyhow::Result<GraphSubgraphResponse> {
         match self {
             Self::Remote(s) => s.graph_export(project_id, params).await,
             Self::Local(s) => s.graph_export(project_id, params).await.map_err(Into::into),
         }
     }
 
-    pub async fn graph_impact(&self, project_id: i64, params: GraphImpactParams) -> anyhow::Result<GraphImpactResponse> {
+    pub async fn graph_impact(
+        &self,
+        project_id: i64,
+        params: GraphImpactParams,
+    ) -> anyhow::Result<GraphImpactResponse> {
         match self {
             Self::Remote(s) => s.graph_impact(project_id, params).await,
             Self::Local(s) => s.graph_impact(project_id, params).await.map_err(Into::into),
         }
     }
 
-    pub async fn graph_entity_impact(&self, project_id: i64, params: GraphEntityImpactParams) -> anyhow::Result<GraphEntityImpactResponse> {
+    pub async fn graph_entity_impact(
+        &self,
+        project_id: i64,
+        params: GraphEntityImpactParams,
+    ) -> anyhow::Result<GraphEntityImpactResponse> {
         match self {
             Self::Remote(s) => s.graph_entity_impact(project_id, params).await,
-            Self::Local(s) => s.graph_entity_impact(project_id, params).await.map_err(Into::into),
+            Self::Local(s) => s
+                .graph_entity_impact(project_id, params)
+                .await
+                .map_err(Into::into),
         }
     }
 
-    pub async fn graph_cycles(&self, project_id: i64, params: GraphCyclesParams) -> anyhow::Result<GraphCyclesResponse> {
+    pub async fn graph_cycles(
+        &self,
+        project_id: i64,
+        params: GraphCyclesParams,
+    ) -> anyhow::Result<GraphCyclesResponse> {
         match self {
             Self::Remote(s) => s.graph_cycles(project_id, params).await,
             Self::Local(s) => s.graph_cycles(project_id, params).await.map_err(Into::into),
         }
     }
 
-    pub async fn graph_structural(&self, project_id: i64, params: GraphStructuralParams) -> anyhow::Result<GraphStructuralResponse> {
+    pub async fn graph_structural(
+        &self,
+        project_id: i64,
+        params: GraphStructuralParams,
+    ) -> anyhow::Result<GraphStructuralResponse> {
         match self {
             Self::Remote(s) => s.graph_structural(project_id, params).await,
-            Self::Local(s) => s.graph_structural(project_id, params).await.map_err(Into::into),
+            Self::Local(s) => s
+                .graph_structural(project_id, params)
+                .await
+                .map_err(Into::into),
         }
     }
 
-    pub async fn graph_module(&self, project_id: i64, params: GraphModuleParams) -> anyhow::Result<GraphModuleResponse> {
+    pub async fn graph_module(
+        &self,
+        project_id: i64,
+        params: GraphModuleParams,
+    ) -> anyhow::Result<GraphModuleResponse> {
         match self {
             Self::Remote(s) => s.graph_module(project_id, params).await,
             Self::Local(s) => s.graph_module(project_id, params).await.map_err(Into::into),
@@ -202,7 +261,11 @@ impl CliService {
         }
     }
 
-    pub async fn watch_start(&self, project_id: i64, request: StartWatchRequest) -> anyhow::Result<StartWatchResponse> {
+    pub async fn watch_start(
+        &self,
+        project_id: i64,
+        request: StartWatchRequest,
+    ) -> anyhow::Result<StartWatchResponse> {
         match self {
             Self::Remote(s) => s.watch_start(project_id, request).await,
             Self::Local(s) => s.watch_start(project_id, request).await.map_err(Into::into),
@@ -216,7 +279,10 @@ impl CliService {
         }
     }
 
-    pub async fn reload_project(&self, project_id: i64) -> anyhow::Result<ProjectConfigReloadResponse> {
+    pub async fn reload_project(
+        &self,
+        project_id: i64,
+    ) -> anyhow::Result<ProjectConfigReloadResponse> {
         match self {
             Self::Remote(s) => s.reload_project(project_id).await,
             Self::Local(s) => s.reload_project(project_id).await.map_err(Into::into),

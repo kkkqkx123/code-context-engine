@@ -1,12 +1,12 @@
 //! Shared watch orchestration for local and HTTP transports.
 
+use crate::context::SharedContext;
 use cce_api::models::{
-    StartWatchRequest, StartWatchResponse, StopWatchResponse, WatchStatus, WatchStatusResponse,
-    SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY,
+    SUPPLY_MODE_GATEWAY, SUPPLY_MODE_KEY, StartWatchRequest, StartWatchResponse, StopWatchResponse,
+    WatchStatus, WatchStatusResponse,
 };
 use cce_orchestrator::hot_update::HotUpdateCoordinator;
 use cce_orchestrator::hot_update::watcher::WatchStatusTracker;
-use crate::state::AppState;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ pub enum WatchStatusError {
 }
 
 pub async fn watch_status(
-    state: &AppState,
+    state: &SharedContext,
     project_id: i64,
 ) -> Result<WatchStatusResponse, WatchStatusError> {
     if project_id <= 0 {
@@ -92,7 +92,7 @@ pub async fn watch_status(
 }
 
 pub async fn watch_start(
-    state: &AppState,
+    state: &SharedContext,
     project_id: i64,
     request: &StartWatchRequest,
 ) -> Result<StartWatchResponse, WatchStartError> {
@@ -174,7 +174,7 @@ pub async fn watch_start(
 }
 
 pub async fn watch_stop(
-    state: &AppState,
+    state: &SharedContext,
     project_id: i64,
 ) -> Result<StopWatchResponse, WatchStopError> {
     if project_id <= 0 {

@@ -16,7 +16,7 @@ use super::staging::{
     pending_pieces_in, stage_file, staging_usage_snapshot, within_staging_bounds,
 };
 use crate::api::response::ApiResult;
-use crate::api::state::AppState;
+use cce_server_shared::context::SharedContext;
 
 /// Store pushed file contents under the project mirror without indexing.
 ///
@@ -36,7 +36,7 @@ use crate::api::state::AppState;
     )
 )]
 pub async fn handle_ingest_batch(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     AxumPath(id): AxumPath<i64>,
     context: Option<Extension<cce_admission::AdmissionContext>>,
     metrics: Extension<std::sync::Arc<cce_admission::AdmissionMetrics>>,

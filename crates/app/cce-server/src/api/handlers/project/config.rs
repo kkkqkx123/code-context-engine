@@ -58,7 +58,7 @@ fn reject_forbidden_profile_keys(value: &serde_json::Value) -> Option<String> {
     )
 )]
 pub async fn handle_update_project_config(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     Json(payload): Json<ProjectConfigUpdateRequest>,
 ) -> ApiResult<ProjectConfigUpdateResponse> {
@@ -202,7 +202,7 @@ pub async fn handle_update_project_config(
     )
 )]
 pub async fn handle_get_project_config(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
 ) -> ApiResult<ProjectConfigGetResponse> {
     let registry = state.engine.project_registry();
@@ -256,7 +256,7 @@ pub async fn handle_get_project_config(
     )
 )]
 pub async fn handle_reload_project_config(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectConfigReloadResponse> {
     let project_registry = state.engine.project_registry();
@@ -339,7 +339,7 @@ fn effective_default_embedding(config: &AppConfig) -> Option<String> {
     )
 )]
 pub async fn handle_get_project_llm_overview(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
 ) -> ApiResult<ProjectLlmOverviewResponse> {
     let registry = state.engine.project_registry();
@@ -558,7 +558,7 @@ pub async fn handle_get_project_llm_overview(
     )
 )]
 pub async fn handle_update_project_llm_config(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     Json(payload): Json<ProjectLlmUpdateRequest>,
 ) -> ApiResult<ProjectLlmUpdateResponse> {
@@ -718,7 +718,7 @@ pub async fn handle_update_project_llm_config(
     )
 )]
 pub async fn handle_test_project_llm(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
     Json(payload): Json<LlmTestRequest>,
 ) -> ApiResult<LlmTestResponse> {

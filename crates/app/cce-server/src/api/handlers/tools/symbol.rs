@@ -16,7 +16,7 @@ use super::{
 };
 use cce_orchestrator::{FindReferencesTool, GetSymbolsTool, GotoDefinitionTool};
 
-use crate::api::AppState;
+use crate::api::SharedContext;
 
 // ============================================================================
 // Find References
@@ -35,7 +35,7 @@ use crate::api::AppState;
     )
 )]
 pub async fn handle_find_references(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Json(request): Json<cce_api::models::FindReferencesRequest>,
 ) -> Json<cce_api::models::FindReferencesResponse> {
     // Validate project_id
@@ -138,7 +138,7 @@ pub async fn handle_find_references(
     )
 )]
 pub async fn handle_get_symbols(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Json(request): Json<cce_api::models::GetSymbolsRequest>,
 ) -> Json<cce_api::models::GetSymbolsResponse> {
     // Validate project_id
@@ -230,7 +230,7 @@ pub async fn handle_get_symbols(
     )
 )]
 pub async fn handle_goto_definition(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Json(request): Json<cce_api::models::GotoDefinitionRequest>,
 ) -> Json<cce_api::models::GotoDefinitionResponse> {
     // Validate project_id

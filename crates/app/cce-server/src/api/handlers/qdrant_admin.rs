@@ -5,16 +5,16 @@
 //! - Start / Stop / Restart the managed Qdrant subprocess
 //!
 //! These endpoints are only available when Qdrant is configured with
-//! `auto_start = true` and the `QdrantProcessHandle` is present in AppState.
+//! `auto_start = true` and the `QdrantProcessHandle` is present in SharedContext.
 
 use axum::extract::State;
 
 use crate::api::response::ApiResult;
-use crate::api::state::AppState;
 use cce_api::models::{
     ErrorResponse, QdrantActionResponse, QdrantProcessStatus, QdrantProcessStatusResponse,
     error_codes,
 };
+use cce_server_shared::context::SharedContext;
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -33,7 +33,7 @@ use cce_api::models::{
     )
 )]
 pub async fn handle_qdrant_process_status(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
 ) -> ApiResult<QdrantProcessStatusResponse> {
     let Some(handle) = state.qdrant_control.as_ref() else {
         return ApiResult::Error(no_control_handle());
@@ -61,7 +61,7 @@ pub async fn handle_qdrant_process_status(
     )
 )]
 pub async fn handle_qdrant_process_start(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
 ) -> ApiResult<QdrantActionResponse> {
     let Some(handle) = state.qdrant_control.as_ref() else {
         return ApiResult::Error(no_control_handle());
@@ -103,7 +103,7 @@ pub async fn handle_qdrant_process_start(
     )
 )]
 pub async fn handle_qdrant_process_stop(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
 ) -> ApiResult<QdrantActionResponse> {
     let Some(handle) = state.qdrant_control.as_ref() else {
         return ApiResult::Error(no_control_handle());
@@ -145,7 +145,7 @@ pub async fn handle_qdrant_process_stop(
     )
 )]
 pub async fn handle_qdrant_process_restart(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
 ) -> ApiResult<QdrantActionResponse> {
     let Some(handle) = state.qdrant_control.as_ref() else {
         return ApiResult::Error(no_control_handle());

@@ -5,7 +5,7 @@
 //! update coordinator.
 
 use cce_orchestrator::IndexOptions;
-use cce_server_shared::state::AppState;
+use cce_server_shared::context::SharedContext;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -52,7 +52,7 @@ pub struct ProjectArgs {
 }
 
 /// Run the list projects tool call.
-pub async fn list_projects(state: &Arc<AppState>) -> Result<CallToolResult, rmcp::ErrorData> {
+pub async fn list_projects(state: &Arc<SharedContext>) -> Result<CallToolResult, rmcp::ErrorData> {
     let Some(store) = state.engine.metadata_store() else {
         return Ok(CallToolResult::error(vec![ContentBlock::text(
             "metadata store is not configured; cannot list projects",
@@ -85,7 +85,7 @@ pub async fn list_projects(state: &Arc<AppState>) -> Result<CallToolResult, rmcp
 
 /// Run the get project tool call.
 pub async fn get_project(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: ProjectArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     match state
@@ -111,7 +111,7 @@ pub async fn get_project(
 
 /// Run the full index tool call.
 pub async fn index_project(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: IndexProjectArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     // Only explicit request overrides are passed through; empty lists mean
@@ -168,7 +168,7 @@ pub async fn index_project(
 
 /// Run the incremental index tool call.
 pub async fn incremental_index(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: IncrementalIndexArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let deleted = args.deleted.clone().unwrap_or_default();
@@ -216,7 +216,7 @@ pub async fn incremental_index(
 
 /// Run the engine health tool call.
 pub async fn health(
-    state: &Arc<AppState>,
+    state: &Arc<SharedContext>,
     args: ProjectArgs,
 ) -> Result<CallToolResult, rmcp::ErrorData> {
     let relation = state

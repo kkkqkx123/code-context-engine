@@ -52,7 +52,7 @@ fn index_response_from_result(result: IndexResult) -> IndexResponse {
     )
 )]
 pub async fn handle_index(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Json(query): Json<IndexRequest>,
 ) -> ApiResult<IndexResponse> {
     // Validate project_id
@@ -80,7 +80,7 @@ pub async fn handle_index(
     }
 
     // Build index options via the shared construction path.
-    let options = cce_server_shared::build_index_options(&query);
+    let options = cce_server_shared::services::index::build_index_options(&query);
 
     // Execute indexing with project_id using engine's index method
     let result = match state.engine.index(query.project_id, options).await {

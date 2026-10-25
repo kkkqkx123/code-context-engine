@@ -49,7 +49,7 @@ pub type EntitySearchApiResponse = ApiResult<EntitySearchResponse>;
     )
 )]
 pub async fn handle_entity_search(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Json(request): Json<EntitySearchRequest>,
 ) -> EntitySearchApiResponse {
     let start = std::time::Instant::now();

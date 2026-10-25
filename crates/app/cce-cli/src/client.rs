@@ -56,7 +56,6 @@ impl ApiClient {
     ) -> Result<R> {
         self.inner.delete_with_body(path, body).await
     }
-
 }
 
 #[cfg(test)]

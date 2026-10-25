@@ -7,8 +7,8 @@ mod client;
 mod commands;
 mod icons;
 mod output;
-mod service;
 mod remote;
+mod service;
 
 use anyhow::Result;
 use clap::Parser;

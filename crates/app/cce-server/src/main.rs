@@ -7,7 +7,7 @@ use cce_config::Settings;
 use cce_server::logger;
 
 use cce_server::api;
-use cce_server::engine::CodeContextEngine;
+use cce_server_shared::engine::CodeContextEngine;
 
 fn main() -> anyhow::Result<()> {
     // Initialize configuration from file, falling back to defaults.

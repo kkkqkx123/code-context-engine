@@ -27,7 +27,7 @@ use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
     )
 )]
 pub async fn handle_create_project(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Json(request): Json<CreateProjectRequest>,
 ) -> ApiResult<ProjectDetailResponse> {
     // Check if metadata store is available
@@ -41,38 +41,62 @@ pub async fn handle_create_project(
         }
     };
 
-    let created = match cce_server_shared::create_project(metadata_store, &request) {
+    let created = match cce_server_shared::services::project::create_project(
+        metadata_store,
+        &request,
+    ) {
         Ok(c) => c,
         Err(e) => {
             return match e {
-                cce_server_shared::ProjectCreateError::Invalid(m) => {
+                cce_server_shared::services::project::ProjectCreateError::Invalid(m) => {
                     // Map specific messages? Keep generic invalid request.
                     if m.contains("cannot be empty") {
-                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Root path cannot be empty"))
+                        ApiResult::Error(ErrorResponse::new(
+                            error_codes::INVALID_REQUEST,
+                            "Root path cannot be empty",
+                        ))
                     } else if m.contains("does not exist") {
-                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Root path does not exist"))
+                        ApiResult::Error(ErrorResponse::new(
+                            error_codes::INVALID_REQUEST,
+                            "Root path does not exist",
+                        ))
                     } else if m.contains("not a directory") {
-                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Root path is not a directory"))
+                        ApiResult::Error(ErrorResponse::new(
+                            error_codes::INVALID_REQUEST,
+                            "Root path is not a directory",
+                        ))
                     } else if m.to_lowercase().starts_with("failed to resolve path") {
                         let detail = m.split_once(": ").map(|x| x.1).unwrap_or(m.as_str());
-                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, format!("Failed to resolve path: {}", detail)))
+                        ApiResult::Error(ErrorResponse::new(
+                            error_codes::INVALID_REQUEST,
+                            format!("Failed to resolve path: {}", detail),
+                        ))
                     } else {
                         ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, m))
                     }
                 }
-                cce_server_shared::ProjectCreateError::MetadataUnavailable => {
-                    ApiResult::Error(ErrorResponse::new(error_codes::STORAGE_ERROR, "Metadata store not initialized"))
+                cce_server_shared::services::project::ProjectCreateError::MetadataUnavailable => {
+                    ApiResult::Error(ErrorResponse::new(
+                        error_codes::STORAGE_ERROR,
+                        "Metadata store not initialized",
+                    ))
                 }
-                cce_server_shared::ProjectCreateError::PathExists => {
-                    ApiResult::Error(ErrorResponse::new(error_codes::CONFLICT, "Project already exists at this path"))
+                cce_server_shared::services::project::ProjectCreateError::PathExists => {
+                    ApiResult::Error(ErrorResponse::new(
+                        error_codes::CONFLICT,
+                        "Project already exists at this path",
+                    ))
                 }
-                cce_server_shared::ProjectCreateError::Conflict(m) => {
+                cce_server_shared::services::project::ProjectCreateError::Conflict(m) => {
                     ApiResult::Error(ErrorResponse::new(error_codes::CONFLICT, m))
                 }
-                cce_server_shared::ProjectCreateError::Storage(m) => {
+                cce_server_shared::services::project::ProjectCreateError::Storage(m) => {
                     // Preserve UNIQUE handling already converted to Conflict; other storage errors.
                     if m.contains("UNIQUE constraint failed") {
-                        ApiResult::Error(ErrorResponse::new(error_codes::CONFLICT, "Project with this name or root path already exists"))
+                        ApiResult::Error(ErrorResponse::new(
+                            error_codes::CONFLICT,
+                            "Project with this name or root path already exists",
+                        ))
                     } else {
                         ApiResult::Error(ErrorResponse::new(error_codes::STORAGE_ERROR, m))
                     }
@@ -111,7 +135,7 @@ pub async fn handle_create_project(
     )
 )]
 pub async fn handle_update_project(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id_str): Path<String>,
     Json(request): Json<UpdateProjectRequest>,
 ) -> ApiResult<ProjectDetailResponse> {
@@ -298,7 +322,7 @@ pub async fn handle_update_project(
     )
 )]
 pub async fn handle_delete_project(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(id): Path<i64>,
 ) -> ApiResult<ProjectDeleteResponse> {
     // 1. Stop watch if running (handler-specific: maintenance service doesn't manage watchers)
@@ -309,7 +333,7 @@ pub async fn handle_delete_project(
     }
 
     // 2. Use unified maintenance service for all storage-layer cleanup
-    let maintenance = crate::maintenance::ProjectIndexMaintenanceService::new(
+    let maintenance = cce_server_shared::maintenance::ProjectIndexMaintenanceService::new(
         state.engine.clone(),
         Some(state.engine.vector_clone()),
         Some(state.engine.fulltext_clone()),

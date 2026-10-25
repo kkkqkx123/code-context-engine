@@ -10,7 +10,7 @@ use cce_storage_metadb_sqlite::{FileRepository, ProjectRepository};
 use super::paths::storage_path;
 use super::staging::received_chunk_indices;
 use crate::api::response::ApiResult;
-use crate::api::state::AppState;
+use cce_server_shared::context::SharedContext;
 
 /// Compare a gateway manifest against the stored file hashes.
 ///
@@ -30,7 +30,7 @@ use crate::api::state::AppState;
     )
 )]
 pub async fn handle_ingest_manifest(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     AxumPath(id): AxumPath<i64>,
     axum::Json(request): axum::Json<IngestManifestRequest>,
 ) -> ApiResult<IngestManifestResponse> {
@@ -85,7 +85,8 @@ pub async fn handle_ingest_manifest(
             upload.push(path);
             continue;
         }
-        let total = cce_ingest_transfer::total_chunks_for_size(meta.size.max(1), INGEST_CHUNK_BYTES);
+        let total =
+            cce_ingest_transfer::total_chunks_for_size(meta.size.max(1), INGEST_CHUNK_BYTES);
         let received = received_chunk_indices(id, request.manifest_version, &path);
         if received.len() as u32 >= total {
             continue;

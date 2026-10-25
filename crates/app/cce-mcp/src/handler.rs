@@ -1,6 +1,6 @@
 //! MCP server handler exposing the Code Context Engine as MCP tools.
 //!
-//! Every tool delegates to the shared `AppState`/engine, so the MCP surface
+//! Every tool delegates to the shared `SharedContext`/engine, so the MCP surface
 //! stays a thin adapter over the same capabilities used by the HTTP API and the
 //! CLI. `project_id` is an explicit tool argument for project-scoped tools to
 //! match the engine's per-project lazy-loading model. The stateless `fold`
@@ -29,7 +29,7 @@ mod support;
 
 use std::sync::Arc;
 
-use cce_server_shared::state::AppState;
+use cce_server_shared::context::SharedContext;
 use rmcp::{
     ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -46,7 +46,7 @@ pub use search::{KeywordSearchArgs, SearchArgs};
 /// it only holds cheap `Arc`s.
 #[derive(Clone)]
 pub struct McpServerHandler {
-    state: Arc<AppState>,
+    state: Arc<SharedContext>,
     /// Optional tool allow-list: when set, tools whose name is not listed are
     /// rejected at call time. The router stays static so `#[tool_router]`
     /// codegen does not depend on runtime configuration.
@@ -60,7 +60,7 @@ pub struct McpServerHandler {
 #[tool_router]
 impl McpServerHandler {
     /// Create a handler backed by the shared application state.
-    pub fn new(state: Arc<AppState>, enabled_tools: Option<Vec<String>>) -> Self {
+    pub fn new(state: Arc<SharedContext>, enabled_tools: Option<Vec<String>>) -> Self {
         Self {
             state,
             enabled_tools: enabled_tools.map(Arc::new),

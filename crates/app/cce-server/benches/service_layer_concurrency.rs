@@ -1,7 +1,7 @@
 //! T-10 — service-layer search concurrency benchmark (covers the API/handler
 //! fan-out).
 //!
-//! The service layer serves `handle_search` from a shared `AppState`. This bench
+//! The service layer serves `handle_search` from a shared `SharedContext`. This bench
 //! builds a real engine over the standard 3-file fixture (via the project's own
 //! test harness), indexes it, then issues `K` concurrent `handle_search` calls
 //! and measures wall time. The one-time index is shared; only the request fan-out
@@ -19,7 +19,7 @@ use axum::Json;
 use axum::extract::State;
 use cce_api::models::SearchRequest;
 use cce_server::api::handlers::search;
-use cce_server::api::state::AppState;
+use cce_server_shared::context::SharedContext;
 use tokio::task::JoinSet;
 
 // Reuse the project's own integration-test harness to stand up an engine and a
@@ -30,7 +30,7 @@ mod common;
 /// Issue `k` concurrent `handle_search` calls against `state` and return how
 /// many completed. `SearchRequest` is not `Clone`, so each task builds its own
 /// (they are cheap and deterministic for a fixed project + query).
-async fn run_concurrent(state: AppState, project_id: i64, k: usize) -> usize {
+async fn run_concurrent(state: SharedContext, project_id: i64, k: usize) -> usize {
     let mut set = JoinSet::new();
     for _ in 0..k {
         let state = state.clone();

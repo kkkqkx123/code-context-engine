@@ -15,11 +15,11 @@ use cce_api::models::{
 };
 
 use crate::api::response::ApiResult;
-use crate::runtime::PublishedSnapshot;
+use cce_server_shared::runtime::PublishedSnapshot;
 
 /// Get a relation snapshot, or return an `ErrorResponse`.
 async fn get_snapshot_or_error(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
 ) -> Result<Arc<PublishedSnapshot>, ErrorResponse> {
     if project_id <= 0 {
@@ -111,7 +111,7 @@ fn matches_classification(
     )
 )]
 pub async fn get_relations_by_classification(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path((project_id, classification)): Path<(i64, String)>,
     Query(params): Query<ClassificationQueryParams>,
 ) -> ApiResult<Vec<serde_json::Value>> {
@@ -155,7 +155,7 @@ pub async fn get_relations_by_classification(
     )
 )]
 pub async fn get_classification_stats(
-    State(state): State<crate::api::state::AppState>,
+    State(state): State<cce_server_shared::context::SharedContext>,
     Path(project_id): Path<i64>,
 ) -> ApiResult<ClassificationStatsResponse> {
     let snapshot = match get_snapshot_or_error(&state, project_id).await {

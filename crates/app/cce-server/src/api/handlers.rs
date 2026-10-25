@@ -1,7 +1,7 @@
 //! API handlers
 //!
 //! This module provides HTTP handlers for all API endpoints.
-//! AppState and router are defined in the parent module (state.rs, router.rs).
+//! SharedContext and router are defined in the parent module (state.rs, router.rs).
 //!
 //! ## Module Structure
 //!

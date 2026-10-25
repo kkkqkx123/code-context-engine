@@ -26,14 +26,14 @@ use cce_orchestrator::query::{GraphDirection, GraphFilter, GraphPagination, SubG
 /// Return the relation capability info as a JSON map when the served
 /// snapshot is stale; `None` when the snapshot is fresh.
 async fn stale_relation_info(
-    runtime: &crate::runtime::RelationRuntime,
+    runtime: &cce_server_shared::runtime::RelationRuntime,
 ) -> Option<serde_json::Value> {
     let info = runtime.get_capability_info().await;
     info.stale.then(|| info.to_json_map())
 }
 
 async fn relation_max_depth(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
 ) -> Result<usize, ErrorResponse> {
     state
@@ -140,13 +140,13 @@ fn parse_direction(raw: &str) -> Result<GraphDirection, ErrorResponse> {
 
 /// Shared snapshot + searcher setup for graph handlers.
 async fn graph_context(
-    state: &crate::api::state::AppState,
+    state: &cce_server_shared::context::SharedContext,
     project_id: i64,
 ) -> Result<
     (
-        Arc<crate::runtime::PublishedSnapshot>,
+        Arc<cce_server_shared::runtime::PublishedSnapshot>,
         Arc<cce_orchestrator::query::RelationSearcher>,
-        Arc<crate::runtime::RelationRuntime>,
+        Arc<cce_server_shared::runtime::RelationRuntime>,
     ),
     ErrorResponse,
 > {

@@ -2,8 +2,8 @@
 
 use axum::extract::{Extension, State};
 
-use crate::api::state::AppState;
 use cce_api::models::{AdmissionGlobalStats, AdmissionStatsResponse, TokenAuditEntry};
+use cce_server_shared::context::SharedContext;
 
 /// Render admission counters with per-token durable audit for rejection
 /// analysis. Usage and last-use time survive restarts through the metadata
@@ -15,7 +15,7 @@ use cce_api::models::{AdmissionGlobalStats, AdmissionStatsResponse, TokenAuditEn
     )
 )]
 pub async fn handle_admission_stats(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     Extension(metrics): Extension<std::sync::Arc<cce_admission::AdmissionMetrics>>,
 ) -> axum::Json<AdmissionStatsResponse> {
     let snapshot = metrics.snapshot();

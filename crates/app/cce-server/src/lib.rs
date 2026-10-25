@@ -1,11 +1,8 @@
-//! cce_server crate - HTTP server and engine facade
+//! cce_server crate - HTTP server layer
 //!
-//! The engine facade, runtime, AppState and maintenance service now live in
-//! `cce-server-shared` so that the MCP server (`cce-mcp`) can reuse them as an
-//! independent compile target. We re-export them here under the same paths so
-//! the HTTP layer keeps compiling without changes.
-
-pub use cce_server_shared::{engine, maintenance, runtime};
+//! The engine facade, runtime, shared context (`SharedContext`) and
+//! maintenance service live in `cce-server-shared` and are used directly
+//! from there; this crate only provides the axum/HTTP transport.
 
 pub mod api;
 pub use cce_logging as logger;

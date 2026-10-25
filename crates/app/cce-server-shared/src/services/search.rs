@@ -22,8 +22,8 @@ use cce_orchestrator::query::{
 };
 use cce_types::FileCategory;
 
+use crate::context::SharedContext;
 use crate::engine::EngineError;
-use crate::state::AppState;
 
 /// Failure of the shared query service.
 ///
@@ -129,12 +129,12 @@ pub struct SearchOutcome {
 
 /// Shared query service over one application state.
 pub struct SearchService<'a> {
-    state: &'a AppState,
+    state: &'a SharedContext,
 }
 
 impl<'a> SearchService<'a> {
     /// Borrow the application state for one query service scope.
-    pub fn new(state: &'a AppState) -> Self {
+    pub fn new(state: &'a SharedContext) -> Self {
         Self { state }
     }
 

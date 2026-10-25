@@ -12,7 +12,7 @@ use cce_api::models::{
 use super::paths::{project_root, safe_join};
 use super::staging::stage_bytes;
 use crate::api::response::ApiResult;
-use crate::api::state::AppState;
+use cce_server_shared::context::SharedContext;
 
 /// Apply gateway-observed changes through the hot-update pipeline.
 ///
@@ -35,7 +35,7 @@ use crate::api::state::AppState;
     )
 )]
 pub async fn handle_ingest_event(
-    State(state): State<AppState>,
+    State(state): State<SharedContext>,
     AxumPath(id): AxumPath<i64>,
     axum::Json(request): axum::Json<IngestEventRequest>,
 ) -> ApiResult<IngestEventResponse> {

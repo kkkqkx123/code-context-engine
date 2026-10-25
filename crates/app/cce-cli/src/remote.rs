@@ -3,13 +3,13 @@
 //! Parameter semantics match the local implementation exactly; this type
 //! only encodes the same domain models onto the wire contract paths.
 
+use anyhow::Result as AnyhowResult;
 use cce_api::models::*;
 use cce_api::service_params::{
     GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
     GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
     GraphStructuralParams, GraphSubgraphParams,
 };
-use anyhow::Result as AnyhowResult;
 
 use cce_transport::{GraphQuery, HttpTransportError, QueryParam, SharedHttpClient};
 
@@ -117,7 +117,10 @@ impl RemoteService {
             .param("limit", QueryParam::Number(params.limit))
             .param("domains", QueryParam::Text(params.domains))
             .param("relation_types", QueryParam::Text(params.relation_types))
-            .param("include_external", QueryParam::Bool(params.include_external))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
             .build();
         self.client.get(&path).await.map_err(Self::map)
     }
@@ -137,7 +140,10 @@ impl RemoteService {
             .param("max_depth", QueryParam::Number(params.max_depth))
             .param("domains", QueryParam::Text(params.domains))
             .param("relation_types", QueryParam::Text(params.relation_types))
-            .param("include_external", QueryParam::Bool(params.include_external))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
             .build();
         self.client.get(&path).await.map_err(Self::map)
     }
@@ -157,7 +163,10 @@ impl RemoteService {
             .param("limit", QueryParam::Number(params.limit))
             .param("domains", QueryParam::Text(params.domains))
             .param("relation_types", QueryParam::Text(params.relation_types))
-            .param("include_external", QueryParam::Bool(params.include_external))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
             .build();
         self.client.get(&path).await.map_err(Self::map)
     }
@@ -176,7 +185,10 @@ impl RemoteService {
             .param("limit", QueryParam::Number(params.limit))
             .param("domains", QueryParam::Text(params.domains))
             .param("relation_types", QueryParam::Text(params.relation_types))
-            .param("include_external", QueryParam::Bool(params.include_external))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
             .build();
         self.client.get(&path).await.map_err(Self::map)
     }
@@ -195,7 +207,10 @@ impl RemoteService {
             .param("offset", QueryParam::Number(params.offset))
             .param("domains", QueryParam::Text(params.domains))
             .param("relation_types", QueryParam::Text(params.relation_types))
-            .param("include_external", QueryParam::Bool(params.include_external))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
             .build();
         self.client.get(&path).await.map_err(Self::map)
     }
