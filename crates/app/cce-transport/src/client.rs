@@ -86,9 +86,11 @@ impl SharedHttpClient {
 
     /// Build a transport with an explicit token outranking the environment.
     pub fn new_with_token(base_url: &str, explicit_token: Option<String>) -> Result<Self> {
-        Self::new_with_token_and_timeout(base_url, explicit_token, std::time::Duration::from_secs(
-            SHARED_HTTP_TIMEOUT_SECS,
-        ))
+        Self::new_with_token_and_timeout(
+            base_url,
+            explicit_token,
+            std::time::Duration::from_secs(SHARED_HTTP_TIMEOUT_SECS),
+        )
     }
 
     /// Build a transport with an explicit token and a per-command timeout.

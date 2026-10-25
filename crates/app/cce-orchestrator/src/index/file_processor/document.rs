@@ -26,15 +26,13 @@ impl FileProcessor {
         OrchestratorError,
     > {
         let result = match &self.plugin_registry {
-            Some(registry) => self
-                .doc_pipeline
-                .process_with_plugins_degraded_flag(
-                    content,
-                    file_path,
-                    chunking_config,
-                    output_mode,
-                    registry,
-                ),
+            Some(registry) => self.doc_pipeline.process_with_plugins_degraded_flag(
+                content,
+                file_path,
+                chunking_config,
+                output_mode,
+                registry,
+            ),
             None => self
                 .doc_pipeline
                 .process_with_degraded_flag(content, file_path, chunking_config, output_mode)

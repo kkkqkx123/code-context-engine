@@ -4,13 +4,13 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use cce_transport::SharedHttpClient;
 use crate::client::CliApi;
 use crate::output::{print_error, print_success, print_table, truncate};
 use cce_api::models::{
     CreateProjectRequest, ProjectConfig, ProjectConfigUpdateRequest, ProjectConfigUpdateResponse,
     ProjectDetailResponse, ProjectIndexResponse, UpdateProjectRequest,
 };
+use cce_transport::SharedHttpClient;
 
 fn project_path(id: &str) -> String {
     cce_api::paths::PROJECT_DETAIL_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id)
@@ -125,9 +125,7 @@ pub async fn execute_with_client(
             }
             Ok(())
         }
-        ProjectCommands::Index { id } => {
-            index_project(client, id, verbose).await
-        }
+        ProjectCommands::Index { id } => index_project(client, id, verbose).await,
         ProjectCommands::Reload { id } => {
             let project_id: i64 = id.parse().unwrap_or(-1);
             match client.reload_project(project_id).await {
@@ -146,12 +144,8 @@ pub async fn execute_with_client(
             }
             Ok(())
         }
-        ProjectCommands::Config { id } => {
-            update_project_config(client, id, verbose).await
-        }
-        ProjectCommands::Update { id, name } => {
-            update_project(client, id, name, verbose).await
-        }
+        ProjectCommands::Config { id } => update_project_config(client, id, verbose).await,
+        ProjectCommands::Update { id, name } => update_project(client, id, name, verbose).await,
     }
 }
 

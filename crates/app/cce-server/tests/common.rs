@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use cce_config::AppConfig;
 use cce_config::modules::{EmbeddingModelConfig, ProviderConfig};
-use cce_server_shared::engine::CodeContextEngine;
 use cce_server_shared::context::SharedContext;
+use cce_server_shared::engine::CodeContextEngine;
 
 pub struct TestEnv {
     pub state: SharedContext,

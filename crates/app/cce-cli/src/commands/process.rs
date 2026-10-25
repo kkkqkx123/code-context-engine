@@ -376,10 +376,7 @@ mod tests {
 
     #[test]
     fn pid_record_round_trips_with_start_time() {
-        let path = std::env::temp_dir().join(format!(
-            "cce-pid-record-{}.pid",
-            std::process::id()
-        ));
+        let path = std::env::temp_dir().join(format!("cce-pid-record-{}.pid", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let pid = std::process::id();
         write_pid_file(&path, pid).expect("pid file writes");
@@ -402,10 +399,7 @@ mod tests {
 
     #[test]
     fn legacy_pid_file_without_start_time_stays_compatible() {
-        let path = std::env::temp_dir().join(format!(
-            "cce-pid-legacy-{}.pid",
-            std::process::id()
-        ));
+        let path = std::env::temp_dir().join(format!("cce-pid-legacy-{}.pid", std::process::id()));
         let pid = std::process::id();
         std::fs::write(&path, format!("{pid}\n")).expect("legacy writes");
         let record = read_pid_record(&path)

@@ -8,8 +8,8 @@ use clap::Subcommand;
 use anyhow::Result;
 use cce_api::models::{SummaryRequest, SummaryResponse};
 
-use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success, print_warning};
+use cce_transport::SharedHttpClient;
 
 /// Input paths configuration
 #[derive(Debug, Clone)]

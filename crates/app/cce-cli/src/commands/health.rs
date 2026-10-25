@@ -5,7 +5,6 @@ use clap::Subcommand;
 use anyhow::Result;
 use colored::Colorize;
 
-use cce_transport::SharedHttpClient;
 use crate::icons;
 use crate::output::{print_error, print_output, print_success, print_warning};
 use cce_api::models::{
@@ -13,6 +12,7 @@ use cce_api::models::{
     QdrantHealthResponse, RetryQueueClearResponse, RetryQueueDeadClearResponse,
     RetryQueueDeadResponse, RetryQueueProcessResponse, RetryQueueStatusResponse,
 };
+use cce_transport::SharedHttpClient;
 
 /// Health command variants
 pub enum HealthCommand {

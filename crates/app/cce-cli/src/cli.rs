@@ -245,20 +245,17 @@ impl Cli {
                 timeout_secs,
                 ..
             } if *push => {
-                let gateway_client = cce_gateway::GatewayClient::new_with_token(
-                    &self.server,
-                    token.clone(),
-                )?;
+                let gateway_client =
+                    cce_gateway::GatewayClient::new_with_token(&self.server, token.clone())?;
                 commands::index::execute_push_with_gateway(cmd, &gateway_client, self.verbose).await
             }
             IndexCommands::Run { timeout_secs, .. } if timeout_secs.is_some() => {
                 let secs = timeout_secs.unwrap_or(300).max(1);
-                let client =
-                    cce_transport::SharedHttpClient::new_with_token_and_timeout(
-                        &self.server,
-                        None,
-                        std::time::Duration::from_secs(secs),
-                    )?;
+                let client = cce_transport::SharedHttpClient::new_with_token_and_timeout(
+                    &self.server,
+                    None,
+                    std::time::Duration::from_secs(secs),
+                )?;
                 commands::index::execute_with_client(cmd, &client, self.verbose).await
             }
             _ => {

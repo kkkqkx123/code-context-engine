@@ -41,13 +41,11 @@ pub async fn handle_create_project(
         }
     };
 
-    let created = match cce_server_shared::services::project::create_project(
-        metadata_store,
-        &request,
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            return match e {
+    let created =
+        match cce_server_shared::services::project::create_project(metadata_store, &request) {
+            Ok(c) => c,
+            Err(e) => {
+                return match e {
                 cce_server_shared::services::project::ProjectCreateError::Invalid(m) => {
                     // Map specific messages? Keep generic invalid request.
                     if m.contains("cannot be empty") {
@@ -102,8 +100,8 @@ pub async fn handle_create_project(
                     }
                 }
             };
-        }
-    };
+            }
+        };
 
     // Build response
     ApiResult::Success(ProjectDetailResponse {

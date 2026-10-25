@@ -5,16 +5,20 @@ use clap::Subcommand;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 
-use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::AggregatedMetric;
+use cce_transport::SharedHttpClient;
 
 pub enum MetricsFormat {
     Prometheus,
     Json,
 }
 
-pub async fn execute_with_client(format: MetricsFormat, client: &SharedHttpClient, verbose: bool) -> Result<()> {
+pub async fn execute_with_client(
+    format: MetricsFormat,
+    client: &SharedHttpClient,
+    verbose: bool,
+) -> Result<()> {
     let path = match format {
         MetricsFormat::Prometheus => cce_api::paths::METRICS,
         MetricsFormat::Json => cce_api::paths::METRICS_JSON,

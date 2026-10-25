@@ -333,9 +333,11 @@ fn test_alignment_keys_are_consistent_across_results() {
     // Every code result must carry a non-empty alignment key that survived the
     // BM25 write/read round trip.
     assert!(
-        code_results
-            .iter()
-            .all(|r| r.segment_id.as_deref().map(|s| !s.is_empty()).unwrap_or(false)),
+        code_results.iter().all(|r| r
+            .segment_id
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)),
         "every code result must carry a non-empty segment_id"
     );
 
@@ -365,7 +367,9 @@ fn test_alignment_keys_are_consistent_across_results() {
     // tried (and failed) to express.
     let mut seg_counts: std::collections::HashMap<&str, usize> = Default::default();
     for r in &code_results {
-        *seg_counts.entry(r.segment_id.as_deref().unwrap()).or_insert(0) += 1;
+        *seg_counts
+            .entry(r.segment_id.as_deref().unwrap())
+            .or_insert(0) += 1;
     }
     assert!(
         seg_counts.values().any(|&c| c > 1),

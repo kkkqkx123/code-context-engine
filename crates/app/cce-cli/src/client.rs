@@ -5,7 +5,7 @@
 //! command shares one error mapping without a thin wrapper struct.
 
 use anyhow::Result;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 use cce_api::models::*;
 use cce_api::service_params::{
@@ -13,7 +13,7 @@ use cce_api::service_params::{
     GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
     GraphStructuralParams, GraphSubgraphParams,
 };
-use cce_transport::{GraphQuery, QueryParam, SharedHttpClient, map_transport_error};
+use cce_transport::{map_transport_error, GraphQuery, QueryParam, SharedHttpClient};
 
 /// Typed domain API shared by CLI business commands.
 pub trait CliApi {
@@ -23,10 +23,7 @@ pub trait CliApi {
     async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse>;
     async fn index(&self, request: IndexRequest) -> Result<IndexResponse>;
     async fn search(&self, request: SearchRequest) -> Result<SearchResponse>;
-    async fn search_aggregated(
-        &self,
-        request: AggregatedSearchRequest,
-    ) -> Result<SearchResponse>;
+    async fn search_aggregated(&self, request: AggregatedSearchRequest) -> Result<SearchResponse>;
     async fn graph_ego(
         &self,
         project_id: i64,
@@ -104,10 +101,7 @@ impl CliApi for SharedHttpClient {
         mapped_get(self, cce_api::paths::PROJECT).await
     }
 
-    async fn create_project(
-        &self,
-        request: CreateProjectRequest,
-    ) -> Result<ProjectDetailResponse> {
+    async fn create_project(&self, request: CreateProjectRequest) -> Result<ProjectDetailResponse> {
         mapped_post(self, cce_api::paths::PROJECT, &request).await
     }
 
@@ -129,10 +123,7 @@ impl CliApi for SharedHttpClient {
         mapped_post(self, cce_api::paths::SEARCH, &request).await
     }
 
-    async fn search_aggregated(
-        &self,
-        request: AggregatedSearchRequest,
-    ) -> Result<SearchResponse> {
+    async fn search_aggregated(&self, request: AggregatedSearchRequest) -> Result<SearchResponse> {
         self.post_aggregated_search(&request)
             .await
             .map_err(map_transport_error)
@@ -548,7 +539,9 @@ mod tests {
     async fn mapped_helpers_preserve_contract_paths() {
         let stub = Stub::spawn(serde_json::json!({"success": true, "total": 0, "projects": []}));
         let client = SharedHttpClient::new(&stub.url).expect("client builds");
-        let _: ProjectListResponse = mapped_get(&client, "/api/project").await.expect("mapped get");
+        let _: ProjectListResponse = mapped_get(&client, "/api/project")
+            .await
+            .expect("mapped get");
         let recorded = stub.recorded();
         assert_eq!(recorded[0].1, "/api/project");
     }

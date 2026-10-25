@@ -5,12 +5,12 @@ use clap::Subcommand;
 use anyhow::Result;
 
 use crate::output::{print_error, print_output, print_success, truncate};
-use cce_transport::SharedHttpClient;
 use cce_api::models::{
     CallChainResponse, CallPathResponse, ClassImplementationsResponse, ClassInheritanceResponse,
     EntitySearchRequest, EntitySearchResponse, FunctionCallersResponse, FunctionCallsResponse,
     FunctionDetailResponse,
 };
+use cce_transport::SharedHttpClient;
 
 pub async fn execute_with_client(
     cmd: &EntityCommands,
@@ -18,7 +18,6 @@ pub async fn execute_with_client(
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
-
     match cmd {
         EntityCommands::Function { id, project_id } => {
             get_function(client, *project_id, id, verbose).await

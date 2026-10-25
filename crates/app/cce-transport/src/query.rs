@@ -101,13 +101,19 @@ mod tests {
             .param("depth", QueryParam::Number(2))
             .param("include_external", QueryParam::Bool(true))
             .build();
-        assert_eq!(path, "/p/1/graph/ego?entity_id=a%2Fb&depth=2&include_external=true");
+        assert_eq!(
+            path,
+            "/p/1/graph/ego?entity_id=a%2Fb&depth=2&include_external=true"
+        );
     }
 
     #[test]
     fn list_joins_with_comma() {
         let path = GraphQuery::new("/x".to_string())
-            .param("ids", QueryParam::List(vec!["a".to_string(), "b/c".to_string()]))
+            .param(
+                "ids",
+                QueryParam::List(vec!["a".to_string(), "b/c".to_string()]),
+            )
             .build();
         assert_eq!(path, "/x?ids=a%2Cb%2Fc");
     }

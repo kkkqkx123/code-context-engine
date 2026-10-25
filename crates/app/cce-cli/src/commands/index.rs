@@ -5,13 +5,13 @@ use clap::Subcommand;
 use anyhow::Result;
 
 use crate::client::CliApi;
-use cce_transport::SharedHttpClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
     DeadLetterAcknowledgeRequest, DeadLetterActionResponse, DeadLetterListResponse,
     DeadLetterRetryRequest, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
     ParseRequest, ParseResponse,
 };
+use cce_transport::SharedHttpClient;
 
 /// Execute index commands through the client abstraction.
 pub async fn execute_with_client(
@@ -112,12 +112,8 @@ pub async fn execute_with_client(
             add,
             remove,
             force,
-        } => {
-            incremental_index(client, *project_id, add, remove, *force, verbose).await
-        }
-        IndexCommands::Parse { file } => {
-            parse_file(client, file, verbose).await
-        }
+        } => incremental_index(client, *project_id, add, remove, *force, verbose).await,
+        IndexCommands::Parse { file } => parse_file(client, file, verbose).await,
         IndexCommands::RetryDeadLetter { project_id, files } => {
             retry_dead_letter(client, *project_id, files.as_deref(), verbose).await
         }
@@ -128,9 +124,7 @@ pub async fn execute_with_client(
             project_id,
             file,
             module,
-        } => {
-            acknowledge_dead_letter(client, *project_id, file, module.as_deref(), verbose).await
-        }
+        } => acknowledge_dead_letter(client, *project_id, file, module.as_deref(), verbose).await,
     }
 }
 
@@ -225,7 +219,11 @@ async fn retry_dead_letter(
     Ok(())
 }
 
-async fn list_dead_letters(client: &SharedHttpClient, project_id: i64, verbose: bool) -> Result<()> {
+async fn list_dead_letters(
+    client: &SharedHttpClient,
+    project_id: i64,
+    verbose: bool,
+) -> Result<()> {
     if verbose {
         println!("Listing dead letters for project {}...", project_id);
     }

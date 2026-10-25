@@ -4,9 +4,9 @@
 
 use anyhow::Result;
 
-use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{BatchCompressRequest, BatchCompressResponse};
+use cce_transport::SharedHttpClient;
 
 pub async fn execute_with_client(
     file_paths: &[String],

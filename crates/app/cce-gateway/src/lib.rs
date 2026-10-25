@@ -20,17 +20,20 @@
 //! This module re-exports the public surface so callers keep one import path.
 
 mod client;
-mod policy;
 mod health;
 mod params;
+mod policy;
 mod scan;
 mod sync;
 mod watch;
 
 pub use client::GatewayClient;
-pub use policy::{GATEWAY_BATCH_WIRE_BYTES, should_flush_batch, total_chunks_for_size as total_chunks_for_size_with_bytes};
 pub use health::{GatewayHealth, write_health_file};
 pub use params::{SyncParamOverrides, SyncParams, adaptive_enabled, compression_enabled};
+pub use policy::{
+    GATEWAY_BATCH_WIRE_BYTES, should_flush_batch,
+    total_chunks_for_size as total_chunks_for_size_with_bytes,
+};
 pub use scan::{
     BaselineFingerprint, ScanOutcome, ScanSnapshot, ScannedFile, fingerprints_match,
     load_cached_entries, manifest_version_for_snapshot, save_cached_entries, scan_local,

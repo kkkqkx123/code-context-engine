@@ -4,14 +4,18 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use cce_transport::SharedHttpClient;
 use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
     BatchDeleteRequest, ClearIndexRequest, ClearIndexResponse, DeleteEntityResponse,
     DeleteFileResponse, IndexStatsResponse, StorageStatusResponse,
 };
+use cce_transport::SharedHttpClient;
 
-pub async fn execute_with_client(cmd: &StorageCommands, client: &SharedHttpClient, verbose: bool) -> Result<()> {
+pub async fn execute_with_client(
+    cmd: &StorageCommands,
+    client: &SharedHttpClient,
+    verbose: bool,
+) -> Result<()> {
     match cmd {
         StorageCommands::Status => storage_status(client, verbose).await,
         StorageCommands::Stats { project_id } => index_stats(*project_id, client, verbose).await,
@@ -175,7 +179,12 @@ async fn clear_index(
     Ok(())
 }
 
-async fn delete_file(project_id: i64, client: &SharedHttpClient, path: &str, verbose: bool) -> Result<()> {
+async fn delete_file(
+    project_id: i64,
+    client: &SharedHttpClient,
+    path: &str,
+    verbose: bool,
+) -> Result<()> {
     if verbose {
         println!("Deleting file: {}", path);
     }
@@ -204,7 +213,12 @@ async fn delete_file(project_id: i64, client: &SharedHttpClient, path: &str, ver
     Ok(())
 }
 
-async fn delete_entity(project_id: i64, client: &SharedHttpClient, id: &str, verbose: bool) -> Result<()> {
+async fn delete_entity(
+    project_id: i64,
+    client: &SharedHttpClient,
+    id: &str,
+    verbose: bool,
+) -> Result<()> {
     if verbose {
         println!("Deleting entity: {}", id);
     }

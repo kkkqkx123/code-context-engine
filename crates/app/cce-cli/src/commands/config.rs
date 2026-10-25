@@ -7,10 +7,10 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use cce_transport::SharedHttpClient;
 use crate::client::CliApi;
 use crate::output::{print_error, print_success, print_warning};
 use cce_api::models::{ConfigInfoResponse, ConfigValidateResponse};
+use cce_transport::SharedHttpClient;
 
 /// Execute configuration reload through the client abstraction.
 pub async fn execute_reload_with_client(

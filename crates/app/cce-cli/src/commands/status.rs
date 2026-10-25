@@ -4,10 +4,10 @@ use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
 
-use cce_transport::SharedHttpClient;
 use crate::icons;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::{HealthStatus, StorageComponentStatus, StorageStatus, StorageStatusResponse};
+use cce_transport::SharedHttpClient;
 
 /// Combined status response for JSON output
 #[derive(Debug, Serialize)]
@@ -17,7 +17,11 @@ struct CombinedStatus {
     storage: Option<StorageStatus>,
 }
 
-pub async fn execute_with_client(client: &SharedHttpClient, verbose: bool, format: crate::cli::OutputFormat) -> Result<()> {
+pub async fn execute_with_client(
+    client: &SharedHttpClient,
+    verbose: bool,
+    format: crate::cli::OutputFormat,
+) -> Result<()> {
     if verbose {
         println!("Checking server status: {}", client.base_url());
     }

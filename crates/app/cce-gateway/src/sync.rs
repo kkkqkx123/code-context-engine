@@ -175,7 +175,8 @@ pub async fn upload_paths(
         let Some(file) = snapshot.files.get(identity) else {
             continue;
         };
-        let total = cce_ingest_transfer::total_chunks_for_size(file.size.max(1), INGEST_CHUNK_BYTES);
+        let total =
+            cce_ingest_transfer::total_chunks_for_size(file.size.max(1), INGEST_CHUNK_BYTES);
         wanted.insert(identity.clone(), (0..total).collect());
     }
     for missing in missing_chunks {
@@ -217,8 +218,10 @@ pub async fn upload_paths(
             ));
             continue;
         }
-        let total =
-            cce_ingest_transfer::total_chunks_for_size(bytes.len().max(1) as u64, INGEST_CHUNK_BYTES);
+        let total = cce_ingest_transfer::total_chunks_for_size(
+            bytes.len().max(1) as u64,
+            INGEST_CHUNK_BYTES,
+        );
         let mut indices: Vec<u32> = wanted_indices.into_iter().collect();
         indices.sort_unstable();
         for chunk_index in indices {
@@ -280,7 +283,12 @@ pub async fn upload_paths(
 }
 
 /// Emit per-batch progress immediately after a batch returns.
-fn emit_batch_progress(params: &SyncParams, verbose: bool, batch_staged: usize, total_staged: usize) {
+fn emit_batch_progress(
+    params: &SyncParams,
+    verbose: bool,
+    batch_staged: usize,
+    total_staged: usize,
+) {
     if params.json_progress {
         println!(
             "{}",
@@ -336,7 +344,10 @@ mod tests {
 
     #[test]
     fn supply_wrappers_delegate_to_shared_kernel() {
-        assert_eq!(chunk_hash(b"hello"), cce_ingest_transfer::chunk_hash(b"hello"));
+        assert_eq!(
+            chunk_hash(b"hello"),
+            cce_ingest_transfer::chunk_hash(b"hello")
+        );
         let repetitive = vec![b'a'; 64];
         let (plain, compressed) = maybe_compress(&repetitive, false);
         assert!(!compressed);

@@ -5,7 +5,6 @@ use clap::Subcommand;
 use anyhow::Result;
 use colored::Colorize;
 
-use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{
     BatchFoldRequest, BatchFoldResponse, CompressApiResponse, CompressRequest, DiagnoseApiResponse,
@@ -13,6 +12,7 @@ use cce_api::models::{
     GetSymbolsRequest, GetSymbolsResponse, GotoDefinitionRequest, GotoDefinitionResponse,
     KeywordSearchApiResponse, KeywordSearchRequest, KeywordTermOperator,
 };
+use cce_transport::SharedHttpClient;
 
 pub(crate) struct LocationParams {
     project_id: i64,
@@ -23,7 +23,11 @@ pub(crate) struct LocationParams {
     verbose: bool,
 }
 
-pub async fn execute_with_client(cmd: &ToolCommands, client: &SharedHttpClient, verbose: bool) -> Result<()> {
+pub async fn execute_with_client(
+    cmd: &ToolCommands,
+    client: &SharedHttpClient,
+    verbose: bool,
+) -> Result<()> {
     match cmd {
         ToolCommands::Compress {
             file_path,
@@ -222,7 +226,6 @@ pub async fn execute_compress_with_client(
     client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-
     let request = CompressRequest {
         file_path: file_path.to_string(),
         include_entities,
@@ -275,7 +278,6 @@ pub async fn execute_diagnose_with_client(
     client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-
     let request = DiagnoseRequest {
         code: code.to_string(),
         language: language.map(|s| s.to_string()),
@@ -326,7 +328,6 @@ pub async fn execute_get_symbols_with_client(
     client: &SharedHttpClient,
     verbose: bool,
 ) -> Result<()> {
-
     let request = GetSymbolsRequest {
         project_id,
         paths: paths.to_vec(),
@@ -452,8 +453,11 @@ pub async fn execute_find_references_with_client(
     Ok(())
 }
 
-pub async fn execute_goto_definition_with_client(client: &SharedHttpClient, params: LocationParams, include_body: bool) -> Result<()> {
-
+pub async fn execute_goto_definition_with_client(
+    client: &SharedHttpClient,
+    params: LocationParams,
+    include_body: bool,
+) -> Result<()> {
     let request = GotoDefinitionRequest {
         project_id: params.project_id,
         path: params.path,
@@ -503,8 +507,10 @@ pub async fn execute_goto_definition_with_client(client: &SharedHttpClient, para
     Ok(())
 }
 
-pub async fn execute_keyword_search_with_client(client: &SharedHttpClient, params: &KeywordSearchParams<'_>) -> Result<()> {
-
+pub async fn execute_keyword_search_with_client(
+    client: &SharedHttpClient,
+    params: &KeywordSearchParams<'_>,
+) -> Result<()> {
     let operator = match params.term_operator.map(str::to_ascii_lowercase).as_deref() {
         Some("and") => KeywordTermOperator::And,
         _ => KeywordTermOperator::Or,

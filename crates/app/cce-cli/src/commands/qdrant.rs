@@ -4,11 +4,15 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use cce_transport::SharedHttpClient;
 use crate::output::{print_error, print_success};
 use cce_api::models::{QdrantActionResponse, QdrantProcessStatus, QdrantProcessStatusResponse};
+use cce_transport::SharedHttpClient;
 
-pub async fn execute_with_client(cmd: &QdrantCommands, client: &SharedHttpClient, verbose: bool) -> Result<()> {
+pub async fn execute_with_client(
+    cmd: &QdrantCommands,
+    client: &SharedHttpClient,
+    verbose: bool,
+) -> Result<()> {
     match cmd {
         QdrantCommands::Process { action } => {
             let action_str = match action {
