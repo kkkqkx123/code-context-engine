@@ -12,10 +12,10 @@ use cce_api::models::{
     ParseRequest, ParseResponse,
 };
 
-/// Execute index commands through the domain service abstraction.
-pub async fn execute_with_service(
+/// Execute index commands through the client abstraction.
+pub async fn execute_with_client(
     cmd: &IndexCommands,
-    service: &crate::service::CliService,
+    client: &crate::client::ApiClient,
     server: &str,
     verbose: bool,
 ) -> Result<()> {
@@ -56,7 +56,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Indexing directory: {}", path);
             }
-            match service.index(request).await {
+            match client.index(request).await {
                 Ok(response) => {
                     if response.success {
                         println!();

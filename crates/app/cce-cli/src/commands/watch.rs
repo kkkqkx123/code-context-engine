@@ -7,10 +7,10 @@ use anyhow::Result;
 use crate::output::{print_error, print_success};
 use cce_api::models::StartWatchRequest;
 
-/// Execute watch commands through the domain service abstraction.
-pub async fn execute_with_service(
+/// Execute watch commands through the client abstraction.
+pub async fn execute_with_client(
     cmd: &WatchCommands,
-    service: &crate::service::CliService,
+    client: &crate::client::ApiClient,
     verbose: bool,
 ) -> Result<()> {
     match cmd {
@@ -32,7 +32,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Starting watch on: {}", path);
             }
-            match service.watch_start(*project_id, request).await {
+            match client.watch_start(*project_id, request).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!("Watch started on: {}", response.path));
@@ -44,7 +44,7 @@ pub async fn execute_with_service(
             }
             Ok(())
         }
-        WatchCommands::Stop { project_id } => match service.watch_stop(*project_id).await {
+        WatchCommands::Stop { project_id } => match client.watch_stop(*project_id).await {
             Ok(response) => {
                 if response.success {
                     print_success("Watch stopped");
@@ -58,7 +58,7 @@ pub async fn execute_with_service(
                 Ok(())
             }
         },
-        WatchCommands::Status { project_id } => match service.watch_status(*project_id).await {
+        WatchCommands::Status { project_id } => match client.watch_status(*project_id).await {
             Ok(response) => {
                 if response.success {
                     let status = &response.status;

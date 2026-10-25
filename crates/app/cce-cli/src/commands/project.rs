@@ -15,12 +15,10 @@ fn project_path(id: &str) -> String {
     cce_api::paths::PROJECT_DETAIL_TEMPLATE.replace(cce_api::paths::PROJECT_ID_PLACEHOLDER, id)
 }
 
-/// Execute project commands through the domain service abstraction.
-///
-/// Local and remote share parameter semantics; only the transport differs.
-pub async fn execute_with_service(
+/// Execute project commands through the client abstraction.
+pub async fn execute_with_client(
     cmd: &ProjectCommands,
-    service: &crate::service::CliService,
+    client: &crate::client::ApiClient,
     server: &str,
     verbose: bool,
 ) -> Result<()> {
@@ -49,7 +47,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Creating project at: {}", path);
             }
-            match service.create_project(request).await {
+            match client.create_project(request).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!("Project created: {}", response.project.name));
@@ -63,7 +61,7 @@ pub async fn execute_with_service(
             }
             Ok(())
         }
-        ProjectCommands::List => match service.list_projects().await {
+        ProjectCommands::List => match client.list_projects().await {
             Ok(response) => {
                 if response.success {
                     println!("Projects ({} total):", response.total);
@@ -99,7 +97,7 @@ pub async fn execute_with_service(
         },
         ProjectCommands::Get { id } => {
             let project_id: i64 = id.parse().unwrap_or(-1);
-            match service.get_project(project_id).await {
+            match client.get_project(project_id).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!("Project: {}", response.project.name));
@@ -115,7 +113,7 @@ pub async fn execute_with_service(
         }
         ProjectCommands::Delete { id } => {
             let project_id: i64 = id.parse().unwrap_or(-1);
-            match service.delete_project(project_id).await {
+            match client.delete_project(project_id).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!("Project {} deleted", response.project_id));
@@ -133,7 +131,7 @@ pub async fn execute_with_service(
         }
         ProjectCommands::Reload { id } => {
             let project_id: i64 = id.parse().unwrap_or(-1);
-            match service.reload_project(project_id).await {
+            match client.reload_project(project_id).await {
                 Ok(response) => {
                     if response.success {
                         print_success(&format!(

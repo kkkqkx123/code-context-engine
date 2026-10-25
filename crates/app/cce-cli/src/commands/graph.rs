@@ -7,14 +7,13 @@ use anyhow::Result;
 use crate::output::{print_error, print_output, print_success};
 use cce_api::models::GraphSubgraphResponse;
 
-/// Execute graph commands through the domain service abstraction.
+/// Execute graph commands through the client abstraction.
 ///
-/// Every traversal shares parameter semantics across local and remote modes.
-/// Output rendering stays command-local; transport differences live in the
-/// service implementations.
-pub async fn execute_with_service(
+/// Output rendering stays command-local; transport encoding lives in the
+/// client's typed domain methods.
+pub async fn execute_with_client(
     cmd: &GraphCommands,
-    service: &crate::service::CliService,
+    client: &crate::client::ApiClient,
     _server: &str,
     verbose: bool,
     format: crate::cli::OutputFormat,
@@ -39,7 +38,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Fetching ego graph: {id}");
             }
-            match service
+            match client
                 .graph_ego(
                     *project_id,
                     GraphEgoParams {
@@ -79,7 +78,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Finding graph path: {from} -> {to}");
             }
-            match service
+            match client
                 .graph_path(
                     *project_id,
                     GraphPathParams {
@@ -135,7 +134,7 @@ pub async fn execute_with_service(
                 .filter(|part| !part.is_empty())
                 .map(str::to_string)
                 .collect();
-            match service
+            match client
                 .graph_subgraph(
                     *project_id,
                     GraphSubgraphParams {
@@ -172,7 +171,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Fetching graph components");
             }
-            match service
+            match client
                 .graph_components(
                     *project_id,
                     GraphComponentsParams {
@@ -216,7 +215,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Exporting graph (limit {limit})");
             }
-            match service
+            match client
                 .graph_export(
                     *project_id,
                     GraphExportParams {
@@ -245,7 +244,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Analyzing impact: {file}");
             }
-            match service
+            match client
                 .graph_impact(*project_id, GraphImpactParams { file: file.clone() })
                 .await
             {
@@ -279,7 +278,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Analyzing entity impact: {entity_id}");
             }
-            match service
+            match client
                 .graph_entity_impact(
                     *project_id,
                     GraphEntityImpactParams {
@@ -319,7 +318,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Finding {level} dependency cycles");
             }
-            match service
+            match client
                 .graph_cycles(
                     *project_id,
                     GraphCyclesParams {
@@ -365,7 +364,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Fetching {kind} relations for {entity_id} ({direction})");
             }
-            match service
+            match client
                 .graph_structural(
                     *project_id,
                     GraphStructuralParams {
@@ -413,7 +412,7 @@ pub async fn execute_with_service(
             if verbose {
                 println!("Fetching module relations for {file}");
             }
-            match service
+            match client
                 .graph_module(*project_id, GraphModuleParams { file: file.clone() })
                 .await
             {

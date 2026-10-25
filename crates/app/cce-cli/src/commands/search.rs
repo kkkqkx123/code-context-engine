@@ -33,10 +33,10 @@ fn print_result_item(index: usize, item: &SearchResultItem) {
     println!();
 }
 
-/// Execute search commands through the domain service abstraction.
-pub async fn execute_with_service(
+/// Execute search commands through the client abstraction.
+pub async fn execute_with_client(
     cmd: &SearchCommands,
-    service: &crate::service::CliService,
+    client: &crate::client::ApiClient,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> anyhow::Result<()> {
@@ -101,7 +101,7 @@ pub async fn execute_with_service(
                 println!("Searching: {}", query);
                 println!("Type: {}", query_type);
             }
-            match service.search(request).await {
+            match client.search(request).await {
                 Ok(response) => {
                     if matches!(format, crate::cli::OutputFormat::Json) {
                         crate::output::print_output(format, &response);

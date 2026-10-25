@@ -1,9 +1,18 @@
 //! HTTP client for communicating with CCE server
+//!
+//! Single client layer for the CLI: generic transport methods plus typed
+//! domain methods encoding request parameters onto the wire contract paths.
 
 use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 
-use cce_transport::SharedHttpClient;
+use cce_api::models::*;
+use cce_api::service_params::{
+    GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
+    GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
+    GraphStructuralParams, GraphSubgraphParams,
+};
+use cce_transport::{GraphQuery, HttpTransportError, QueryParam, SharedHttpClient};
 
 /// API client
 pub struct ApiClient {
@@ -55,6 +64,302 @@ impl ApiClient {
         body: &T,
     ) -> Result<R> {
         self.inner.delete_with_body(path, body).await
+    }
+
+    fn map(error: anyhow::Error) -> anyhow::Error {
+        if let Some(http) = error.downcast_ref::<HttpTransportError>() {
+            let text = http.to_string();
+            return if http.status == Some(404) {
+                anyhow::anyhow!("not found: {text}")
+            } else {
+                anyhow::anyhow!("transport error: {text}")
+            };
+        }
+        let text = format!("{error:#}");
+        if text.contains("404") || text.contains("not found") {
+            anyhow::anyhow!("not found: {text}")
+        } else {
+            anyhow::anyhow!("transport error: {text}")
+        }
+    }
+}
+
+impl ApiClient {
+    pub async fn list_projects(&self) -> Result<ProjectListResponse> {
+        self.get(cce_api::paths::PROJECT).await.map_err(Self::map)
+    }
+
+    pub async fn create_project(
+        &self,
+        request: CreateProjectRequest,
+    ) -> Result<ProjectDetailResponse> {
+        self.post(cce_api::paths::PROJECT, &request)
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn get_project(&self, project_id: i64) -> Result<ProjectDetailResponse> {
+        self.get(&cce_api::paths::project_detail(project_id))
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse> {
+        self.delete(&cce_api::paths::project_detail(project_id))
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn index(&self, request: IndexRequest) -> Result<IndexResponse> {
+        self.post(cce_api::paths::INDEX, &request)
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn search(&self, request: SearchRequest) -> Result<SearchResponse> {
+        self.post(cce_api::paths::SEARCH, &request)
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn search_aggregated(
+        &self,
+        request: AggregatedSearchRequest,
+    ) -> Result<SearchResponse> {
+        self.inner
+            .post_aggregated_search(&request)
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn graph_ego(
+        &self,
+        project_id: i64,
+        params: GraphEgoParams,
+    ) -> Result<GraphSubgraphResponse> {
+        let path_template = cce_api::paths::GRAPH_EGO_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("entity_id", QueryParam::Text(params.entity_id))
+            .param("depth", QueryParam::Number(params.depth))
+            .param("direction", QueryParam::Text(params.direction))
+            .param("offset", QueryParam::Number(params.offset))
+            .param("limit", QueryParam::Number(params.limit))
+            .param("domains", QueryParam::Text(params.domains))
+            .param("relation_types", QueryParam::Text(params.relation_types))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_path(
+        &self,
+        project_id: i64,
+        params: GraphPathParams,
+    ) -> Result<GraphPathResponse> {
+        let path_template = cce_api::paths::GRAPH_PATH_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("start", QueryParam::Text(params.start))
+            .param("end", QueryParam::Text(params.end))
+            .param("max_depth", QueryParam::Number(params.max_depth))
+            .param("domains", QueryParam::Text(params.domains))
+            .param("relation_types", QueryParam::Text(params.relation_types))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_subgraph(
+        &self,
+        project_id: i64,
+        params: GraphSubgraphParams,
+    ) -> Result<GraphSubgraphResponse> {
+        let path_template = cce_api::paths::GRAPH_SUBGRAPH_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("ids", QueryParam::List(params.ids))
+            .param("offset", QueryParam::Number(params.offset))
+            .param("limit", QueryParam::Number(params.limit))
+            .param("domains", QueryParam::Text(params.domains))
+            .param("relation_types", QueryParam::Text(params.relation_types))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_components(
+        &self,
+        project_id: i64,
+        params: GraphComponentsParams,
+    ) -> Result<GraphComponentsResponse> {
+        let path_template = cce_api::paths::GRAPH_COMPONENTS_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("offset", QueryParam::Number(params.offset))
+            .param("limit", QueryParam::Number(params.limit))
+            .param("domains", QueryParam::Text(params.domains))
+            .param("relation_types", QueryParam::Text(params.relation_types))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_export(
+        &self,
+        project_id: i64,
+        params: GraphExportParams,
+    ) -> Result<GraphSubgraphResponse> {
+        let path_template = cce_api::paths::GRAPH_EXPORT_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("limit", QueryParam::Number(params.limit))
+            .param("offset", QueryParam::Number(params.offset))
+            .param("domains", QueryParam::Text(params.domains))
+            .param("relation_types", QueryParam::Text(params.relation_types))
+            .param(
+                "include_external",
+                QueryParam::Bool(params.include_external),
+            )
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_impact(
+        &self,
+        project_id: i64,
+        params: GraphImpactParams,
+    ) -> Result<GraphImpactResponse> {
+        let path_template = cce_api::paths::GRAPH_IMPACT_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("file", QueryParam::Text(params.file))
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_entity_impact(
+        &self,
+        project_id: i64,
+        params: GraphEntityImpactParams,
+    ) -> Result<GraphEntityImpactResponse> {
+        let path_template = cce_api::paths::GRAPH_ENTITY_IMPACT_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("entity_id", QueryParam::Text(params.entity_id))
+            .param("max_depth", QueryParam::Number(params.max_depth))
+            .param("scope", QueryParam::Text(params.scope))
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_cycles(
+        &self,
+        project_id: i64,
+        params: GraphCyclesParams,
+    ) -> Result<GraphCyclesResponse> {
+        let path_template = cce_api::paths::GRAPH_CYCLES_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("level", QueryParam::Text(params.level))
+            .param("limit", QueryParam::Number(params.limit))
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_structural(
+        &self,
+        project_id: i64,
+        params: GraphStructuralParams,
+    ) -> Result<GraphStructuralResponse> {
+        let path_template = cce_api::paths::GRAPH_STRUCTURAL_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("entity_id", QueryParam::Text(params.entity_id))
+            .param("kind", QueryParam::Text(params.kind))
+            .param("direction", QueryParam::Text(params.direction))
+            .param("limit", QueryParam::Number(params.limit))
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn graph_module(
+        &self,
+        project_id: i64,
+        params: GraphModuleParams,
+    ) -> Result<GraphModuleResponse> {
+        let path_template = cce_api::paths::GRAPH_MODULE_TEMPLATE.replace(
+            cce_api::paths::PROJECT_ID_PLACEHOLDER,
+            &project_id.to_string(),
+        );
+        let path = GraphQuery::new(path_template)
+            .param("file", QueryParam::Text(params.file))
+            .build();
+        self.get(&path).await.map_err(Self::map)
+    }
+
+    pub async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse> {
+        self.get(&cce_api::paths::watch_status(project_id))
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn watch_start(
+        &self,
+        project_id: i64,
+        request: StartWatchRequest,
+    ) -> Result<StartWatchResponse> {
+        self.post(&cce_api::paths::watch_start(project_id), &request)
+            .await
+            .map_err(Self::map)
+    }
+
+    pub async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse> {
+        self.post(
+            &cce_api::paths::watch_stop(project_id),
+            &serde_json::json!({}),
+        )
+        .await
+        .map_err(Self::map)
+    }
+
+    pub async fn reload_project(&self, project_id: i64) -> Result<ProjectConfigReloadResponse> {
+        self.post(
+            &cce_api::paths::project_reload(project_id),
+            &serde_json::json!({}),
+        )
+        .await
+        .map_err(Self::map)
     }
 }
 

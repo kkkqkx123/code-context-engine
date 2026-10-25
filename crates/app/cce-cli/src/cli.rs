@@ -19,10 +19,6 @@ pub struct Cli {
     )]
     pub server: String,
 
-    /// Execution mode: local calls the engine directly, remote uses HTTP.
-    #[arg(long, value_enum, env = "CCE_SERVICE_MODE")]
-    pub mode: Option<crate::service::CliServiceMode>,
-
     /// Output format
     #[arg(short, long, value_enum, default_value = "table")]
     pub format: OutputFormat,
@@ -151,62 +147,32 @@ pub use crate::commands::health::HealthCommands;
 impl Cli {
     /// Execute the CLI command
     pub async fn execute(&self) -> anyhow::Result<()> {
-        let mode = self.resolved_mode();
         match &self.command {
             Commands::Index(cmd) => {
-                let service =
-                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
-                commands::index::execute_with_service(
-                    cmd,
-                    service.as_trait(),
-                    &self.server,
-                    self.verbose,
-                )
-                .await
+                let client = crate::client::ApiClient::new(&self.server)?;
+                commands::index::execute_with_client(cmd, &client, &self.server, self.verbose).await
             }
             Commands::Search(cmd) => {
-                let service =
-                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
-                commands::search::execute_with_service(
-                    cmd,
-                    service.as_trait(),
-                    self.verbose,
-                    self.format,
-                )
-                .await
+                let client = crate::client::ApiClient::new(&self.server)?;
+                commands::search::execute_with_client(cmd, &client, self.verbose, self.format).await
             }
             Commands::AggSearch(cmd) => {
-                let service =
-                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
-                cmd.execute_with_service(service.as_trait(), self.verbose)
-                    .await
+                let client = crate::client::ApiClient::new(&self.server)?;
+                cmd.execute_with_client(&client, self.verbose).await
             }
             Commands::Project(cmd) => {
-                let service =
-                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
-                commands::project::execute_with_service(
-                    cmd,
-                    service.as_trait(),
-                    &self.server,
-                    self.verbose,
-                )
-                .await
+                let client = crate::client::ApiClient::new(&self.server)?;
+                commands::project::execute_with_client(cmd, &client, &self.server, self.verbose)
+                    .await
             }
             Commands::Entity(cmd) => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Entity commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
                 commands::entity::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::Graph(cmd) => {
-                let service =
-                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
-                commands::graph::execute_with_service(
+                let client = crate::client::ApiClient::new(&self.server)?;
+                commands::graph::execute_with_client(
                     cmd,
-                    service.as_trait(),
+                    &client,
                     &self.server,
                     self.verbose,
                     self.format,
@@ -214,77 +180,24 @@ impl Cli {
                 .await
             }
             Commands::Watch(cmd) => {
-                let service =
-                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
-                commands::watch::execute_with_service(cmd, service.as_trait(), self.verbose).await
+                let client = crate::client::ApiClient::new(&self.server)?;
+                commands::watch::execute_with_client(cmd, &client, self.verbose).await
             }
             Commands::Storage(cmd) => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Storage commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
                 commands::storage::execute(cmd, &self.server, self.verbose).await
             }
-            Commands::Tools(cmd) => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Tool commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
-                commands::tools::execute(cmd, &self.server, self.verbose).await
-            }
-            Commands::Summary(cmd) => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Summary commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
-                self.execute_summary(cmd).await
-            }
+            Commands::Tools(cmd) => commands::tools::execute(cmd, &self.server, self.verbose).await,
+            Commands::Summary(cmd) => self.execute_summary(cmd).await,
             Commands::Config(cmd) => {
-                let service =
-                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
-                self.execute_config_with_service(cmd, service.as_trait())
-                    .await
+                let client = crate::client::ApiClient::new(&self.server)?;
+                self.execute_config_with_client(cmd, &client).await
             }
             Commands::Qdrant(cmd) => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Qdrant commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
                 commands::qdrant::execute(cmd, &self.server, self.verbose).await
             }
-            Commands::Metrics(cmd) => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Metrics commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
-                self.execute_metrics(cmd).await
-            }
-            Commands::Health(cmd) => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Health commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
-                self.execute_health(cmd).await
-            }
+            Commands::Metrics(cmd) => self.execute_metrics(cmd).await,
+            Commands::Health(cmd) => self.execute_health(cmd).await,
             Commands::Status => {
-                if mode == crate::service::CliServiceMode::Local {
-                    eprintln!(
-                        "Status command requires a running server; local embedded mode does not expose it. Use --mode remote or start a server."
-                    );
-                    return Ok(());
-                }
                 commands::status::execute(&self.server, self.verbose, self.format).await
             }
             Commands::Gateway(cmd) => {
@@ -327,15 +240,15 @@ impl Cli {
         }
     }
 
-    /// Execute config command through the domain service abstraction.
-    async fn execute_config_with_service(
+    /// Execute config command through the client abstraction.
+    async fn execute_config_with_client(
         &self,
         cmd: &ConfigCommands,
-        service: &crate::service::CliService,
+        client: &crate::client::ApiClient,
     ) -> anyhow::Result<()> {
         match cmd {
             ConfigCommands::Reload { project_id } => {
-                commands::config::execute_reload_with_service(service, *project_id, self.verbose)
+                commands::config::execute_reload_with_client(client, *project_id, self.verbose)
                     .await
             }
             ConfigCommands::Info => {
@@ -345,11 +258,6 @@ impl Cli {
                 commands::config::execute_validate(&self.server, self.verbose).await
             }
         }
-    }
-
-    /// Resolve the effective service mode for this invocation.
-    fn resolved_mode(&self) -> crate::service::CliServiceMode {
-        crate::service::CliServiceMode::resolve(self.mode)
     }
 
     /// Execute metrics command

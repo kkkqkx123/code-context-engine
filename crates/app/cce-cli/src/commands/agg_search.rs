@@ -116,9 +116,9 @@ fn split_weighted_query(raw: &str, fallback: f32) -> (String, f32) {
 
 impl AggSearchCommand {
     /// Execute through the domain service abstraction with identical semantics.
-    pub async fn execute_with_service(
+    pub async fn execute_with_client(
         &self,
-        service: &crate::service::CliService,
+        client: &crate::client::ApiClient,
         verbose: bool,
     ) -> Result<()> {
         let request = self.build_request()?;
@@ -126,7 +126,7 @@ impl AggSearchCommand {
             println!("Project ID: {:?}", self.project_id);
             println!("Sub-queries: {}", request.sub_queries.len());
         }
-        match service.search_aggregated(request).await {
+        match client.search_aggregated(request).await {
             Ok(response) => {
                 Self::render(&response);
                 Ok(())
