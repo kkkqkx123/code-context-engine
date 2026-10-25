@@ -111,13 +111,6 @@ pub const INGEST_EVENT_TEMPLATE: &str = "/api/project/{project_id}/ingest/event"
 
 pub const ADMISSION_STATS: &str = "/api/admission/stats";
 
-/// Wire byte budget per gateway upload batch.
-///
-/// Accounting uses base64 wire length so a batch stays inside the admission
-/// body limit after transport growth. The gateway filters with this bound
-/// before pushing so oversized batches never consume transfer bandwidth.
-pub const GATEWAY_BATCH_WIRE_BYTES: u64 = 4 * 1024 * 1024;
-
 /// Build a project scoped path from a template holding the unified placeholder.
 fn expand_project(template: &str, project_id: i64) -> String {
     template.replace(PROJECT_ID_PLACEHOLDER, &project_id.to_string())

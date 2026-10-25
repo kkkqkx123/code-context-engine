@@ -11,21 +11,15 @@ use cce_api::models::{
     DeadLetterRetryRequest, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
     IndexResponse, ParseRequest, ParseResponse,
 };
+use cce_service::CodeContextService;
 
-/// Index run parameters
-struct IndexRunParams<'a> {
-    project_id: i64,
-    path: &'a str,
-    extensions: &'a str,
-    exclude: &'a str,
-    ignore_patterns: &'a Option<String>,
-    gitignore: bool,
-    custom_gitignore: &'a Option<String>,
-}
-
-pub async fn execute(cmd: &IndexCommands, server: &str, verbose: bool) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
+/// Execute index commands through the domain service abstraction.
+pub async fn execute_with_service(
+    cmd: &IndexCommands,
+    service: &dyn cce_service::CodeContextService,
+    server: &str,
+    verbose: bool,
+) -> Result<()> {
     match cmd {
         IndexCommands::Run {
             project_id,
@@ -36,35 +30,98 @@ pub async fn execute(cmd: &IndexCommands, server: &str, verbose: bool) -> Result
             gitignore,
             custom_gitignore,
         } => {
-            let params = IndexRunParams {
+            let ext_list: Vec<String> = extensions
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect();
+            let exclude_list: Vec<String> =
+                exclude.split(',').map(|s| s.trim().to_string()).collect();
+            let ignore_list: Vec<String> = ignore_patterns
+                .as_ref()
+                .map(|s| {
+                    s.split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let request = IndexRequest {
                 project_id: *project_id,
-                path,
-                extensions,
-                exclude,
-                ignore_patterns,
-                gitignore: *gitignore,
-                custom_gitignore,
+                path: path.to_string(),
+                extensions: ext_list,
+                exclude_dirs: exclude_list,
+                respect_gitignore: *gitignore,
+                ignore_patterns: ignore_list,
+                custom_gitignore: custom_gitignore.clone(),
             };
-            run_index(&client, &params, verbose).await
+            if verbose {
+                println!("Indexing directory: {}", path);
+            }
+            match service.index(request).await {
+                Ok(response) => {
+                    if response.success {
+                        println!();
+                        print_success(&response.message);
+                        println!();
+                        println!("  Files scanned:   {}", response.files_scanned);
+                        println!("  Files indexed:   {}", response.files_indexed);
+                        println!("  Failed files:    {}", response.failed_files);
+                        println!("  Degraded files:  {}", response.degraded_files);
+                        println!("  Skipped (perm):  {}", response.skipped_permanent);
+                        println!("  Total entities:  {}", response.total_entities);
+                        println!("  Total relations: {}", response.total_relations);
+                        println!("  Total vectors:   {}", response.total_vectors);
+                        if response.circuit_open {
+                            print_error("Backend circuit breaker opened during this run");
+                        }
+                        println!(
+                            "  Elapsed time:    {}",
+                            format_duration(response.elapsed_ms)
+                        );
+                        if !response.errors.is_empty() {
+                            println!();
+                            println!("Errors:");
+                            for error in &response.errors {
+                                print_error(error);
+                            }
+                        }
+                    } else {
+                        print_error(&response.message);
+                    }
+                }
+                Err(e) => print_error(&format!("Index execution failed: {e}")),
+            }
+            Ok(())
         }
         IndexCommands::Incremental {
             project_id,
             add,
             remove,
             force,
-        } => incremental_index(&client, *project_id, add, remove, *force, verbose).await,
-        IndexCommands::Parse { file } => parse_file(&client, file, verbose).await,
+        } => {
+            let client = ApiClient::new(server)?;
+            incremental_index(&client, *project_id, add, remove, *force, verbose).await
+        }
+        IndexCommands::Parse { file } => {
+            let client = ApiClient::new(server)?;
+            parse_file(&client, file, verbose).await
+        }
         IndexCommands::RetryDeadLetter { project_id, files } => {
+            let client = ApiClient::new(server)?;
             retry_dead_letter(&client, *project_id, files.as_deref(), verbose).await
         }
         IndexCommands::DeadLetters { project_id } => {
+            let client = ApiClient::new(server)?;
             list_dead_letters(&client, *project_id, verbose).await
         }
         IndexCommands::AcknowledgeDeadLetter {
             project_id,
             file,
             module,
-        } => acknowledge_dead_letter(&client, *project_id, file, module.as_deref(), verbose).await,
+        } => {
+            let client = ApiClient::new(server)?;
+            acknowledge_dead_letter(&client, *project_id, file, module.as_deref(), verbose).await
+        }
     }
 }
 
@@ -138,87 +195,6 @@ async fn acknowledge_dead_letter(
     } else {
         print_error(&response.message);
     }
-    Ok(())
-}
-
-async fn run_index(client: &ApiClient, params: &IndexRunParams<'_>, verbose: bool) -> Result<()> {
-    let ext_list: Vec<String> = params
-        .extensions
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .collect();
-    let exclude_list: Vec<String> = params
-        .exclude
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .collect();
-    let ignore_list: Vec<String> = params
-        .ignore_patterns
-        .as_ref()
-        .map(|s| {
-            s.split(',')
-                .map(|p| p.trim().to_string())
-                .filter(|p| !p.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let request = IndexRequest {
-        project_id: params.project_id,
-        path: params.path.to_string(),
-        extensions: ext_list,
-        exclude_dirs: exclude_list,
-        respect_gitignore: params.gitignore,
-        ignore_patterns: ignore_list,
-        custom_gitignore: params.custom_gitignore.clone(),
-    };
-
-    if verbose {
-        println!("Indexing directory: {}", params.path);
-    }
-
-    let response: IndexResponse = client.post(cce_api::paths::INDEX, &request).await?;
-
-    if response.success {
-        println!();
-        print_success(&response.message);
-        println!();
-        println!("  Files scanned:   {}", response.files_scanned);
-        println!("  Files indexed:   {}", response.files_indexed);
-        println!("  Failed files:    {}", response.failed_files);
-        println!("  Degraded files:  {}", response.degraded_files);
-        println!("  Skipped (perm):  {}", response.skipped_permanent);
-        println!("  Total entities:  {}", response.total_entities);
-        println!("  Total relations: {}", response.total_relations);
-        println!("  Total vectors:   {}", response.total_vectors);
-        if response.circuit_open {
-            print_error("Backend circuit breaker opened during this run");
-        }
-        println!(
-            "  Elapsed time:    {}",
-            format_duration(response.elapsed_ms)
-        );
-
-        if !response.errors.is_empty() {
-            println!();
-            println!("Errors:");
-            for error in &response.errors {
-                print_error(error);
-            }
-        }
-    } else {
-        print_error(&response.message);
-        println!("  Failed files:    {}", response.failed_files);
-        println!("  Degraded files:  {}", response.degraded_files);
-        println!("  Skipped (perm):  {}", response.skipped_permanent);
-        if response.circuit_open {
-            print_error("Backend circuit breaker opened during this run");
-        }
-        for error in &response.errors {
-            print_error(error);
-        }
-    }
-
     Ok(())
 }
 

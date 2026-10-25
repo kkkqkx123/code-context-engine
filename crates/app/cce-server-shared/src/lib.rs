@@ -9,5 +9,8 @@
 pub mod engine;
 pub mod maintenance;
 pub mod runtime;
+pub mod service_local;
 pub mod services;
 pub mod state;
+
+pub use service_local::LocalService;

@@ -6,6 +6,7 @@ use clap::Parser;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success, truncate};
 use cce_api::models::{AggregatedSearchRequest, SearchResponse, SearchResultItem, SubQueryRequest};
+use cce_service::CodeContextService;
 
 /// Execute multi-query aggregated search
 #[derive(Parser, Debug)]
@@ -117,10 +118,50 @@ fn split_weighted_query(raw: &str, fallback: f32) -> (String, f32) {
 
 impl AggSearchCommand {
     pub async fn execute(&self, client: &ApiClient, verbose: bool) -> Result<()> {
-        // Build sub-queries list
-        let mut sub_queries = Vec::new();
+        let request = self.build_request()?;
+        if verbose {
+            println!("Project ID: {:?}", self.project_id);
+            println!("Sub-queries: {}", request.sub_queries.len());
+            for (i, sq) in request.sub_queries.iter().enumerate() {
+                println!(
+                    "  {}. [{}] {} (weight: {:.1})",
+                    i + 1,
+                    sq.query_type,
+                    sq.text,
+                    sq.weight
+                );
+            }
+        }
+        let response: SearchResponse = client.search_aggregated(&request).await?;
+        Self::render(&response);
+        Ok(())
+    }
 
-        // Add BM25 sub-queries
+    /// Execute through the domain service abstraction with identical semantics.
+    pub async fn execute_with_service(
+        &self,
+        service: &dyn cce_service::CodeContextService,
+        verbose: bool,
+    ) -> Result<()> {
+        let request = self.build_request()?;
+        if verbose {
+            println!("Project ID: {:?}", self.project_id);
+            println!("Sub-queries: {}", request.sub_queries.len());
+        }
+        match service.search_aggregated(request).await {
+            Ok(response) => {
+                Self::render(&response);
+                Ok(())
+            }
+            Err(e) => {
+                print_error(&format!("Aggregated search failed: {e}"));
+                Ok(())
+            }
+        }
+    }
+
+    fn build_request(&self) -> Result<AggregatedSearchRequest> {
+        let mut sub_queries = Vec::new();
         for query in &self.bm25_queries {
             let (text, weight) = split_weighted_query(query, self.bm25_weight);
             sub_queries.push(SubQueryRequest {
@@ -129,8 +170,6 @@ impl AggSearchCommand {
                 weight,
             });
         }
-
-        // Add Vector sub-queries
         for query in &self.vector_queries {
             let (text, weight) = split_weighted_query(query, self.vector_weight);
             sub_queries.push(SubQueryRequest {
@@ -139,8 +178,6 @@ impl AggSearchCommand {
                 weight,
             });
         }
-
-        // Add Hybrid sub-queries
         for query in &self.hybrid_queries {
             let (text, weight) = split_weighted_query(query, self.hybrid_weight);
             sub_queries.push(SubQueryRequest {
@@ -149,8 +186,6 @@ impl AggSearchCommand {
                 weight,
             });
         }
-
-        // Add Summary sub-queries
         for query in &self.summary_queries {
             let (text, weight) = split_weighted_query(query, self.summary_weight);
             sub_queries.push(SubQueryRequest {
@@ -159,45 +194,37 @@ impl AggSearchCommand {
                 weight,
             });
         }
-
         if sub_queries.is_empty() {
             anyhow::bail!(
                 "at least one sub-query is required (--bm25, --vector, --hybrid or --summary)"
             );
         }
-
-        // Parse filters
         let exclude_content_types: Vec<String> = self
             .exclude_content_types
             .as_ref()
             .map(|s| s.split(',').map(|ct| ct.trim().to_string()).collect())
             .unwrap_or_default();
-
         let exclude_patterns: Vec<String> = self
             .exclude_patterns
             .as_ref()
             .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
             .unwrap_or_default();
-
         let include_patterns: Vec<String> = self
             .include_patterns
             .as_ref()
             .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
             .unwrap_or_default();
-
         let include_categories: Vec<String> = self
             .include_categories
             .as_ref()
             .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
             .unwrap_or_default();
-
         let exclude_categories: Vec<String> = self
             .exclude_categories
             .as_ref()
             .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
             .unwrap_or_default();
-
-        let request = AggregatedSearchRequest {
+        Ok(AggregatedSearchRequest {
             project_id: self.project_id,
             project_path: self.project_path.clone(),
             sub_queries,
@@ -213,33 +240,17 @@ impl AggSearchCommand {
             rerank_max_candidates: self.rerank_max_candidates,
             query_intent: self.query_intent.clone(),
             expand: self.expand,
-        };
+        })
+    }
 
-        if verbose {
-            println!("Project ID: {:?}", self.project_id);
-            println!("Sub-queries: {}", request.sub_queries.len());
-            for (i, sq) in request.sub_queries.iter().enumerate() {
-                println!(
-                    "  {}. [{}] {} (weight: {:.1})",
-                    i + 1,
-                    sq.query_type,
-                    sq.text,
-                    sq.weight
-                );
-            }
-        }
-
-        let response: SearchResponse = client.search_aggregated(&request).await?;
-
+    fn render(response: &SearchResponse) {
         if response.success {
             print_success(&format!(
                 "Found {} results in {}",
                 response.total,
                 format_duration(response.elapsed_ms)
             ));
-
             println!();
-
             if response.items.is_empty() {
                 println!("No results found");
             } else {
@@ -250,8 +261,6 @@ impl AggSearchCommand {
         } else {
             print_error("Aggregated search failed");
         }
-
-        Ok(())
     }
 }
 
@@ -263,17 +272,13 @@ fn print_result_item(index: usize, item: &SearchResultItem) {
         start = item.start_line,
         end = item.end_line
     );
-
     if let Some(ref entity_type) = item.entity_type {
         println!("   Type: {}", entity_type);
     }
-
-    // Print code snippet (first 3 lines)
     let lines: Vec<&str> = item.code_chunk.lines().take(3).collect();
     for line in lines {
         println!("   {}", line);
     }
-
     println!();
 }
 

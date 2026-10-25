@@ -30,9 +30,15 @@ pub struct AdmissionConfig {
     /// false in an admission-enabled build.
     #[serde(default)]
     pub enabled: bool,
-    /// Accepted tokens with their project bindings.
+    /// Gateway push tokens with their project bindings. Gateway tokens may
+    /// only call ingest entries; management entries require an admin token.
     #[serde(default)]
     pub tokens: Vec<TokenEntry>,
+    /// Management tokens with full project and operational scope. Parsed
+    /// from `CCE_MANAGEMENT_TOKENS` with the same entry shape. Empty
+    /// projects on an admin token authorizes every project.
+    #[serde(default)]
+    pub management_tokens: Vec<TokenEntry>,
     /// Path prefixes that bypass authentication (health probes).
     #[serde(default = "default_public_paths")]
     pub public_path_prefixes: Vec<String>,
@@ -74,6 +80,7 @@ impl Default for AdmissionConfig {
         Self {
             enabled: false,
             tokens: Vec::new(),
+            management_tokens: Vec::new(),
             public_path_prefixes: default_public_paths(),
             rate_limit_per_min: default_rate_limit(),
             max_body_bytes: default_max_body_bytes(),
@@ -86,9 +93,11 @@ impl Default for AdmissionConfig {
 impl AdmissionConfig {
     /// Load admission settings from the process environment.
     ///
-    /// `CCE_ADMISSION_TOKENS` holds semicolon separated entries shaped as
+    /// `CCE_ADMISSION_TOKENS` holds gateway push entries shaped as
     /// `token@1,2:quota_bytes`, `token@1,2`, or a bare `token` with no
-    /// project scope. The optional quota suffix bounds stored bytes per
+    /// project scope. `CCE_MANAGEMENT_TOKENS` holds admin entries in the
+    /// same shape; an admin entry with empty projects authorizes every
+    /// project. The optional quota suffix bounds stored bytes per
     /// token; absent means unlimited. The optional
     /// `CCE_ADMISSION_PUBLIC_PATHS` overrides the default bypass list with
     /// comma separated prefixes, `CCE_ADMISSION_RATE_LIMIT_PER_MIN` tunes the
@@ -96,14 +105,22 @@ impl AdmissionConfig {
     /// bodies. A missing token variable yields a disabled configuration.
     pub fn from_env() -> Result<Self, crate::middleware::AdmissionError> {
         let mut config = Self::default();
-        let Some(raw) = std::env::var("CCE_ADMISSION_TOKENS")
+        let gateway = std::env::var("CCE_ADMISSION_TOKENS")
             .ok()
-            .filter(|v| !v.trim().is_empty())
-        else {
+            .filter(|v| !v.trim().is_empty());
+        let management = std::env::var("CCE_MANAGEMENT_TOKENS")
+            .ok()
+            .filter(|v| !v.trim().is_empty());
+        if gateway.is_none() && management.is_none() {
             return Ok(config);
-        };
+        }
         config.enabled = true;
-        config.tokens = parse_token_env(&raw)?;
+        if let Some(raw) = gateway {
+            config.tokens = parse_token_env(&raw)?;
+        }
+        if let Some(raw) = management {
+            config.management_tokens = parse_token_env(&raw)?;
+        }
         if let Ok(raw_paths) = std::env::var("CCE_ADMISSION_PUBLIC_PATHS") {
             let paths: Vec<String> = raw_paths
                 .split(',')
@@ -153,7 +170,7 @@ impl AdmissionConfig {
 
     /// Whether this configuration can actually admit traffic.
     pub fn is_configured(&self) -> bool {
-        self.enabled && !self.tokens.is_empty()
+        self.enabled && (!self.tokens.is_empty() || !self.management_tokens.is_empty())
     }
 
     /// Reject weak or ambiguous token bindings before serving traffic.
@@ -162,13 +179,14 @@ impl AdmissionConfig {
         if !self.enabled {
             return Ok(());
         }
-        if self.tokens.is_empty() {
+        if self.tokens.is_empty() && self.management_tokens.is_empty() {
             return Err(AdmissionError::config(
                 "admission is enabled but no tokens are configured",
             ));
         }
-        let mut seen: Vec<[u8; 32]> = Vec::with_capacity(self.tokens.len());
-        for entry in &self.tokens {
+        let mut seen: Vec<[u8; 32]> =
+            Vec::with_capacity(self.tokens.len() + self.management_tokens.len());
+        for entry in self.tokens.iter().chain(self.management_tokens.iter()) {
             if entry.token.len() < MIN_TOKEN_LEN {
                 return Err(AdmissionError::config(
                     "every admission token must be at least 16 characters",

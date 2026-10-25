@@ -33,6 +33,8 @@ members = [
     "crates/encoding-guess",
     # app
     "crates/app/cce-api",
+    "crates/app/cce-transport",
+    "crates/app/cce-service",
     "crates/app/cce-admission",
     "crates/app/cce-plugin-runtime",
     "crates/app/cce-orchestrator",

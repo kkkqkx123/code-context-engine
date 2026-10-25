@@ -10,9 +10,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime};
 
 use base64::Engine as _;
-use cce_api::models::{
-    INGEST_CHUNK_BYTES, IngestedFile, MAX_INGEST_FILE_BYTES, total_chunks_for_size,
-};
+use cce_api::models::{INGEST_CHUNK_BYTES, IngestedFile, MAX_INGEST_FILE_BYTES};
 
 use super::paths::{safe_join, storage_path};
 
@@ -357,7 +355,7 @@ pub(crate) async fn stage_bytes(
 
 /// Upper bound on chunks for one file, derived from the 1 MiB file cap.
 pub(crate) fn max_file_chunks() -> u32 {
-    total_chunks_for_size(MAX_INGEST_FILE_BYTES)
+    cce_supply::total_chunks_for_size(MAX_INGEST_FILE_BYTES, INGEST_CHUNK_BYTES)
 }
 
 /// One file's chunks decoded and verified, ready to be staged.

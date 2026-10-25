@@ -144,6 +144,11 @@ pub struct IngestBatchResponse {
     /// Chunks accepted in this batch, including partial files.
     #[serde(default)]
     pub staged_chunks: usize,
+    /// Chunks already staged before this batch and skipped without rewrite.
+    /// Replays report here instead of double-counting staged work, so
+    /// delivered versus indexed progress stays observable.
+    #[serde(default)]
+    pub deduped_chunks: usize,
     /// Files skipped with per-file reasons.
     #[serde(default)]
     pub errors: Vec<String>,

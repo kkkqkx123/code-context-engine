@@ -30,6 +30,444 @@ struct PathSeeds<'a> {
     to: &'a str,
 }
 
+/// Execute graph commands through the domain service abstraction.
+///
+/// Every traversal shares parameter semantics across local and remote modes.
+/// Output rendering stays command-local; transport differences live in the
+/// service implementations.
+pub async fn execute_with_service(
+    cmd: &GraphCommands,
+    service: &dyn cce_service::CodeContextService,
+    _server: &str,
+    verbose: bool,
+    format: crate::cli::OutputFormat,
+) -> Result<()> {
+    use cce_service::{
+        GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
+        GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
+        GraphStructuralParams, GraphSubgraphParams,
+    };
+    match cmd {
+        GraphCommands::Ego {
+            id,
+            depth,
+            direction,
+            offset,
+            limit,
+            domains,
+            relation_types,
+            include_external,
+            project_id,
+        } => {
+            if verbose {
+                println!("Fetching ego graph: {id}");
+            }
+            match service
+                .graph_ego(
+                    *project_id,
+                    GraphEgoParams {
+                        entity_id: id.clone(),
+                        depth: *depth,
+                        direction: direction.clone(),
+                        offset: *offset,
+                        limit: *limit,
+                        domains: domains.clone(),
+                        relation_types: relation_types.clone(),
+                        include_external: *include_external,
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_subgraph(&response);
+                    } else {
+                        print_error("Graph ego query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph ego query failed: {e}")),
+            }
+        }
+        GraphCommands::Path {
+            from,
+            to,
+            depth,
+            domains,
+            relation_types,
+            include_external,
+            project_id,
+        } => {
+            if verbose {
+                println!("Finding graph path: {from} -> {to}");
+            }
+            match service
+                .graph_path(
+                    *project_id,
+                    GraphPathParams {
+                        start: from.clone(),
+                        end: to.clone(),
+                        max_depth: *depth,
+                        domains: domains.clone(),
+                        relation_types: relation_types.clone(),
+                        include_external: *include_external,
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        if response.path_found {
+                            print_success(&format!(
+                                "Path: {} nodes, {} edges (epoch {})",
+                                response.nodes.len(),
+                                response.edges.len(),
+                                response.relation_epoch
+                            ));
+                            for node in &response.nodes {
+                                println!("  {} [{}] {}", node.id, node.kind, node.label);
+                            }
+                        } else {
+                            print_success("No path found");
+                        }
+                    } else {
+                        print_error("Graph path query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph path query failed: {e}")),
+            }
+        }
+        GraphCommands::Subgraph {
+            ids,
+            offset,
+            limit,
+            domains,
+            relation_types,
+            include_external,
+            project_id,
+        } => {
+            if verbose {
+                println!("Fetching subgraph: {ids}");
+            }
+            let seeds = ids
+                .split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect();
+            match service
+                .graph_subgraph(
+                    *project_id,
+                    GraphSubgraphParams {
+                        ids: seeds,
+                        offset: *offset,
+                        limit: *limit,
+                        domains: domains.clone(),
+                        relation_types: relation_types.clone(),
+                        include_external: *include_external,
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_subgraph(&response);
+                    } else {
+                        print_error("Graph subgraph query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph subgraph query failed: {e}")),
+            }
+        }
+        GraphCommands::Components {
+            offset,
+            limit,
+            domains,
+            relation_types,
+            include_external,
+            project_id,
+        } => {
+            if verbose {
+                println!("Fetching graph components");
+            }
+            match service
+                .graph_components(
+                    *project_id,
+                    GraphComponentsParams {
+                        offset: *offset,
+                        limit: *limit,
+                        domains: domains.clone(),
+                        relation_types: relation_types.clone(),
+                        include_external: *include_external,
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_success(&format!(
+                            "{} components (total {}, epoch {})",
+                            response.components.len(),
+                            response.total_components,
+                            response.relation_epoch
+                        ));
+                        for (index, group) in response.components.iter().enumerate() {
+                            println!("  component {index}: {} entities", group.len());
+                        }
+                    } else {
+                        print_error("Graph components query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph components query failed: {e}")),
+            }
+        }
+        GraphCommands::Export {
+            limit,
+            offset,
+            domains,
+            relation_types,
+            include_external,
+            project_id,
+        } => {
+            if verbose {
+                println!("Exporting graph (limit {limit})");
+            }
+            match service
+                .graph_export(
+                    *project_id,
+                    GraphExportParams {
+                        limit: *limit,
+                        offset: *offset,
+                        domains: domains.clone(),
+                        relation_types: relation_types.clone(),
+                        include_external: *include_external,
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_subgraph(&response);
+                    } else {
+                        print_error("Graph export failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph export failed: {e}")),
+            }
+        }
+        GraphCommands::Impact { file, project_id } => {
+            if verbose {
+                println!("Analyzing impact: {file}");
+            }
+            match service
+                .graph_impact(*project_id, GraphImpactParams { file: file.clone() })
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_success(&format!(
+                            "Impact of {} (score {:.1}, epoch {})",
+                            response.changed_file, response.impact_score, response.relation_epoch
+                        ));
+                        for dependent in &response.direct_dependents {
+                            println!("  direct: {dependent}");
+                        }
+                        for dependent in &response.indirect_dependents {
+                            println!("  indirect: {dependent}");
+                        }
+                    } else {
+                        print_error("Graph impact query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph impact query failed: {e}")),
+            }
+        }
+        GraphCommands::EntityImpact {
+            entity_id,
+            max_depth,
+            scope,
+            project_id,
+        } => {
+            if verbose {
+                println!("Analyzing entity impact: {entity_id}");
+            }
+            match service
+                .graph_entity_impact(
+                    *project_id,
+                    GraphEntityImpactParams {
+                        entity_id: entity_id.clone(),
+                        max_depth: *max_depth,
+                        scope: scope.clone(),
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_success(&format!(
+                            "Impact of {} (score {:.1}, epoch {})",
+                            response.changed_entity, response.impact_score, response.relation_epoch
+                        ));
+                        for dependent in &response.direct_dependents {
+                            println!("  direct: {dependent}");
+                        }
+                        for dependent in &response.indirect_dependents {
+                            println!("  indirect: {dependent}");
+                        }
+                    } else {
+                        print_error("Graph entity impact query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph entity impact query failed: {e}")),
+            }
+        }
+        GraphCommands::Cycles {
+            level,
+            limit,
+            project_id,
+        } => {
+            if verbose {
+                println!("Finding {level} dependency cycles");
+            }
+            match service
+                .graph_cycles(
+                    *project_id,
+                    GraphCyclesParams {
+                        level: level.clone(),
+                        limit: *limit,
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        let truncated = if response.truncated {
+                            ", truncated"
+                        } else {
+                            ""
+                        };
+                        print_success(&format!(
+                            "{} of {} {}-level cycles{truncated} (epoch {})",
+                            response.cycles.len(),
+                            response.total_cycles,
+                            response.level,
+                            response.relation_epoch
+                        ));
+                        for (index, cycle) in response.cycles.iter().enumerate() {
+                            println!("  cycle {index}: {}", cycle.members.join(" -> "));
+                        }
+                    } else {
+                        print_error("Graph cycle query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph cycle query failed: {e}")),
+            }
+        }
+        GraphCommands::Structural {
+            entity_id,
+            kind,
+            direction,
+            limit,
+            project_id,
+        } => {
+            if verbose {
+                println!("Fetching {kind} relations for {entity_id} ({direction})");
+            }
+            match service
+                .graph_structural(
+                    *project_id,
+                    GraphStructuralParams {
+                        entity_id: entity_id.clone(),
+                        kind: kind.clone(),
+                        direction: direction.clone(),
+                        limit: *limit,
+                    },
+                )
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        let truncated = if response.truncated {
+                            ", truncated"
+                        } else {
+                            ""
+                        };
+                        print_success(&format!(
+                            "{} of {} {}{truncated} (epoch {})",
+                            response.relations.len(),
+                            response.total_relations,
+                            response.kind,
+                            response.relation_epoch
+                        ));
+                        for relation in &response.relations {
+                            println!(
+                                "  {} [{}] {} {}",
+                                relation.entity_id,
+                                relation.domain,
+                                relation.label,
+                                relation.source_file
+                            );
+                        }
+                    } else {
+                        print_error("Graph structural query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph structural query failed: {e}")),
+            }
+        }
+        GraphCommands::Module { file, project_id } => {
+            if verbose {
+                println!("Fetching module relations for {file}");
+            }
+            match service
+                .graph_module(*project_id, GraphModuleParams { file: file.clone() })
+                .await
+            {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_success(&format!(
+                            "{} imports, {} exports, {} caller files (epoch {})",
+                            response.imports.len(),
+                            response.exports.len(),
+                            response.caller_files.len(),
+                            response.relation_epoch
+                        ));
+                        for import in &response.imports {
+                            println!("  -[{}]-> {}", import.relation, import.target);
+                        }
+                        for caller in &response.caller_files {
+                            println!("  <- {caller}");
+                        }
+                    } else {
+                        print_error("Graph module query failed");
+                    }
+                }
+                Err(e) => print_error(&format!("Graph module query failed: {e}")),
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn execute(
     cmd: &GraphCommands,
     server: &str,

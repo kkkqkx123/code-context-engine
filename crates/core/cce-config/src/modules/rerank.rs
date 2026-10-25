@@ -67,7 +67,7 @@ pub struct RerankConfig {
     pub score_drop_threshold: f32,
 
     /// Minimum score threshold for reranking
-    #[serde(default = "default_min_score", alias = "min_score_for_rerank")]
+    #[serde(default = "default_min_score")]
     pub min_score: f32,
 
     /// Score threshold to start detecting drop-off

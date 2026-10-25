@@ -2,8 +2,8 @@
 
 use axum::extract::{Path as AxumPath, State};
 use cce_api::models::{
-    ErrorResponse, IngestManifestRequest, IngestManifestResponse, MissingChunk, error_codes,
-    total_chunks_for_size,
+    ErrorResponse, INGEST_CHUNK_BYTES, IngestManifestRequest, IngestManifestResponse, MissingChunk,
+    error_codes,
 };
 use cce_storage_metadb_sqlite::{FileRepository, ProjectRepository};
 
@@ -67,8 +67,15 @@ pub async fn handle_ingest_manifest(
             }
         };
         let fresh = stored.as_ref().is_some_and(|record| {
-            record.content_hash.as_deref() == meta.content_hash.as_deref()
-                && meta.content_hash.is_some()
+            cce_supply::fingerprints_match(
+                record.content_hash.as_deref(),
+                0,
+                record.last_modified,
+                meta.content_hash.as_deref(),
+                meta.size,
+                meta.modified_secs,
+            ) && meta.content_hash.is_some()
+                && record.content_hash.is_some()
         });
         if fresh {
             unchanged += 1;
@@ -78,7 +85,7 @@ pub async fn handle_ingest_manifest(
             upload.push(path);
             continue;
         }
-        let total = total_chunks_for_size(meta.size.max(1));
+        let total = cce_supply::total_chunks_for_size(meta.size.max(1), INGEST_CHUNK_BYTES);
         let received = received_chunk_indices(id, request.manifest_version, &path);
         if received.len() as u32 >= total {
             continue;

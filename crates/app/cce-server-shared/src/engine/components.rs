@@ -140,6 +140,18 @@ impl super::CodeContextEngine {
         self.retry_queue.remove(project_id).await;
     }
 
+    pub async fn clear_all_component_caches(&self) {
+        self.orchestrator_cache.clear().await;
+        self.searcher_cache.clear().await;
+        self.hot_update_cache.clear().await;
+        self.operation_coordinator_cache.clear().await;
+        self.relation_runtime_cache.clear().await;
+        self.progress_tracker.clear().await;
+        self.retry_queue.clear().await;
+        self.query_result_cache.clear().await;
+        self.plugin_registry_cache.clear().await;
+    }
+
     /// Get the per-project progress tracker cache
     pub fn progress_tracker(&self) -> &ProjectCache<ProgressTracker> {
         &self.progress_tracker

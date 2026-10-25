@@ -53,6 +53,24 @@ pub enum EngineError {
     Recovery(String),
 }
 
+/// Assembly target selecting which backends a build initializes.
+///
+/// Full keeps existing behavior for servers and local indexing. Retrieval
+/// keeps vector, fulltext, embedder, and metadata while skipping background
+/// aggregation. GraphOnly keeps metadata and relation dependencies while
+/// skipping aggregation and background probes; vector, fulltext, and
+/// embedder still construct locally but no background work starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AssemblyProfile {
+    /// Server and local indexing behavior.
+    #[default]
+    Full,
+    /// Retrieval-only single tests without background aggregation.
+    Retrieval,
+    /// Graph-only single tests without aggregation or probes.
+    GraphOnly,
+}
+
 /// Code Context Engine - High-level facade
 ///
 /// Provides indexing, searching, and file watching capabilities through
@@ -63,6 +81,9 @@ pub struct CodeContextEngine {
     vector: VectorStore,
     fulltext: FulltextStore,
     embedder: Arc<OpenAICompatibleProvider>,
+
+    /// Assembly target this engine was built for.
+    assembly: AssemblyProfile,
 
     /// SQLite metadata store for persistent storage
     metadata_store: Option<Arc<SqliteClient>>,
@@ -131,6 +152,11 @@ impl CodeContextEngine {
         EngineBuilder::new()
     }
 
+    /// Assembly target this engine was built for.
+    pub fn assembly_profile(&self) -> AssemblyProfile {
+        self.assembly
+    }
+
     /// Get (or lazily create) the shared query result cache for a project.
     ///
     /// The returned clone shares the underlying store with every other
@@ -192,7 +218,19 @@ impl CodeContextEngine {
     }
 
     /// Initialize all components from config
-    async fn init_components(mut config: AppConfig) -> Result<Self, EngineError> {
+    async fn init_components(config: AppConfig) -> Result<Self, EngineError> {
+        Self::init_components_with_profile(config, AssemblyProfile::Full).await
+    }
+
+    /// Initialize components for one assembly target.
+    ///
+    /// Non-full profiles skip background aggregation and probe setup so
+    /// retrieval-only and graph-only tests assemble without background work.
+    /// Backend handles still construct so request paths keep one shape.
+    async fn init_components_with_profile(
+        mut config: AppConfig,
+        profile: AssemblyProfile,
+    ) -> Result<Self, EngineError> {
         // Resolve configuration dependencies (auto-enable required features)
         config.resolve_dependencies();
 
@@ -275,8 +313,12 @@ impl CodeContextEngine {
         let llm_health_metrics =
             cce_metrics::LlmHealthMetrics::new(&metrics_registry, &llm_provider_label);
 
-        // Create metrics aggregator (optional, can be disabled via config)
-        let metrics_aggregator = if config.metrics.aggregation.enabled {
+        // Create metrics aggregator (optional, can be disabled via config).
+        // Non-full assembly targets skip background aggregation entirely so
+        // retrieval-only and graph-only tests assemble without background work.
+        let metrics_aggregator = if config.metrics.aggregation.enabled
+            && matches!(profile, AssemblyProfile::Full)
+        {
             let global = &config.metrics.aggregation;
             let agg_config = AggregationConfig {
                 interval_secs: global.interval_secs,
@@ -316,6 +358,7 @@ impl CodeContextEngine {
             vector,
             fulltext: fulltext_store,
             embedder,
+            assembly: profile,
             metadata_store,
             orchestrator_cache: ProjectCache::new(),
             plugin_registry_cache: ProjectCache::new(),
@@ -346,6 +389,7 @@ pub struct EngineBuilder {
     qdrant_url: Option<String>,
     bm25_url: Option<String>,
     workspace: Option<String>,
+    profile: AssemblyProfile,
 }
 
 impl EngineBuilder {
@@ -357,6 +401,7 @@ impl EngineBuilder {
             qdrant_url: None,
             bm25_url: None,
             workspace: None,
+            profile: AssemblyProfile::Full,
         }
     }
 
@@ -387,6 +432,24 @@ impl EngineBuilder {
     /// Set workspace path (affects Qdrant collection naming)
     pub fn workspace(mut self, path: impl Into<String>) -> Self {
         self.workspace = Some(path.into());
+        self
+    }
+
+    /// Select the assembly target. Defaults to full server behavior.
+    pub fn profile(mut self, profile: AssemblyProfile) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// Assemble for retrieval-only tests without background aggregation.
+    pub fn retrieval_only(mut self) -> Self {
+        self.profile = AssemblyProfile::Retrieval;
+        self
+    }
+
+    /// Assemble for graph-only tests without aggregation or probes.
+    pub fn graph_only(mut self) -> Self {
+        self.profile = AssemblyProfile::GraphOnly;
         self
     }
 
@@ -440,7 +503,7 @@ impl EngineBuilder {
             effective_config.database.bm25.index_path = Some(bm25_url);
         }
 
-        CodeContextEngine::init_components(effective_config).await
+        CodeContextEngine::init_components_with_profile(effective_config, self.profile).await
     }
 }
 

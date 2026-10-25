@@ -1,9 +1,8 @@
-//! Shared HTTP transport for clients talking to the server.
+//! Shared HTTP transport for remote clients.
 //!
-//! The CLI and the file supply gateway previously carried their own copies of
-//! base URL handling, token resolution, timeout setup, and error reporting.
-//! This module keeps that behavior in one place so both clients send the same
-//! requests. Existing client types keep their public shape and delegate here.
+//! Moved from the wire contract crate so local execution never pulls in
+//! network timeout, base URL, or token behavior. The gateway and the CLI
+//! remote mode share this client; local mode does not depend on it.
 
 use anyhow::{Context, Result};
 
@@ -66,7 +65,6 @@ impl SharedHttpClient {
             let text = response.text().await.unwrap_or_default();
             anyhow::bail!("Request failed with status {status}: {text}");
         }
-        // The caller holds the URL context in its own error wrapper.
         Ok(response)
     }
 
@@ -176,9 +174,9 @@ impl SharedHttpClient {
     pub async fn post_ingest_manifest(
         &self,
         project_id: i64,
-        body: &crate::models::IngestManifestRequest,
-    ) -> Result<crate::models::IngestManifestResponse> {
-        self.post(&crate::paths::ingest_manifest(project_id), body)
+        body: &cce_api::models::IngestManifestRequest,
+    ) -> Result<cce_api::models::IngestManifestResponse> {
+        self.post(&cce_api::paths::ingest_manifest(project_id), body)
             .await
     }
 
@@ -186,9 +184,9 @@ impl SharedHttpClient {
     pub async fn post_ingest_batch(
         &self,
         project_id: i64,
-        body: &crate::models::IngestBatchRequest,
-    ) -> Result<crate::models::IngestBatchResponse> {
-        self.post(&crate::paths::ingest_batch(project_id), body)
+        body: &cce_api::models::IngestBatchRequest,
+    ) -> Result<cce_api::models::IngestBatchResponse> {
+        self.post(&cce_api::paths::ingest_batch(project_id), body)
             .await
     }
 
@@ -198,7 +196,7 @@ impl SharedHttpClient {
         project_id: i64,
         body: &T,
     ) -> Result<R> {
-        self.post(&crate::paths::ingest_commit(project_id), body)
+        self.post(&cce_api::paths::ingest_commit(project_id), body)
             .await
     }
 
@@ -206,18 +204,18 @@ impl SharedHttpClient {
     pub async fn post_ingest_event(
         &self,
         project_id: i64,
-        body: &crate::models::IngestEventRequest,
-    ) -> Result<crate::models::IngestEventResponse> {
-        self.post(&crate::paths::ingest_event(project_id), body)
+        body: &cce_api::models::IngestEventRequest,
+    ) -> Result<cce_api::models::IngestEventResponse> {
+        self.post(&cce_api::paths::ingest_event(project_id), body)
             .await
     }
 
     /// Run an aggregated search across sub queries.
     pub async fn post_aggregated_search(
         &self,
-        body: &crate::models::AggregatedSearchRequest,
-    ) -> Result<crate::models::SearchResponse> {
-        self.post(crate::paths::SEARCH_AGGREGATED, body).await
+        body: &cce_api::models::AggregatedSearchRequest,
+    ) -> Result<cce_api::models::SearchResponse> {
+        self.post(cce_api::paths::SEARCH_AGGREGATED, body).await
     }
 }
 

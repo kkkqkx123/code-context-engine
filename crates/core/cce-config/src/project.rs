@@ -177,16 +177,12 @@ pub enum GrammarAbiPolicy {
 /// Allows projects to specify which embedding model to use and override runtime behaviors.
 /// Model metadata (dimension, provider) is defined in global config.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProjectEmbedderConfig {
     /// The specific embedding model to use for this project.
     /// References a model key defined in global [llm.embedding_models].
     #[serde(default)]
     pub model: Option<String>,
-
-    /// Optional preprocessor override for this project.
-    /// Useful if the same model needs different prefixes/templates in different projects.
-    #[serde(default)]
-    pub preprocessor: Option<super::modules::PreprocessorConfig>,
 }
 
 /// Project-level LLM configuration
@@ -522,6 +518,7 @@ pub struct ProjectSummaryPatch {
 /// Storage location stays global for the shared engine; tuning knobs apply
 /// globally and are not isolated per project.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProjectStorageConfig {
     /// Qdrant vector storage configuration override
     #[serde(default)]
@@ -545,7 +542,7 @@ pub struct ProjectStorageConfig {
 /// Only HNSW knobs are overridable per project; data_dir and dimension stay
 /// global so one engine directory serves all projects via group isolation.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProjectLocalVectorConfig {
     pub hnsw_m: Option<u32>,
     pub hnsw_ef_construct: Option<u32>,
@@ -562,6 +559,7 @@ pub struct ProjectLocalVectorConfig {
 /// present, replaces the corresponding effective value derived from the
 /// global preset/override chain.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProjectQdrantConfig {
     /// Collection preset (overrides global preset)
     #[serde(default)]
@@ -590,7 +588,7 @@ pub struct ProjectQdrantConfig {
 /// the global preset/override chain. When specified, only the provided fields
 /// are changed; unset fields keep the effective value.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct HnswConfigOverride {
     /// Number of neighbors per node (2-128)
     /// Higher values improve accuracy but increase memory and build time
@@ -615,7 +613,7 @@ pub struct HnswConfigOverride {
 
 /// Partial vector storage configuration override
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct VectorStorageConfigOverride {
     /// Store vectors on disk
     /// Reduces memory usage significantly
@@ -624,7 +622,7 @@ pub struct VectorStorageConfigOverride {
 
 /// Partial WAL (Write-Ahead Log) configuration override
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct WalConfigOverride {
     /// WAL capacity in MB
     /// Larger capacity reduces flush frequency, improves write performance
@@ -641,6 +639,7 @@ pub struct WalConfigOverride {
 /// project isolation. Only algorithm and enable flag are overridable per
 /// project; per-project tuning applies globally to the shared engine.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProjectBm25Config {
     /// Enable/disable BM25 indexing
     #[serde(default)]
@@ -653,6 +652,7 @@ pub struct ProjectBm25Config {
 
 /// Index manager configuration override
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IndexManagerConfigOverride {
     /// Writer memory budget in bytes
     pub writer_memory_budget: usize,
@@ -1303,7 +1303,6 @@ max_file_size = 512000
     fn test_project_embedder_config_default() {
         let config = ProjectEmbedderConfig::default();
         assert!(config.model.is_none());
-        assert!(config.preprocessor.is_none());
     }
 
     #[test]
@@ -1334,14 +1333,9 @@ rerank_max_candidates = 30
     fn test_project_embedder_config_serialization() {
         let toml_str = r#"
 model = "bge-m3"
-
-[preprocessor]
-type = "prefix"
-prefix = "query: "
 "#;
         let config: ProjectEmbedderConfig = toml::from_str(toml_str).expect("Failed to parse");
         assert_eq!(config.model, Some("bge-m3".to_string()));
-        // Note: vector_dimension is no longer part of ProjectEmbedderConfig
     }
 
     #[test]

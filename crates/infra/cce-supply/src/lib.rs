@@ -121,6 +121,75 @@ pub fn parse_exclude_filter(csv: &str) -> Vec<String> {
         .collect()
 }
 
+/// Build scanner include patterns from an extension list.
+///
+/// Empty input yields an empty list meaning no include restriction. Non-empty
+/// input maps each extension to a glob suffix so the scanner and the gateway
+/// pre-filter describe the same file universe without duplicating the format.
+pub fn scan_include_patterns(extensions: &[String]) -> Vec<String> {
+    extensions
+        .iter()
+        .map(|ext| ext.trim())
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| format!("*.{}", ext.trim_start_matches('.').to_lowercase()))
+        .collect()
+}
+
+/// Build scanner exclude patterns from an exclude directory list.
+pub fn scan_exclude_patterns(exclude_dirs: &[String]) -> Vec<String> {
+    exclude_dirs
+        .iter()
+        .map(|entry| entry.trim())
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Gateway scanner uses no include restriction: the remote pipeline stays
+/// authoritative for parsing while the transport side only pre-filters by
+/// suffix after the scan. The explicit constructor keeps the empty literal
+/// out of call sites.
+pub fn gateway_include_patterns() -> Vec<String> {
+    Vec::new()
+}
+
+/// Classification of one scanned entry for supply purposes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupplyFileDecision {
+    /// Usable file passing size, text, and suffix checks.
+    Keep,
+    /// Larger than the ingest bound.
+    Oversize,
+    /// Detected binary content.
+    Binary,
+    /// Rejected by the suffix pre-filter.
+    Filtered,
+}
+
+/// Classify one scanned entry without touching the filesystem.
+///
+/// The caller supplies already-observed size, text-ness, and the normalized
+/// relative identity. The ingest bound stays with the caller; this function
+/// only compares.
+pub fn classify_supply_file(
+    size: u64,
+    is_text: bool,
+    relative_path: &str,
+    wanted: &[String],
+    max_bytes: u64,
+) -> SupplyFileDecision {
+    if size > max_bytes {
+        return SupplyFileDecision::Oversize;
+    }
+    if !is_text {
+        return SupplyFileDecision::Binary;
+    }
+    if !extension_matches(relative_path, wanted) {
+        return SupplyFileDecision::Filtered;
+    }
+    SupplyFileDecision::Keep
+}
+
 /// Whether a relative path passes the supply pre-filter.
 ///
 /// An empty wanted list accepts all text files. The remote project profile
@@ -220,5 +289,40 @@ mod tests {
         assert!(!extension_matches("docs/readme.md", &wanted));
         let empty: Vec<String> = Vec::new();
         assert!(extension_matches("anything.bin", &empty));
+    }
+
+    #[test]
+    fn scan_patterns_derive_from_plain_lists() {
+        let extensions = vec!["rs".to_string(), ".PY".to_string(), " ".to_string()];
+        assert_eq!(
+            scan_include_patterns(&extensions),
+            vec!["*.rs".to_string(), "*.py".to_string()]
+        );
+        let empty: Vec<String> = Vec::new();
+        assert!(scan_include_patterns(&empty).is_empty());
+        assert!(gateway_include_patterns().is_empty());
+        let exclude = vec!["target".to_string(), " ".to_string()];
+        assert_eq!(scan_exclude_patterns(&exclude), vec!["target".to_string()]);
+    }
+
+    #[test]
+    fn supply_classification_covers_keep_and_drops() {
+        let wanted = vec!["rs".to_string()];
+        assert_eq!(
+            classify_supply_file(10, true, "src/main.rs", &wanted, 100),
+            SupplyFileDecision::Keep
+        );
+        assert_eq!(
+            classify_supply_file(200, true, "src/main.rs", &wanted, 100),
+            SupplyFileDecision::Oversize
+        );
+        assert_eq!(
+            classify_supply_file(10, false, "src/main.rs", &wanted, 100),
+            SupplyFileDecision::Binary
+        );
+        assert_eq!(
+            classify_supply_file(10, true, "docs/readme.md", &wanted, 100),
+            SupplyFileDecision::Filtered
+        );
     }
 }

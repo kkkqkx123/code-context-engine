@@ -144,8 +144,10 @@ pub struct ScanOutcome {
 /// deleted files are unaffected by reuse.
 ///
 /// The scan uses the same traversal and ignore semantics as local indexing.
-/// The ingest bound is applied as the scanner size limit so oversized files
-/// are marked before hashing. The extension filter is an explicit user-side
+/// Include and exclude patterns derive from the shared supply kernel so the
+/// gateway file universe cannot drift from the index file universe. The
+/// ingest bound is applied as the scanner size limit so oversized files are
+/// marked before hashing. The extension filter is an explicit user-side
 /// supply pre-filter; the remote project configuration stays authoritative
 /// for parsing. Plugin file filters are intentionally not applied here;
 /// oversupplied files are filtered again by the remote pipeline.
@@ -153,11 +155,12 @@ pub async fn scan_local(
     params: &SyncParams,
     previous: Option<&HashMap<PathBuf, FileEntry>>,
 ) -> Result<ScanOutcome> {
-    let exclude_patterns = cce_supply::parse_exclude_filter(&params.exclude);
+    let exclude_patterns =
+        cce_supply::scan_exclude_patterns(&cce_supply::parse_exclude_filter(&params.exclude));
     let wanted = cce_supply::parse_extension_filter(&params.extensions);
     let options = ScanOptions {
         root_path: params.path.clone(),
-        include_patterns: Vec::new(),
+        include_patterns: cce_supply::gateway_include_patterns(),
         exclude_patterns,
         follow_symlinks: false,
         respect_gitignore: params.gitignore,
@@ -184,14 +187,15 @@ pub async fn scan_local(
     let mut skipped_oversize = 0usize;
     let mut skipped_binary = 0usize;
     for entry in report.entries {
-        if entry.size > MAX_INGEST_FILE_BYTES {
-            skipped_oversize += 1;
-        } else if !entry.is_text() {
-            skipped_binary += 1;
-        } else {
-            let identity = cce_types::path::normalize_project_path(&entry.identity_key());
-            let matches = cce_supply::extension_matches(&identity, &wanted);
-            if matches {
+        let identity = cce_types::path::normalize_project_path(&entry.identity_key());
+        match cce_supply::classify_supply_file(
+            entry.size,
+            entry.is_text(),
+            &identity,
+            &wanted,
+            MAX_INGEST_FILE_BYTES,
+        ) {
+            cce_supply::SupplyFileDecision::Keep => {
                 files.insert(
                     identity,
                     ScannedFile {
@@ -202,6 +206,9 @@ pub async fn scan_local(
                     },
                 );
             }
+            cce_supply::SupplyFileDecision::Oversize => skipped_oversize += 1,
+            cce_supply::SupplyFileDecision::Binary => skipped_binary += 1,
+            cce_supply::SupplyFileDecision::Filtered => {}
         }
         entries.insert(entry.relative_path.clone(), entry);
     }

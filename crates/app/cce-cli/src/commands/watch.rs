@@ -4,114 +4,88 @@ use clap::Subcommand;
 
 use anyhow::Result;
 
-use crate::client::ApiClient;
 use crate::output::{print_error, print_success};
-use cce_api::models::{
-    StartWatchRequest, StartWatchResponse, StopWatchResponse, WatchStatusResponse,
-};
+use cce_api::models::StartWatchRequest;
+use cce_service::CodeContextService;
 
-pub async fn execute(cmd: &WatchCommands, server: &str, verbose: bool) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
+/// Execute watch commands through the domain service abstraction.
+pub async fn execute_with_service(
+    cmd: &WatchCommands,
+    service: &dyn cce_service::CodeContextService,
+    verbose: bool,
+) -> Result<()> {
     match cmd {
         WatchCommands::Start {
             project_id,
             path,
             extensions,
             debounce,
-        } => start_watch(&client, *project_id, path, extensions, *debounce, verbose).await,
-        WatchCommands::Stop { project_id } => stop_watch(&client, *project_id, verbose).await,
-        WatchCommands::Status { project_id } => watch_status(&client, *project_id, verbose).await,
-    }
-}
-
-async fn start_watch(
-    client: &ApiClient,
-    project_id: i64,
-    path: &str,
-    extensions: &Option<String>,
-    debounce: u64,
-    verbose: bool,
-) -> Result<()> {
-    let ext_list: Vec<String> = extensions
-        .as_ref()
-        .map(|s| s.split(',').map(|e| e.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let request = StartWatchRequest {
-        path: path.to_string(),
-        extensions: ext_list,
-        debounce_ms: debounce,
-    };
-
-    if verbose {
-        println!("Starting watch on: {}", path);
-    }
-
-    let response: StartWatchResponse = client
-        .post(&cce_api::paths::watch_start(project_id), &request)
-        .await?;
-
-    if response.success {
-        print_success(&format!("Watch started on: {}", response.path));
-    } else {
-        print_error("Failed to start watch");
-    }
-
-    Ok(())
-}
-
-async fn stop_watch(client: &ApiClient, project_id: i64, verbose: bool) -> Result<()> {
-    if verbose {
-        println!("Stopping watch...");
-    }
-
-    let response: StopWatchResponse = client
-        .post(
-            &cce_api::paths::watch_stop(project_id),
-            &serde_json::json!({}),
-        )
-        .await?;
-
-    if response.success {
-        print_success("Watch stopped");
-    } else {
-        print_error("Failed to stop watch");
-    }
-
-    Ok(())
-}
-
-async fn watch_status(client: &ApiClient, project_id: i64, verbose: bool) -> Result<()> {
-    if verbose {
-        println!("Fetching watch status...");
-    }
-
-    let response: WatchStatusResponse = client
-        .get(&cce_api::paths::watch_status(project_id))
-        .await?;
-
-    if response.success {
-        let status = &response.status;
-        println!("Watch status:");
-        println!("  Active:            {}", status.active);
-        println!("  Events processed:  {}", status.events_processed);
-
-        if let Some(ref started_at) = status.started_at {
-            println!("  Started at:        {}", started_at);
-        }
-
-        if !status.watched_dirs.is_empty() {
-            println!("  Watched dirs:");
-            for dir in &status.watched_dirs {
-                println!("    - {}", dir);
+        } => {
+            let ext_list: Vec<String> = extensions
+                .as_ref()
+                .map(|s| s.split(',').map(|e| e.trim().to_string()).collect())
+                .unwrap_or_default();
+            let request = StartWatchRequest {
+                path: path.to_string(),
+                extensions: ext_list,
+                debounce_ms: *debounce,
+            };
+            if verbose {
+                println!("Starting watch on: {}", path);
             }
+            match service.watch_start(*project_id, request).await {
+                Ok(response) => {
+                    if response.success {
+                        print_success(&format!("Watch started on: {}", response.path));
+                    } else {
+                        print_error("Failed to start watch");
+                    }
+                }
+                Err(e) => print_error(&format!("Failed to start watch: {e}")),
+            }
+            Ok(())
         }
-    } else {
-        print_error("Failed to get watch status");
+        WatchCommands::Stop { project_id } => match service.watch_stop(*project_id).await {
+            Ok(response) => {
+                if response.success {
+                    print_success("Watch stopped");
+                } else {
+                    print_error("Failed to stop watch");
+                }
+                Ok(())
+            }
+            Err(e) => {
+                print_error(&format!("Failed to stop watch: {e}"));
+                Ok(())
+            }
+        },
+        WatchCommands::Status { project_id } => match service.watch_status(*project_id).await {
+            Ok(response) => {
+                if response.success {
+                    let status = &response.status;
+                    println!("Watch status:");
+                    println!("  Active:            {}", status.active);
+                    println!("  Events processed:  {}", status.events_processed);
+                    if let Some(ref started_at) = status.started_at {
+                        println!("  Started at:        {}", started_at);
+                    }
+                    if !status.watched_dirs.is_empty() {
+                        println!("  Watched dirs:");
+                        for dir in &status.watched_dirs {
+                            println!("    - {}", dir);
+                        }
+                    }
+                } else {
+                    print_error("Failed to get watch status");
+                }
+                Ok(())
+            }
+            Err(e) => {
+                print_error(&format!("Failed to get watch status: {e}"));
+                Ok(())
+            }
+        },
     }
-
-    Ok(())
 }
 
 /// Watch commands

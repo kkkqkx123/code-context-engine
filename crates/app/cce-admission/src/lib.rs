@@ -16,7 +16,9 @@ pub mod middleware;
 pub mod token;
 
 pub use config::{AdmissionConfig, TokenEntry};
-pub use context::{AdmissionContext, is_loopback_host, is_public_path, requires_admission};
+pub use context::{
+    AdmissionContext, is_gateway_path, is_loopback_host, is_public_path, requires_admission,
+};
 pub use metrics::{AdmissionMetrics, AdmissionStats};
 pub use middleware::{AdmissionGate, admission_middleware, cors_middleware, timeout_middleware};
 pub use token::TokenStore;

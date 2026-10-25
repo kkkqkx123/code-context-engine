@@ -141,7 +141,15 @@ pub async fn handle_ingest_batch(
 
     let mut staged = 0usize;
     let mut staged_chunks = 0usize;
+    let mut deduped_chunks = 0usize;
     for file in &decoded {
+        if versioned {
+            deduped_chunks = deduped_chunks.saturating_add(
+                file.pieces
+                    .len()
+                    .saturating_sub(file.pending_chunks as usize),
+            );
+        }
         match stage_file(FileStageParams {
             root: &root,
             staging_base: &staging_base,
@@ -215,6 +223,7 @@ pub async fn handle_ingest_batch(
         manifest_version: request.manifest_version,
         staged,
         staged_chunks,
+        deduped_chunks,
         errors,
     })
 }

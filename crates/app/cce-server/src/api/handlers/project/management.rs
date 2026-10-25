@@ -34,14 +34,6 @@ pub async fn handle_create_project(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<CreateProjectRequest>,
 ) -> ApiResult<ProjectDetailResponse> {
-    // Validate root_path is not empty
-    if request.root_path.is_empty() {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Root path cannot be empty",
-        ));
-    }
-
     // Root path semantics: registry stores the logical identifier used for
     // display and de-duplication. Local supply requires a server-side
     // physical directory; gateway supply allows a logical-only path since
@@ -51,20 +43,14 @@ pub async fn handle_create_project(
         .as_deref()
         .map(|mode| mode.trim().to_lowercase() == cce_api::models::SUPPLY_MODE_GATEWAY)
         .unwrap_or(false);
+    if request.root_path.is_empty() && !supply_is_gateway {
+        return ApiResult::Error(ErrorResponse::new(
+            error_codes::INVALID_REQUEST,
+            "Root path cannot be empty",
+        ));
+    }
     let root_path_str = if supply_is_gateway {
-        let logical = request.root_path.trim();
-        if logical.is_empty() {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "Root path cannot be empty",
-            ));
-        }
-        let trimmed = logical.trim_end_matches('/').trim_end_matches('\\');
-        if trimmed.is_empty() {
-            "/".to_string()
-        } else {
-            trimmed.to_string()
-        }
+        cce_supply::normalize_logical_path(&request.root_path)
     } else {
         let root_path = PathBuf::from(&request.root_path);
         if !root_path.exists() {

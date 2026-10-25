@@ -44,14 +44,29 @@ pub async fn handle_config_reload(
     State(state): State<crate::api::state::AppState>,
     Query(query): Query<ConfigReloadQuery>,
 ) -> ApiResult<ConfigReloadResponse> {
-    // Get project_id from query param, or return error
-    let project_id = match query.project_id {
-        Some(id) => id,
-        None => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "project_id query parameter is required. Use /api/project/{id}/reload for per-project reload.",
-            ));
+    // Without a project id this is a global safe reload. Dangerous section
+    // changes fail closed; safe sections advance the global version so the
+    // project registry invalidates cached effective configurations.
+    let Some(project_id) = query.project_id else {
+        match Settings::reload_safe_from_file(None) {
+            Ok(version) => {
+                state.engine.clear_all_component_caches().await;
+                let _ = state.engine.project_registry().invalidate_cache(None).await;
+                state.invalidate_relation_searcher_all().await;
+                return ApiResult::Success(ConfigReloadResponse {
+                    success: true,
+                    message: format!(
+                        "Global configuration reloaded (version {version}); project caches invalidated by global version"
+                    ),
+                });
+            }
+            Err(error) => {
+                return ApiResult::Error(ErrorResponse::with_details(
+                    error_codes::INVALID_REQUEST,
+                    "Global reload refused; restart required for dangerous sections",
+                    error.to_string(),
+                ));
+            }
         }
     };
 
@@ -64,6 +79,7 @@ pub async fn handle_config_reload(
             e.to_string(),
         ));
     }
+    state.invalidate_relation_searcher(project_id).await;
 
     // Attempt hot-update coordinator reload if available
     match engine.get_hot_update_coordinator(project_id).await {

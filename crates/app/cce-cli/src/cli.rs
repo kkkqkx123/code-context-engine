@@ -19,6 +19,10 @@ pub struct Cli {
     )]
     pub server: String,
 
+    /// Execution mode: local calls the engine directly, remote uses HTTP.
+    #[arg(long, value_enum, env = "CCE_SERVICE_MODE")]
+    pub mode: Option<crate::service::CliServiceMode>,
+
     /// Output format
     #[arg(short, long, value_enum, default_value = "table")]
     pub format: OutputFormat,
@@ -148,30 +152,76 @@ impl Cli {
     /// Execute the CLI command
     pub async fn execute(&self) -> anyhow::Result<()> {
         match &self.command {
-            Commands::Index(cmd) => commands::index::execute(cmd, &self.server, self.verbose).await,
+            Commands::Index(cmd) => {
+                let service =
+                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
+                commands::index::execute_with_service(
+                    cmd,
+                    service.as_trait(),
+                    &self.server,
+                    self.verbose,
+                )
+                .await
+            }
             Commands::Search(cmd) => {
-                commands::search::execute(cmd, &self.server, self.verbose, self.format).await
+                let service =
+                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
+                commands::search::execute_with_service(
+                    cmd,
+                    service.as_trait(),
+                    self.verbose,
+                    self.format,
+                )
+                .await
             }
             Commands::AggSearch(cmd) => {
-                let client = crate::client::ApiClient::new(&self.server)?;
-                cmd.execute(&client, self.verbose).await
+                let service =
+                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
+                cmd.execute_with_service(service.as_trait(), self.verbose)
+                    .await
             }
             Commands::Project(cmd) => {
-                commands::project::execute(cmd, &self.server, self.verbose).await
+                let service =
+                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
+                commands::project::execute_with_service(
+                    cmd,
+                    service.as_trait(),
+                    &self.server,
+                    self.verbose,
+                )
+                .await
             }
             Commands::Entity(cmd) => {
                 commands::entity::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::Graph(cmd) => {
-                commands::graph::execute(cmd, &self.server, self.verbose, self.format).await
+                let service =
+                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
+                commands::graph::execute_with_service(
+                    cmd,
+                    service.as_trait(),
+                    &self.server,
+                    self.verbose,
+                    self.format,
+                )
+                .await
             }
-            Commands::Watch(cmd) => commands::watch::execute(cmd, &self.server, self.verbose).await,
+            Commands::Watch(cmd) => {
+                let service =
+                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
+                commands::watch::execute_with_service(cmd, service.as_trait(), self.verbose).await
+            }
             Commands::Storage(cmd) => {
                 commands::storage::execute(cmd, &self.server, self.verbose).await
             }
             Commands::Tools(cmd) => commands::tools::execute(cmd, &self.server, self.verbose).await,
             Commands::Summary(cmd) => self.execute_summary(cmd).await,
-            Commands::Config(cmd) => self.execute_config(cmd).await,
+            Commands::Config(cmd) => {
+                let service =
+                    crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
+                self.execute_config_with_service(cmd, service.as_trait())
+                    .await
+            }
             Commands::Qdrant(cmd) => {
                 commands::qdrant::execute(cmd, &self.server, self.verbose).await
             }
@@ -233,6 +283,31 @@ impl Cli {
                 commands::config::execute_validate(&self.server, self.verbose).await
             }
         }
+    }
+
+    /// Execute config command through the domain service abstraction.
+    async fn execute_config_with_service(
+        &self,
+        cmd: &ConfigCommands,
+        service: &dyn cce_service::CodeContextService,
+    ) -> anyhow::Result<()> {
+        match cmd {
+            ConfigCommands::Reload { project_id } => {
+                commands::config::execute_reload_with_service(service, *project_id, self.verbose)
+                    .await
+            }
+            ConfigCommands::Info => {
+                commands::config::execute_info(&self.server, self.verbose).await
+            }
+            ConfigCommands::Validate => {
+                commands::config::execute_validate(&self.server, self.verbose).await
+            }
+        }
+    }
+
+    /// Resolve the effective service mode for this invocation.
+    fn resolved_mode(&self) -> crate::service::CliServiceMode {
+        crate::service::CliServiceMode::resolve(self.mode)
     }
 
     /// Execute metrics command

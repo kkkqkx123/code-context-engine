@@ -7,6 +7,7 @@ use anyhow::Result;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_output, print_success, truncate};
 use cce_api::models::{SearchRequest, SearchResponse, SearchResultItem};
+use cce_service::CodeContextService;
 
 /// Search query parameters
 struct SearchQueryParams<'a> {
@@ -73,6 +74,109 @@ pub async fn execute(
                 expand: *expand,
             };
             search_query(&client, &params, params.project_id, verbose, format).await
+        }
+    }
+}
+
+/// Execute search commands through the domain service abstraction.
+pub async fn execute_with_service(
+    cmd: &SearchCommands,
+    service: &dyn cce_service::CodeContextService,
+    verbose: bool,
+    format: crate::cli::OutputFormat,
+) -> Result<()> {
+    match cmd {
+        SearchCommands::Query {
+            project_id,
+            project_path,
+            query,
+            query_type,
+            limit,
+            min_score,
+            directory,
+            exclude_content_types,
+            exclude,
+            include,
+            include_categories,
+            exclude_categories,
+            enable_rerank,
+            rerank_max_candidates,
+            query_intent,
+            expand,
+        } => {
+            let exclude_patterns: Vec<String> = exclude
+                .as_ref()
+                .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+                .unwrap_or_default();
+            let include_patterns: Vec<String> = include
+                .as_ref()
+                .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+                .unwrap_or_default();
+            let exclude_ct: Vec<String> = exclude_content_types
+                .as_ref()
+                .map(|s| s.split(',').map(|ct| ct.trim().to_string()).collect())
+                .unwrap_or_default();
+            let include_cats: Vec<String> = include_categories
+                .as_ref()
+                .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+                .unwrap_or_default();
+            let exclude_cats: Vec<String> = exclude_categories
+                .as_ref()
+                .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+                .unwrap_or_default();
+            let request = SearchRequest {
+                project_id: Some(*project_id),
+                project_path: project_path.clone(),
+                query: query.to_string(),
+                query_type: query_type.to_string(),
+                limit: *limit,
+                min_score: *min_score,
+                directory_prefix: directory.clone(),
+                exclude_content_types: exclude_ct,
+                exclude_patterns,
+                include_patterns,
+                include_categories: include_cats,
+                exclude_categories: exclude_cats,
+                enable_rerank: *enable_rerank,
+                rerank_max_candidates: *rerank_max_candidates,
+                query_intent: query_intent.clone(),
+                expand: *expand,
+            };
+            if verbose {
+                println!("Searching: {}", query);
+                println!("Type: {}", query_type);
+            }
+            match service.search(request).await {
+                Ok(response) => {
+                    if matches!(format, crate::cli::OutputFormat::Json) {
+                        print_output(format, &response);
+                    } else if response.success {
+                        print_success(&format!(
+                            "Found {} results in {}",
+                            response.total,
+                            format_duration(response.elapsed_ms)
+                        ));
+                        if !response.sources_used.is_empty() {
+                            println!("Sources: {}", response.sources_used.join(", "));
+                        }
+                        println!();
+                        if response.items.is_empty() {
+                            println!("No results found");
+                        } else {
+                            for (i, item) in response.items.iter().enumerate() {
+                                print_result_item(i + 1, item);
+                            }
+                        }
+                    } else {
+                        print_error("Search failed");
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    print_error(&format!("Search failed: {e}"));
+                    Ok(())
+                }
+            }
         }
     }
 }

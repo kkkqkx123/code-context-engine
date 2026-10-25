@@ -52,6 +52,7 @@ struct RateBucket {
 #[derive(Debug)]
 pub struct AdmissionGate {
     store: TokenStore,
+    admin_store: TokenStore,
     public_prefixes: Vec<String>,
     rate_limit_per_min: u32,
     max_body_bytes: usize,
@@ -66,6 +67,7 @@ impl AdmissionGate {
     pub fn new(config: &crate::config::AdmissionConfig, metrics: Arc<AdmissionMetrics>) -> Self {
         Self {
             store: TokenStore::from_config(config),
+            admin_store: TokenStore::from_management_config(config),
             public_prefixes: config.public_path_prefixes.clone(),
             rate_limit_per_min: config.rate_limit_per_min,
             max_body_bytes: config.max_body_bytes,
@@ -83,7 +85,7 @@ impl AdmissionGate {
 
     /// Whether any token is configured.
     pub fn is_empty(&self) -> bool {
-        self.store.is_empty()
+        self.store.is_empty() && self.admin_store.is_empty()
     }
 
     async fn check_rate(&self, token_hash: &[u8; 32]) -> bool {
@@ -192,17 +194,44 @@ pub async fn admission_middleware(
         );
     };
 
-    let Some(entry) = gate.store.authenticate(&token) else {
-        gate.metrics.record_auth_rejection();
-        tracing::warn!(path = %path, "admission rejected request with unknown token");
-        return reject(StatusCode::UNAUTHORIZED, "AUTH_REQUIRED", "unknown token");
+    let (entry, is_admin) = match gate.admin_store.authenticate(&token) {
+        Some(entry) => (entry, true),
+        None => match gate.store.authenticate(&token) {
+            Some(entry) => (entry, false),
+            None => {
+                gate.metrics.record_auth_rejection();
+                tracing::warn!(path = %path, "admission rejected request with unknown token");
+                return reject(StatusCode::UNAUTHORIZED, "AUTH_REQUIRED", "unknown token");
+            }
+        },
     };
     let token_hash = entry.hash;
-    let context = AdmissionContext::new(
-        entry.fingerprint.clone(),
-        entry.projects.clone(),
-        entry.quota_bytes,
-    );
+    let context = if is_admin {
+        AdmissionContext::new_admin(
+            entry.fingerprint.clone(),
+            entry.projects.clone(),
+            entry.quota_bytes,
+        )
+    } else {
+        AdmissionContext::new(
+            entry.fingerprint.clone(),
+            entry.projects.clone(),
+            entry.quota_bytes,
+        )
+    };
+    if !context.allows_path(&path) {
+        gate.metrics.record_scope_rejection();
+        tracing::warn!(
+            fingerprint = %context.fingerprint,
+            path = %path,
+            "admission rejected gateway token outside ingest scope"
+        );
+        return reject(
+            StatusCode::FORBIDDEN,
+            "PROJECT_FORBIDDEN",
+            "gateway tokens may only call ingest entries",
+        );
+    }
 
     if !gate.check_rate(&token_hash).await {
         gate.metrics.record_rate_rejection();

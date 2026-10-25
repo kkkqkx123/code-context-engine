@@ -186,6 +186,103 @@ impl Settings {
         Ok(())
     }
 
+    /// Whether the config file watcher is enabled.
+    ///
+    /// Opt-in via `CCE_CONFIG_WATCH=1` or `true`. Defaults to disabled so
+    /// long-running servers never reload unexpectedly.
+    pub fn config_watch_enabled() -> bool {
+        match std::env::var("CCE_CONFIG_WATCH")
+            .ok()
+            .map(|v| v.trim().to_lowercase())
+            .as_deref()
+        {
+            Some("1") | Some("true") | Some("yes") | Some("on") => true,
+            _ => false,
+        }
+    }
+
+    /// Reload safe global sections from a file without restarting.
+    ///
+    /// Safe sections (scanner, grouper, orchestrator, relation, symbol
+    /// resolution, AST-to-NL, license header, summary, rerank tuning,
+    /// metrics, search, cache, logger, plugins, MCP) update in place and
+    /// advance the global version so project registry caches invalidate.
+    /// Dangerous sections (server bind, database backends and locations,
+    /// embedder and LLM providers and models, export targets) require a
+    /// restart; any change there fails closed with an explicit error.
+    pub fn reload_safe_from_file(path: Option<&std::path::Path>) -> Result<u64, ConfigError> {
+        let mut loader = ConfigLoader::new();
+        if let Some(p) = path {
+            loader = loader.with_path(p);
+        }
+        let mut fresh = loader.load()?;
+        fresh.validate_and_resolve_dependencies();
+        Self::reload_safe(fresh)
+    }
+
+    /// Apply a freshly loaded configuration's safe sections.
+    pub fn reload_safe(fresh: AppConfig) -> Result<u64, ConfigError> {
+        let lock = GLOBAL_CONFIG
+            .get()
+            .ok_or_else(|| ConfigError::Other("Configuration not initialized.".to_string()))?;
+        let current = lock
+            .read()
+            .map_err(|e| ConfigError::Other(format!("Failed to acquire read lock: {}", e)))?
+            .clone();
+        let mut dangerous = Vec::new();
+        if serde_json::to_value(&current.server).unwrap_or_default()
+            != serde_json::to_value(&fresh.server).unwrap_or_default()
+        {
+            dangerous.push("server");
+        }
+        if serde_json::to_value(&current.database).unwrap_or_default()
+            != serde_json::to_value(&fresh.database).unwrap_or_default()
+        {
+            dangerous.push("database");
+        }
+        if serde_json::to_value(&current.embedder).unwrap_or_default()
+            != serde_json::to_value(&fresh.embedder).unwrap_or_default()
+        {
+            dangerous.push("embedder");
+        }
+        if serde_json::to_value(&current.llm).unwrap_or_default()
+            != serde_json::to_value(&fresh.llm).unwrap_or_default()
+        {
+            dangerous.push("llm");
+        }
+        if serde_json::to_value(&current.export).unwrap_or_default()
+            != serde_json::to_value(&fresh.export).unwrap_or_default()
+        {
+            dangerous.push("export");
+        }
+        if !dangerous.is_empty() {
+            return Err(ConfigError::Other(format!(
+                "global reload refused: dangerous sections changed ({}); restart required",
+                dangerous.join(", ")
+            )));
+        }
+        let mut guard = lock
+            .write()
+            .map_err(|e| ConfigError::Other(format!("Failed to acquire write lock: {}", e)))?;
+        guard.scanner = fresh.scanner;
+        guard.grouper = fresh.grouper;
+        guard.logger = fresh.logger;
+        guard.orchestrator = fresh.orchestrator;
+        guard.relation = fresh.relation;
+        guard.symbol_resolution = fresh.symbol_resolution;
+        guard.ast_to_nl = fresh.ast_to_nl;
+        guard.license_header = fresh.license_header;
+        guard.summary = fresh.summary;
+        guard.rerank = fresh.rerank;
+        guard.metrics = fresh.metrics;
+        guard.plugins = fresh.plugins;
+        guard.search = fresh.search;
+        guard.cache = fresh.cache;
+        guard.mcp = fresh.mcp;
+        drop(guard);
+        Ok(GLOBAL_CONFIG_VERSION.fetch_add(1, Ordering::SeqCst) + 1)
+    }
+
     /// Get scanner configuration
     ///
     /// Returns an error if configuration has not been initialized.

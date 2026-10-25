@@ -7,10 +7,9 @@ use base64::Engine as _;
 
 use cce_api::models::{
     INGEST_CHUNK_BYTES, IngestBatchRequest, IngestCommitResponse, IngestFileMeta,
-    IngestManifestRequest, IngestManifestResponse, IngestedFile, MAX_INGEST_BATCH_FILES,
-    MAX_INGEST_CHUNKS_PER_BATCH, MAX_INGEST_FILE_BYTES, MissingChunk, total_chunks_for_size,
+    IngestManifestRequest, IngestManifestResponse, IngestedFile, MAX_INGEST_FILE_BYTES,
+    MissingChunk,
 };
-use cce_api::paths::GATEWAY_BATCH_WIRE_BYTES;
 
 use super::client::GatewayClient;
 use super::params::SyncParams;
@@ -21,7 +20,7 @@ use super::scan::{
 
 /// Push one full sync pass: manifest, missing contents, then commit.
 ///
-/// Upload batches account base64 wire length against the shared API wire
+/// Upload batches account base64 wire length against the transport wire
 /// budget so a batch never exceeds the admission body limit after growth.
 /// When a scan cache file is configured, the pass loads the previous entries
 /// and scans incrementally so unchanged files skip re-hashing; without a
@@ -170,7 +169,7 @@ pub async fn upload_paths(
         let Some(file) = snapshot.files.get(identity) else {
             continue;
         };
-        let total = total_chunks_for_size(file.size.max(1));
+        let total = cce_supply::total_chunks_for_size(file.size.max(1), INGEST_CHUNK_BYTES);
         wanted.insert(identity.clone(), (0..total).collect());
     }
     for missing in missing_chunks {
@@ -212,7 +211,8 @@ pub async fn upload_paths(
             ));
             continue;
         }
-        let total = total_chunks_for_size(bytes.len().max(1) as u64);
+        let total =
+            cce_supply::total_chunks_for_size(bytes.len().max(1) as u64, INGEST_CHUNK_BYTES);
         let mut indices: Vec<u32> = wanted_indices.into_iter().collect();
         indices.sort_unstable();
         for chunk_index in indices {
@@ -235,10 +235,7 @@ pub async fn upload_paths(
                 chunk_hash: Some(hash),
                 compressed,
             });
-            if batch.len() >= MAX_INGEST_CHUNKS_PER_BATCH
-                || batch.len() >= MAX_INGEST_BATCH_FILES
-                || batch_bytes >= GATEWAY_BATCH_WIRE_BYTES
-            {
+            if cce_transport::policy::should_flush_batch(batch.len(), batch.len(), batch_bytes) {
                 flush_batch(
                     client,
                     params.project_id,

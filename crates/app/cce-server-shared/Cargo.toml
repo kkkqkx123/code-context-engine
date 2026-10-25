@@ -39,8 +39,10 @@ cce-storage-vector-qdrant = { version = "0.1.0", path = "../../infra/cce-storage
 cce-storage-vector-local = { version = "0.1.0", path = "../../infra/cce-storage-vector-local" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
+cce-supply = { version = "0.1.0", path = "../../infra/cce-supply" }
 cce-orchestrator = { version = "0.1.0", path = "../cce-orchestrator" }
 cce-api = { version = "0.1.0", path = "../cce-api" }
+cce-service = { version = "0.1.0", path = "../cce-service" }
 
 [dev-dependencies]
 llm-suite-rerank = { version = "0.1.0", path = "../../infra/llm-suite/crates/llm-suite-rerank", features = ["mock"] }

@@ -472,10 +472,6 @@ fn default_max_input_tokens() -> usize {
     8192
 }
 
-/// Type alias for backward compatibility
-/// ModelDefinition is now EmbeddingModelConfig
-pub type ModelDefinition = EmbeddingModelConfig;
-
 #[cfg(test)]
 mod tests {
     use super::*;

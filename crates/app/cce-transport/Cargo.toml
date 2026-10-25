@@ -1,0 +1,21 @@
+[package]
+name = "cce-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Remote transmission for CCE gateway and CLI remote mode"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+cce-api = { version = "0.1.0", path = "../cce-api" }
+cce-service = { version = "0.1.0", path = "../cce-service" }
+cce-supply = { version = "0.1.0", path = "../../infra/cce-supply" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

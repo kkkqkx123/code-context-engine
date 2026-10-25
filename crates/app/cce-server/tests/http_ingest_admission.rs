@@ -246,6 +246,7 @@ fn matrix_config() -> AdmissionConfig {
             projects: vec![7],
             quota_bytes: None,
         }],
+        management_tokens: Vec::new(),
         public_path_prefixes: vec!["/api/health".to_string()],
         rate_limit_per_min: 600,
         max_body_bytes: 16,

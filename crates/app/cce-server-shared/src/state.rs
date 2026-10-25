@@ -103,6 +103,11 @@ impl AppState {
         cache.remove(&project_id);
     }
 
+    /// Invalidate all cached relation searchers (e.g. on global reload).
+    pub async fn invalidate_relation_searcher_all(&self) {
+        self.relation_searcher_cache.write().await.clear();
+    }
+
     // --- Component access helpers ---
     // These provide convenient access to components stored in the engine.
 

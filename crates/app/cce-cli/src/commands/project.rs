@@ -36,6 +36,152 @@ pub async fn execute(cmd: &ProjectCommands, server: &str, verbose: bool) -> Resu
     }
 }
 
+/// Execute project commands through the domain service abstraction.
+///
+/// Local and remote share parameter semantics; only the transport differs.
+pub async fn execute_with_service(
+    cmd: &ProjectCommands,
+    service: &dyn cce_service::CodeContextService,
+    server: &str,
+    verbose: bool,
+) -> Result<()> {
+    use cce_service::CodeContextService;
+    match cmd {
+        ProjectCommands::Create {
+            path,
+            name,
+            extensions,
+            exclude,
+        } => {
+            let ext_list: Vec<String> = extensions
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect();
+            let exclude_list: Vec<String> =
+                exclude.split(',').map(|s| s.trim().to_string()).collect();
+            let request = CreateProjectRequest {
+                name: name.clone(),
+                root_path: path.to_string(),
+                extensions: ext_list,
+                exclude_dirs: exclude_list,
+                respect_gitignore: true,
+                ignore_patterns: vec![],
+                supply_mode: None,
+            };
+            if verbose {
+                println!("Creating project at: {}", path);
+            }
+            match service.create_project(request).await {
+                Ok(response) => {
+                    if response.success {
+                        print_success(&format!("Project created: {}", response.project.name));
+                        println!();
+                        print_project_details(&response.project);
+                    } else {
+                        print_error("Failed to create project");
+                    }
+                }
+                Err(e) => print_error(&format!("Failed to create project: {e}")),
+            }
+            Ok(())
+        }
+        ProjectCommands::List => match service.list_projects().await {
+            Ok(response) => {
+                if response.success {
+                    println!("Projects ({} total):", response.total);
+                    println!();
+                    if response.projects.is_empty() {
+                        println!("No projects found");
+                    } else {
+                        let headers = vec!["#", "ID", "Name", "Path"];
+                        let rows: Vec<Vec<String>> = response
+                            .projects
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| {
+                                vec![
+                                    (i + 1).to_string(),
+                                    p.id.clone(),
+                                    p.name.clone(),
+                                    truncate(&p.root_path, 40),
+                                ]
+                            })
+                            .collect();
+                        print_table(&headers, &rows);
+                    }
+                } else {
+                    print_error("Failed to list projects");
+                }
+                Ok(())
+            }
+            Err(e) => {
+                print_error(&format!("Failed to list projects: {e}"));
+                Ok(())
+            }
+        },
+        ProjectCommands::Get { id } => {
+            let project_id: i64 = id.parse().unwrap_or(-1);
+            match service.get_project(project_id).await {
+                Ok(response) => {
+                    if response.success {
+                        print_success(&format!("Project: {}", response.project.name));
+                        println!();
+                        print_project_details(&response.project);
+                    } else {
+                        print_error("Failed to get project");
+                    }
+                }
+                Err(e) => print_error(&format!("Failed to get project: {e}")),
+            }
+            Ok(())
+        }
+        ProjectCommands::Delete { id } => {
+            let project_id: i64 = id.parse().unwrap_or(-1);
+            match service.delete_project(project_id).await {
+                Ok(response) => {
+                    if response.success {
+                        print_success(&format!("Project {} deleted", response.project_id));
+                    } else {
+                        print_error("Failed to delete project");
+                    }
+                }
+                Err(e) => print_error(&format!("Failed to delete project: {e}")),
+            }
+            Ok(())
+        }
+        ProjectCommands::Index { id } => {
+            let client = ApiClient::new(server)?;
+            index_project(&client, id, verbose).await
+        }
+        ProjectCommands::Reload { id } => {
+            let project_id: i64 = id.parse().unwrap_or(-1);
+            match service.reload_project(project_id).await {
+                Ok(response) => {
+                    if response.success {
+                        print_success(&format!(
+                            "Project {} configuration reloaded",
+                            response.project_id
+                        ));
+                        println!("  {}", response.message);
+                    } else {
+                        print_error("Failed to reload project configuration");
+                    }
+                }
+                Err(e) => print_error(&format!("Failed to reload project configuration: {e}")),
+            }
+            Ok(())
+        }
+        ProjectCommands::Config { id } => {
+            let client = ApiClient::new(server)?;
+            update_project_config(&client, id, verbose).await
+        }
+        ProjectCommands::Update { id, name } => {
+            let client = ApiClient::new(server)?;
+            update_project(&client, id, name, verbose).await
+        }
+    }
+}
+
 async fn create_project(
     client: &ApiClient,
     path: &str,

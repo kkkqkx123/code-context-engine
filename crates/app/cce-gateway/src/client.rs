@@ -2,11 +2,11 @@
 
 use anyhow::Result;
 
-use cce_api::http::SharedHttpClient;
 use cce_api::models::{
     IngestBatchRequest, IngestBatchResponse, IngestEventRequest, IngestEventResponse,
     IngestManifestRequest, IngestManifestResponse,
 };
+use cce_transport::SharedHttpClient;
 
 /// Minimal HTTP client carrying the admission token from the environment.
 #[derive(Debug, Clone)]

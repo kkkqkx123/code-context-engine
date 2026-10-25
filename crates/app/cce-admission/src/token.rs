@@ -55,10 +55,19 @@ pub struct TokenStore {
 }
 
 impl TokenStore {
-    /// Pre-hash every configured token. Callers must validate first.
+    /// Pre-hash every configured gateway token. Callers must validate first.
     pub fn from_config(config: &crate::config::AdmissionConfig) -> Self {
-        let entries = config
-            .tokens
+        Self::from_entries(&config.tokens)
+    }
+
+    /// Pre-hash every configured management token.
+    pub fn from_management_config(config: &crate::config::AdmissionConfig) -> Self {
+        Self::from_entries(&config.management_tokens)
+    }
+
+    /// Pre-hash an explicit entry list.
+    pub fn from_entries(entries: &[crate::config::TokenEntry]) -> Self {
+        let entries = entries
             .iter()
             .map(|entry| {
                 let hash = hash_token(&entry.token);

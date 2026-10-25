@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 
-use cce_api::http::SharedHttpClient;
+use cce_transport::SharedHttpClient;
 
 /// API client
 pub struct ApiClient {

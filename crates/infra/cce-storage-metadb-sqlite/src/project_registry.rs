@@ -290,8 +290,7 @@ impl ProjectRegistry {
     ///
     /// The write bumps `profile_version` atomically in the same statement so
     /// the version observed on the next load is the version of this write.
-    /// The profile document is the single source of truth; legacy scan
-    /// columns are no longer synced and only remain as inert storage.
+    /// The profile document is the single source of truth.
     pub async fn update_profile(
         &self,
         project_id: i64,

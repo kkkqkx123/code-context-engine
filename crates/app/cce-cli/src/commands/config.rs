@@ -10,6 +10,7 @@ use anyhow::Result;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success, print_warning};
 use cce_api::models::{ConfigInfoResponse, ConfigReloadResponse, ConfigValidateResponse};
+use cce_service::CodeContextService;
 
 /// Execute configuration reload
 pub async fn execute_reload(server: &str, project_id: i64, verbose: bool) -> Result<()> {
@@ -54,6 +55,41 @@ pub async fn execute_reload(server: &str, project_id: i64, verbose: bool) -> Res
         }
     }
 
+    Ok(())
+}
+
+/// Execute configuration reload through the domain service abstraction.
+pub async fn execute_reload_with_service(
+    service: &dyn cce_service::CodeContextService,
+    project_id: i64,
+    verbose: bool,
+) -> Result<()> {
+    if verbose {
+        println!(
+            "Triggering configuration reload for project {}...",
+            project_id
+        );
+    }
+    match service.reload_project(project_id).await {
+        Ok(response) => {
+            if response.success {
+                print_success("Configuration reloaded successfully");
+                if !response.message.is_empty() {
+                    println!("  {}", response.message);
+                }
+            } else if !response.message.is_empty() {
+                print_error(&format!(
+                    "Configuration reload failed: {}",
+                    response.message
+                ));
+            } else {
+                print_error("Configuration reload failed");
+            }
+        }
+        Err(e) => {
+            print_error(&format!("Failed to reload configuration: {e}"));
+        }
+    }
     Ok(())
 }
 

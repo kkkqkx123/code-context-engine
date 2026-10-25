@@ -12,11 +12,11 @@ impl AppConfig {
     ///
     /// # Design Principles
     ///
-    /// - Project config can override: scanner, grouper, orchestrator, relation, ast_to_nl, license_header, summary, embedder (model only), llm (chat/rerank models)
+    /// - Project config can override: scanner, grouper, orchestrator, relation, ast_to_nl, license_header, summary, embedder (model only), llm (chat/rerank models), plugins
     /// - Project config CANNOT override: server, database, logger, export
     /// - Storage location (data_dir, index_path, collection) stays global for the shared engine;
     ///   per-project storage tuning applies globally and is not isolated
-    /// - Embedder override is limited to model selection and preprocessing; API keys and base_url remain from global
+    /// - Embedder override is limited to model selection; API keys and base_url remain from global
     /// - LLM override allows projects to specify different chat/rerank models while keeping provider credentials global
     /// - Sensitive settings (API keys, URLs) remain in global config
     pub fn merge_with_project(&self, project: &ProjectAppConfig) -> AppConfig {
@@ -45,6 +45,9 @@ impl AppConfig {
         // --- explicitly given fields override it.
         if let Some(ref scanner) = project.scanner {
             merged.scanner.merge(scanner);
+        }
+        if let Some(ref plugins) = project.plugins {
+            merged.plugins = plugins.clone();
         }
         if let Some(ref grouper) = project.grouper {
             merged.grouper.merge(grouper);

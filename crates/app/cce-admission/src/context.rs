@@ -9,10 +9,13 @@
 pub struct AdmissionContext {
     /// Log-safe token fingerprint, never the token itself.
     pub fingerprint: String,
-    /// Explicitly authorized project ids. Empty authorizes no project scope.
+    /// Explicitly authorized project ids. Empty authorizes no project scope
+    /// for gateway tokens and every project for admin tokens.
     pub projects: Vec<i64>,
     /// Stored byte quota for pushed content. None means unlimited.
     pub quota_bytes: Option<u64>,
+    /// Whether the presenting token carries management scope.
+    pub is_admin: bool,
 }
 
 impl AdmissionContext {
@@ -22,13 +25,41 @@ impl AdmissionContext {
             fingerprint,
             projects,
             quota_bytes,
+            is_admin: false,
+        }
+    }
+
+    /// Create an admin context from a verified management token.
+    pub fn new_admin(fingerprint: String, projects: Vec<i64>, quota_bytes: Option<u64>) -> Self {
+        Self {
+            fingerprint,
+            projects,
+            quota_bytes,
+            is_admin: true,
         }
     }
 
     /// Whether the token binding covers the given project id.
     pub fn allows_project(&self, project_id: i64) -> bool {
+        if self.is_admin && self.projects.is_empty() {
+            return true;
+        }
         self.projects.contains(&project_id)
     }
+
+    /// Whether the token may call the given path.
+    pub fn allows_path(&self, path: &str) -> bool {
+        if self.is_admin {
+            return true;
+        }
+        is_gateway_path(path)
+    }
+}
+
+/// Whether a path is reachable with a gateway push token.
+pub fn is_gateway_path(path: &str) -> bool {
+    let clean = path.split('?').next().unwrap_or(path);
+    clean.contains("/ingest/")
 }
 
 /// Whether the bind host is a loopback address.
@@ -115,6 +146,23 @@ mod tests {
         assert!(!context.allows_project(4));
         let empty = AdmissionContext::new("fp".to_string(), Vec::new(), None);
         assert!(!empty.allows_project(3));
+        let admin_empty = AdmissionContext::new_admin("fp".to_string(), Vec::new(), None);
+        assert!(admin_empty.allows_project(3));
+        let admin_scoped = AdmissionContext::new_admin("fp".to_string(), vec![3], None);
+        assert!(admin_scoped.allows_project(3));
+        assert!(!admin_scoped.allows_project(4));
+    }
+
+    #[test]
+    fn gateway_path_restricts_to_ingest_entries() {
+        let gateway = AdmissionContext::new("fp".to_string(), vec![1], None);
+        assert!(gateway.allows_path("/api/project/1/ingest/manifest"));
+        assert!(gateway.allows_path("/api/project/1/ingest/batch"));
+        assert!(!gateway.allows_path("/api/project/1/index"));
+        assert!(!gateway.allows_path("/api/search"));
+        let admin = AdmissionContext::new_admin("fp".to_string(), Vec::new(), None);
+        assert!(admin.allows_path("/api/project/1/index"));
+        assert!(admin.allows_path("/api/search"));
     }
 
     #[test]

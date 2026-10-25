@@ -17,13 +17,13 @@ path = "src/lib.rs"
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 clap = { version = "4.6", features = ["derive", "env"] }
 base64 = "0.22"
 cce-api = { version = "0.1.0", path = "../cce-api" }
+cce-transport = { version = "0.1.0", path = "../cce-transport" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
 cce-supply = { version = "0.1.0", path = "../../infra/cce-supply" }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }

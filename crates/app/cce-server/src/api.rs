@@ -127,6 +127,7 @@ pub async fn serve(
         .expect("engine Arc must have exactly one reference after coordinator drops");
 
     let app_state = state::AppState::from_engine(&engine, qdrant_handle).await;
+    spawn_config_watcher();
     #[cfg(feature = "admission")]
     let app = admission_app(app_state, host)?;
     #[cfg(not(feature = "admission"))]
@@ -146,6 +147,41 @@ pub async fn serve(
 
 // Re-export for convenience
 pub use state::AppState;
+
+/// Spawn the optional global config file watcher.
+///
+/// Disabled by default; enabled with `CCE_CONFIG_WATCH=1`. Polls the
+/// resolved config file for modification time changes and applies safe
+/// section reloads. Dangerous changes log a warning and keep serving the
+/// previous configuration until a restart.
+fn spawn_config_watcher() {
+    if !cce_config::Settings::config_watch_enabled() {
+        return;
+    }
+    let path = cce_config::Settings::resolve_config_path(None);
+    tracing::info!(path = %path, "Config file watcher enabled");
+    tokio::spawn(async move {
+        let mut last_mtime: Option<std::time::SystemTime> =
+            std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            let current = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+            if current != last_mtime {
+                last_mtime = current;
+                let probe = std::path::PathBuf::from(&path);
+                match cce_config::Settings::reload_safe_from_file(Some(probe.as_path())) {
+                    Ok(version) => {
+                        tracing::info!(version, "Global configuration reloaded from watched file")
+                    }
+                    Err(error) => tracing::warn!(
+                        error = %error,
+                        "Watched config change refused; restart required for dangerous sections"
+                    ),
+                }
+            }
+        }
+    });
+}
 
 #[cfg(feature = "admission")]
 /// Assemble the router for admission-enabled builds.
