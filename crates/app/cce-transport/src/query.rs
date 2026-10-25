@@ -109,6 +109,6 @@ mod tests {
         let path = GraphQuery::new("/x".to_string())
             .param("ids", QueryParam::List(vec!["a".to_string(), "b/c".to_string()]))
             .build();
-        assert_eq!(path, "/x?ids=a,b%2Fc");
+        assert_eq!(path, "/x?ids=a%2Cb%2Fc");
     }
 }

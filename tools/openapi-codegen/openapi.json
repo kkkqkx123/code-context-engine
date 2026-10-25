@@ -1980,7 +1980,7 @@
         "tags": [
           "Project"
         ],
-        "summary": "Handle read merged project config request",
+        "summary": "Handle read stored project profile request",
         "operationId": "handle_get_project_config",
         "parameters": [
           {
@@ -3838,7 +3838,7 @@
           "Project"
         ],
         "summary": "Handle typed project LLM update request.",
-        "description": "Only project-effective chat and rerank fields are accepted. The update is\nvalidated, stored in memory and component caches are cleared without\ninvalidating the registry entry.",
+        "description": "Only project-effective chat and rerank selections are accepted. The update\nis validated and persisted as part of the project profile document, so a\nrestart keeps the values. Provider connection details and per-model\ntuning stay global and are rejected here.",
         "operationId": "handle_update_project_llm_config",
         "parameters": [
           {
@@ -9406,7 +9406,7 @@
       },
       "ProjectConfigGetResponse": {
         "type": "object",
-        "description": "Response for reading the merged project configuration",
+        "description": "Response for reading the stored project profile",
         "required": [
           "success",
           "project_id",
@@ -9415,7 +9415,7 @@
         ],
         "properties": {
           "config": {
-            "description": "Merged runtime configuration (global defaults plus project overrides)"
+            "description": "Stored project profile (ProjectAppConfig as JSON), not the merged\nruntime configuration. Combine with the global configuration to\nderive the effective values."
           },
           "config_version": {
             "type": "integer",
@@ -9466,7 +9466,7 @@
         ],
         "properties": {
           "config": {
-            "description": "Project-level configuration (partial config, free-form)"
+            "description": "Project profile document (ProjectAppConfig as JSON). Only\nproject-effective fields are accepted; global-only sections such as\n`server`, `database`, `logger`, `metrics`, `export`, `mcp`,\n`search`, `cache` or `symbol_resolution` are rejected."
           }
         }
       },
@@ -9479,6 +9479,12 @@
           "message"
         ],
         "properties": {
+          "config_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Combined profile/global version after the write. Advances when either\nthe profile or the global configuration changes. Observe the same\nvalue through GET.",
+            "minimum": 0
+          },
           "hot_reload_applied": {
             "type": "boolean"
           },

@@ -6,7 +6,7 @@ use axum::{Json, extract::State};
 use std::path::PathBuf;
 
 use cce_api::models::{ErrorResponse, IndexRequest, IndexResponse, error_codes};
-use cce_orchestrator::{IndexOptions, IndexResult};
+use cce_orchestrator::IndexResult;
 
 use crate::api::response::ApiResult;
 
@@ -79,37 +79,8 @@ pub async fn handle_index(
         ));
     }
 
-    // Build index options
-    let mut options = IndexOptions::new(&root_dir)
-        .with_extensions(if query.extensions.is_empty() {
-            vec![
-                "rs".to_string(),
-                "py".to_string(),
-                "js".to_string(),
-                "ts".to_string(),
-                "c".to_string(),
-                "cpp".to_string(),
-                "java".to_string(),
-            ]
-        } else {
-            query.extensions
-        })
-        .with_exclude_dirs(if query.exclude_dirs.is_empty() {
-            vec![
-                "node_modules".to_string(),
-                "target".to_string(),
-                ".git".to_string(),
-                "vendor".to_string(),
-            ]
-        } else {
-            query.exclude_dirs
-        })
-        .with_gitignore(query.respect_gitignore)
-        .with_ignore_patterns(query.ignore_patterns);
-
-    if let Some(custom_gitignore) = query.custom_gitignore {
-        options = options.with_custom_gitignore(custom_gitignore);
-    }
+    // Build index options via the shared construction path.
+    let options = cce_server_shared::build_index_options(&query);
 
     // Execute indexing with project_id using engine's index method
     let result = match state.engine.index(query.project_id, options).await {

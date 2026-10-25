@@ -6,7 +6,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use cce_api::models::{
     CreateProjectRequest, GraphComponentsResponse, GraphCycle, GraphCyclesResponse, GraphEdge,
     GraphEntityImpactResponse, GraphImpactResponse, GraphModuleResponse, GraphNode,
@@ -14,7 +13,7 @@ use cce_api::models::{
     ModuleRelation, ProjectConfig, ProjectConfigReloadResponse, ProjectDeleteResponse,
     ProjectDetailResponse, ProjectIndexResponse, ProjectListResponse, SearchRequest,
     SearchResponse, StartWatchRequest, StartWatchResponse, StopWatchResponse, StructuralRelation,
-    WatchStatus, WatchStatusResponse,
+    WatchStatusResponse,
 };
 use cce_api::service_params::{
     GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
@@ -515,93 +514,30 @@ impl LocalService {
         &self,
         request: CreateProjectRequest,
     ) -> Result<ProjectDetailResponse, ServiceError> {
-        let supply_is_gateway = request
-            .supply_mode
-            .as_deref()
-            .map(|m| m.trim().to_lowercase() == cce_api::models::SUPPLY_MODE_GATEWAY)
-            .unwrap_or(false);
-        if request.root_path.is_empty() && !supply_is_gateway {
-            return Err(ServiceError::Invalid(
-                "root path cannot be empty".to_string(),
-            ));
-        }
-        let root_path_str = if supply_is_gateway {
-            cce_types::normalize_logical_path(&request.root_path)
-        } else {
-            let root = PathBuf::from(&request.root_path);
-            if !root.exists() {
-                return Err(ServiceError::Invalid(
-                    "root path does not exist".to_string(),
-                ));
-            }
-            if !root.is_dir() {
-                return Err(ServiceError::Invalid(
-                    "root path is not a directory".to_string(),
-                ));
-            }
-            root.canonicalize()
-                .map_err(|e| ServiceError::Invalid(format!("failed to resolve path: {e}")))?
-                .to_string_lossy()
-                .to_string()
-        };
-        let store =
-            self.state.engine.metadata_store().ok_or_else(|| {
+        let store = self.state.engine.metadata_store().ok_or_else(|| {
+            ServiceError::Engine("metadata store not initialized".to_string())
+        })?;
+        let created = crate::create_project(store, &request).map_err(|e| match e {
+            crate::ProjectCreateError::Invalid(m) => ServiceError::Invalid(m),
+            crate::ProjectCreateError::MetadataUnavailable => {
                 ServiceError::Engine("metadata store not initialized".to_string())
-            })?;
-        let client = store.as_ref();
-        let exists = client
-            .with_transaction(|tx| {
-                cce_storage_metadb_sqlite::ProjectRepository::path_exists(tx, &root_path_str)
-            })
-            .map_err(|e| Self::engine_error(e))?;
-        if exists {
-            return Err(ServiceError::Invalid(
-                "project already exists at this path".to_string(),
-            ));
-        }
-        let name = match &request.name {
-            Some(n) if !n.is_empty() => n.clone(),
-            _ => cce_storage_metadb_sqlite::generate_project_name(&root_path_str),
-        };
-        let mut new_project =
-            cce_storage_metadb_sqlite::NewProjectRecord::new(name.clone(), root_path_str.clone());
-        let initial_profile = cce_config::ProjectAppConfig::from_filter_args(
-            request.extensions.clone(),
-            request.exclude_dirs.clone(),
-            Some(request.respect_gitignore),
-            request.ignore_patterns.clone(),
-        );
-        new_project.profile_json = Some(initial_profile.to_canonical_json());
-        let project_id = client
-            .with_transaction(|tx| {
-                cce_storage_metadb_sqlite::ProjectRepository::insert(tx, &new_project)
-            })
-            .map_err(|e| Self::engine_error(e))?;
-        if let Some(supply_mode) = request.supply_mode.as_deref() {
-            let normalized = supply_mode.trim().to_lowercase();
-            if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
-                || normalized == cce_api::models::SUPPLY_MODE_LOCAL
-            {
-                let _ = client.with_transaction(|tx| {
-                    cce_storage_metadb_sqlite::ProjectRepository::meta_set_string(
-                        tx,
-                        project_id,
-                        cce_api::models::SUPPLY_MODE_KEY,
-                        &normalized,
-                    )
-                });
             }
-        }
+            crate::ProjectCreateError::PathExists => {
+                ServiceError::Invalid("project already exists at this path".to_string())
+            }
+            crate::ProjectCreateError::Conflict(m) => ServiceError::Engine(m),
+            crate::ProjectCreateError::Storage(m) => ServiceError::Engine(m),
+        })?;
         Ok(ProjectDetailResponse {
             success: true,
             project: ProjectConfig {
-                id: project_id.to_string(),
-                name,
-                root_path: root_path_str,
-                extensions: request.extensions,
-                exclude_dirs: request.exclude_dirs,
-                respect_gitignore: request.respect_gitignore,
-                ignore_patterns: request.ignore_patterns,
+                id: created.project_id.to_string(),
+                name: created.name,
+                root_path: created.root_path,
+                extensions: created.extensions,
+                exclude_dirs: created.exclude_dirs,
+                respect_gitignore: created.respect_gitignore,
+                ignore_patterns: created.ignore_patterns,
                 created_at: chrono::Utc::now().to_rfc3339(),
                 last_indexed: None,
             },
@@ -678,35 +614,7 @@ impl LocalService {
                 request.path
             )));
         }
-        let mut options = cce_orchestrator::IndexOptions::new(&root_dir)
-            .with_extensions(if request.extensions.is_empty() {
-                vec![
-                    "rs".to_string(),
-                    "py".to_string(),
-                    "js".to_string(),
-                    "ts".to_string(),
-                    "c".to_string(),
-                    "cpp".to_string(),
-                    "java".to_string(),
-                ]
-            } else {
-                request.extensions
-            })
-            .with_exclude_dirs(if request.exclude_dirs.is_empty() {
-                vec![
-                    "node_modules".to_string(),
-                    "target".to_string(),
-                    ".git".to_string(),
-                    "vendor".to_string(),
-                ]
-            } else {
-                request.exclude_dirs
-            })
-            .with_gitignore(request.respect_gitignore)
-            .with_ignore_patterns(request.ignore_patterns);
-        if let Some(custom) = request.custom_gitignore {
-            options = options.with_custom_gitignore(custom);
-        }
+        let options = crate::build_index_options(&request);
         let result = self
             .state
             .engine
@@ -1281,41 +1189,13 @@ impl LocalService {
     }
 
     pub async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse, ServiceError> {
-        if project_id <= 0 {
-            return Err(ServiceError::Invalid(
-                "project_id must be positive".to_string(),
-            ));
-        }
-        let map = self.state.watch_status.read().await;
-        let tracker = map.get(&project_id).cloned().unwrap_or_default();
-        drop(map);
-        let events_processed = match self
-            .state
-            .engine
-            .get_hot_update_coordinator(project_id)
+        crate::watch_status(&self.state, project_id)
             .await
-        {
-            Ok(coord) => coord.lock().await.total_events(),
-            Err(_) => tracker.events_processed as usize,
-        };
-        let relation_epoch = match self.state.engine.get_relation_runtime(project_id).await {
-            Ok(runtime) => {
-                let epoch = runtime.get_relation_epoch().await;
-                (epoch > 0).then_some(epoch)
-            }
-            Err(_) => None,
-        };
-        Ok(WatchStatusResponse {
-            success: true,
-            status: WatchStatus {
-                active: tracker.active,
-                watched_dirs: tracker.watched_dirs.clone(),
-                events_processed,
-                started_at: tracker.started_at.map(|t| t.to_rfc3339()),
-                relation_epoch,
-                data_epoch: None,
-            },
-        })
+            .map_err(|e| match e {
+                crate::WatchStatusError::InvalidProjectId => {
+                    ServiceError::Invalid("project_id must be positive".to_string())
+                }
+            })
     }
 
     pub async fn watch_start(
@@ -1323,111 +1203,44 @@ impl LocalService {
         project_id: i64,
         request: StartWatchRequest,
     ) -> Result<StartWatchResponse, ServiceError> {
-        if project_id <= 0 {
-            return Err(ServiceError::Invalid(
-                "project_id must be positive".to_string(),
-            ));
-        }
-        if let Some(store) = self.state.engine.metadata_store()
-            && let Ok(mode) = store.as_ref().with_transaction(|tx| {
-                cce_storage_metadb_sqlite::ProjectRepository::meta_get_string_optional(
-                    tx,
-                    project_id,
-                    cce_api::models::SUPPLY_MODE_KEY,
-                )
+        crate::watch_start(&self.state, project_id, &request)
+            .await
+            .map_err(|e| match e {
+                crate::WatchStartError::InvalidProjectId => {
+                    ServiceError::Invalid("project_id must be positive".to_string())
+                }
+                crate::WatchStartError::GatewaySupplied => ServiceError::Invalid(
+                    "project is gateway-supplied; local watching is disabled".to_string(),
+                ),
+                crate::WatchStartError::ProjectLoad(m) => ServiceError::Engine(m),
+                crate::WatchStartError::RootNotAccessible(m) => {
+                    ServiceError::Invalid(format!("project root is not accessible: {m}"))
+                }
+                crate::WatchStartError::WatchNotAccessible(m) => {
+                    ServiceError::Invalid(format!("watch path is not accessible: {m}"))
+                }
+                crate::WatchStartError::NotWithinRoot { .. } => {
+                    ServiceError::Invalid("watch path is not within project root".to_string())
+                }
+                crate::WatchStartError::PathNotFound(m) => {
+                    ServiceError::Invalid(format!("watch path is not accessible: {m}"))
+                }
+                crate::WatchStartError::HotCoordinator(m) => ServiceError::Engine(m),
+                crate::WatchStartError::StartWatch(m) => ServiceError::Engine(m),
+                crate::WatchStartError::EventLoop(m) => ServiceError::Engine(m),
             })
-            && mode.as_deref() == Some(cce_api::models::SUPPLY_MODE_GATEWAY)
-        {
-            return Err(ServiceError::Invalid(
-                "project is gateway-supplied; local watching is disabled".to_string(),
-            ));
-        }
-        let entry = self
-            .state
-            .engine
-            .project_registry()
-            .get_or_load(project_id)
-            .await
-            .map_err(|e| Self::engine_error(e))?;
-        let project_root = PathBuf::from(&entry.metadata.root_path);
-        let watch_path = PathBuf::from(&request.path);
-        let canonical_root = project_root
-            .canonicalize()
-            .map_err(|e| ServiceError::Invalid(format!("project root is not accessible: {e}")))?;
-        let canonical_watch = watch_path
-            .canonicalize()
-            .map_err(|e| ServiceError::Invalid(format!("watch path is not accessible: {e}")))?;
-        if !canonical_watch.starts_with(&canonical_root) {
-            return Err(ServiceError::Invalid(
-                "watch path is not within project root".to_string(),
-            ));
-        }
-        let hot = self
-            .state
-            .engine
-            .get_hot_update_coordinator(project_id)
-            .await
-            .map_err(|e| Self::engine_error(e))?;
-        {
-            let mut coordinator = hot.lock().await;
-            coordinator
-                .start_watch(&canonical_watch)
-                .await
-                .map_err(|e| Self::engine_error(e))?;
-            coordinator
-                .start_event_loop()
-                .await
-                .map_err(|e| Self::engine_error(e))?;
-        }
-        cce_orchestrator::hot_update::HotUpdateCoordinator::start_background_processor_from_arc(
-            hot.clone(),
-        )
-        .await;
-        {
-            let mut map = self.state.watch_status.write().await;
-            let tracker = map
-                .entry(project_id)
-                .or_insert_with(cce_orchestrator::hot_update::watcher::WatchStatusTracker::new);
-            tracker.start(&canonical_watch);
-        }
-        Ok(StartWatchResponse {
-            success: true,
-            message: "file watching started".to_string(),
-            project_id,
-            path: canonical_watch.to_string_lossy().into_owned(),
-            extensions: request.extensions,
-            debounce_ms: request.debounce_ms,
-        })
     }
 
     pub async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse, ServiceError> {
-        if project_id <= 0 {
-            return Err(ServiceError::Invalid(
-                "project_id must be positive".to_string(),
-            ));
-        }
-        let hot = self
-            .state
-            .engine
-            .get_hot_update_coordinator(project_id)
+        crate::watch_stop(&self.state, project_id)
             .await
-            .map_err(|e| Self::engine_error(e))?;
-        hot.lock()
-            .await
-            .stop_watch()
-            .await
-            .map_err(|e| Self::engine_error(e))?;
-        {
-            let mut map = self.state.watch_status.write().await;
-            if let Some(tracker) = map.get_mut(&project_id) {
-                tracker.stop();
-            }
-        }
-        Ok(StopWatchResponse {
-            success: true,
-            message: "file watching stopped".to_string(),
-            project_id,
-        })
+            .map_err(|e| match e {
+                crate::WatchStopError::InvalidProjectId => {
+                    ServiceError::Invalid("project_id must be positive".to_string())
+                }
+                crate::WatchStopError::HotCoordinator(m) => ServiceError::Engine(m),
+                crate::WatchStopError::StopWatch(m) => ServiceError::Engine(m),
+            })
     }
 
     pub async fn reload_project(

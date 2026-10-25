@@ -6,18 +6,14 @@ use axum::{
     Json,
     extract::{Path, State},
 };
-use std::path::PathBuf;
 
 use crate::api::response::ApiResult;
-use crate::runtime::recovery::ProjectMeta;
 use cce_api::models::error_codes;
 use cce_api::models::{
     CreateProjectRequest, ErrorResponse, ProjectConfig, ProjectDeleteResponse,
     ProjectDetailResponse, UpdateProjectRequest,
 };
-use cce_storage_metadb_sqlite::{
-    NewProjectRecord, ProjectRepository, ProjectUpdateRecord, generate_project_name,
-};
+use cce_storage_metadb_sqlite::{ProjectRepository, ProjectUpdateRecord};
 
 /// Handle create project request
 #[utoipa::path(
@@ -34,49 +30,6 @@ pub async fn handle_create_project(
     State(state): State<crate::api::state::AppState>,
     Json(request): Json<CreateProjectRequest>,
 ) -> ApiResult<ProjectDetailResponse> {
-    // Root path semantics: registry stores the logical identifier used for
-    // display and de-duplication. Local supply requires a server-side
-    // physical directory; gateway supply allows a logical-only path since
-    // content arrives via ingest and the server never touches the filesystem.
-    let supply_is_gateway = request
-        .supply_mode
-        .as_deref()
-        .map(|mode| mode.trim().to_lowercase() == cce_api::models::SUPPLY_MODE_GATEWAY)
-        .unwrap_or(false);
-    if request.root_path.is_empty() && !supply_is_gateway {
-        return ApiResult::Error(ErrorResponse::new(
-            error_codes::INVALID_REQUEST,
-            "Root path cannot be empty",
-        ));
-    }
-    let root_path_str = if supply_is_gateway {
-        cce_types::normalize_logical_path(&request.root_path)
-    } else {
-        let root_path = PathBuf::from(&request.root_path);
-        if !root_path.exists() {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "Root path does not exist",
-            ));
-        }
-        if !root_path.is_dir() {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::INVALID_REQUEST,
-                "Root path is not a directory",
-            ));
-        }
-        let canonical_path = match root_path.canonicalize() {
-            Ok(p) => p,
-            Err(e) => {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::INVALID_REQUEST,
-                    format!("Failed to resolve path: {}", e),
-                ));
-            }
-        };
-        canonical_path.to_string_lossy().to_string()
-    };
-
     // Check if metadata store is available
     let metadata_store = match state.engine.metadata_store() {
         Some(s) => s,
@@ -88,103 +41,57 @@ pub async fn handle_create_project(
         }
     };
 
-    // Check if path already exists
-    let client = metadata_store.as_ref();
-    match client.with_transaction(|tx| ProjectRepository::path_exists(tx, &root_path_str)) {
-        Ok(false) => {}
-        Ok(true) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::CONFLICT,
-                "Project already exists at this path",
-            ));
-        }
+    let created = match cce_server_shared::create_project(metadata_store, &request) {
+        Ok(c) => c,
         Err(e) => {
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                format!("Failed to check path: {}", e),
-            ));
-        }
-    }
-
-    // Generate or use provided name
-    let name = match &request.name {
-        Some(n) if !n.is_empty() => n.clone(),
-        _ => generate_project_name(&root_path_str),
-    };
-
-    // Create new project record. The profile document is the single source
-    // of truth for scan configuration; supply filter arguments become a
-    // one-shot profile patch through the shared supply kernel.
-    let mut new_project = NewProjectRecord::new(name.clone(), root_path_str.clone());
-    let initial_profile = cce_config::ProjectAppConfig::from_filter_args(
-        request.extensions.clone(),
-        request.exclude_dirs.clone(),
-        Some(request.respect_gitignore),
-        request.ignore_patterns.clone(),
-    );
-    new_project.profile_json = Some(initial_profile.to_canonical_json());
-
-    // Insert into database
-    let client = metadata_store.as_ref();
-    let project_id = match client.with_transaction(|tx| ProjectRepository::insert(tx, &new_project))
-    {
-        Ok(id) => id,
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("UNIQUE constraint failed") {
-                return ApiResult::Error(ErrorResponse::new(
-                    error_codes::CONFLICT,
-                    "Project with this name or root path already exists",
-                ));
-            }
-            return ApiResult::Error(ErrorResponse::new(
-                error_codes::STORAGE_ERROR,
-                format!("Failed to create project: {}", msg),
-            ));
+            return match e {
+                cce_server_shared::ProjectCreateError::Invalid(m) => {
+                    // Map specific messages? Keep generic invalid request.
+                    if m.contains("cannot be empty") {
+                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Root path cannot be empty"))
+                    } else if m.contains("does not exist") {
+                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Root path does not exist"))
+                    } else if m.contains("not a directory") {
+                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, "Root path is not a directory"))
+                    } else if m.to_lowercase().starts_with("failed to resolve path") {
+                        let detail = m.split_once(": ").map(|x| x.1).unwrap_or(m.as_str());
+                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, format!("Failed to resolve path: {}", detail)))
+                    } else {
+                        ApiResult::Error(ErrorResponse::new(error_codes::INVALID_REQUEST, m))
+                    }
+                }
+                cce_server_shared::ProjectCreateError::MetadataUnavailable => {
+                    ApiResult::Error(ErrorResponse::new(error_codes::STORAGE_ERROR, "Metadata store not initialized"))
+                }
+                cce_server_shared::ProjectCreateError::PathExists => {
+                    ApiResult::Error(ErrorResponse::new(error_codes::CONFLICT, "Project already exists at this path"))
+                }
+                cce_server_shared::ProjectCreateError::Conflict(m) => {
+                    ApiResult::Error(ErrorResponse::new(error_codes::CONFLICT, m))
+                }
+                cce_server_shared::ProjectCreateError::Storage(m) => {
+                    // Preserve UNIQUE handling already converted to Conflict; other storage errors.
+                    if m.contains("UNIQUE constraint failed") {
+                        ApiResult::Error(ErrorResponse::new(error_codes::CONFLICT, "Project with this name or root path already exists"))
+                    } else {
+                        ApiResult::Error(ErrorResponse::new(error_codes::STORAGE_ERROR, m))
+                    }
+                }
+            };
         }
     };
-
-    // Initialize project metadata for version management
-    if let Err(e) = ProjectMeta::init_for_project(client, project_id) {
-        tracing::warn!(
-            project_id = project_id,
-            error = %e,
-            "Failed to initialize project metadata (non-critical)"
-        );
-    }
-    if let Some(supply_mode) = request.supply_mode.as_deref() {
-        let normalized = supply_mode.trim().to_lowercase();
-        if normalized == cce_api::models::SUPPLY_MODE_GATEWAY
-            || normalized == cce_api::models::SUPPLY_MODE_LOCAL
-        {
-            if let Err(e) = client.with_transaction(|tx| {
-                ProjectRepository::meta_set_string(
-                    tx,
-                    project_id,
-                    cce_api::models::SUPPLY_MODE_KEY,
-                    &normalized,
-                )
-            }) {
-                tracing::warn!(
-                    project_id = project_id,
-                    error = %e,
-                    "Failed to record supply mode (non-critical)"
-                );
-            }
-        }
-    }
 
     // Build response
     ApiResult::Success(ProjectDetailResponse {
         success: true,
         project: ProjectConfig {
-            id: project_id.to_string(),
-            name,
-            root_path: root_path_str,
-            extensions: request.extensions,
-            exclude_dirs: request.exclude_dirs,
-            respect_gitignore: request.respect_gitignore,
-            ignore_patterns: request.ignore_patterns,
+            id: created.project_id.to_string(),
+            name: created.name,
+            root_path: created.root_path,
+            extensions: created.extensions,
+            exclude_dirs: created.exclude_dirs,
+            respect_gitignore: created.respect_gitignore,
+            ignore_patterns: created.ignore_patterns,
             created_at: chrono::Utc::now().to_rfc3339(),
             last_indexed: None,
         },

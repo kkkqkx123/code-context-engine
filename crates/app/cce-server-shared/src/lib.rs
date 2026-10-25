@@ -14,3 +14,7 @@ pub mod services;
 pub mod state;
 
 pub use service_local::{LocalService, ServiceError};
+pub use services::build_index_options;
+pub use services::{watch_start, watch_status, watch_stop};
+pub use services::{WatchStartError, WatchStatusError, WatchStopError};
+pub use services::{CreatedProject, ProjectCreateError, create_project};
