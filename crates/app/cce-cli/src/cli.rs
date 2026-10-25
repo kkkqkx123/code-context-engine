@@ -327,21 +327,6 @@ impl Cli {
         }
     }
 
-    /// Execute config command
-    async fn execute_config(&self, cmd: &ConfigCommands) -> anyhow::Result<()> {
-        match cmd {
-            ConfigCommands::Reload { project_id } => {
-                commands::config::execute_reload(&self.server, *project_id, self.verbose).await
-            }
-            ConfigCommands::Info => {
-                commands::config::execute_info(&self.server, self.verbose).await
-            }
-            ConfigCommands::Validate => {
-                commands::config::execute_validate(&self.server, self.verbose).await
-            }
-        }
-    }
-
     /// Execute config command through the domain service abstraction.
     async fn execute_config_with_service(
         &self,

@@ -9,7 +9,7 @@ use crate::output::{format_duration, print_error, print_success};
 use cce_api::models::{
     DeadLetterAcknowledgeRequest, DeadLetterActionResponse, DeadLetterListResponse,
     DeadLetterRetryRequest, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
-    IndexResponse, ParseRequest, ParseResponse,
+    ParseRequest, ParseResponse,
 };
 
 /// Execute index commands through the domain service abstraction.

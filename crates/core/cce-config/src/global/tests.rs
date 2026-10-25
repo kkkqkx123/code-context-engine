@@ -307,7 +307,6 @@ fn test_merge_with_project_embedder_model() {
     let project = ProjectAppConfig {
         embedder: Some(ProjectEmbedderConfig {
             model: Some("bge-m3".to_string()),
-            ..Default::default()
         }),
         ..Default::default()
     };

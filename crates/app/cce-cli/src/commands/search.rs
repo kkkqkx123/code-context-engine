@@ -2,80 +2,37 @@
 
 use clap::Subcommand;
 
-use anyhow::Result;
+use crate::output::truncate;
+use cce_api::models::SearchResultItem;
 
-use crate::client::ApiClient;
-use crate::output::{format_duration, print_error, print_output, print_success, truncate};
-use cce_api::models::{SearchRequest, SearchResponse, SearchResultItem};
+fn print_result_item(index: usize, item: &SearchResultItem) {
+    let entity_names = if item.entity_names.is_empty() {
+        String::new()
+    } else {
+        format!("[{}] ", item.entity_names.join(", "))
+    };
+    println!(
+        "{index}.{names} {path} {start}-{end}",
+        index = index,
+        names = entity_names,
+        path = truncate(&item.file_path, 50),
+        start = item.start_line,
+        end = item.end_line
+    );
 
-/// Search query parameters
-struct SearchQueryParams<'a> {
-    project_id: i64,
-    project_path: Option<&'a str>,
-    query: &'a str,
-    query_type: &'a str,
-    limit: usize,
-    min_score: Option<f32>,
-    directory: &'a Option<String>,
-    exclude_content_types: &'a Option<String>,
-    exclude: &'a Option<String>,
-    include: &'a Option<String>,
-    include_categories: &'a Option<String>,
-    exclude_categories: &'a Option<String>,
-    enable_rerank: Option<bool>,
-    rerank_max_candidates: Option<usize>,
-    query_intent: &'a Option<String>,
-    expand: Option<bool>,
-}
-pub async fn execute(
-    cmd: &SearchCommands,
-    server: &str,
-    verbose: bool,
-    format: crate::cli::OutputFormat,
-) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
-    match cmd {
-        SearchCommands::Query {
-            project_id,
-            project_path,
-            query,
-            query_type,
-            limit,
-            min_score,
-            directory,
-            exclude_content_types,
-            exclude,
-            include,
-            include_categories,
-            exclude_categories,
-            enable_rerank,
-            rerank_max_candidates,
-            query_intent,
-            expand,
-        } => {
-            let params = SearchQueryParams {
-                project_id: *project_id,
-                project_path: project_path.as_deref(),
-                query,
-                query_type,
-                limit: *limit,
-                min_score: *min_score,
-                directory,
-                exclude_content_types,
-                exclude,
-                include,
-                include_categories,
-                exclude_categories,
-                enable_rerank: *enable_rerank,
-                rerank_max_candidates: *rerank_max_candidates,
-                query_intent,
-                expand: *expand,
-            };
-            search_query(&client, &params, params.project_id, verbose, format).await
-        }
+    if let Some(ref entity_type) = item.entity_type {
+        println!("   Type: {}", entity_type);
     }
+
+    // Print code snippet (first 3 lines)
+    let lines: Vec<&str> = item.code_chunk.lines().take(3).collect();
+    for line in lines {
+        println!("   {}", line);
+    }
+
+    println!();
 }
+
 
 /// Execute search commands through the domain service abstraction.
 pub async fn execute_with_service(
@@ -83,7 +40,7 @@ pub async fn execute_with_service(
     service: &crate::service::CliService,
     verbose: bool,
     format: crate::cli::OutputFormat,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     match cmd {
         SearchCommands::Query {
             project_id,
@@ -123,7 +80,7 @@ pub async fn execute_with_service(
                 .as_ref()
                 .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
                 .unwrap_or_default();
-            let request = SearchRequest {
+            let request = cce_api::models::SearchRequest {
                 project_id: Some(*project_id),
                 project_path: project_path.clone(),
                 query: query.to_string(),
@@ -148,12 +105,12 @@ pub async fn execute_with_service(
             match service.search(request).await {
                 Ok(response) => {
                     if matches!(format, crate::cli::OutputFormat::Json) {
-                        print_output(format, &response);
+                        crate::output::print_output(format, &response);
                     } else if response.success {
-                        print_success(&format!(
+                        crate::output::print_success(&format!(
                             "Found {} results in {}",
                             response.total,
-                            format_duration(response.elapsed_ms)
+                            crate::output::format_duration(response.elapsed_ms)
                         ));
                         if !response.sources_used.is_empty() {
                             println!("Sources: {}", response.sources_used.join(", "));
@@ -167,137 +124,17 @@ pub async fn execute_with_service(
                             }
                         }
                     } else {
-                        print_error("Search failed");
+                        crate::output::print_error("Search failed");
                     }
                     Ok(())
                 }
                 Err(e) => {
-                    print_error(&format!("Search failed: {e}"));
+                    crate::output::print_error(&format!("Search failed: {e}"));
                     Ok(())
                 }
             }
         }
     }
-}
-
-async fn search_query(
-    client: &ApiClient,
-    params: &SearchQueryParams<'_>,
-    project_id: i64,
-    verbose: bool,
-    format: crate::cli::OutputFormat,
-) -> Result<()> {
-    let exclude_patterns: Vec<String> = params
-        .exclude
-        .as_ref()
-        .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let include_patterns: Vec<String> = params
-        .include
-        .as_ref()
-        .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let exclude_content_types: Vec<String> = params
-        .exclude_content_types
-        .as_ref()
-        .map(|s| s.split(',').map(|ct| ct.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let include_categories: Vec<String> = params
-        .include_categories
-        .as_ref()
-        .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let exclude_categories: Vec<String> = params
-        .exclude_categories
-        .as_ref()
-        .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
-        .unwrap_or_default();
-
-    let request = SearchRequest {
-        project_id: Some(project_id),
-        project_path: params.project_path.map(|s| s.to_string()),
-        query: params.query.to_string(),
-        query_type: params.query_type.to_string(),
-        limit: params.limit,
-        min_score: params.min_score,
-        directory_prefix: params.directory.clone(),
-        exclude_content_types,
-        exclude_patterns,
-        include_patterns,
-        include_categories,
-        exclude_categories,
-        enable_rerank: params.enable_rerank,
-        rerank_max_candidates: params.rerank_max_candidates,
-        query_intent: params.query_intent.clone(),
-        expand: params.expand,
-    };
-
-    if verbose {
-        println!("Searching: {}", params.query);
-        println!("Type: {}", params.query_type);
-    }
-
-    let response: SearchResponse = client.post(cce_api::paths::SEARCH, &request).await?;
-
-    if matches!(format, crate::cli::OutputFormat::Json) {
-        print_output(format, &response);
-    } else if response.success {
-        print_success(&format!(
-            "Found {} results in {}",
-            response.total,
-            format_duration(response.elapsed_ms)
-        ));
-
-        if !response.sources_used.is_empty() {
-            println!("Sources: {}", response.sources_used.join(", "));
-        }
-
-        println!();
-
-        if response.items.is_empty() {
-            println!("No results found");
-        } else {
-            for (i, item) in response.items.iter().enumerate() {
-                print_result_item(i + 1, item);
-            }
-        }
-    } else {
-        print_error("Search failed");
-    }
-
-    Ok(())
-}
-
-fn print_result_item(index: usize, item: &SearchResultItem) {
-    let entity_names = if item.entity_names.is_empty() {
-        String::new()
-    } else {
-        format!("[{}] ", item.entity_names.join(", "))
-    };
-    println!(
-        "{index}.{names} {path} {start}-{end}",
-        index = index,
-        names = entity_names,
-        path = truncate(&item.file_path, 50),
-        start = item.start_line,
-        end = item.end_line
-    );
-
-    if let Some(ref entity_type) = item.entity_type {
-        println!("   Type: {}", entity_type);
-    }
-
-    // Print code snippet (first 3 lines)
-    let lines: Vec<&str> = item.code_chunk.lines().take(3).collect();
-    for line in lines {
-        println!("   {}", line);
-    }
-
-    println!();
 }
 
 /// Search commands

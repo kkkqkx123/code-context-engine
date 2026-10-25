@@ -3,7 +3,6 @@
 use anyhow::Result;
 use clap::Parser;
 
-use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success, truncate};
 use cce_api::models::{AggregatedSearchRequest, SearchResponse, SearchResultItem, SubQueryRequest};
 
@@ -116,26 +115,6 @@ fn split_weighted_query(raw: &str, fallback: f32) -> (String, f32) {
 }
 
 impl AggSearchCommand {
-    pub async fn execute(&self, client: &ApiClient, verbose: bool) -> Result<()> {
-        let request = self.build_request()?;
-        if verbose {
-            println!("Project ID: {:?}", self.project_id);
-            println!("Sub-queries: {}", request.sub_queries.len());
-            for (i, sq) in request.sub_queries.iter().enumerate() {
-                println!(
-                    "  {}. [{}] {} (weight: {:.1})",
-                    i + 1,
-                    sq.query_type,
-                    sq.text,
-                    sq.weight
-                );
-            }
-        }
-        let response: SearchResponse = client.search_aggregated(&request).await?;
-        Self::render(&response);
-        Ok(())
-    }
-
     /// Execute through the domain service abstraction with identical semantics.
     pub async fn execute_with_service(
         &self,

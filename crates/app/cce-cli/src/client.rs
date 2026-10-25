@@ -57,13 +57,6 @@ impl ApiClient {
         self.inner.delete_with_body(path, body).await
     }
 
-    /// Execute aggregated search
-    pub async fn search_aggregated(
-        &self,
-        request: &cce_api::models::AggregatedSearchRequest,
-    ) -> Result<cce_api::models::SearchResponse> {
-        self.inner.post_aggregated_search(request).await
-    }
 }
 
 #[cfg(test)]

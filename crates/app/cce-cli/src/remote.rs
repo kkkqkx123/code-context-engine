@@ -26,13 +26,6 @@ impl RemoteService {
         })
     }
 
-    /// Build with an explicit token outranking the environment.
-    pub fn new_with_token(base_url: &str, explicit_token: Option<String>) -> anyhow::Result<Self> {
-        Ok(Self {
-            client: SharedHttpClient::new_with_token(base_url, explicit_token)?,
-        })
-    }
-
     fn map(error: anyhow::Error) -> anyhow::Error {
         if let Some(http) = error.downcast_ref::<HttpTransportError>() {
             let text = http.to_string();
@@ -332,8 +325,6 @@ impl RemoteService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn ego_path_uses_transport_encoding() {
         // smoke: ensure module compiles with trait usage

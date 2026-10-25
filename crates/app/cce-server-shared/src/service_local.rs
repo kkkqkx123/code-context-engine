@@ -220,7 +220,7 @@ impl LocalService {
         let outcome = service
             .run_single(project_id, spec)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         Ok(SearchResponse {
             success: true,
             total: outcome.total,
@@ -281,7 +281,7 @@ impl LocalService {
             .engine
             .get_relation_runtime(project_id)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         if !runtime.can_serve_queries().await {
             return Err(ServiceError::Engine(
                 "relation index not available".to_string(),
@@ -295,14 +295,14 @@ impl LocalService {
             .state
             .get_relation_searcher(project_id)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let entry = self
             .state
             .engine
             .project_registry()
             .get_or_load(project_id)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let max_depth = entry.config.relation.max_call_depth;
         Ok((snapshot, searcher, max_depth, runtime))
     }
@@ -501,7 +501,7 @@ impl LocalService {
         let records = store
             .as_ref()
             .with_transaction(|tx| cce_storage_metadb_sqlite::ProjectRepository::get_all(tx))
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let projects: Vec<_> = records.iter().map(Self::record_to_config).collect();
         Ok(ProjectListResponse {
             success: true,
@@ -559,7 +559,7 @@ impl LocalService {
             .with_transaction(|tx| {
                 cce_storage_metadb_sqlite::ProjectRepository::get_by_id(tx, project_id)
             })
-            .map_err(|e| Self::engine_error(e))?
+            .map_err(Self::engine_error)?
             .ok_or_else(|| ServiceError::NotFound("project does not exist".to_string()))?;
         Ok(ProjectDetailResponse {
             success: true,
@@ -582,7 +582,7 @@ impl LocalService {
             .with_transaction(|tx| {
                 cce_storage_metadb_sqlite::ProjectRepository::get_by_id(tx, project_id)
             })
-            .map_err(|e| Self::engine_error(e))?
+            .map_err(Self::engine_error)?
             .is_some();
         if !existed {
             return Err(ServiceError::NotFound("project does not exist".to_string()));
@@ -620,7 +620,7 @@ impl LocalService {
             .engine
             .index(request.project_id, options)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         Ok(index_response_from_result(result))
     }
 
@@ -724,7 +724,7 @@ impl LocalService {
         let outcome = service
             .run_aggregated(project_id, spec)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         Ok(SearchResponse {
             success: true,
             total: outcome.total,
@@ -765,7 +765,7 @@ impl LocalService {
                 &filter,
                 pagination,
             )
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let (nodes, edges) = convert_paged_graph(&graph)?;
         let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
         Ok(GraphSubgraphResponse {
@@ -801,7 +801,7 @@ impl LocalService {
         );
         let path = service
             .shortest_path_with_options(start, end, params.max_depth.min(max_depth), &filter)
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let (nodes, edges) = match path.as_ref() {
             Some(graph) => convert_graph(graph)?,
             None => Default::default(),
@@ -846,7 +846,7 @@ impl LocalService {
         let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
         let graph = service
             .subgraph_with_options(&entity_ids, &filter, pagination)
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let (nodes, edges) = convert_paged_graph(&graph)?;
         let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
         Ok(GraphSubgraphResponse {
@@ -887,7 +887,7 @@ impl LocalService {
         let pagination = parse_graph_pagination(params.offset, params.limit);
         let paged = service
             .connected_components_with_options(&filter, pagination)
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let groups = paged
             .components
             .into_iter()
@@ -933,7 +933,7 @@ impl LocalService {
         let pagination = parse_graph_pagination(params.offset, params.limit.max(1));
         let graph = service
             .export_full_with_options(params.limit, &filter, pagination)
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let (nodes, edges) = convert_paged_graph(&graph)?;
         let truncated = graph.total_nodes > nodes.len() || graph.total_edges > edges.len();
         Ok(GraphSubgraphResponse {
@@ -1256,14 +1256,14 @@ impl LocalService {
             .engine
             .reload_project_config(project_id)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         let entry = self
             .state
             .engine
             .project_registry()
             .get_or_load(project_id)
             .await
-            .map_err(|e| Self::engine_error(e))?;
+            .map_err(Self::engine_error)?;
         Ok(ProjectConfigReloadResponse {
             success: true,
             project_id,

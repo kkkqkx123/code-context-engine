@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use cce_config::Settings;
 use cce_config::modules::McpTransport;
-use cce_logging;
 use cce_server_shared::engine::CodeContextEngine;
 use cce_server_shared::state::AppState;
 use tokio_util::sync::CancellationToken;

@@ -34,10 +34,7 @@ impl FileProcessor {
                     chunking_config,
                     output_mode,
                     registry,
-                )
-                .map(|(chunks, summary, degraded, vocabulary)| {
-                    (chunks, summary, degraded, vocabulary)
-                }),
+                ),
             None => self
                 .doc_pipeline
                 .process_with_degraded_flag(content, file_path, chunking_config, output_mode)

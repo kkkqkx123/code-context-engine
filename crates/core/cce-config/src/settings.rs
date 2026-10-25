@@ -191,14 +191,13 @@ impl Settings {
     /// Opt-in via `CCE_CONFIG_WATCH=1` or `true`. Defaults to disabled so
     /// long-running servers never reload unexpectedly.
     pub fn config_watch_enabled() -> bool {
-        match std::env::var("CCE_CONFIG_WATCH")
-            .ok()
-            .map(|v| v.trim().to_lowercase())
-            .as_deref()
-        {
-            Some("1") | Some("true") | Some("yes") | Some("on") => true,
-            _ => false,
-        }
+        matches!(
+            std::env::var("CCE_CONFIG_WATCH")
+                .ok()
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("1") | Some("true") | Some("yes") | Some("on")
+        )
     }
 
     /// Reload safe global sections from a file without restarting.

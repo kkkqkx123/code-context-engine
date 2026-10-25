@@ -9,53 +9,7 @@ use anyhow::Result;
 
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success, print_warning};
-use cce_api::models::{ConfigInfoResponse, ConfigReloadResponse, ConfigValidateResponse};
-
-/// Execute configuration reload
-pub async fn execute_reload(server: &str, project_id: i64, verbose: bool) -> Result<()> {
-    let client = ApiClient::new(server)?;
-
-    if verbose {
-        println!(
-            "Triggering configuration reload for project {}...",
-            project_id
-        );
-    }
-
-    let url = format!(
-        "{}?project_id={}",
-        cce_api::paths::CONFIG_RELOAD,
-        project_id
-    );
-    let empty_body = serde_json::json!({});
-
-    match client
-        .post::<serde_json::Value, ConfigReloadResponse>(&url, &empty_body)
-        .await
-    {
-        Ok(response) => {
-            if response.success {
-                print_success("Configuration reloaded successfully");
-
-                if !response.message.is_empty() {
-                    println!("  {}", response.message);
-                }
-            } else if !response.message.is_empty() {
-                print_error(&format!(
-                    "Configuration reload failed: {}",
-                    response.message
-                ));
-            } else {
-                print_error("Configuration reload failed");
-            }
-        }
-        Err(e) => {
-            print_error(&format!("Failed to reload configuration: {}", e));
-        }
-    }
-
-    Ok(())
-}
+use cce_api::models::{ConfigInfoResponse, ConfigValidateResponse};
 
 /// Execute configuration reload through the domain service abstraction.
 pub async fn execute_reload_with_service(

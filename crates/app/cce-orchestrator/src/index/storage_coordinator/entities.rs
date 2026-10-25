@@ -256,7 +256,7 @@ impl StorageCoordinator {
                         .map(|((source_id, _), db_id)| (source_id, db_id))
                         .collect();
                     for ((_source_id, parent_source_id), db_id) in
-                        sources.into_iter().zip(db_ids.into_iter())
+                        sources.into_iter().zip(db_ids)
                     {
                         let Some(parent_source_id) = parent_source_id else {
                             continue;
