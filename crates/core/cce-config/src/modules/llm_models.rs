@@ -64,7 +64,10 @@ pub struct ProviderConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
-    /// Provider type (local or remote)
+    /// Provider type (local or remote).
+    ///
+    /// This is currently declarative metadata: runtime behavior such as
+    /// rate limiting and retries is configured explicitly per provider.
     #[serde(default)]
     pub provider_type: ProviderType,
 

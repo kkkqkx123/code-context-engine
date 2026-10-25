@@ -57,6 +57,13 @@ impl VectorBackend {
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local)
     }
+
+    /// Whether this selects a remote service backend.
+    ///
+    /// The vector remote backend is currently the Qdrant implementation.
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Qdrant)
+    }
 }
 
 /// Relation storage backend selection.
@@ -86,6 +93,10 @@ impl RelationBackend {
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local)
     }
+
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote)
+    }
 }
 
 /// Fulltext storage backend selection.
@@ -114,6 +125,10 @@ impl FulltextBackend {
 
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local)
+    }
+
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote)
     }
 }
 

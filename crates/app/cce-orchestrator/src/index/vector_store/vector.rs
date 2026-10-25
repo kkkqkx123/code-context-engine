@@ -38,6 +38,12 @@ impl VectorStore {
         matches!(self, Self::Qdrant(_))
     }
 
+    /// Alias for the remote backend, matching the local/remote vocabulary
+    /// used by the other storage backends.
+    pub fn is_remote(&self) -> bool {
+        self.is_qdrant()
+    }
+
     /// Backend name for logging (`local` or `qdrant`).
     pub fn backend_name(&self) -> &'static str {
         match self {

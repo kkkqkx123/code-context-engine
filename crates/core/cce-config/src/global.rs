@@ -153,6 +153,17 @@ impl DatabaseConfig {
                 "database.fulltext_remote.index_name",
             ));
         }
+        // Remote relation/fulltext branches are forward scaffolding and are
+        // not wired into the engine write path. Reject them here so the
+        // failure surfaces during configuration validation instead of
+        // halfway through startup.
+        if !self.relation_backend.is_local() || !self.fulltext_backend.is_local() {
+            return Err(ConfigValidationError::invalid_field(
+                "database.relation_backend",
+                "remote relation/fulltext backends are not wired yet; use local backends",
+            ));
+        }
+
         let official = matches!(
             (
                 &self.vector_backend,
@@ -540,6 +551,15 @@ impl AppConfig {
             self.orchestrator.indexer.build_relations,
             &mut self.relation.index.enabled,
         ));
+
+        // Local LLM providers commonly have no upstream rate limit. When the
+        // operator leaves the default limit in place, treat it as "unlimited"
+        // so local services are not throttled by a cloud-oriented default.
+        for provider in self.llm.providers.values_mut() {
+            if provider.provider_type.is_local() && provider.rate_limit == 600 {
+                provider.rate_limit = 0;
+            }
+        }
 
         infos
     }

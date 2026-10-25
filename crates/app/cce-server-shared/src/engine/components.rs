@@ -80,11 +80,13 @@ impl super::CodeContextEngine {
         self.metadata_store.clone()
     }
 
-    /// Get the relation backend enum (phase-2 branch accessor).
+    /// Get the relation backend enum selected at assembly time.
+    ///
+    /// The backend is stored as a neutral handle so callers cannot assume
+    /// the SQLite branch. Remote backends remain explicitly unsupported in
+    /// the engine write path and report that through their own methods.
     pub fn relation_store(&self) -> Option<RelationStore> {
-        self.metadata_store
-            .as_ref()
-            .map(|store| RelationStore::local(store.clone()))
+        Some(self.relation_store.clone())
     }
 
     /// Reload project configuration and recreate components

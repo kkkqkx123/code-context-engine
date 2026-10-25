@@ -88,6 +88,12 @@ pub struct CodeContextEngine {
     /// SQLite metadata store for persistent storage
     metadata_store: Option<Arc<SqliteClient>>,
 
+    /// Relation storage backend selected at assembly time.
+    ///
+    /// Kept as the backend-neutral handle so callers cannot assume the
+    /// SQLite branch when a remote backend is configured.
+    relation_store: RelationStore,
+
     /// Project-specific IndexOrchestrator cache (lazy-loaded per project)
     orchestrator_cache: ProjectCache<Mutex<IndexOrchestrator>>,
 
@@ -259,12 +265,12 @@ impl CodeContextEngine {
         // write path still requires the local branch.
         let relation_store = RelationStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
+        let relation_store_for_engine = relation_store.clone();
         let sqlite_client = relation_store.into_local().ok_or_else(|| {
             EngineError::Config(
                 "remote relation branch is not wired into the engine write path yet".to_string(),
             )
         })?;
-
         // The SQLite client is shared as the metadata store
         let metadata_store = Some(sqlite_client.clone());
 
@@ -360,6 +366,7 @@ impl CodeContextEngine {
             embedder,
             assembly: profile,
             metadata_store,
+            relation_store: relation_store_for_engine,
             orchestrator_cache: ProjectCache::new(),
             plugin_registry_cache: ProjectCache::new(),
             searcher_cache: ProjectCache::new(),

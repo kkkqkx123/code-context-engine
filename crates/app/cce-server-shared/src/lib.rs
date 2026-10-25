@@ -13,5 +13,4 @@ pub mod context;
 pub mod engine;
 pub mod maintenance;
 pub mod runtime;
-pub mod service_local;
 pub mod services;
