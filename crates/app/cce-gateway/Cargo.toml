@@ -25,7 +25,7 @@ base64 = "0.22"
 cce-api = { version = "0.1.0", path = "../cce-api" }
 cce-transport = { version = "0.1.0", path = "../cce-transport" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
-cce-supply = { version = "0.1.0", path = "../../infra/cce-supply" }
+cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transfer" }
 cce-types = { version = "0.1.0", path = "../../core/cce-types" }
 cce-config = { version = "0.1.0", path = "../../core/cce-config" }
 cce-logging = { version = "0.1.0", path = "../../core/cce-logging" }

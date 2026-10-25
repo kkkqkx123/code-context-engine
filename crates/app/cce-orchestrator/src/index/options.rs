@@ -150,8 +150,8 @@ impl IndexOptions {
     pub fn to_scan_options(&self) -> cce_scanner::ScanOptions {
         cce_scanner::ScanOptions {
             root_path: self.root_dir.to_string_lossy().to_string(),
-            include_patterns: cce_supply::scan_include_patterns(&self.extensions),
-            exclude_patterns: cce_supply::scan_exclude_patterns(&self.exclude_dirs),
+            include_patterns: cce_scanner::scan_include_patterns(&self.extensions),
+            exclude_patterns: cce_scanner::scan_exclude_patterns(&self.exclude_dirs),
             follow_symlinks: false,
             respect_gitignore: self.respect_gitignore,
             gitignore_patterns: self.additional_ignore_patterns.clone(),

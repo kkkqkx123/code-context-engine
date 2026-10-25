@@ -104,7 +104,7 @@ impl From<&ScannedFile> for BaselineFingerprint {
 /// Hashed entries compare by hash only. Hash-less entries fall back to the
 /// size plus modification time comparison.
 pub fn fingerprints_match(previous: &BaselineFingerprint, current: &ScannedFile) -> bool {
-    cce_supply::fingerprints_match(
+    cce_ingest_transfer::fingerprints_match(
         previous.content_hash.as_deref(),
         previous.size,
         previous.modified_secs,
@@ -123,7 +123,7 @@ pub fn manifest_version_for_snapshot(snapshot: &ScanSnapshot) -> u64 {
         .iter()
         .map(|(identity, file)| (identity.as_str(), file.size, file.content_hash.as_deref()))
         .collect();
-    cce_supply::manifest_version_for_entries(&entries)
+    cce_ingest_transfer::manifest_version_for_entries(&entries)
 }
 
 /// One scan pass: usable files plus the entries the next pass reuses.
@@ -156,11 +156,11 @@ pub async fn scan_local(
     previous: Option<&HashMap<PathBuf, FileEntry>>,
 ) -> Result<ScanOutcome> {
     let exclude_patterns =
-        cce_supply::scan_exclude_patterns(&cce_supply::parse_exclude_filter(&params.exclude));
-    let wanted = cce_supply::parse_extension_filter(&params.extensions);
+        cce_scanner::scan_exclude_patterns(&cce_scanner::parse_exclude_filter(&params.exclude));
+    let wanted = cce_scanner::parse_extension_filter(&params.extensions);
     let options = ScanOptions {
         root_path: params.path.clone(),
-        include_patterns: cce_supply::gateway_include_patterns(),
+        include_patterns: cce_scanner::gateway_include_patterns(),
         exclude_patterns,
         follow_symlinks: false,
         respect_gitignore: params.gitignore,
@@ -188,14 +188,14 @@ pub async fn scan_local(
     let mut skipped_binary = 0usize;
     for entry in report.entries {
         let identity = cce_types::path::normalize_project_path(&entry.identity_key());
-        match cce_supply::classify_supply_file(
+        match cce_scanner::classify_scan_file(
             entry.size,
             entry.is_text(),
             &identity,
             &wanted,
             MAX_INGEST_FILE_BYTES,
         ) {
-            cce_supply::SupplyFileDecision::Keep => {
+            cce_scanner::ScanFileDecision::Keep => {
                 files.insert(
                     identity,
                     ScannedFile {
@@ -206,9 +206,9 @@ pub async fn scan_local(
                     },
                 );
             }
-            cce_supply::SupplyFileDecision::Oversize => skipped_oversize += 1,
-            cce_supply::SupplyFileDecision::Binary => skipped_binary += 1,
-            cce_supply::SupplyFileDecision::Filtered => {}
+            cce_scanner::ScanFileDecision::Oversize => skipped_oversize += 1,
+            cce_scanner::ScanFileDecision::Binary => skipped_binary += 1,
+            cce_scanner::ScanFileDecision::Filtered => {}
         }
         entries.insert(entry.relative_path.clone(), entry);
     }

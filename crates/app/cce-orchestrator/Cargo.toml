@@ -24,7 +24,6 @@ cce-storage-metadb-sqlite = { version = "0.1.0", path = "../../infra/cce-storage
 cce-storage-common = { version = "0.1.0", path = "../../infra/cce-storage-common" }
 cce-storage-metadb-pg = { version = "0.1.0", path = "../../infra/cce-storage-metadb-pg" }
 cce-scanner = { version = "0.1.0", path = "../../infra/cce-scanner" }
-cce-supply = { version = "0.1.0", path = "../../infra/cce-supply" }
 cce-llm-client = { version = "0.1.0", path = "../../infra/cce-llm-client" }
 cce-circuit-breaker = { version = "0.1.0", path = "../../infra/cce-circuit-breaker" }
 

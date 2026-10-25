@@ -26,7 +26,7 @@ pub fn should_flush_batch(chunk_count: usize, file_count: usize, wire_bytes: u64
 /// Single source lives in the supply kernel; this wrapper keeps transport
 /// callers on the same calculation without introducing a second implementation.
 pub fn total_chunks_for_size(size: u64, chunk_bytes: usize) -> u32 {
-    cce_supply::total_chunks_for_size(size, chunk_bytes)
+    cce_ingest_transfer::total_chunks_for_size(size, chunk_bytes)
 }
 
 #[cfg(test)]

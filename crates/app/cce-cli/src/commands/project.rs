@@ -41,11 +41,10 @@ pub async fn execute(cmd: &ProjectCommands, server: &str, verbose: bool) -> Resu
 /// Local and remote share parameter semantics; only the transport differs.
 pub async fn execute_with_service(
     cmd: &ProjectCommands,
-    service: &dyn cce_service::CodeContextService,
+    service: &crate::service::CliService,
     server: &str,
     verbose: bool,
 ) -> Result<()> {
-    use cce_service::CodeContextService;
     match cmd {
         ProjectCommands::Create {
             path,

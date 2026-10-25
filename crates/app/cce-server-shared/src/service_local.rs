@@ -16,10 +16,10 @@ use cce_api::models::{
     SearchResponse, StartWatchRequest, StartWatchResponse, StopWatchResponse, StructuralRelation,
     WatchStatus, WatchStatusResponse,
 };
-use cce_service::{
-    CodeContextService, GraphComponentsParams, GraphCyclesParams, GraphEgoParams,
-    GraphEntityImpactParams, GraphExportParams, GraphImpactParams, GraphModuleParams,
-    GraphPathParams, GraphStructuralParams, GraphSubgraphParams, ServiceError,
+use cce_api::service_params::{
+    GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
+    GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
+    GraphStructuralParams, GraphSubgraphParams,
 };
 
 use crate::engine::CodeContextEngine;
@@ -28,6 +28,23 @@ use crate::services::search::{
 };
 use crate::state::AppState;
 use cce_codegraph::index::snapshot_query::SnapshotEntityQueryOps;
+
+/// Domain service failure.
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceError {
+    /// Transport or protocol failure.
+    #[error("transport error: {0}")]
+    Transport(String),
+    /// Invalid request parameters.
+    #[error("invalid request: {0}")]
+    Invalid(String),
+    /// Requested resource was not found.
+    #[error("not found: {0}")]
+    NotFound(String),
+    /// Underlying engine failure.
+    #[error("engine error: {0}")]
+    Engine(String),
+}
 
 /// Local service holding shared application state.
 pub struct LocalService {
@@ -93,7 +110,7 @@ impl LocalService {
         }
     }
 
-    async fn resolve_project_id(
+    pub async fn resolve_project_id(
         &self,
         project_id: Option<i64>,
         project_path: Option<&str>,
@@ -133,7 +150,7 @@ impl LocalService {
         }
     }
 
-    async fn search_single(
+    pub async fn search_single(
         &self,
         project_id: i64,
         request: SearchRequest,
@@ -248,7 +265,7 @@ fn validate_glob(pattern: &str) -> Result<(), ServiceError> {
 }
 
 impl LocalService {
-    async fn graph_context(
+    pub async fn graph_context(
         &self,
         project_id: i64,
     ) -> Result<
@@ -476,9 +493,8 @@ fn index_response_from_result(result: cce_orchestrator::IndexResult) -> IndexRes
     }
 }
 
-#[async_trait]
-impl CodeContextService for LocalService {
-    async fn list_projects(&self) -> Result<ProjectListResponse, ServiceError> {
+impl LocalService {
+    pub async fn list_projects(&self) -> Result<ProjectListResponse, ServiceError> {
         let store =
             self.state.engine.metadata_store().ok_or_else(|| {
                 ServiceError::Engine("metadata store not initialized".to_string())
@@ -495,7 +511,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn create_project(
+    pub async fn create_project(
         &self,
         request: CreateProjectRequest,
     ) -> Result<ProjectDetailResponse, ServiceError> {
@@ -510,7 +526,7 @@ impl CodeContextService for LocalService {
             ));
         }
         let root_path_str = if supply_is_gateway {
-            cce_supply::normalize_logical_path(&request.root_path)
+            cce_types::normalize_logical_path(&request.root_path)
         } else {
             let root = PathBuf::from(&request.root_path);
             if !root.exists() {
@@ -549,7 +565,7 @@ impl CodeContextService for LocalService {
         };
         let mut new_project =
             cce_storage_metadb_sqlite::NewProjectRecord::new(name.clone(), root_path_str.clone());
-        let initial_profile = cce_supply::profile_patch_from_supply_filter(
+        let initial_profile = cce_config::ProjectAppConfig::from_filter_args(
             request.extensions.clone(),
             request.exclude_dirs.clone(),
             Some(request.respect_gitignore),
@@ -592,7 +608,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn get_project(&self, project_id: i64) -> Result<ProjectDetailResponse, ServiceError> {
+    pub async fn get_project(&self, project_id: i64) -> Result<ProjectDetailResponse, ServiceError> {
         if project_id <= 0 {
             return Err(ServiceError::Invalid(
                 "project_id must be positive".to_string(),
@@ -615,7 +631,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse, ServiceError> {
+    pub async fn delete_project(&self, project_id: i64) -> Result<ProjectDeleteResponse, ServiceError> {
         if project_id <= 0 {
             return Err(ServiceError::Invalid(
                 "project_id must be positive".to_string(),
@@ -643,7 +659,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn index(&self, request: IndexRequest) -> Result<IndexResponse, ServiceError> {
+    pub async fn index(&self, request: IndexRequest) -> Result<IndexResponse, ServiceError> {
         if request.project_id <= 0 {
             return Err(ServiceError::Invalid(
                 "project_id must be positive".to_string(),
@@ -700,7 +716,7 @@ impl CodeContextService for LocalService {
         Ok(index_response_from_result(result))
     }
 
-    async fn search(&self, request: SearchRequest) -> Result<SearchResponse, ServiceError> {
+    pub async fn search(&self, request: SearchRequest) -> Result<SearchResponse, ServiceError> {
         let project_id = self
             .resolve_project_id(request.project_id, request.project_path.as_deref())
             .await?;
@@ -712,7 +728,7 @@ impl CodeContextService for LocalService {
         self.search_single(project_id, request).await
     }
 
-    async fn search_aggregated(
+    pub async fn search_aggregated(
         &self,
         request: cce_api::models::AggregatedSearchRequest,
     ) -> Result<SearchResponse, ServiceError> {
@@ -813,7 +829,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_ego(
+    pub async fn graph_ego(
         &self,
         project_id: i64,
         params: GraphEgoParams,
@@ -856,7 +872,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_path(
+    pub async fn graph_path(
         &self,
         project_id: i64,
         params: GraphPathParams,
@@ -892,7 +908,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_subgraph(
+    pub async fn graph_subgraph(
         &self,
         project_id: i64,
         params: GraphSubgraphParams,
@@ -937,7 +953,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_components(
+    pub async fn graph_components(
         &self,
         project_id: i64,
         params: GraphComponentsParams,
@@ -983,7 +999,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_export(
+    pub async fn graph_export(
         &self,
         project_id: i64,
         params: GraphExportParams,
@@ -1024,7 +1040,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_impact(
+    pub async fn graph_impact(
         &self,
         project_id: i64,
         params: GraphImpactParams,
@@ -1050,7 +1066,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_entity_impact(
+    pub async fn graph_entity_impact(
         &self,
         project_id: i64,
         params: GraphEntityImpactParams,
@@ -1094,7 +1110,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_cycles(
+    pub async fn graph_cycles(
         &self,
         project_id: i64,
         params: GraphCyclesParams,
@@ -1154,7 +1170,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_structural(
+    pub async fn graph_structural(
         &self,
         project_id: i64,
         params: GraphStructuralParams,
@@ -1219,7 +1235,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn graph_module(
+    pub async fn graph_module(
         &self,
         project_id: i64,
         params: GraphModuleParams,
@@ -1264,7 +1280,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse, ServiceError> {
+    pub async fn watch_status(&self, project_id: i64) -> Result<WatchStatusResponse, ServiceError> {
         if project_id <= 0 {
             return Err(ServiceError::Invalid(
                 "project_id must be positive".to_string(),
@@ -1302,7 +1318,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn watch_start(
+    pub async fn watch_start(
         &self,
         project_id: i64,
         request: StartWatchRequest,
@@ -1384,7 +1400,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse, ServiceError> {
+    pub async fn watch_stop(&self, project_id: i64) -> Result<StopWatchResponse, ServiceError> {
         if project_id <= 0 {
             return Err(ServiceError::Invalid(
                 "project_id must be positive".to_string(),
@@ -1414,7 +1430,7 @@ impl CodeContextService for LocalService {
         })
     }
 
-    async fn reload_project(
+    pub async fn reload_project(
         &self,
         project_id: i64,
     ) -> Result<ProjectConfigReloadResponse, ServiceError> {

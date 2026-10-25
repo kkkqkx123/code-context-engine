@@ -10,7 +10,6 @@ use anyhow::Result;
 use crate::client::ApiClient;
 use crate::output::{print_error, print_success, print_warning};
 use cce_api::models::{ConfigInfoResponse, ConfigReloadResponse, ConfigValidateResponse};
-use cce_service::CodeContextService;
 
 /// Execute configuration reload
 pub async fn execute_reload(server: &str, project_id: i64, verbose: bool) -> Result<()> {
@@ -60,7 +59,7 @@ pub async fn execute_reload(server: &str, project_id: i64, verbose: bool) -> Res
 
 /// Execute configuration reload through the domain service abstraction.
 pub async fn execute_reload_with_service(
-    service: &dyn cce_service::CodeContextService,
+    service: &crate::service::CliService,
     project_id: i64,
     verbose: bool,
 ) -> Result<()> {

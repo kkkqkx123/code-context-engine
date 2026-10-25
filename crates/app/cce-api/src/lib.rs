@@ -7,3 +7,4 @@
 
 pub mod models;
 pub mod paths;
+pub mod service_params;

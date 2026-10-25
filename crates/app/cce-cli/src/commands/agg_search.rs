@@ -6,7 +6,6 @@ use clap::Parser;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_success, truncate};
 use cce_api::models::{AggregatedSearchRequest, SearchResponse, SearchResultItem, SubQueryRequest};
-use cce_service::CodeContextService;
 
 /// Execute multi-query aggregated search
 #[derive(Parser, Debug)]
@@ -140,7 +139,7 @@ impl AggSearchCommand {
     /// Execute through the domain service abstraction with identical semantics.
     pub async fn execute_with_service(
         &self,
-        service: &dyn cce_service::CodeContextService,
+        service: &crate::service::CliService,
         verbose: bool,
     ) -> Result<()> {
         let request = self.build_request()?;

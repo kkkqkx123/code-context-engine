@@ -304,7 +304,7 @@ pub(crate) fn decode_chunk_payload(
     let raw = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|e| format!("{relative}: content is not valid base64: {e}"))?;
-    let bytes = cce_supply::decompress_chunk(raw.as_slice(), compressed)
+    let bytes = cce_ingest_transfer::decompress_chunk(raw.as_slice(), compressed)
         .map_err(|e| format!("{relative}: {e}"))?;
     if bytes.len() > INGEST_CHUNK_BYTES + 1024 {
         return Err(format!(
@@ -312,7 +312,7 @@ pub(crate) fn decode_chunk_payload(
         ));
     }
     if let Some(expected) = expected_chunk_hash {
-        let actual = cce_supply::chunk_hash(&bytes);
+        let actual = cce_ingest_transfer::chunk_hash(&bytes);
         if actual != expected {
             return Err(format!(
                 "{relative}: chunk hash mismatch; a fresh upload of the piece is required"
@@ -335,7 +335,7 @@ pub(crate) async fn stage_bytes(
         ));
     }
     if let Some(expected) = expected_hash {
-        let actual = cce_supply::chunk_hash(bytes);
+        let actual = cce_ingest_transfer::chunk_hash(bytes);
         if actual != expected {
             return Err(format!(
                 "{relative} changed between manifest and upload; a fresh manifest is required"
@@ -355,7 +355,7 @@ pub(crate) async fn stage_bytes(
 
 /// Upper bound on chunks for one file, derived from the 1 MiB file cap.
 pub(crate) fn max_file_chunks() -> u32 {
-    cce_supply::total_chunks_for_size(MAX_INGEST_FILE_BYTES, INGEST_CHUNK_BYTES)
+    cce_ingest_transfer::total_chunks_for_size(MAX_INGEST_FILE_BYTES, INGEST_CHUNK_BYTES)
 }
 
 /// One file's chunks decoded and verified, ready to be staged.

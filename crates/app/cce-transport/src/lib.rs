@@ -7,15 +7,10 @@
 //! crate.
 
 pub mod client;
-pub mod policy;
-pub mod remote;
+pub mod query;
 
-pub use client::{SharedHttpClient, build_client, normalize_base_url};
-pub use policy::{
-    GATEWAY_BATCH_WIRE_BYTES, should_flush_batch,
-    total_chunks_for_size as total_chunks_for_size_with_bytes,
-};
-pub use remote::RemoteService;
+pub use client::{HttpTransportError, SharedHttpClient, build_client, normalize_base_url};
+pub use query::{GraphQuery, QueryParam, urlencoding_sanitize};
 
 /// Read the admission token from the environment.
 ///

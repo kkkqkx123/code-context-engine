@@ -11,12 +11,11 @@ use cce_api::models::{
     DeadLetterRetryRequest, IncrementalIndexRequest, IncrementalIndexResponse, IndexRequest,
     IndexResponse, ParseRequest, ParseResponse,
 };
-use cce_service::CodeContextService;
 
 /// Execute index commands through the domain service abstraction.
 pub async fn execute_with_service(
     cmd: &IndexCommands,
-    service: &dyn cce_service::CodeContextService,
+    service: &crate::service::CliService,
     server: &str,
     verbose: bool,
 ) -> Result<()> {

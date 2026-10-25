@@ -50,7 +50,7 @@ pub async fn handle_create_project(
         ));
     }
     let root_path_str = if supply_is_gateway {
-        cce_supply::normalize_logical_path(&request.root_path)
+        cce_types::normalize_logical_path(&request.root_path)
     } else {
         let root_path = PathBuf::from(&request.root_path);
         if !root_path.exists() {
@@ -116,7 +116,7 @@ pub async fn handle_create_project(
     // of truth for scan configuration; supply filter arguments become a
     // one-shot profile patch through the shared supply kernel.
     let mut new_project = NewProjectRecord::new(name.clone(), root_path_str.clone());
-    let initial_profile = cce_supply::profile_patch_from_supply_filter(
+    let initial_profile = cce_config::ProjectAppConfig::from_filter_args(
         request.extensions.clone(),
         request.exclude_dirs.clone(),
         Some(request.respect_gitignore),

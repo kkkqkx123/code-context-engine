@@ -14,8 +14,7 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 cce-api = { version = "0.1.0", path = "../cce-api" }
-cce-service = { version = "0.1.0", path = "../cce-service" }
-cce-supply = { version = "0.1.0", path = "../../infra/cce-supply" }
+cce-ingest-transfer = { version = "0.1.0", path = "../../infra/cce-ingest-transfer" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

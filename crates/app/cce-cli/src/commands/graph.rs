@@ -37,12 +37,12 @@ struct PathSeeds<'a> {
 /// service implementations.
 pub async fn execute_with_service(
     cmd: &GraphCommands,
-    service: &dyn cce_service::CodeContextService,
+    service: &crate::service::CliService,
     _server: &str,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {
-    use cce_service::{
+    use cce_api::service_params::{
         GraphComponentsParams, GraphCyclesParams, GraphEgoParams, GraphEntityImpactParams,
         GraphExportParams, GraphImpactParams, GraphModuleParams, GraphPathParams,
         GraphStructuralParams, GraphSubgraphParams,

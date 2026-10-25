@@ -12,8 +12,8 @@ pub use build_system::{
     imports_match_package, is_build_config, is_build_config_name, is_build_config_name_lower,
 };
 pub use path::{
-    extension_lower, file_name_str, group_id_base, is_non_utf8, normalize_project_path,
-    normalized_equals, relativize, segments, stable_path_id,
+    extension_lower, file_name_str, group_id_base, is_non_utf8, normalize_logical_path,
+    normalize_project_path, normalized_equals, relativize, segments, stable_path_id,
 };
 pub use serialization::{SerializationError, deserialize_from_cache, serialize_for_cache};
 pub use types::*;

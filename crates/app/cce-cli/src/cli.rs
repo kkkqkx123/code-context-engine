@@ -151,6 +151,7 @@ pub use crate::commands::health::HealthCommands;
 impl Cli {
     /// Execute the CLI command
     pub async fn execute(&self) -> anyhow::Result<()> {
+        let mode = self.resolved_mode();
         match &self.command {
             Commands::Index(cmd) => {
                 let service =
@@ -192,6 +193,12 @@ impl Cli {
                 .await
             }
             Commands::Entity(cmd) => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Entity commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
                 commands::entity::execute(cmd, &self.server, self.verbose, self.format).await
             }
             Commands::Graph(cmd) => {
@@ -212,10 +219,32 @@ impl Cli {
                 commands::watch::execute_with_service(cmd, service.as_trait(), self.verbose).await
             }
             Commands::Storage(cmd) => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Storage commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
                 commands::storage::execute(cmd, &self.server, self.verbose).await
             }
-            Commands::Tools(cmd) => commands::tools::execute(cmd, &self.server, self.verbose).await,
-            Commands::Summary(cmd) => self.execute_summary(cmd).await,
+            Commands::Tools(cmd) => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Tool commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
+                commands::tools::execute(cmd, &self.server, self.verbose).await
+            }
+            Commands::Summary(cmd) => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Summary commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
+                self.execute_summary(cmd).await
+            }
             Commands::Config(cmd) => {
                 let service =
                     crate::service::CliService::build(&self.server, self.resolved_mode()).await?;
@@ -223,11 +252,39 @@ impl Cli {
                     .await
             }
             Commands::Qdrant(cmd) => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Qdrant commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
                 commands::qdrant::execute(cmd, &self.server, self.verbose).await
             }
-            Commands::Metrics(cmd) => self.execute_metrics(cmd).await,
-            Commands::Health(cmd) => self.execute_health(cmd).await,
+            Commands::Metrics(cmd) => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Metrics commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
+                self.execute_metrics(cmd).await
+            }
+            Commands::Health(cmd) => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Health commands require a running server; local embedded mode does not expose them. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
+                self.execute_health(cmd).await
+            }
             Commands::Status => {
+                if mode == crate::service::CliServiceMode::Local {
+                    eprintln!(
+                        "Status command requires a running server; local embedded mode does not expose it. Use --mode remote or start a server."
+                    );
+                    return Ok(());
+                }
                 commands::status::execute(&self.server, self.verbose, self.format).await
             }
             Commands::Gateway(cmd) => {
@@ -289,7 +346,7 @@ impl Cli {
     async fn execute_config_with_service(
         &self,
         cmd: &ConfigCommands,
-        service: &dyn cce_service::CodeContextService,
+        service: &crate::service::CliService,
     ) -> anyhow::Result<()> {
         match cmd {
             ConfigCommands::Reload { project_id } => {

@@ -13,4 +13,4 @@ pub mod service_local;
 pub mod services;
 pub mod state;
 
-pub use service_local::LocalService;
+pub use service_local::{LocalService, ServiceError};

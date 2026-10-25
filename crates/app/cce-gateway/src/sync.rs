@@ -169,7 +169,7 @@ pub async fn upload_paths(
         let Some(file) = snapshot.files.get(identity) else {
             continue;
         };
-        let total = cce_supply::total_chunks_for_size(file.size.max(1), INGEST_CHUNK_BYTES);
+        let total = cce_ingest_transfer::total_chunks_for_size(file.size.max(1), INGEST_CHUNK_BYTES);
         wanted.insert(identity.clone(), (0..total).collect());
     }
     for missing in missing_chunks {
@@ -204,7 +204,7 @@ pub async fn upload_paths(
             continue;
         }
         if let Some(expected) = file.content_hash.as_deref()
-            && cce_supply::chunk_hash(&bytes) != expected
+            && cce_ingest_transfer::chunk_hash(&bytes) != expected
         {
             errors.push(format!(
                 "{identity}: changed between manifest and upload; a fresh manifest is required"
@@ -212,7 +212,7 @@ pub async fn upload_paths(
             continue;
         }
         let total =
-            cce_supply::total_chunks_for_size(bytes.len().max(1) as u64, INGEST_CHUNK_BYTES);
+            cce_ingest_transfer::total_chunks_for_size(bytes.len().max(1) as u64, INGEST_CHUNK_BYTES);
         let mut indices: Vec<u32> = wanted_indices.into_iter().collect();
         indices.sort_unstable();
         for chunk_index in indices {
@@ -235,7 +235,7 @@ pub async fn upload_paths(
                 chunk_hash: Some(hash),
                 compressed,
             });
-            if cce_transport::policy::should_flush_batch(batch.len(), batch.len(), batch_bytes) {
+            if crate::policy::should_flush_batch(batch.len(), batch.len(), batch_bytes) {
                 flush_batch(
                     client,
                     params.project_id,
@@ -295,13 +295,13 @@ async fn flush_batch(
 
 /// Hash one chunk of raw bytes for per-chunk verification.
 pub fn chunk_hash(bytes: &[u8]) -> String {
-    cce_supply::chunk_hash(bytes)
+    cce_ingest_transfer::chunk_hash(bytes)
 }
 
 /// Optionally compress chunk bytes. Compression stays off unless the
 /// gateway explicitly enables it; the server decompresses before hashing.
 pub fn maybe_compress(bytes: &[u8], compress: bool) -> (Vec<u8>, bool) {
-    cce_supply::maybe_compress(bytes, compress)
+    cce_ingest_transfer::maybe_compress(bytes, compress)
 }
 
 #[cfg(test)]
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn supply_wrappers_delegate_to_shared_kernel() {
-        assert_eq!(chunk_hash(b"hello"), cce_supply::chunk_hash(b"hello"));
+        assert_eq!(chunk_hash(b"hello"), cce_ingest_transfer::chunk_hash(b"hello"));
         let repetitive = vec![b'a'; 64];
         let (plain, compressed) = maybe_compress(&repetitive, false);
         assert!(!compressed);

@@ -7,7 +7,6 @@ use anyhow::Result;
 use crate::client::ApiClient;
 use crate::output::{format_duration, print_error, print_output, print_success, truncate};
 use cce_api::models::{SearchRequest, SearchResponse, SearchResultItem};
-use cce_service::CodeContextService;
 
 /// Search query parameters
 struct SearchQueryParams<'a> {
@@ -81,7 +80,7 @@ pub async fn execute(
 /// Execute search commands through the domain service abstraction.
 pub async fn execute_with_service(
     cmd: &SearchCommands,
-    service: &dyn cce_service::CodeContextService,
+    service: &crate::service::CliService,
     verbose: bool,
     format: crate::cli::OutputFormat,
 ) -> Result<()> {

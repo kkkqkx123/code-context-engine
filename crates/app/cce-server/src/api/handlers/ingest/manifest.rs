@@ -67,7 +67,7 @@ pub async fn handle_ingest_manifest(
             }
         };
         let fresh = stored.as_ref().is_some_and(|record| {
-            cce_supply::fingerprints_match(
+            cce_ingest_transfer::fingerprints_match(
                 record.content_hash.as_deref(),
                 0,
                 record.last_modified,
@@ -85,7 +85,7 @@ pub async fn handle_ingest_manifest(
             upload.push(path);
             continue;
         }
-        let total = cce_supply::total_chunks_for_size(meta.size.max(1), INGEST_CHUNK_BYTES);
+        let total = cce_ingest_transfer::total_chunks_for_size(meta.size.max(1), INGEST_CHUNK_BYTES);
         let received = received_chunk_indices(id, request.manifest_version, &path);
         if received.len() as u32 >= total {
             continue;

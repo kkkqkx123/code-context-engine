@@ -1118,6 +1118,30 @@ impl ProjectAppConfig {
         serde_json::from_str(trimmed).map_err(|error| format!("Invalid project profile: {error}"))
     }
 
+    pub fn from_filter_args(
+        extensions: Vec<String>,
+        exclude_dirs: Vec<String>,
+        respect_gitignore: Option<bool>,
+        ignore_patterns: Vec<String>,
+    ) -> Self {
+        let extensions_opt = if extensions.is_empty() {
+            None
+        } else {
+            Some(extensions)
+        };
+        let exclude_opt = if exclude_dirs.is_empty() {
+            None
+        } else {
+            Some(exclude_dirs)
+        };
+        let ignore_opt = if ignore_patterns.is_empty() {
+            None
+        } else {
+            Some(ignore_patterns)
+        };
+        Self::from_scan_lists(extensions_opt, exclude_opt, respect_gitignore, ignore_opt)
+    }
+
     pub fn from_scan_lists(
         extensions: Option<Vec<String>>,
         exclude_dirs: Option<Vec<String>>,

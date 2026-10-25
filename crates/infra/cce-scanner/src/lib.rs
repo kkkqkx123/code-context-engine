@@ -3,6 +3,7 @@
 pub(crate) mod content;
 pub(crate) mod error;
 pub(crate) mod file_processor;
+pub(crate) mod filter;
 pub(crate) mod ignore;
 
 pub(crate) mod models;
@@ -17,6 +18,10 @@ pub use content::{
 };
 pub use error::{Result, ScannerError};
 pub use file_processor::{FileProcessor, FileProcessorConfig, compute_content_hash};
+pub use filter::{
+    ScanFileDecision, classify_scan_file, extension_matches, gateway_include_patterns,
+    parse_exclude_filter, parse_extension_filter, scan_exclude_patterns, scan_include_patterns,
+};
 pub use ignore::IgnoreMatcher;
 
 pub use models::{FileContentPayload, FileEntry, FileSetView, FileViewEntry};

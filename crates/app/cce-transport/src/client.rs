@@ -5,6 +5,29 @@
 //! remote mode share this client; local mode does not depend on it.
 
 use anyhow::{Context, Result};
+use std::fmt;
+
+/// Transport error carrying an optional HTTP status code.
+///
+/// Remote service mapping can use the status instead of parsing error text.
+#[derive(Debug)]
+pub struct HttpTransportError {
+    /// HTTP status code when the failure came from a response.
+    pub status: Option<u16>,
+    /// Human-readable failure detail.
+    pub message: String,
+}
+
+impl fmt::Display for HttpTransportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.status {
+            Some(status) => write!(f, "HTTP {status}: {}", self.message),
+            None => write!(f, "{}", self.message),
+        }
+    }
+}
+
+impl std::error::Error for HttpTransportError {}
 
 /// Timeout applied to every shared client request.
 pub const SHARED_HTTP_TIMEOUT_SECS: u64 = 300;
@@ -59,11 +82,14 @@ impl SharedHttpClient {
     }
 
     /// Check a response status and read the body for error context.
-    async fn checked(response: reqwest::Response) -> Result<reqwest::Response> {
+    async fn checked(response: reqwest::Response) -> Result<reqwest::Response, HttpTransportError> {
         let status = response.status();
         if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
-            anyhow::bail!("Request failed with status {status}: {text}");
+            return Err(HttpTransportError {
+                status: Some(status.as_u16()),
+                message: text,
+            });
         }
         Ok(response)
     }

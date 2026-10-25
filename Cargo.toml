@@ -26,7 +26,7 @@ members = [
     "crates/infra/cce-storage-metadb-sqlite",
     "crates/infra/cce-storage-metadb-pg",
     "crates/infra/cce-scanner",
-    "crates/infra/cce-supply",
+    "crates/infra/cce-ingest-transfer",
     # local vector engine (git submodule: https://github.com/kkkqkx123/simvec)
     "crates/simvec",
     # encoding detection (git remote: https://github.com/kkkqkx123/encoding-guess)
@@ -34,7 +34,6 @@ members = [
     # app
     "crates/app/cce-api",
     "crates/app/cce-transport",
-    "crates/app/cce-service",
     "crates/app/cce-admission",
     "crates/app/cce-plugin-runtime",
     "crates/app/cce-orchestrator",

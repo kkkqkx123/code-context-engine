@@ -178,6 +178,23 @@ pub fn is_build_config_name_lower(lower_name: &str) -> bool {
     crate::build_system::is_build_config_name_lower(lower_name)
 }
 
+/// Normalize a logical project path without touching the filesystem.
+///
+/// Trims whitespace and trailing separators. Empty results collapse to root
+/// so gateway logical roots stay comparable without canonicalization.
+pub fn normalize_logical_path(raw: &str) -> String {
+    let logical = raw.trim();
+    if logical.is_empty() {
+        return String::new();
+    }
+    let trimmed = logical.trim_end_matches('/').trim_end_matches('\\');
+    if trimmed.is_empty() {
+        "/".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Well-known documentation file names without an extension
 /// (README, LICENSE, ...). Single source of truth shared by the language
 /// detector (`LanguageInfo::detect_from_path`) and every consumer that used

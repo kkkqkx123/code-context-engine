@@ -6,12 +6,11 @@ use anyhow::Result;
 
 use crate::output::{print_error, print_success};
 use cce_api::models::StartWatchRequest;
-use cce_service::CodeContextService;
 
 /// Execute watch commands through the domain service abstraction.
 pub async fn execute_with_service(
     cmd: &WatchCommands,
-    service: &dyn cce_service::CodeContextService,
+    service: &crate::service::CliService,
     verbose: bool,
 ) -> Result<()> {
     match cmd {
