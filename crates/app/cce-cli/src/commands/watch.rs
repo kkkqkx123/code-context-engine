@@ -87,10 +87,10 @@ pub async fn execute_with_client(
     }
 }
 
-/// Watch commands
+/// Watch commands (server-side listeners; the server must access the path)
 #[derive(Subcommand)]
 pub enum WatchCommands {
-    /// Start watching a directory
+    /// Start a server-side directory watch
     Start {
         /// Project ID
         #[arg(short = 'P', long)]
@@ -109,14 +109,14 @@ pub enum WatchCommands {
         debounce: u64,
     },
 
-    /// Stop watching
+    /// Stop a server-side watch
     Stop {
         /// Project ID
         #[arg(short = 'P', long)]
         project_id: i64,
     },
 
-    /// Get watch status
+    /// Get server-side watch status
     Status {
         /// Project ID
         #[arg(short = 'P', long)]

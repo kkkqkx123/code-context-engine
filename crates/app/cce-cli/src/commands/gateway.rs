@@ -271,7 +271,7 @@ pub enum GatewayCommands {
         token: Option<String>,
     },
 
-    /// Sync once, then poll and push incremental changes
+    /// Sync once, then poll and push incremental changes (client-side resident loop)
     Watch {
         /// Project ID on the remote host
         #[arg(short = 'P', long)]

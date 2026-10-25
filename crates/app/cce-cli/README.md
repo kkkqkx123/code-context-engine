@@ -200,9 +200,43 @@ cce-cli tools definition --symbol handle_request
 ### 状态检查
 
 ```bash
-# 检查服务端状态
+# 检查服务端状态（纯远端健康检查，适用于本地与远端）
 cce-cli status
 ```
+
+### 服务生命周期（本地进程管理）
+
+业务命令永远是纯 HTTP 客户端，不会隐式拉起服务端。以下命令显式管理本机 `cce` 服务端进程：
+
+```bash
+# 前台运行（继承终端输入输出，透传退出码，适合调试）
+cce-cli server run --config config.toml
+
+# 后台启动（写 PID/日志文件，等待健康检查通过）
+cce-cli server start --config config.toml
+
+# 本地进程加远端健康的混合状态
+cce-cli server status
+
+# 查看或跟随后台日志
+cce-cli server logs --tail 100
+cce-cli server logs --follow
+
+# 停止后台进程（仅通过 PID 文件终止已知本地进程）
+cce-cli server stop
+
+# 重启后台进程
+cce-cli server restart --config config.toml
+```
+
+约定：
+
+- 二进制发现顺序为显式 `--binary`、CLI 同目录、`PATH`。
+- PID/日志文件默认位于操作系统数据目录下的 `cce` 子目录，并按 `--server` 端口区分多实例，可用 `--pid-file`/`--log-file` 显式覆盖。
+- 就绪定义为健康端点可达，`healthy` 降级只告警不阻塞启动。
+- `server stop` 只终止 PID 文件记录的本地进程；远端地址可达但无 PID 文件时拒绝终止。
+- Qdrant 进程仍由服务端管理，CLI 只通过 `qdrant process` 命令远程控制。
+- `watch` 是服务端监听器（要求服务端可访问目标路径），`gateway watch` 是客户端驻留同步循环，两者语义不同。
 
 ## 输出格式
 

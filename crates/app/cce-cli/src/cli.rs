@@ -78,6 +78,10 @@ pub enum Commands {
     #[command(subcommand)]
     Storage(StorageCommands),
 
+    /// Server lifecycle management (local process only; business commands stay pure HTTP clients)
+    #[command(subcommand)]
+    Server(ServerCommands),
+
     /// Tools
     #[command(subcommand)]
     Tools(ToolCommands),
@@ -115,6 +119,8 @@ pub enum Commands {
 }
 
 pub use crate::commands::mcp::McpCommands;
+
+pub use crate::commands::server::ServerCommands;
 
 pub use crate::commands::index::IndexCommands;
 
@@ -196,6 +202,9 @@ impl Cli {
                 commands::qdrant::execute(cmd, &self.server, self.verbose).await
             }
             Commands::Metrics(cmd) => self.execute_metrics(cmd).await,
+            Commands::Server(cmd) => {
+                commands::server::execute(cmd, &self.server, self.verbose, self.format).await
+            }
             Commands::Health(cmd) => self.execute_health(cmd).await,
             Commands::Status => {
                 commands::status::execute(&self.server, self.verbose, self.format).await
@@ -445,6 +454,18 @@ mod tests {
         ));
         assert!(matches!(parse(&["mcp", "stdio"]).command, Commands::Mcp(_)));
         assert!(matches!(parse(&["mcp", "http"]).command, Commands::Mcp(_)));
+        assert!(matches!(
+            parse(&["server", "run"]).command,
+            Commands::Server(_)
+        ));
+        assert!(matches!(
+            parse(&["server", "status"]).command,
+            Commands::Server(_)
+        ));
+        assert!(matches!(
+            parse(&["server", "logs"]).command,
+            Commands::Server(_)
+        ));
         assert!(matches!(parse(&["status"]).command, Commands::Status));
     }
 

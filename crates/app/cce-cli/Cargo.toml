@@ -12,7 +12,7 @@ name = "cce-cli"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "signal"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
@@ -34,3 +34,4 @@ clap = { version = "4.6", features = ["derive", "env", "color", "suggestions"] }
 colored = "3.1"
 comfy-table = "8.0"
 urlencoding = "2.1"
+sysinfo = { workspace = true }
