@@ -161,7 +161,7 @@ impl DatabaseConfig {
         if !self.relation_backend.is_local() {
             return Err(ConfigValidationError::invalid_field(
                 "database.relation_backend",
-                "remote relation backend is not wired yet; use local backends",
+                "remote relation backend is not wired yet: supported matrices are local/local/local and qdrant/local/local; set relation_backend = \"local\"",
             ));
         }
 
@@ -181,9 +181,41 @@ impl DatabaseConfig {
         } else {
             Err(ConfigValidationError::invalid_field(
                 "database.vector_backend",
-                "non-preset backend combination requires database.allow_nonstandard_backends = true",
+                "non-preset backend combination requires database.allow_nonstandard_backends = true; switching backends requires a full reindex and restart",
             ))
         }
+    }
+}
+
+impl AppConfig {
+    /// Default embedding dimension implied by the configured default model.
+    fn default_embedding_dimension(&self) -> Option<usize> {
+        let key = if !self.embedder.default_model.trim().is_empty() {
+            Some(self.embedder.default_model.clone())
+        } else {
+            self.llm.defaults.embedding.clone()
+        };
+        let key = key.filter(|k| !k.trim().is_empty())?;
+        let model = self.llm.embedding_models.get(&key)?;
+        if model.vector_dimension == 0 {
+            return None;
+        }
+        Some(model.vector_dimension)
+    }
+
+    /// Active backend width must match the default embedding model width.
+    fn validate_vector_dimension(&self) -> Option<ConfigValidationError> {
+        let expected = self.default_embedding_dimension()?;
+        let actual = self.database.vector_dimension();
+        if expected == actual {
+            return None;
+        }
+        Some(ConfigValidationError::invalid_field(
+            "embedder.default_model",
+            format!(
+                "embedding dimension {expected} differs from active vector backend dimension {actual}; update vector_size and perform a full reindex",
+            ),
+        ))
     }
 }
 
@@ -396,6 +428,10 @@ impl Validate for AppConfig {
         }
 
         if let Err(e) = self.embedder.validate_structured() {
+            errors.push(e);
+        }
+
+        if let Some(e) = self.validate_vector_dimension() {
             errors.push(e);
         }
 

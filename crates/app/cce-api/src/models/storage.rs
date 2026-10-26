@@ -42,6 +42,8 @@ pub struct QdrantProcessInfo {
 /// Storage component status
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct StorageComponentStatus {
+    /// Active backend name (`local`, `qdrant`, `remote`, or `unconfigured`)
+    pub backend: String,
     /// Whether the storage is connected
     pub connected: bool,
     /// Number of items stored

@@ -518,7 +518,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Handle read merged project config request */
+        /** Handle read stored project profile request */
         get: operations["handle_get_project_config"];
         /** Handle update project config request */
         put: operations["handle_update_project_config"];
@@ -849,9 +849,10 @@ export interface paths {
         get?: never;
         /**
          * Handle typed project LLM update request.
-         * @description Only project-effective chat and rerank fields are accepted. The update is
-         *     validated, stored in memory and component caches are cleared without
-         *     invalidating the registry entry.
+         * @description Only project-effective chat and rerank selections are accepted. The update
+         *     is validated and persisted as part of the project profile document, so a
+         *     restart keeps the values. Provider connection details and per-model
+         *     tuning stay global and are rejected here.
          */
         put: operations["handle_update_project_llm_config"];
         post?: never;
@@ -2715,9 +2716,13 @@ export interface components {
             /** @description Root directory path */
             root_path: string;
         };
-        /** @description Response for reading the merged project configuration */
+        /** @description Response for reading the stored project profile */
         ProjectConfigGetResponse: {
-            /** @description Merged runtime configuration (global defaults plus project overrides) */
+            /**
+             * @description Stored project profile (ProjectAppConfig as JSON), not the merged
+             *     runtime configuration. Combine with the global configuration to
+             *     derive the effective values.
+             */
             config: unknown;
             /** Format: int64 */
             config_version: number;
@@ -2736,11 +2741,23 @@ export interface components {
         };
         /** @description Request body for updating project config */
         ProjectConfigUpdateRequest: {
-            /** @description Project-level configuration (partial config, free-form) */
+            /**
+             * @description Project profile document (ProjectAppConfig as JSON). Only
+             *     project-effective fields are accepted; global-only sections such as
+             *     `server`, `database`, `logger`, `metrics`, `export`, `mcp`,
+             *     `search`, `cache` or `symbol_resolution` are rejected.
+             */
             config: unknown;
         };
         /** @description Response for updating project config */
         ProjectConfigUpdateResponse: {
+            /**
+             * Format: int64
+             * @description Combined profile/global version after the write. Advances when either
+             *     the profile or the global configuration changes. Observe the same
+             *     value through GET.
+             */
+            config_version?: number;
             hot_reload_applied: boolean;
             message: string;
             success: boolean;
@@ -3113,6 +3130,8 @@ export interface components {
         };
         /** @description Storage component status */
         StorageComponentStatus: {
+            /** @description Active backend name (`local`, `qdrant`, `remote`, or `unconfigured`) */
+            backend: string;
             /** @description Whether the storage is connected */
             connected: boolean;
             /**

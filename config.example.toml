@@ -131,7 +131,7 @@ reload_policy = "on_commit_with_delay"
 # This section only contains embedder-specific runtime configuration.
 #
 # Default model to use (references a model in [llm.embedding_models])
-default_model = "nomic-embed-text"
+default_model = "bge-m3"
 
 # Maximum tokens per batch request
 max_batch_tokens = 8192

@@ -620,6 +620,7 @@ pub async fn handle_storage_status(
         let vector = state.engine.vector();
         let diag = vector.diagnose_summary().await;
         StorageComponentStatus {
+            backend: vector.backend_name().to_string(),
             connected: diag.reachable,
             item_count: diag.points_count as usize,
             disk_usage_mb: 0.0, // Neither backend exposes disk usage here
@@ -630,8 +631,10 @@ pub async fn handle_storage_status(
 
     // Check BM25 through the backend-neutral diagnostics snapshot.
     let bm25_storage = {
-        let diag = state.engine.fulltext().diagnose_summary().await;
+        let fulltext = state.engine.fulltext();
+        let diag = fulltext.diagnose_summary().await;
         StorageComponentStatus {
+            backend: fulltext.backend_name().to_string(),
             connected: diag.reachable,
             item_count: diag.documents_count as usize,
             disk_usage_mb: 0.0,
@@ -645,6 +648,7 @@ pub async fn handle_storage_status(
         Some(store) => {
             let diag = store.diagnose_summary().await;
             StorageComponentStatus {
+                backend: store.backend_name().to_string(),
                 connected: diag.reachable,
                 item_count: 0,
                 disk_usage_mb: diag.size_bytes as f64 / 1024.0 / 1024.0,
@@ -653,6 +657,7 @@ pub async fn handle_storage_status(
             }
         }
         None => StorageComponentStatus {
+            backend: "unconfigured".to_string(),
             connected: false,
             item_count: 0,
             disk_usage_mb: 0.0,

@@ -95,6 +95,7 @@ async fn storage_status(client: &SharedHttpClient, verbose: bool) -> Result<()> 
 }
 
 fn print_component_status(component: &cce_api::models::StorageComponentStatus) {
+    println!("  Backend:      {}", component.backend);
     println!("  Connected:    {}", component.connected);
     println!("  Items:        {}", component.item_count);
     println!("  Disk usage:   {:.2} MB", component.disk_usage_mb);

@@ -67,7 +67,7 @@ pub async fn execute_with_client(
 
                         let status = storage_status.as_ref().unwrap();
 
-                        println!("\nVector Storage (Qdrant):");
+                        println!("\nVector Storage:");
                         print_component_status("  ", &status.vector_storage);
 
                         println!("\nBM25 Storage:");
@@ -124,6 +124,7 @@ fn print_component_status(prefix: &str, component: &StorageComponentStatus) {
     };
 
     println!("{}Status: {}", prefix, status_color);
+    println!("{}Backend: {}", prefix, component.backend);
     println!("{}Items: {}", prefix, component.item_count);
     println!("{}Disk Usage: {:.2} MB", prefix, component.disk_usage_mb);
 

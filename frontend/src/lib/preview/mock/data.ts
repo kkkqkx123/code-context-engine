@@ -408,17 +408,20 @@ export const mockStorageStatus: StorageStatusResponse = {
 	success: true,
 	status: {
 		vector_storage: {
+			backend: 'qdrant',
 			connected: true,
 			item_count: 12847,
 			disk_usage_mb: 245.6,
 			version: '1.8.0'
 		},
 		bm25_storage: {
+			backend: 'local',
 			connected: true,
 			item_count: 12847,
 			disk_usage_mb: 89.2
 		},
 		relation_storage: {
+			backend: 'local',
 			connected: true,
 			item_count: 3421,
 			disk_usage_mb: 12.4

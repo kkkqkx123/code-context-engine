@@ -397,7 +397,7 @@ async fn check_bm25(state: &SharedContext) -> ServiceStatus {
     } else {
         let detail = diag
             .error
-            .unwrap_or_else(|| "BM25 remote branch is not supported".to_string());
+            .unwrap_or_else(|| "BM25 health check failed".to_string());
         ServiceStatus {
             reachable: false,
             message: detail,

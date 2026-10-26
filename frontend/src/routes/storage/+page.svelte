@@ -51,6 +51,12 @@
 		}
 	}
 
+	function backendName(
+		component: { backend?: string | null } | null | undefined,
+	): string {
+		return component?.backend?.trim() ? String(component.backend) : 'unknown';
+	}
+
 	function formatQdrantStatus(status: QdrantProcessStatus): string {
 		if (status.type === 'Failed') return `Failed: ${status.message}`;
 		return status.type;
@@ -100,10 +106,17 @@
 
 		<!-- Storage Status Overview -->
 		<Card title="Storage Components" subtitle="Health status overview">
+			<p class="backend-note">
+				Active backends are read-only. Switching backends requires editing the
+				server configuration file, then restarting and performing a full
+				reindex.
+			</p>
 			<div class="spec-bar">
 				{#if $storageState.status}
 					<div class="spec-item">
-						<div class="spec-label">Vector DB</div>
+						<div class="spec-label">
+							Vector DB ({backendName($storageState.status.vector_storage)})
+						</div>
 						<div class="spec-value">
 							<Badge
 								label={$storageState.status.vector_storage.connected
@@ -127,7 +140,9 @@
 					</div>
 
 					<div class="spec-item">
-						<div class="spec-label">BM25 Index</div>
+						<div class="spec-label">
+							BM25 Index ({backendName($storageState.status.bm25_storage)})
+						</div>
 						<div class="spec-value">
 							<Badge
 								label={$storageState.status.bm25_storage.connected
@@ -146,7 +161,9 @@
 					</div>
 
 					<div class="spec-item">
-						<div class="spec-label">Relations</div>
+						<div class="spec-label">
+							Relations ({backendName($storageState.status.relation_storage)})
+						</div>
 						<div class="spec-value">
 							<Badge
 								label={$storageState.status.relation_storage.connected
@@ -287,7 +304,6 @@
 {/if}
 
 <style>
-
 	.dismiss-btn {
 		background: none;
 		border: none;
@@ -295,6 +311,13 @@
 		font-size: 1.5rem;
 		cursor: pointer;
 		line-height: 1;
+	}
+
+	.backend-note {
+		color: var(--gray-600);
+		font-size: 0.85rem;
+		margin-bottom: 1rem;
+		line-height: 1.6;
 	}
 
 	.spec-bar {

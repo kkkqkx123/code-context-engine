@@ -740,3 +740,22 @@ fn test_resolve_embedding_config_includes_endpoint_path() {
     assert_eq!(resolved.model, "bge-m3");
     assert_eq!(resolved.vector_dimension, 1024);
 }
+
+#[test]
+fn test_vector_dimension_matches_default_embedding() {
+    let mut config = config_with_provider_and_models();
+    config.embedder.default_model = "emb-model".to_string();
+    config.database.vector_local.vector_size = 1024;
+    assert!(config.validate_structured().is_ok());
+}
+
+#[test]
+fn test_vector_dimension_mismatch_fails_validation() {
+    let mut config = config_with_provider_and_models();
+    config.embedder.default_model = "emb-model".to_string();
+    config.database.vector_local.vector_size = 768;
+    let err = config
+        .validate_structured()
+        .expect_err("dimension mismatch must fail");
+    assert!(err.to_string().contains("embedding dimension"));
+}

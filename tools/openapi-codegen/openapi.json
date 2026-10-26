@@ -10644,11 +10644,16 @@
         "type": "object",
         "description": "Storage component status",
         "required": [
+          "backend",
           "connected",
           "item_count",
           "disk_usage_mb"
         ],
         "properties": {
+          "backend": {
+            "type": "string",
+            "description": "Active backend name (`local`, `qdrant`, `remote`, or `unconfigured`)"
+          },
           "connected": {
             "type": "boolean",
             "description": "Whether the storage is connected"
