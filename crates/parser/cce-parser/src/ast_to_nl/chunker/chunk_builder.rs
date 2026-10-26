@@ -256,8 +256,21 @@ impl ChunkBuilder {
     /// The estimate is intentionally conservative: an underestimate is
     /// repaired by the pre-injection limit check, while an overestimate
     /// only produces a slightly smaller body.
-    pub(crate) fn decoration_allowance(group: &EntityGroup, path: ChunkPath) -> usize {
+    pub(crate) fn decoration_allowance(group: &EntityGroup, path: ChunkPath, limit: usize) -> usize {
         let unit = unit(path);
+        let (identity_cap, topic_cap, head_cap) = if limit == 0 || limit == usize::MAX {
+            (
+                IDENTITY_COST_CAP,
+                TOPIC_LINE_COST_CAP,
+                SYNTHETIC_HEAD_COST_CAP,
+            )
+        } else {
+            (
+                limit.saturating_sub(1).max(1),
+                (limit / 8).max(4),
+                (limit / 4).max(8),
+            )
+        };
         let identity_line = format!("{} ({}).\n", group.name, group.kind.kind_label());
         let first = if path == ChunkPath::Embedding {
             cost(&identity_line, path)
@@ -278,17 +291,17 @@ impl ChunkBuilder {
                 format!("{}.{}", group.name, name)
             };
             let identity = Self::signature_identity(group, id, &name, &qualified, kind);
-            let identity = truncate_to_cost(&identity, unit, IDENTITY_COST_CAP);
+            let identity = truncate_to_cost(&identity, unit, identity_cap);
             continuation = continuation.max(
                 cost(identity, path)
-                    .saturating_add(TOPIC_LINE_COST_CAP)
+                    .saturating_add(topic_cap)
                     .saturating_add(2),
             );
         }
         continuation = continuation.max(cost(&identity_line, path).saturating_add(2));
         first
             .max(continuation)
-            .saturating_add(SYNTHETIC_HEAD_COST_CAP)
+            .saturating_add(head_cap)
     }
 
     /// Identity line for one continued entity.

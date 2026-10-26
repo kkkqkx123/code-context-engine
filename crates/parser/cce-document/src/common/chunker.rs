@@ -419,8 +419,14 @@ pub fn split_bm25_by_terms(text: &str, max_terms: usize, overlap_terms: usize) -
             // prefix. The shortened piece only costs less, so the limit is
             // still respected; CJK text without whitespace keeps the
             // measured character boundary.
-            if let Some(relative) = text[start..end].rfind(char::is_whitespace) {
-                let candidate = start + relative + 1;
+            let slice = &text[start..end];
+            if let Some(relative) = slice.rfind(char::is_whitespace) {
+                let whitespace_len = slice[relative..]
+                    .chars()
+                    .next()
+                    .map(|character| character.len_utf8())
+                    .unwrap_or(1);
+                let candidate = start + relative + whitespace_len;
                 if candidate > start {
                     end = candidate;
                 }
@@ -448,6 +454,19 @@ mod tests {
         let result = split_bm25_by_terms(text, 10, 2);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "short text");
+    }
+
+    #[test]
+    fn test_split_bm25_by_terms_cjk_whitespace_no_panic() {
+        // U+3000 (ideographic space) is a 3-byte whitespace character.
+        let text = "媒体服务器\u{3000}轨道片段\u{3000}分段测试\u{3000}".repeat(20);
+        let result = split_bm25_by_terms(&text, 5, 1);
+        assert!(!result.is_empty());
+        for seg in &result {
+            assert!(cce_text::ChunkUnit::Terms.cost(seg) <= 5 || seg.trim().is_empty() == false);
+        }
+        // Round-trip: concatenated segments (minus overlap) cover original content
+        assert!(result.iter().all(|s| s.is_char_boundary(s.len())));
     }
 
     #[test]

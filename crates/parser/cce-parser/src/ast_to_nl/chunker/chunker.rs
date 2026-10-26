@@ -257,8 +257,8 @@ impl GroupChunker {
     > {
         use cce_config::modules::ChunkBudget;
         let has_vocabulary = self.group_mentions_vocabulary(file_path, language, texts);
-        let embedding_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding);
-        let bm25_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Bm25);
+        let embedding_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding, self.config.limit(ChunkPath::Embedding));
+        let bm25_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Bm25, self.config.limit(ChunkPath::Bm25));
         let emb_budget: ChunkBudget =
             self.config
                 .budget(ChunkPath::Embedding, has_vocabulary, embedding_decoration);
@@ -270,21 +270,13 @@ impl GroupChunker {
                 && budget.pre_injection_limit != usize::MAX
                 && budget.decoration_cost >= budget.pre_injection_limit
             {
-                tracing::warn!(
-                    file_path = %file_path,
-                    group = %group.group_id,
-                    path = %name,
-                    decoration = budget.decoration_cost,
-                    pre = budget.pre_injection_limit,
-                    hard = budget.hard_limit,
-                    reserve = budget.reserve,
-                    "Decoration estimate leaves no body room; splitting with minimal body"
-                );
+                return Err(ParseError::code_splitting(format!(
+                    "decoration exceeds the pre-injection budget (path={name}, decoration={}, pre={})",
+                    budget.decoration_cost, budget.pre_injection_limit
+                )));
             }
         }
-        let config = self
-            .config
-            .body_config(has_vocabulary, embedding_decoration, bm25_decoration);
+        let config = self.config.clone();
         Ok((config, emb_budget, bm25_budget))
     }
 
@@ -589,10 +581,12 @@ impl GroupChunker {
             emb_dec = emb_dec.max(ChunkBuilder::decoration_allowance(
                 &gc.group,
                 ChunkPath::Embedding,
+                self.config.limit(ChunkPath::Embedding),
             ));
             bm25_dec = bm25_dec.max(ChunkBuilder::decoration_allowance(
                 &gc.group,
                 ChunkPath::Bm25,
+                self.config.limit(ChunkPath::Bm25),
             ));
         }
         enforce_hard_limit(
@@ -634,9 +628,6 @@ impl GroupChunker {
         let language = group_conversions
             .first()
             .map(|gc| gc.group.language.to_string());
-        let has_vocabulary =
-            self.batch_mentions_vocabulary(group_conversions, file_path, language.as_deref());
-        let merge_config = self.config.pre_injection_config(has_vocabulary);
         let mut tracker = GroupTracker::new();
         let mut all_chunks = ChunkOutput::default();
         let groups: Vec<EntityGroup> = group_conversions
@@ -726,7 +717,7 @@ impl GroupChunker {
         let merged_emb_chunks = super::merge::merge_small_chunks_cross_group(
             emb_chunks_inner,
             &group_spans,
-            &merge_config,
+            &self.config,
         );
 
         let mut emb_results: Vec<ChunkedResult> = merged_emb_chunks;

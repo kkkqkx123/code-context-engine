@@ -149,10 +149,12 @@ impl<'a> HeaderHelper<'a> {
             ChunkPath::Embedding => self.config.min_chunk_tokens,
         };
 
-        let max_limit = match path {
-            ChunkPath::Bm25 => self.config.max_bm25_terms,
-            ChunkPath::Embedding => self.config.max_tokens,
-        };
+        // The header is fixed for the whole group; the member budget therefore
+        // excludes the header cost AND the "\n\n" separator that
+        // `assemble_combined_text` inserts between them. Keeping the two
+        // values distinct lets `below_min` pack up to the member maximum
+        // without ever pushing the combined text past the path limit.
+        let member_max_limit = first_budget.saturating_sub(2).max(1);
 
         let mut groups = Vec::new();
         let mut current_group = Vec::new();
@@ -185,13 +187,18 @@ impl<'a> HeaderHelper<'a> {
             } else {
                 continuation_budget
             };
+            let effective_max = if groups.is_empty() {
+                member_max_limit
+            } else {
+                continuation_budget.saturating_sub(2).max(1)
+            };
             if !current_group.is_empty() {
                 let mut candidate = current_text.clone();
                 candidate.push_str("\n\n");
                 candidate.push_str(member_text);
                 let candidate_cost = self.unit_count(&candidate, path);
                 let below_min = current_cost < min_cost;
-                if candidate_cost > max_limit || (!below_min && candidate_cost > budget) {
+                if candidate_cost > effective_max || (!below_min && candidate_cost > budget) {
                     groups.push(std::mem::take(&mut current_group));
                     current_text.clear();
                 }

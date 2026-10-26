@@ -190,7 +190,7 @@ pub struct ChunkingConfig {
     /// Minimum chunk token count (default: 150)
     #[serde(default = "default_min_chunk_tokens")]
     pub min_chunk_tokens: usize,
-    /// Minimum chunk BM25 term count (default: 80)
+    /// Minimum chunk BM25 term count (default: 45)
     #[serde(default = "default_min_chunk_bm25_terms")]
     pub min_chunk_bm25_terms: usize,
     /// Whether to respect entity boundaries when splitting (default: true)
@@ -266,6 +266,10 @@ pub struct ChunkBudget {
     pub pre_injection_limit: usize,
     /// The limit the body splitter works with.
     pub body_limit: usize,
+    /// The undersized-chunk trigger for merging.
+    pub min_limit: usize,
+    /// The largest combined cost a merge may produce.
+    pub merge_limit: usize,
 }
 
 impl ChunkBudget {
@@ -282,11 +286,6 @@ impl ChunkBudget {
     /// Whether `text` fits the body limit.
     pub fn fits_body(&self, text: &str) -> bool {
         self.unit.fits(text, self.body_limit)
-    }
-
-    /// The ceiling a merge may produce on this path.
-    pub fn merge_limit(&self) -> usize {
-        self.pre_injection_limit
     }
 }
 
@@ -359,10 +358,26 @@ impl ChunkingConfig {
                 decoration_cost: 0,
                 pre_injection_limit: usize::MAX,
                 body_limit: usize::MAX,
+                min_limit: 0,
+                merge_limit: usize::MAX,
             };
         }
         let pre_injection_limit = limit.saturating_sub(reserve);
         let body_limit = pre_injection_limit.saturating_sub(decoration_cost).max(1);
+        let min_limit = match path {
+            cce_types::ChunkPath::Bm25 => self.min_chunk_bm25_terms,
+            cce_types::ChunkPath::Embedding => self.min_chunk_tokens,
+        };
+        let merge_limit = match path {
+            cce_types::ChunkPath::Bm25 => body_limit,
+            cce_types::ChunkPath::Embedding => {
+                if self.cross_group_merge_threshold == 0 {
+                    body_limit
+                } else {
+                    self.cross_group_merge_threshold.min(body_limit)
+                }
+            }
+        };
         ChunkBudget {
             unit: self.unit(path),
             hard_limit: limit,
@@ -370,6 +385,8 @@ impl ChunkingConfig {
             decoration_cost,
             pre_injection_limit,
             body_limit,
+            min_limit,
+            merge_limit,
         }
     }
 
@@ -402,44 +419,6 @@ impl ChunkingConfig {
             return 0;
         }
         ((limit as f32) * self.glossary_reserve_ratio).ceil() as usize
-    }
-
-    /// A configuration whose path limits are the body limits for the given
-    /// decoration allowances.
-    ///
-    /// The hard limits stay available on the original configuration. This
-    /// derived configuration is only used to drive splitting, header packing
-    /// and merge thresholds.
-    pub fn body_config(
-        &self,
-        has_vocabulary: bool,
-        embedding_decoration: usize,
-        bm25_decoration: usize,
-    ) -> Self {
-        let mut body = self.clone();
-        if self.max_tokens > 0 {
-            let embedding = self.budget(
-                cce_types::ChunkPath::Embedding,
-                has_vocabulary,
-                embedding_decoration,
-            );
-            body.max_tokens = embedding.body_limit;
-            body.cross_group_merge_threshold =
-                self.merge_limit(cce_types::ChunkPath::Embedding, has_vocabulary);
-        }
-        if self.max_bm25_terms > 0 {
-            let bm25 = self.budget(cce_types::ChunkPath::Bm25, has_vocabulary, bm25_decoration);
-            body.max_bm25_terms = bm25.body_limit;
-        }
-        body
-    }
-
-    /// A configuration reduced only by the terminology reserve.
-    ///
-    /// Documents have no identity or header decoration appended after
-    /// splitting, so the pre-injection limit is also the body limit.
-    pub fn pre_injection_config(&self, has_vocabulary: bool) -> Self {
-        self.body_config(has_vocabulary, 0, 0)
     }
 }
 
@@ -577,7 +556,7 @@ fn default_respect_boundaries() -> bool {
 }
 
 fn default_min_chunk_bm25_terms() -> usize {
-    80
+    45
 }
 
 fn default_max_summary_words() -> usize {
@@ -614,7 +593,7 @@ mod tests {
         assert_eq!(config.chunking.max_bm25_terms, 150);
         assert_eq!(config.chunking.overlap_bm25_terms, 5);
         assert_eq!(config.chunking.min_chunk_tokens, 150);
-        assert_eq!(config.chunking.min_chunk_bm25_terms, 80);
+        assert_eq!(config.chunking.min_chunk_bm25_terms, 45);
     }
 
     #[test]
@@ -696,7 +675,7 @@ mod tests {
         assert_eq!(chunking.overlap_bm25_terms, 5);
         assert_eq!(chunking.max_overlap_ratio, 0.2);
         assert_eq!(chunking.min_chunk_tokens, 150);
-        assert_eq!(chunking.min_chunk_bm25_terms, 80);
+        assert_eq!(chunking.min_chunk_bm25_terms, 45);
         assert!(chunking.respect_boundaries);
         assert_eq!(chunking.cross_group_merge_threshold, 0);
     }
@@ -710,7 +689,7 @@ mod tests {
         assert_eq!(defaults.overlap_bm25_terms, 5);
         assert_eq!(defaults.max_overlap_ratio, 0.2);
         assert_eq!(defaults.min_chunk_tokens, 150);
-        assert_eq!(defaults.min_chunk_bm25_terms, 80);
+        assert_eq!(defaults.min_chunk_bm25_terms, 45);
         assert!(defaults.respect_boundaries);
     }
 }

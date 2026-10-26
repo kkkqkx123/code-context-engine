@@ -303,8 +303,10 @@ impl PipelineRouter {
 
         // A malformed structured document must not lose the file entirely:
         // degrade to the plain-text pipeline instead of failing indexing.
+        // Budget errors (CodeSplitting) are NOT degraded: they are permanent
+        // failures the caller must surface rather than mask as plain text.
         let mut output = match result {
-            Err(e) if !matches!(doc_type, DocType::PlainText) => {
+            Err(e) if !matches!(doc_type, DocType::PlainText) && !matches!(e, ParseError::CodeSplitting(_)) => {
                 warn!(
                     file_path = %file_path,
                     doc_type = ?doc_type,
@@ -315,6 +317,7 @@ impl PipelineRouter {
                     .process(content, file_path, config, output_mode)
                     .map(|(chunks, summary)| (chunks, summary, true))?
             }
+            Err(e) => return Err(e),
             other => other.map(|(chunks, summary)| (chunks, summary, false))?,
         };
         enforce_document_hard_limit(&mut output.0, config, file_path, false)?;
@@ -386,7 +389,12 @@ impl PipelineRouter {
         // against the hard limit.
         let vocabulary = registry.vocabulary_for(file_path, None);
         let has_vocabulary = vocabulary.as_ref().is_some_and(|table| !table.is_empty());
-        let effective = config.pre_injection_config(has_vocabulary);
+        let effective = {
+            let mut c = config.clone();
+            c.max_tokens = config.pre_injection_limit(ChunkPath::Embedding, has_vocabulary);
+            c.max_bm25_terms = config.pre_injection_limit(ChunkPath::Bm25, has_vocabulary);
+            c
+        };
 
         if let Some(parsed) =
             self.process_with_plugin_list(content, file_path, &effective, output_mode, &above)?

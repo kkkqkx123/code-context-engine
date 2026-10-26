@@ -63,8 +63,9 @@ pub(crate) fn should_merge(
     path: ChunkPath,
     config: &ChunkingConfig,
 ) -> bool {
+    let budget = config.budget(path, false, 0);
     if path == ChunkPath::Embedding && (prev.self_contained || next.self_contained) {
-        let (min_threshold, _) = merge_limits(path, config);
+        let (min_threshold, _) = merge_limits(path, &budget);
         let protects_small_topic =
             (prev.self_contained && is_topic_unit(prev) && cost(&prev.text, path) < min_threshold)
                 || (next.self_contained
@@ -91,12 +92,12 @@ pub(crate) fn should_merge(
         && !ChunkBuilder::states_own_topic(&next.text)
         && is_topic_unit(prev)
     {
-        let (_, ceiling) = merge_limits(path, config);
+        let (_, ceiling) = merge_limits(path, &budget);
         if combined_cost(prev, next, path) <= ceiling {
             return true;
         }
     }
-    let (min_threshold, ceiling) = merge_limits(path, config);
+    let (min_threshold, ceiling) = merge_limits(path, &budget);
     let prev_cost = cost(&prev.text, path);
     let next_cost = cost(&next.text, path);
     let combined = combined_cost(prev, next, path);

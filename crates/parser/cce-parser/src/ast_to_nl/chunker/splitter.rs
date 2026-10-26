@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use cce_config::modules::ChunkingConfig;
+use cce_config::modules::ChunkBudget;
 use cce_types::ParseError;
 use cce_types::entity::EntityId;
 use cce_utils::token_estimation::TokenEstimator;
@@ -100,45 +101,79 @@ impl BoundaryLevel {
 pub struct TextSplitter {
     config: ChunkingConfig,
     estimator: TokenEstimator,
-    pre_embedding: Option<usize>,
-    pre_bm25: Option<usize>,
+    emb_budget: ChunkBudget,
+    bm25_budget: ChunkBudget,
 }
 
 impl TextSplitter {
     /// Create new text splitter
     pub fn new(config: ChunkingConfig) -> Self {
+        let emb_budget = config.budget(cce_types::ChunkPath::Embedding, false, 0);
+        let bm25_budget = config.budget(cce_types::ChunkPath::Bm25, false, 0);
         Self {
             config,
             estimator: TokenEstimator::default(),
-            pre_embedding: None,
-            pre_bm25: None,
+            emb_budget,
+            bm25_budget,
         }
     }
 
     /// Create a splitter that merges up to the pre-injection limits.
     pub fn with_pre_limits(config: ChunkingConfig, pre_embedding: usize, pre_bm25: usize) -> Self {
+        let mut emb_budget = config.budget(cce_types::ChunkPath::Embedding, false, 0);
+        let mut bm25_budget = config.budget(cce_types::ChunkPath::Bm25, false, 0);
+        if pre_embedding != 0 && pre_embedding != usize::MAX {
+            emb_budget.pre_injection_limit = pre_embedding;
+            emb_budget.body_limit = pre_embedding;
+        }
+        if pre_bm25 != 0 && pre_bm25 != usize::MAX {
+            bm25_budget.pre_injection_limit = pre_bm25;
+            bm25_budget.body_limit = pre_bm25;
+        }
         Self {
             config,
             estimator: TokenEstimator::default(),
-            pre_embedding: Some(pre_embedding),
-            pre_bm25: Some(pre_bm25),
+            emb_budget,
+            bm25_budget,
         }
     }
 
-    fn merge_ceiling(&self, path: ChunkPath) -> (usize, usize) {
-        let (min, default_ceiling) = super::boundary::merge_limits(path, &self.config);
-        let pre = match path {
-            ChunkPath::Embedding => self.pre_embedding,
-            ChunkPath::Bm25 => self.pre_bm25,
-        };
-        match pre {
-            Some(limit) if limit != 0 && limit != usize::MAX => {
-                let ceiling = default_ceiling.min(limit);
-                (min, ceiling)
-            }
-            Some(_) => (min, default_ceiling),
-            None => (min, default_ceiling),
+    pub fn with_budgets(config: ChunkingConfig, emb_budget: ChunkBudget, bm25_budget: ChunkBudget) -> Self {
+        Self {
+            config,
+            estimator: TokenEstimator::default(),
+            emb_budget,
+            bm25_budget,
         }
+    }
+
+    fn budget(&self, path: ChunkPath) -> ChunkBudget {
+        match path {
+            ChunkPath::Embedding => self.emb_budget,
+            ChunkPath::Bm25 => self.bm25_budget,
+        }
+    }
+
+    fn effective_config(&self, path: ChunkPath) -> ChunkingConfig {
+        let mut c = self.config.clone();
+        let b = self.budget(path);
+        match path {
+            ChunkPath::Embedding => {
+                c.max_tokens = b.body_limit;
+                c.min_chunk_tokens = b.min_limit;
+                c.cross_group_merge_threshold = b.merge_limit;
+            }
+            ChunkPath::Bm25 => {
+                c.max_bm25_terms = b.body_limit;
+                c.min_chunk_bm25_terms = b.min_limit;
+            }
+        }
+        c
+    }
+
+    fn merge_ceiling(&self, path: ChunkPath) -> (usize, usize) {
+        let budget = self.budget(path);
+        (budget.min_limit, budget.merge_limit)
     }
 
     pub fn split(
@@ -244,11 +279,12 @@ impl TextSplitter {
         }
 
         if level == BoundaryLevel::Tokens {
+            let cfg = self.effective_config(path);
             let mut boundaries = strategies::tokens::split_by_tokens_in_range(
                 text,
                 range,
                 path,
-                &self.config,
+                &cfg,
                 &self.estimator,
             );
             if !inherit_entity_ids.is_empty() {
@@ -293,11 +329,11 @@ impl TextSplitter {
                 boundary.entity_ids = inherit_entity_ids.to_vec();
             }
             let piece_ids = boundary.entity_ids.clone();
-            if self.config.limit(path) == 0
+            if self.budget(path).body_limit == 0
                 || self
                     .config
                     .cost(&text[boundary.start_byte..boundary.end_byte], path)
-                    <= self.config.limit(path)
+                    <= self.budget(path).body_limit
             {
                 return Ok(vec![boundary]);
             }
@@ -320,8 +356,8 @@ impl TextSplitter {
             }
             let piece_ids = b.entity_ids.clone();
 
-            if self.config.limit(path) > 0
-                && self.config.cost(&text[b.start_byte..b.end_byte], path) > self.config.limit(path)
+            if self.budget(path).body_limit > 0
+                && self.config.cost(&text[b.start_byte..b.end_byte], path) > self.budget(path).body_limit
             {
                 result.extend(self.split_range_at(
                     text,
@@ -349,12 +385,13 @@ impl TextSplitter {
         nl_boundaries: Option<&[NlEntityBoundary]>,
         range: Range<usize>,
     ) -> Vec<ChunkBoundary> {
+        let cfg = self.effective_config(path);
         match level {
             BoundaryLevel::NestedGroups => strategies::nested_groups::split_by_nested_groups(
                 text,
                 group,
                 path,
-                &self.config,
+                &cfg,
                 range,
             ),
             BoundaryLevel::Entities => {
@@ -367,7 +404,7 @@ impl TextSplitter {
                         text,
                         group,
                         path,
-                        &self.config,
+                        &cfg,
                         nl,
                         range,
                     ),
@@ -375,13 +412,13 @@ impl TextSplitter {
                 }
             }
             BoundaryLevel::Sentences => {
-                strategies::sentences::split_text_by_sentences(text, range, path, &self.config)
+                strategies::sentences::split_text_by_sentences(text, range, path, &cfg)
             }
             BoundaryLevel::Lines => {
-                strategies::lines::split_text_by_lines(text, range, path, &self.config)
+                strategies::lines::split_text_by_lines(text, range, path, &cfg)
             }
             BoundaryLevel::Paragraphs => {
-                strategies::paragraphs::split_text_by_paragraphs(text, range, path, &self.config)
+                strategies::paragraphs::split_text_by_paragraphs(text, range, path, &cfg)
             }
             BoundaryLevel::Tokens => unreachable!("tokens is the terminal, not a partition level"),
         }

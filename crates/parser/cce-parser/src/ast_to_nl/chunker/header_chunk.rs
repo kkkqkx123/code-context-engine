@@ -861,18 +861,17 @@ mod tests {
             },
         ];
         let (combined, member_ids) = assemble_combined_text(header_text, &members, ChunkPath::Bm25);
-        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
-        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
-        let body_cfg = base.body_config(false, emb_dec, bm25_dec);
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding, base.limit(ChunkPath::Embedding));
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25, base.limit(ChunkPath::Bm25));
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
-        let splitter = TextSplitter::with_pre_limits(
-            body_cfg.clone(),
-            emb_budget.pre_injection_limit,
-            bm25_budget.pre_injection_limit,
+        let splitter = TextSplitter::with_budgets(
+            base.clone(),
+            emb_budget,
+            bm25_budget,
         );
         let infra = super::super::chunker::ChunkInfrastructure {
-            config: &body_cfg,
+            config: &base,
             estimator: &est,
             splitter: &splitter,
             pre_injection_embedding: emb_budget.pre_injection_limit,
@@ -903,18 +902,17 @@ mod tests {
         let empty: [ConversionResult; 0] = [];
         let text = n_words(300);
         let (combined, member_ids) = assemble_combined_text(&text, &empty, ChunkPath::Bm25);
-        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
-        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
-        let body_cfg = base.body_config(false, emb_dec, bm25_dec);
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding, base.limit(ChunkPath::Embedding));
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25, base.limit(ChunkPath::Bm25));
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
-        let splitter = TextSplitter::with_pre_limits(
-            body_cfg.clone(),
-            emb_budget.pre_injection_limit,
-            bm25_budget.pre_injection_limit,
+        let splitter = TextSplitter::with_budgets(
+            base.clone(),
+            emb_budget,
+            bm25_budget,
         );
         let infra = super::super::chunker::ChunkInfrastructure {
-            config: &body_cfg,
+            config: &base,
             estimator: &est,
             splitter: &splitter,
             pre_injection_embedding: emb_budget.pre_injection_limit,

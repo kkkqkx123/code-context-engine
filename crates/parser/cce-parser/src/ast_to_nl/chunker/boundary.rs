@@ -2,7 +2,7 @@
 //!
 //! Defines chunk boundaries and split reasons for text segmentation.
 
-use cce_config::modules::ChunkingConfig;
+use cce_config::modules::ChunkBudget;
 use cce_text::ChunkUnit;
 use cce_types::ConversionResult;
 use cce_types::entity::EntityId;
@@ -38,18 +38,8 @@ pub fn cost(text: &str, path: ChunkPath) -> usize {
 /// body configs for the intra-splitter pass, pre-injection configs for the
 /// cross-group pass. The ceiling semantics follow the unified merge limit
 /// defined on the chunking config.
-pub fn merge_limits(path: ChunkPath, config: &ChunkingConfig) -> (usize, usize) {
-    match path {
-        ChunkPath::Bm25 => (config.min_chunk_bm25_terms, config.max_bm25_terms),
-        ChunkPath::Embedding => (
-            config.min_chunk_tokens,
-            if config.cross_group_merge_threshold == 0 {
-                config.max_tokens
-            } else {
-                config.cross_group_merge_threshold
-            },
-        ),
-    }
+pub fn merge_limits(_path: ChunkPath, budget: &ChunkBudget) -> (usize, usize) {
+    (budget.min_limit, budget.merge_limit)
 }
 
 /// Whether `prev` may absorb `next` under an explicit merge ceiling.
@@ -85,8 +75,8 @@ pub fn can_merge_with_ceiling(
 /// the one being rescued) and the combined cost stays within the path's
 /// merge ceiling. Small trailing fragments are absorbed by their large
 /// left neighbor, and small leading fragments absorb their right neighbor.
-pub fn can_merge(prev: &str, next: &str, path: ChunkPath, config: &ChunkingConfig) -> bool {
-    let (min_threshold, merge_threshold) = merge_limits(path, config);
+pub fn can_merge(prev: &str, next: &str, path: ChunkPath, budget: &ChunkBudget) -> bool {
+    let (min_threshold, merge_threshold) = (budget.min_limit, budget.merge_limit);
     let prev_cost = cost(prev, path);
     let next_cost = cost(next, path);
     // The intra-splitter pass concatenates the two segment texts directly.
