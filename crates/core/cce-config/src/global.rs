@@ -153,14 +153,15 @@ impl DatabaseConfig {
                 "database.fulltext_remote.index_name",
             ));
         }
-        // Remote relation/fulltext branches are forward scaffolding and are
-        // not wired into the engine write path. Reject them here so the
-        // failure surfaces during configuration validation instead of
-        // halfway through startup.
-        if !self.relation_backend.is_local() || !self.fulltext_backend.is_local() {
+        // The remote relation branch is forward scaffolding and is not wired
+        // into the engine write path. Reject it here so the failure surfaces
+        // during configuration validation instead of halfway through startup.
+        // The remote fulltext branch is wired (Elasticsearch), so it is
+        // allowed and validated above.
+        if !self.relation_backend.is_local() {
             return Err(ConfigValidationError::invalid_field(
                 "database.relation_backend",
-                "remote relation/fulltext backends are not wired yet; use local backends",
+                "remote relation backend is not wired yet; use local backends",
             ));
         }
 
@@ -172,6 +173,8 @@ impl DatabaseConfig {
             ),
             (VB::Local, RelationBackend::Local, FulltextBackend::Local)
                 | (VB::Qdrant, RelationBackend::Local, FulltextBackend::Local)
+                | (VB::Local, RelationBackend::Local, FulltextBackend::Remote)
+                | (VB::Qdrant, RelationBackend::Local, FulltextBackend::Remote)
         );
         if official || self.allow_nonstandard_backends {
             Ok(())

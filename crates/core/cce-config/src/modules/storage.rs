@@ -110,8 +110,7 @@ pub enum FulltextBackend {
     /// Embedded Tantivy index (current behavior).
     #[default]
     Local,
-    /// Elasticsearch branch (forward scaffolding: configurable but not
-    /// wired into indexing, search, or hot-update paths yet).
+    /// Elasticsearch branch.
     Remote,
 }
 

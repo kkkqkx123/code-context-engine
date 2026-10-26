@@ -286,14 +286,23 @@ impl CodeContextEngine {
         let mut fulltext_store = FulltextStore::from_database_config(&config.database)
             .map_err(|e| EngineError::Config(e.to_string()))?;
 
-        // Initialize the fulltext index if the local branch is active.
-        // The client synchronizes internally, so no lock is taken here;
-        // the one-time connect runs on the single owner before sharing.
-        if let FulltextStore::Local(shared) = &mut fulltext_store
-            && let Some(client) = Arc::get_mut(shared)
-            && let Err(e) = client.connect().await
-        {
-            tracing::warn!(error = %e, "Failed to connect BM25 index, BM25 will be unavailable");
+        // Initialize the fulltext index for whichever branch is active.
+        // The local branch opens its Tantivy index; the remote branch
+        // ensures the Elasticsearch index exists. Both calls run on the
+        // single owner before sharing.
+        match &mut fulltext_store {
+            FulltextStore::Local(shared) => {
+                if let Some(client) = Arc::get_mut(shared)
+                    && let Err(e) = client.connect().await
+                {
+                    tracing::warn!(error = %e, "Failed to connect BM25 index, BM25 will be unavailable");
+                }
+            }
+            FulltextStore::Remote(shared) => {
+                if let Err(e) = shared.ensure_index().await {
+                    tracing::warn!(error = %e, "Failed to ensure Elasticsearch index, BM25 will be unavailable");
+                }
+            }
         }
 
         let embedder_config = config.embedder.clone();

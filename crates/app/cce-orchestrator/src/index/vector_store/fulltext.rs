@@ -8,11 +8,10 @@ use cce_types::StorageError;
 
 /// Fulltext backend holding one concrete implementation.
 ///
-/// Local is the embedded Tantivy branch and the only supported branch; the
-/// remote Elasticsearch client is forward scaffolding and assembly rejects
-/// it at startup until the remote read and write paths are wired. The enum
-/// mirrors [`VectorStore`] so assembly selects branches from configuration
-/// instead of threading concrete client types through every caller.
+/// Local is the embedded Tantivy branch; remote is the Elasticsearch branch.
+/// Both branches implement the fulltext contract, so assembly selects them
+/// from configuration instead of threading concrete client types through
+/// every caller.
 #[derive(Clone)]
 pub enum FulltextStore {
     /// Embedded Tantivy index.
@@ -84,9 +83,9 @@ impl FulltextStore {
 
     /// Build the store from the resolved database configuration.
     ///
-    /// The remote branch is rejected at startup: only the local backend is
-    /// supported, and refusing here keeps a remote selection from failing
-    /// halfway through indexing or search.
+    /// The local branch opens the embedded Tantivy index; the remote branch
+    /// constructs an Elasticsearch client from the configured endpoint. Both
+    /// branches share the fulltext contract, so callers stay branch-free.
     pub fn from_database_config(
         database: &cce_config::global::DatabaseConfig,
     ) -> Result<Self, StorageError> {
@@ -95,9 +94,12 @@ impl FulltextStore {
                 let client = Bm25Client::new(database.bm25.clone());
                 Ok(Self::Local(Arc::new(client)))
             }
-            cce_config::modules::FulltextBackend::Remote => Err(StorageError::validation(
-                "remote fulltext backend is not wired yet: supported matrices are local/local/local and qdrant/local/local; set fulltext_backend = \"local\"",
-            )),
+            cce_config::modules::FulltextBackend::Remote => {
+                let client = ElasticsearchClient::from_database_config(database).map_err(|e| {
+                    StorageError::query(format!("failed to create elasticsearch client: {e}"))
+                })?;
+                Ok(Self::Remote(Arc::new(client)))
+            }
         }
     }
 }
@@ -460,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn fulltext_store_remote_branch_rejected_at_startup() {
+    fn fulltext_store_remote_branch_builds_when_configured() {
         let mut database = cce_config::global::DatabaseConfig {
             fulltext_backend: cce_config::modules::FulltextBackend::Remote,
             ..cce_config::global::DatabaseConfig::default()
@@ -468,11 +470,8 @@ mod tests {
         assert!(FulltextStore::from_database_config(&database).is_err());
         database.fulltext_remote.url = Some("http://localhost:9200".to_string());
         database.fulltext_remote.index_name = Some("code_index".to_string());
-        let err = FulltextStore::from_database_config(&database)
-            .expect_err("remote branch must fail at startup");
-        assert!(
-            err.to_string().contains("not wired yet"),
-            "unexpected error: {err}"
-        );
+        let store = FulltextStore::from_database_config(&database)
+            .expect("remote branch must build when configured");
+        assert_eq!(FulltextStorage::backend_name(&store), "remote");
     }
 }
