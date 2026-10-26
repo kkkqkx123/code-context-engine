@@ -50,6 +50,7 @@ pub fn source_coverage_for_entity_ids(
     group: &EntityGroup,
     entity_ids: &[EntityId],
     kind: SourceSpanKind,
+    fallback_span: Option<cce_types::Span>,
 ) -> (cce_types::Span, Vec<cce_types::Span>, SourceSpanKind) {
     let kind = if group.group_type == crate::grouper::GroupType::FileDocumentation {
         SourceSpanKind::DocumentRange
@@ -66,7 +67,8 @@ pub fn source_coverage_for_entity_ids(
         } else {
             SourceSpanKind::GroupFallback
         };
-        let mut span = group.span;
+        let base_span = fallback_span.unwrap_or(group.span);
+        let mut span = base_span;
         let mut ranges = vec![span];
         expand_to_doc_comment_start(group, entity_ids, &mut span, &mut ranges);
         return (span, ranges, fallback_kind);
@@ -204,8 +206,12 @@ mod tests {
         let group = make_group(GroupType::MergedFragments, Some(header), group_span);
 
         let entity_ids = vec![EntityId(1)];
-        let (source_span, _, _) =
-            source_coverage_for_entity_ids(&group, &entity_ids, SourceSpanKind::GroupFallback);
+        let (source_span, _, _) = source_coverage_for_entity_ids(
+            &group,
+            &entity_ids,
+            SourceSpanKind::GroupFallback,
+            None,
+        );
 
         assert_eq!(
             source_span.start_position.row, 0,
@@ -220,8 +226,12 @@ mod tests {
         let group = make_group(GroupType::Standalone, Some(header), group_span);
 
         let entity_ids = vec![EntityId(1)];
-        let (source_span, _, _) =
-            source_coverage_for_entity_ids(&group, &entity_ids, SourceSpanKind::GroupFallback);
+        let (source_span, _, _) = source_coverage_for_entity_ids(
+            &group,
+            &entity_ids,
+            SourceSpanKind::GroupFallback,
+            None,
+        );
 
         assert_eq!(
             source_span.start_position.row, 0,
@@ -242,8 +252,12 @@ mod tests {
             .insert(EntityId(1), make_span(100, 200, 45, 60));
 
         let entity_ids = vec![EntityId(1)];
-        let (source_span, ranges, _) =
-            source_coverage_for_entity_ids(&group, &entity_ids, SourceSpanKind::GroupFallback);
+        let (source_span, ranges, _) = source_coverage_for_entity_ids(
+            &group,
+            &entity_ids,
+            SourceSpanKind::GroupFallback,
+            None,
+        );
 
         assert_eq!(
             source_span.start_position.row, 0,
@@ -265,7 +279,7 @@ mod tests {
         // Handing out the whole group span would let it claim every source
         // range the group covers.
         let (source_span, ranges, kind) =
-            source_coverage_for_entity_ids(&group, &[], SourceSpanKind::ExactEntities);
+            source_coverage_for_entity_ids(&group, &[], SourceSpanKind::ExactEntities, None);
 
         assert_eq!(source_span.start_byte, group_span.start_byte);
         assert!(!ranges.is_empty());
@@ -295,8 +309,12 @@ mod tests {
             .insert(EntityId(2), make_span(200, 300, 20, 30));
 
         let entity_ids = vec![EntityId(2)];
-        let (source_span, ranges, _) =
-            source_coverage_for_entity_ids(&group, &entity_ids, SourceSpanKind::GroupFallback);
+        let (source_span, ranges, _) = source_coverage_for_entity_ids(
+            &group,
+            &entity_ids,
+            SourceSpanKind::GroupFallback,
+            None,
+        );
 
         assert_eq!(
             source_span.start_position.row, 9,
@@ -318,8 +336,12 @@ mod tests {
             .insert(EntityId(1), make_span(100, 200, 45, 60));
 
         let entity_ids = vec![EntityId(1)];
-        let (source_span, _, _) =
-            source_coverage_for_entity_ids(&group, &entity_ids, SourceSpanKind::GroupFallback);
+        let (source_span, _, _) = source_coverage_for_entity_ids(
+            &group,
+            &entity_ids,
+            SourceSpanKind::GroupFallback,
+            None,
+        );
 
         assert_eq!(
             source_span.start_position.row, 45,

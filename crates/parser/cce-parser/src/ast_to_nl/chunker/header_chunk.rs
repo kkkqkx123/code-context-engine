@@ -343,14 +343,13 @@ fn process_path(
         } else {
             None
         };
-        let nl_boundaries = super::chunker::compute_nl_boundaries_for_group(
-            header_text,
-            header_entity_id,
-            &members,
-            input.path,
-        );
-        let (combined_text, member_entity_ids) =
-            assemble_combined_text(header_text, &members, input.path);
+        let (combined_text, nl_boundaries, member_entity_ids) =
+            super::boundary::assemble_with_boundaries(
+                header_text,
+                header_entity_id,
+                &members,
+                input.path,
+            );
         // The BM25 path recomputes keywords per chunk from content entity
         // ids; the aggregate is only consumed by embedding chunks.
         let member_keywords = if input.path == ChunkPath::Embedding {
@@ -421,37 +420,15 @@ fn collect_topic_lines(
         .collect()
 }
 
-/// Assemble the combined header + member text for one member group, along
-/// with the entity ids of the members that contributed text (in order).
-///
-/// A member without text contributes nothing: the entity intervals the
-/// splitter works with are computed from the same texts, so an empty member
-/// must not shift the offsets of the members that follow it.
+#[cfg(test)]
 fn assemble_combined_text(
     header_text: &str,
     members: &[ConversionResult],
     path: ChunkPath,
 ) -> (String, Vec<EntityId>) {
-    let mut combined_text = String::new();
-    if !header_text.is_empty() {
-        combined_text.push_str(header_text);
-    }
-
-    let mut member_entity_ids = Vec::new();
-    for member in members {
-        let member_text = match path {
-            ChunkPath::Bm25 => &member.bm25_text,
-            ChunkPath::Embedding => &member.embedding_text,
-        };
-        if let Some(text) = member_text.as_deref().filter(|text| !text.is_empty()) {
-            if !combined_text.is_empty() {
-                combined_text.push_str("\n\n");
-            }
-            combined_text.push_str(text);
-            member_entity_ids.push(member.entity_id);
-        }
-    }
-    (combined_text, member_entity_ids)
+    let (text, _boundaries, ids) =
+        super::boundary::assemble_with_boundaries(header_text, None, members, path);
+    (text, ids)
 }
 
 fn finalize_group_path_chunks(chunks: &mut [ChunkedResult]) {
@@ -861,15 +838,19 @@ mod tests {
             },
         ];
         let (combined, member_ids) = assemble_combined_text(header_text, &members, ChunkPath::Bm25);
-        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding, base.limit(ChunkPath::Embedding));
-        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25, base.limit(ChunkPath::Bm25));
+        let emb_dec = ChunkBuilder::decoration_allowance(
+            &group,
+            ChunkPath::Embedding,
+            base.limit(ChunkPath::Embedding),
+        );
+        let bm25_dec = ChunkBuilder::decoration_allowance(
+            &group,
+            ChunkPath::Bm25,
+            base.limit(ChunkPath::Bm25),
+        );
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
-        let splitter = TextSplitter::with_budgets(
-            base.clone(),
-            emb_budget,
-            bm25_budget,
-        );
+        let splitter = TextSplitter::with_budgets(base.clone(), emb_budget, bm25_budget);
         let infra = super::super::chunker::ChunkInfrastructure {
             config: &base,
             estimator: &est,
@@ -902,15 +883,19 @@ mod tests {
         let empty: [ConversionResult; 0] = [];
         let text = n_words(300);
         let (combined, member_ids) = assemble_combined_text(&text, &empty, ChunkPath::Bm25);
-        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding, base.limit(ChunkPath::Embedding));
-        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25, base.limit(ChunkPath::Bm25));
+        let emb_dec = ChunkBuilder::decoration_allowance(
+            &group,
+            ChunkPath::Embedding,
+            base.limit(ChunkPath::Embedding),
+        );
+        let bm25_dec = ChunkBuilder::decoration_allowance(
+            &group,
+            ChunkPath::Bm25,
+            base.limit(ChunkPath::Bm25),
+        );
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
-        let splitter = TextSplitter::with_budgets(
-            base.clone(),
-            emb_budget,
-            bm25_budget,
-        );
+        let splitter = TextSplitter::with_budgets(base.clone(), emb_budget, bm25_budget);
         let infra = super::super::chunker::ChunkInfrastructure {
             config: &base,
             estimator: &est,

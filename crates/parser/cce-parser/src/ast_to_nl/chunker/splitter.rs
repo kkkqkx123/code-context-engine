@@ -1,7 +1,7 @@
 use std::ops::Range;
 
-use cce_config::modules::ChunkingConfig;
 use cce_config::modules::ChunkBudget;
+use cce_config::modules::ChunkingConfig;
 use cce_types::ParseError;
 use cce_types::entity::EntityId;
 use cce_utils::token_estimation::TokenEstimator;
@@ -138,7 +138,11 @@ impl TextSplitter {
         }
     }
 
-    pub fn with_budgets(config: ChunkingConfig, emb_budget: ChunkBudget, bm25_budget: ChunkBudget) -> Self {
+    pub fn with_budgets(
+        config: ChunkingConfig,
+        emb_budget: ChunkBudget,
+        bm25_budget: ChunkBudget,
+    ) -> Self {
         Self {
             config,
             estimator: TokenEstimator::default(),
@@ -357,7 +361,8 @@ impl TextSplitter {
             let piece_ids = b.entity_ids.clone();
 
             if self.budget(path).body_limit > 0
-                && self.config.cost(&text[b.start_byte..b.end_byte], path) > self.budget(path).body_limit
+                && self.config.cost(&text[b.start_byte..b.end_byte], path)
+                    > self.budget(path).body_limit
             {
                 result.extend(self.split_range_at(
                     text,
@@ -387,13 +392,9 @@ impl TextSplitter {
     ) -> Vec<ChunkBoundary> {
         let cfg = self.effective_config(path);
         match level {
-            BoundaryLevel::NestedGroups => strategies::nested_groups::split_by_nested_groups(
-                text,
-                group,
-                path,
-                &cfg,
-                range,
-            ),
+            BoundaryLevel::NestedGroups => {
+                strategies::nested_groups::split_by_nested_groups(text, group, path, &cfg, range)
+            }
             BoundaryLevel::Entities => {
                 // Entity boundaries come from the conversion layer, which
                 // knows which text each entity contributed. Without those
@@ -401,12 +402,7 @@ impl TextSplitter {
                 // to a coarser source.
                 match nl_boundaries {
                     Some(nl) => strategies::members::split_by_members_with_nl(
-                        text,
-                        group,
-                        path,
-                        &cfg,
-                        nl,
-                        range,
+                        text, group, path, &cfg, nl, range,
                     ),
                     None => Vec::new(),
                 }
@@ -414,9 +410,7 @@ impl TextSplitter {
             BoundaryLevel::Sentences => {
                 strategies::sentences::split_text_by_sentences(text, range, path, &cfg)
             }
-            BoundaryLevel::Lines => {
-                strategies::lines::split_text_by_lines(text, range, path, &cfg)
-            }
+            BoundaryLevel::Lines => strategies::lines::split_text_by_lines(text, range, path, &cfg),
             BoundaryLevel::Paragraphs => {
                 strategies::paragraphs::split_text_by_paragraphs(text, range, path, &cfg)
             }

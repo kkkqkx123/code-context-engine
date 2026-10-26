@@ -306,7 +306,10 @@ impl PipelineRouter {
         // Budget errors (CodeSplitting) are NOT degraded: they are permanent
         // failures the caller must surface rather than mask as plain text.
         let mut output = match result {
-            Err(e) if !matches!(doc_type, DocType::PlainText) && !matches!(e, ParseError::CodeSplitting(_)) => {
+            Err(e)
+                if !matches!(doc_type, DocType::PlainText)
+                    && !matches!(e, ParseError::CodeSplitting(_)) =>
+            {
                 warn!(
                     file_path = %file_path,
                     doc_type = ?doc_type,

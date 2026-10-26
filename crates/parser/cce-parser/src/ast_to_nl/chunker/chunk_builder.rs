@@ -13,55 +13,7 @@ use super::result::{
 use super::source_coverage::{self, set_source_coverage};
 use super::tracker::GroupTracker;
 
-pub struct SingleChunkContext<'a> {
-    pub group: &'a EntityGroup,
-    pub file_path: &'a str,
-    pub path: ChunkPath,
-    pub text: &'a str,
-    /// Embedding-path keywords. The BM25 path recomputes keywords from
-    /// content entity ids and ignores this field.
-    pub keywords: &'a [String],
-}
-
-pub struct UnsplitContext<'a> {
-    pub group: &'a EntityGroup,
-    pub file_path: &'a str,
-    pub path: ChunkPath,
-    pub chunk_id: String,
-    pub chunk_index: usize,
-    pub total_chunks: usize,
-    pub text: String,
-    pub word_count: usize,
-    pub end_byte: usize,
-    pub content_entity_ids: Vec<cce_types::entity::EntityId>,
-    pub context_entity_ids: Vec<cce_types::entity::EntityId>,
-    /// Embedding-path keywords. The BM25 path recomputes keywords from
-    /// content entity ids and ignores this field.
-    pub keywords: Vec<String>,
-    /// Cross-group parent name for BM25 title and keyword qualification.
-    /// Resolved by the caller from the group tracker; `None` leaves
-    /// parent-less groups and module-level items to the file-stem rule.
-    pub parent_qualifier: Option<String>,
-    pub split_reason: SplitReason,
-    pub related_groups: Vec<super::result::GroupRelation>,
-}
-
-/// Header-specific parameters for `from_segments`.
-///
-/// The header path (header + member groups) treats the group header entity
-/// differently from member entities: it is excluded from content attribution
-/// (it is context), and it joins the source coverage of the first segment of
-/// the first member group.
-pub struct SegmentHeaderContext<'a> {
-    pub header_entity_id: Option<EntityId>,
-    pub include_header_in_first_coverage: bool,
-    /// Topic lines of the entities this batch covers, keyed by entity id.
-    ///
-    /// A continuation block repeats the topic of the entity it continues,
-    /// so that a block holding the tail of an entity still states what the
-    /// entity is about.
-    pub topic_lines: &'a [(EntityId, Vec<String>)],
-}
+pub use super::chunk_contexts::{SegmentHeaderContext, SingleChunkContext, UnsplitContext};
 
 pub struct ChunkBuilder;
 
@@ -256,7 +208,11 @@ impl ChunkBuilder {
     /// The estimate is intentionally conservative: an underestimate is
     /// repaired by the pre-injection limit check, while an overestimate
     /// only produces a slightly smaller body.
-    pub(crate) fn decoration_allowance(group: &EntityGroup, path: ChunkPath, limit: usize) -> usize {
+    pub(crate) fn decoration_allowance(
+        group: &EntityGroup,
+        path: ChunkPath,
+        limit: usize,
+    ) -> usize {
         let unit = unit(path);
         let (identity_cap, topic_cap, head_cap) = if limit == 0 || limit == usize::MAX {
             (
@@ -299,9 +255,7 @@ impl ChunkBuilder {
             );
         }
         continuation = continuation.max(cost(&identity_line, path).saturating_add(2));
-        first
-            .max(continuation)
-            .saturating_add(head_cap)
+        first.max(continuation).saturating_add(head_cap)
     }
 
     /// Identity line for one continued entity.
@@ -408,6 +362,9 @@ impl ChunkBuilder {
         }
         if let Some(name) = parent.filter(|p| !p.is_empty()) {
             return Some(name);
+        }
+        if group.group_type == GroupType::MergedFragments {
+            return None;
         }
         if group.name.is_empty() {
             return None;
@@ -595,6 +552,7 @@ impl ChunkBuilder {
                 ctx.group,
                 &content_entity_ids,
                 SourceSpanKind::ExactEntities,
+                None,
             );
 
         let (title, keywords) = if ctx.path == ChunkPath::Bm25 {
@@ -660,7 +618,11 @@ impl ChunkBuilder {
                     },
                 );
                 set_source_coverage(&mut meta, source_ranges, source_span_kind);
-                meta.bm25_word_count = Some(word_count);
+                meta.bm25_word_count = if ctx.path == ChunkPath::Bm25 {
+                    Some(word_count)
+                } else {
+                    None
+                };
                 meta.segment_id = ctx.group.group_id.to_string();
                 meta.test_info = ctx.group.test_info;
                 meta
@@ -728,13 +690,21 @@ impl ChunkBuilder {
                     covered_entity_ids.clone()
                 };
                 // The header entity is context, not content: exclude it from
-                // content attribution on the header path.
+                // content attribution on the header path. The first chunk that
+                // carries the header's own text keeps the header as content so
+                // it does not end up with an empty entity list; continuation
+                // chunks keep the header as context only.
                 let content_entity_ids: Vec<_> = if let Some(ctx) = &header_ctx {
-                    raw_entity_ids
+                    let filtered: Vec<_> = raw_entity_ids
                         .iter()
                         .copied()
                         .filter(|id| Some(*id) != ctx.header_entity_id)
-                        .collect()
+                        .collect();
+                    if filtered.is_empty() && index == 0 && ctx.include_header_in_first_coverage {
+                        raw_entity_ids.clone()
+                    } else {
+                        filtered
+                    }
                 } else {
                     raw_entity_ids
                 };
@@ -800,11 +770,62 @@ impl ChunkBuilder {
                 } else {
                     covered_source_ids.clone()
                 };
+                // When no entity could be attributed to the chunk, derive a
+                // local source span from the NL boundaries overlapping the
+                // segment instead of falling back to the whole group span.
+                let fallback_span = if coverage_entity_ids.is_empty() {
+                    let mut ids = super::boundary::intersect_entities_in_range(
+                        nl_boundaries,
+                        segment.boundary.start_byte,
+                        segment.boundary.end_byte,
+                    );
+                    if ids.is_empty() {
+                        // Nearest boundary fallback: take the closest entity
+                        // boundary to the segment start.
+                        if let Some(b) = nl_boundaries.iter().min_by_key(|b| {
+                            (b.start_byte as isize - segment.boundary.start_byte as isize).abs()
+                        }) {
+                            ids.push(b.entity_id);
+                        }
+                    }
+                    let spans: Vec<_> = ids
+                        .iter()
+                        .filter_map(|id| group.entity_spans.get(id).copied())
+                        .collect();
+                    if spans.is_empty() {
+                        None
+                    } else {
+                        let first = spans[0];
+                        Some(spans.iter().copied().skip(1).fold(first, |acc, cur| {
+                            let start = if cur.start_byte < acc.start_byte {
+                                cur
+                            } else {
+                                acc
+                            };
+                            let end = if cur.end_byte > acc.end_byte {
+                                cur
+                            } else {
+                                acc
+                            };
+                            cce_types::Span::new(
+                                start.start_byte,
+                                end.end_byte,
+                                start.start_position.row,
+                                start.start_position.column,
+                                end.end_position.row,
+                                end.end_position.column,
+                            )
+                        }))
+                    }
+                } else {
+                    None
+                };
                 let (source_span, source_ranges, source_span_kind) =
                     source_coverage::source_coverage_for_entity_ids(
                         group,
                         &coverage_entity_ids,
                         source_kind,
+                        fallback_span,
                     );
 
                 let word_count = cost(&segment_text, ChunkPath::Bm25);
@@ -928,7 +949,11 @@ impl ChunkBuilder {
                             },
                         );
                         set_source_coverage(&mut meta, source_ranges, source_span_kind);
-                        meta.bm25_word_count = Some(word_count);
+                        meta.bm25_word_count = if path == ChunkPath::Bm25 {
+                            Some(word_count)
+                        } else {
+                            None
+                        };
                         meta.segment_id = group.group_id.to_string();
                         meta.test_info = group.test_info;
                         meta
@@ -949,6 +974,7 @@ impl ChunkBuilder {
                 ctx.group,
                 &content_entity_ids,
                 SourceSpanKind::ExactEntities,
+                None,
             );
 
         let token_count = cost(&ctx.text, ctx.path);
@@ -1056,7 +1082,11 @@ impl ChunkBuilder {
                     },
                 );
                 set_source_coverage(&mut meta, source_ranges, source_span_kind);
-                meta.bm25_word_count = Some(ctx.word_count);
+                meta.bm25_word_count = if ctx.path == ChunkPath::Bm25 {
+                    Some(ctx.word_count)
+                } else {
+                    None
+                };
                 meta.segment_id = ctx.group.group_id.to_string();
                 meta.test_info = ctx.group.test_info;
                 meta

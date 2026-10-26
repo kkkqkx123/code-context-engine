@@ -93,12 +93,15 @@
 
 pub mod boundary;
 pub mod chunk_builder;
+pub mod chunk_contexts;
 pub mod chunker;
 pub mod config;
 pub mod header;
 pub mod header_chunk;
+pub mod limits;
 pub mod overlap;
 pub mod result;
+pub mod single_path;
 pub mod source_coverage;
 pub mod splitter;
 pub mod strategy;

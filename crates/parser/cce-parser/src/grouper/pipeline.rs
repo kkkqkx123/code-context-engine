@@ -463,10 +463,10 @@ impl PreprocessingPipeline {
                 if !rel.relation_type.is_call() {
                     continue;
                 }
-                call_paths_map
-                    .entry(rel.src)
-                    .or_default()
-                    .push(rel.dst_name.clone());
+                let Some(name) = call_target_name(&rel.dst_name) else {
+                    continue;
+                };
+                call_paths_map.entry(rel.src).or_default().push(name);
             }
             for paths in call_paths_map.values_mut() {
                 paths.sort();
@@ -870,6 +870,38 @@ impl PreprocessingPipeline {
             }
         }
         info
+    }
+}
+
+/// The plain name of a called function.
+///
+/// A call target may be written as a member access chain (`obj->method`,
+/// `obj.field.method`). The receiver is an arbitrary expression and states
+/// nothing about what is invoked, so only the called name is kept. A
+/// namespace-qualified name (`Type::method`) is kept whole: the qualifier
+/// is part of the name.
+fn call_target_name(raw: &str) -> Option<String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let arrow = name.rfind("->");
+    let dot = name.rfind('.');
+    let cut = match (arrow, dot) {
+        (Some(arrow), Some(dot)) => Some(arrow.max(dot)),
+        (Some(arrow), None) => Some(arrow),
+        (None, Some(dot)) => Some(dot),
+        (None, None) => None,
+    };
+    let name = match cut {
+        Some(pos) => name[pos..].trim_start_matches(['-', '>', '.']).trim(),
+        None => name,
+    };
+    let name = name.strip_suffix('!').unwrap_or(name).trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
     }
 }
 

@@ -241,6 +241,82 @@ pub fn intersect_entities_in_range(
 /// the first member is what the block starts with. Attributing it to the
 /// group's header instead would make every continuation block look as if it
 /// carried the group's first fragment.
+/// Assemble the combined header + member text and compute NL entity boundaries
+/// in a single pass, so offsets can never drift from the actual text.
+///
+/// Returns `(combined_text, boundaries, member_entity_ids)` where
+/// `member_entity_ids` lists members that contributed text, in order.
+pub fn assemble_with_boundaries(
+    header_text: &str,
+    header_entity_id: Option<EntityId>,
+    members: &[ConversionResult],
+    path: ChunkPath,
+) -> (String, Vec<NlEntityBoundary>, Vec<EntityId>) {
+    let mut combined_text = String::new();
+    if !header_text.is_empty() {
+        combined_text.push_str(header_text);
+    }
+
+    let mut boundaries = Vec::new();
+    if !header_text.is_empty() {
+        if let Some(id) = header_entity_id {
+            boundaries.push(NlEntityBoundary {
+                entity_id: id,
+                start_byte: 0,
+                end_byte: header_text.len(),
+            });
+        }
+    }
+
+    let mut member_entity_ids = Vec::new();
+    for member in members {
+        let member_text = match path {
+            ChunkPath::Bm25 => member.bm25_text.as_deref(),
+            ChunkPath::Embedding => member.embedding_text.as_deref(),
+        };
+        let Some(text) = member_text.filter(|t| !t.is_empty()) else {
+            continue;
+        };
+
+        let member_start = if combined_text.is_empty() {
+            0
+        } else {
+            combined_text.len() + 2
+        };
+        if !combined_text.is_empty() {
+            combined_text.push_str("\n\n");
+        }
+        combined_text.push_str(text);
+        let member_end = combined_text.len();
+        member_entity_ids.push(member.entity_id);
+
+        // Synthetic head folding: a synthetic head is not an entity's own
+        // text, so it is folded into the first member's region.
+        let (region_start, region_end) =
+            if header_entity_id.is_none() && !header_text.is_empty() && boundaries.is_empty() {
+                (0, member_end)
+            } else {
+                (member_start, member_end)
+            };
+
+        boundaries.push(NlEntityBoundary {
+            entity_id: member.entity_id,
+            start_byte: region_start,
+            end_byte: region_end,
+        });
+    }
+
+    // Debug assertions: boundaries must stay within combined_text.
+    debug_assert!(
+        boundaries
+            .iter()
+            .all(|b| b.start_byte <= b.end_byte && b.end_byte <= combined_text.len()),
+        "NL boundary out of range"
+    );
+
+    (combined_text, boundaries, member_entity_ids)
+}
+
 pub fn compute_nl_entity_boundaries(
     header_text: &str,
     header_entity_id: Option<EntityId>,
