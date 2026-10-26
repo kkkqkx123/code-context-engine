@@ -460,15 +460,13 @@ impl PreprocessingPipeline {
         if !parsed_file.raw_relations.is_empty() {
             let mut call_paths_map: HashMap<EntityId, Vec<String>> = HashMap::new();
             for rel in &parsed_file.raw_relations {
-                // Only calls describe what an entity invokes; imports and
-                // type references describe what it mentions.
                 if !rel.relation_type.is_call() {
                     continue;
                 }
-                let Some(name) = call_target_name(&rel.dst_name) else {
-                    continue;
-                };
-                call_paths_map.entry(rel.src).or_default().push(name);
+                call_paths_map
+                    .entry(rel.src)
+                    .or_default()
+                    .push(rel.dst_name.clone());
             }
             for paths in call_paths_map.values_mut() {
                 paths.sort();
@@ -872,38 +870,6 @@ impl PreprocessingPipeline {
             }
         }
         info
-    }
-}
-
-/// The plain name of a called function.
-///
-/// A call target may be written as a member access chain (`obj->method`,
-/// `obj.field.method`). The receiver is an arbitrary expression and states
-/// nothing about what is invoked, so only the called name is kept. A
-/// namespace-qualified name (`Type::method`) is kept whole: the qualifier
-/// is part of the name.
-fn call_target_name(raw: &str) -> Option<String> {
-    let name = raw.trim();
-    if name.is_empty() {
-        return None;
-    }
-    let arrow = name.rfind("->");
-    let dot = name.rfind('.');
-    let cut = match (arrow, dot) {
-        (Some(arrow), Some(dot)) => Some(arrow.max(dot)),
-        (Some(arrow), None) => Some(arrow),
-        (None, Some(dot)) => Some(dot),
-        (None, None) => None,
-    };
-    let name = match cut {
-        Some(pos) => name[pos..].trim_start_matches(['-', '>', '.']).trim(),
-        None => name,
-    };
-    let name = name.strip_suffix('!').unwrap_or(name).trim();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_string())
     }
 }
 

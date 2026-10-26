@@ -409,9 +409,6 @@ impl ChunkBuilder {
         if let Some(name) = parent.filter(|p| !p.is_empty()) {
             return Some(name);
         }
-        if group.group_type == GroupType::MergedFragments {
-            return None;
-        }
         if group.name.is_empty() {
             return None;
         }

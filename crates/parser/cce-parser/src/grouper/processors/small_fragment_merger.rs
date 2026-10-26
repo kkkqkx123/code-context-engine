@@ -348,7 +348,6 @@ impl SmallFragmentMerger {
     /// context its neighbours share.
     fn is_merge_candidate(group: &EntityGroup) -> bool {
         group.group_type.is_standalone()
-            || group.group_type == crate::grouper::types::GroupType::FunctionWithMembers
     }
 
     /// Check if a group is import-like (header kind is import/require/include/export).

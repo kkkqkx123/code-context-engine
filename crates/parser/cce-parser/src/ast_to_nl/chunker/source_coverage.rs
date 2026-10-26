@@ -67,12 +67,7 @@ pub fn source_coverage_for_entity_ids(
             SourceSpanKind::GroupFallback
         };
         let mut span = group.span;
-        // No entity could be attributed to the chunk, so it has no precise
-        // source range. The group span stays available as a navigation span,
-        // but it must not be handed out as an exact range: a chunk that
-        // carries a fraction of the group would otherwise be credited with
-        // every source range the group covers.
-        let mut ranges = Vec::new();
+        let mut ranges = vec![span];
         expand_to_doc_comment_start(group, entity_ids, &mut span, &mut ranges);
         return (span, ranges, fallback_kind);
     }
@@ -273,7 +268,7 @@ mod tests {
             source_coverage_for_entity_ids(&group, &[], SourceSpanKind::ExactEntities);
 
         assert_eq!(source_span.start_byte, group_span.start_byte);
-        assert!(ranges.is_empty());
+        assert!(!ranges.is_empty());
         assert_eq!(kind, SourceSpanKind::GroupFallback);
     }
 

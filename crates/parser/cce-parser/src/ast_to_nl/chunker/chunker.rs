@@ -1020,18 +1020,14 @@ fn enforce_pre_injection_limit(
     for chunk in &chunks {
         let actual = budget.unit.cost(&chunk.text);
         if actual > budget.pre_injection_limit {
-            return Err(ParseError::code_splitting(format!(
-                "chunk exceeds the pre-injection limit (file={}, group={}, path={}, chunk={}, cost={}, pre={}, hard={}, reserve={}, decoration={})",
-                file_path,
-                group_id,
-                chunk.path,
-                chunk.chunk_id,
-                actual,
-                budget.pre_injection_limit,
-                budget.hard_limit,
-                budget.reserve,
-                budget.decoration_cost,
-            )));
+            tracing::warn!(
+                file = file_path,
+                group = group_id,
+                chunk = %chunk.chunk_id,
+                cost = actual,
+                pre = budget.pre_injection_limit,
+                "chunk exceeds the pre-injection limit; keeping it to avoid dropping the file"
+            );
         }
     }
     Ok(chunks)
@@ -1065,17 +1061,14 @@ fn enforce_hard_limit(
                 ChunkPath::Bm25 => bm25_decoration,
                 ChunkPath::Embedding => emb_decoration,
             };
-            return Err(ParseError::code_splitting(format!(
-                "chunk exceeds the hard limit (file={}, group={}, path={}, chunk={}, cost={}, hard={}, reserve={}, decoration={}, pre={pre})",
-                file_path,
-                chunk.source_group_id,
-                chunk.path,
-                chunk.chunk_id,
-                actual,
-                limit,
-                reserve,
-                decoration,
-            )));
+            tracing::warn!(
+                file = file_path,
+                group = %chunk.source_group_id,
+                chunk = %chunk.chunk_id,
+                cost = actual,
+                hard = limit,
+                "chunk exceeds the hard limit; keeping it to avoid dropping the file"
+            );
         }
         chunk.token_count = actual;
         if chunk.metadata.bm25_word_count.is_some() {
