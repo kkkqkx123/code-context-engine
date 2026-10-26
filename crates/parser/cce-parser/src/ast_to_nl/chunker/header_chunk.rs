@@ -136,7 +136,14 @@ fn smart_chunk_with_header(
 ) -> Result<ChunkOutput, ParseError> {
     tracker.record_group(group);
 
-    let helper = HeaderHelper::new(infra.config);
+    let mut body_config = infra.config.clone();
+    if infra.emb_budget.hard_limit > 0 {
+        body_config.max_tokens = infra.emb_budget.body_limit;
+    }
+    if infra.bm25_budget.hard_limit > 0 {
+        body_config.max_bm25_terms = infra.bm25_budget.body_limit;
+    }
+    let helper = HeaderHelper::new(&body_config);
 
     let ctx = GroupChunkContext {
         infra,

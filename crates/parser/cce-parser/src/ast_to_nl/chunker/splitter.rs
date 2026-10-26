@@ -118,26 +118,6 @@ impl TextSplitter {
         }
     }
 
-    /// Create a splitter that merges up to the pre-injection limits.
-    pub fn with_pre_limits(config: ChunkingConfig, pre_embedding: usize, pre_bm25: usize) -> Self {
-        let mut emb_budget = config.budget(cce_types::ChunkPath::Embedding, false, 0);
-        let mut bm25_budget = config.budget(cce_types::ChunkPath::Bm25, false, 0);
-        if pre_embedding != 0 && pre_embedding != usize::MAX {
-            emb_budget.pre_injection_limit = pre_embedding;
-            emb_budget.body_limit = pre_embedding;
-        }
-        if pre_bm25 != 0 && pre_bm25 != usize::MAX {
-            bm25_budget.pre_injection_limit = pre_bm25;
-            bm25_budget.body_limit = pre_bm25;
-        }
-        Self {
-            config,
-            estimator: TokenEstimator::default(),
-            emb_budget,
-            bm25_budget,
-        }
-    }
-
     pub fn with_budgets(
         config: ChunkingConfig,
         emb_budget: ChunkBudget,

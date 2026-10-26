@@ -28,10 +28,11 @@ pub(crate) fn enforce_segment_max_limit(
     group: &EntityGroup,
     nl_boundaries: &[NlEntityBoundary],
 ) -> Result<Vec<ChunkSegment>, ParseError> {
-    let limit = infra.config.limit(path);
-    if limit == 0 {
+    let budget = infra.budget(path);
+    if budget.hard_limit == 0 {
         return Ok(segments);
     }
+    let limit = budget.body_limit;
 
     let mut validated = Vec::with_capacity(segments.len());
     for seg in segments {

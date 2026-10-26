@@ -114,8 +114,8 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
         0
     };
 
-    let needs_split =
-        infra.config.limit(path) > 0 && infra.config.cost(text, path) > infra.config.limit(path);
+    let budget = infra.budget(path);
+    let needs_split = budget.hard_limit > 0 && infra.config.cost(text, path) > budget.body_limit;
 
     if !needs_split {
         let plain_tracker: &GroupTracker = tracker;

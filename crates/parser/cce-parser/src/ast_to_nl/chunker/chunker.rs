@@ -350,11 +350,7 @@ impl GroupChunker {
         let group_texts = [bm25_text.as_str(), embedding_text.as_str()];
         let (config, emb_budget, bm25_budget) =
             self.group_config(group, file_path, Some(&language), &group_texts)?;
-        let splitter = TextSplitter::with_pre_limits(
-            config.clone(),
-            emb_budget.pre_injection_limit,
-            bm25_budget.pre_injection_limit,
-        );
+        let splitter = TextSplitter::with_budgets(config.clone(), emb_budget, bm25_budget);
         let infra = super::single_path::ChunkInfrastructure {
             config: &config,
             estimator: &self.estimator,
@@ -476,11 +472,7 @@ impl GroupChunker {
         }
         let (config, emb_budget, bm25_budget) =
             self.group_config(group, file_path, Some(&language), &conversion_texts)?;
-        let splitter = TextSplitter::with_pre_limits(
-            config.clone(),
-            emb_budget.pre_injection_limit,
-            bm25_budget.pre_injection_limit,
-        );
+        let splitter = TextSplitter::with_budgets(config.clone(), emb_budget, bm25_budget);
         let infra = super::single_path::ChunkInfrastructure {
             config: &config,
             estimator: &self.estimator,
@@ -674,11 +666,7 @@ impl GroupChunker {
             }
             let (config, emb_budget, bm25_budget) =
                 self.group_config(&gc.group, file_path, language.as_deref(), &conversion_texts)?;
-            let splitter = TextSplitter::with_pre_limits(
-                config.clone(),
-                emb_budget.pre_injection_limit,
-                bm25_budget.pre_injection_limit,
-            );
+            let splitter = TextSplitter::with_budgets(config.clone(), emb_budget, bm25_budget);
             let infra = super::single_path::ChunkInfrastructure {
                 config: &config,
                 estimator: &self.estimator,
@@ -726,10 +714,23 @@ impl GroupChunker {
         // The type system guarantees Bm25Chunk cannot enter this path.
         let emb_chunks_inner: Vec<ChunkedResult> =
             emb_chunks.into_iter().map(|c| c.into_inner()).collect();
+        let merge_has_vocabulary =
+            self.batch_mentions_vocabulary(group_conversions, file_path, language.as_deref());
+        let mut merge_config = self.config.clone();
+        if self.config.limit(ChunkPath::Embedding) > 0 {
+            merge_config.max_tokens = self
+                .config
+                .pre_injection_limit(ChunkPath::Embedding, merge_has_vocabulary);
+        }
+        if self.config.limit(ChunkPath::Bm25) > 0 {
+            merge_config.max_bm25_terms = self
+                .config
+                .pre_injection_limit(ChunkPath::Bm25, merge_has_vocabulary);
+        }
         let merged_emb_chunks = super::merge::merge_small_chunks_cross_group(
             emb_chunks_inner,
             &group_spans,
-            &self.config,
+            &merge_config,
         );
 
         let mut emb_results: Vec<ChunkedResult> = merged_emb_chunks;
