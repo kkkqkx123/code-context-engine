@@ -6,6 +6,7 @@
 		"dev": "vite dev",
 		"dev:preview": "vite dev --mode preview",
 		"build": "vite build && node scripts/check-build-isolation.mjs",
+		"build:analyze": "ANALYZE=1 vite build && node scripts/check-build-isolation.mjs",
 		"build:preview": "vite build --mode preview",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

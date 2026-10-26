@@ -9,20 +9,26 @@ export default defineConfig(({ mode }) => {
 	// The default resolution goes through the tsconfig paths to client.ts,
 	// so mock code never enters the module graph of default builds.
 	const isPreview = mode === 'preview';
+	// The bundle report costs several seconds of build time (gzip + brotli
+	// per chunk in generateBundle); opt in with ANALYZE=1 when auditing sizes.
+	const analyze = process.env.ANALYZE === '1';
 
 	return {
 		plugins: [
 			sveltekit(),
-			isProd &&
-				visualizer({
-					open: false,
-					filename: 'stats.md',
-					emitFile: true,
-					gzipSize: true,
-					brotliSize: true,
-					template: 'markdown',
-				}),
-		].filter(Boolean),
+			...(analyze
+				? [
+						visualizer({
+							open: false,
+							filename: 'stats.md',
+							emitFile: true,
+							gzipSize: true,
+							brotliSize: true,
+							template: 'markdown',
+						}),
+					]
+				: []),
+		],
 		resolve: {
 			alias: isPreview
 				? [
