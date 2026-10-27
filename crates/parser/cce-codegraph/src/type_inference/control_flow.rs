@@ -562,4 +562,13 @@ mod tests {
     fn test_find_else_offset_without_else_is_none() {
         assert!(find_else_offset("if (x instanceof String) { use(x); }").is_none());
     }
+
+    #[test]
+    fn utf8_conjunct_scanner_does_not_panic_on_multibyte() {
+        let text = "if x != null && y != null { 世界 }";
+        let parts = split_top_level_conjuncts(text);
+        assert!(!parts.is_empty());
+        let word_parts = split_top_level_word_conjuncts("α and β and γ", "and");
+        assert_eq!(word_parts.len(), 3);
+    }
 }

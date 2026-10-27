@@ -399,6 +399,10 @@ fn strip_unsafe_blocks(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut i = 0;
     while i < bytes.len() {
+        if !text.is_char_boundary(i) {
+            i = cce_utils::text::ceil_char_boundary(text, i);
+            continue;
+        }
         let is_keyword_start =
             i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
         if is_keyword_start && bytes[i..].starts_with(b"unsafe") {
@@ -1066,5 +1070,14 @@ mod tests {
         assert_eq!(lines[1], "    let mut buffer = Vec::new();");
         assert_eq!(lines[2], "} else {");
         assert_eq!(lines[3], "    return;");
+    }
+
+    #[test]
+    fn branch_discriminants_handles_multibyte() {
+        let text = "switch (x) { case 世界: break; case default: break; }";
+        let labels = branch_discriminants(text);
+        assert!(labels.contains(&"世界".to_string()) || labels.is_empty());
+        // Should not panic on multibyte input.
+        let _ = branch_discriminants("switch (x) { case ¡café: break; }");
     }
 }

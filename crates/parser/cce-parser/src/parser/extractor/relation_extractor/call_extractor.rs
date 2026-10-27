@@ -279,6 +279,10 @@ fn scan_call_idents(text: &str) -> Vec<(String, usize)> {
     let mut i = 0usize;
     let mut quote: Option<u8> = None;
     while i < bytes.len() {
+        if !text.is_char_boundary(i) {
+            i = cce_utils::text::ceil_char_boundary(text, i);
+            continue;
+        }
         let b = bytes[i];
         if let Some(q) = quote {
             if b == b'\\' {

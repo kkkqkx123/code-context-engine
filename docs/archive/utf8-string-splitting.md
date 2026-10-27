@@ -41,3 +41,71 @@ Rust 的 `str` 切片（`&s[..n]`、`&s[a..b]`、`String::truncate(n)`）在索�
 ## 不适用场景
 
 以下形式相似的代码**不是** `&str` 切片，无需处理：二进制字节流切片（simvec/tantivy 的 `&bytes[..N]`）、`Vec<String>` 切片、保证 ASCII 的输入（数字字面量后缀剥离、hex 字符串）、以及索引来自 `char_indices()` 的切片（天然为边界）。
+
+
+
+## 直接切片点概况与复现命令
+
+直接切片点的完整清单不内嵌于本文档，避免文档与代码漂移。以下命令可随时复现当前状态，自行判断安全性。
+
+### 复现命令
+
+1. 全部第一方直接切片点（排除 fixtures/tests/tantivy）：
+
+```shell
+grep -rnE '&[a-zA-Z_][a-zA-Z0-9_]*\[' --include="*.rs" crates   | grep -v '/fixtures/' | grep -v '/tests/' | grep -v '/tantivy/'
+```
+
+2. 手动字节循环且直接切片的高风险文件：
+
+```shell
+grep -rln "while .* < .*\.len()" --include="*.rs" crates   | grep -v fixtures | grep -v tests | grep -v tantivy   | while read f; do
+      if grep -qE '&(text|source|line|str|cleaned|content|header|rest|name)\[' "$f"; then echo "$f"; fi
+    done
+```
+
+3. 统计切片点数量与分布：
+
+```shell
+grep -rnE '&[a-zA-Z_][a-zA-Z0-9_]*\[' --include="*.rs" crates   | grep -v '/fixtures/' | grep -v '/tests/' | grep -v '/tantivy/'   | cut -d: -f1 | sed 's#/src/.*##' | sort | uniq -c | sort -rn
+```
+
+### 当前概况（基于最近一次复现）
+
+- 全部第一方直接切片点数量：660 条。
+- 主要分布：`cce-parser`（162 文件级命中）、`cce-codegraph`（99）、`llm-suite-codec`（51）、`simvec`（37）、`cce-orchestrator`（33）、`cce-document`（32）。
+- 高风险手动字节循环文件：`index_enrichment.rs`、`control_flow.rs`、`python.rs`、`scala.rs`、`variable_patterns.rs`、`macro_body_call_extractor.rs`、`call_extractor.rs`、`metadata.rs`、`capture/parser.rs`、`common/utils.rs`、`budget.rs`、`segment.rs`、`openapi.rs`、`injection.rs`、`license_detector.rs`、`docker_chunker.rs`、`chunker.rs`、`encoding-guess/stages.rs`、`text.rs`。
+- 安全判断依据：`char_indices()` / `.find()` / `.get()` / tree-sitter span / ASCII 扫描得到的下标通常安全；手动字节循环中的任意下标切片需要额外守卫或统一 helper。
+
+### 已迁移状态
+
+- `cce-utils::text`：新增 `prev_char_boundary`、`next_char_boundary`、`char_at`、`slice_clamped`、`slice_exact`。
+- `index_enrichment::branch_discriminants`：仅在字符边界推进，切片经 `slice_exact`。
+- `control_flow::split_top_level_conjuncts` / `split_top_level_word_conjuncts`：循环加入字符边界守卫。
+- `python::truncate_at_header_colon`：加入字符边界守卫。
+- `macro_body_call_extractor`、`call_extractor`、`metadata::extract_binary_plus_operands`：加入字符边界守卫。
+- `metadata.rs` tree-sitter span 切片：改用 `slice_clamped`。
+
+### 待收敛
+
+- 其余直接切片点按三段式模板逐步迁移：字节数组扫描 ASCII 分隔符 → 边界下标 → 统一 helper 切片。
+- tree-sitter 偏移进入字符串处理前统一 `is_char_boundary` 校验。
+- 新增切分逻辑必须包含多字节属性测试；CI 对新增直接切片模式做 grep 守卫。
+
+
+## 代码复用改进分析
+
+### 现状问题
+
+1. **边界逻辑分散**：`floor_char_boundary` / `ceil_char_boundary` 已集中于 `cce-utils::text`，但调用点仍大量直接写 `&s[..n]`、`&s[a..b]`、`truncate`，导致每次新增逻辑都要重新判断边界。
+2. **扫描模板不统一**：手动字节循环中，ASCII 分隔符扫描与 `&str` 切片混在一起；部分模块用 `char_indices()`，部分用 `bytes[i]`，风格不一致，容易在复制代码时引入 unsafe 切片。
+3. **外部偏移处理不一致**：tree-sitter span 有的通过 `source.get(...)`，有的通过 `.min(len)` 直接切片；后者在异常偏移下仍可能 panic。
+4. **llm-suite 例外复制**：`infra/llm-suite` 因依赖倒置复制了 floor 语义，容易与 `cce-utils` 漂移。
+
+### 改进建议
+
+1. **唯一入口**：所有 `&str` 切片必须经过 `cce_utils::text` 的 `floor_char_boundary` / `ceil_char_boundary` / `slice_clamped` / `slice_exact` / `truncate_to_byte_len`；直接 `&s[..n]` 仅允许字面量常量（如 `&bytes[..4]`）。
+2. **统一扫描模板**：手动字节扫描应遵循“字节数组扫描 ASCII 分隔符 → 边界下标 → 统一 helper 切片”的三段式，禁止在循环中直接 `text[i..]`。
+3. **外部偏移统一规范化**：tree-sitter/capture span 在进入字符串处理前统一做 `is_char_boundary` 校验与修正，优先使用 `source.get(start..end)`。
+4. **llm-suite 一致性**：保留复制实现，但以测试锚定与 `cce_utils` 的等价性，避免语义漂移。
+5. **防回归**：新增切分逻辑必须包含多字节属性测试；CI 中对新增直接切片模式做 grep 守卫。
