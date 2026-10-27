@@ -296,9 +296,25 @@ fn materialize(
     // Metadata is authoritative from the chunk record. Chunk records store
     // tree-sitter's zero-based rows; this type exposes one-based line numbers,
     // so the boundary conversion happens here and nowhere downstream.
+    //
+    // A retrieved chunk is only a fragment of its group. Materialize the
+    // whole group span so callers receive the complete method/entity and the
+    // dedup-by-alignment-key step above collapses sibling fragments onto one
+    // result instead of returning partial bodies.
+    let (group_start, group_end) = chunk_records
+        .values()
+        .filter(|candidate| {
+            candidate.file_path == chunk.file_path && candidate.segment_id == chunk.segment_id
+        })
+        .fold((chunk.start_line, chunk.end_line), |acc, candidate| {
+            (
+                acc.0.min(candidate.start_line),
+                acc.1.max(candidate.end_line),
+            )
+        });
     result.file_path = chunk.file_path.clone();
-    result.start_line = to_one_based_line(chunk.start_line);
-    result.end_line = to_one_based_line(chunk.end_line);
+    result.start_line = to_one_based_line(group_start);
+    result.end_line = to_one_based_line(group_end);
     // The chunk-level type describes the group container; refine to the hit's
     // own entity kind the same way the display name is refined below.
     result.kind = choose_entity_kind(chunk, &result.entity_ids, &chunk.chunk_type);
@@ -335,8 +351,8 @@ fn materialize(
         cache,
         project_root,
         &chunk.file_path,
-        chunk.start_line.max(0) as u32,
-        chunk.end_line.max(0) as u32,
+        group_start.max(0) as u32,
+        group_end.max(0) as u32,
     ) {
         None => {
             result.content_state = ContentState::Reference(DowngradeReason::FileMissing);
