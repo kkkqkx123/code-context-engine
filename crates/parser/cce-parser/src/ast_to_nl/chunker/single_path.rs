@@ -84,8 +84,6 @@ pub struct HeaderPathParams<'a> {
     pub chunk_index: usize,
     pub total_chunks: usize,
     pub include_header_in_first_coverage: bool,
-    /// Topic lines of the entities this batch covers, keyed by entity id.
-    pub topic_lines: &'a [(EntityId, Vec<String>)],
 }
 
 /// Chunk a single text path (BM25 or Embedding) independently
@@ -199,7 +197,6 @@ pub fn chunk_single_path(input: ChunkInput) -> Result<ChunkOutput, ParseError> {
     let header_ctx = header_mode.as_ref().map(|h| SegmentHeaderContext {
         header_entity_id: h.header_entity_id,
         include_header_in_first_coverage: h.include_header_in_first_coverage,
-        topic_lines: h.topic_lines,
     });
 
     let chunks = builder.from_segments(

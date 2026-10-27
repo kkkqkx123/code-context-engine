@@ -262,12 +262,10 @@ impl GroupChunker {
         let embedding_decoration = ChunkBuilder::decoration_allowance(
             group,
             ChunkPath::Embedding,
-            self.config.limit(ChunkPath::Embedding),
         );
         let bm25_decoration = ChunkBuilder::decoration_allowance(
             group,
             ChunkPath::Bm25,
-            self.config.limit(ChunkPath::Bm25),
         );
         let emb_budget: ChunkBudget =
             self.config
@@ -585,12 +583,10 @@ impl GroupChunker {
             emb_dec = emb_dec.max(ChunkBuilder::decoration_allowance(
                 &gc.group,
                 ChunkPath::Embedding,
-                self.config.limit(ChunkPath::Embedding),
             ));
             bm25_dec = bm25_dec.max(ChunkBuilder::decoration_allowance(
                 &gc.group,
                 ChunkPath::Bm25,
-                self.config.limit(ChunkPath::Bm25),
             ));
         }
         super::limits::enforce_hard_limit(

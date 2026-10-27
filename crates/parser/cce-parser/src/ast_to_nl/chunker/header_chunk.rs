@@ -3,7 +3,6 @@ use crate::grouper::types::GroupType;
 use cce_text::truncate_to_cost;
 use cce_types::ConversionResult;
 use cce_types::ParseError;
-use cce_types::entity::EntityId;
 
 use super::boundary::unit;
 use super::chunk_builder::ChunkBuilder;
@@ -364,9 +363,6 @@ fn process_path(
         } else {
             Vec::new()
         };
-        // The topic of every entity in this batch, so that a continuation
-        // block can repeat the topic of the entity it continues.
-        let topic_lines = collect_topic_lines(&members, input.path);
         let chunk_input = super::chunker::ChunkInput {
             infra: ctx.infra,
             group: ctx.group,
@@ -392,7 +388,6 @@ fn process_path(
                 chunk_index: idx,
                 total_chunks: total,
                 include_header_in_first_coverage: idx == 0,
-                topic_lines: &topic_lines,
             }),
         };
         let path_out = super::chunker::chunk_single_path(chunk_input)?;
@@ -403,36 +398,12 @@ fn process_path(
     Ok(output)
 }
 
-/// The topic lines of every entity in a batch, keyed by entity id.
-///
-/// The lines are taken from the entity's own converted text: they state what
-/// the entity branches on, what it calls, or how its control flow is shaped.
-fn collect_topic_lines(
-    members: &[ConversionResult],
-    path: ChunkPath,
-) -> Vec<(EntityId, Vec<String>)> {
-    members
-        .iter()
-        .filter_map(|member| {
-            let text = match path {
-                ChunkPath::Bm25 => member.bm25_text.as_deref(),
-                ChunkPath::Embedding => member.embedding_text.as_deref(),
-            }?;
-            let lines: Vec<String> = super::chunk_builder::topic_lines(text)
-                .into_iter()
-                .map(|line| line.trim().to_string())
-                .collect();
-            (!lines.is_empty()).then_some((member.entity_id, lines))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 fn assemble_combined_text(
     header_text: &str,
     members: &[ConversionResult],
     path: ChunkPath,
-) -> (String, Vec<EntityId>) {
+) -> (String, Vec<cce_types::entity::EntityId>) {
     let (text, _boundaries, ids) =
         super::boundary::assemble_with_boundaries(header_text, None, members, path);
     (text, ids)
@@ -552,7 +523,6 @@ mod tests {
                 chunk_index,
                 total_chunks: 1,
                 include_header_in_first_coverage: chunk_index == 0,
-                topic_lines: &[],
             }),
         }
     }
@@ -848,12 +818,10 @@ mod tests {
         let emb_dec = ChunkBuilder::decoration_allowance(
             &group,
             ChunkPath::Embedding,
-            base.limit(ChunkPath::Embedding),
         );
         let bm25_dec = ChunkBuilder::decoration_allowance(
             &group,
             ChunkPath::Bm25,
-            base.limit(ChunkPath::Bm25),
         );
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
@@ -893,12 +861,10 @@ mod tests {
         let emb_dec = ChunkBuilder::decoration_allowance(
             &group,
             ChunkPath::Embedding,
-            base.limit(ChunkPath::Embedding),
         );
         let bm25_dec = ChunkBuilder::decoration_allowance(
             &group,
             ChunkPath::Bm25,
-            base.limit(ChunkPath::Bm25),
         );
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
@@ -941,7 +907,6 @@ mod tests {
             Some(super::super::chunk_builder::SegmentHeaderContext {
                 header_entity_id: group.header_id,
                 include_header_in_first_coverage: true,
-                topic_lines: &[],
             }),
         )
     }

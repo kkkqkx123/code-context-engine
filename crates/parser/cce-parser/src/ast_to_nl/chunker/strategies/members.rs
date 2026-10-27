@@ -7,7 +7,7 @@ use crate::grouper::EntityGroup;
 
 use super::super::boundary::{ChunkBoundary, NlEntityBoundary, SplitReason, cost};
 use super::super::result::ChunkPath;
-use super::lines::extend_or_push_trailing;
+use super::trailing::extend_or_push_trailing;
 
 /// Partition `text[range]` at the entity intervals the conversion layer
 /// reported.

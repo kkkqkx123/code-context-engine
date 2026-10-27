@@ -3,52 +3,91 @@ use cce_types::entity::EntityId;
 
 use super::result::{ChunkMetadata, SourceSpanKind};
 
-/// Earliest `doc_comment_start_line` recorded on any of the given entities
-/// (0-indexed row), if any.
+/// `doc_comment_start_line` recorded on one entity (0-indexed row), if any.
 ///
-/// Doc comments are attached to entities by the comment processor but their
-/// span is not part of the entity span. A chunk whose text includes an entity
-/// (and therefore its doc comment) should expand its source coverage to start
-/// at the doc comment, so the chunk's line range reflects the text it
-/// actually carries.
-fn earliest_doc_comment_start_row(group: &EntityGroup, entity_ids: &[EntityId]) -> Option<usize> {
-    let ids: std::collections::HashSet<EntityId> = entity_ids.iter().copied().collect();
+/// Doc comments are attached to entities by the comment processor. A leading
+/// comment (`//`, `///`, `#`) sits above the entity span, while a docstring
+/// sits inside it; only the leading comment is outside the coverage the
+/// entity's own span already describes.
+fn doc_comment_start_row(group: &EntityGroup, entity_id: EntityId) -> Option<usize> {
     group
         .header
         .iter()
         .chain(group.members.iter())
-        .filter(|entity| ids.contains(&entity.id))
-        .filter_map(|entity| entity.metadata.get("doc_comment_start_line"))
-        .filter_map(|line| line.parse::<usize>().ok())
+        .find(|entity| entity.id == entity_id)
+        .and_then(|entity| entity.metadata.get("doc_comment_start_line"))
+        .and_then(|line| line.parse::<usize>().ok())
         .map(|line| line.saturating_sub(1))
-        .min()
 }
 
 /// Expand `span` (and the first range of `ranges`, if any) so the source
-/// coverage starts at the earliest attached doc comment line.
+/// coverage starts at the doc comment attached above the entity that opens it.
+///
+/// Only a region that starts at an entity's own first line carries that
+/// entity's leading comment: a fragment starting mid-entity carries body code
+/// and must not reach back over the lines before it, or every fragment would
+/// claim the same lines again.
 fn expand_to_doc_comment_start(
     group: &EntityGroup,
     entity_ids: &[EntityId],
     span: &mut cce_types::Span,
     ranges: &mut [cce_types::Span],
 ) {
-    if let Some(doc_start_row) = earliest_doc_comment_start_row(group, entity_ids) {
-        if doc_start_row < span.start_position.row {
-            span.start_position.row = doc_start_row;
+    let start_row = span.start_position.row;
+    let mut earliest: Option<usize> = None;
+    for id in entity_ids {
+        // An entity without a recorded span has no body of its own; the
+        // group's first line is the line it opens.
+        let entity_start_row = group
+            .entity_spans
+            .get(id)
+            .map_or(group.span.start_position.row, |span| {
+                span.start_position.row
+            });
+        if entity_start_row != start_row {
+            continue;
         }
-        if let Some(first) = ranges.first_mut() {
-            if doc_start_row < first.start_position.row {
-                first.start_position.row = doc_start_row;
-            }
+        let Some(doc_row) = doc_comment_start_row(group, *id) else {
+            continue;
+        };
+        if doc_row < start_row {
+            earliest = Some(earliest.map_or(doc_row, |row| row.min(doc_row)));
         }
+    }
+    let Some(doc_row) = earliest else {
+        return;
+    };
+    span.start_position.row = doc_row;
+    if let Some(first) = ranges.first_mut() {
+        first.start_position.row = doc_row;
     }
 }
 
-/// Build source coverage from body entities, preserving disjoint entity
-/// ranges instead of collapsing them into one broad impl/module span.
+/// Build source coverage from the entities a chunk carries.
 pub fn source_coverage_for_entity_ids(
     group: &EntityGroup,
     entity_ids: &[EntityId],
+    kind: SourceSpanKind,
+    fallback_span: Option<cce_types::Span>,
+) -> (cce_types::Span, Vec<cce_types::Span>, SourceSpanKind) {
+    let spans = entity_ids
+        .iter()
+        .filter_map(|id| group.entity_spans.get(id).copied())
+        .collect();
+    source_coverage_from_spans(group, entity_ids, spans, kind, fallback_span)
+}
+
+/// Build source coverage from spans the caller resolved.
+///
+/// The spans may be narrower than the entities' own spans — a fragment owns a
+/// line window of the entity it comes from — or endpoint-adjusted, as with a
+/// group header that is reported as the region it declares rather than the
+/// body it encloses. `entity_ids` names the entities the coverage belongs to
+/// and drives doc-comment expansion.
+pub fn source_coverage_from_spans(
+    group: &EntityGroup,
+    entity_ids: &[EntityId],
+    spans: Vec<cce_types::Span>,
     kind: SourceSpanKind,
     fallback_span: Option<cce_types::Span>,
 ) -> (cce_types::Span, Vec<cce_types::Span>, SourceSpanKind) {
@@ -57,21 +96,24 @@ pub fn source_coverage_for_entity_ids(
     } else {
         kind
     };
-    let mut spans: Vec<_> = entity_ids
-        .iter()
-        .filter_map(|id| group.entity_spans.get(id).copied())
-        .collect();
+    let mut spans = spans;
     if spans.is_empty() {
-        let fallback_kind = if group.group_type == crate::grouper::GroupType::FileDocumentation {
-            SourceSpanKind::DocumentRange
-        } else {
-            SourceSpanKind::GroupFallback
-        };
+        // No entity span states what the text covers. The group's own span
+        // still encloses the whole group text, so an unsplit chunk (the only
+        // caller that can get here) owns that span. Without a usable span the
+        // coverage is unknown and must stay a fallback.
         let base_span = fallback_span.unwrap_or(group.span);
         let mut span = base_span;
         let mut ranges = vec![span];
         expand_to_doc_comment_start(group, entity_ids, &mut span, &mut ranges);
-        return (span, ranges, fallback_kind);
+        let kind = if group.group_type == crate::grouper::GroupType::FileDocumentation {
+            SourceSpanKind::DocumentRange
+        } else if span.line_range_opt().is_some() {
+            SourceSpanKind::EnclosingEntity
+        } else {
+            SourceSpanKind::GroupFallback
+        };
+        return (span, ranges, kind);
     }
 
     spans.sort_by_key(|span| (span.start_byte, span.end_byte));
@@ -270,20 +312,20 @@ mod tests {
     }
 
     #[test]
-    fn no_entity_leaves_no_precise_range() {
+    fn unsplit_without_entity_owns_the_group_range() {
         let header = make_header(1, None);
         let group_span = make_span(100, 500, 41, 90);
         let group = make_group(GroupType::MergedFragments, Some(header), group_span);
 
-        // A chunk that carries no identifiable entity owns no source range.
-        // Handing out the whole group span would let it claim every source
-        // range the group covers.
+        // A chunk that covers the whole group text and names no entity owns
+        // the group's own span: the text is the group, so the span encloses
+        // exactly what the chunk carries. It is enclosing, not exact.
         let (source_span, ranges, kind) =
             source_coverage_for_entity_ids(&group, &[], SourceSpanKind::ExactEntities, None);
 
         assert_eq!(source_span.start_byte, group_span.start_byte);
         assert!(!ranges.is_empty());
-        assert_eq!(kind, SourceSpanKind::GroupFallback);
+        assert_eq!(kind, SourceSpanKind::EnclosingEntity);
     }
 
     #[test]

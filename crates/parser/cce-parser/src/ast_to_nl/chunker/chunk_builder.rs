@@ -17,31 +17,14 @@ pub use super::chunk_contexts::{SegmentHeaderContext, SingleChunkContext, Unspli
 
 pub struct ChunkBuilder;
 
-/// Identifier byte test shared by name-boundary matching in this module.
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80
-}
-
 /// Prefixes of the text lines that state an entity's subject.
 const TOPIC_LINE_PREFIXES: [&str; 3] = ["branches on: ", "control flow: ", "calls: "];
-
-/// Maximum number of topic lines an entity contributes to a block head.
-const MAX_TOPIC_LINES: usize = 3;
-
-/// Maximum cost of one topic line in a continuation head.
-const TOPIC_LINE_COST_CAP: usize = 24;
-
-/// Maximum cost of a signature identity line.
-const IDENTITY_COST_CAP: usize = 80;
-
-/// Maximum cost of a synthetic block head.
-pub(crate) const SYNTHETIC_HEAD_COST_CAP: usize = 32;
 
 /// Whether a line states an entity's subject.
 ///
 /// The three forms are the branch discriminants an entity dispatches on, the
-/// shape of its control flow, and the functions it calls. All three name
-/// what the entity is about; none of them describes the surrounding code.
+/// shape of its control flow, and the functions it calls. All three name what
+/// the entity is about; none of them describes the surrounding code.
 fn is_topic_line(line: &str) -> bool {
     let line = line.trim_start();
     TOPIC_LINE_PREFIXES.iter().any(|prefix| {
@@ -50,16 +33,11 @@ fn is_topic_line(line: &str) -> bool {
     })
 }
 
-/// The topic lines of a converted entity.
-///
-/// A block that carries only the tail of an entity keeps none of them, so a
-/// continuation block repeats them to stay retrievable on its own.
-pub(crate) fn topic_lines(text: &str) -> Vec<&str> {
-    text.lines()
-        .filter(|line| is_topic_line(line))
-        .take(MAX_TOPIC_LINES)
-        .collect()
-}
+/// Maximum cost of one identity line.
+const IDENTITY_COST_CAP: usize = 80;
+
+/// Maximum cost of a synthetic block head.
+pub(crate) const SYNTHETIC_HEAD_COST_CAP: usize = 32;
 
 /// Whether an entity carries its own docstring, making it semantically
 /// self-contained. Members with an independent description must stay in
@@ -84,6 +62,176 @@ fn first_content_entity_id<'a>(
     content_entity_ids
         .find(|id| Some(**id) != header_entity_id)
         .copied()
+}
+
+/// Overlap between a segment's NL-text range and an entity boundary.
+fn nl_overlap(segment: &ChunkSegment, boundary: &NlEntityBoundary) -> usize {
+    segment
+        .boundary
+        .end_byte
+        .min(boundary.end_byte)
+        .saturating_sub(segment.boundary.start_byte.max(boundary.start_byte))
+}
+
+/// Slice `base` at line offsets `[start_offset, end_offset)` of its line range.
+///
+/// The byte offsets are interpolated over the same proportions so the slice
+/// stays inside `base` and adjacent slices abut; only the line range is exact.
+fn slice_span_lines(
+    base: &cce_types::Span,
+    start_offset: usize,
+    end_offset: usize,
+) -> cce_types::Span {
+    let Some((first_line, last_line)) = base.line_range_opt() else {
+        return *base;
+    };
+    let line_count = last_line - first_line + 1;
+    let start_offset = start_offset.min(line_count - 1);
+    let end_offset = end_offset.clamp(start_offset + 1, line_count);
+    let byte_len = base.end_byte.saturating_sub(base.start_byte);
+    cce_types::Span::new(
+        base.start_byte + byte_len * start_offset / line_count,
+        base.start_byte + byte_len * end_offset / line_count,
+        first_line - 1 + start_offset,
+        0,
+        first_line - 1 + end_offset,
+        0,
+    )
+}
+
+/// Line slice of `span` covered by the byte interval `[start, end)` of a
+/// `total`-byte text that the span is unrelated to.
+///
+/// Used when a fragment states no entity at all: the fragment still occupies
+/// a defined fraction of the text, so it owns the same fraction of the
+/// group's lines and never the whole group.
+fn text_slice_of_span(
+    span: &cce_types::Span,
+    start: usize,
+    end: usize,
+    total: usize,
+) -> cce_types::Span {
+    let Some((first_line, last_line)) = span.line_range_opt() else {
+        return *span;
+    };
+    if total == 0 {
+        return *span;
+    }
+    let line_count = last_line - first_line + 1;
+    let start_offset = start.min(total) * line_count / total;
+    let end_offset = (end.min(total) * line_count / total).max(start_offset + 1);
+    slice_span_lines(span, start_offset, end_offset)
+}
+
+/// Source lines the group header owns when it is carried as context.
+///
+/// A class header encloses every member, so its span covers the whole body.
+/// A chunk that carries only the header's text therefore covers the header's
+/// own declaration lines: the region from the group start up to the first
+/// member. `None` when the header's span is already its whole extent — no
+/// enclosed member, or a function whose members are internal parts of the
+/// body its own text describes.
+fn header_region_span(group: &EntityGroup, header_id: EntityId) -> Option<cce_types::Span> {
+    if group.group_type == GroupType::FunctionWithMembers {
+        return None;
+    }
+    let header = group.entity_spans.get(&header_id).copied()?;
+    let first_member = group
+        .members
+        .iter()
+        .filter_map(|member| group.entity_spans.get(&member.id).copied())
+        .filter(|span| span.start_byte > header.start_byte && span.start_byte < header.end_byte)
+        .min_by_key(|span| span.start_byte)?;
+    Some(cce_types::Span::new(
+        header.start_byte,
+        first_member.start_byte,
+        header.start_position.row,
+        header.start_position.column,
+        first_member.start_position.row,
+        0,
+    ))
+}
+
+/// Split the source lines an entity owns across the fragments carrying it.
+///
+/// Fragment boundaries only carry NL-text offsets, so the source lines behind
+/// a fragment cannot be read off directly. A fragment's share of the entity's
+/// NL text is mapped onto a contiguous slice of the entity's line range: the
+/// slices tile the whole range, so together the fragments cover the entity
+/// once and no two fragments claim the same lines. A header-path chunk
+/// partitions the header region instead of the body the header encloses.
+fn fragment_source_windows(
+    group: &EntityGroup,
+    segments: &[ChunkSegment],
+    nl_boundaries: &[NlEntityBoundary],
+    header_region: Option<(EntityId, cce_types::Span)>,
+) -> std::collections::HashMap<(usize, EntityId), cce_types::Span> {
+    let mut pieces: std::collections::HashMap<EntityId, Vec<(usize, usize)>> =
+        std::collections::HashMap::new();
+    for (index, segment) in segments.iter().enumerate() {
+        let length = segment
+            .boundary
+            .end_byte
+            .saturating_sub(segment.boundary.start_byte)
+            .max(1);
+        let mut claimed: Vec<EntityId> = Vec::new();
+        for id in &segment.boundary.entity_ids {
+            if claimed.contains(id) {
+                continue;
+            }
+            claimed.push(*id);
+            let overlap = nl_boundaries
+                .iter()
+                .find(|boundary| boundary.entity_id == *id)
+                .map(|boundary| nl_overlap(segment, boundary))
+                .filter(|overlap| *overlap > 0)
+                .unwrap_or(length);
+            pieces.entry(*id).or_default().push((index, overlap));
+        }
+        for boundary in nl_boundaries {
+            if claimed.contains(&boundary.entity_id) {
+                continue;
+            }
+            let overlap = nl_overlap(segment, boundary);
+            if overlap > 0 {
+                pieces
+                    .entry(boundary.entity_id)
+                    .or_default()
+                    .push((index, overlap));
+            }
+        }
+    }
+
+    let mut windows = std::collections::HashMap::new();
+    for (entity_id, entity_pieces) in pieces {
+        let base = match header_region {
+            Some((header_id, region)) if header_id == entity_id => region,
+            _ => match group.entity_spans.get(&entity_id) {
+                Some(span) => *span,
+                None => continue,
+            },
+        };
+        if let [(index, _)] = entity_pieces[..] {
+            windows.insert((index, entity_id), base);
+            continue;
+        }
+        let Some((first_line, last_line)) = base.line_range_opt() else {
+            continue;
+        };
+        let line_count = last_line - first_line + 1;
+        let total_weight: usize = entity_pieces.iter().map(|(_, weight)| *weight).sum();
+        let mut consumed = 0usize;
+        for (index, weight) in entity_pieces {
+            let start_offset = consumed * line_count / total_weight;
+            consumed += weight;
+            let end_offset = (consumed * line_count / total_weight).max(start_offset + 1);
+            windows.insert(
+                (index, entity_id),
+                slice_span_lines(&base, start_offset, end_offset),
+            );
+        }
+    }
+    windows
 }
 
 impl Default for ChunkBuilder {
@@ -149,7 +297,6 @@ impl ChunkBuilder {
         entity_ids: &[EntityId],
         segment_text: &str,
         parent: Option<&str>,
-        topic_lines: &[(EntityId, Vec<String>)],
         path: ChunkPath,
     ) -> Option<String> {
         let first_line = segment_text.lines().next().unwrap_or_default();
@@ -174,25 +321,10 @@ impl ChunkBuilder {
             if first_line.contains(&qualified) {
                 continue;
             }
-            let identity = Self::signature_identity(group, id, &name, &qualified, kind);
+            let identity = Self::identity_line(kind, &qualified);
             let identity = truncate_to_cost(&identity, unit, IDENTITY_COST_CAP);
             if !identity.trim().is_empty() {
                 parts.push(identity.to_string());
-            }
-            // The entity's own topic travels with the continuation: a block
-            // that holds the tail of an entity says nothing about what the
-            // entity is about without it. The line set is capped so a long
-            // topic cannot consume the whole chunk budget.
-            if let Some(lines) = topic_lines
-                .iter()
-                .find(|(topic_id, _)| *topic_id == id)
-                .map(|(_, lines)| lines)
-            {
-                let joined = lines.join("\n");
-                let joined = truncate_to_cost(&joined, unit, TOPIC_LINE_COST_CAP);
-                if !joined.trim().is_empty() {
-                    parts.push(joined.to_string());
-                }
             }
         }
         if parts.is_empty() {
@@ -203,33 +335,25 @@ impl ChunkBuilder {
 
     /// Upper bound of the text appended after splitting for one group.
     ///
-    /// The splitter works on a body limit; this allowance protects the
-    /// identity, topic and synthetic-head lines that assembly adds back.
-    /// The estimate is intentionally conservative: an underestimate is
-    /// repaired by the pre-injection limit check, while an overestimate
-    /// only produces a slightly smaller body.
-    pub(crate) fn decoration_allowance(
-        group: &EntityGroup,
-        path: ChunkPath,
-        limit: usize,
-    ) -> usize {
+    /// The splitter works on a body limit; this allowance protects the lines
+    /// assembly adds back: the identity line of the first chunk, the identity
+    /// anchor of every continuation chunk, and the synthetic head that names
+    /// the members of a later block. It counts only decoration that can
+    /// actually appear for this group, because every token reserved here is a
+    /// token the body cannot use.
+    pub(crate) fn decoration_allowance(group: &EntityGroup, path: ChunkPath) -> usize {
         let unit = unit(path);
-        let (identity_cap, topic_cap, head_cap) = if limit == 0 || limit == usize::MAX {
-            (
-                IDENTITY_COST_CAP,
-                TOPIC_LINE_COST_CAP,
-                SYNTHETIC_HEAD_COST_CAP,
-            )
+        // A synthetic head exists only where member blocks are built, which is
+        // the header path of a container group. A standalone group is split
+        // into fragments of its own body and never gets a block head.
+        let head_cap = if group.group_type.is_container() {
+            SYNTHETIC_HEAD_COST_CAP
         } else {
-            (
-                limit.saturating_sub(1).max(1),
-                (limit / 8).max(4),
-                (limit / 4).max(8),
-            )
+            0
         };
-        let identity_line = format!("{} ({}).\n", group.name, group.kind.kind_label());
+        let first_line = format!("{} ({}).\n", group.name, group.kind.kind_label());
         let first = if path == ChunkPath::Embedding {
-            cost(&identity_line, path)
+            cost(&first_line, path)
         } else {
             0
         };
@@ -246,88 +370,25 @@ impl ChunkBuilder {
             } else {
                 format!("{}.{}", group.name, name)
             };
-            let identity = Self::signature_identity(group, id, &name, &qualified, kind);
-            let identity = truncate_to_cost(&identity, unit, identity_cap);
-            continuation = continuation.max(
-                cost(identity, path)
-                    .saturating_add(topic_cap)
-                    .saturating_add(2),
-            );
+            let identity = Self::identity_line(kind, &qualified);
+            let identity = truncate_to_cost(&identity, unit, IDENTITY_COST_CAP);
+            continuation = continuation.max(cost(identity, path).saturating_add(2));
         }
-        continuation = continuation.max(cost(&identity_line, path).saturating_add(2));
+        continuation = continuation.max(cost(&first_line, path).saturating_add(2));
         first.max(continuation).saturating_add(head_cap)
     }
 
     /// Identity line for one continued entity.
     ///
-    /// Continuation segments start mid-entity, so a bare kind-plus-name line
-    /// is not enough to tell overloads apart or to match signature-level
-    /// queries. When the entity carries a substantive signature (a parameter
-    /// list mentioning its own name), the signature itself is repeated with
-    /// the bare name owner-qualified; otherwise the previous kind-plus-name
-    /// form is kept.
-    fn signature_identity(
-        group: &EntityGroup,
-        id: EntityId,
-        name: &str,
-        qualified: &str,
-        kind: EntityKind,
-    ) -> String {
-        if let Some(signature) = Self::entity_signature_by_id(group, id) {
-            if signature.contains('(') && signature.contains(name) {
-                return format!(
-                    "{}.",
-                    Self::qualify_name_in_text(&signature, name, qualified)
-                );
-            }
-        }
+    /// The anchor is one kind-plus-qualified-name line. Repeating the entity's
+    /// signature here would copy a parameter list that can be longer than the
+    /// fragment's own body into every fragment of the group, so each fragment
+    /// would spend most of its budget on text identical to its siblings and
+    /// cover only a handful of source lines. Overloads are still told apart by
+    /// the body each fragment carries; the body, not the repeated signature, is
+    /// what retrieval matches.
+    fn identity_line(kind: EntityKind, qualified: &str) -> String {
         format!("{} {}.", kind.kind_label(), qualified)
-    }
-
-    /// First non-empty signature of an entity in the group, if any.
-    fn entity_signature_by_id(group: &EntityGroup, id: EntityId) -> Option<String> {
-        if let Some(header) = &group.header {
-            if header.id == id && !header.signature.is_empty() {
-                return Some(header.signature.clone());
-            }
-        }
-        group
-            .members
-            .iter()
-            .find(|m| m.id == id)
-            .map(|m| m.signature.clone())
-            .filter(|signature| !signature.is_empty())
-    }
-
-    /// Replace the bare entity name inside a signature with its qualified
-    /// form, matching whole identifiers only.
-    fn qualify_name_in_text(signature: &str, name: &str, qualified: &str) -> String {
-        if name.is_empty() || name == qualified {
-            return signature.to_string();
-        }
-        let mut out = String::with_capacity(signature.len() + qualified.len());
-        let mut rest = signature;
-        while let Some(pos) = rest.find(name) {
-            let before = pos.checked_sub(1).map(|i| rest.as_bytes()[i]);
-            let after = rest.as_bytes().get(pos + name.len()).copied();
-            let boundary_before = before.is_none_or(|b| !is_ident_byte(b));
-            let boundary_after = after.is_none_or(|b| !is_ident_byte(b));
-            if boundary_before && boundary_after {
-                out.push_str(&rest[..pos]);
-                out.push_str(qualified);
-                rest = &rest[pos + name.len()..];
-            } else {
-                let advance = rest[pos..]
-                    .chars()
-                    .next()
-                    .map(|character| character.len_utf8())
-                    .unwrap_or(name.len());
-                out.push_str(&rest[..pos + advance]);
-                rest = &rest[pos + advance..];
-            }
-        }
-        out.push_str(rest);
-        out
     }
 
     /// Cross-group parent name for a standalone child group.
@@ -640,12 +701,25 @@ impl ChunkBuilder {
         file_path: &str,
         keywords: &[String],
         nl_boundaries: &[NlEntityBoundary],
-        header_ctx: Option<SegmentHeaderContext<'_>>,
+        header_ctx: Option<SegmentHeaderContext>,
     ) -> Vec<ChunkedResult> {
         let total = segments.len();
         let is_fragment = total > 1;
         let original_entity_id = group.header_id;
         let related_groups = tracker.get_related_groups(&group.group_id);
+        // Header-path chunks carry the header as context: its conversion
+        // states what the group is about, not the body the header encloses,
+        // so those chunks claim the header region instead of the whole body.
+        let header_region = header_ctx
+            .as_ref()
+            .and_then(|ctx| ctx.header_entity_id)
+            .and_then(|id| header_region_span(group, id).map(|region| (id, region)));
+        let fragment_windows =
+            fragment_source_windows(group, segments, nl_boundaries, header_region);
+        let text_len = segments
+            .last()
+            .map(|segment| segment.boundary.end_byte)
+            .unwrap_or(0);
 
         segments
             .iter()
@@ -714,30 +788,17 @@ impl ChunkBuilder {
                 // carries the header's own text covers the header's source
                 // lines: dropping the header here leaves such a segment
                 // with no source coverage at all.
-                let covered_source_ids = covered_entity_ids;
                 if is_continuation {
                     // Continuation segments repeat the identity of the
                     // entities they cover (see `continuation_identity`) on
                     // both paths: a BM25 fragment starting mid-method would
                     // otherwise lose the `Class.method` co-occurrence that
-                    // qualified queries depend on. Segments with no
-                    // attributable entity fall back to the group identity line.
-                    let fallback_ids;
-                    let ids = if content_entity_ids.is_empty() {
-                        fallback_ids = group.all_entity_ids();
-                        &fallback_ids
-                    } else {
-                        &content_entity_ids
-                    };
+                    // qualified queries depend on.
                     if let Some(prefix) = Self::continuation_identity(
                         group,
-                        ids,
+                        &content_entity_ids,
                         &segment_text,
                         parent.as_deref(),
-                        header_ctx
-                            .as_ref()
-                            .map(|ctx| ctx.topic_lines)
-                            .unwrap_or_default(),
                         path,
                     ) {
                         segment_text = prefix + &segment_text;
@@ -749,83 +810,91 @@ impl ChunkBuilder {
                         );
                     }
                 }
-                let source_kind = if matches!(
+                let mut coverage_entity_ids: Vec<_> = if let Some(ctx) = &header_ctx {
+                    if index == 0 && ctx.include_header_in_first_coverage {
+                        ctx.header_entity_id
+                            .into_iter()
+                            .chain(covered_entity_ids.iter().copied())
+                            .collect()
+                    } else {
+                        covered_entity_ids.clone()
+                    }
+                } else {
+                    covered_entity_ids.clone()
+                };
+                let mut seen = std::collections::HashSet::new();
+                coverage_entity_ids.retain(|id| seen.insert(*id));
+                // A fragment owns the line window of the entity it comes from
+                // (see `fragment_source_windows`); an entity that appears
+                // whole in this segment keeps its own span.
+                let mut coverage_spans: Vec<cce_types::Span> = coverage_entity_ids
+                    .iter()
+                    .filter_map(|id| {
+                        fragment_windows
+                            .get(&(index, *id))
+                            .copied()
+                            .or_else(|| group.entity_spans.get(id).copied())
+                    })
+                    .collect();
+                let windowed = coverage_entity_ids
+                    .iter()
+                    .any(|id| fragment_windows.contains_key(&(index, *id)));
+                let hard_split_single_entity = matches!(
                     segment.boundary.split_reason,
                     SplitReason::TokenLimit | SplitReason::HardLimit
-                ) && content_entity_ids.len() == 1
-                {
+                ) && content_entity_ids.len() == 1;
+                let mut source_kind = if windowed || hard_split_single_entity {
                     SourceSpanKind::EnclosingEntity
                 } else {
                     SourceSpanKind::ExactEntities
                 };
-                let coverage_entity_ids: Vec<_> = if let Some(ctx) = &header_ctx {
-                    if index == 0 && ctx.include_header_in_first_coverage {
-                        ctx.header_entity_id
-                            .into_iter()
-                            .chain(covered_source_ids.iter().copied())
-                            .collect()
-                    } else {
-                        covered_source_ids.clone()
-                    }
-                } else {
-                    covered_source_ids.clone()
-                };
-                // When no entity could be attributed to the chunk, derive a
-                // local source span from the NL boundaries overlapping the
-                // segment instead of falling back to the whole group span.
-                let fallback_span = if coverage_entity_ids.is_empty() {
+                if coverage_spans.is_empty() {
+                    // Nothing states which entity the segment carries. Take
+                    // the entity boundaries its NL text overlaps, or the
+                    // nearest one, so the fragment still owns a source range.
                     let mut ids = super::boundary::intersect_entities_in_range(
                         nl_boundaries,
                         segment.boundary.start_byte,
                         segment.boundary.end_byte,
                     );
                     if ids.is_empty() {
-                        // Nearest boundary fallback: take the closest entity
-                        // boundary to the segment start.
-                        if let Some(b) = nl_boundaries.iter().min_by_key(|b| {
+                        if let Some(boundary) = nl_boundaries.iter().min_by_key(|b| {
                             (b.start_byte as isize - segment.boundary.start_byte as isize).abs()
                         }) {
-                            ids.push(b.entity_id);
+                            ids.push(boundary.entity_id);
                         }
                     }
-                    let spans: Vec<_> = ids
+                    let mut seen = std::collections::HashSet::new();
+                    ids.retain(|id| seen.insert(*id));
+                    coverage_spans = ids
                         .iter()
-                        .filter_map(|id| group.entity_spans.get(id).copied())
+                        .filter_map(|id| {
+                            fragment_windows
+                                .get(&(index, *id))
+                                .copied()
+                                .or_else(|| group.entity_spans.get(id).copied())
+                        })
                         .collect();
-                    if spans.is_empty() {
-                        None
-                    } else {
-                        let first = spans[0];
-                        Some(spans.iter().copied().skip(1).fold(first, |acc, cur| {
-                            let start = if cur.start_byte < acc.start_byte {
-                                cur
-                            } else {
-                                acc
-                            };
-                            let end = if cur.end_byte > acc.end_byte {
-                                cur
-                            } else {
-                                acc
-                            };
-                            cce_types::Span::new(
-                                start.start_byte,
-                                end.end_byte,
-                                start.start_position.row,
-                                start.start_position.column,
-                                end.end_position.row,
-                                end.end_position.column,
-                            )
-                        }))
+                    if coverage_spans.is_empty() {
+                        // A fragment with no entity at all claims the slice
+                        // of the group its text occupies, never the group.
+                        coverage_spans.push(text_slice_of_span(
+                            &group.span,
+                            segment.boundary.start_byte,
+                            segment.boundary.end_byte,
+                            text_len,
+                        ));
+                        source_kind = SourceSpanKind::EnclosingEntity;
                     }
-                } else {
-                    None
-                };
+                    coverage_entity_ids = ids;
+                }
                 let (source_span, source_ranges, source_span_kind) =
-                    source_coverage::source_coverage_for_entity_ids(
+                    source_coverage::source_coverage_from_spans(
                         group,
                         &coverage_entity_ids,
+                        coverage_spans,
                         source_kind,
-                        fallback_span,
+                        None,
                     );
 
                 let word_count = cost(&segment_text, ChunkPath::Bm25);
@@ -852,11 +921,7 @@ impl ChunkBuilder {
                         || Self::states_own_topic(&segment_text));
 
                 let (bm25_title, bm25_keywords) = if path == ChunkPath::Bm25 {
-                    let effective_ids = if content_entity_ids.is_empty() {
-                        group.all_entity_ids()
-                    } else {
-                        content_entity_ids.clone()
-                    };
+                    let effective_ids = content_entity_ids.clone();
                     (
                         Some(Self::bm25_title_for_ids(
                             group,
@@ -879,11 +944,7 @@ impl ChunkBuilder {
                     // group's blocks one shared identity, so the title is
                     // computed per block from the entities it actually
                     // holds.
-                    let effective_ids = if content_entity_ids.is_empty() {
-                        group.all_entity_ids()
-                    } else {
-                        content_entity_ids.clone()
-                    };
+                    let effective_ids = content_entity_ids.clone();
                     (
                         Some(Self::bm25_title_for_ids(
                             group,
@@ -989,11 +1050,7 @@ impl ChunkBuilder {
                 || states_topic);
 
         let (bm25_title, bm25_keywords) = if ctx.path == ChunkPath::Bm25 {
-            let effective_ids = if content_entity_ids.is_empty() {
-                ctx.group.all_entity_ids()
-            } else {
-                content_entity_ids.clone()
-            };
+            let effective_ids = content_entity_ids.clone();
             (
                 Some(Self::bm25_title_for_ids(
                     ctx.group,
@@ -1014,11 +1071,7 @@ impl ChunkBuilder {
             // result presentation. It is computed per chunk from the
             // entities the chunk holds, so the blocks of a merged group do
             // not share one identity.
-            let effective_ids = if content_entity_ids.is_empty() {
-                ctx.group.all_entity_ids()
-            } else {
-                content_entity_ids.clone()
-            };
+            let effective_ids = content_entity_ids.clone();
             (
                 Some(Self::bm25_title_for_ids(
                     ctx.group,
@@ -1176,7 +1229,8 @@ mod tests {
         // continuation block that carries the header's body. The header is
         // context on the attribution side, but the block still covers the
         // header's source lines: without the header in the coverage set the
-        // block would own no source range at all.
+        // block would own no source range at all. The blocks partition the
+        // header region, so no two of them claim the same lines.
         let group = header_with_member_group();
         let tracker = GroupTracker::new();
         let segments = vec![
@@ -1202,7 +1256,6 @@ mod tests {
             Some(SegmentHeaderContext {
                 header_entity_id: group.header_id,
                 include_header_in_first_coverage: true,
-                topic_lines: &[],
             }),
         );
 
@@ -1214,12 +1267,20 @@ mod tests {
                 chunk.chunk_id
             );
         }
-        let ranges = chunks[1].metadata.source_ranges();
-        assert_eq!(ranges.len(), 1);
-        assert_eq!(
-            ranges[0].line_range_opt(),
-            Some((11, 40)),
-            "the continuation block covers the header's own source lines"
+        let first = chunks[0].metadata.source_ranges();
+        let second = chunks[1].metadata.source_ranges();
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        let first = first[0].line_range_opt().expect("first block line range");
+        let second = second[0].line_range_opt().expect("continuation line range");
+        assert_eq!(first.0, 11, "the blocks start at the header declaration");
+        assert!(
+            first.1 < second.0,
+            "the blocks must not claim the same source lines: {first:?} vs {second:?}"
+        );
+        assert!(
+            second.1 <= 42,
+            "the blocks stay inside the header region, got {second:?}"
         );
         assert!(
             chunks[1].metadata.content_entity_ids().is_empty(),
@@ -1332,13 +1393,16 @@ mod tests {
             &[EntityId(2)],
             "body fragment without the signature line",
             Some("Processor"),
-            &[],
             ChunkPath::Embedding,
         )
         .expect("covered method repeats its identity");
         assert!(
-            identity.contains("Processor.findName(int hash)."),
-            "continuation should repeat the signature, got: {identity}"
+            identity.contains("Processor.findName"),
+            "continuation should qualify the name, got: {identity}"
+        );
+        assert!(
+            !identity.contains("int hash"),
+            "continuation must not repeat the signature, got: {identity}"
         );
     }
 
@@ -1356,7 +1420,6 @@ mod tests {
             &[EntityId(2)],
             "body fragment",
             Some("Processor"),
-            &[],
             ChunkPath::Embedding,
         )
         .expect("identity without signature falls back to kind plus name");
@@ -1367,7 +1430,7 @@ mod tests {
     }
 
     #[test]
-    fn test_continuation_identity_qualifies_signature_name() {
+    fn test_continuation_identity_never_repeats_the_signature() {
         let mut group = method_group();
         group.header = Some(GroupedEntity::new(
             EntityId(2),
@@ -1380,13 +1443,19 @@ mod tests {
             &[EntityId(2)],
             "loop body fragment",
             Some("mpeg-pat"),
-            &[],
             ChunkPath::Embedding,
         )
-        .expect("pointer-return function repeats its signature");
+        .expect("a pointer-return function repeats its name");
+        // A parameter list can be longer than the fragment body, so repeating
+        // it would spend the fragment's budget on text shared with every
+        // sibling fragment.
         assert!(
-            identity.contains("mpeg-pat.pat_find (struct pat_t* pat, unsigned short pn)."),
+            identity.contains("function mpeg-pat.pat_find."),
             "unexpected identity: {identity}"
+        );
+        assert!(
+            !identity.contains("unsigned short"),
+            "the signature must not be repeated: {identity}"
         );
     }
 
@@ -1450,14 +1519,5 @@ mod tests {
         assert!(!ChunkBuilder::states_own_topic(
             "function handler.\nint depth = 0;\nreturn depth;"
         ));
-    }
-
-    #[test]
-    fn test_topic_lines_are_collected_for_continuation() {
-        let text = "function handler.\nbranches on: rtmp->connect.\ncalls: assert.\nint depth = 0;";
-        let lines = topic_lines(text);
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "branches on: rtmp->connect.");
-        assert_eq!(lines[1], "calls: assert.");
     }
 }

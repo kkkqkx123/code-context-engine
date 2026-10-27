@@ -87,17 +87,27 @@ fn merge_source_coverage(
         )
     });
 
-    let kind = match (a.source_span_kind, b.source_span_kind) {
-        (SourceSpanKind::ExactEntities, SourceSpanKind::ExactEntities) => {
-            SourceSpanKind::ExactEntities
-        }
-        (SourceSpanKind::DocumentRange, SourceSpanKind::DocumentRange) => {
-            SourceSpanKind::DocumentRange
-        }
-        _ => SourceSpanKind::GroupFallback,
-    };
+    let kind = merged_kind(a.source_span_kind, b.source_span_kind);
 
     (source_span, merged, kind)
+}
+
+/// Coverage kind of a chunk whose ranges are the union of two chunks' ranges.
+///
+/// The union covers the merged text exactly as well as the weaker of the two
+/// inputs covered its own text: a merged range is exact only when both inputs
+/// were exact, and stays reliable (enclosing) as long as neither input lost
+/// its ownership. `GroupFallback`/`Unavailable` still absorb everything, since
+/// the merged chunk inherits an input whose ownership could not be recovered.
+fn merged_kind(a: SourceSpanKind, b: SourceSpanKind) -> SourceSpanKind {
+    use SourceSpanKind::*;
+    match (a, b) {
+        (GroupFallback | Unavailable, _) | (_, GroupFallback | Unavailable) => GroupFallback,
+        (EnclosingEntity, _) | (_, EnclosingEntity) => EnclosingEntity,
+        (DocumentRange, ExactEntities) | (ExactEntities, DocumentRange) => EnclosingEntity,
+        (DocumentRange, DocumentRange) => DocumentRange,
+        (ExactEntities, ExactEntities) => ExactEntities,
+    }
 }
 
 /// Merge two adjacent chunks into one.
@@ -289,10 +299,11 @@ pub(crate) fn merge_two_chunks(
 /// Sorts chunks by source position (using group span), then merges adjacent chunks
 /// where either side is below the min threshold and the combined size fits
 /// within the merge ceiling. The decision is delegated to
-/// `merge_strategy::should_merge`, which wraps the single shared rule
-/// `boundary::can_merge` plus the Embedding-only self-contained exemption
-/// (which yields once every self-contained side is at or above min),
-/// identical to the intra-splitter pass in `splitter::TextSplitter`.
+/// `merge_strategy::should_merge`, which applies the shared min/ceiling
+/// limits from `boundary::merge_limits` plus the Embedding-only
+/// self-contained exemption (which yields once every self-contained side is
+/// at or above min), identical to the intra-splitter pass in
+/// `splitter::TextSplitter`.
 ///
 /// Cost is path-dependent: the Embedding path measures estimated tokens
 /// (re-estimated on the combined text), the BM25 path measures actual word

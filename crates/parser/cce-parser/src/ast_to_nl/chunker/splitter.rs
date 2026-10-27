@@ -28,8 +28,6 @@ enum BoundaryLevel {
     Entities,
     /// Sentence-end positions.
     Sentences,
-    /// Newline positions.
-    Lines,
     /// Blank-line positions.
     Paragraphs,
     /// Hard token/word cut (`split_by_tokens`), the guaranteed terminal.
@@ -41,50 +39,22 @@ impl BoundaryLevel {
     fn next(self) -> Self {
         match self {
             Self::NestedGroups => Self::Entities,
+            // An entity is the finest unit that may own a chunk, so an
+            // oversized entity re-splits at the sentence ends inside it and
+            // only an oversized sentence falls through to the hard cut.
             Self::Entities => Self::Sentences,
-            Self::Sentences => Self::Lines,
-            Self::Lines => Self::Paragraphs,
-            Self::Paragraphs => Self::Tokens,
+            Self::Sentences | Self::Paragraphs => Self::Tokens,
             Self::Tokens => Self::Tokens,
         }
     }
 
-    /// Path-aware descent: the BM25 path skips sentence and paragraph
-    /// levels and falls through to line boundaries before the hard token
-    /// cut, so over-limit declaration text is subdivided at newline
-    /// boundaries instead of mid-expression truncation.
-    fn next_for_path(self, path: ChunkPath) -> Self {
-        if path != ChunkPath::Bm25 {
-            return self.next();
-        }
-        match self {
-            Self::NestedGroups => Self::Entities,
-            Self::Entities => Self::Lines,
-            Self::Sentences | Self::Lines | Self::Paragraphs | Self::Tokens => Self::Tokens,
-        }
-    }
-
     /// Boundary source that best sub-divides an oversized piece produced by
-    /// `self`: sentence-end positions inside entity/nested-group text,
-    /// newlines inside sentence/paragraph text, hard token cut for lines.
+    /// `self`: sentence ends inside entity/nested-group text, the hard token
+    /// cut for everything finer.
     fn subdivide(self) -> Self {
         match self {
             Self::NestedGroups | Self::Entities => Self::Sentences,
-            Self::Sentences | Self::Paragraphs => Self::Lines,
-            Self::Lines | Self::Tokens => Self::Tokens,
-        }
-    }
-
-    /// Path-aware subdivision: the BM25 path subdivides oversized
-    /// declarations at line boundaries; only line-oversize pieces go to
-    /// the hard cut.
-    fn subdivide_for_path(self, path: ChunkPath) -> Self {
-        if path != ChunkPath::Bm25 {
-            return self.subdivide();
-        }
-        match self {
-            Self::Lines | Self::Tokens => Self::Tokens,
-            _ => Self::Lines,
+            Self::Sentences | Self::Paragraphs | Self::Tokens => Self::Tokens,
         }
     }
 
@@ -294,7 +264,7 @@ impl TextSplitter {
                 path,
                 nl_boundaries,
                 range,
-                level.next_for_path(path),
+                level.next(),
                 inherit_entity_ids,
             );
         }
@@ -327,7 +297,7 @@ impl TextSplitter {
                 path,
                 nl_boundaries,
                 boundary.start_byte..boundary.end_byte,
-                level.subdivide_for_path(path),
+                level.subdivide(),
                 &piece_ids,
             );
         }
@@ -350,7 +320,7 @@ impl TextSplitter {
                     path,
                     nl_boundaries,
                     b.start_byte..b.end_byte,
-                    level.subdivide_for_path(path),
+                    level.subdivide(),
                     &piece_ids,
                 )?);
             } else {
@@ -390,7 +360,6 @@ impl TextSplitter {
             BoundaryLevel::Sentences => {
                 strategies::sentences::split_text_by_sentences(text, range, path, &cfg)
             }
-            BoundaryLevel::Lines => strategies::lines::split_text_by_lines(text, range, path, &cfg),
             BoundaryLevel::Paragraphs => {
                 strategies::paragraphs::split_text_by_paragraphs(text, range, path, &cfg)
             }
@@ -460,11 +429,12 @@ impl TextSplitter {
     ///
     /// Both merge layers (this intra-splitter pass and the cross-group
     /// pass in `merge::merge_small_chunks_cross_group`) share the same
-    /// decision rule (`boundary::can_merge`): a merge happens when either
-    /// side is still below the path's min threshold and the combined cost
-    /// stays within the path's merge ceiling. Large segments absorb
-    /// trailing small fragments, preventing tiny field-declaration chunks.
-    /// A single left-to-right greedy pass fully determines the result.
+    /// limits from `boundary::merge_limits`: a cross-entity merge happens
+    /// when either side is still below the path's min threshold and the
+    /// combined cost stays within the path's merge ceiling. Fragments of
+    /// one entity are instead packed up to the ceiling, so a long method
+    /// does not stay fragmented at the min threshold. A single
+    /// left-to-right greedy pass fully determines the result.
     fn merge_small_segments(
         &self,
         segments: Vec<ChunkSegment>,
@@ -474,8 +444,19 @@ impl TextSplitter {
         let mut merged: Vec<ChunkSegment> = Vec::with_capacity(segments.len());
         for segment in segments {
             if let Some(last) = merged.last_mut() {
-                let mergeable =
-                    can_merge_with_ceiling(&last.text, &segment.text, path, min_threshold, ceiling);
+                // Fragments of one entity are packed back together up to the
+                // ceiling; pieces from different entities only merge when one
+                // of them is still undersized.
+                let same_unit = !last.boundary.entity_ids.is_empty()
+                    && last.boundary.entity_ids == segment.boundary.entity_ids;
+                let mergeable = can_merge_with_ceiling(
+                    &last.text,
+                    &segment.text,
+                    path,
+                    min_threshold,
+                    ceiling,
+                    same_unit,
+                );
                 if mergeable {
                     last.text.push_str(&segment.text);
                     last.boundary.end_byte = segment.boundary.end_byte;
@@ -952,7 +933,6 @@ mod tests {
             BoundaryLevel::NestedGroups,
             BoundaryLevel::Entities,
             BoundaryLevel::Sentences,
-            BoundaryLevel::Lines,
             BoundaryLevel::Paragraphs,
             BoundaryLevel::Tokens,
         ];
@@ -1139,6 +1119,73 @@ mod tests {
         let segments = vec![segment(&words(20), 0, 30), segment(&words(100), 30, 200)];
         let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
         assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn test_same_unit_fragments_pack_to_the_ceiling() {
+        let config = ChunkingConfig {
+            max_tokens: 300,
+            min_chunk_tokens: 100,
+            glossary_reserve_ratio: 0.0,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        // Six fragments of one entity, each far above the min threshold:
+        // they still pack together because they are parts of one unit.
+        let segments: Vec<ChunkSegment> = (0..6)
+            .map(|i| {
+                ChunkSegment::new(
+                    ChunkBoundary::new(i * 60, (i + 1) * 60, SplitReason::MemberBoundary)
+                        .with_entity_ids(vec![EntityId(1)]),
+                    words(60),
+                )
+            })
+            .collect();
+
+        let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
+
+        let piece = cost(&words(60), ChunkPath::Embedding);
+        assert_eq!(merged.len(), 2);
+        assert!(
+            cost(&merged[0].text, ChunkPath::Embedding) > piece * 3,
+            "one entity's fragments must pack together, got {} pieces",
+            merged.len()
+        );
+        for segment in &merged {
+            assert!(
+                cost(&segment.text, ChunkPath::Embedding) <= 300,
+                "a packed fragment must stay within the ceiling"
+            );
+        }
+    }
+
+    #[test]
+    fn test_same_unit_fragments_never_exceed_the_ceiling() {
+        let config = ChunkingConfig {
+            max_tokens: 300,
+            min_chunk_tokens: 100,
+            glossary_reserve_ratio: 0.0,
+            ..Default::default()
+        };
+        let splitter = TextSplitter::new(config);
+        // Fragments of one entity still stop at the ceiling: merging them
+        // would produce a chunk the path's limit rejects.
+        let segments = vec![
+            ChunkSegment::new(
+                ChunkBoundary::new(0, 170, SplitReason::MemberBoundary)
+                    .with_entity_ids(vec![EntityId(1)]),
+                words(170),
+            ),
+            ChunkSegment::new(
+                ChunkBoundary::new(170, 340, SplitReason::MemberBoundary)
+                    .with_entity_ids(vec![EntityId(1)]),
+                words(170),
+            ),
+        ];
+
+        let merged = splitter.merge_small_segments(segments, ChunkPath::Embedding);
+
+        assert_eq!(merged.len(), 2);
     }
 
     #[test]

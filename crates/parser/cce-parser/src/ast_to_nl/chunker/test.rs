@@ -868,12 +868,10 @@ mod tests {
         let emb_dec = ChunkBuilder::decoration_allowance(
             &group,
             ChunkPath::Embedding,
-            base.limit(ChunkPath::Embedding),
         );
         let bm25_dec = ChunkBuilder::decoration_allowance(
             &group,
             ChunkPath::Bm25,
-            base.limit(ChunkPath::Bm25),
         );
         let body_cfg = base.clone();
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
@@ -904,6 +902,10 @@ mod tests {
             .filter(|c| c.path == ChunkPath::Bm25)
             .collect();
         assert!(bm25.len() > 1, "the over-budget text must be split");
+        // Every fragment carries function code, so every fragment stays
+        // inside the function range; a local variable mentioned in the text
+        // never narrows a fragment down to the variable's own range.
+        let mut claimed: Vec<(usize, usize)> = Vec::new();
         for chunk in bm25 {
             let ranges = chunk.metadata.source_ranges();
             assert!(
@@ -912,16 +914,35 @@ mod tests {
                 chunk.chunk_id
             );
             for range in ranges {
-                assert_eq!(
-                    range.start_position.row, 198,
-                    "a fragment of the function body claims the function range"
+                let claimed_range = (range.start_position.row, range.end_position.row);
+                assert!(
+                    claimed_range.0 >= 198 && claimed_range.1 <= 240,
+                    "a fragment must stay inside the function range, got {range:?}"
                 );
-                assert_eq!(
-                    range.end_position.row, 240,
-                    "a fragment of the function body claims the function range"
+                assert_ne!(
+                    claimed_range,
+                    (200, 200),
+                    "a fragment must not claim the narrow range of a local variable"
                 );
+                claimed.push(claimed_range);
             }
         }
+        claimed.sort_unstable();
+        claimed.dedup();
+        assert!(
+            claimed.len() > 1,
+            "fragments claim distinct sub-ranges of the function: {claimed:?}"
+        );
+        assert_eq!(
+            claimed.first().expect("claim").0,
+            198,
+            "the first fragment starts at the function start: {claimed:?}"
+        );
+        assert_eq!(
+            claimed.last().expect("claim").1,
+            240,
+            "the last fragment ends at the function end: {claimed:?}"
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ use cce_config::modules::ChunkingConfig;
 
 use super::super::boundary::{ChunkBoundary, SplitReason, cost};
 use super::super::result::ChunkPath;
-use super::lines::extend_or_push_trailing;
+use super::trailing::extend_or_push_trailing;
 
 /// Partition `text[range]` at sentence boundaries (accumulating sentences
 /// into chunks up to the path limit).

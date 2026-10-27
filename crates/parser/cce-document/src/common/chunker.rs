@@ -463,7 +463,7 @@ mod tests {
         let result = split_bm25_by_terms(&text, 5, 1);
         assert!(!result.is_empty());
         for seg in &result {
-            assert!(cce_text::ChunkUnit::Terms.cost(seg) <= 5 || seg.trim().is_empty() == false);
+            assert!(cce_text::ChunkUnit::Terms.cost(seg) <= 5 || !seg.trim().is_empty());
         }
         // Round-trip: concatenated segments (minus overlap) cover original content
         assert!(result.iter().all(|s| s.is_char_boundary(s.len())));

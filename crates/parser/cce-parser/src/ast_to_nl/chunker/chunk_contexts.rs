@@ -43,9 +43,7 @@ pub struct UnsplitContext<'a> {
 }
 
 /// Header-path parameters for `from_segments`.
-pub struct SegmentHeaderContext<'a> {
+pub struct SegmentHeaderContext {
     pub header_entity_id: Option<EntityId>,
     pub include_header_in_first_coverage: bool,
-    /// Topic lines of the entities this batch covers, keyed by entity id.
-    pub topic_lines: &'a [(EntityId, Vec<String>)],
 }

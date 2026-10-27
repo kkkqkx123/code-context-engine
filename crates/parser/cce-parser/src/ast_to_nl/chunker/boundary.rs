@@ -47,47 +47,31 @@ pub fn merge_limits(_path: ChunkPath, budget: &ChunkBudget) -> (usize, usize) {
 /// The ceiling is the pre-injection limit of the path. Callers that split on
 /// a body limit must pass the pre-injection limit here so a merge never
 /// consumes the reserve kept for terminology injection.
+///
+/// `same_unit` marks adjacent pieces that belong to the same entity: a long
+/// entity split at line boundaries must be packed back towards the ceiling,
+/// otherwise every fragment stays at the min threshold and the same source
+/// span is claimed many times over. Pieces from different entities still
+/// merge only to rescue an undersized side, because gluing unrelated members
+/// together would blur their identities.
 pub fn can_merge_with_ceiling(
     prev: &str,
     next: &str,
     path: ChunkPath,
     min_threshold: usize,
     ceiling: usize,
+    same_unit: bool,
 ) -> bool {
     let prev_cost = cost(prev, path);
     let next_cost = cost(next, path);
     let combined = cost(&format!("{prev}{next}"), path);
-    if ceiling > 0 && combined > ceiling {
-        return false;
-    }
     if ceiling == 0 {
         return prev_cost < min_threshold || next_cost < min_threshold;
     }
-    prev_cost < min_threshold || next_cost < min_threshold
-}
-
-/// Whether `prev` may absorb `next` in a merge.
-///
-/// The single merge decision shared by the intra-splitter pass
-/// (`splitter::TextSplitter`) and the cross-group pass
-/// (`merge::merge_small_chunks_cross_group`): a merge happens when either
-/// side is still below the path's min threshold (the undersized chunk is
-/// the one being rescued) and the combined cost stays within the path's
-/// merge ceiling. Small trailing fragments are absorbed by their large
-/// left neighbor, and small leading fragments absorb their right neighbor.
-pub fn can_merge(prev: &str, next: &str, path: ChunkPath, budget: &ChunkBudget) -> bool {
-    let (min_threshold, merge_threshold) = (budget.min_limit, budget.merge_limit);
-    let prev_cost = cost(prev, path);
-    let next_cost = cost(next, path);
-    // The intra-splitter pass concatenates the two segment texts directly.
-    // Measuring the actual concatenation avoids under-counting text that is
-    // glued together and avoids the separator that belongs to the
-    // cross-group merge layer.
-    let combined = cost(&format!("{prev}{next}"), path);
-    if combined > merge_threshold {
+    if combined > ceiling {
         return false;
     }
-    prev_cost < min_threshold || next_cost < min_threshold
+    same_unit || prev_cost < min_threshold || next_cost < min_threshold
 }
 
 /// Chunk boundary information

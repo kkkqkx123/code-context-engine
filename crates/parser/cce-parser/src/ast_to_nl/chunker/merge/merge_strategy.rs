@@ -3,7 +3,7 @@
 //! Extracted from `merge.rs` so the mechanical merge (`merge_two_chunks`,
 //! `merge_source_coverage`) stays separate from the policy that decides
 //! *when* and *which* chunks to merge. All three policy pieces share the
-//! single source of truth in `boundary::{cost, can_merge, merge_limits}`.
+//! single source of truth in `boundary::{cost, merge_limits}`.
 
 use std::collections::HashMap;
 
@@ -51,12 +51,11 @@ pub(crate) fn combined_cost(a: &ChunkedResult, b: &ChunkedResult, path: ChunkPat
 ///    produces a unit titled after the macro whose body is an unrelated
 ///    function, and the mismatch in the other direction is just as
 ///    misleading. Only peers of one kind may merge across groups.
-/// 4. Size threshold via `boundary::can_merge`: either side below the
+/// 4. Size threshold via `boundary::merge_limits`: either side below the
 ///    path's min threshold and the combined cost within the merge ceiling.
 ///
-/// This is the single merge decision shared by the intra-splitter pass and
-/// the cross-group pass; using one function prevents the two layers from
-/// drifting apart.
+/// The intra-splitter pass uses the same limits, so the two layers cannot
+/// drift apart.
 pub(crate) fn should_merge(
     prev: &ChunkedResult,
     next: &ChunkedResult,

@@ -540,7 +540,7 @@ fn default_max_tokens() -> usize {
 }
 
 fn default_overlap_tokens() -> usize {
-    50
+    25
 }
 
 fn default_max_overlap_ratio() -> f32 {
@@ -548,7 +548,7 @@ fn default_max_overlap_ratio() -> f32 {
 }
 
 fn default_min_chunk_tokens() -> usize {
-    150
+    200
 }
 
 fn default_respect_boundaries() -> bool {
@@ -556,7 +556,7 @@ fn default_respect_boundaries() -> bool {
 }
 
 fn default_min_chunk_bm25_terms() -> usize {
-    45
+    60
 }
 
 fn default_max_summary_words() -> usize {
@@ -568,7 +568,7 @@ fn default_max_bm25_terms() -> usize {
 }
 
 fn default_overlap_bm25_terms() -> usize {
-    5
+    3
 }
 
 fn default_glossary_reserve_ratio() -> f32 {
