@@ -298,18 +298,20 @@ fn branch_discriminants(text: &str) -> Vec<String> {
     let mut labels = Vec::new();
     let mut index = 0usize;
 
-    while index < bytes.len() {
+    while index < text.len() {
+        // Only ever advance on UTF-8 char boundaries, so a multibyte
+        // character in a comment or string literal can never be split.
         if !text[index..].starts_with(CASE) {
-            index += 1;
+            index = cce_utils::text::next_char_boundary(text, index + 1);
             continue;
         }
         // The keyword must stand on its own: `case` inside a longer
         // identifier is not a branch label.
-        let before_ok = index == 0 || !is_identifier_byte(bytes[index - 1]);
+        let before_ok = index == 0 || !is_identifier_byte(bytes[index.saturating_sub(1)]);
         let after = index + CASE.len();
         let after_ok = after >= bytes.len() || !is_identifier_byte(bytes[after]);
         if !before_ok || !after_ok {
-            index = after;
+            index = cce_utils::text::next_char_boundary(text, after);
             continue;
         }
         let label_start = after
@@ -323,12 +325,13 @@ fn branch_discriminants(text: &str) -> Vec<String> {
                 .take_while(|b| is_identifier_byte(**b))
                 .count();
         if label_end > label_start {
-            let label = &text[label_start..label_end];
-            if label != "default" {
+            let label = cce_utils::text::slice_exact(text, label_start, label_end)
+                .unwrap_or("");
+            if !label.is_empty() && label != "default" {
                 labels.push(label.to_string());
             }
         }
-        index = label_end.max(after);
+        index = cce_utils::text::next_char_boundary(text, label_end.max(after));
     }
 
     labels

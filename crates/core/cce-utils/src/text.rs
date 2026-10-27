@@ -140,6 +140,44 @@ pub fn truncate_string_to_byte_len(text: &mut String, max_bytes: usize) {
     text.truncate(boundary);
 }
 
+/// Move a byte index down to the previous UTF-8 char boundary.
+pub fn prev_char_boundary(text: &str, position: usize) -> usize {
+    floor_char_boundary(text, position)
+}
+
+/// Move a byte index up to the next UTF-8 char boundary.
+pub fn next_char_boundary(text: &str, position: usize) -> usize {
+    ceil_char_boundary(text, position)
+}
+
+/// The character starting at `position`, when `position` is a valid
+/// UTF-8 char boundary inside `text`.
+pub fn char_at(text: &str, position: usize) -> Option<char> {
+    if !text.is_char_boundary(position) {
+        return None;
+    }
+    text[position..].chars().next()
+}
+
+/// Slice `text` between two byte offsets without ever splitting a char.
+pub fn slice_clamped(text: &str, start: usize, end: usize) -> &str {
+    let start = floor_char_boundary(text, start);
+    let end = floor_char_boundary(text, end.max(start));
+    &text[start..end]
+}
+
+/// Strict slice between two byte offsets.
+pub fn slice_exact(text: &str, start: usize, end: usize) -> Option<&str> {
+    if start > end
+        || end > text.len()
+        || !text.is_char_boundary(start)
+        || !text.is_char_boundary(end)
+    {
+        return None;
+    }
+    Some(&text[start..end])
+}
+
 /// Check if text is empty or contains only whitespace
 ///
 /// # Example
@@ -443,5 +481,26 @@ mod tests {
         let mut owned = inverted.to_string();
         truncate_string_to_byte_len(&mut owned, 2);
         assert_eq!(owned, "a");
+    }
+}
+
+
+#[cfg(test)]
+mod unified_boundary_helper_tests {
+    use super::*;
+
+    #[test]
+    fn unified_boundary_helpers_never_split_multibyte() {
+        let text = format!("{}¡{}世界🌍", "a".repeat(10), "b".repeat(10));
+        for i in 0..=text.len() {
+            assert!(text.is_char_boundary(prev_char_boundary(&text, i)));
+            assert!(text.is_char_boundary(next_char_boundary(&text, i)));
+            assert_eq!(prev_char_boundary(&text, i), floor_char_boundary(&text, i));
+            assert_eq!(next_char_boundary(&text, i), ceil_char_boundary(&text, i));
+        }
+        assert_eq!(char_at(&text, 0), Some('a'));
+        assert!(slice_exact(&text, 0, 1).is_some());
+        let sliced = slice_clamped(&text, 1, 2);
+        assert!(text.is_char_boundary(sliced.as_ptr() as usize - text.as_ptr() as usize));
     }
 }

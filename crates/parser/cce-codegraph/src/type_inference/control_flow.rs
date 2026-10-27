@@ -154,6 +154,10 @@ pub mod shared {
         let mut start = 0usize;
         let mut i = 0usize;
         while i < bytes.len() {
+            if !text.is_char_boundary(i) {
+                i = cce_utils::text::ceil_char_boundary(text, i);
+                continue;
+            }
             let b = bytes[i];
             if let Some(q) = quote {
                 if b == b'\\' {
@@ -207,6 +211,10 @@ pub mod shared {
         let mut start = 0usize;
         let mut i = 0usize;
         while i < bytes.len() {
+            if !text.is_char_boundary(i) {
+                i = cce_utils::text::ceil_char_boundary(text, i);
+                continue;
+            }
             let b = bytes[i];
             if let Some(q) = quote {
                 if b == b'\\' {
