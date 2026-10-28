@@ -32,7 +32,10 @@ pub(crate) fn enforce_segment_max_limit(
     if budget.hard_limit == 0 {
         return Ok(segments);
     }
-    let limit = budget.body_limit;
+    // Retain segments that fit the pre-injection budget, matching the
+    // splitter's small over-limit retention: re-splitting them only strands
+    // tail fragments while the hard limit still holds.
+    let limit = budget.pre_injection_limit;
 
     let mut validated = Vec::with_capacity(segments.len());
     for seg in segments {

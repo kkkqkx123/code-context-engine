@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_compact_header_dot_inside_identifier_is_not_sentence_end() {
-        with_helper(15, |helper| {
+        with_helper(9, |helper| {
             let long = "foo.bar baz qux quux corge grault garply";
             let result = helper.compact_header(long, "", ChunkPath::Bm25);
             assert_eq!(result, "foo.bar baz qux");

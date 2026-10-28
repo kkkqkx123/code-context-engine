@@ -24,7 +24,11 @@ impl ChunkUnit {
     pub fn cost(self, text: &str) -> usize {
         match self {
             Self::Tokens => estimate_tokens(text),
-            Self::Terms => segment_text(text, shared_jieba()).len(),
+            // One position per indexed term: a source word and its
+            // identifier splits share a position, so one word costs one no
+            // matter how many forms the index keeps for it. CJK dictionary
+            // segments each own a position and keep their granularity.
+            Self::Terms => position_count(text),
         }
     }
 
@@ -75,6 +79,19 @@ pub fn truncate_to_cost(text: &str, unit: ChunkUnit, limit: usize) -> &str {
         best = next;
     }
     &text[..best]
+}
+
+/// Number of indexed positions in `text`.
+///
+/// The original word and its auxiliary splits share one position
+/// (`position_length == 0` marks the auxiliaries), so counting positions
+/// keeps one source word at cost one while CJK dictionary segments each
+/// keep their own.
+fn position_count(text: &str) -> usize {
+    segment_text(text, shared_jieba())
+        .iter()
+        .filter(|token| token.position_length == 1)
+        .count()
 }
 
 fn byte_at_char(text: &str, char_index: usize) -> usize {
@@ -144,6 +161,13 @@ pub fn split_to_fit(text: &str, unit: ChunkUnit, limit: usize) -> Vec<(usize, us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terms_count_positions_not_split_forms() {
+        assert_eq!(ChunkUnit::Terms.cost("get_or_init"), 1);
+        assert_eq!(ChunkUnit::Terms.cost("is_hidden"), 1);
+        assert_eq!(ChunkUnit::Terms.cost("hello world"), 2);
+    }
 
     #[test]
     fn token_and_term_units_are_distinct() {

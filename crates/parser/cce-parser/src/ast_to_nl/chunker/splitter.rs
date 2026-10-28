@@ -36,7 +36,14 @@ enum BoundaryLevel {
 
 impl BoundaryLevel {
     /// Next coarser boundary source for the data-driven whole-interval descent.
-    fn next(self) -> Self {
+    fn next(self, path: ChunkPath) -> Self {
+        if path == ChunkPath::Bm25 {
+            return match self {
+                Self::NestedGroups => Self::Entities,
+                Self::Entities | Self::Sentences => Self::Paragraphs,
+                Self::Paragraphs | Self::Tokens => Self::Tokens,
+            };
+        }
         match self {
             Self::NestedGroups => Self::Entities,
             // An entity is the finest unit that may own a chunk, so an
@@ -49,9 +56,16 @@ impl BoundaryLevel {
     }
 
     /// Boundary source that best sub-divides an oversized piece produced by
-    /// `self`: sentence ends inside entity/nested-group text, the hard token
-    /// cut for everything finer.
-    fn subdivide(self) -> Self {
+    /// `self`: sentence ends inside entity/nested-group text on the embedding
+    /// path and paragraph ends on the BM25 path, the hard token cut for
+    /// everything finer.
+    fn subdivide(self, path: ChunkPath) -> Self {
+        if path == ChunkPath::Bm25 {
+            return match self {
+                Self::NestedGroups | Self::Entities => Self::Paragraphs,
+                Self::Sentences | Self::Paragraphs | Self::Tokens => Self::Tokens,
+            };
+        }
         match self {
             Self::NestedGroups | Self::Entities => Self::Sentences,
             Self::Sentences | Self::Paragraphs | Self::Tokens => Self::Tokens,
@@ -264,7 +278,7 @@ impl TextSplitter {
                 path,
                 nl_boundaries,
                 range,
-                level.next(),
+                level.next(path),
                 inherit_entity_ids,
             );
         }
@@ -283,12 +297,16 @@ impl TextSplitter {
                 boundary.entity_ids = inherit_entity_ids.to_vec();
             }
             let piece_ids = boundary.entity_ids.clone();
-            if self.budget(path).body_limit == 0
-                || self
-                    .config
-                    .cost(&text[boundary.start_byte..boundary.end_byte], path)
-                    <= self.budget(path).body_limit
-            {
+            let budget = self.budget(path);
+            let piece_cost = self
+                .config
+                .cost(&text[boundary.start_byte..boundary.end_byte], path);
+            // A single piece that fits the pre-injection budget is kept whole:
+            // it absorbs decoration without crossing the hard limit, and
+            // splitting it only strands a tiny tail fragment next to a full
+            // block. The output stays one segment, so no continuation
+            // identity is appended on top of it.
+            if budget.body_limit == 0 || piece_cost <= budget.pre_injection_limit {
                 return Ok(vec![boundary]);
             }
             return self.split_range_at(
@@ -297,11 +315,12 @@ impl TextSplitter {
                 path,
                 nl_boundaries,
                 boundary.start_byte..boundary.end_byte,
-                level.subdivide(),
+                level.subdivide(path),
                 &piece_ids,
             );
         }
 
+        let budget = self.budget(path);
         let mut result = Vec::with_capacity(boundaries.len());
         for mut b in boundaries {
             validate_boundary(&b, &range, text)?;
@@ -310,9 +329,8 @@ impl TextSplitter {
             }
             let piece_ids = b.entity_ids.clone();
 
-            if self.budget(path).body_limit > 0
-                && self.config.cost(&text[b.start_byte..b.end_byte], path)
-                    > self.budget(path).body_limit
+            if budget.body_limit > 0
+                && self.config.cost(&text[b.start_byte..b.end_byte], path) > budget.body_limit
             {
                 result.extend(self.split_range_at(
                     text,
@@ -320,7 +338,7 @@ impl TextSplitter {
                     path,
                     nl_boundaries,
                     b.start_byte..b.end_byte,
-                    level.subdivide(),
+                    level.subdivide(path),
                     &piece_ids,
                 )?);
             } else {
