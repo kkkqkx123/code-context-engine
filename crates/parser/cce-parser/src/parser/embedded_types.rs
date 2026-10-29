@@ -14,10 +14,30 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 
 use cce_types::Span;
+use cce_types::language::Language;
 
 // Re-export core embedded block types from cce_core.
 // These were moved to break the circular dependency between cce_core and cce_parser.
 pub use cce_types::entity::{BlockRelation, BlockRelationType, BlockType, EmbeddedBlock};
+
+/// Language governing language-dispatched analysis for one entity.
+///
+/// Entities extracted from an embedded block (e.g. `<script>` in Vue) were
+/// parsed with the block's language, so every layer downstream of the merge
+/// must dispatch on it — not on the file language. Entities outside any
+/// block (or files without blocks, including the synthetic `ParsedFile`
+/// built by `process_entities`) fall back to the file language.
+pub fn resolve_entity_language(
+    blocks: &[EmbeddedBlock],
+    file_language: Language,
+    span: &Span,
+) -> Language {
+    blocks
+        .iter()
+        .find(|block| block.contains_span(span))
+        .map(|block| block.language)
+        .unwrap_or(file_language)
+}
 
 // ============================================================================
 // CSS-in-JS Types
@@ -242,5 +262,43 @@ mod tests {
         let config = EmbeddedParseConfig::scripts_only();
         assert!(config.parse_script);
         assert!(!config.parse_style);
+    }
+
+    fn script_block() -> EmbeddedBlock {
+        EmbeddedBlock {
+            block_type: BlockType::Script,
+            language: Language::JavaScript,
+            content: "function demo() {}".to_string(),
+            span: Span::new(10, 40, 1, 0, 3, 0),
+            content_span: Span::new(18, 36, 1, 8, 2, 10),
+            attributes: std::collections::HashMap::new(),
+            should_parse: true,
+        }
+    }
+
+    /// Layer routing must follow the block, not the file: entities inside
+    /// an embedded block dispatch on the block language.
+    #[test]
+    fn test_resolve_entity_language_prefers_block() {
+        let blocks = vec![script_block()];
+        let inside = Span::new(20, 30, 1, 10, 2, 0);
+        assert_eq!(
+            resolve_entity_language(&blocks, Language::Vue, &inside),
+            Language::JavaScript
+        );
+    }
+
+    #[test]
+    fn test_resolve_entity_language_falls_back_to_file() {
+        let blocks = vec![script_block()];
+        let outside = Span::new(0, 5, 0, 0, 0, 5);
+        assert_eq!(
+            resolve_entity_language(&blocks, Language::Vue, &outside),
+            Language::Vue
+        );
+        assert_eq!(
+            resolve_entity_language(&[], Language::Vue, &outside),
+            Language::Vue
+        );
     }
 }

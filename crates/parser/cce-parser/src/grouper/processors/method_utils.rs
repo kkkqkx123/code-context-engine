@@ -179,7 +179,10 @@ impl GetterSetterDetector {
     fn matches_getter_pattern(&self, method: &Entity, language: &Language) -> bool {
         let name = method.name.to_lowercase();
 
-        let is_getter_name = if matches!(language, Language::JavaScript | Language::TypeScript) {
+        let is_getter_name = if matches!(
+            language,
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx
+        ) {
             name.starts_with("get ")
                 || name.starts_with("is ")
                 || name.starts_with("get")
@@ -199,8 +202,13 @@ impl GetterSetterDetector {
             Language::Python | Language::Ruby => param_count == 1,
             Language::Php => param_count == 1,
             Language::Rust => param_count == 1,
-            Language::TypeScript | Language::JavaScript => param_count == 0,
+            Language::TypeScript | Language::JavaScript | Language::Jsx | Language::Tsx => {
+                param_count == 0
+            }
             Language::CSharp => param_count == 0,
+            // Go receivers, Dart getters, Scala accessors and dynamic
+            // languages carry zero or one parameter by construction; the
+            // generic bound accepts both shapes.
             _ => param_count <= 1,
         };
 
@@ -232,7 +240,10 @@ impl GetterSetterDetector {
     fn matches_setter_pattern(&self, method: &Entity, language: &Language) -> bool {
         let name = method.name.to_lowercase();
 
-        let is_setter_name = if matches!(language, Language::JavaScript | Language::TypeScript) {
+        let is_setter_name = if matches!(
+            language,
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx
+        ) {
             name.starts_with("set ") || name.starts_with("set")
         } else {
             name.starts_with("set")
@@ -249,7 +260,9 @@ impl GetterSetterDetector {
             Language::Python | Language::Ruby => param_count == 2,
             Language::Php => param_count == 2,
             Language::Rust => param_count == 2,
-            Language::TypeScript | Language::JavaScript => param_count == 1,
+            Language::TypeScript | Language::JavaScript | Language::Jsx | Language::Tsx => {
+                param_count == 1
+            }
             Language::CSharp => param_count == 1,
             _ => param_count == 1 || param_count == 2,
         };
@@ -466,5 +479,44 @@ mod tests {
             detector.detect_method_type(&getter, &Language::Java),
             MethodType::ComplexMethod
         );
+    }
+
+    /// JS-family parity: Jsx/Tsx follow the same getter/setter shapes as
+    /// JavaScript/TypeScript, including the spaced `get ` accessor form.
+    #[test]
+    fn test_js_family_getter_setter_parity() {
+        let detector = GetterSetterDetector::new();
+        for language in [
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Jsx,
+            Language::Tsx,
+        ] {
+            let mut getter = Entity::new(
+                EntityId(0),
+                EntityKind::Method,
+                "getName".to_string(),
+                Span::default(),
+            );
+            getter.parameters = Vec::new();
+            assert_eq!(
+                detector.detect_method_type(&getter, &language),
+                MethodType::SimpleGetter,
+                "getter parity for {language:?}"
+            );
+
+            let mut setter = Entity::new(
+                EntityId(1),
+                EntityKind::Method,
+                "setName".to_string(),
+                Span::default(),
+            );
+            setter.parameters = vec![("value".to_string(), Some("any".to_string()))];
+            assert_eq!(
+                detector.detect_method_type(&setter, &language),
+                MethodType::SimpleSetter,
+                "setter parity for {language:?}"
+            );
+        }
     }
 }

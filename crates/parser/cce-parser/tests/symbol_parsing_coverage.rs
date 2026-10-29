@@ -523,6 +523,31 @@ fn c_pointer_return_function_yields_entity() {
 }
 
 #[test]
+fn php_method_modifiers_recorded() {
+    let parsed = parse_file(
+        "mod.php",
+        "<?php\nclass Store {\n  public static function load(): string { return \"v\"; }\n  private function helper(): void {}\n}\n",
+    );
+    let load = find(&parsed.entities, EntityKind::Method, "load");
+    assert!(
+        load.modifiers.iter().any(|m| m == "public"),
+        "visibility should be recorded, got {:?}",
+        load.modifiers
+    );
+    assert!(
+        load.modifiers.iter().any(|m| m == "static"),
+        "static should be recorded, got {:?}",
+        load.modifiers
+    );
+    let helper = find(&parsed.entities, EntityKind::Method, "helper");
+    assert!(
+        helper.modifiers.iter().any(|m| m == "private"),
+        "private visibility should be recorded, got {:?}",
+        helper.modifiers
+    );
+}
+
+#[test]
 fn c_static_function_modifier() {
     let parsed = parse_file(
         "mod.c",

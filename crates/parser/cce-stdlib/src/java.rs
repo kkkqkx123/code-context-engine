@@ -987,7 +987,8 @@ impl_stdlib_categorizer!(
                 "java.nio.charset",
                 "java.nio.file",
                 "java.nio.file.attribute",
-                "java.nio.file.spi"
+                "java.nio.file.spi",
+                "System"
             ]
         ),
         (

@@ -841,6 +841,61 @@ impl CppStdlibDetector {
     }
 }
 
+impl_stdlib_categorizer!(
+    CppStdlibDetector,
+    [
+        (
+            StdlibCategory::Collection,
+            [
+                "vector",
+                "deque",
+                "list",
+                "map",
+                "set",
+                "unordered_map",
+                "unordered_set",
+                "array",
+                "sort",
+                "find",
+                "accumulate"
+            ]
+        ),
+        (
+            StdlibCategory::Io,
+            [
+                "iostream", "istream", "ostream", "fstream", "sstream", "cout", "cin", "cerr"
+            ]
+        ),
+        (
+            StdlibCategory::String,
+            ["string", "wstring", "string_view", "to_string"]
+        ),
+        (
+            StdlibCategory::Concurrency,
+            ["thread", "mutex", "atomic", "lock_guard"]
+        ),
+        (
+            StdlibCategory::Error,
+            ["exception", "runtime_error", "stdexcept"]
+        ),
+        (
+            StdlibCategory::Utility,
+            [
+                "unique_ptr",
+                "shared_ptr",
+                "make_unique",
+                "make_shared",
+                "move",
+                "forward",
+                "swap",
+                "pair",
+                "tuple",
+                "optional"
+            ]
+        ),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

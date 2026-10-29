@@ -37,6 +37,19 @@ pub struct NestedExtractionContext<'a> {
     pub language: &'a Language,
     /// Parsed file containing source code
     pub parsed_file: &'a ParsedFile,
+
     /// Configuration for nest processor
     pub config: &'a NestProcessorConfig,
+}
+
+impl<'a> NestedExtractionContext<'a> {
+    /// Language governing analysis for one entity: the innermost embedded
+    /// block containing it, else the file language.
+    pub fn language_for(&self, entity: &Entity) -> Language {
+        crate::parser::embedded_types::resolve_entity_language(
+            &self.parsed_file.embedded_blocks,
+            self.parsed_file.language,
+            &entity.span,
+        )
+    }
 }

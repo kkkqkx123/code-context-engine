@@ -220,6 +220,18 @@ impl BashStdlibDetector {
     }
 }
 
+impl_stdlib_categorizer!(
+    BashStdlibDetector,
+    [
+        (StdlibCategory::Io, ["echo", "printf", "read", "cat", "tee"]),
+        (StdlibCategory::String, ["grep", "sed", "awk", "cut", "tr"]),
+        (
+            StdlibCategory::Utility,
+            ["test", "true", "false", "cd", "exit"]
+        ),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

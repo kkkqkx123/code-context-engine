@@ -396,9 +396,14 @@ fn classify_stdlib_category(
     if !StdlibDetector::is_stdlib_by_type(callee_name, relation_type, language) {
         return None;
     }
+    // Remapped plugin languages inherit their host's categories.
+    let effective = cce_types::language::effective_language(language);
     // Get the specific category from the language-specific detector
-    match language {
-        cce_types::Language::JavaScript | cce_types::Language::TypeScript => {
+    match effective {
+        cce_types::Language::JavaScript
+        | cce_types::Language::TypeScript
+        | cce_types::Language::Jsx
+        | cce_types::Language::Tsx => {
             crate::parser::stdlib::javascript::JavaScriptStdlibDetector::get_category(callee_name)
         }
         cce_types::Language::Rust => {
@@ -415,6 +420,42 @@ fn classify_stdlib_category(
         }
         cce_types::Language::CSharp => {
             crate::parser::stdlib::csharp::CSharpStdlibDetector::get_category(callee_name)
+        }
+        cce_types::Language::C => {
+            crate::parser::stdlib::c::CStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Cpp => {
+            crate::parser::stdlib::cpp::CppStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Kotlin => {
+            crate::parser::stdlib::kotlin::KotlinStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Scala => {
+            crate::parser::stdlib::scala::ScalaStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Dart => {
+            crate::parser::stdlib::dart::DartStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Ruby => {
+            crate::parser::stdlib::ruby::RubyStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Php => {
+            crate::parser::stdlib::php::PhpStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Lua => {
+            crate::parser::stdlib::lua::LuaStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
+        }
+        cce_types::Language::Bash => {
+            crate::parser::stdlib::bash::BashStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
         }
         _ => Some(StdlibCategory::Other),
     }

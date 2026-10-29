@@ -41,6 +41,18 @@ impl<'a> FileProcessingContext<'a> {
         &self.parsed_file.language
     }
 
+    /// Get the language governing language-dispatched analysis for one
+    /// entity: the innermost embedded block containing it, else the file
+    /// language. File-level decisions (path rules, whole-file heuristics)
+    /// keep using [`language`](Self::language).
+    pub fn language_for(&self, entity: &Entity) -> Language {
+        crate::parser::embedded_types::resolve_entity_language(
+            &self.parsed_file.embedded_blocks,
+            self.parsed_file.language,
+            &entity.span,
+        )
+    }
+
     /// Find an entity by ID
     pub fn find_entity(&self, entity_id: cce_types::entity::EntityId) -> Option<&Entity> {
         self.entities.iter().find(|e| e.id == entity_id)

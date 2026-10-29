@@ -34,16 +34,9 @@ impl FunctionMemberProcessor {
     /// # Arguments
     /// * `groups` - Mutable reference to the list of entity groups
     /// * `entities` - All entities from the parsed file
-    /// * `language` - Programming language
-    ///
     /// # Returns
     /// Number of associations made
-    pub fn process(
-        &self,
-        groups: &mut Vec<EntityGroup>,
-        entities: &[Entity],
-        language: cce_types::language::Language,
-    ) -> usize {
+    pub fn process(&self, groups: &mut Vec<EntityGroup>, entities: &[Entity]) -> usize {
         let mut processed_ids: HashSet<EntityId> =
             groups.iter().flat_map(|g| g.all_entity_ids()).collect();
         let mut absorbed_group_indices: HashSet<usize> = HashSet::new();
@@ -143,9 +136,13 @@ impl FunctionMemberProcessor {
             }
             processed_ids.insert(header_id);
 
+            // The merged group keeps the function group's own language:
+            // children absorbed here were already analyzed per entity
+            // upstream; the group renders under its owning function.
+            let func_language = groups[func_idx].language;
             replacements.push((
                 func_idx,
-                create_function_with_members_group(func_entity, child_entities, language),
+                create_function_with_members_group(func_entity, child_entities, func_language),
             ));
         }
 
@@ -265,8 +262,7 @@ mod tests {
             EntityGroup::from_entity(prop.clone(), Language::JavaScript),
         ];
         let entities = vec![func, prop];
-        let count =
-            FunctionMemberProcessor::new().process(&mut groups, &entities, Language::JavaScript);
+        let count = FunctionMemberProcessor::new().process(&mut groups, &entities);
         assert_eq!(count, 1);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].group_type, GroupType::FunctionWithMembers);
@@ -283,7 +279,7 @@ mod tests {
             EntityGroup::from_entity(inner.clone(), Language::JavaScript),
         ];
         let entities = vec![outer, inner];
-        FunctionMemberProcessor::new().process(&mut groups, &entities, Language::JavaScript);
+        FunctionMemberProcessor::new().process(&mut groups, &entities);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name.as_str(), "authenticate");
         assert!(

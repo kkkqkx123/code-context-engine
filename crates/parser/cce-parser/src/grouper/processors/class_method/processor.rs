@@ -35,7 +35,6 @@ impl ClassMethodProcessor {
         let mut groups = Vec::new();
         let mut processed_ids = std::collections::HashSet::new();
         let mut association_count = 0;
-        let language = *ctx.language();
 
         // Step 1: Find auto-trait implementations targeting type definitions.
         // Auto-trait impls (Sync, Send, UnwindSafe, etc.) have no children
@@ -135,11 +134,12 @@ impl ClassMethodProcessor {
 
             // Mark stdlib/constructor/complex methods roles and merge
             // simple getters/setters when enabled.
+            let owner_language = ctx.language_for(&entity);
             let pattern_result = self.apply_pattern_processing(
                 &entity,
                 &fields,
                 &methods,
-                ctx.language(),
+                &owner_language,
                 ctx.config,
             );
 
@@ -161,7 +161,7 @@ impl ClassMethodProcessor {
                     entity.clone(),
                     field_entities,
                     pattern_result.methods.clone(),
-                    language,
+                    owner_language,
                 );
                 group.pattern_info = pattern_result.pattern_info;
                 group.member_roles = pattern_result.member_roles;
@@ -195,7 +195,8 @@ impl ClassMethodProcessor {
                 association_count += 1;
             } else {
                 // Large class or no methods: keep separate
-                let mut group = EntityGroup::from_entity(entity.clone(), language);
+                let owner_language = ctx.language_for(&entity);
+                let mut group = EntityGroup::from_entity(entity.clone(), owner_language);
 
                 group.nested_groups = nested_groups.into_boxed_slice();
                 group.nesting_level = 0;
@@ -231,7 +232,8 @@ impl ClassMethodProcessor {
                         continue;
                     }
                     if !processed_ids.contains(&child.id) {
-                        groups.push(EntityGroup::from_entity(child.clone(), language));
+                        let child_language = ctx.language_for(child);
+                        groups.push(EntityGroup::from_entity(child.clone(), child_language));
                         processed_ids.insert(child.id);
                     }
                 }
@@ -239,7 +241,8 @@ impl ClassMethodProcessor {
                 // Add fields as separate groups so they appear as children in the tree
                 for field in fields.iter() {
                     if !processed_ids.contains(&field.id) {
-                        groups.push(EntityGroup::from_entity((*field).clone(), language));
+                        let field_language = ctx.language_for(field);
+                        groups.push(EntityGroup::from_entity((*field).clone(), field_language));
                         processed_ids.insert(field.id);
                     }
                 }
@@ -306,7 +309,11 @@ impl ClassMethodProcessor {
                     continue;
                 }
 
-                groups.push(EntityGroup::from_entity(entity.clone(), language));
+                let standalone_language = ctx.language_for(entity);
+                groups.push(EntityGroup::from_entity(
+                    entity.clone(),
+                    standalone_language,
+                ));
                 processed_ids.insert(entity.id);
             }
         }

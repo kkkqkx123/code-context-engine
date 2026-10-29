@@ -144,7 +144,8 @@ impl TestSuiteDetector {
             .iter()
             .filter(|e| !e.kind.is_annotation_like())
             .filter_map(|e| {
-                let info = self.detect_entity(e, ctx.language(), file_path, &annotations, source);
+                let language = ctx.language_for(e);
+                let info = self.detect_entity(e, &language, file_path, &annotations, source);
                 if info.is_unknown() {
                     None
                 } else {

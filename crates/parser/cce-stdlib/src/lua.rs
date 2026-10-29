@@ -246,6 +246,27 @@ impl LuaStdlibDetector {
     }
 }
 
+impl_stdlib_categorizer!(
+    LuaStdlibDetector,
+    [
+        (
+            StdlibCategory::Collection,
+            ["table", "table.insert", "table.remove"]
+        ),
+        (StdlibCategory::Io, ["print", "io", "io.open"]),
+        (StdlibCategory::String, ["string", "string.format"]),
+        (StdlibCategory::Numeric, ["math", "math.sqrt", "tonumber"]),
+        (
+            StdlibCategory::Concurrency,
+            ["coroutine", "coroutine.resume", "thread"]
+        ),
+        (
+            StdlibCategory::Utility,
+            ["os", "pairs", "ipairs", "require"]
+        ),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

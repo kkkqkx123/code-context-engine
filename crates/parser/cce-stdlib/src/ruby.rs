@@ -1042,6 +1042,42 @@ impl_stdlib_by_type_simple!(
     ]
 );
 
+impl_stdlib_categorizer!(
+    RubyStdlibDetector,
+    [
+        (
+            StdlibCategory::Collection,
+            ["Array", "Hash", "Enumerable", "Range"]
+        ),
+        (
+            StdlibCategory::Io,
+            [
+                "puts",
+                "print",
+                "printf",
+                "gets",
+                "File",
+                "IO",
+                "require",
+                "require_relative"
+            ]
+        ),
+        (StdlibCategory::String, ["String", "Symbol"]),
+        (StdlibCategory::Numeric, ["Integer", "Float", "Numeric"]),
+        (StdlibCategory::Concurrency, ["Thread", "Mutex", "Fiber"]),
+        (
+            StdlibCategory::Error,
+            [
+                "raise",
+                "fail",
+                "Exception",
+                "StandardError",
+                "RuntimeError"
+            ]
+        ),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

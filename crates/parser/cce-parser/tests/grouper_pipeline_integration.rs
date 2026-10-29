@@ -887,3 +887,101 @@ fn test_pipeline_process_entities_idempotent() {
         assert_eq!(g1.group_type, g2.group_type);
     }
 }
+
+// ============================================================
+// Embedded-block language resolution
+// ============================================================
+
+fn script_block(start: usize, end: usize) -> cce_types::entity::EmbeddedBlock {
+    cce_types::entity::EmbeddedBlock {
+        block_type: cce_types::entity::BlockType::Script,
+        language: Language::JavaScript,
+        content: String::new(),
+        span: Span {
+            start_position: cce_types::Position { row: 0, column: 0 },
+            end_position: cce_types::Position { row: 0, column: 0 },
+            start_byte: start * 10,
+            end_byte: end * 10,
+        },
+        content_span: Span {
+            start_position: cce_types::Position { row: 0, column: 0 },
+            end_position: cce_types::Position { row: 0, column: 0 },
+            start_byte: start * 10,
+            end_byte: end * 10,
+        },
+        attributes: std::collections::HashMap::new(),
+        should_parse: true,
+    }
+}
+
+/// Entities inside an embedded block must be grouped under the block
+/// language, not the file language: downstream conversion (call pruning,
+/// noise profiles, test detection) dispatches on `group.language`.
+#[test]
+fn test_embedded_block_entity_uses_block_language() {
+    let pipeline = PreprocessingPipeline::new();
+    let mut parsed_file = make_pf(
+        Language::Vue,
+        "app.vue",
+        "",
+        vec![
+            create_function(1, "demo", 2, 4),
+            create_function(2, "outside", 12, 14),
+        ],
+    );
+    parsed_file.embedded_blocks.push(script_block(1, 6));
+
+    let result = pipeline.process(&parsed_file);
+    let demo = result
+        .groups
+        .iter()
+        .find(|g| g.name == "demo")
+        .expect("demo group present");
+    assert_eq!(
+        demo.language,
+        Language::JavaScript,
+        "script-block entity must carry the block language, got {:?}",
+        demo.language
+    );
+    let outside = result
+        .groups
+        .iter()
+        .find(|g| g.name == "outside")
+        .expect("outside group present");
+    assert_eq!(
+        outside.language,
+        Language::Vue,
+        "entities outside blocks keep the file language, got {:?}",
+        outside.language
+    );
+}
+
+/// Production-path proof that block coordinates line up: a real Vue SFC
+/// parsed by the coordinator must group its `<script>` function under
+/// JavaScript. A span-rebase or language-tagging regression turns this red.
+#[test]
+fn test_vue_sfc_script_function_groups_as_javascript() {
+    let source = "<template>\n  <button @click=\"save\">Save</button>\n</template>\n<script>\nfunction save() {\n  console.log(\"saving\");\n}\n</script>\n";
+    let mut coordinator = cce_parser::parser::coordinator::ParseCoordinator::new();
+    let parsed = coordinator
+        .parse("app.vue", source)
+        .expect("Vue SFC should parse");
+    assert!(
+        !parsed.embedded_blocks.is_empty(),
+        "expected embedded blocks, got none"
+    );
+
+    let pipeline = PreprocessingPipeline::new();
+    let result = pipeline.process(&parsed);
+    let save = result
+        .groups
+        .iter()
+        .find(|g| g.name == "save")
+        .expect("save group present");
+    assert_eq!(
+        save.language,
+        Language::JavaScript,
+        "script function must group as JavaScript, got {:?}",
+        save.language
+    );
+}

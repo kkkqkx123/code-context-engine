@@ -1001,7 +1001,9 @@ impl_stdlib_categorizer!(
                 "System.IO.Pipes",
                 "System.IO.Ports",
                 "System.IO.MemoryMappedFiles",
-                "System.IO.IsolatedStorage"
+                "System.IO.IsolatedStorage",
+                "System.Console",
+                "Console"
             ]
         ),
         (

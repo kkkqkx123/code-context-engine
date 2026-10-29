@@ -41,12 +41,11 @@ impl TestSuiteProcessor {
         let mut groups = Vec::new();
         let mut processed_ids = std::collections::HashSet::new();
         let mut association_count = 0;
-        let language = *ctx.language();
-
         // Check if test entity grouping is enabled
         if !ctx.config.enable_test_entity_grouping {
             // Return all entities as standalone groups
             for entity in ctx.entities {
+                let language = ctx.language_for(entity);
                 groups.push(EntityGroup::from_entity(entity.clone(), language));
                 processed_ids.insert(entity.id);
             }
@@ -70,7 +69,8 @@ impl TestSuiteProcessor {
             // Test cases are either:
             // 1. Children of the test suite entity (parent-child relationship)
             // 2. Entities within the suite's span that are test cases
-            let test_cases = self.find_test_cases_for_suite(suite, ctx.entities, &language);
+            let suite_language = ctx.language_for(suite);
+            let test_cases = self.find_test_cases_for_suite(suite, ctx.entities, &suite_language);
 
             // Check nesting depth
             let nesting_depth = self.calculate_nesting_depth(suite, ctx.entities);
@@ -83,13 +83,14 @@ impl TestSuiteProcessor {
                 );
 
                 // Flatten: create standalone group for this suite
-                groups.push(EntityGroup::from_entity(suite.clone(), language));
+                groups.push(EntityGroup::from_entity(suite.clone(), suite_language));
                 processed_ids.insert(suite.id);
 
                 // Add test cases as standalone groups too
                 for case in &test_cases {
                     if !processed_ids.contains(&case.id) {
-                        groups.push(EntityGroup::from_entity(case.clone(), language));
+                        let case_language = ctx.language_for(case);
+                        groups.push(EntityGroup::from_entity(case.clone(), case_language));
                         processed_ids.insert(case.id);
                     }
                 }
@@ -99,12 +100,16 @@ impl TestSuiteProcessor {
             // Create test suite with cases group
             if test_cases.is_empty() {
                 // No test cases, but still preserve TestSuiteWithCases type identity
-                let group = EntityGroup::test_suite_with_cases(suite.clone(), Vec::new(), language);
+                let group =
+                    EntityGroup::test_suite_with_cases(suite.clone(), Vec::new(), suite_language);
                 groups.push(group);
             } else {
                 // Create grouped test suite
-                let group =
-                    EntityGroup::test_suite_with_cases(suite.clone(), test_cases.clone(), language);
+                let group = EntityGroup::test_suite_with_cases(
+                    suite.clone(),
+                    test_cases.clone(),
+                    suite_language,
+                );
                 groups.push(group);
                 association_count += 1;
 
@@ -120,6 +125,7 @@ impl TestSuiteProcessor {
         // Step 3: Add remaining test entities as standalone groups
         for entity in ctx.entities.iter().filter(|e| e.kind.is_test_related()) {
             if !processed_ids.contains(&entity.id) {
+                let language = ctx.language_for(entity);
                 groups.push(EntityGroup::from_entity(entity.clone(), language));
                 processed_ids.insert(entity.id);
             }

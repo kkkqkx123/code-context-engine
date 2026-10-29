@@ -234,6 +234,42 @@ v.push(1);
 }
 
 #[test]
+fn test_extract_c_stdlib_category() {
+    // Newly categorized languages must flow through the same classifier:
+    // `printf` resolves to Io instead of the uncategorized bucket.
+    let mut ast_parser = AstParser::new();
+    let entity_extractor = EntityExtractor::new();
+    let relation_extractor = RelationExtractor::new();
+
+    let code = "#include <stdio.h>\nint main() { printf(\"hi\"); return 0; }\n";
+
+    let tree = ast_parser
+        .parse_with_tree(code, &Language::C)
+        .expect("Failed to parse")
+        .0;
+    let entities = entity_extractor
+        .extract(&tree, code, &Language::C)
+        .expect("Failed to extract entities");
+    let relations = relation_extractor
+        .extract(&tree, code, &Language::C, &entities, Some(1))
+        .expect("Failed to extract relations");
+
+    let calls: Vec<_> = relations
+        .iter()
+        .filter(|r| r.relation_type.is_call())
+        .collect();
+    let printf = calls
+        .iter()
+        .find(|r| r.dst_name() == "printf")
+        .expect("printf call present");
+    assert_eq!(
+        printf.stdlib_category,
+        Some(StdlibCategory::Io),
+        "printf category should be Io, not uncategorized"
+    );
+}
+
+#[test]
 fn test_extract_full_callee_name_javascript_method() {
     // Regression: `console.log(...)` and `Math.max(...)` must keep
     // their receivers so stdlib detection sees the qualified name.

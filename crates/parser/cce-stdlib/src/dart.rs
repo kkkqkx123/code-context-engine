@@ -1086,6 +1086,36 @@ impl DartStdlibDetector {
     }
 }
 
+impl_stdlib_categorizer!(
+    DartStdlibDetector,
+    [
+        (
+            StdlibCategory::Collection,
+            ["List", "Set", "Map", "Iterable", "Queue", "dart:collection"]
+        ),
+        (
+            StdlibCategory::Io,
+            ["print", "dart:io", "File", "stdin", "stdout"]
+        ),
+        (
+            StdlibCategory::Concurrency,
+            [
+                "Future",
+                "Stream",
+                "Completer",
+                "dart:async",
+                "dart:isolate"
+            ]
+        ),
+        (StdlibCategory::String, ["String"]),
+        (
+            StdlibCategory::Numeric,
+            ["int", "double", "num", "dart:math"]
+        ),
+        (StdlibCategory::Error, ["Exception", "Error"]),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

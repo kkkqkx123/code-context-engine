@@ -7,6 +7,27 @@ mod detector;
 mod packages;
 mod types;
 
+impl_stdlib_categorizer!(
+    ScalaStdlibDetector,
+    [
+        (
+            StdlibCategory::Collection,
+            ["List", "Vector", "Map", "Set", "Option", "Array"]
+        ),
+        (
+            StdlibCategory::Io,
+            ["println", "print", "printf", "readLine"]
+        ),
+        (StdlibCategory::String, ["String"]),
+        (StdlibCategory::Numeric, ["Int", "Long", "Float", "Double"]),
+        (StdlibCategory::Concurrency, ["Future", "scala.concurrent"]),
+        (
+            StdlibCategory::Utility,
+            ["Either", "Try", "identity", "implicitly"]
+        ),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

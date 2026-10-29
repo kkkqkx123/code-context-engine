@@ -981,6 +981,65 @@ mod tests {
         clear_plugin_languages();
     }
 
+    /// Sync guard: every non-template parsable language must map its
+    /// sentinel call to a real category, not the uncategorized bucket.
+    /// Adding a language without taxonomy turns this red by design:
+    /// an uncategorized stdlib call is incomplete implementation.
+    #[test]
+    fn test_stdlib_category_covers_all_categorized_languages() {
+        use cce_types::StdlibCategory;
+        let template = [
+            Language::Html,
+            Language::Css,
+            Language::Vue,
+            Language::Svelte,
+            Language::Ejs,
+        ];
+        for language in Language::ast_parsable_languages() {
+            if template.contains(language) {
+                continue;
+            }
+            let sentinel = match language {
+                Language::Bash => ("echo", BashStdlibDetector::get_category("echo")),
+                Language::C => ("printf", CStdlibDetector::get_category("printf")),
+                Language::Cpp => ("cout", CppStdlibDetector::get_category("cout")),
+                Language::CSharp => (
+                    "Console.WriteLine",
+                    CSharpStdlibDetector::get_category("Console.WriteLine"),
+                ),
+                Language::Dart => ("print", DartStdlibDetector::get_category("print")),
+                Language::Go => ("fmt.Println", GoStdlibDetector::get_category("fmt.Println")),
+                Language::Java => (
+                    "System.out.println",
+                    JavaStdlibDetector::get_category("System.out.println"),
+                ),
+                Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => (
+                    "console.log",
+                    JavaScriptStdlibDetector::get_category("console.log"),
+                ),
+                Language::Kotlin => ("listOf", KotlinStdlibDetector::get_category("listOf")),
+                Language::Lua => (
+                    "string.format",
+                    LuaStdlibDetector::get_category("string.format"),
+                ),
+                Language::Php => ("strlen", PhpStdlibDetector::get_category("strlen")),
+                Language::Python => ("print", PythonStdlibDetector::get_category("print")),
+                Language::Ruby => ("puts", RubyStdlibDetector::get_category("puts")),
+                Language::Rust => ("Vec::new", RustStdlibDetector::get_category("Vec::new")),
+                Language::Scala => ("println", ScalaStdlibDetector::get_category("println")),
+                other => panic!(
+                    "{other:?} is parsable but has no category sentinel: \
+                     add a categorizer table and a sentinel arm"
+                ),
+            };
+            let (call, category) = sentinel;
+            assert!(
+                matches!(category, Some(c) if c != StdlibCategory::Other),
+                "{call} in {language:?} must map to a real category, got {category:?}"
+            );
+        }
+    }
+
     /// Sync guard: every parsable language must have a conscious stdlib
     /// decision. Add the new language (or an explicit opt-out) here when
     /// extending `Language::ast_parsable_languages`.

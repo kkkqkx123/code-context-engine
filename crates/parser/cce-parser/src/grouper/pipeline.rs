@@ -334,7 +334,6 @@ impl PreprocessingPipeline {
                     .map(|e| e.name.as_str())
                     .collect();
 
-                let language = parsed_file.language;
                 for entity in still_remaining {
                     // Constructors/destructors owned by a parent type belong
                     // to their class group and must not become standalone
@@ -377,28 +376,59 @@ impl PreprocessingPipeline {
                                     })
                                     .map(|e| e.id);
                                 for method in methods {
-                                    let mut group = EntityGroup::from_entity(method, language);
+                                    let method_language =
+                                        crate::parser::embedded_types::resolve_entity_language(
+                                            &parsed_file.embedded_blocks,
+                                            parsed_file.language,
+                                            &method.span,
+                                        );
+                                    let mut group =
+                                        EntityGroup::from_entity(method, method_language);
                                     group.parent_group_id =
                                         alias_id.map(EntityGroup::group_id_for_entity);
                                     groups.push(group);
                                 }
                             } else {
-                                let group =
-                                    EntityGroup::impl_block_with_methods(entity, methods, language);
+                                let block_language =
+                                    crate::parser::embedded_types::resolve_entity_language(
+                                        &parsed_file.embedded_blocks,
+                                        parsed_file.language,
+                                        &entity.span,
+                                    );
+                                let group = EntityGroup::impl_block_with_methods(
+                                    entity,
+                                    methods,
+                                    block_language,
+                                );
                                 groups.push(group);
                             }
                         } else {
-                            groups.push(EntityGroup::from_entity(entity, language));
+                            let block_language =
+                                crate::parser::embedded_types::resolve_entity_language(
+                                    &parsed_file.embedded_blocks,
+                                    parsed_file.language,
+                                    &entity.span,
+                                );
+                            groups.push(EntityGroup::from_entity(entity, block_language));
                         }
                     } else {
-                        groups.push(EntityGroup::from_entity(entity, language));
+                        let block_language = crate::parser::embedded_types::resolve_entity_language(
+                            &parsed_file.embedded_blocks,
+                            parsed_file.language,
+                            &entity.span,
+                        );
+                        groups.push(EntityGroup::from_entity(entity, block_language));
                     }
                 }
             }
         } else if !filtered_entities.is_empty() {
-            let language = parsed_file.language;
             for entity in filtered_entities {
-                groups.push(EntityGroup::from_entity(entity, language));
+                let block_language = crate::parser::embedded_types::resolve_entity_language(
+                    &parsed_file.embedded_blocks,
+                    parsed_file.language,
+                    &entity.span,
+                );
+                groups.push(EntityGroup::from_entity(entity, block_language));
             }
         }
 
@@ -421,11 +451,9 @@ impl PreprocessingPipeline {
         // Stage 5: Process function member grouping (if enabled)
         // Groups function-level entities (macros, closures, statements) as members
         if self.config.enable_function_member_grouping {
-            let func_member_count = self.function_member_processor.process(
-                &mut groups,
-                &parsed_file.entities,
-                parsed_file.language,
-            );
+            let func_member_count = self
+                .function_member_processor
+                .process(&mut groups, &parsed_file.entities);
             if func_member_count > 0 {}
         }
 
@@ -691,7 +719,14 @@ impl PreprocessingPipeline {
             groups.extend(class_groups);
         } else if !filtered_entities.is_empty() {
             for entity in filtered_entities {
-                groups.push(EntityGroup::from_entity(entity, language));
+                // The synthetic file carries no embedded blocks, so this
+                // falls back to the caller-provided language.
+                let block_language = crate::parser::embedded_types::resolve_entity_language(
+                    &temp_parsed_file.embedded_blocks,
+                    language,
+                    &entity.span,
+                );
+                groups.push(EntityGroup::from_entity(entity, block_language));
             }
         }
 

@@ -1093,6 +1093,47 @@ impl KotlinStdlibDetector {
     }
 }
 
+impl_stdlib_categorizer!(
+    KotlinStdlibDetector,
+    [
+        (
+            StdlibCategory::Collection,
+            [
+                "Array",
+                "List",
+                "Map",
+                "Set",
+                "listOf",
+                "mutableListOf",
+                "setOf",
+                "mutableSetOf",
+                "mapOf",
+                "mutableMapOf"
+            ]
+        ),
+        (StdlibCategory::String, ["String", "String?"]),
+        (
+            StdlibCategory::Numeric,
+            ["Int", "Long", "Float", "Double", "Byte", "Short"]
+        ),
+        (
+            StdlibCategory::Error,
+            [
+                "error",
+                "TODO",
+                "check",
+                "require",
+                "checkNotNull",
+                "requireNotNull"
+            ]
+        ),
+        (
+            StdlibCategory::Utility,
+            ["lazy", "let", "run", "with", "apply", "also", "repeat"]
+        ),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -83,16 +83,17 @@ impl ClassMethodProcessor {
 
                 // Mark stdlib/constructor/complex methods roles and merge
                 // simple getters/setters when enabled.
+                let child_language = ctx.language_for(child_entity);
                 let pattern_result = self.apply_pattern_processing(
                     child_entity,
                     &fields,
                     &methods,
-                    ctx.language,
+                    &child_language,
                     ctx.config,
                 );
 
                 // Create nested entity group
-                let mut group = EntityGroup::from_entity(child_entity.clone(), *ctx.language);
+                let mut group = EntityGroup::from_entity(child_entity.clone(), child_language);
                 group.nested_groups = deeper_nested.into_boxed_slice();
                 group.nesting_level = ctx.max_depth;
                 group.parent_group_id = Some(EntityGroup::group_id_for_entity(parent_entity.id));

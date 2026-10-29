@@ -907,6 +907,27 @@ impl PhpStdlibDetector {
     }
 }
 
+impl_stdlib_categorizer!(
+    PhpStdlibDetector,
+    [
+        (
+            StdlibCategory::Collection,
+            [
+                "array_map",
+                "array_merge",
+                "array_filter",
+                "array_keys",
+                "ArrayObject",
+                "SplFixedArray"
+            ]
+        ),
+        (StdlibCategory::Io, ["echo", "print", "printf", "sprintf"]),
+        (StdlibCategory::String, ["strlen", "strpos", "str_replace"]),
+        (StdlibCategory::Error, ["Exception", "ErrorException"]),
+        (StdlibCategory::Utility, ["DateTime", "stdClass", "Closure"]),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

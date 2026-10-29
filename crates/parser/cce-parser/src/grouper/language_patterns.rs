@@ -56,4 +56,31 @@ mod tests {
         assert!(is_self_reference("&mut self", &Language::Rust));
         assert!(!is_self_reference("other", &Language::Python));
     }
+
+    /// Sync guard: only languages with an explicit receiver parameter answer
+    /// here; every other parsable language must keep the negative. Add new
+    /// languages to one of the two lists when extending the parsable set.
+    #[test]
+    fn test_self_reference_covers_all_parsable_languages() {
+        let with_self: &[Language] = &[
+            Language::Python,
+            Language::Rust,
+            Language::Cpp,
+            Language::Php,
+        ];
+        for language in Language::ast_parsable_languages() {
+            let expects = with_self.contains(language);
+            assert_eq!(
+                has_explicit_self_parameter(language),
+                expects,
+                "{language:?} self-parameter decision changed"
+            );
+            assert!(
+                !is_self_reference("definitely_not_self", language),
+                "{language:?} must reject unrelated types"
+            );
+        }
+        assert!(is_self_reference("self", &Language::Python));
+        assert!(is_self_reference("$this", &Language::Php));
+    }
 }

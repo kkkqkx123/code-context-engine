@@ -1001,6 +1001,42 @@ impl CStdlibDetector {
     }
 }
 
+impl_stdlib_categorizer!(
+    CStdlibDetector,
+    [
+        (StdlibCategory::Collection, ["bsearch", "qsort"]),
+        (
+            StdlibCategory::Io,
+            [
+                "stdio.h", "printf", "fprintf", "sprintf", "snprintf", "scanf", "fscanf", "sscanf",
+                "fopen", "fclose", "fread", "fwrite", "fgets", "fputs", "fgetc", "fputc",
+                "getchar", "putchar", "gets", "puts", "perror"
+            ]
+        ),
+        (
+            StdlibCategory::String,
+            [
+                "string.h", "strlen", "strcpy", "strncpy", "strcmp", "strncmp", "strcat",
+                "strncat", "strchr", "strstr", "memcpy", "memmove", "memset", "memcmp"
+            ]
+        ),
+        (StdlibCategory::Numeric, ["math.h", "sqrt", "abs", "labs"]),
+        (
+            StdlibCategory::Concurrency,
+            ["threads.h", "stdatomic.h", "thrd_create", "mtx_lock"]
+        ),
+        (StdlibCategory::Error, ["errno.h"]),
+        (StdlibCategory::Macro, ["assert.h", "assert"]),
+        (
+            StdlibCategory::Utility,
+            [
+                "stdlib.h", "malloc", "calloc", "realloc", "free", "exit", "abort", "getenv",
+                "system", "time.h"
+            ]
+        ),
+    ]
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
