@@ -306,16 +306,32 @@ fn process_path(
                     } else {
                         owner
                     };
-                    // Continuation blocks keep the group topic sentence ahead of
-                    // the member identity so split halves and tiny merged members
-                    // still carry file-level intent in vector space.
-                    continuation_for_block = format!(
-                        "{} {}. {} {}.",
-                        ctx.group.kind.kind_label(),
-                        ctx.group.name,
-                        first.kind.kind_label(),
-                        display
-                    );
+                    // Continuation blocks name the members they hold. When
+                    // the member carries its own descriptor (docstring), it
+                    // is retrievable on its own: repeating the group topic
+                    // ahead of it only adds a shared common component that
+                    // pulls every block of the group toward the same
+                    // direction and dilutes the member's own signal.
+                    // Tiny members without a descriptor keep the group
+                    // topic so they still carry file-level intent.
+                    if super::chunk_builder::entity_has_own_descriptor(
+                        ctx.group,
+                        first.entity_id,
+                    ) {
+                        continuation_for_block =
+                            format!("{} {}.", first.kind.kind_label(), display);
+                    } else {
+                        // Continuation blocks keep the group topic sentence ahead of
+                        // the member identity so split halves and tiny merged members
+                        // still carry file-level intent in vector space.
+                        continuation_for_block = format!(
+                            "{} {}. {} {}.",
+                            ctx.group.kind.kind_label(),
+                            ctx.group.name,
+                            first.kind.kind_label(),
+                            display
+                        );
+                    }
                 }
                 &continuation_for_block
             } else {

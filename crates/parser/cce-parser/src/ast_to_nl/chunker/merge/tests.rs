@@ -876,6 +876,60 @@ fn test_merge_small_chunks_sentence_fragment_has_no_topic_purity() {
 }
 
 #[test]
+fn test_merge_small_chunks_first_block_header_context_keeps_veto() {
+    let config = ChunkingConfig {
+        min_chunk_tokens: 150,
+        max_tokens: 512,
+        ..Default::default()
+    };
+    let group_spans = HashMap::from([
+        ("g1".to_string(), Span::new(0, 10, 0, 0, 0, 0)),
+        ("g2".to_string(), Span::new(10, 20, 0, 0, 0, 0)),
+    ]);
+
+    // First-block chunk: group header (context) plus one documented member.
+    // Its topic is the member's own, so the self-contained veto must hold
+    // even though two entity ids are attributed to the chunk.
+    let mut first = make_test_chunk_with_code_meta(
+        "g1_emb_0",
+        "g1",
+        ChunkPath::Embedding,
+        &"word ".repeat(60),
+        90,
+        vec![EntityId(1), EntityId(2)],
+        vec![EntityId(1)],
+        vec![],
+        vec![],
+        vec![],
+        Span::new(0, 10, 0, 0, 0, 0),
+        false,
+        None,
+        None,
+    );
+    first.self_contained = true;
+    let chunks = vec![
+        first,
+        make_test_chunk(
+            "g2_emb_0",
+            "g2",
+            ChunkPath::Embedding,
+            &"word ".repeat(140),
+            210,
+            vec![EntityId(3)],
+            Span::new(10, 20, 0, 0, 0, 0),
+        ),
+    ];
+
+    let result = merge_small_chunks_cross_group(chunks, &group_spans, &config);
+
+    assert_eq!(
+        result.len(),
+        2,
+        "header-plus-one-member block keeps its topic veto"
+    );
+}
+
+#[test]
 fn test_merge_small_chunks_self_contained_bm25_unaffected() {
     let config = ChunkingConfig {
         min_chunk_bm25_terms: 80,
@@ -1266,5 +1320,52 @@ fn test_single_topic_small_chunk_keeps_veto() {
     assert!(
         !merge_strategy::should_merge(&pure, &neighbor, ChunkPath::Embedding, &config),
         "a below-min single-entity self-contained chunk keeps its pure topic"
+    );
+}
+
+#[test]
+fn test_tiny_residue_merges_across_kinds() {
+    let config = ChunkingConfig::default();
+    // 14-token sentence splinter next to a same-group neighbor of a
+    // different kind: the kind gate must not strand a fragment of the
+    // unit it was split from.
+    let mut splinter = make_test_chunk_with_code_meta(
+        "tiny_emb_0",
+        "g1",
+        ChunkPath::Embedding,
+        "field debug.",
+        14,
+        vec![EntityId(1)],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        Span::new(0, 10, 0, 0, 0, 0),
+        false,
+        None,
+        None,
+    );
+    splinter.self_contained = false;
+    let mut neighbor = make_small_self_contained_chunk("next_emb_0", "g1", vec![EntityId(3)]);
+    neighbor.self_contained = false;
+    neighbor.metadata.as_code_mut().expect("code meta").entity_kind = EntityKind::Struct;
+    assert!(
+        merge_strategy::should_merge(&splinter, &neighbor, ChunkPath::Embedding, &config),
+        "a tiny same-group residue rejoins its unit regardless of kind"
+    );
+
+    // Same tiny residue from another group at a disjoint span: the kind
+    // gate still applies.
+    let mut stranger = make_small_self_contained_chunk("other_emb_0", "g2", vec![EntityId(4)]);
+    stranger.self_contained = false;
+    stranger.metadata.source_span = Span::new(10, 20, 0, 0, 0, 0);
+    stranger
+        .metadata
+        .as_code_mut()
+        .expect("code meta")
+        .entity_kind = EntityKind::Struct;
+    assert!(
+        !merge_strategy::should_merge(&splinter, &stranger, ChunkPath::Embedding, &config),
+        "a tiny residue must not glue unrelated groups"
     );
 }

@@ -67,6 +67,17 @@ impl<'a> IndexTextEnricher<'a> {
             conversion.append_index_context_raw_separate(&bm25_cleaned, &emb_cleaned);
         }
 
+        // The template emits a `calls:` line naming the entity's call
+        // targets, but the behavior sidecar above appends the raw body that
+        // already states most of those calls verbatim. Restating them in a
+        // dedicated line only duplicates the identifiers and adds a shared
+        // common component across every callable chunk, pulling unrelated
+        // vectors toward each other. Drop the callees the surrounding text
+        // already names; drop the line when nothing distinctive remains.
+        // BM25 text is untouched: the keyword index relies on the raw
+        // identifier occurrences.
+        prune_redundant_calls_lines(conversion);
+
         if let Some(vocabulary) = vocabulary {
             self.compute_glossary(conversion, processing_result, &extra_text, vocabulary);
         }
@@ -112,6 +123,18 @@ impl<'a> IndexTextEnricher<'a> {
         processing_result: &ProcessingResult,
         source: &str,
     ) -> Option<String> {
+        // FileDocumentation groups are pure prose; their span covers the doc
+        // comment itself. Extracting a "body" from it would re-append the
+        // full document the template already compressed to ~300 tokens,
+        // undoing the cap and splitting one summary into many near-identical
+        // chunks. Docs carry no callable behavior, so there is no sidecar.
+        if processing_result.groups.iter().any(|group| {
+            group.group_type == cce_types::GroupType::FileDocumentation
+                && (group.header.as_ref().is_some_and(|h| h.id == entity_id)
+                    || group.members.iter().any(|m| m.id == entity_id))
+        }) {
+            return None;
+        }
         let cf_facts = processing_result.control_flow.get(entity_id);
         let bf_facts = processing_result.behavior.get(entity_id);
 
@@ -236,6 +259,112 @@ impl<'a> IndexTextEnricher<'a> {
 /// Maximum number of branch discriminants listed in a topic anchor.
 const MAX_ANCHOR_DISCRIMINANTS: usize = 8;
 
+/// Bare call-target names that carry no subject of their own.
+///
+/// Error constructors, assertions, formatting and collection plumbing occur
+/// in nearly every callable body. Naming them in a dedicated line states
+/// nothing the body does not already imply, so they never survive the
+/// redundancy prune on their own.
+const BOILERPLATE_CALLEES: &[&str] = &[
+    "Ok", "Err", "Some", "None", "assert", "assert_eq", "assert_ne", "debug_assert", "panic",
+    "todo", "unimplemented", "unreachable", "vec", "format", "write", "writeln", "print",
+    "println", "eprint", "eprintln", "clone", "cloned", "to_string", "to_owned", "as_ref",
+    "as_mut", "len", "is_empty", "is_some", "is_none", "is_ok", "is_err", "unwrap", "expect",
+    "push", "pop", "iter", "iter_mut", "into", "from", "map", "and_then",
+];
+
+/// Whether a call target restates what the surrounding text already names.
+///
+/// A qualified target is redundant when it occurs verbatim, or when both
+/// its head qualifier and its final segment occur as identifier tokens
+/// (the receiver is spelled differently but both parts are stated). A bare
+/// target is redundant when it occurs as an identifier token or belongs to
+/// the language boilerplate set.
+fn callee_is_redundant(callee: &str, full_text: &str, tokens: &std::collections::HashSet<&str>) -> bool {
+    let callee = callee.trim().trim_end_matches('.').trim();
+    if callee.is_empty() {
+        return true;
+    }
+    if full_text.contains(callee) {
+        return true;
+    }
+    let qualified = callee.contains("::") || callee.contains('.');
+    if qualified {
+        let head = callee
+            .split([':', '.'])
+            .next()
+            .unwrap_or("")
+            .trim();
+        let tail = callee
+            .rsplit([':', '.'])
+            .next()
+            .unwrap_or("")
+            .trim();
+        if !head.is_empty() && head != tail && tokens.contains(head) && tokens.contains(tail) {
+            return true;
+        }
+        return false;
+    }
+    tokens.contains(callee) || BOILERPLATE_CALLEES.contains(&callee)
+}
+
+/// Drop `calls:` callees the embedding text already states.
+///
+/// Operates on the embedding text only, after the behavior sidecar is
+/// appended, so redundancy is judged against the complete text the
+/// retriever will read (identity, documentation and raw body).
+fn prune_redundant_calls_lines(conversion: &mut ConversionResult) {
+    let Some(text) = conversion.embedding_text.as_mut() else {
+        return;
+    };
+    if !text.contains("calls:") {
+        return;
+    }
+    let mut body_lines: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        if !line.trim_start().starts_with("calls:") {
+            body_lines.push(line);
+        }
+    }
+    let full_text = body_lines.join("\n");
+    let tokens: std::collections::HashSet<&str> = full_text
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|t| !t.is_empty())
+        .collect();
+    let mut kept_lines: Vec<String> = Vec::new();
+    let mut changed = false;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let Some(rest) = trimmed.strip_prefix("calls:") else {
+            kept_lines.push(line.to_string());
+            continue;
+        };
+        let indent_len = line.len() - trimmed.len();
+        let indent: String = line.chars().take(indent_len).collect();
+        let original: Vec<&str> = rest
+            .trim_end_matches('.')
+            .split(',')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .collect();
+        let kept: Vec<&str> = original
+            .iter()
+            .copied()
+            .filter(|c| !callee_is_redundant(c, &full_text, &tokens))
+            .collect();
+        if kept.len() != original.len() {
+            changed = true;
+        }
+        if kept.is_empty() {
+            continue;
+        }
+        kept_lines.push(format!("{}calls: {}.", indent, kept.join(", ")));
+    }
+    if changed {
+        *text = kept_lines.join("\n");
+    }
+}
+
 /// Topic anchor of an entity: the values its branches dispatch on.
 ///
 /// A function that dispatches on protocol constants states its whole
@@ -250,40 +379,31 @@ fn topic_anchor(entity_id: EntityId, processing_result: &ProcessingResult) -> Op
     let facts = processing_result.control_flow.get(entity_id)?;
 
     let mut discriminants: Vec<String> = Vec::new();
-    let mut branches = 0usize;
-    let mut loops = 0usize;
 
     for fact in &facts.facts {
-        match fact.kind {
-            ControlFlowFactKind::If | ControlFlowFactKind::Match => {
-                branches += 1;
-                for label in branch_discriminants(&fact.text) {
-                    if discriminants.len() >= MAX_ANCHOR_DISCRIMINANTS {
-                        break;
-                    }
-                    if !discriminants.iter().any(|d| d == &label) {
-                        discriminants.push(label);
-                    }
+        if matches!(
+            fact.kind,
+            ControlFlowFactKind::If | ControlFlowFactKind::Match
+        ) {
+            for label in branch_discriminants(&fact.text) {
+                if discriminants.len() >= MAX_ANCHOR_DISCRIMINANTS {
+                    break;
+                }
+                if !discriminants.iter().any(|d| d == &label) {
+                    discriminants.push(label);
                 }
             }
-            ControlFlowFactKind::Loop => loops += 1,
-            _ => {}
         }
     }
 
     if !discriminants.is_empty() {
         return Some(format!("branches on: {}.", discriminants.join(", ")));
     }
-    if branches > 0 || loops > 0 {
-        let mut shape = Vec::new();
-        if branches > 0 {
-            shape.push(format!("{} branches", branches));
-        }
-        if loops > 0 {
-            shape.push(format!("{} loops", loops));
-        }
-        return Some(format!("control flow: {}.", shape.join(", ")));
-    }
+    // No discriminants: no anchor. A generic shape note ("N branches, M
+    // loops") states no subject the entity does not already name; it only
+    // adds a shared common component across every branching function and
+    // dilutes the member's own signal. Branch-heavy functions already
+    // carry their bodies in the sidecar.
     None
 }
 
@@ -878,6 +998,40 @@ mod tests {
     }
 
     #[test]
+    fn test_build_extra_text_skips_file_documentation() {
+        use cce_types::{EntityKind, GroupedEntity};
+        use crate::grouper::types::{EntityGroup, GroupType};
+
+        let mut doc_group = EntityGroup::new("file_doc_test", GroupType::FileDocumentation);
+        doc_group.header = Some(GroupedEntity {
+            id: EntityId(1),
+            name: "lib.rs".to_string(),
+            kind: EntityKind::Module,
+            doc_comment: Some("The crate docs.".to_string()),
+            ..Default::default()
+        });
+        let processing_result = ProcessingResult {
+            groups: vec![doc_group],
+            entity_meta: Default::default(),
+            behavior: BehaviorStore::default(),
+            control_flow: ControlFlowStore::default(),
+            stats: Default::default(),
+        };
+
+        let bm25_cleaner = Bm25TextCleaner::new();
+        let enricher = IndexTextEnricher::new(&bm25_cleaner);
+        let result = enricher.build_extra_text(
+            EntityId(1),
+            &processing_result,
+            "//! The crate docs.\n//! More docs.\n",
+        );
+        assert!(
+            result.is_none(),
+            "file docs carry no code sidecar, got: {result:?}"
+        );
+    }
+
+    #[test]
     fn test_strip_syntax_noise_rust_profile() {
         let source = "unsafe { &mut *self.inner.get() }.as_mut()";
         let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Rust));
@@ -1079,5 +1233,56 @@ mod tests {
         assert!(labels.contains(&"世界".to_string()) || labels.is_empty());
         // Should not panic on multibyte input.
         let _ = branch_discriminants("switch (x) { case ¡café: break; }");
+    }
+
+    fn prune_case(text: &str) -> String {
+        let mut conversion = ConversionResult::embedding_only(
+            EntityId(1),
+            cce_types::EntityKind::Function,
+            "demo".to_string(),
+            "demo.rs".to_string(),
+            text.to_string(),
+        );
+        prune_redundant_calls_lines(&mut conversion);
+        conversion
+            .embedding_text
+            .expect("embedding text survives pruning")
+    }
+
+    #[test]
+    fn prune_drops_callees_stated_by_body() {
+        let out = prune_case(
+            "function demo.\n\
+             calls: Candidate::new, as_ref, is_match_candidate.\n\
+             Returns true.\n\
+             self.is_match_candidate(&Candidate::new(path.as_ref()))",
+        );
+        assert!(!out.contains("calls:"), "all callees restated: {out:?}");
+        assert!(out.contains("self.is_match_candidate"));
+    }
+
+    #[test]
+    fn prune_drops_boilerplate_only_line() {
+        let out = prune_case(
+            "function demo.\ncalls: Ok.\nReturns a match.\nOk(self.find())",
+        );
+        assert!(!out.contains("calls:"), "boilerplate restated: {out:?}");
+    }
+
+    #[test]
+    fn prune_drops_boilerplate_absent_from_body() {
+        let out = prune_case(
+            "function demo.\ncalls: vec, push.\nDoes things.\nlet x = 1;",
+        );
+        assert!(!out.contains("calls:"), "bare boilerplate dropped: {out:?}");
+    }
+
+    #[test]
+    fn prune_keeps_distinctive_unstated_callee() {
+        let out = prune_case(
+            "function demo.\ncalls: build_from_hir, Ok.\nBuilds a regex.\nOk(output)",
+        );
+        assert!(out.contains("calls: build_from_hir."), "keeps novel callee: {out:?}");
+        assert!(!out.contains("Ok,"));
     }
 }

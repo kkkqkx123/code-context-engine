@@ -77,6 +77,34 @@ pub(crate) fn should_merge(
     if prev.metadata.test_info.is_test() != next.metadata.test_info.is_test() {
         return false;
     }
+    // Tiny-rescue (Embedding-only): a residue far below the min threshold
+    // (sentence splinters, bare fields, header-only tails) is a poor
+    // retrieval unit on its own. Within one group such fragments only
+    // rejoin the unit they were split from, so fold a tiny side back into
+    // its neighbor as long as the combined text stays within the hard
+    // limit. A tiny chunk whose source span is contained in the neighbor's
+    // span is the same code unit described twice (struct plus its field,
+    // overlapping sentence splinters): reuniting them only removes a
+    // duplicate claim, even across groups. Gluing span-disjoint entities
+    // would mislabel the merged chunk, so the kind gate below still
+    // applies there. Documented topics are protected by the veto above
+    // and never reach this branch; the test boundary is never crossed.
+    if path == ChunkPath::Embedding {
+        let (min_threshold, _) = merge_limits(path, &budget);
+        let tiny = min_threshold / 3;
+        let prev_cost = cost(&prev.text, path);
+        let next_cost = cost(&next.text, path);
+        if (prev_cost <= tiny || next_cost <= tiny)
+            && combined_cost(prev, next, path) <= budget.hard_limit
+            && (prev.source_group_id == next.source_group_id
+                || spans_contain_or_contained(
+                    &prev.metadata.source_span,
+                    &next.metadata.source_span,
+                ))
+        {
+            return true;
+        }
+    }
     if !shares_kind(prev, next) {
         return false;
     }
@@ -103,6 +131,20 @@ pub(crate) fn should_merge(
     combined <= ceiling && (prev_cost < min_threshold || next_cost < min_threshold)
 }
 
+/// Whether one source span contains the other.
+///
+/// A tiny chunk whose span sits inside the neighbor's span (or vice versa)
+/// describes the same code unit twice: reuniting them only removes a
+/// duplicate claim. Spans without source locations never count as
+/// contained, so chunks that lost their positions can never glue.
+fn spans_contain_or_contained(a: &Span, b: &Span) -> bool {
+    if !a.is_available() || !b.is_available() {
+        return false;
+    }
+    (a.start_byte <= b.start_byte && b.end_byte <= a.end_byte)
+        || (b.start_byte <= a.start_byte && a.end_byte <= b.end_byte)
+}
+
 /// Whether two chunks describe the same kind of entity.
 ///
 /// The identity a merge keeps is the left chunk's, so merging chunks of
@@ -125,8 +167,23 @@ fn shares_kind(prev: &ChunkedResult, next: &ChunkedResult) -> bool {
 /// entity they describe lives in another chunk. Letting such a fragment
 /// veto merges strands neighboring residues (bare fields, header-only
 /// tails) that can never merge anywhere else.
+///
+/// The group header is context, not content: a first-block chunk holds the
+/// header plus one member, but its topic is still the member's own.
+/// Counting the header as a second entity would disqualify every
+/// first-block chunk from topic protection and let small documented
+/// members be absorbed by their neighbors.
 fn is_topic_unit(chunk: &ChunkedResult) -> bool {
-    if chunk.metadata.content_entity_ids().len() > 1 {
+    let content = chunk.metadata.content_entity_ids();
+    // Chunks without any entity attribution keep the legacy answer below.
+    let single_unit = if content.is_empty() {
+        true
+    } else {
+        let context = chunk.metadata.context_entity_ids();
+        let mut non_header = content.iter().filter(|id| !context.contains(id));
+        non_header.next().is_some() && non_header.next().is_none()
+    };
+    if !single_unit {
         return false;
     }
     match chunk.metadata.as_code() {

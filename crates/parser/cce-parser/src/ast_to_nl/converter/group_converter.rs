@@ -368,6 +368,18 @@ impl super::AstToNlConverter {
                         let prefix = if matches!(
                             header.kind,
                             EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                        ) && Self::carries_owner_qualification(
+                            emb_text,
+                            &parent_name,
+                            &header.name,
+                        ) {
+                            // The member conversion already carries the
+                            // owner-qualified name via group qualification;
+                            // repeating it only duplicates the identity.
+                            String::new()
+                        } else if matches!(
+                            header.kind,
+                            EntityKind::Function | EntityKind::Method | EntityKind::Constructor
                         ) {
                             format!("{}.{}(). ", parent_name, header.name)
                         } else if matches!(header.kind, EntityKind::Field | EntityKind::Property)
@@ -470,6 +482,17 @@ impl super::AstToNlConverter {
                 if let Some(ref mut emb_text) = member.embedding_text {
                     if !emb_text.is_empty() {
                         let prefix = if matches!(
+                            member.kind,
+                            EntityKind::Function | EntityKind::Method | EntityKind::Constructor
+                        ) && Self::carries_owner_qualification(
+                            emb_text,
+                            &parent_name,
+                            &member.name,
+                        ) {
+                            // Already owner-qualified via group qualification;
+                            // repeating the prefix only duplicates the identity.
+                            String::new()
+                        } else if matches!(
                             member.kind,
                             EntityKind::Function | EntityKind::Method | EntityKind::Constructor
                         ) {

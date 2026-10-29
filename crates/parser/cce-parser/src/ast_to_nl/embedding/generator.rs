@@ -79,11 +79,22 @@ impl EmbeddingGenerator {
         // If the group has a very long doc_comment (> 500 tokens), emit it as
         // a single full documentation segment. The group description already
         // omits long docstrings, so this writes the text exactly once.
+        //
+        // The threshold must use the same cleaned text as the template
+        // (`RegularGroupTemplate::clean_doc_comment`): the template includes
+        // the cleaned doc only when it fits, so this segment exists only
+        // when the template omitted it. Using raw text here would disagree
+        // on borderline docs and emit the doc twice (cleaned + raw).
         if let Some(ref header) = group.header {
             if let Some(ref doc) = header.doc_comment {
-                let doc_tokens = estimate_tokens(doc);
-                if doc_tokens > LONG_DOC_THRESHOLD {
-                    descriptions.push(format!("Documentation of {}:\n{}", group.name, doc));
+                let profile = NoiseProfile::for_language(group.language);
+                if let Some(cleaned) = Self::cleaned_doc_for_threshold(doc, profile) {
+                    if estimate_tokens(&cleaned) > LONG_DOC_THRESHOLD {
+                        descriptions.push(format!(
+                            "Documentation of {}:\n{}",
+                            group.name, cleaned
+                        ));
+                    }
                 }
             }
         }
@@ -211,6 +222,27 @@ impl EmbeddingGenerator {
                 result.push('.');
             }
             result
+        }
+    }
+
+    /// Cleaned doc text for the long-doc threshold, mirroring the template.
+    ///
+    /// Must stay in sync with
+    /// `RegularGroupTemplate::clean_doc_comment`: same cleaning, same
+    /// threshold input, so the template and this segment never emit the
+    /// same doc twice.
+    fn cleaned_doc_for_threshold(doc: &str, profile: NoiseProfile) -> Option<String> {
+        use cce_utils::normalize_whitespace_preserving_newlines;
+        let cleaned =
+            normalize_whitespace_preserving_newlines(&crate::ast_to_nl::clean_comment_content(doc));
+        let cleaned = crate::ast_to_nl::embedding::filter_embedding_noise(&cleaned, profile);
+        let cleaned = cleaned.trim();
+        if cleaned.is_empty() {
+            None
+        } else if cleaned.ends_with('.') {
+            Some(cleaned.to_string())
+        } else {
+            Some(format!("{}.", cleaned))
         }
     }
 }
