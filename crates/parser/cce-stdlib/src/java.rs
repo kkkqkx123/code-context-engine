@@ -883,6 +883,22 @@ impl JavaStdlibDetector {
         false
     }
 
+    /// Standard library constants.
+    pub const STDLIB_CONSTANTS: &[&str] = &[
+        "Integer.MAX_VALUE",
+        "Integer.MIN_VALUE",
+        "Long.MAX_VALUE",
+        "Long.MIN_VALUE",
+        "Double.MAX_VALUE",
+        "Math.PI",
+        "Math.E",
+    ];
+
+    /// Check if a name is a standard library constant.
+    pub fn is_stdlib_constant(name: &str) -> bool {
+        Self::STDLIB_CONSTANTS.contains(&name)
+    }
+
     /// Check if a type name is from the JDK
     pub fn is_stdlib_type(name: &str) -> bool {
         Self::is_primitive_type(name)

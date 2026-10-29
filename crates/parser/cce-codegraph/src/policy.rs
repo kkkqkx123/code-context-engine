@@ -1,3 +1,4 @@
+pub mod c;
 pub mod common;
 pub mod cpp;
 pub mod csharp;
@@ -6,7 +7,9 @@ pub mod go;
 pub mod hierarchy;
 pub mod java;
 pub mod javascript;
+pub mod php;
 pub mod python;
+pub mod ruby;
 pub mod rust;
 pub mod type_member;
 
@@ -18,9 +21,9 @@ use crate::symbol::{ScopeContext, Visibility};
 /// Dispatch visibility signal parsing to the language-specific table.
 ///
 /// Languages without a dedicated signal table share the generic catch-all.
-/// This is intentional for C, PHP, Ruby, Bash and Lua: C has no visibility
-/// keywords, PHP and Ruby resolve through extracted modifiers first, and
-/// shell dialects have no visibility system.
+/// This is intentional for Bash and Lua, which have no visibility system.
+/// C, PHP and Ruby have dedicated tables backed by storage-class,
+/// modifier and access-section signals.
 pub fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visibility> {
     // Kotlin modifiers differ from Java: `open` is orthogonal to visibility
     // (an `open class` is still public) while `internal` is Kotlin-specific.
@@ -51,7 +54,10 @@ pub fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visib
         Language::Dart => dart::visibility_from_signal(signal),
         Language::Java | Language::Kotlin | Language::Scala => java::visibility_from_signal(signal),
         Language::CSharp => csharp::visibility_from_signal(signal),
+        Language::C => c::visibility_from_signal(signal),
         Language::Cpp => cpp::visibility_from_signal(signal),
+        Language::Php => php::visibility_from_signal(signal),
+        Language::Ruby => ruby::visibility_from_signal(signal),
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             javascript::visibility_from_signal(signal)
         }
@@ -131,7 +137,10 @@ pub fn visibility_from_name(name: &str, language: &Language) -> Option<Visibilit
         Language::Rust => rust::visibility_from_name(name),
         Language::Java | Language::Kotlin | Language::Scala => java::visibility_from_name(name),
         Language::CSharp => csharp::visibility_from_name(name),
+        Language::C => c::visibility_from_name(name),
         Language::Cpp => cpp::visibility_from_name(name),
+        Language::Php => php::visibility_from_name(name),
+        Language::Ruby => ruby::visibility_from_name(name),
         _ => None,
     }
 }
@@ -189,7 +198,10 @@ pub fn detect_entity_visibility(entity: &Entity, language: &Language) -> Visibil
         Language::Kotlin => Visibility::Public,
         Language::Java | Language::Scala => java::default_visibility(),
         Language::CSharp => csharp::default_visibility(),
+        Language::C => c::default_visibility(),
         Language::Cpp => cpp::default_visibility(),
+        Language::Php => php::default_visibility(),
+        Language::Ruby => ruby::default_visibility(),
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             javascript::default_visibility()
         }
@@ -220,7 +232,10 @@ pub fn is_visible(
         }
         Language::Go => go::is_visible(visibility, from_scope, defined_in),
         Language::CSharp => csharp::is_visible(visibility, from_scope, defined_in),
+        Language::C => c::is_visible(visibility, from_scope, defined_in),
         Language::Cpp => cpp::is_visible(visibility, from_scope, defined_in),
+        Language::Php => php::is_visible(visibility, from_scope, defined_in),
+        Language::Ruby => ruby::is_visible(visibility, from_scope, defined_in),
         Language::Python => python::is_visible(visibility, from_scope, defined_in),
         Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
             javascript::is_visible(visibility, from_scope, defined_in)
@@ -354,9 +369,9 @@ mod tests {
         );
     }
 
-    // Ruby uses the generic catch-all handler.
+    // Ruby uses a dedicated handler.
     #[test]
-    fn ruby_generic_signal() {
+    fn ruby_dedicated_signal() {
         assert_eq!(
             visibility_from_signal("public", &Language::Ruby),
             Some(Visibility::Public)
@@ -369,15 +384,7 @@ mod tests {
             visibility_from_signal("protected", &Language::Ruby),
             Some(Visibility::Protected)
         );
-    }
-
-    #[test]
-    fn ruby_generic_crate_signal_maps_to_package() {
-        // Distinct from JVM: the catch-all maps `pub(crate)` to Package.
-        assert_eq!(
-            visibility_from_signal("pub(crate)", &Language::Ruby),
-            Some(Visibility::Package)
-        );
+        assert_eq!(visibility_from_signal("pub(crate)", &Language::Ruby), None);
     }
 
     #[test]
@@ -393,13 +400,17 @@ mod tests {
     }
 
     #[test]
-    fn ruby_no_naming_visibility() {
+    fn ruby_naming_visibility() {
+        assert_eq!(
+            visibility_from_name("initialize", &Language::Ruby),
+            Some(Visibility::Private)
+        );
         assert_eq!(visibility_from_name("_helper", &Language::Ruby), None);
     }
 
-    // PHP uses the generic catch-all handler.
+    // PHP uses a dedicated handler.
     #[test]
-    fn php_generic_signal() {
+    fn php_dedicated_signal() {
         assert_eq!(
             visibility_from_signal("public", &Language::Php),
             Some(Visibility::Public)
@@ -412,15 +423,37 @@ mod tests {
             visibility_from_signal("protected", &Language::Php),
             Some(Visibility::Protected)
         );
+        assert_eq!(visibility_from_signal("static", &Language::Php), None);
     }
 
     #[test]
-    fn php_permissive_is_visible() {
+    fn php_scoped_is_visible() {
         let def = ScopeContext::new("a.php", "App");
-        let other = ScopeContext::new("b.php", "Other");
+        let same_file = ScopeContext::new("a.php", "App");
+        let same_pkg = ScopeContext::new("b.php", "App");
+        let other = ScopeContext::new("c.php", "Other");
+        assert!(is_visible(&Visibility::Public, &other, &def, Language::Php));
+        assert!(is_visible(
+            &Visibility::Protected,
+            &same_pkg,
+            &def,
+            Language::Php
+        ));
+        assert!(!is_visible(
+            &Visibility::Protected,
+            &other,
+            &def,
+            Language::Php
+        ));
         assert!(is_visible(
             &Visibility::Private,
-            &other,
+            &same_file,
+            &def,
+            Language::Php
+        ));
+        assert!(!is_visible(
+            &Visibility::Private,
+            &same_pkg,
             &def,
             Language::Php
         ));
@@ -438,14 +471,29 @@ mod tests {
         assert!(is_visible(&Visibility::Private, &def, &def, Language::Bash));
     }
 
-    // C has no visibility keywords and shares the generic catch-all.
+    // C uses storage-class signals.
     #[test]
-    fn c_generic_signal_and_naming() {
+    fn c_dedicated_signal_and_naming() {
         assert_eq!(
-            visibility_from_signal("public", &Language::C),
+            visibility_from_signal("static", &Language::C),
+            Some(Visibility::Private)
+        );
+        assert_eq!(
+            visibility_from_signal("extern", &Language::C),
             Some(Visibility::Public)
         );
+        assert_eq!(visibility_from_signal("public", &Language::C), None);
         assert_eq!(visibility_from_name("foo", &Language::C), None);
+    }
+
+    #[test]
+    fn c_scoped_is_visible() {
+        let def = ScopeContext::new("a.c", "pkg");
+        let same = ScopeContext::new("a.c", "pkg");
+        let other = ScopeContext::new("b.c", "pkg");
+        assert!(is_visible(&Visibility::Public, &other, &def, Language::C));
+        assert!(is_visible(&Visibility::Private, &same, &def, Language::C));
+        assert!(!is_visible(&Visibility::Private, &other, &def, Language::C));
     }
 
     // Lua has no real visibility model; everything resolves to public/visible.

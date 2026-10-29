@@ -216,6 +216,25 @@ impl_stdlib_by_type_simple!(
 );
 
 impl PythonStdlibDetector {
+    /// Standard library constants.
+    pub const STDLIB_CONSTANTS: &[&str] = &[
+        "True",
+        "False",
+        "None",
+        "NotImplemented",
+        "Ellipsis",
+        "math.pi",
+        "math.e",
+        "math.inf",
+        "math.nan",
+        "sys.maxsize",
+    ];
+
+    /// Check if a name is a standard library constant.
+    pub fn is_stdlib_constant(name: &str) -> bool {
+        Self::STDLIB_CONSTANTS.contains(&name)
+    }
+
     /// Check if a type is a standard library type (builtin type)
     /// This provides a unified interface with other language detectors
     pub fn is_stdlib_type(name: &str) -> bool {

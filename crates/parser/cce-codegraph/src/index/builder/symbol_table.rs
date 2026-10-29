@@ -160,15 +160,12 @@ impl SymbolTableBuilder {
 
     /// Determine if an import source refers to an internal module (same package/project).
     ///
-    /// Uses language-specific patterns to identify internal imports:
-    /// - Rust: `crate::`, `self::`, `super::` prefixes
-    /// - Python: relative imports (starting with `.`)
-    /// - JavaScript family: relative imports (starting with `./` or `../`)
-    /// - Go: relative imports (starting with `.`)
-    /// - C/C++: relative includes (quoted paths, not angle-bracket system headers)
-    ///
-    /// Remaining languages conservatively return false until per-language
-    /// internal module rules are designed.
+    /// This is the context-free relative-specifier check: absolute package
+    /// or namespace imports (Java family, C#) need `package_declaration` or
+    /// `project_packages` and are classified in `ExtractionContext`
+    /// (`cce-parser-core`); here only file- or module-relative specifiers
+    /// resolve to internal by construction. Mirrors
+    /// `ExtractionContext::is_relative_specifier`.
     fn is_internal_import(source: &str, language: Language) -> bool {
         match language {
             Language::Rust => {
@@ -184,8 +181,21 @@ impl SymbolTableBuilder {
             Language::C | Language::Cpp => {
                 // C/C++ quoted includes are typically project-local
                 // Note: is_system_header already handles angle-bracket includes
-                !source.starts_with('<')
+                !source.starts_with('<') && !source.starts_with('/')
             }
+            Language::Dart => source.starts_with("./") || source.starts_with("../"),
+            Language::Php => {
+                source.starts_with("./")
+                    || source.starts_with("../")
+                    || source.ends_with(".php")
+                    || (source.contains('/') && !source.contains('\\'))
+            }
+            Language::Ruby | Language::Lua | Language::Bash => {
+                source.starts_with("./") || source.starts_with("../")
+            }
+            // Java, Kotlin, Scala and C# use absolute package paths only;
+            // package-prefix internal is decided with project context in
+            // `ExtractionContext::is_internal_import`.
             _ => false,
         }
     }

@@ -76,6 +76,20 @@ impl CSharpExtractor {
             || CSharpStdlibDetector::is_dotnet_path(namespace)
     }
 
+    /// Extract namespace declaration from C# source
+    fn extract_namespace_declaration(tree: &Tree, source: &str) -> Option<String> {
+        let root_node = tree.root_node();
+        for namespace_node in find_children_by_kind(&root_node, "namespace_declaration") {
+            if let Some(name) = namespace_node.child_by_field_name("name") {
+                let namespace_name = node_text(&name, source);
+                if !namespace_name.is_empty() {
+                    return Some(namespace_name);
+                }
+            }
+        }
+        None
+    }
+
     /// Check if a type has public visibility
     fn is_public_type(node: &tree_sitter::Node, source: &str) -> bool {
         // Check for modifiers
@@ -372,6 +386,10 @@ impl SymbolExtractor for CSharpExtractor {
         exports
     }
 
+    fn extract_package_declaration(&self, tree: &Tree, source: &str) -> Option<String> {
+        Self::extract_namespace_declaration(tree, source)
+    }
+
     fn language(&self) -> Language {
         Language::CSharp
     }
@@ -424,6 +442,21 @@ mod tests {
         assert_eq!(namespace, "MyCompany.Project");
         assert_eq!(alias, Some("Project".to_string()));
         assert!(!is_static);
+    }
+
+    #[test]
+    fn test_namespace_declaration() {
+        use crate::parser::AstParser;
+        let code = "namespace MyCompany.Project { class Foo {} }";
+        let mut parser = AstParser::new();
+        let (tree, _) = parser
+            .parse_with_tree(code, &Language::CSharp)
+            .expect("parse");
+        let extractor = CSharpExtractor::new();
+        assert_eq!(
+            extractor.extract_package_declaration(&tree, code),
+            Some("MyCompany.Project".to_string())
+        );
     }
 
     #[test]

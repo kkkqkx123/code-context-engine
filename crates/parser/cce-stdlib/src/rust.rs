@@ -587,6 +587,26 @@ impl_stdlib_categorizer!(
 );
 
 impl RustStdlibDetector {
+    /// Standard library associated constants.
+    pub const STDLIB_CONSTANTS: &[&str] = &[
+        "u8::MAX",
+        "u16::MAX",
+        "u32::MAX",
+        "u64::MAX",
+        "i32::MAX",
+        "i32::MIN",
+        "i64::MAX",
+        "usize::MAX",
+        "f32::INFINITY",
+        "f64::INFINITY",
+        "f64::NAN",
+    ];
+
+    /// Check if a name is a standard library constant.
+    pub fn is_stdlib_constant(name: &str) -> bool {
+        Self::STDLIB_CONSTANTS.contains(&name)
+    }
+
     /// Check if a name is a Rust stdlib entity
     pub fn is_stdlib_name(name: &str) -> bool {
         Self::get_category(name).is_some()

@@ -992,6 +992,19 @@ impl KotlinStdlibDetector {
         false
     }
 
+    /// Standard library constants.
+    pub const STDLIB_CONSTANTS: &[&str] = &[
+        "Int.MAX_VALUE",
+        "Long.MAX_VALUE",
+        "Double.NaN",
+        "UInt.MAX_VALUE",
+    ];
+
+    /// Check if a name is a standard library constant.
+    pub fn is_stdlib_constant(name: &str) -> bool {
+        Self::STDLIB_CONSTANTS.contains(&name)
+    }
+
     /// Check if a type name is from the Kotlin standard library
     pub fn is_stdlib_type(name: &str) -> bool {
         Self::is_builtin_type(name) || Self::is_kotlin_path(name)

@@ -320,6 +320,22 @@ impl_stdlib_categorizer!(
 );
 
 impl JavaScriptStdlibDetector {
+    /// Standard library constants.
+    pub const STDLIB_CONSTANTS: &[&str] = &[
+        "Infinity",
+        "NaN",
+        "undefined",
+        "Math.PI",
+        "Math.E",
+        "Number.MAX_VALUE",
+        "Number.MIN_VALUE",
+    ];
+
+    /// Check if a name is a standard library constant.
+    pub fn is_stdlib_constant(name: &str) -> bool {
+        Self::STDLIB_CONSTANTS.contains(&name)
+    }
+
     /// Check if a type name is a builtin object or global
     pub fn is_stdlib_type(name: &str) -> bool {
         if Self::is_builtin_object(name) || Self::is_global_object(name) {

@@ -119,7 +119,7 @@ impl StdlibDetector {
 
     /// Check if a constant is from the standard library
     ///
-    /// Only languages with dedicated constant tables participate; the rest
+    /// Languages with dedicated constant tables participate; the rest
     /// conservatively return false. Remapped plugin languages inherit host tables.
     pub fn is_stdlib_constant(name: &str, language: &Language) -> bool {
         let effective = effective_language(language);
@@ -129,6 +129,13 @@ impl StdlibDetector {
             Language::CSharp => CSharpStdlibDetector::is_stdlib_constant(name),
             Language::Go => GoStdlibDetector::is_stdlib_constant(name),
             Language::Php => PhpStdlibDetector::is_stdlib_constant(name),
+            Language::Rust => RustStdlibDetector::is_stdlib_constant(name),
+            Language::Python => PythonStdlibDetector::is_stdlib_constant(name),
+            Language::Java => JavaStdlibDetector::is_stdlib_constant(name),
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+                JavaScriptStdlibDetector::is_stdlib_constant(name)
+            }
+            Language::Kotlin => KotlinStdlibDetector::is_stdlib_constant(name),
             _ => false,
         }
     }
@@ -947,6 +954,54 @@ mod tests {
             "MY_CONSTANT",
             &Language::Php
         ));
+    }
+
+    #[test]
+    fn test_stdlib_constant_covers_new_tables() {
+        assert!(StdlibDetector::is_stdlib_constant(
+            "u8::MAX",
+            &Language::Rust
+        ));
+        assert!(StdlibDetector::is_stdlib_constant(
+            "math.pi",
+            &Language::Python
+        ));
+        assert!(StdlibDetector::is_stdlib_constant(
+            "Math.PI",
+            &Language::Java
+        ));
+        assert!(StdlibDetector::is_stdlib_constant(
+            "Math.PI",
+            &Language::JavaScript
+        ));
+        assert!(StdlibDetector::is_stdlib_constant(
+            "Int.MAX_VALUE",
+            &Language::Kotlin
+        ));
+        assert!(!StdlibDetector::is_stdlib_constant(
+            "MY_CONSTANT",
+            &Language::Rust
+        ));
+    }
+
+    #[test]
+    fn test_stdlib_constant_conservative_missing() {
+        // C, C++, C#, Go, PHP, Rust, Python, Java, JS family and Kotlin
+        // ship dedicated constant tables; the rest stay conservative.
+        for language in [
+            Language::Jsx,
+            Language::Tsx,
+            Language::Scala,
+            Language::Dart,
+            Language::Ruby,
+            Language::Lua,
+            Language::Bash,
+        ] {
+            assert!(
+                !StdlibDetector::is_stdlib_constant("ANYTHING", &language),
+                "{language:?} has no constant table and must stay conservative"
+            );
+        }
     }
 
     #[test]
