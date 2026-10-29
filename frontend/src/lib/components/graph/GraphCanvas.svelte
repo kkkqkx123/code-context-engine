@@ -120,8 +120,6 @@
 		onNodeActivate?: (nodeId: string) => void;
 		/** The Cytoscape Core instance, bound back to the parent for direct use. */
 		cy?: Core | null;
-		/** The container div, bound back for measurement. */
-		containerElement?: HTMLDivElement | null;
 	}
 
 	let {
@@ -368,14 +366,17 @@
 	});
 
 	$effect(() => {
-		// Track filter inputs so decoration stays current.
-		void visibleDomains;
-		void focusId;
-		void selectedId;
-		void search;
-		void impactDirect;
-		void impactTransitive;
-		if (cy) {
+		// Decoration depends on these props; reference them directly so the
+		// reactive graph stays in sync without relying on no-op void reads.
+		const decorationInputs = {
+			visibleDomains,
+			focusId,
+			selectedId,
+			search,
+			impactDirect,
+			impactTransitive,
+		};
+		if (cy && decorationInputs) {
 			applyDomainFilter();
 			applyDecorations();
 		}
@@ -411,9 +412,12 @@
 				level: Math.max(GRAPH_MIN_ZOOM, cy.zoom() / 1.25),
 				renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
 			});
-		} else if (event.key === '0') {
+		} else if (event.key === '0' || event.key === 'f' || event.key === 'F') {
 			event.preventDefault();
 			cy.fit(undefined, 40);
+		} else if (event.key === 'Enter' && selectedId) {
+			event.preventDefault();
+			onNodeActivate(selectedId);
 		}
 	}}
 	style="min-height: {minHeight}px"

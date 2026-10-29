@@ -561,3 +561,69 @@ pre code {
 	color: var(--gray-600);
 	line-height: 1.5;
 }
+
+/* Shared graph control styles (extracted from duplicated component styles). */
+.graph-inline-field {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+
+.graph-inline-label {
+	font-family: 'Space Mono', monospace;
+	font-size: 0.6rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--gray-500);
+}
+
+.graph-seed-input {
+	height: 30px;
+	min-width: 220px;
+	padding: 0 0.5rem;
+	border: 1px solid var(--gray-300);
+	font-family: 'Space Mono', monospace;
+	font-size: 0.75rem;
+}
+
+.graph-seed-input:focus {
+	outline: none;
+	border-color: var(--black);
+}
+
+.graph-seed-input.narrow {
+	min-width: 70px;
+	width: 70px;
+}
+
+.graph-seed-input.wide-input {
+	min-width: 320px;
+}
+
+.graph-seed-input.file-input {
+	min-width: 200px;
+}
+
+.graph-ghost-btn {
+	height: 30px;
+	padding: 0 0.85rem;
+	border: 1px solid var(--black);
+	cursor: pointer;
+	font-family: 'Space Mono', monospace;
+	font-size: 0.65rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	transition: all 0.15s;
+	background: var(--white);
+	color: var(--black);
+}
+
+.graph-ghost-btn:hover {
+	background: var(--gray-100);
+}
+
+.graph-small-btn {
+	height: 24px;
+	padding: 0 0.6rem;
+	margin-left: auto;
+}

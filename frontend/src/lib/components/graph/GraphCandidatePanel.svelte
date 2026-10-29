@@ -16,6 +16,9 @@
 
 <div class="candidate-panel" aria-label="Symbol candidates">
 	<p class="candidate-hint">Multiple symbols match this name — pick one:</p>
+	<p class="candidate-context">
+		The current graph stays loaded until a candidate is chosen.
+	</p>
 	<ul class="candidate-list">
 		{#each candidates as candidate (candidate.stable_id)}
 			<li>
@@ -39,6 +42,12 @@
 		padding: 0.6rem 0.75rem;
 		margin-bottom: 1rem;
 		border: 1px solid var(--gray-300);
+	}
+
+	.candidate-context {
+		margin: 0 0 0.5rem;
+		font-size: 0.7rem;
+		color: var(--gray-500);
 	}
 
 	.candidate-hint {

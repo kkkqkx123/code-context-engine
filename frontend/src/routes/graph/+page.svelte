@@ -51,11 +51,15 @@
 	// Secondary panels load after the canvas mounts so the explorer's first
 	// paint is dominated by the renderer, not the surrounding forms.
 	type ComponentOf<T> = T extends { default: infer C } ? C : never;
-	type GraphSeedBarC = ComponentOf<typeof import('$lib/components/graph/GraphSeedBar.svelte')>;
+	type GraphSeedBarC = ComponentOf<
+		typeof import('$lib/components/graph/GraphSeedBar.svelte')
+	>;
 	type GraphFilterPanelC = ComponentOf<
 		typeof import('$lib/components/graph/GraphFilterPanel.svelte')
 	>;
-	type GraphLegendC = ComponentOf<typeof import('$lib/components/graph/GraphLegend.svelte')>;
+	type GraphLegendC = ComponentOf<
+		typeof import('$lib/components/graph/GraphLegend.svelte')
+	>;
 	type GraphCandidatePanelC = ComponentOf<
 		typeof import('$lib/components/graph/GraphCandidatePanel.svelte')
 	>;
@@ -401,7 +405,8 @@
 
 	/** Load a set of ids as an induced subgraph and re-run the layout. */
 	async function openAsSubgraph(ids: string[]) {
-		await graphActions.loadSubgraph(ids);
+		await graphActions.loadSubgraph(ids, undefined, serverFilter());
+		await graphActions.loadComponentsIfStale(undefined, serverFilter());
 		cy?.layout(layoutOptions(layout)).run();
 	}
 
@@ -569,9 +574,6 @@
 						onFocusMatches={focusSearchMatches}
 					/>
 				{/if}
-				{#if GraphLegend}
-					<GraphLegend />
-				{/if}
 			</div>
 
 			<div class="canvas-column">
@@ -607,6 +609,20 @@
 					Drag to pan · Ctrl/Cmd + wheel to zoom · Double click a node to expand
 					its neighborhood
 				</p>
+				<details class="canvas-help">
+					<summary>Navigation help</summary>
+					<ul class="canvas-help-list">
+						<li>Drag the canvas to pan; Ctrl/Cmd + wheel to zoom.</li>
+						<li>Click a node to inspect it; double click to expand one hop.</li>
+						<li>Use + / - / 0 on the canvas for zoom in, zoom out and fit.</li>
+						<li>Press Enter on a focused node to expand its neighborhood.</li>
+					</ul>
+				</details>
+				{#if GraphLegend}
+					<div class="canvas-legend">
+						<GraphLegend />
+					</div>
+				{/if}
 			</div>
 
 			{#if GraphNodeInspector}
@@ -621,54 +637,57 @@
 			{/if}
 		</div>
 
-		<div class="result-tabs" role="tablist" aria-label="Graph results">
-			<button
-				type="button"
-				role="tab"
-				class="result-tab"
-				class:active={resultTab === 'communities'}
-				aria-selected={resultTab === 'communities'}
-				onclick={() => loadResultTab('communities')}
-			>
-				Communities
-			</button>
-			<button
-				type="button"
-				role="tab"
-				class="result-tab"
-				class:active={resultTab === 'cycles'}
-				aria-selected={resultTab === 'cycles'}
-				onclick={() => loadResultTab('cycles')}
-			>
-				Cycles
-			</button>
-			<button
-				type="button"
-				role="tab"
-				class="result-tab"
-				class:active={resultTab === 'module'}
-				aria-selected={resultTab === 'module'}
-				onclick={() => loadResultTab('module')}
-			>
-				Module
-			</button>
-		</div>
+		<details class="result-section" open>
+			<summary class="result-section-summary">Results</summary>
+			<div class="result-tabs" role="tablist" aria-label="Graph results">
+				<button
+					type="button"
+					role="tab"
+					class="result-tab"
+					class:active={resultTab === 'communities'}
+					aria-selected={resultTab === 'communities'}
+					onclick={() => loadResultTab('communities')}
+				>
+					Communities
+				</button>
+				<button
+					type="button"
+					role="tab"
+					class="result-tab"
+					class:active={resultTab === 'cycles'}
+					aria-selected={resultTab === 'cycles'}
+					onclick={() => loadResultTab('cycles')}
+				>
+					Cycles
+				</button>
+				<button
+					type="button"
+					role="tab"
+					class="result-tab"
+					class:active={resultTab === 'module'}
+					aria-selected={resultTab === 'module'}
+					onclick={() => loadResultTab('module')}
+				>
+					Module
+				</button>
+			</div>
 
-		{#if resultTab === 'communities' && GraphCommunitiesPanel}
-			<GraphCommunitiesPanel {communities} onLoad={openAsSubgraph} />
-		{:else if resultTab === 'cycles' && GraphCyclesPanel}
-			<GraphCyclesPanel onLoadSubgraph={openAsSubgraph} />
-		{:else if resultTab === 'module' && GraphModulePanel}
-			<GraphModulePanel
-				data={moduleQuery.data}
-				loading={moduleQuery.loading}
-				error={moduleQuery.error}
-				stale={moduleQuery.stale}
-				{watchEpoch}
-				onFocusEntity={focusPeer}
-				onImpactFile={impactCallerFile}
-			/>
-		{/if}
+			{#if resultTab === 'communities' && GraphCommunitiesPanel}
+				<GraphCommunitiesPanel {communities} onLoad={openAsSubgraph} />
+			{:else if resultTab === 'cycles' && GraphCyclesPanel}
+				<GraphCyclesPanel onLoadSubgraph={openAsSubgraph} />
+			{:else if resultTab === 'module' && GraphModulePanel}
+				<GraphModulePanel
+					data={moduleQuery.data}
+					loading={moduleQuery.loading}
+					error={moduleQuery.error}
+					stale={moduleQuery.stale}
+					{watchEpoch}
+					onFocusEntity={focusPeer}
+					onImpactFile={impactCallerFile}
+				/>
+			{/if}
+		</details>
 	</div>
 </div>
 
@@ -721,7 +740,10 @@
 
 	.workspace {
 		display: grid;
-		grid-template-columns: 240px minmax(0, 1fr) 300px;
+		grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(
+				240px,
+				300px
+			);
 		gap: 1rem;
 		align-items: start;
 	}
@@ -828,6 +850,50 @@
 	.impact-item-btn:hover {
 		border-color: var(--black);
 		background: var(--gray-100);
+	}
+
+	.canvas-help {
+		margin: 0.5rem 0 0;
+		border: 1px solid var(--gray-300);
+		padding: 0.35rem 0.6rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		color: var(--gray-600);
+	}
+
+	.canvas-help summary {
+		cursor: pointer;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-500);
+	}
+
+	.canvas-help-list {
+		margin: 0.4rem 0 0;
+		padding-left: 1.1rem;
+		color: var(--gray-600);
+	}
+
+	.canvas-legend {
+		margin-top: 0.75rem;
+		border: 1px solid var(--gray-300);
+		padding: 0.5rem;
+	}
+
+	.result-section {
+		margin-top: 1rem;
+		border: 1px solid var(--black);
+	}
+
+	.result-section-summary {
+		cursor: pointer;
+		padding: 0.5rem 0.75rem;
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--gray-600);
+		background: var(--gray-50);
 	}
 
 	@media (max-width: 1200px) {

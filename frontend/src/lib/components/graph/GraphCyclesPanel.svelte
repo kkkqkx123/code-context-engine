@@ -39,21 +39,27 @@
 	<div class="panel-head">
 		<h4 class="communities-title">Dependency cycles</h4>
 		{#if query.stale}
-			<span class="stale-tag">Stale — index advanced to {$watchState.status?.relation_epoch}</span>
+			<span class="stale-tag"
+				>Stale — index advanced to {$watchState.status?.relation_epoch}</span
+			>
 		{/if}
 	</div>
 	<div class="panel-controls">
-		<label class="inline-field">
-			<span class="inline-label">Level</span>
-			<select class="seed-input narrow" bind:value={cyclesLevel} aria-label="Cycle detection level">
+		<label class="graph-inline-field">
+			<span class="graph-inline-label">Level</span>
+			<select
+				class="graph-seed-input narrow"
+				bind:value={cyclesLevel}
+				aria-label="Cycle detection level"
+			>
 				<option value="entity">entity</option>
 				<option value="file">file</option>
 			</select>
 		</label>
-		<label class="inline-field">
-			<span class="inline-label">Limit</span>
+		<label class="graph-inline-field">
+			<span class="graph-inline-label">Limit</span>
 			<input
-				class="seed-input narrow"
+				class="graph-seed-input narrow"
 				type="number"
 				min="1"
 				max="5000"
@@ -61,7 +67,12 @@
 				aria-label="Cycle result limit"
 			/>
 		</label>
-		<button type="button" class="ghost-btn" onclick={runCycles} disabled={query.loading}>
+		<button
+			type="button"
+			class="graph-ghost-btn"
+			onclick={runCycles}
+			disabled={query.loading}
+		>
 			{query.loading ? 'Detecting…' : 'Detect'}
 		</button>
 	</div>
@@ -69,10 +80,14 @@
 		<p class="panel-error">{query.error}</p>
 	{:else if query.data !== null}
 		{#if sortedCycles.length === 0}
-			<p class="panel-empty">No dependency cycles detected at {query.data.level} level.</p>
+			<p class="panel-empty">
+				No dependency cycles detected at {query.data.level} level.
+			</p>
 		{:else}
 			<p class="communities-hint">
-				{query.data.cycles.length} cycle{query.data.cycles.length === 1 ? '' : 's'} at
+				{query.data.cycles.length} cycle{query.data.cycles.length === 1
+					? ''
+					: 's'} at
 				{query.data.level} level, largest first.
 				{#if query.data.truncated}
 					More cycles exist beyond the limit (detected ≥
@@ -88,7 +103,7 @@
 							{#if cyclesLevel === 'entity'}
 								<button
 									type="button"
-									class="ghost-btn small-btn"
+									class="graph-ghost-btn graph-small-btn"
 									onclick={() => onLoadSubgraph(cycle.members)}
 								>
 									Load as subgraph
@@ -211,19 +226,19 @@
 		white-space: nowrap;
 	}
 
-	.small-btn {
+	.graph-small-btn {
 		height: 24px;
 		padding: 0 0.6rem;
 		margin-left: auto;
 	}
 
-	.inline-field {
+	.graph-inline-field {
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;
 	}
 
-	.inline-label {
+	.graph-inline-label {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.6rem;
 		text-transform: uppercase;
@@ -231,7 +246,7 @@
 		color: var(--gray-500);
 	}
 
-	.seed-input {
+	.graph-seed-input {
 		height: 30px;
 		min-width: 220px;
 		padding: 0 0.5rem;
@@ -240,12 +255,12 @@
 		font-size: 0.75rem;
 	}
 
-	.seed-input.narrow {
+	.graph-seed-input.narrow {
 		min-width: 70px;
 		width: 70px;
 	}
 
-	.ghost-btn {
+	.graph-ghost-btn {
 		height: 30px;
 		padding: 0 0.85rem;
 		border: 1px solid var(--black);
@@ -259,7 +274,7 @@
 		color: var(--black);
 	}
 
-	.ghost-btn:hover {
+	.graph-ghost-btn:hover {
 		background: var(--gray-100);
 	}
 

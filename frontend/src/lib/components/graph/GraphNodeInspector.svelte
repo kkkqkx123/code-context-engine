@@ -21,7 +21,11 @@
 		relationLabel,
 	} from '$lib/utils/graph-domains';
 	import { clampPositive } from '$lib/utils/graph-params';
-	import type { GraphEdge, GraphNode, GraphStructuralResponse } from '$lib/api/graph';
+	import type {
+		GraphEdge,
+		GraphNode,
+		GraphStructuralResponse,
+	} from '$lib/api/graph';
 
 	// Backend-defined structural relation families.
 	const STRUCTURAL_KINDS = [
@@ -46,7 +50,8 @@
 		onFocusEntity: (entityId: string) => void;
 	}
 
-	let { node, edges, communities, onExpand, onCenter, onFocusEntity }: Props = $props();
+	let { node, edges, communities, onExpand, onCenter, onFocusEntity }: Props =
+		$props();
 
 	let structuralKind = $state<StructuralKind>('child_elements');
 	let structuralDirection = $state<'out' | 'in'>('out');
@@ -107,13 +112,25 @@
 		</dl>
 
 		<div class="inspector-actions">
-			<button type="button" class="ghost-btn" onclick={() => openEntity(node.id)}>
+			<button
+				type="button"
+				class="graph-ghost-btn"
+				onclick={() => openEntity(node.id)}
+			>
 				Open entity
 			</button>
-			<button type="button" class="ghost-btn" onclick={() => onExpand(node.id)}>
+			<button
+				type="button"
+				class="graph-ghost-btn"
+				onclick={() => onExpand(node.id)}
+			>
 				Expand
 			</button>
-			<button type="button" class="ghost-btn" onclick={() => onCenter(node.id)}>
+			<button
+				type="button"
+				class="graph-ghost-btn"
+				onclick={() => onCenter(node.id)}
+			>
 				Center
 			</button>
 		</div>
@@ -141,7 +158,10 @@
 						{CONFIDENCE_META[confidence].label}
 					</p>
 					{#if edge.cfg_condition}
-						<p class="relation-guard mono" title="Conditional-compilation guard">
+						<p
+							class="relation-guard mono"
+							title="Conditional-compilation guard"
+						>
 							cfg({edge.cfg_condition})
 						</p>
 					{/if}
@@ -159,10 +179,10 @@
 			{/if}
 		</h5>
 		<div class="structural-controls">
-			<label class="inline-field">
-				<span class="inline-label">Kind</span>
+			<label class="graph-inline-field">
+				<span class="graph-inline-label">Kind</span>
 				<select
-					class="seed-input"
+					class="graph-seed-input"
 					bind:value={structuralKind}
 					aria-label="Structural relation family"
 				>
@@ -171,10 +191,10 @@
 					{/each}
 				</select>
 			</label>
-			<label class="inline-field">
-				<span class="inline-label">Dir</span>
+			<label class="graph-inline-field">
+				<span class="graph-inline-label">Dir</span>
 				<select
-					class="seed-input narrow"
+					class="graph-seed-input narrow"
 					bind:value={structuralDirection}
 					aria-label="Structural direction"
 				>
@@ -182,10 +202,10 @@
 					<option value="in">in</option>
 				</select>
 			</label>
-			<label class="inline-field">
-				<span class="inline-label">Limit</span>
+			<label class="graph-inline-field">
+				<span class="graph-inline-label">Limit</span>
 				<input
-					class="seed-input narrow"
+					class="graph-seed-input narrow"
 					type="number"
 					min="1"
 					max="2000"
@@ -195,7 +215,7 @@
 			</label>
 			<button
 				type="button"
-				class="ghost-btn small-btn"
+				class="graph-ghost-btn graph-small-btn"
 				onclick={runStructural}
 				disabled={query.loading}
 			>
@@ -207,16 +227,18 @@
 		{:else if query.data !== null && structuralFor === node.id}
 			{#if query.data.relations.length === 0}
 				<p class="panel-empty">
-					No {query.data.kind} relations for this entity ({query.data.direction}).
+					No {query.data.kind} relations for this entity ({query.data
+						.direction}).
 				</p>
 			{:else}
 				<p class="structural-hint">
-					{query.data.relations.length} relation{query.data.relations.length === 1
+					{query.data.relations.length} relation{query.data.relations.length ===
+					1
 						? ''
 						: 's'}
 					{#if query.data.truncated}
-						of {query.data.total_relations ?? query.data.relations.length} —
-						increase the limit for the full list.
+						of {query.data.total_relations ?? query.data.relations.length} — increase
+						the limit for the full list.
 					{/if}
 				</p>
 				<ul class="relation-list structural-list">
@@ -231,14 +253,14 @@
 							<div class="peer-actions">
 								<button
 									type="button"
-									class="ghost-btn small-btn"
+									class="graph-ghost-btn graph-small-btn"
 									onclick={() => openEntity(relation.entity_id)}
 								>
 									Open
 								</button>
 								<button
 									type="button"
-									class="ghost-btn small-btn"
+									class="graph-ghost-btn graph-small-btn"
 									onclick={() => onFocusEntity(relation.entity_id)}
 								>
 									Focus
@@ -434,7 +456,7 @@
 		margin-bottom: 0.5rem;
 	}
 
-	.structural-controls .seed-input {
+	.structural-controls .graph-seed-input {
 		min-width: 0;
 		height: 26px;
 		font-size: 0.68rem;
@@ -452,7 +474,7 @@
 		margin-top: 0.3rem;
 	}
 
-	.peer-actions .small-btn {
+	.peer-actions .graph-small-btn {
 		margin-left: 0;
 	}
 
@@ -469,13 +491,13 @@
 		margin: 0;
 	}
 
-	.inline-field {
+	.graph-inline-field {
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;
 	}
 
-	.inline-label {
+	.graph-inline-label {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.6rem;
 		text-transform: uppercase;
@@ -483,7 +505,7 @@
 		color: var(--gray-500);
 	}
 
-	.seed-input {
+	.graph-seed-input {
 		height: 30px;
 		min-width: 220px;
 		padding: 0 0.5rem;
@@ -492,12 +514,12 @@
 		font-size: 0.75rem;
 	}
 
-	.seed-input.narrow {
+	.graph-seed-input.narrow {
 		min-width: 70px;
 		width: 70px;
 	}
 
-	.ghost-btn {
+	.graph-ghost-btn {
 		height: 30px;
 		padding: 0 0.85rem;
 		border: 1px solid var(--black);
@@ -511,11 +533,11 @@
 		color: var(--black);
 	}
 
-	.ghost-btn:hover {
+	.graph-ghost-btn:hover {
 		background: var(--gray-100);
 	}
 
-	.small-btn {
+	.graph-small-btn {
 		height: 24px;
 		padding: 0 0.6rem;
 		margin-left: auto;

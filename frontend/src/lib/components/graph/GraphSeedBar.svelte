@@ -1,7 +1,14 @@
 <script lang="ts">
 	/**
-	 * Seed bar for the graph explorer: seed mode tabs, per-mode inputs,
-	 * impact analysis inputs and the advanced server-side filter disclosure.
+	 * Seed bar for the graph explorer.
+	 *
+	 * The bar is split into three semantic sections so the three different
+	 * intents it serves stay visually and cognitively separate:
+	 *
+	 *   - Load: replace the working set with a seeded view.
+	 *   - Impact: highlight dependents of a changed file or entity.
+	 *   - Module: inspect module-level relations of one file.
+	 *
 	 * The bar owns no query logic — it binds form state and reports intent
 	 * through the on* callbacks; the page executes the loads.
 	 */
@@ -77,242 +84,276 @@
 			onRunImpact();
 		}
 	}
+
+	function handleModuleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			onRunModule();
+		}
+	}
 </script>
 
 <div class="seed-bar">
-	<span class="group-label">Load</span>
-	<div class="seed-mode">
-		<button
-			type="button"
-			class="mode-btn"
-			class:active={seedMode === 'focus'}
-			onclick={() => (seedMode = 'focus')}
-		>
-			Focus entity
-		</button>
-		<button
-			type="button"
-			class="mode-btn"
-			class:active={seedMode === 'overview'}
-			onclick={() => (seedMode = 'overview')}
-		>
-			Project overview
-		</button>
-		<button
-			type="button"
-			class="mode-btn"
-			class:active={seedMode === 'path'}
-			onclick={() => (seedMode = 'path')}
-		>
-			Find path
-		</button>
-		<button
-			type="button"
-			class="mode-btn"
-			class:active={seedMode === 'subgraph'}
-			onclick={() => (seedMode = 'subgraph')}
-		>
-			Subgraph
-		</button>
-	</div>
+	<section class="seed-section" aria-label="Load a graph view">
+		<h3 class="seed-section-title">Load</h3>
+		<div class="seed-section-body">
+			<div class="seed-mode" role="group" aria-label="Seed mode">
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={seedMode === 'focus'}
+					onclick={() => (seedMode = 'focus')}
+				>
+					Focus entity
+				</button>
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={seedMode === 'overview'}
+					onclick={() => (seedMode = 'overview')}
+				>
+					Project overview
+				</button>
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={seedMode === 'path'}
+					onclick={() => (seedMode = 'path')}
+				>
+					Find path
+				</button>
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={seedMode === 'subgraph'}
+					onclick={() => (seedMode = 'subgraph')}
+				>
+					Subgraph
+				</button>
+			</div>
 
-	{#if seedMode === 'focus'}
-		<input
-			class="seed-input"
-			type="text"
-			placeholder="Symbol name, path#name or id…"
-			bind:value={seedId}
-			onkeydown={handleSeedKeydown}
-			aria-label="Entity id to focus on"
-		/>
-		<label class="inline-field">
-			<span class="inline-label">Depth</span>
-			<input
-				class="seed-input narrow"
-				type="number"
-				min="1"
-				max="4"
-				bind:value={egoDepth}
-				aria-label="Neighborhood depth"
-			/>
-		</label>
-		<label class="inline-field">
-			<span class="inline-label">Dir</span>
-			<select
-				class="seed-input narrow"
-				bind:value={egoDirection}
-				aria-label="Traversal direction"
+			{#if seedMode === 'focus'}
+				<input
+					class="graph-seed-input"
+					type="text"
+					placeholder="Symbol name, path#name or id…"
+					bind:value={seedId}
+					onkeydown={handleSeedKeydown}
+					aria-label="Entity id to focus on"
+				/>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Depth</span>
+					<input
+						class="graph-seed-input narrow"
+						type="number"
+						min="1"
+						max="4"
+						bind:value={egoDepth}
+						aria-label="Neighborhood depth"
+					/>
+				</label>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Dir</span>
+					<select
+						class="graph-seed-input narrow"
+						bind:value={egoDirection}
+						aria-label="Traversal direction"
+					>
+						<option value="both">both</option>
+						<option value="out">out</option>
+						<option value="in">in</option>
+					</select>
+				</label>
+			{:else if seedMode === 'path'}
+				<input
+					class="graph-seed-input"
+					type="text"
+					placeholder="Start entity id…"
+					bind:value={pathStart}
+					onkeydown={handleSeedKeydown}
+					aria-label="Path start entity id"
+				/>
+				<span class="path-arrow" aria-hidden="true"
+					><Icon name="arrow-right" /></span
+				>
+				<input
+					class="graph-seed-input"
+					type="text"
+					placeholder="End entity id…"
+					bind:value={pathEnd}
+					onkeydown={handleSeedKeydown}
+					aria-label="Path end entity id"
+				/>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Depth</span>
+					<input
+						class="graph-seed-input narrow"
+						type="number"
+						min="1"
+						max="100"
+						bind:value={pathDepth}
+						aria-label="Path maximum search depth"
+					/>
+				</label>
+			{:else if seedMode === 'subgraph'}
+				<input
+					class="graph-seed-input wide-input"
+					type="text"
+					placeholder="Comma-separated entity ids…"
+					bind:value={subgraphIds}
+					onkeydown={handleSeedKeydown}
+					aria-label="Entity ids for induced subgraph"
+				/>
+			{:else}
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Limit</span>
+					<input
+						class="graph-seed-input narrow"
+						type="number"
+						min="1"
+						max="10000"
+						bind:value={overviewLimit}
+						aria-label="Overview node limit"
+					/>
+				</label>
+			{/if}
+
+			<button
+				type="button"
+				class="primary-btn"
+				onclick={onRunSeed}
+				disabled={loading}
+				title="Replace the working set with the seeded view"
 			>
-				<option value="both">both</option>
-				<option value="out">out</option>
-				<option value="in">in</option>
-			</select>
-		</label>
-	{:else if seedMode === 'path'}
-		<input
-			class="seed-input"
-			type="text"
-			placeholder="Start entity id…"
-			bind:value={pathStart}
-			onkeydown={handleSeedKeydown}
-			aria-label="Path start entity id"
-		/>
-		<span class="path-arrow" aria-hidden="true"><Icon name="arrow-right" /></span>
-		<input
-			class="seed-input"
-			type="text"
-			placeholder="End entity id…"
-			bind:value={pathEnd}
-			onkeydown={handleSeedKeydown}
-			aria-label="Path end entity id"
-		/>
-		<label class="inline-field">
-			<span class="inline-label">Depth</span>
-			<input
-				class="seed-input narrow"
-				type="number"
-				min="1"
-				max="100"
-				bind:value={pathDepth}
-				aria-label="Path maximum search depth"
-			/>
-		</label>
-	{:else if seedMode === 'subgraph'}
-		<input
-			class="seed-input wide-input"
-			type="text"
-			placeholder="Comma-separated entity ids…"
-			bind:value={subgraphIds}
-			onkeydown={handleSeedKeydown}
-			aria-label="Entity ids for induced subgraph"
-		/>
-	{:else}
-		<label class="inline-field">
-			<span class="inline-label">Limit</span>
-			<input
-				class="seed-input narrow"
-				type="number"
-				min="1"
-				max="10000"
-				bind:value={overviewLimit}
-				aria-label="Overview node limit"
-			/>
-		</label>
-	{/if}
+				{loading ? 'Loading…' : 'Load'}
+			</button>
+		</div>
+	</section>
 
-	<button
-		type="button"
-		class="primary-btn"
-		onclick={onRunSeed}
-		disabled={loading}
-	>
-		{loading ? 'Loading…' : 'Load'}
-	</button>
-
-	<div class="seed-spacer"></div>
-
-	<span class="group-label">Impact</span>
-	<div class="impact-mode" role="group" aria-label="Impact mode">
-		<button
-			type="button"
-			class="mode-btn"
-			class:active={impactMode === 'file'}
-			onclick={() => (impactMode = 'file')}
-		>
-			File
-		</button>
-		<button
-			type="button"
-			class="mode-btn"
-			class:active={impactMode === 'entity'}
-			onclick={() => (impactMode = 'entity')}
-		>
-			Entity
-		</button>
-	</div>
-	{#if impactMode === 'file'}
-		<input
-			class="seed-input file-input"
-			type="text"
-			placeholder="Impact: file path…"
-			bind:value={impactFile}
-			onkeydown={handleImpactKeydown}
-			aria-label="File path for impact analysis"
-		/>
-	{:else}
-		<input
-			class="seed-input file-input"
-			type="text"
-			placeholder="Impact: entity id…"
-			bind:value={impactEntity}
-			onkeydown={handleImpactKeydown}
-			aria-label="Entity id for impact analysis"
-		/>
-		<label class="inline-field">
-			<span class="inline-label">Scope</span>
-			<select
-				class="seed-input narrow"
-				bind:value={impactScope}
-				aria-label="Entity impact scope"
+	<section class="seed-section" aria-label="Impact analysis">
+		<h3 class="seed-section-title">Impact</h3>
+		<div class="seed-section-body">
+			<div class="impact-mode" role="group" aria-label="Impact mode">
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={impactMode === 'file'}
+					onclick={() => (impactMode = 'file')}
+				>
+					File
+				</button>
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={impactMode === 'entity'}
+					onclick={() => (impactMode = 'entity')}
+				>
+					Entity
+				</button>
+			</div>
+			{#if impactMode === 'file'}
+				<input
+					class="graph-seed-input file-input"
+					type="text"
+					placeholder="Impact: file path…"
+					bind:value={impactFile}
+					onkeydown={handleImpactKeydown}
+					aria-label="File path for impact analysis"
+				/>
+			{:else}
+				<input
+					class="graph-seed-input file-input"
+					type="text"
+					placeholder="Impact: entity id…"
+					bind:value={impactEntity}
+					onkeydown={handleImpactKeydown}
+					aria-label="Entity id for impact analysis"
+				/>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Scope</span>
+					<select
+						class="graph-seed-input narrow"
+						bind:value={impactScope}
+						aria-label="Entity impact scope"
+					>
+						<option value="entity">entity</option>
+						<option value="file">file</option>
+					</select>
+				</label>
+				<label class="graph-inline-field">
+					<span class="graph-inline-label">Depth</span>
+					<input
+						class="graph-seed-input narrow"
+						type="number"
+						min="1"
+						max="50"
+						bind:value={impactDepth}
+						aria-label="Entity impact depth"
+					/>
+				</label>
+			{/if}
+			<button
+				type="button"
+				class="graph-ghost-btn"
+				onclick={onRunImpact}
+				disabled={impactBusy}
+				title="Highlight direct and indirect dependents"
 			>
-				<option value="entity">entity</option>
-				<option value="file">file</option>
-			</select>
-		</label>
-		<label class="inline-field">
-			<span class="inline-label">Depth</span>
+				{impactBusy ? 'Analyzing…' : 'Impact'}
+			</button>
+			{#if showClear}
+				<button
+					type="button"
+					class="graph-ghost-btn"
+					onclick={onClearImpact}
+					title="Clear impact highlighting"
+				>
+					Clear
+				</button>
+			{/if}
+		</div>
+	</section>
+
+	<section class="seed-section" aria-label="Module relations">
+		<h3 class="seed-section-title">Module</h3>
+		<div class="seed-section-body">
 			<input
-				class="seed-input narrow"
-				type="number"
-				min="1"
-				max="50"
-				bind:value={impactDepth}
-				aria-label="Entity impact depth"
+				class="graph-seed-input file-input"
+				type="text"
+				placeholder="Module: file path…"
+				bind:value={impactFile}
+				onkeydown={handleModuleKeydown}
+				aria-label="File path for module relations"
 			/>
-		</label>
-	{/if}
-	<button
-		type="button"
-		class="ghost-btn"
-		onclick={onRunImpact}
-		disabled={impactBusy}
-	>
-		{impactBusy ? 'Analyzing…' : 'Impact'}
-	</button>
-	{#if impactMode === 'file'}
-		<button
-			type="button"
-			class="ghost-btn"
-			onclick={onRunModule}
-			disabled={moduleLoading}
-		>
-			{moduleLoading ? 'Querying…' : 'Module'}
-		</button>
-	{/if}
-	{#if showClear}
-		<button type="button" class="ghost-btn" onclick={onClearImpact}
-			>Clear</button
-		>
-	{/if}
+			<button
+				type="button"
+				class="graph-ghost-btn"
+				onclick={onRunModule}
+				disabled={moduleLoading}
+				title="Query exports, callers and imports for this file"
+			>
+				{moduleLoading ? 'Querying…' : 'Module'}
+			</button>
+		</div>
+	</section>
 </div>
 
 <details class="adv-filter" aria-label="Server-side filters">
 	<summary>Advanced server filters</summary>
 	<div class="adv-filter-body">
-		<label class="inline-field">
-			<span class="inline-label">Relation types</span>
+		<label class="graph-inline-field">
+			<span class="graph-inline-label">Relation types</span>
 			<input
-				class="seed-input wide-input"
+				class="graph-seed-input wide-input"
 				type="text"
 				placeholder="call.direct, inheritance, … (empty = all)"
 				bind:value={serverRelationTypes}
 				aria-label="Server-side relation type filter"
 			/>
 		</label>
-		<label class="inline-field">
-			<span class="inline-label">External edges</span>
+		<label class="graph-inline-field">
+			<span class="graph-inline-label">External edges</span>
 			<select
-				class="seed-input narrow"
+				class="graph-seed-input narrow"
 				bind:value={serverIncludeExternal}
 				aria-label="Include external edges on the server"
 			>
@@ -329,30 +370,42 @@
 </details>
 
 <style>
-	.group-label {
-		font-family: 'Space Mono', monospace;
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: var(--gray-500);
-		padding: 0 0.25rem;
-		align-self: center;
-		border-right: 1px solid var(--gray-300);
-		padding-right: 0.5rem;
-		margin-right: 0.25rem;
+	.seed-bar {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 0.75rem;
+		margin-bottom: 1rem;
 	}
 
-	.seed-bar {
+	.seed-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.75rem;
+		border: 1px solid var(--black);
+		background: var(--white);
+	}
+
+	.seed-section-title {
+		font-family: 'Space Mono', monospace;
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--gray-600);
+		margin: 0;
+		padding-bottom: 0.35rem;
+		border-bottom: 1px solid var(--gray-200);
+	}
+
+	.seed-section-body {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 		flex-wrap: wrap;
-		padding: 0.75rem;
-		border: 1px solid var(--black);
-		margin-bottom: 1rem;
 	}
 
-	.seed-mode {
+	.seed-mode,
+	.impact-mode {
 		display: flex;
 	}
 
@@ -379,7 +432,7 @@
 		border-color: var(--black);
 	}
 
-	.seed-input {
+	.graph-seed-input {
 		height: 30px;
 		min-width: 220px;
 		padding: 0 0.5rem;
@@ -388,17 +441,17 @@
 		font-size: 0.75rem;
 	}
 
-	.seed-input:focus {
+	.graph-seed-input:focus {
 		outline: none;
 		border-color: var(--black);
 	}
 
-	.seed-input.narrow {
+	.graph-seed-input.narrow {
 		min-width: 70px;
 		width: 70px;
 	}
 
-	.seed-input.wide-input {
+	.graph-seed-input.wide-input {
 		min-width: 320px;
 	}
 
@@ -411,14 +464,10 @@
 		color: var(--gray-500);
 	}
 
-	.seed-spacer {
-		flex: 1;
-	}
-
 	.adv-filter {
 		border: 1px solid var(--gray-300);
 		border-top: none;
-		margin: -1rem 0 1rem;
+		margin: -0.25rem 0 1rem;
 		padding: 0.4rem 0.75rem;
 		font-family: 'Space Mono', monospace;
 		font-size: 0.7rem;
@@ -446,13 +495,13 @@
 		color: var(--gray-500);
 	}
 
-	.inline-field {
+	.graph-inline-field {
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;
 	}
 
-	.inline-label {
+	.graph-inline-label {
 		font-family: 'Space Mono', monospace;
 		font-size: 0.6rem;
 		text-transform: uppercase;
@@ -461,7 +510,7 @@
 	}
 
 	.primary-btn,
-	.ghost-btn {
+	.graph-ghost-btn {
 		height: 30px;
 		padding: 0 0.85rem;
 		border: 1px solid var(--black);
@@ -483,20 +532,22 @@
 		cursor: wait;
 	}
 
-	.ghost-btn {
+	.graph-ghost-btn {
 		background: var(--white);
 		color: var(--black);
 	}
 
-	.ghost-btn:hover {
+	.graph-ghost-btn:hover {
 		background: var(--gray-100);
-	}
-
-	.impact-mode {
-		display: flex;
 	}
 
 	.impact-mode .mode-btn {
 		padding: 0.4rem 0.6rem;
+	}
+
+	@media (max-width: 900px) {
+		.seed-bar {
+			grid-template-columns: 1fr;
+		}
 	}
 </style>
