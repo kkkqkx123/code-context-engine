@@ -104,26 +104,13 @@ impl AstParser {
     }
 
     /// Check if a language is supported for AST parsing.
+    ///
+    /// Single source of truth lives on [`Language::is_supported_for_ast`];
+    /// this wrapper exists so diagnostic tooling shares the pipeline gate
+    /// instead of maintaining a second list that drifts (frontend and
+    /// plugin languages parse through the embedded/plugin paths).
     pub fn is_supported(language: &Language) -> bool {
-        matches!(
-            language,
-            Language::C
-                | Language::Cpp
-                | Language::CSharp
-                | Language::JavaScript
-                | Language::TypeScript
-                | Language::Rust
-                | Language::Go
-                | Language::Java
-                | Language::Python
-                | Language::Dart
-                | Language::Scala
-                | Language::Kotlin
-                | Language::Ruby
-                | Language::Php
-                | Language::Bash
-                | Language::Lua
-        )
+        language.is_supported_for_ast()
     }
 
     fn convert_node(&self, node: Node, source: &str) -> AstNode {

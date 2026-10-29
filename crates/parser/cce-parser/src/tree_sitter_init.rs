@@ -435,6 +435,21 @@ pub fn register_ast_language_plugins(
                 .entry(ext.to_lowercase())
                 .or_insert_with(|| plugin_id.clone());
         }
+        // Companion-matrix hint: without a `LangHeuristics` provider scoped
+        // to this language, entity-level stdlib classification keeps the
+        // conservative fallback (nothing is ever marked stdlib). Advisory
+        // only; capability combinations stay optional.
+        if registry
+            .get_plugins(PluginCapability::LangHeuristics, None, Some(&name))
+            .is_empty()
+        {
+            tracing::warn!(
+                language = %name,
+                plugin = %plugin_id,
+                "plugin language registered without a LangHeuristics companion: \
+                 stdlib classification for its entities stays conservative"
+            );
+        }
     }
     count
 }
@@ -479,13 +494,14 @@ pub fn clear_plugin_languages_all() {
     cce_types::language::clear_plugin_languages();
 }
 
+/// Serializes tests that mutate the process-global plugin language tables
+/// (they run in parallel by default and would race on shared state).
+#[cfg(test)]
+pub(crate) static GLOBAL_TABLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Serializes tests that mutate the process-global plugin language tables
-    /// (they run in parallel by default and would race on shared state).
-    static GLOBAL_TABLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn test_get_supported_languages() {

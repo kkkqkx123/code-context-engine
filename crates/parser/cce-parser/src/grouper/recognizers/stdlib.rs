@@ -81,7 +81,8 @@ impl StdlibEntityDetector {
         entity: &Entity,
         language: &Language,
     ) -> Option<StdlibEntityInfo> {
-        match language {
+        // Remapped plugin languages inherit their host grammar's detectors.
+        match &cce_types::language::effective_language(language) {
             Language::Rust => self.rust_detector.detect(entity),
             Language::Python => self.python_detector.detect(entity),
             Language::JavaScript | Language::TypeScript => self.javascript_detector.detect(entity),
@@ -91,7 +92,8 @@ impl StdlibEntityDetector {
 
     /// Check if a name is a standard library entity
     pub fn is_stdlib_name(&self, name: &str, language: &Language) -> bool {
-        match language {
+        // Remapped plugin languages inherit their host grammar's detectors.
+        match &cce_types::language::effective_language(language) {
             Language::Rust => self.rust_detector.is_stdlib_name(name),
             Language::Python => self.python_detector.is_stdlib_name(name),
             Language::JavaScript | Language::TypeScript => {
@@ -106,7 +108,8 @@ impl StdlibEntityDetector {
     /// Returns the category if the name is a recognized standard library entity,
     /// or None if it's not recognized.
     pub fn get_stdlib_category(&self, name: &str, language: &Language) -> Option<StdlibCategory> {
-        match language {
+        // Remapped plugin languages inherit their host grammar's detectors.
+        match &cce_types::language::effective_language(language) {
             Language::Rust => self.rust_detector.get_category(name),
             Language::Python => self.python_detector.get_category(name),
             Language::JavaScript | Language::TypeScript => {

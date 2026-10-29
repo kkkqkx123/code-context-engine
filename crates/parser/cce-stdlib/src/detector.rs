@@ -1,7 +1,7 @@
 // Standard Library Detector
 // Unified interface for standard library call detection across languages
 
-use cce_types::language::Language;
+use cce_types::language::{Language, effective_language};
 use cce_types::relation::RelationType;
 
 use super::{
@@ -26,7 +26,9 @@ impl StdlibDetector {
         relation_type: &RelationType,
         language: &Language,
     ) -> bool {
-        match language {
+        // Remapped plugin languages inherit their host grammar's tables.
+        let effective = effective_language(language);
+        match &effective {
             Language::Bash => BashStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::C => CStdlibDetector::is_stdlib_by_type(call_name, relation_type),
             Language::Cpp => CppStdlibDetector::is_stdlib_by_type(call_name, relation_type),
@@ -53,7 +55,9 @@ impl StdlibDetector {
     /// This is the legacy interface that uses string analysis. For better performance,
     /// use `is_stdlib_by_type` when RelationType information is available.
     pub fn is_stdlib_call(call_name: &str, language: &Language) -> bool {
-        match language {
+        // Remapped plugin languages inherit their host grammar's tables.
+        let effective = effective_language(language);
+        match &effective {
             Language::Bash => BashStdlibDetector::is_stdlib_call(call_name),
             Language::C => CStdlibDetector::is_stdlib_call(call_name),
             Language::Cpp => CppStdlibDetector::is_stdlib_call(call_name),
@@ -945,5 +949,94 @@ mod tests {
             "something",
             &Language::Unknown
         ));
+    }
+
+    /// Plugin contract: a remapped language inherits its host's tables; a
+    /// native plugin language keeps the conservative fallback (`false`).
+    #[test]
+    fn test_stdlib_custom_language_inheritance_and_fallback() {
+        use cce_types::language::{
+            clear_plugin_languages, register_plugin_language, register_remap_plugin_language,
+        };
+
+        clear_plugin_languages();
+        let remapped = register_remap_plugin_language(
+            "sync-stdlib-remap",
+            &["syncsr".to_string()],
+            &Language::Rust.to_string(),
+        );
+        let native = register_plugin_language("sync-stdlib-native", &["syncsn".to_string()]);
+        assert!(StdlibDetector::is_stdlib_call(
+            "Vec::new",
+            &Language::Custom(remapped)
+        ));
+        assert!(!StdlibDetector::is_stdlib_call(
+            "Vec::new",
+            &Language::Custom(native)
+        ));
+        assert!(!StdlibDetector::is_stdlib_call(
+            "Vec::new",
+            &Language::Custom(u32::MAX)
+        ));
+        clear_plugin_languages();
+    }
+
+    /// Sync guard: every parsable language must have a conscious stdlib
+    /// decision. Add the new language (or an explicit opt-out) here when
+    /// extending `Language::ast_parsable_languages`.
+    #[test]
+    fn test_stdlib_covers_all_parsable_languages() {
+        // Template languages carry no stdlib calls of their own; their
+        // embedded script/style blocks re-enter every layer as the host
+        // language, so `false` here is the intended conservative answer.
+        let template: &[Language] = &[
+            Language::Html,
+            Language::Css,
+            Language::Vue,
+            Language::Svelte,
+            Language::Ejs,
+        ];
+        let sentinels: &[(Language, &str)] = &[
+            (Language::Bash, "echo"),
+            (Language::C, "printf"),
+            (Language::Cpp, "std::cout"),
+            (Language::CSharp, "Console.WriteLine"),
+            (Language::Dart, "print"),
+            (Language::Go, "fmt.Println"),
+            (Language::Java, "System.out.println"),
+            (Language::JavaScript, "console.log"),
+            (Language::TypeScript, "console.log"),
+            (Language::Jsx, "console.log"),
+            (Language::Tsx, "console.log"),
+            (Language::Kotlin, "listOf"),
+            (Language::Lua, "string.format"),
+            (Language::Php, "strlen"),
+            (Language::Python, "print"),
+            (Language::Ruby, "puts"),
+            (Language::Rust, "Vec::new"),
+            (Language::Scala, "println"),
+        ];
+        for language in Language::ast_parsable_languages() {
+            if template.contains(language) {
+                assert!(
+                    !StdlibDetector::is_stdlib_call("something", language),
+                    "template language {language:?} must stay conservative"
+                );
+                continue;
+            }
+            let (_, sentinel) = sentinels
+                .iter()
+                .find(|(lang, _)| lang == language)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{language:?} is parsable but has no stdlib sentinel: \
+                         add a detector arm or an explicit opt-out"
+                    )
+                });
+            assert!(
+                StdlibDetector::is_stdlib_call(sentinel, language),
+                "sentinel {sentinel} not recognized for {language:?}"
+            );
+        }
     }
 }

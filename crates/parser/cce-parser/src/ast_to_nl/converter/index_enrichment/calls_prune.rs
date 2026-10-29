@@ -143,7 +143,8 @@ const BASH_BARE_METHODS: &[&str] = &["echo", "cd", "exit", "return", "set", "exp
 /// (C, Dart and document-like languages) use an empty table: the shared
 /// detector already covers them.
 fn bare_boilerplate_methods(language: Language) -> &'static [&'static str] {
-    match language {
+    // Remapped plugin languages inherit their host grammar's table.
+    match cce_types::language::effective_language(&language) {
         Language::Rust => RUST_BARE_METHODS,
         Language::Python => PYTHON_BARE_METHODS,
         Language::JavaScript
@@ -398,6 +399,87 @@ mod tests {
             !out.contains("calls:"),
             "qualified Rust stdlib pruned via detector: {out:?}"
         );
+    }
+
+    /// Plugin contract: a remapped language prunes like its host; a native
+    /// plugin language keeps the conservative fallback (no bare table, no
+    /// detector hit, so an unstated distinctive callee survives).
+    #[test]
+    fn prune_custom_language_inheritance_and_fallback() {
+        use cce_types::language::{
+            clear_plugin_languages, register_plugin_language, register_remap_plugin_language,
+        };
+
+        // Shares the process-global table with tree_sitter_init tests.
+        let _guard = crate::tree_sitter_init::GLOBAL_TABLE_LOCK
+            .lock()
+            .expect("test lock poisoned");
+        clear_plugin_languages();
+        let remapped = register_remap_plugin_language(
+            "sync-prune-remap",
+            &["syncpr".to_string()],
+            &Language::Rust.to_string(),
+        );
+        let native = register_plugin_language("sync-prune-native", &["syncpn".to_string()]);
+        let text = "function demo.\ncalls: unwrap.\nDoes things.\nlet x = 1;";
+        assert!(
+            !prune_case_for_language(text, Language::Custom(remapped)).contains("calls:"),
+            "remapped language must prune like its host"
+        );
+        assert!(
+            prune_case_for_language(text, Language::Custom(native)).contains("unwrap"),
+            "native plugin language must keep conservative fallback"
+        );
+        clear_plugin_languages();
+    }
+
+    /// Sync guard: every parsable language must have a conscious bare-table
+    /// decision. `false` means the shared detector fully covers the language
+    /// (C, Dart) or the language carries no prunable bare calls (templates).
+    #[test]
+    fn prune_bare_table_covers_all_parsable_languages() {
+        let expects_entries: &[Language] = &[
+            Language::Rust,
+            Language::Python,
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Jsx,
+            Language::Tsx,
+            Language::Vue,
+            Language::Svelte,
+            Language::Ejs,
+            Language::Go,
+            Language::Java,
+            Language::Kotlin,
+            Language::Scala,
+            Language::Cpp,
+            Language::CSharp,
+            Language::Ruby,
+            Language::Php,
+            Language::Lua,
+            Language::Bash,
+        ];
+        let expects_empty: &[Language] =
+            &[Language::C, Language::Dart, Language::Html, Language::Css];
+        for language in Language::ast_parsable_languages() {
+            let table = bare_boilerplate_methods(*language);
+            if expects_empty.contains(language) {
+                assert!(
+                    table.is_empty(),
+                    "{language:?} must keep an empty bare table (detector covers it)"
+                );
+            } else {
+                assert!(
+                    expects_entries.contains(language),
+                    "{language:?} is parsable but has no bare-table decision: \
+                     add it to expects_entries or expects_empty"
+                );
+                assert!(
+                    !table.is_empty(),
+                    "{language:?} listed as covered but its bare table is empty"
+                );
+            }
+        }
     }
 
     #[test]

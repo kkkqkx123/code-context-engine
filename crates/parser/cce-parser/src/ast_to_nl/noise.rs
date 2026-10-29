@@ -37,7 +37,8 @@ impl NoiseProfile {
     ///
     /// Rust-specific syntax rules are enabled only for Rust.
     pub fn for_language(language: Language) -> Self {
-        match language {
+        // Remapped plugin languages inherit their host grammar's profile.
+        match cce_types::language::effective_language(&language) {
             Language::Rust => Self {
                 unwrap_unsafe_blocks: true,
                 strip_deref_markers: true,

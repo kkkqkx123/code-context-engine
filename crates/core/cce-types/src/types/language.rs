@@ -168,35 +168,44 @@ impl std::fmt::Display for Language {
 }
 
 impl Language {
+    /// Built-in languages with a tree-sitter grammar behind the parse gate.
+    ///
+    /// Single source of truth for every language-dispatched layer (stdlib
+    /// detection, call pruning, noise profiles): each layer holds an
+    /// expectation table keyed by this list, so adding a language here
+    /// without updating a layer turns that layer's sync test red.
+    /// `Custom` plugin languages are dynamic and covered separately.
+    pub fn ast_parsable_languages() -> &'static [Language] {
+        &[
+            Language::C,
+            Language::Cpp,
+            Language::CSharp,
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Html,
+            Language::Css,
+            Language::Vue,
+            Language::Svelte,
+            Language::Ejs,
+            Language::Jsx,
+            Language::Tsx,
+            Language::Rust,
+            Language::Go,
+            Language::Java,
+            Language::Kotlin,
+            Language::Scala,
+            Language::Python,
+            Language::Php,
+            Language::Ruby,
+            Language::Dart,
+            Language::Bash,
+            Language::Lua,
+        ]
+    }
+
     /// Check if this language is supported for AST parsing
     pub fn is_supported_for_ast(&self) -> bool {
-        matches!(
-            self,
-            Language::C
-                | Language::Cpp
-                | Language::CSharp
-                | Language::JavaScript
-                | Language::TypeScript
-                | Language::Html
-                | Language::Css
-                | Language::Vue
-                | Language::Svelte
-                | Language::Ejs
-                | Language::Jsx
-                | Language::Tsx
-                | Language::Rust
-                | Language::Go
-                | Language::Java
-                | Language::Kotlin
-                | Language::Scala
-                | Language::Python
-                | Language::Php
-                | Language::Ruby
-                | Language::Dart
-                | Language::Bash
-                | Language::Lua
-                | Language::Custom(_)
-        )
+        matches!(self, Language::Custom(_)) || Self::ast_parsable_languages().contains(self)
     }
 
     /// Check if this is an SFC (Single File Component) language
@@ -799,6 +808,35 @@ pub fn plugin_language_name(index: u32) -> Option<String> {
     guard.get(index as usize).map(|r| r.name.clone())
 }
 
+/// Host built-in language backing a `LanguageRemap` custom language.
+///
+/// Returns `None` for native plugin grammars and unregistered indexes.
+/// The stored grammar name is validated at registration, so a parse
+/// failure here degrades to `None` rather than panicking.
+pub fn plugin_remap_target(index: u32) -> Option<Language> {
+    let name = plugin_language_table()
+        .lock()
+        .ok()?
+        .get(index as usize)?
+        .remap_grammar
+        .clone()?;
+    Language::from_name(&name)
+}
+
+/// Resolve the language whose tables drive language-dispatched layers.
+///
+/// A `LanguageRemap` custom language reuses a host built-in grammar, so
+/// stdlib detection, call pruning and noise profiles all apply the host
+/// language's tables to it. Native plugin grammars and everything else
+/// resolve to themselves (conservative fallback in each layer).
+/// Non-custom languages take a lock-free fast path.
+pub fn effective_language(language: &Language) -> Language {
+    match language {
+        Language::Custom(index) => plugin_remap_target(*index).unwrap_or(*language),
+        _ => *language,
+    }
+}
+
 /// Look up a registered plugin language's extensions by index.
 pub fn plugin_language_extensions(index: u32) -> Vec<String> {
     plugin_language_table()
@@ -1208,5 +1246,46 @@ mod tests {
         assert!(Language::Svelte.is_supported_for_ast());
         assert!(Language::Jsx.is_supported_for_ast());
         assert!(Language::Tsx.is_supported_for_ast());
+    }
+
+    /// Sync guard: the parsable list is the single source behind the gate.
+    #[test]
+    fn test_ast_parsable_languages_match_gate() {
+        for language in Language::ast_parsable_languages() {
+            assert!(
+                language.is_supported_for_ast(),
+                "{language:?} listed but rejected by the gate"
+            );
+            assert!(
+                !matches!(language, Language::Custom(_)),
+                "plugin languages are dynamic and must not be listed"
+            );
+        }
+    }
+
+    /// `LanguageRemap` entries resolve to their host language; everything
+    /// else resolves to itself. Unique names plus table reset keep this
+    /// hermetic against parallel tests sharing the process-global table.
+    #[test]
+    fn test_effective_language_resolves_remap() {
+        clear_plugin_languages();
+        let index = register_remap_plugin_language(
+            "sync-remap-guard",
+            &["syncrg".to_string()],
+            &Language::Rust.to_string(),
+        );
+        let native = register_plugin_language("sync-native-guard", &["syncng".to_string()]);
+        assert_eq!(effective_language(&Language::Custom(index)), Language::Rust);
+        assert_eq!(
+            effective_language(&Language::Custom(native)),
+            Language::Custom(native)
+        );
+        assert_eq!(
+            effective_language(&Language::Custom(u32::MAX)),
+            Language::Custom(u32::MAX)
+        );
+        assert_eq!(effective_language(&Language::Go), Language::Go);
+        assert_eq!(effective_language(&Language::Unknown), Language::Unknown);
+        clear_plugin_languages();
     }
 }

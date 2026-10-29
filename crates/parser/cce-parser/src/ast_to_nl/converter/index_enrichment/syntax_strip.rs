@@ -167,4 +167,34 @@ mod tests {
             "Bash command substitution must be preserved, got: {cleaned}"
         );
     }
+
+    /// Sync guard: the noise profile is an explicit expectation table, not
+    /// a silent default. Only Rust enables language-specific rules today;
+    /// a new language must be added here with its rules (or a documented
+    /// all-off entry) when extending `Language::ast_parsable_languages`.
+    #[test]
+    fn noise_profile_covers_all_parsable_languages() {
+        let enabled: &[Language] = &[Language::Rust];
+        for language in Language::ast_parsable_languages() {
+            let profile = NoiseProfile::for_language(*language);
+            if enabled.contains(language) {
+                assert!(
+                    profile.unwrap_unsafe_blocks
+                        && profile.strip_deref_markers
+                        && profile.filter_safety_boilerplate
+                        && profile.strip_macro_repetition,
+                    "{language:?} listed as enabled but its profile is partial"
+                );
+            } else {
+                assert!(
+                    !profile.unwrap_unsafe_blocks
+                        && !profile.strip_deref_markers
+                        && !profile.filter_safety_boilerplate
+                        && !profile.strip_macro_repetition,
+                    "{language:?} is parsable but missing from the noise expectation: \
+                     add it to enabled or accept the all-off profile explicitly"
+                );
+            }
+        }
+    }
 }
