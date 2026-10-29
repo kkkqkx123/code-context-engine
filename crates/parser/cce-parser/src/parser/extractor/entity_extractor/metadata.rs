@@ -1157,11 +1157,7 @@ fn extract_java_variable_metadata(
     let Some(type_node) = type_node else {
         return;
     };
-    let text = cce_utils::text::slice_clamped(
-        source,
-        type_node.start_byte(),
-        type_node.end_byte(),
-    );
+    let text = cce_utils::text::slice_clamped(source, type_node.start_byte(), type_node.end_byte());
     let trimmed = text.trim();
     if !trimmed.is_empty() {
         entity.set_metadata("source_type", trimmed.to_string());
@@ -1211,11 +1207,7 @@ fn extract_kotlin_variable_metadata(
             continue;
         }
         if child.is_named() {
-            let text = cce_utils::text::slice_clamped(
-                source,
-                child.start_byte(),
-                child.end_byte(),
-            );
+            let text = cce_utils::text::slice_clamped(source, child.start_byte(), child.end_byte());
             let trimmed = text.trim();
             if !trimmed.is_empty() {
                 entity.set_metadata("source_type", trimmed.to_string());

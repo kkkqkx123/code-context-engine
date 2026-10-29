@@ -314,10 +314,7 @@ fn process_path(
                     // direction and dilutes the member's own signal.
                     // Tiny members without a descriptor keep the group
                     // topic so they still carry file-level intent.
-                    if super::chunk_builder::entity_has_own_descriptor(
-                        ctx.group,
-                        first.entity_id,
-                    ) {
+                    if super::chunk_builder::entity_has_own_descriptor(ctx.group, first.entity_id) {
                         continuation_for_block =
                             format!("{} {}.", first.kind.kind_label(), display);
                     } else {
@@ -540,6 +537,95 @@ mod tests {
                 total_chunks: 1,
                 include_header_in_first_coverage: chunk_index == 0,
             }),
+        }
+    }
+
+    #[test]
+    fn test_enforce_segment_retained_between_body_and_pre_injection() {
+        let cfg = ChunkingConfig {
+            max_bm25_terms: 150,
+            ..Default::default()
+        };
+        let est = TokenEstimator::default();
+        let mut bm25_budget = cfg.budget(ChunkPath::Bm25, false, 0);
+        bm25_budget.body_limit = 50;
+        let emb_budget = cfg.budget(ChunkPath::Embedding, false, 0);
+        let splitter = TextSplitter::with_budgets(cfg.clone(), emb_budget, bm25_budget);
+        let infra = super::super::chunker::ChunkInfrastructure {
+            config: &cfg,
+            estimator: &est,
+            splitter: &splitter,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: false,
+        };
+        let group = test_group();
+        let nlb: [NlEntityBoundary; 0] = [];
+        // 50 < 140 <= 150: above the body limit but within the pre-injection
+        // limit, matching the splitter's small over-limit retention.
+        let text = n_words(140);
+        let seg = ChunkSegment::new(
+            ChunkBoundary::new(0, text.len(), SplitReason::MemberBoundary),
+            text.clone(),
+        );
+        let result = super::super::segment_limit::enforce_segment_max_limit(
+            vec![seg],
+            ChunkPath::Bm25,
+            &infra,
+            &group,
+            &nlb,
+        )
+        .expect("segment split must succeed");
+        assert_eq!(result.len(), 1, "over-body segment must be kept");
+        assert_eq!(result[0].text, text);
+    }
+
+    #[test]
+    fn test_enforce_segment_over_pre_injection_resplit() {
+        let cfg = ChunkingConfig {
+            max_bm25_terms: 150,
+            ..Default::default()
+        };
+        let est = TokenEstimator::default();
+        let mut bm25_budget = cfg.budget(ChunkPath::Bm25, false, 0);
+        bm25_budget.body_limit = 50;
+        let emb_budget = cfg.budget(ChunkPath::Embedding, false, 0);
+        let splitter = TextSplitter::with_budgets(cfg.clone(), emb_budget, bm25_budget);
+        let infra = super::super::chunker::ChunkInfrastructure {
+            config: &cfg,
+            estimator: &est,
+            splitter: &splitter,
+            pre_injection_embedding: emb_budget.pre_injection_limit,
+            pre_injection_bm25: bm25_budget.pre_injection_limit,
+            emb_budget,
+            bm25_budget,
+            has_vocabulary: false,
+        };
+        let group = test_group();
+        let nlb: [NlEntityBoundary; 0] = [];
+        // 200 > 150: beyond the pre-injection limit, the segment is still
+        // re-split and every piece comes back within the body limit.
+        let text = n_words(200);
+        let seg = ChunkSegment::new(
+            ChunkBoundary::new(0, text.len(), SplitReason::MemberBoundary),
+            text,
+        );
+        let result = super::super::segment_limit::enforce_segment_max_limit(
+            vec![seg],
+            ChunkPath::Bm25,
+            &infra,
+            &group,
+            &nlb,
+        )
+        .expect("segment split must succeed");
+        assert!(result.len() >= 2, "over-pre segment must be re-split");
+        for s in &result {
+            assert!(
+                s.text.split_whitespace().count() <= 50,
+                "piece exceeds the body limit"
+            );
         }
     }
 
@@ -831,14 +917,8 @@ mod tests {
             },
         ];
         let (combined, member_ids) = assemble_combined_text(header_text, &members, ChunkPath::Bm25);
-        let emb_dec = ChunkBuilder::decoration_allowance(
-            &group,
-            ChunkPath::Embedding,
-        );
-        let bm25_dec = ChunkBuilder::decoration_allowance(
-            &group,
-            ChunkPath::Bm25,
-        );
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
         let splitter = TextSplitter::with_budgets(base.clone(), emb_budget, bm25_budget);
@@ -874,14 +954,8 @@ mod tests {
         let empty: [ConversionResult; 0] = [];
         let text = n_words(300);
         let (combined, member_ids) = assemble_combined_text(&text, &empty, ChunkPath::Bm25);
-        let emb_dec = ChunkBuilder::decoration_allowance(
-            &group,
-            ChunkPath::Embedding,
-        );
-        let bm25_dec = ChunkBuilder::decoration_allowance(
-            &group,
-            ChunkPath::Bm25,
-        );
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);
         let splitter = TextSplitter::with_budgets(base.clone(), emb_budget, bm25_budget);

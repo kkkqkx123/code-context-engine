@@ -1348,7 +1348,11 @@ fn test_tiny_residue_merges_across_kinds() {
     splinter.self_contained = false;
     let mut neighbor = make_small_self_contained_chunk("next_emb_0", "g1", vec![EntityId(3)]);
     neighbor.self_contained = false;
-    neighbor.metadata.as_code_mut().expect("code meta").entity_kind = EntityKind::Struct;
+    neighbor
+        .metadata
+        .as_code_mut()
+        .expect("code meta")
+        .entity_kind = EntityKind::Struct;
     assert!(
         merge_strategy::should_merge(&splinter, &neighbor, ChunkPath::Embedding, &config),
         "a tiny same-group residue rejoins its unit regardless of kind"

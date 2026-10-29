@@ -1014,6 +1014,133 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_single_piece_between_body_and_pre_injection_kept_whole() {
+        let config = ChunkingConfig {
+            max_bm25_terms: 150,
+            ..Default::default()
+        };
+        // A real group with vocabulary and decoration shrinks the body limit
+        // below the pre-injection limit; reproduce that shape directly.
+        let mut bm25_budget = config.budget(ChunkPath::Bm25, false, 0);
+        bm25_budget.body_limit = 50;
+        let emb_budget = config.budget(ChunkPath::Embedding, false, 0);
+        let splitter = TextSplitter::with_budgets(config, emb_budget, bm25_budget);
+        let text = words(140);
+        let boundaries = splitter
+            .split_range_at(
+                &text,
+                &EntityGroup::default(),
+                ChunkPath::Bm25,
+                None,
+                0..text.len(),
+                BoundaryLevel::Paragraphs,
+                &[],
+            )
+            .expect("test splitter input must be valid");
+        // 50 < 140 <= 150: above the body limit but within the pre-injection
+        // budget, so the single entity piece is kept whole instead of being
+        // cut into a full block plus a stranded tail.
+        assert_eq!(boundaries.len(), 1, "over-body piece should be kept whole");
+        assert_eq!(boundaries[0].start_byte, 0);
+        assert_eq!(boundaries[0].end_byte, text.len());
+    }
+
+    #[test]
+    fn test_single_piece_over_pre_injection_subdivided() {
+        let config = ChunkingConfig {
+            max_bm25_terms: 150,
+            ..Default::default()
+        };
+        let mut bm25_budget = config.budget(ChunkPath::Bm25, false, 0);
+        bm25_budget.body_limit = 50;
+        let emb_budget = config.budget(ChunkPath::Embedding, false, 0);
+        let splitter = TextSplitter::with_budgets(config, emb_budget, bm25_budget);
+        let text = words(200);
+        let boundaries = splitter
+            .split_range_at(
+                &text,
+                &EntityGroup::default(),
+                ChunkPath::Bm25,
+                None,
+                0..text.len(),
+                BoundaryLevel::Paragraphs,
+                &[],
+            )
+            .expect("test splitter input must be valid");
+        // 200 > 150: beyond the pre-injection limit, subdivision still runs
+        // and every piece is cut to the body limit.
+        assert!(boundaries.len() >= 2, "over-pre piece must be subdivided");
+        assert_partition(&text, &boundaries);
+        for b in &boundaries {
+            assert!(
+                text[b.start_byte..b.end_byte].split_whitespace().count() <= 50,
+                "piece exceeds the body limit"
+            );
+        }
+    }
+
+    #[test]
+    fn test_entity_subdivision_routes_bm25_to_paragraphs_embedding_to_sentences() {
+        let text = "alpha beta gamma. delta epsilon zeta.\n\neta theta iota kappa.";
+        let nlb = vec![NlEntityBoundary {
+            entity_id: EntityId(1),
+            start_byte: 0,
+            end_byte: text.len(),
+        }];
+
+        let bm25_config = ChunkingConfig {
+            max_bm25_terms: 5,
+            ..Default::default()
+        };
+        let bm25_splitter = TextSplitter::new(bm25_config);
+        let boundaries = bm25_splitter
+            .split_range_at(
+                text,
+                &EntityGroup::default(),
+                ChunkPath::Bm25,
+                Some(&nlb),
+                0..text.len(),
+                BoundaryLevel::Entities,
+                &[],
+            )
+            .expect("test splitter input must be valid");
+        assert!(boundaries.len() >= 2);
+        assert_partition(text, &boundaries);
+        for b in &boundaries {
+            assert_ne!(
+                b.split_reason,
+                SplitReason::SentenceBoundary,
+                "BM25 subdivision must skip the sentence level"
+            );
+        }
+
+        let emb_config = ChunkingConfig {
+            max_tokens: 10,
+            ..Default::default()
+        };
+        let emb_splitter = TextSplitter::new(emb_config);
+        let boundaries = emb_splitter
+            .split_range_at(
+                text,
+                &EntityGroup::default(),
+                ChunkPath::Embedding,
+                Some(&nlb),
+                0..text.len(),
+                BoundaryLevel::Entities,
+                &[],
+            )
+            .expect("test splitter input must be valid");
+        assert!(boundaries.len() >= 2);
+        assert_partition(text, &boundaries);
+        assert!(
+            boundaries
+                .iter()
+                .any(|b| b.split_reason == SplitReason::SentenceBoundary),
+            "embedding subdivision must still use sentence boundaries"
+        );
+    }
+
     fn words(n: usize) -> String {
         let mut s = (0..n)
             .map(|i| format!("w{i}"))

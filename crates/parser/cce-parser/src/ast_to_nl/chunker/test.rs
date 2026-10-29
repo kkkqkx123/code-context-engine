@@ -865,14 +865,8 @@ mod tests {
             member_conversions: vec![],
         };
 
-        let emb_dec = ChunkBuilder::decoration_allowance(
-            &group,
-            ChunkPath::Embedding,
-        );
-        let bm25_dec = ChunkBuilder::decoration_allowance(
-            &group,
-            ChunkPath::Bm25,
-        );
+        let emb_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Embedding);
+        let bm25_dec = ChunkBuilder::decoration_allowance(&group, ChunkPath::Bm25);
         let body_cfg = base.clone();
         let emb_budget = base.budget(ChunkPath::Embedding, false, emb_dec);
         let bm25_budget = base.budget(ChunkPath::Bm25, false, bm25_dec);

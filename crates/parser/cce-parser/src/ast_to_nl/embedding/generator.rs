@@ -90,10 +90,7 @@ impl EmbeddingGenerator {
                 let profile = NoiseProfile::for_language(group.language);
                 if let Some(cleaned) = Self::cleaned_doc_for_threshold(doc, profile) {
                     if estimate_tokens(&cleaned) > LONG_DOC_THRESHOLD {
-                        descriptions.push(format!(
-                            "Documentation of {}:\n{}",
-                            group.name, cleaned
-                        ));
+                        descriptions.push(format!("Documentation of {}:\n{}", group.name, cleaned));
                     }
                 }
             }

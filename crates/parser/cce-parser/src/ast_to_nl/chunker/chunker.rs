@@ -259,14 +259,8 @@ impl GroupChunker {
     > {
         use cce_config::modules::ChunkBudget;
         let has_vocabulary = self.group_mentions_vocabulary(file_path, language, texts);
-        let embedding_decoration = ChunkBuilder::decoration_allowance(
-            group,
-            ChunkPath::Embedding,
-        );
-        let bm25_decoration = ChunkBuilder::decoration_allowance(
-            group,
-            ChunkPath::Bm25,
-        );
+        let embedding_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Embedding);
+        let bm25_decoration = ChunkBuilder::decoration_allowance(group, ChunkPath::Bm25);
         let emb_budget: ChunkBudget =
             self.config
                 .budget(ChunkPath::Embedding, has_vocabulary, embedding_decoration);

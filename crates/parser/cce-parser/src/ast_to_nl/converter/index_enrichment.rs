@@ -266,11 +266,48 @@ const MAX_ANCHOR_DISCRIMINANTS: usize = 8;
 /// nothing the body does not already imply, so they never survive the
 /// redundancy prune on their own.
 const BOILERPLATE_CALLEES: &[&str] = &[
-    "Ok", "Err", "Some", "None", "assert", "assert_eq", "assert_ne", "debug_assert", "panic",
-    "todo", "unimplemented", "unreachable", "vec", "format", "write", "writeln", "print",
-    "println", "eprint", "eprintln", "clone", "cloned", "to_string", "to_owned", "as_ref",
-    "as_mut", "len", "is_empty", "is_some", "is_none", "is_ok", "is_err", "unwrap", "expect",
-    "push", "pop", "iter", "iter_mut", "into", "from", "map", "and_then",
+    "Ok",
+    "Err",
+    "Some",
+    "None",
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert",
+    "panic",
+    "todo",
+    "unimplemented",
+    "unreachable",
+    "vec",
+    "format",
+    "write",
+    "writeln",
+    "print",
+    "println",
+    "eprint",
+    "eprintln",
+    "clone",
+    "cloned",
+    "to_string",
+    "to_owned",
+    "as_ref",
+    "as_mut",
+    "len",
+    "is_empty",
+    "is_some",
+    "is_none",
+    "is_ok",
+    "is_err",
+    "unwrap",
+    "expect",
+    "push",
+    "pop",
+    "iter",
+    "iter_mut",
+    "into",
+    "from",
+    "map",
+    "and_then",
 ];
 
 /// Whether a call target restates what the surrounding text already names.
@@ -280,7 +317,11 @@ const BOILERPLATE_CALLEES: &[&str] = &[
 /// (the receiver is spelled differently but both parts are stated). A bare
 /// target is redundant when it occurs as an identifier token or belongs to
 /// the language boilerplate set.
-fn callee_is_redundant(callee: &str, full_text: &str, tokens: &std::collections::HashSet<&str>) -> bool {
+fn callee_is_redundant(
+    callee: &str,
+    full_text: &str,
+    tokens: &std::collections::HashSet<&str>,
+) -> bool {
     let callee = callee.trim().trim_end_matches('.').trim();
     if callee.is_empty() {
         return true;
@@ -290,16 +331,8 @@ fn callee_is_redundant(callee: &str, full_text: &str, tokens: &std::collections:
     }
     let qualified = callee.contains("::") || callee.contains('.');
     if qualified {
-        let head = callee
-            .split([':', '.'])
-            .next()
-            .unwrap_or("")
-            .trim();
-        let tail = callee
-            .rsplit([':', '.'])
-            .next()
-            .unwrap_or("")
-            .trim();
+        let head = callee.split([':', '.']).next().unwrap_or("").trim();
+        let tail = callee.rsplit([':', '.']).next().unwrap_or("").trim();
         if !head.is_empty() && head != tail && tokens.contains(head) && tokens.contains(tail) {
             return true;
         }
@@ -445,8 +478,7 @@ fn branch_discriminants(text: &str) -> Vec<String> {
                 .take_while(|b| is_identifier_byte(**b))
                 .count();
         if label_end > label_start {
-            let label = cce_utils::text::slice_exact(text, label_start, label_end)
-                .unwrap_or("");
+            let label = cce_utils::text::slice_exact(text, label_start, label_end).unwrap_or("");
             if !label.is_empty() && label != "default" {
                 labels.push(label.to_string());
             }
@@ -999,8 +1031,8 @@ mod tests {
 
     #[test]
     fn test_build_extra_text_skips_file_documentation() {
-        use cce_types::{EntityKind, GroupedEntity};
         use crate::grouper::types::{EntityGroup, GroupType};
+        use cce_types::{EntityKind, GroupedEntity};
 
         let mut doc_group = EntityGroup::new("file_doc_test", GroupType::FileDocumentation);
         doc_group.header = Some(GroupedEntity {
@@ -1263,26 +1295,24 @@ mod tests {
 
     #[test]
     fn prune_drops_boilerplate_only_line() {
-        let out = prune_case(
-            "function demo.\ncalls: Ok.\nReturns a match.\nOk(self.find())",
-        );
+        let out = prune_case("function demo.\ncalls: Ok.\nReturns a match.\nOk(self.find())");
         assert!(!out.contains("calls:"), "boilerplate restated: {out:?}");
     }
 
     #[test]
     fn prune_drops_boilerplate_absent_from_body() {
-        let out = prune_case(
-            "function demo.\ncalls: vec, push.\nDoes things.\nlet x = 1;",
-        );
+        let out = prune_case("function demo.\ncalls: vec, push.\nDoes things.\nlet x = 1;");
         assert!(!out.contains("calls:"), "bare boilerplate dropped: {out:?}");
     }
 
     #[test]
     fn prune_keeps_distinctive_unstated_callee() {
-        let out = prune_case(
-            "function demo.\ncalls: build_from_hir, Ok.\nBuilds a regex.\nOk(output)",
+        let out =
+            prune_case("function demo.\ncalls: build_from_hir, Ok.\nBuilds a regex.\nOk(output)");
+        assert!(
+            out.contains("calls: build_from_hir."),
+            "keeps novel callee: {out:?}"
         );
-        assert!(out.contains("calls: build_from_hir."), "keeps novel callee: {out:?}");
         assert!(!out.contains("Ok,"));
     }
 }
