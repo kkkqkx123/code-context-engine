@@ -43,6 +43,9 @@ use require_filter::is_shadowed_require;
 pub struct RelationExtractor {
     /// Query executor
     query_executor: Arc<QueryExecutor>,
+    /// Optional plugin registry for the `LangHeuristics` call-level hook
+    /// (custom languages only; built-in languages never consult plugins).
+    heuristics_registry: Option<Arc<cce_plugin::PluginRegistry>>,
 }
 
 impl RelationExtractor {
@@ -50,6 +53,7 @@ impl RelationExtractor {
     pub fn new() -> Self {
         Self {
             query_executor: Arc::new(QueryExecutor::new()),
+            heuristics_registry: None,
         }
     }
 
@@ -57,7 +61,22 @@ impl RelationExtractor {
     pub fn with_executor(executor: Arc<QueryExecutor>) -> Self {
         Self {
             query_executor: executor,
+            heuristics_registry: None,
         }
+    }
+
+    /// Attach a plugin registry for the `LangHeuristics` call-level hook.
+    ///
+    /// Only custom languages consult plugins, and only when the built-in
+    /// tables miss; without a registry every custom call stays conservative.
+    pub fn with_heuristics_registry(mut self, registry: Arc<cce_plugin::PluginRegistry>) -> Self {
+        self.heuristics_registry = Some(registry);
+        self
+    }
+
+    /// Replace the heuristics registry in place.
+    pub fn set_heuristics_registry(&mut self, registry: Arc<cce_plugin::PluginRegistry>) {
+        self.heuristics_registry = Some(registry);
     }
 
     /// Extract relations from source code
@@ -121,9 +140,15 @@ impl RelationExtractor {
         let mut relations = Vec::new();
 
         for mat in &matches {
-            if let Some(relation) =
-                process_call_match(mat, &entity_index, language, file_id, tree, source)
-            {
+            if let Some(relation) = process_call_match(
+                mat,
+                &entity_index,
+                language,
+                file_id,
+                tree,
+                source,
+                self.heuristics_registry.as_deref(),
+            ) {
                 relations.push(relation);
             }
         }

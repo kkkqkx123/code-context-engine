@@ -533,4 +533,40 @@ pub trait FfiPlugin: Send + Sync + 'static {
     fn entity_kind(&self, _ctx: *mut std::ffi::c_void, _capture_name: &str) -> Option<String> {
         None
     }
+
+    /// Whether the plugin classifies call sites as standard-library calls.
+    ///
+    /// Consulted only for custom languages the built-in detectors miss.
+    fn supports_stdlib_call_heuristic(&self) -> bool {
+        false
+    }
+
+    /// Classify `call_name` as a standard-library call. `relation_type`
+    /// carries the stable relation name (`"call.direct"`, …) or null
+    /// when the caller has no relation context. Return the category name
+    /// or null to decline.
+    fn classify_stdlib_call(
+        &self,
+        _ctx: *mut std::ffi::c_void,
+        _call_name: &str,
+        _relation_type: Option<&str>,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Whether the plugin contributes bare boilerplate method names.
+    fn supports_bare_methods_heuristic(&self) -> bool {
+        false
+    }
+
+    /// Contribute bare callee names for call-text pruning. Return null
+    /// (or an empty JSON array) to decline; the host takes the first
+    /// non-empty answer without merging.
+    fn bare_boilerplate_methods(
+        &self,
+        _ctx: *mut std::ffi::c_void,
+        _language: &str,
+    ) -> Option<Vec<String>> {
+        None
+    }
 }

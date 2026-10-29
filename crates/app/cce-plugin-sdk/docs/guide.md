@@ -149,6 +149,10 @@ cargo build --release
 | `is_test_file(ctx, file_path, content)` | `Option<bool>` | `None` | `supports_test_file_heuristic→true` |
 | `supports_entity_kind_heuristic()` | `bool` | `false` | — |
 | `entity_kind(ctx, capture_name)` | `Option<String>` | `None` | `supports_entity_kind_heuristic→true` |
+| `supports_stdlib_call_heuristic()` | `bool` | `false` | — |
+| `classify_stdlib_call(ctx, call_name, relation_type?)` | `Option<String>` | `None` | `supports_stdlib_call_heuristic→true` |
+| `supports_bare_methods_heuristic()` | `bool` | `false` | — |
+| `bare_boilerplate_methods(ctx, language)` | `Option<Vec<String>>` | `None` | `supports_bare_methods_heuristic→true` |
 | `supports_group_override()` | `bool` | `false` | — |
 | `group(ctx, context_json)` | `Result<Option<Vec<EntityGroup>>, PluginError>` | `Ok(None)` | `supports_group_override→true` |
 | `supports_relation_extract()` | `bool` | `false` | — |
@@ -192,12 +196,14 @@ cargo build --release
 - **GroupOverride**：完全替换内置分组。入参为扩展 `GroupPluginContext`（含序列化的实体与原始关系），返回 `EntityGroup` 数组；返回非空数组时跳过内置分组，下游 `post_group` 钩子与 combined-source 生成仍照常执行。
 - **Chunk**：完全替换内置分块，返回标准 `ChunkedResult` 形状。入参为 `GroupConversions` 数组 + `file_path`。插件产出的每个 chunk 必须满足配置的硬上限：Embedding 按 token 数、BM25 按索引分词器产生的 term 数。host 在插件返回后逐块校验；超限直接返回永久性 `CodeSplitting` 错误，不截断、不自动回退到内置分块。该约束属于 host 与插件的契约，不新增 ABI 符号。
 - **Rerank**：查询结果重排（全局能力，无文件 / 语言过滤）。入参为查询 + `RerankCandidate` 数组，返回 `RerankResult`（重排顺序 + 分数 + 可选理由）。
-- **AstLanguage**：自定义语言解析（仅 Native），提供 tree-sitter grammar 指针 + 查询方案字符串 + 语言名与扩展名。宿主在注册时校验 grammar 的 ABI 版本（`plugins.grammar_abi_policy`，默认 `deny` 拒绝区间外 grammar，可配 `warn`）；缺失 / 空指针 grammar 一律跳过并告警。
+- **AstLanguage**：自定义语言解析（仅 Native），提供 tree-sitter grammar 指针 + 查询方案字符串 + 语言名与扩展名。宿主在注册时校验 grammar 的 ABI 版本（`plugins.grammar_abi_policy`，默认 `deny` 拒绝区间外 grammar，可配 `warn`）；缺失 / 空指针 grammar 一律跳过并告警。无 `LangHeuristics` 配套的语言按 `plugins.missing_heuristics_policy` 处理（默认 `warn` 注册并告警、可配 `deny` 跳过，用于严格项目与 CI 门禁）。
 - **LanguageRemap**：自定义语言直接复用宿主内置 grammar（Lua 与 Native 均可，无 FFI 指针）。声明 `language_name` / `language_extensions` / `remap_grammar_language`（指向宿主内置语言名），8 类查询方案可选——未提供时回落被引用语言的方案。适用于既有语言超集 / 子集形态的 DSL（模板方言、配置扩展等）。
-- **LangHeuristics**：自定义语言启发式，三个钩子相互独立、均可缺省：
+- **LangHeuristics**：自定义语言启发式，五个钩子相互独立、均可缺省：
   - `classify_stdlib(module_path)` → 标准库分类名（`Collection` / `Io` / …）或 nil，接入实体 stdlib 标记（仅对 `Language::Custom` 生效）；
   - `is_test_file(file_path, content)` → `true` / `false` / nil，内置路径规则无信号时生效，标记整个文件为测试文件；
-  - `entity_kind(capture_name)` → 实体 kind 名（`function` / `class` / …）或 nil，内置捕获名映射未命中时生效。
+  - `entity_kind(capture_name)` → 实体 kind 名（`function` / `class` / …）或 nil，内置捕获名映射未命中时生效；
+  - `classify_stdlib_call(call_name, relation_type?)` → 标准库分类名或 nil，`relation_type` 为稳定关系名（`call.direct` / `call.method` / …）或缺省（无关系上下文时），接入调用关系 stdlib 分类（仅对 `Language::Custom` 且内置未命中时生效，内置语言永不咨询插件）；
+  - `bare_boilerplate_methods(language)` → 裸方法名数组或 nil，接入嵌入文本调用行裁剪（同上，仅自定义语言，首个非空答案生效，不合并）。去噪画像暂不开放插件自定义，原生插件语言保持全关。
 - **RelationExtract**：向关系索引补充框架特定符号与显式关系（如 Spring `@Bean` 注入）。实现 `extract_symbols(...)` / `extract_relations(...)`，返回 `PluginSymbol` / `PluginRelation` 数组；宿主将符号注册进项目符号表、关系经解析器解析为 `SymbolKey → entity_id`（无法解析的目标丢弃并告警）。默认关闭，需 `relation.plugin_symbols_enabled = true`。
 - **SymbolExtract**：自定义语言的 import/export 符号提取，配合 `AstLanguage` 使用。实现 `extract_imports(content, file_path, language)` / `extract_exports(...)`，返回 `PluginImport` / `PluginExport` 数组；宿主将其转换为标准化 import/export 进入关系索引（默认关闭，需 `relation.plugin_symbol_extract_enabled = true`）。
 - **QueryRewrite**：召回前改写 / 扩展查询（链式档）。返回 `QueryRewriteResult { rewritten_query, expansion_terms }`；原始查询保留为兜底项。
@@ -282,6 +288,8 @@ declare_plugin!(MyPlugin, MyPlugin::new()); // 自定义初始化
 | `cce_plugin_has_stdlib_heuristic` / `cce_plugin_classify_stdlib` | `LangHeuristics` stdlib 分类钩子 | ✅ |
 | `cce_plugin_has_test_file_heuristic` / `cce_plugin_is_test_file` | `LangHeuristics` 测试文件钩子 | ✅ |
 | `cce_plugin_has_entity_kind_heuristic` / `cce_plugin_entity_kind` | `LangHeuristics` 实体 kind 钩子 | ✅ |
+| `cce_plugin_has_stdlib_call_heuristic` / `cce_plugin_classify_stdlib_call` | `LangHeuristics` 调用级 stdlib 分类钩子 | ✅ |
+| `cce_plugin_has_bare_methods_heuristic` / `cce_plugin_bare_boilerplate_methods` | `LangHeuristics` 裸方法表钩子 | ✅ |
 | `cce_plugin_has_group_override` / `cce_plugin_group` | `GroupOverride` 能力（完全替换内置分组） | ✅ |
 | `cce_plugin_has_relation_extract` / `cce_plugin_extract_symbols` / `cce_plugin_extract_relations` | `RelationExtract` 能力（符号 + 显式关系注入） | ✅ |
 | `cce_plugin_has_symbol_extract` / `cce_plugin_extract_imports` / `cce_plugin_extract_exports` | `SymbolExtract` 能力（import/export 提取） | ✅ |
@@ -336,6 +344,10 @@ bool        cce_plugin_has_test_file_heuristic(void);
 char*       cce_plugin_is_test_file(void* ctx, const char* file_path, const char* content);
 bool        cce_plugin_has_entity_kind_heuristic(void);
 char*       cce_plugin_entity_kind(void* ctx, const char* capture_name);
+bool        cce_plugin_has_stdlib_call_heuristic(void);
+char*       cce_plugin_classify_stdlib_call(void* ctx, const char* call_name, const char* relation_type);
+bool        cce_plugin_has_bare_methods_heuristic(void);
+char*       cce_plugin_bare_boilerplate_methods(void* ctx, const char* language);
 
 // 领域术语（Vocabulary）
 bool        cce_plugin_has_vocabulary(void);

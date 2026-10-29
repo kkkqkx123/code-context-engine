@@ -29,6 +29,7 @@ pub(crate) fn process_call_match(
     file_id: Option<i64>,
     tree: &Tree,
     source: &str,
+    heuristics_registry: Option<&cce_plugin::PluginRegistry>,
 ) -> Option<Relation> {
     // Find the callee name
     let callee_capture = find_callee_capture(mat)?;
@@ -65,7 +66,8 @@ pub(crate) fn process_call_match(
     // confirms and provides additional categorization based on relation type.
     //
     // See STDLIB_SUMMARY.md for design rationale and architecture.
-    let stdlib_category = classify_stdlib_category(&callee_name, &relation_type, language);
+    let stdlib_category =
+        classify_stdlib_category(&callee_name, &relation_type, language, heuristics_registry);
 
     Some(match caller_id {
         Some(caller_id) => Relation::new(
@@ -392,9 +394,24 @@ fn classify_stdlib_category(
     callee_name: &str,
     relation_type: &RelationType,
     language: &Language,
+    heuristics_registry: Option<&cce_plugin::PluginRegistry>,
 ) -> Option<StdlibCategory> {
     if !StdlibDetector::is_stdlib_by_type(callee_name, relation_type, language) {
-        return None;
+        // Built-in tables miss everything outside their language set, which
+        // is exactly the custom-language case: consult call-level plugin
+        // heuristics before settling on the conservative answer. Built-in
+        // languages never reach the plugins, so their behavior is unchanged.
+        if !matches!(language, Language::Custom(_)) {
+            return None;
+        }
+        let registry = heuristics_registry?;
+        return crate::plugin::heuristics::classify_stdlib_call(
+            registry,
+            callee_name,
+            Some(&relation_type.to_string()),
+            None,
+            Some(language.to_string().as_str()),
+        );
     }
     // Remapped plugin languages inherit their host's categories.
     let effective = cce_types::language::effective_language(language);
@@ -464,5 +481,111 @@ fn classify_stdlib_category(
                 .or(Some(StdlibCategory::Other))
         }
         _ => Some(StdlibCategory::Other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cce_plugin::{CodePlugin, PluginError, PluginMetadata, PluginRegistry};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// Fake call-level heuristics plugin for category routing tests.
+    struct FakeCallPlugin {
+        meta: PluginMetadata,
+        answer: Option<String>,
+    }
+
+    impl FakeCallPlugin {
+        fn answering(id: &str, category: &str) -> Self {
+            Self {
+                meta: PluginMetadata {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    version: "0.1.0".to_string(),
+                    priority: 0,
+                    capability_priorities: HashMap::new(),
+                    capability_timeouts: HashMap::new(),
+                    description: None,
+                    capabilities: Vec::new(),
+                },
+                answer: Some(category.to_string()),
+            }
+        }
+    }
+
+    impl CodePlugin for FakeCallPlugin {
+        fn metadata(&self) -> &PluginMetadata {
+            &self.meta
+        }
+        fn supports_stdlib_call_heuristic(&self) -> bool {
+            true
+        }
+        fn classify_stdlib_call(
+            &self,
+            _call_name: &str,
+            _relation_type: Option<&str>,
+        ) -> Result<Option<String>, PluginError> {
+            Ok(self.answer.clone())
+        }
+    }
+
+    fn registry_with_fake() -> PluginRegistry {
+        let mut registry = PluginRegistry::new();
+        registry.register(Arc::new(FakeCallPlugin::answering(
+            "call-route-guard",
+            "Collection",
+        )));
+        registry
+    }
+
+    /// Plugin contract: a native custom language consults call-level
+    /// plugins when the built-in tables miss; without a registry the
+    /// answer stays conservative.
+    #[test]
+    fn test_classify_custom_language_uses_plugin_on_builtin_miss() {
+        let registry = registry_with_fake();
+        let language = Language::Custom(7);
+        assert_eq!(
+            classify_stdlib_category(
+                "tpl_emit",
+                &RelationType::DirectCall,
+                &language,
+                Some(&registry),
+            ),
+            Some(StdlibCategory::Collection)
+        );
+        assert_eq!(
+            classify_stdlib_category("tpl_emit", &RelationType::DirectCall, &language, None),
+            None,
+            "no registry keeps custom calls conservative"
+        );
+    }
+
+    /// Built-in languages never reach plugins, even when one answers.
+    #[test]
+    fn test_classify_builtin_language_ignores_plugins() {
+        let registry = registry_with_fake();
+        assert_eq!(
+            classify_stdlib_category(
+                "my_widget",
+                &RelationType::DirectCall,
+                &Language::Rust,
+                Some(&registry),
+            ),
+            None,
+            "built-in miss stays a miss with plugins present"
+        );
+        assert_eq!(
+            classify_stdlib_category(
+                "Vec::new",
+                &RelationType::DirectCall,
+                &Language::Rust,
+                Some(&registry),
+            ),
+            Some(StdlibCategory::Collection),
+            "built-in hit keeps the built-in category"
+        );
     }
 }

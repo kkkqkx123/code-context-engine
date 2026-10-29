@@ -496,8 +496,11 @@ char *cce_plugin_remap_grammar_language(void);
 /*
  * ── LangHeuristics (language heuristics) ─────────────────────────────────
  *
- * Three independent, optional hooks that improve custom-language precision.
+ * Five independent, optional hooks that improve custom-language precision.
  * Each has its own capability guard; unexported hooks are simply skipped.
+ * The call-level hooks (`classify_stdlib_call`, `bare_boilerplate_methods`)
+ * are consulted only for custom languages the built-in tables miss;
+ * built-in languages never reach them.
  */
 
 /* Whether the plugin maps module paths to stdlib categories. */
@@ -532,6 +535,34 @@ bool cce_plugin_has_entity_kind_heuristic(void);
  *   (void *ctx, const char *capture_name) -> char *kind_or_null
  */
 char *cce_plugin_entity_kind(void *ctx, const char *capture_name);
+
+/* Whether the plugin classifies call sites as standard-library calls. */
+bool cce_plugin_has_stdlib_call_heuristic(void);
+
+/*
+ * Classify `call_name` (bare function or `recv.method` spell) as a
+ * standard-library call. `relation_type` carries the stable relation name
+ * ("call.direct", "call.method", ...) or is NULL when the caller has no
+ * relation context. Return the category name (same vocabulary as
+ * `cce_plugin_classify_stdlib`), or NULL to decline / mark not-stdlib.
+ *   (void *ctx, const char *call_name, const char *relation_type_or_null)
+ *     -> char *category_or_null
+ */
+char *cce_plugin_classify_stdlib_call(void *ctx, const char *call_name,
+                                       const char *relation_type);
+
+/* Whether the plugin contributes bare boilerplate method names. */
+bool cce_plugin_has_bare_methods_heuristic(void);
+
+/*
+ * Contribute bare callee names for call-text pruning (high-frequency,
+ * low-signal spellings unresolvable by name). Returns a JSON array of
+ * strings, e.g. `["emit","fire"]`, or NULL to decline (an empty array
+ * also declines). The host takes the first non-empty answer without
+ * merging.
+ *   (void *ctx, const char *language) -> char *json_array_or_null
+ */
+char *cce_plugin_bare_boilerplate_methods(void *ctx, const char *language);
 
 /*
  * ── FFI result protocol ──────────────────────────────────────────────────

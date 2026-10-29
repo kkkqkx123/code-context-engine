@@ -329,6 +329,24 @@ macro_rules! declare_plugin {
             .unwrap_or(false)
         }
 
+        /// Whether this plugin classifies call sites as stdlib calls.
+        #[no_mangle]
+        pub extern "C" fn cce_plugin_has_stdlib_call_heuristic() -> bool {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                PLUGIN.supports_stdlib_call_heuristic()
+            }))
+            .unwrap_or(false)
+        }
+
+        /// Whether this plugin contributes bare boilerplate method names.
+        #[no_mangle]
+        pub extern "C" fn cce_plugin_has_bare_methods_heuristic() -> bool {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                PLUGIN.supports_bare_methods_heuristic()
+            }))
+            .unwrap_or(false)
+        }
+
         // ── Capability entry points ─────────────────────────────────
 
         /// Parse a document into a `PluginDocument`.
@@ -889,6 +907,64 @@ macro_rules! declare_plugin {
             .unwrap_or(None);
             match kind {
                 Some(s) => std::ffi::CString::new(s)
+                    .map(|c| c.into_raw())
+                    .unwrap_or(std::ptr::null_mut()),
+                None => std::ptr::null_mut(),
+            }
+        }
+
+        /// Classify `call_name` as a standard-library call, or null.
+        /// `relation_type` carries the stable relation name or is null
+        /// when the caller has no relation context.
+        #[no_mangle]
+        pub unsafe extern "C" fn cce_plugin_classify_stdlib_call(
+            ctx: *mut std::ffi::c_void,
+            call_name: *const std::ffi::c_char,
+            relation_type: *const std::ffi::c_char,
+        ) -> *mut std::ffi::c_char {
+            let call_str = match unsafe { $crate::ffi::read_c_str(call_name) } {
+                Ok(s) => s.to_string(),
+                Err(_) => return std::ptr::null_mut(),
+            };
+            let relation_opt = if relation_type.is_null() {
+                None
+            } else {
+                match unsafe { $crate::ffi::read_c_str(relation_type) } {
+                    Ok(s) => Some(s.to_string()),
+                    Err(_) => return std::ptr::null_mut(),
+                }
+            };
+            let category = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                PLUGIN.classify_stdlib_call(ctx, &call_str, relation_opt.as_deref())
+            }))
+            .unwrap_or(None);
+            match category {
+                Some(s) => std::ffi::CString::new(s)
+                    .map(|c| c.into_raw())
+                    .unwrap_or(std::ptr::null_mut()),
+                None => std::ptr::null_mut(),
+            }
+        }
+
+        /// Contribute bare boilerplate method names as a JSON array, or
+        /// null to decline. An empty array also declines.
+        #[no_mangle]
+        pub unsafe extern "C" fn cce_plugin_bare_boilerplate_methods(
+            ctx: *mut std::ffi::c_void,
+            language: *const std::ffi::c_char,
+        ) -> *mut std::ffi::c_char {
+            let language_str = match unsafe { $crate::ffi::read_c_str(language) } {
+                Ok(s) => s.to_string(),
+                Err(_) => return std::ptr::null_mut(),
+            };
+            let methods = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                PLUGIN.bare_boilerplate_methods(ctx, &language_str)
+            }))
+            .unwrap_or(None);
+            match methods {
+                Some(list) => $crate::serde_json::to_string(&list)
+                    .ok()
+                    .and_then(|json| std::ffi::CString::new(json).ok())
                     .map(|c| c.into_raw())
                     .unwrap_or(std::ptr::null_mut()),
                 None => std::ptr::null_mut(),

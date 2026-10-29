@@ -181,6 +181,7 @@ fn callee_is_redundant(
     full_text: &str,
     tokens: &std::collections::HashSet<&str>,
     language: Language,
+    plugin_bare: Option<&[String]>,
 ) -> bool {
     let callee = callee.trim().trim_end_matches('.').trim();
     if callee.is_empty() {
@@ -207,7 +208,13 @@ fn callee_is_redundant(
     if StdlibDetector::is_stdlib_call(callee, &language) {
         return true;
     }
-    bare_boilerplate_methods(language).contains(&callee)
+    if bare_boilerplate_methods(language).contains(&callee) {
+        return true;
+    }
+    // Plugin-contributed bare names (custom languages only; built-in
+    // tables stay pure). The converter resolves them per file, so this
+    // layer only applies the list it is given.
+    plugin_bare.is_some_and(|list| list.iter().any(|name| name == callee))
 }
 
 /// Drop `calls:` callees the embedding text already states.
@@ -215,7 +222,11 @@ fn callee_is_redundant(
 /// Operates on the embedding text only, after the behavior sidecar is
 /// appended, so redundancy is judged against the complete text the
 /// retriever will read (identity, documentation and raw body).
-pub(super) fn prune_redundant_calls_lines(conversion: &mut ConversionResult, language: Language) {
+pub(super) fn prune_redundant_calls_lines(
+    conversion: &mut ConversionResult,
+    language: Language,
+    plugin_bare: Option<&[String]>,
+) {
     let Some(text) = conversion.embedding_text.as_mut() else {
         return;
     };
@@ -252,7 +263,7 @@ pub(super) fn prune_redundant_calls_lines(conversion: &mut ConversionResult, lan
         let kept: Vec<&str> = original
             .iter()
             .copied()
-            .filter(|c| !callee_is_redundant(c, &full_text, &tokens, language))
+            .filter(|c| !callee_is_redundant(c, &full_text, &tokens, language, plugin_bare))
             .collect();
         if kept.len() != original.len() {
             changed = true;
@@ -284,7 +295,21 @@ mod tests {
             "demo.rs".to_string(),
             text.to_string(),
         );
-        prune_redundant_calls_lines(&mut conversion, language);
+        prune_redundant_calls_lines(&mut conversion, language, None);
+        conversion
+            .embedding_text
+            .expect("embedding text survives pruning")
+    }
+
+    fn prune_case_with_plugin_bare(text: &str, language: Language, bare: &[String]) -> String {
+        let mut conversion = ConversionResult::embedding_only(
+            EntityId(1),
+            EntityKind::Function,
+            "demo".to_string(),
+            "demo.tplx".to_string(),
+            text.to_string(),
+        );
+        prune_redundant_calls_lines(&mut conversion, language, Some(bare));
         conversion
             .embedding_text
             .expect("embedding text survives pruning")
@@ -388,6 +413,22 @@ mod tests {
         assert!(
             rust.contains("calls: printf."),
             "printf is meaningful in Rust: {rust:?}"
+        );
+    }
+
+    #[test]
+    fn prune_applies_plugin_bare_list_for_custom_language() {
+        // A plugin-contributed bare name prunes even though built-in
+        // tables know nothing about the custom language.
+        let text = "function demo.\ncalls: tpl_emit.\nDoes things.\nlet x = 1;";
+        let bare = ["tpl_emit".to_string()];
+        let out = prune_case_with_plugin_bare(text, Language::Custom(7), &bare);
+        assert!(!out.contains("calls:"), "plugin bare name pruned: {out:?}");
+        // Without the plugin list the same callee is distinctive.
+        let kept = prune_case_for_language(text, Language::Custom(7));
+        assert!(
+            kept.contains("tpl_emit"),
+            "no plugin answer keeps callee: {kept:?}"
         );
     }
 

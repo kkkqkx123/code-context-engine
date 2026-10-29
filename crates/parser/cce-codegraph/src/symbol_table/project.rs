@@ -546,12 +546,14 @@ impl ProjectSymbolTable {
                 }
                 let mut set = OverloadSet::new(method_name.clone(), owner.clone());
                 for member in members {
-                    let (parameter_types, return_type) = self.load_overload_candidate_types(member);
+                    let (parameter_types, return_type, arity) =
+                        self.load_overload_candidate_types(member);
                     let candidate = OverloadCandidate {
                         entity_id: member.entity_id,
                         parameter_types,
                         return_type,
                         specificity: members.len() as u32,
+                        arity,
                     };
                     set.add_candidate(candidate);
                 }
@@ -636,7 +638,12 @@ impl ProjectSymbolTable {
     fn load_overload_candidate_types(
         &self,
         member: &crate::symbol_table::type_index::MemberEntry,
-    ) -> (Vec<TypeShape>, TypeShape) {
+    ) -> (
+        Vec<TypeShape>,
+        TypeShape,
+        crate::type_inference::overload::ParamArity,
+    ) {
+        use crate::type_inference::overload::ParamArity;
         let normalized = normalize_project_path(&member.file_path);
 
         // Try type inference context first (has parsed TypeShape)
@@ -659,13 +666,26 @@ impl ProjectSymbolTable {
                                 .or_else(|| parse_type_shape(&b.type_name, Language::Unknown))
                         })
                         .unwrap_or(TypeShape::Named("unknown".to_string()));
-                    return (parameter_types, return_type);
+                    let arity = type_ctx.param_arity(member.entity_id);
+                    return (parameter_types, return_type, arity);
                 }
+            }
+            // Bindings may be empty while an arity record still exists
+            // (untyped or zero-parameter functions): keep the record so
+            // arity filtering distinguishes declared zero-arity from
+            // missing data instead of guessing.
+            let arity = type_ctx.param_arity(member.entity_id);
+            if arity.known {
+                return (vec![], TypeShape::Named("unknown".to_string()), arity);
             }
         }
 
         // Fallback: no parameter types available
-        (vec![], TypeShape::Named("unknown".to_string()))
+        (
+            vec![],
+            TypeShape::Named("unknown".to_string()),
+            ParamArity::unknown(),
+        )
     }
 
     /// Attach a metrics sink for observability.

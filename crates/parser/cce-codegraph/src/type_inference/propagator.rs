@@ -49,6 +49,10 @@ pub struct CrossFilePropagator {
     param_name_index: DashMap<String, Vec<TypeBinding>>,
     /// Reverse param name mapping.
     param_id_to_name: DashMap<EntityId, String>,
+    /// Global cache: function EntityId -> extraction-time arity record.
+    /// Copied alongside `param_type_cache` so overload resolution judges
+    /// call arity from declared parameters, not just typed bindings.
+    param_arity_cache: DashMap<EntityId, super::overload::ParamArity>,
     /// Global cache: field/property EntityId -> type binding.
     field_type_cache: DashMap<EntityId, TypeBinding>,
     /// Per-file index for field types.
@@ -127,6 +131,9 @@ impl CrossFilePropagator {
 
         // Parameter types propagation
         let mut file_param_entries: Vec<(EntityId, Vec<TypeBinding>)> = Vec::new();
+        for (entity_id, arity) in ctx.param_arity_iter() {
+            self.param_arity_cache.insert(*entity_id, *arity);
+        }
         for (entity_id, bindings) in ctx.parameter_types_iter() {
             let func_name = match name_map.get(entity_id) {
                 Some(n) => n.clone(),
@@ -223,6 +230,7 @@ impl CrossFilePropagator {
             for (entity_id, _) in entries {
                 self.param_type_cache.remove(&entity_id);
                 self.param_id_to_name.remove(&entity_id);
+                self.param_arity_cache.remove(&entity_id);
             }
             needs_rebuild_param = true;
         }
@@ -340,11 +348,17 @@ impl CrossFilePropagator {
                     .unwrap_or(TypeShape::Named(return_binding.type_name.clone()))
             });
             let specificity = parameter_types.iter().map(compute_specificity).sum();
+            let arity = self
+                .param_arity_cache
+                .get(entity_id)
+                .map(|entry| *entry)
+                .unwrap_or_default();
             set.add_candidate(OverloadCandidate {
                 entity_id: *entity_id,
                 parameter_types,
                 return_type,
                 specificity,
+                arity,
             });
         }
         let arg_refs: Vec<Option<&TypeShape>> =
@@ -404,6 +418,7 @@ impl CrossFilePropagator {
         self.file_param_index.clear();
         self.param_name_index.clear();
         self.param_id_to_name.clear();
+        self.param_arity_cache.clear();
         self.field_type_cache.clear();
         self.file_field_index.clear();
         self.field_name_index.clear();
@@ -424,6 +439,7 @@ impl CrossFilePropagator {
     pub fn is_empty(&self) -> bool {
         self.return_type_cache.is_empty()
             && self.param_type_cache.is_empty()
+            && self.param_arity_cache.is_empty()
             && self.field_type_cache.is_empty()
     }
 

@@ -241,6 +241,8 @@ impl CodePlugin for LuaPlugin {
         self.classify_stdlib_fn_name.is_some()
             || self.is_test_file_fn_name.is_some()
             || self.entity_kind_fn_name.is_some()
+            || self.classify_stdlib_call_fn_name.is_some()
+            || self.bare_boilerplate_methods_fn_name.is_some()
     }
 
     fn supports_stdlib_heuristic(&self) -> bool {
@@ -355,6 +357,109 @@ impl CodePlugin for LuaPlugin {
                         })?
                         .to_string(),
                 )),
+                _ => Ok(None),
+            }
+        })
+    }
+
+    fn supports_stdlib_call_heuristic(&self) -> bool {
+        self.classify_stdlib_call_fn_name.is_some()
+    }
+
+    fn classify_stdlib_call(
+        &self,
+        call_name: &str,
+        relation_type: Option<&str>,
+    ) -> Result<Option<String>, PluginError> {
+        let Some(fn_name) = &self.classify_stdlib_call_fn_name else {
+            return Ok(None);
+        };
+        let fn_name = fn_name.clone();
+        let call_name = call_name.to_string();
+        let relation_type = relation_type.map(str::to_string);
+        let plugin_id = self.metadata.id.clone();
+        self.execute_with_timeout("classify_stdlib_call", move |lua| {
+            let plugin_table: Table = lua
+                .globals()
+                .get("plugin")
+                .map_err(|e| PluginError::ScriptError(e.to_string()))?;
+            let func: mlua::Function = plugin_table.get(fn_name.as_str()).map_err(|e| {
+                PluginError::LogicError(format!("Failed to get classify_stdlib_call function: {e}"))
+            })?;
+            let call_val = lua
+                .create_string(&call_name)
+                .map_err(|e| PluginError::ScriptError(e.to_string()))?;
+            let result: mlua::Value = match relation_type {
+                Some(relation) => {
+                    let relation_val = lua
+                        .create_string(&relation)
+                        .map_err(|e| PluginError::ScriptError(e.to_string()))?;
+                    func.call((call_val, relation_val)).map_err(|e| {
+                        warn!("Lua plugin {plugin_id} classify_stdlib_call failed: {e}");
+                        PluginError::ScriptError(format!("classify_stdlib_call error: {e}"))
+                    })?
+                }
+                None => func.call(call_val).map_err(|e| {
+                    warn!("Lua plugin {plugin_id} classify_stdlib_call failed: {e}");
+                    PluginError::ScriptError(format!("classify_stdlib_call error: {e}"))
+                })?,
+            };
+            match result {
+                mlua::Value::String(s) => Ok(Some(
+                    s.to_str()
+                        .map_err(|e| {
+                            PluginError::InvalidOutput(format!(
+                                "classify_stdlib_call non-UTF8 output: {e}"
+                            ))
+                        })?
+                        .to_string(),
+                )),
+                _ => Ok(None),
+            }
+        })
+    }
+
+    fn supports_bare_methods_heuristic(&self) -> bool {
+        self.bare_boilerplate_methods_fn_name.is_some()
+    }
+
+    fn bare_boilerplate_methods(&self, language: &str) -> Result<Option<Vec<String>>, PluginError> {
+        let Some(fn_name) = &self.bare_boilerplate_methods_fn_name else {
+            return Ok(None);
+        };
+        let fn_name = fn_name.clone();
+        let language = language.to_string();
+        let plugin_id = self.metadata.id.clone();
+        self.execute_with_timeout("bare_boilerplate_methods", move |lua| {
+            let plugin_table: Table = lua
+                .globals()
+                .get("plugin")
+                .map_err(|e| PluginError::ScriptError(e.to_string()))?;
+            let func: mlua::Function = plugin_table.get(fn_name.as_str()).map_err(|e| {
+                PluginError::LogicError(format!(
+                    "Failed to get bare_boilerplate_methods function: {e}"
+                ))
+            })?;
+            let language_val = lua
+                .create_string(&language)
+                .map_err(|e| PluginError::ScriptError(e.to_string()))?;
+            let result: mlua::Value = func.call(language_val).map_err(|e| {
+                warn!("Lua plugin {plugin_id} bare_boilerplate_methods failed: {e}");
+                PluginError::ScriptError(format!("bare_boilerplate_methods error: {e}"))
+            })?;
+            match result {
+                mlua::Value::Table(table) => {
+                    let mut methods = Vec::new();
+                    for value in table.sequence_values::<String>() {
+                        methods.push(value.map_err(|e| {
+                            PluginError::InvalidOutput(format!(
+                                "bare_boilerplate_methods non-string entry: {e}"
+                            ))
+                        })?);
+                    }
+                    Ok(Some(methods))
+                }
+                mlua::Value::Nil => Ok(None),
                 _ => Ok(None),
             }
         })

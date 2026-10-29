@@ -130,7 +130,11 @@ impl CodePlugin for NativePlugin {
     // ── LangHeuristics ───────────────────────────────────────────────
 
     fn supports_any_heuristic(&self) -> bool {
-        self.has_stdlib_heuristic || self.has_test_file_heuristic || self.has_entity_kind_heuristic
+        self.has_stdlib_heuristic
+            || self.has_test_file_heuristic
+            || self.has_entity_kind_heuristic
+            || self.has_stdlib_call_heuristic
+            || self.has_bare_methods_heuristic
     }
 
     fn supports_stdlib_heuristic(&self) -> bool {
@@ -227,6 +231,98 @@ impl CodePlugin for NativePlugin {
             // SAFETY: `func` is a valid function pointer from the same library.
             unsafe {
                 call_owned_string_fn1(|ctx| func(ctx, c_capture.as_ptr()), free_string_fn, ctx)
+            }
+        })
+    }
+
+    fn supports_stdlib_call_heuristic(&self) -> bool {
+        self.classify_stdlib_call_fn.is_some() && self.has_stdlib_call_heuristic
+    }
+
+    fn classify_stdlib_call(
+        &self,
+        call_name: &str,
+        relation_type: Option<&str>,
+    ) -> Result<Option<String>, PluginError> {
+        let Some(func) = self.classify_stdlib_call_fn else {
+            return Ok(None);
+        };
+        if !self.has_stdlib_call_heuristic {
+            return Ok(None);
+        }
+        let free_string_fn = self.free_string_fn;
+        let ctx = self.context.as_ref().map(|c| SendPtr(c.0));
+        let call_name = call_name.to_string();
+        let relation_type = relation_type.map(str::to_string);
+        self.execute_with_timeout("classify_stdlib_call", move || {
+            let c_call = std::ffi::CString::new(call_name.as_str())
+                .map_err(|e| PluginError::InvalidOutput(format!("call_name contains NUL: {e}")))?;
+            let c_relation = relation_type
+                .as_deref()
+                .map(std::ffi::CString::new)
+                .transpose()
+                .map_err(|e| {
+                    PluginError::InvalidOutput(format!("relation_type contains NUL: {e}"))
+                })?;
+            let relation_ptr = c_relation
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null());
+            // SAFETY: `func` is a valid function pointer from the same
+            // library; a null relation pointer means "unknown" and the
+            // output is read and freed before returning.
+            unsafe {
+                let ret_ptr = func(
+                    ctx.map(|c| c.0).unwrap_or(std::ptr::null_mut()),
+                    c_call.as_ptr(),
+                    relation_ptr,
+                );
+                if ret_ptr.is_null() {
+                    return Ok(None);
+                }
+                let c_str = std::ffi::CStr::from_ptr(ret_ptr);
+                let owned = c_str
+                    .to_str()
+                    .map_err(|_| {
+                        PluginError::InvalidOutput("Plugin returned non-UTF-8 string".to_string())
+                    })?
+                    .to_string();
+                free_string_fn(ret_ptr);
+                Ok(Some(owned))
+            }
+        })
+    }
+
+    fn supports_bare_methods_heuristic(&self) -> bool {
+        self.bare_boilerplate_methods_fn.is_some() && self.has_bare_methods_heuristic
+    }
+
+    fn bare_boilerplate_methods(&self, language: &str) -> Result<Option<Vec<String>>, PluginError> {
+        let Some(func) = self.bare_boilerplate_methods_fn else {
+            return Ok(None);
+        };
+        if !self.has_bare_methods_heuristic {
+            return Ok(None);
+        }
+        let free_string_fn = self.free_string_fn;
+        let ctx = self.context.as_ref().map(|c| SendPtr(c.0));
+        let language = language.to_string();
+        self.execute_with_timeout("bare_boilerplate_methods", move || {
+            let c_language = std::ffi::CString::new(language.as_str())
+                .map_err(|e| PluginError::InvalidOutput(format!("language contains NUL: {e}")))?;
+            // SAFETY: `func` is a valid function pointer from the same library.
+            let raw = unsafe {
+                call_owned_string_fn1(|ctx| func(ctx, c_language.as_ptr()), free_string_fn, ctx)
+            }?;
+            match raw {
+                None => Ok(None),
+                Some(json) => serde_json::from_str::<Vec<String>>(&json)
+                    .map(Some)
+                    .map_err(|e| {
+                        PluginError::InvalidOutput(format!(
+                            "Plugin returned malformed bare-methods array: {e}"
+                        ))
+                    }),
             }
         })
     }

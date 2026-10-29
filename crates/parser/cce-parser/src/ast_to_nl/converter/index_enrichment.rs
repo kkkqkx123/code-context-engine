@@ -54,6 +54,7 @@ impl<'a> IndexTextEnricher<'a> {
         source: &str,
         language: Language,
         vocabulary: Option<&FileVocabulary>,
+        plugin_bare: Option<&[String]>,
     ) {
         // Topic anchor: what the entity branches on. A function that
         // dispatches on protocol constants states its whole subject in
@@ -98,7 +99,7 @@ impl<'a> IndexTextEnricher<'a> {
         // already names; drop the line when nothing distinctive remains.
         // BM25 text is untouched: the keyword index relies on the raw
         // identifier occurrences.
-        prune_redundant_calls_lines(conversion, language);
+        prune_redundant_calls_lines(conversion, language, plugin_bare);
 
         if let Some(vocabulary) = vocabulary {
             self.compute_glossary(conversion, processing_result, &extra_text, vocabulary);

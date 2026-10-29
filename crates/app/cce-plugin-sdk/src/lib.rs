@@ -133,6 +133,22 @@ mod tests {
     }
 
     #[test]
+    fn test_call_level_heuristics_default_to_none() {
+        assert!(!cce_plugin_has_stdlib_call_heuristic());
+        assert!(!cce_plugin_has_bare_methods_heuristic());
+        let call = std::ffi::CString::new("emit").expect("cstring");
+        let rel = std::ffi::CString::new("call.direct").expect("cstring");
+        let lang = std::ffi::CString::new("tplx").expect("cstring");
+        let category = unsafe {
+            cce_plugin_classify_stdlib_call(std::ptr::null_mut(), call.as_ptr(), rel.as_ptr())
+        };
+        assert!(category.is_null());
+        let bare =
+            unsafe { cce_plugin_bare_boilerplate_methods(std::ptr::null_mut(), lang.as_ptr()) };
+        assert!(bare.is_null());
+    }
+
+    #[test]
     fn test_has_embedding_generation_default() {
         assert!(!cce_plugin_has_embedding_generation());
     }
@@ -265,9 +281,13 @@ mod tests {
             "cce_plugin_has_stdlib_heuristic",
             "cce_plugin_has_test_file_heuristic",
             "cce_plugin_has_entity_kind_heuristic",
+            "cce_plugin_has_stdlib_call_heuristic",
+            "cce_plugin_has_bare_methods_heuristic",
             "cce_plugin_classify_stdlib",
             "cce_plugin_is_test_file",
             "cce_plugin_entity_kind",
+            "cce_plugin_classify_stdlib_call",
+            "cce_plugin_bare_boilerplate_methods",
             "cce_plugin_has_group_override",
             "cce_plugin_has_relation_extract",
             "cce_plugin_has_query_rewrite",

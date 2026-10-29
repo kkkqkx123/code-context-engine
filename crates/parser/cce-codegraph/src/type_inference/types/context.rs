@@ -47,6 +47,11 @@ pub struct ScopedTypeContext {
     return_types_by_name: HashMap<String, Vec<(EntityId, TypeBinding)>>,
     /// Parameter types (not affected by scope nesting)
     parameter_types: HashMap<EntityId, Vec<TypeBinding>>,
+    /// Extraction-time arity records (total/required/rest marker).
+    /// Populated alongside `parameter_types`, including for entities
+    /// whose bindings are empty, so overload resolution can judge
+    /// call arity even when no parameter carries a type annotation.
+    param_arity: HashMap<EntityId, super::super::overload::ParamArity>,
     /// Language this context was built for
     language: Language,
     /// Type parameter bindings (e.g., "T" -> "String") per scope
@@ -64,6 +69,7 @@ impl Default for ScopedTypeContext {
             return_types: HashMap::new(),
             return_types_by_name: HashMap::new(),
             parameter_types: HashMap::new(),
+            param_arity: HashMap::new(),
             language: Language::Unknown,
             type_param_bindings: vec![HashMap::new()],
             generic_param_ownership: HashMap::new(),
@@ -339,11 +345,13 @@ impl ScopedTypeContext {
                     .unwrap_or(TypeShape::Named(binding.type_name.clone()))
             });
             let specificity = parameter_types.iter().map(compute_specificity).sum();
+            let arity = self.param_arity(*entity_id);
             set.add_candidate(OverloadCandidate {
                 entity_id: *entity_id,
                 parameter_types,
                 return_type,
                 specificity,
+                arity,
             });
         }
         let arg_refs: Vec<Option<&TypeShape>> =
@@ -399,6 +407,34 @@ impl ScopedTypeContext {
     /// Record parameter type bindings for a function entity.
     pub fn add_parameter_types(&mut self, entity_id: EntityId, bindings: Vec<TypeBinding>) {
         self.parameter_types.insert(entity_id, bindings);
+    }
+
+    /// Record the extraction-time arity snapshot for a function entity.
+    ///
+    /// Always recorded, even when no parameter carries a type annotation,
+    /// so overload resolution distinguishes declared zero-arity from
+    /// missing data (which stays neutral instead of guessing).
+    pub fn set_param_arity(
+        &mut self,
+        entity_id: EntityId,
+        arity: super::super::overload::ParamArity,
+    ) {
+        self.param_arity.insert(entity_id, arity);
+    }
+
+    /// Read the arity snapshot, defaulting to an unknown (neutral) record.
+    pub fn param_arity(&self, entity_id: EntityId) -> super::super::overload::ParamArity {
+        self.param_arity
+            .get(&entity_id)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Iterate arity snapshots for cache propagation.
+    pub fn param_arity_iter(
+        &self,
+    ) -> impl Iterator<Item = (&EntityId, &super::super::overload::ParamArity)> {
+        self.param_arity.iter()
     }
 
     /// Record a variable type binding in the current (innermost) scope.
@@ -655,6 +691,9 @@ impl ScopedTypeContext {
         }
         for (k, v) in &other.parameter_types {
             self.parameter_types.insert(*k, v.clone());
+        }
+        for (k, v) in &other.param_arity {
+            self.param_arity.insert(*k, *v);
         }
     }
 
@@ -1501,11 +1540,19 @@ mod tests {
             EntityId(2),
             vec![overload_binding("Int"), overload_binding("Int")],
         );
+        ctx.set_param_arity(
+            EntityId(2),
+            crate::type_inference::overload::ParamArity::exact(2),
+        );
         ctx.add_return_type_by_name("combine".to_string(), EntityId(2), overload_binding("Int"));
         ctx.add_return_type(EntityId(4), overload_binding("String"));
         ctx.add_parameter_types(
             EntityId(4),
             vec![overload_binding("String"), overload_binding("String")],
+        );
+        ctx.set_param_arity(
+            EntityId(4),
+            crate::type_inference::overload::ParamArity::exact(2),
         );
         ctx.add_return_type_by_name(
             "combine".to_string(),

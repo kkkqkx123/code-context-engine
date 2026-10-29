@@ -114,6 +114,7 @@ impl super::AstToNlConverter {
                     for gc in &mut group_conversions {
                         let language = gc.group.language;
                         let vocabulary = self.vocabulary_for(file_path, language);
+                        let bare = self.bare_methods_for(file_path, language);
                         let enricher = IndexTextEnricher::new(&self.bm25_cleaner);
                         if let Some(header) = gc.header_conversion.as_mut() {
                             enricher.enrich_conversion(
@@ -122,6 +123,7 @@ impl super::AstToNlConverter {
                                 src,
                                 language,
                                 vocabulary.as_deref(),
+                                bare.as_deref(),
                             );
                         }
                         for member in &mut gc.member_conversions {
@@ -131,6 +133,7 @@ impl super::AstToNlConverter {
                                 src,
                                 language,
                                 vocabulary.as_deref(),
+                                bare.as_deref(),
                             );
                         }
                     }
@@ -199,12 +202,27 @@ impl super::AstToNlConverter {
             for gc in &mut group_conversions {
                 let language = gc.group.language;
                 let vocabulary = self.vocabulary_for(file_path, language);
+                let bare = self.bare_methods_for(file_path, language);
                 let enricher = IndexTextEnricher::new(&self.bm25_cleaner);
                 if let Some(header) = gc.header_conversion.as_mut() {
-                    enricher.enrich_conversion(header, pr, src, language, vocabulary.as_deref());
+                    enricher.enrich_conversion(
+                        header,
+                        pr,
+                        src,
+                        language,
+                        vocabulary.as_deref(),
+                        bare.as_deref(),
+                    );
                 }
                 for member in &mut gc.member_conversions {
-                    enricher.enrich_conversion(member, pr, src, language, vocabulary.as_deref());
+                    enricher.enrich_conversion(
+                        member,
+                        pr,
+                        src,
+                        language,
+                        vocabulary.as_deref(),
+                        bare.as_deref(),
+                    );
                 }
             }
         }

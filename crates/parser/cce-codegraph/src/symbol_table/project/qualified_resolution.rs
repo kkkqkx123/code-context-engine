@@ -674,6 +674,12 @@ impl ProjectSymbolTable {
         self.symbol_from_entry(symbolizable[winner], name, from_scope)
     }
 
+    /// Declared parameter count for disambiguation pre-filtering.
+    ///
+    /// Exact-only by design: this filter runs before type-aware scoring
+    /// and prefers a unique exact match. Rest collectors and defaulted
+    /// tails are resolved by the overload-set scoring paths, which read
+    /// the extraction-time arity record instead of guessing here.
     fn candidate_arity(&self, entry: &SimpleNameEntry, name: &str) -> Option<usize> {
         let eid = entry.entity_id();
         if let Some(owner) = self

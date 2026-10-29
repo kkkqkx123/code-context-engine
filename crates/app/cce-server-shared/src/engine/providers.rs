@@ -344,10 +344,12 @@ impl super::CodeContextEngine {
             .language_extension_conflict
             .unwrap_or_default();
         let grammar_abi_policy = plugin_config.grammar_abi_policy.unwrap_or_default();
+        let missing_heuristics_policy = plugin_config.missing_heuristics_policy.unwrap_or_default();
         let ast_languages = cce_parser::tree_sitter_init::register_ast_language_plugins(
             &registry,
             extension_conflict_policy,
             grammar_abi_policy,
+            missing_heuristics_policy,
         );
         if ast_languages > 0 {
             tracing::info!(

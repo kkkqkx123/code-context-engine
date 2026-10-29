@@ -98,6 +98,14 @@ fn test_lang_heuristics_functions_probed() {
                 entity_kind = function(capture_name)
                     if capture_name == "entity.tpl_block" then return "function" end
                     return nil
+                end,
+                classify_stdlib_call = function(call_name, relation_type)
+                    if call_name == "tpl_emit" then return "Io" end
+                    return nil
+                end,
+                bare_boilerplate_methods = function(language)
+                    if language == "tplx" then return { "tpl_emit" } end
+                    return nil
                 end
             }
         "#;
@@ -106,6 +114,8 @@ fn test_lang_heuristics_functions_probed() {
     assert!(plugin.supports_stdlib_heuristic());
     assert!(plugin.supports_test_file_heuristic());
     assert!(plugin.supports_entity_kind_heuristic());
+    assert!(plugin.supports_stdlib_call_heuristic());
+    assert!(plugin.supports_bare_methods_heuristic());
     assert_eq!(
         plugin
             .classify_stdlib("core.utils.fmt")
@@ -136,6 +146,28 @@ fn test_lang_heuristics_functions_probed() {
         plugin.entity_kind("entity.other").expect("defer call"),
         None
     );
+    assert_eq!(
+        plugin
+            .classify_stdlib_call("tpl_emit", Some("call.direct"))
+            .expect("call classify"),
+        Some("Io".to_string())
+    );
+    assert_eq!(
+        plugin
+            .classify_stdlib_call("other", None)
+            .expect("call defer"),
+        None
+    );
+    assert_eq!(
+        plugin.bare_boilerplate_methods("tplx").expect("bare call"),
+        Some(vec!["tpl_emit".to_string()])
+    );
+    assert_eq!(
+        plugin
+            .bare_boilerplate_methods("other")
+            .expect("bare defer"),
+        None
+    );
 }
 
 #[test]
@@ -145,6 +177,8 @@ fn test_lang_heuristics_absent_by_default() {
     assert!(!plugin.supports_stdlib_heuristic());
     assert!(!plugin.supports_test_file_heuristic());
     assert!(!plugin.supports_entity_kind_heuristic());
+    assert!(!plugin.supports_stdlib_call_heuristic());
+    assert!(!plugin.supports_bare_methods_heuristic());
 }
 
 #[test]

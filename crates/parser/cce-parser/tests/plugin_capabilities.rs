@@ -347,7 +347,9 @@ fn test_relation_extract_registers_symbols_and_relations() {
 /// kind, classifies a stdlib module path, and flags a test file.
 #[test]
 fn test_lang_heuristics_full_chain() {
-    use cce_config::project::{GrammarAbiPolicy, LanguageExtensionConflictPolicy};
+    use cce_config::project::{
+        GrammarAbiPolicy, LanguageExtensionConflictPolicy, MissingHeuristicsPolicy,
+    };
     use cce_parser::parser::ast_parser::AstParser;
     use cce_parser::parser::extractor::EntityExtractor;
     use cce_types::EntityKind;
@@ -389,6 +391,7 @@ fn test_lang_heuristics_full_chain() {
         &registry,
         LanguageExtensionConflictPolicy::Allow,
         GrammarAbiPolicy::Deny,
+        MissingHeuristicsPolicy::Warn,
     );
     assert_eq!(registered, 1, "remap language must register");
     let index =

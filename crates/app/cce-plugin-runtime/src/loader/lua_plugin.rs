@@ -64,6 +64,10 @@ pub struct LuaPlugin {
     pub(crate) is_test_file_fn_name: Option<String>,
     /// `plugin.entity_kind(capture_name)` (`LangHeuristics`).
     pub(crate) entity_kind_fn_name: Option<String>,
+    /// `plugin.classify_stdlib_call(call_name, relation_type?)` (`LangHeuristics`).
+    pub(crate) classify_stdlib_call_fn_name: Option<String>,
+    /// `plugin.bare_boilerplate_methods(language)` (`LangHeuristics`).
+    pub(crate) bare_boilerplate_methods_fn_name: Option<String>,
     /// Host-side compiled regex patterns for entity extraction (`plugin.patterns`).
     pub(crate) patterns: Vec<CompiledPattern>,
     pub(crate) metrics: Option<Arc<PluginMetrics>>,
@@ -288,6 +292,16 @@ impl LuaPlugin {
             .ok()
             .flatten()
             .map(|_| "entity_kind".to_string());
+        let classify_stdlib_call_fn_name = plugin_table
+            .get::<Option<mlua::Function>>("classify_stdlib_call")
+            .ok()
+            .flatten()
+            .map(|_| "classify_stdlib_call".to_string());
+        let bare_boilerplate_methods_fn_name = plugin_table
+            .get::<Option<mlua::Function>>("bare_boilerplate_methods")
+            .ok()
+            .flatten()
+            .map(|_| "bare_boilerplate_methods".to_string());
         let query_schemes = match plugin_table.get::<Option<Table>>("query_schemes") {
             Ok(Some(t)) => {
                 let mut schemes = HashMap::new();
@@ -367,6 +381,8 @@ impl LuaPlugin {
             classify_stdlib_fn_name,
             is_test_file_fn_name,
             entity_kind_fn_name,
+            classify_stdlib_call_fn_name,
+            bare_boilerplate_methods_fn_name,
             patterns,
             metrics: None,
             disabled: AtomicBool::new(false),

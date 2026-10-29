@@ -17,6 +17,7 @@ use super::generics::{
     GenericTypeArg, parse_generic_type, resolve_collection_factory_shape, shape_contains_param,
     substitute_call_return_type,
 };
+use super::overload::entity_param_arity;
 
 /// Strip a leading colon from a captured type annotation.
 ///
@@ -126,6 +127,7 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
             if !param_bindings.is_empty() {
                 ctx.add_parameter_types(entity.id, param_bindings);
             }
+            ctx.set_param_arity(entity.id, entity_param_arity(entity, ctx.language()));
             return;
         }
     }
@@ -161,6 +163,7 @@ pub fn extract_function_types(entity: &Entity, ctx: &mut ScopedTypeContext) {
     if !param_bindings.is_empty() {
         ctx.add_parameter_types(entity.id, param_bindings);
     }
+    ctx.set_param_arity(entity.id, entity_param_arity(entity, ctx.language()));
 }
 
 /// Try same-file `call_target` resolution: `x = f()` where `f` is defined
@@ -1084,6 +1087,34 @@ mod tests {
         assert_eq!(
             rt.shape.as_ref().map(type_shape_to_string),
             Some("T[]".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_function_types_records_param_arity() {
+        use super::super::overload::ParamArity;
+        let entity = make_entity(
+            1,
+            "log",
+            None,
+            vec![("format", Some("String")), ("args", Some("String..."))],
+        );
+        let mut ctx = ScopedTypeContext::new(Language::Java);
+        extract_function_types(&entity, &mut ctx);
+        assert_eq!(
+            ctx.param_arity(cce_types::EntityId(1)),
+            ParamArity {
+                total: 2,
+                required: 1,
+                is_varargs: true,
+                known: true,
+            }
+        );
+        let bare = make_entity(2, "run", None, vec![]);
+        extract_function_types(&bare, &mut ctx);
+        assert_eq!(
+            ctx.param_arity(cce_types::EntityId(2)),
+            ParamArity::exact(0)
         );
     }
 

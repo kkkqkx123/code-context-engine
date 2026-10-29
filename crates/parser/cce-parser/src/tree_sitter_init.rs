@@ -261,14 +261,22 @@ pub type PluginTsLanguageRef = Arc<PluginTsLanguage>;
 /// - `Deny` (default): skip the conflicting plugin entirely.
 /// - `Warn`: register, log a warning (parse-time validation still applies).
 ///
+/// `missing_heuristics_policy` governs plugin languages without a
+/// `LangHeuristics` companion scoped to them:
+/// - `Warn` (default): register, log a warning (entity stdlib
+///   classification for such files stays conservative).
+/// - `Deny`: skip the plugin entirely (strict projects and CI gates).
+///
 /// Plugins whose grammar is missing, null, or referencing an unknown built-in
 /// language are always skipped with a warning (they cannot parse files).
 pub fn register_ast_language_plugins(
     registry: &crate::plugin::PluginRegistry,
     extension_conflict_policy: cce_config::project::LanguageExtensionConflictPolicy,
     grammar_abi_policy: cce_config::project::GrammarAbiPolicy,
+    missing_heuristics_policy: cce_config::project::MissingHeuristicsPolicy,
 ) -> usize {
     use cce_config::project::GrammarAbiPolicy as AbiPolicy;
+    use cce_config::project::MissingHeuristicsPolicy as HeuristicsPolicy;
     use cce_plugin::{CodePlugin, PluginCapability};
 
     let plugins = registry.get_plugins(PluginCapability::AstLanguage, None, None);
@@ -347,6 +355,34 @@ pub fn register_ast_language_plugins(
         }
         if skip {
             continue;
+        }
+
+        // Companion-matrix gate: without a `LangHeuristics` provider scoped
+        // to this language, entity-level stdlib classification keeps the
+        // conservative fallback. Advisory (`Warn`) by default; `Deny`
+        // refuses the registration for strict projects and CI gates.
+        if registry
+            .get_plugins(PluginCapability::LangHeuristics, None, Some(&name))
+            .is_empty()
+        {
+            match missing_heuristics_policy {
+                HeuristicsPolicy::Deny => {
+                    tracing::warn!(
+                        language = %name,
+                        plugin = %plugin_id,
+                        "plugin language has no LangHeuristics companion: registration refused by deny policy (set plugins.missing_heuristics_policy = \"warn\" to allow)"
+                    );
+                    continue;
+                }
+                HeuristicsPolicy::Warn => {
+                    tracing::warn!(
+                        language = %name,
+                        plugin = %plugin_id,
+                        "plugin language registered without a LangHeuristics companion: \
+                         stdlib classification for its entities stays conservative"
+                    );
+                }
+            }
         }
 
         let mut schemes = HashMap::new();
@@ -435,21 +471,6 @@ pub fn register_ast_language_plugins(
                 .entry(ext.to_lowercase())
                 .or_insert_with(|| plugin_id.clone());
         }
-        // Companion-matrix hint: without a `LangHeuristics` provider scoped
-        // to this language, entity-level stdlib classification keeps the
-        // conservative fallback (nothing is ever marked stdlib). Advisory
-        // only; capability combinations stay optional.
-        if registry
-            .get_plugins(PluginCapability::LangHeuristics, None, Some(&name))
-            .is_empty()
-        {
-            tracing::warn!(
-                language = %name,
-                plugin = %plugin_id,
-                "plugin language registered without a LangHeuristics companion: \
-                 stdlib classification for its entities stays conservative"
-            );
-        }
     }
     count
 }
@@ -502,6 +523,7 @@ pub(crate) static GLOBAL_TABLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cce_config::project::MissingHeuristicsPolicy;
 
     #[test]
     fn test_get_supported_languages() {
@@ -662,6 +684,7 @@ mod tests {
             &registry,
             LanguageExtensionConflictPolicy::Allow,
             GrammarAbiPolicy::Deny,
+            MissingHeuristicsPolicy::Warn,
         );
         assert_eq!(count, 0, "missing grammar symbol must not register");
         assert!(
@@ -693,6 +716,7 @@ mod tests {
             &registry,
             LanguageExtensionConflictPolicy::Allow,
             GrammarAbiPolicy::Deny,
+            MissingHeuristicsPolicy::Warn,
         );
         assert_eq!(count, 1, "ABI-compatible grammar must be registered");
         assert_eq!(
@@ -769,6 +793,7 @@ mod tests {
             &registry,
             LanguageExtensionConflictPolicy::Allow,
             GrammarAbiPolicy::Deny,
+            MissingHeuristicsPolicy::Warn,
         );
         assert_eq!(count, 1, "remap plugin must be registered");
         let index = cce_types::language::plugin_language_for_extension("tplx").expect("extension");
@@ -808,9 +833,140 @@ mod tests {
             &registry,
             LanguageExtensionConflictPolicy::Allow,
             GrammarAbiPolicy::Deny,
+            MissingHeuristicsPolicy::Warn,
         );
         assert_eq!(count, 0, "unknown remap target must not register");
         assert!(cce_types::language::plugin_language_for_extension("wex").is_none());
+        clear_plugin_languages_all();
+    }
+
+    /// Fake `LangHeuristics` companion for the missing-heuristics policy tests.
+    struct FakeHeuristicsPlugin {
+        meta: cce_plugin::PluginMetadata,
+    }
+
+    impl FakeHeuristicsPlugin {
+        fn new(id: &str) -> Self {
+            Self {
+                meta: cce_plugin::PluginMetadata {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    version: "0.1.0".to_string(),
+                    priority: 0,
+                    capability_priorities: HashMap::new(),
+                    capability_timeouts: HashMap::new(),
+                    description: None,
+                    capabilities: Vec::new(),
+                },
+            }
+        }
+    }
+
+    impl cce_plugin::CodePlugin for FakeHeuristicsPlugin {
+        fn metadata(&self) -> &cce_plugin::PluginMetadata {
+            &self.meta
+        }
+        fn supports_stdlib_heuristic(&self) -> bool {
+            true
+        }
+        fn classify_stdlib(
+            &self,
+            _module_path: &str,
+        ) -> Result<Option<String>, cce_plugin::PluginError> {
+            Ok(None)
+        }
+    }
+
+    fn grammar_ptr() -> *const std::ffi::c_void {
+        let ts_lang = get_tree_sitter_language(&Language::Rust).expect("rust grammar");
+        // SAFETY: built-in grammar pointer is valid for the process lifetime.
+        unsafe { std::mem::transmute::<TsLanguage, *const std::ffi::c_void>(ts_lang) }
+    }
+
+    #[test]
+    fn test_missing_heuristics_deny_skips_registration() {
+        use cce_config::project::{GrammarAbiPolicy, LanguageExtensionConflictPolicy};
+
+        let _guard = GLOBAL_TABLE_LOCK.lock().expect("test lock poisoned");
+        clear_plugin_languages_all();
+        let mut registry = crate::plugin::PluginRegistry::new();
+        registry.register(std::sync::Arc::new(FakeAstLanguagePlugin::new(
+            "deny_lang",
+            "denylang",
+            &["denyx"],
+            Some(grammar_ptr()),
+        )));
+        let count = register_ast_language_plugins(
+            &registry,
+            LanguageExtensionConflictPolicy::Allow,
+            GrammarAbiPolicy::Deny,
+            MissingHeuristicsPolicy::Deny,
+        );
+        assert_eq!(
+            count, 0,
+            "deny policy must skip languages without a companion"
+        );
+        assert!(
+            cce_types::language::plugin_language_for_extension("denyx").is_none(),
+            "denied language must leave no routing behind"
+        );
+        clear_plugin_languages_all();
+    }
+
+    #[test]
+    fn test_missing_heuristics_warn_registers_with_fallback() {
+        use cce_config::project::{GrammarAbiPolicy, LanguageExtensionConflictPolicy};
+
+        let _guard = GLOBAL_TABLE_LOCK.lock().expect("test lock poisoned");
+        clear_plugin_languages_all();
+        let mut registry = crate::plugin::PluginRegistry::new();
+        registry.register(std::sync::Arc::new(FakeAstLanguagePlugin::new(
+            "warn_lang",
+            "warnlang",
+            &["warnx"],
+            Some(grammar_ptr()),
+        )));
+        let count = register_ast_language_plugins(
+            &registry,
+            LanguageExtensionConflictPolicy::Allow,
+            GrammarAbiPolicy::Deny,
+            MissingHeuristicsPolicy::Warn,
+        );
+        assert_eq!(count, 1, "warn policy keeps the default registration");
+        assert_eq!(
+            cce_types::language::plugin_language_name(0).as_deref(),
+            Some("warnlang")
+        );
+        clear_plugin_languages_all();
+    }
+
+    #[test]
+    fn test_missing_heuristics_deny_passes_with_companion() {
+        use cce_config::project::{GrammarAbiPolicy, LanguageExtensionConflictPolicy};
+
+        let _guard = GLOBAL_TABLE_LOCK.lock().expect("test lock poisoned");
+        clear_plugin_languages_all();
+        let mut registry = crate::plugin::PluginRegistry::new();
+        registry.register(std::sync::Arc::new(FakeAstLanguagePlugin::new(
+            "paired_lang",
+            "pairedlang",
+            &["pairedx"],
+            Some(grammar_ptr()),
+        )));
+        registry.register(std::sync::Arc::new(FakeHeuristicsPlugin::new(
+            "paired_heuristics",
+        )));
+        let count = register_ast_language_plugins(
+            &registry,
+            LanguageExtensionConflictPolicy::Allow,
+            GrammarAbiPolicy::Deny,
+            MissingHeuristicsPolicy::Deny,
+        );
+        assert_eq!(count, 1, "deny policy passes languages with a companion");
+        assert!(
+            cce_types::language::plugin_language_for_extension("pairedx").is_some(),
+            "paired language must route"
+        );
         clear_plugin_languages_all();
     }
 

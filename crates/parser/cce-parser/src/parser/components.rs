@@ -94,16 +94,16 @@ impl Components {
     }
 
     /// Create a new component holder wired with the plugin registry for the
-    /// `LangHeuristics` entity-kind hook.
+    /// `LangHeuristics` entity-kind and call-level hooks.
     pub fn with_plugin_registry(registry: Arc<cce_plugin::PluginRegistry>) -> Self {
         Self {
             language_detector: LanguageDetector::new(),
             ast_parser: AstParser::new(),
-            entity_extractor: EntityExtractor::new().with_heuristics_registry(registry),
+            entity_extractor: EntityExtractor::new().with_heuristics_registry(registry.clone()),
             behavior_extractor: BehaviorExtractor::new(),
             macro_body_extractor: MacroBodyExtractor::new(),
             control_flow_extractor: ControlFlowExtractor::new(),
-            relation_extractor: RelationExtractor::new(),
+            relation_extractor: RelationExtractor::new().with_heuristics_registry(registry),
             structural_extractor: StructuralExtractor::new(),
             comment_processor: CommentProcessor::new(),
             embedded_parser: EmbeddedParser::new(),
@@ -113,7 +113,9 @@ impl Components {
     /// Replace the plugin registry in place without discarding other
     /// component configuration.
     pub fn set_plugin_registry(&mut self, registry: Arc<cce_plugin::PluginRegistry>) {
-        self.entity_extractor.set_heuristics_registry(registry);
+        self.entity_extractor
+            .set_heuristics_registry(registry.clone());
+        self.relation_extractor.set_heuristics_registry(registry);
     }
 
     /// Apply the license header filtering configuration to every component

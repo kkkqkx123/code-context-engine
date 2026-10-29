@@ -524,13 +524,15 @@ pub trait CodePlugin: Send + Sync {
 
     // ── LangHeuristics (Lua + native) ────────────────────────────────
 
-    /// Whether the plugin provides at least one of the three language
-    /// heuristics (stdlib / test-file / entity-kind). The per-method
-    /// `supports_*` guards below select which are consulted.
+    /// Whether the plugin provides at least one of the language heuristics
+    /// (stdlib / test-file / entity-kind / stdlib-call / bare-methods).
+    /// The per-method `supports_*` guards below select which are consulted.
     fn supports_any_heuristic(&self) -> bool {
         self.supports_stdlib_heuristic()
             || self.supports_test_file_heuristic()
             || self.supports_entity_kind_heuristic()
+            || self.supports_stdlib_call_heuristic()
+            || self.supports_bare_methods_heuristic()
     }
 
     /// Whether the plugin maps module paths to stdlib categories.
@@ -565,6 +567,48 @@ pub trait CodePlugin: Send + Sync {
     /// an entity kind name (`"function"`, `"class"`, …). `Ok(None)` defers
     /// to the built-in capture→kind mapping.
     fn entity_kind(&self, _query_capture_name: &str) -> Result<Option<String>, PluginError> {
+        Ok(None)
+    }
+
+    /// Whether the plugin classifies call sites as standard-library calls.
+    ///
+    /// Consulted only for custom languages the built-in detectors do not
+    /// cover (native plugin languages; remap languages inherit their host
+    /// tables first). Built-in languages never reach this hook.
+    fn supports_stdlib_call_heuristic(&self) -> bool {
+        false
+    }
+
+    /// Classify `call_name` (e.g. a bare function or `recv.method` spell)
+    /// as a standard-library call. `relation_type` carries the stable
+    /// relation name (`"call.direct"`, `"call.method"`, …) or `None`
+    /// when the caller has no relation context. Return the stdlib category
+    /// name (`"Collection"`, `"Io"`, …) or `None` to decline, in which
+    /// case the host keeps its conservative answer.
+    fn classify_stdlib_call(
+        &self,
+        _call_name: &str,
+        _relation_type: Option<&str>,
+    ) -> Result<Option<String>, PluginError> {
+        Ok(None)
+    }
+
+    /// Whether the plugin contributes bare boilerplate method names for
+    /// call-text pruning (same scope rule as
+    /// [`Self::supports_stdlib_call_heuristic`]).
+    fn supports_bare_methods_heuristic(&self) -> bool {
+        false
+    }
+
+    /// Contribute bare callee names the host may prune from embedding
+    /// call lines (high-frequency, low-signal spellings unresolvable by
+    /// name, e.g. receiver-dependent helpers). `language` is the detected
+    /// language name. Return `None` (or an empty list) to decline; the
+    /// first non-empty answer wins and merges nothing.
+    fn bare_boilerplate_methods(
+        &self,
+        _language: &str,
+    ) -> Result<Option<Vec<String>>, PluginError> {
         Ok(None)
     }
 

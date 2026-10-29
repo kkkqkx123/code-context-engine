@@ -131,6 +131,10 @@ pub struct NativePlugin {
     pub(crate) has_test_file_heuristic: bool,
     /// Whether the plugin reports the `LangHeuristics` entity-kind hook.
     pub(crate) has_entity_kind_heuristic: bool,
+    /// Whether the plugin reports the `LangHeuristics` stdlib-call hook.
+    pub(crate) has_stdlib_call_heuristic: bool,
+    /// Whether the plugin reports the `LangHeuristics` bare-methods hook.
+    pub(crate) has_bare_methods_heuristic: bool,
     /// Whether the plugin reports `RelationExtract` support.
     pub(crate) has_relation_extract: bool,
     /// Whether the plugin reports `SymbolExtract` support.
@@ -199,6 +203,10 @@ pub struct NativePlugin {
     pub(crate) is_test_file_fn: Option<PluginStringFn2>,
     /// `cce_plugin_entity_kind` — None if not exported.
     pub(crate) entity_kind_fn: Option<PluginStringFn>,
+    /// `cce_plugin_classify_stdlib_call` — None if not exported.
+    pub(crate) classify_stdlib_call_fn: Option<PluginStringFn2>,
+    /// `cce_plugin_bare_boilerplate_methods` — None if not exported.
+    pub(crate) bare_boilerplate_methods_fn: Option<PluginStringFn>,
     /// `cce_plugin_destroy` — None if not exported.
     pub(crate) destroy_ctx_fn: Option<DestroyContextFn>,
 
@@ -389,6 +397,18 @@ impl NativePlugin {
                 .ok()
                 .map(|s| *s)
         };
+        let has_stdlib_call_heuristic_fn: Option<HasCapabilityFn> = unsafe {
+            library
+                .get(HAS_STDLIB_CALL_HEURISTIC.bytes)
+                .ok()
+                .map(|s| *s)
+        };
+        let has_bare_methods_heuristic_fn: Option<HasCapabilityFn> = unsafe {
+            library
+                .get(HAS_BARE_METHODS_HEURISTIC.bytes)
+                .ok()
+                .map(|s| *s)
+        };
         // Capability guards
         let has_group_override_fn: Option<HasCapabilityFn> =
             unsafe { library.get(HAS_GROUP_OVERRIDE.bytes).ok().map(|s| *s) };
@@ -456,6 +476,10 @@ impl NativePlugin {
             unsafe { library.get(IS_TEST_FILE.bytes).ok().map(|s| *s) };
         let entity_kind_fn: Option<PluginStringFn> =
             unsafe { library.get(ENTITY_KIND.bytes).ok().map(|s| *s) };
+        let classify_stdlib_call_fn: Option<PluginStringFn2> =
+            unsafe { library.get(CLASSIFY_STDLIB_CALL.bytes).ok().map(|s| *s) };
+        let bare_boilerplate_methods_fn: Option<PluginStringFn> =
+            unsafe { library.get(BARE_BOILERPLATE_METHODS.bytes).ok().map(|s| *s) };
 
         // cce_plugin_create / cce_plugin_destroy (lifecycle)
         let create_ctx_fn: Option<CreateContextFn> =
@@ -482,6 +506,12 @@ impl NativePlugin {
             .map(|f| unsafe { f() })
             .unwrap_or(false);
         let has_entity_kind_heuristic = has_entity_kind_heuristic_fn
+            .map(|f| unsafe { f() })
+            .unwrap_or(false);
+        let has_stdlib_call_heuristic = has_stdlib_call_heuristic_fn
+            .map(|f| unsafe { f() })
+            .unwrap_or(false);
+        let has_bare_methods_heuristic = has_bare_methods_heuristic_fn
             .map(|f| unsafe { f() })
             .unwrap_or(false);
         let has_group_override = has_group_override_fn
@@ -587,6 +617,8 @@ impl NativePlugin {
             has_stdlib_heuristic,
             has_test_file_heuristic,
             has_entity_kind_heuristic,
+            has_stdlib_call_heuristic,
+            has_bare_methods_heuristic,
             has_relation_extract,
             has_symbol_extract,
             has_query_rewrite,
@@ -619,6 +651,8 @@ impl NativePlugin {
             classify_stdlib_fn,
             is_test_file_fn,
             entity_kind_fn,
+            classify_stdlib_call_fn,
+            bare_boilerplate_methods_fn,
             destroy_ctx_fn,
             query_schemes,
             language_name,

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use cce_types::entity::EntityId;
-use cce_types::language::Language;
+use cce_types::language::{Language, effective_language};
 
 pub use super::compatibility::{
     CompatibilityLevel, TypeCompatibility, is_assignable, is_assignable_with_shapes,
@@ -50,6 +50,128 @@ impl OverloadScore {
     }
 }
 
+/// Per-entity parameter arity snapshot.
+///
+/// Recorded at extraction time from the declared parameters (names,
+/// defaults and rest markers), so overload resolution judges call arity
+/// without re-deriving syntax per language. `known == false` means no
+/// extraction record exists (hand-built test contexts, legacy caches):
+/// arity filtering stays neutral instead of guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ParamArity {
+    /// Declared parameter count, including untyped entries.
+    pub total: usize,
+    /// Minimum accepted argument count (defaults and rest markers discounted).
+    pub required: usize,
+    /// Whether the last parameter collects the remaining arguments.
+    pub is_varargs: bool,
+    /// Whether this record came from real extraction data.
+    pub known: bool,
+}
+
+impl ParamArity {
+    /// Neutral record for candidates without extraction data.
+    pub fn unknown() -> Self {
+        Self::default()
+    }
+
+    /// Exact record for a fixed-arity parameter list.
+    pub fn exact(total: usize) -> Self {
+        Self {
+            total,
+            required: total,
+            is_varargs: false,
+            known: true,
+        }
+    }
+
+    /// Whether a call site with `arg_count` arguments may dispatch here.
+    pub fn accepts(&self, arg_count: usize) -> bool {
+        if !self.known {
+            return true;
+        }
+        if arg_count < self.required {
+            return false;
+        }
+        if self.is_varargs {
+            return true;
+        }
+        arg_count <= self.total
+    }
+}
+
+/// Whether one declared parameter is a rest collector.
+///
+/// Detection is per language because the marker lives in different places:
+/// name prefixes (`*args`, `...args`, `&block`), name keywords (`vararg`),
+/// or type spellings (`String...`, `T*`, `...int`, `params int[]`).
+/// Languages without rest syntax (Dart optional parameters are
+/// default-driven, templates and data formats carry no signatures) answer
+/// false. Remapped plugin languages resolve to their host language first;
+/// native plugin languages stay conservative.
+///
+/// Callers pass the raw declared name and type text; both are trimmed here.
+/// Either side may be absent (untyped entries keep their name marker).
+/// Precision-first: unknown spellings answer false.
+pub fn is_varargs_param(name: &str, type_text: Option<&str>, language: Language) -> bool {
+    let language = effective_language(&language);
+    let name = name.trim();
+    let ty = type_text.map(str::trim).unwrap_or("");
+    match language {
+        Language::Python => name.starts_with('*'),
+        Language::Rust => name == "...",
+        Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+            name.starts_with("...")
+        }
+        Language::Java => name.starts_with("...") || ty.ends_with("..."),
+        Language::Kotlin => {
+            name.strip_prefix("vararg ").is_some() || ty.strip_prefix("vararg ").is_some()
+        }
+        Language::Scala => ty.ends_with('*'),
+        Language::CSharp => ty == "params" || ty.strip_prefix("params ").is_some(),
+        Language::Go => ty.starts_with("..."),
+        Language::C | Language::Cpp => name == "..." || ty.ends_with("..."),
+        Language::Php => name.starts_with("..."),
+        Language::Ruby => name.starts_with('*') || name.starts_with('&'),
+        Language::Lua => name == "...",
+        _ => false,
+    }
+}
+
+/// Derive the arity record for one extracted function entity.
+///
+/// `total` counts every declared entry (typed or not); `required`
+/// discounts defaulted entries and a trailing rest collector. Default
+/// counts come from the extractor-recorded defaults metadata; a missing
+/// or unreadable payload simply discounts nothing.
+///
+/// Only the last entry can be a rest collector; a rest marker anywhere
+/// else is ignored so malformed declarations stay conservative.
+/// Every call site records, including zero-parameter functions, so
+/// `known` always holds for extracted entities.
+pub fn entity_param_arity(entity: &cce_types::Entity, language: Language) -> ParamArity {
+    let total = entity.parameters.len();
+    let defaulted = entity
+        .metadata
+        .get(cce_types::entity::meta_keys::PARAM_DEFAULTS)
+        .and_then(|encoded| serde_json::from_str::<serde_json::Value>(encoded).ok())
+        .and_then(|value| value.as_array().map(std::vec::Vec::len))
+        .unwrap_or(0)
+        .min(total);
+    let last_is_varargs = entity
+        .parameters
+        .last()
+        .is_some_and(|(name, ty)| is_varargs_param(name, ty.as_deref(), language));
+    ParamArity {
+        total,
+        required: total
+            .saturating_sub(defaulted)
+            .saturating_sub(usize::from(last_is_varargs)),
+        is_varargs: last_is_varargs,
+        known: true,
+    }
+}
+
 /// A single overload candidate.
 #[derive(Debug, Clone)]
 pub struct OverloadCandidate {
@@ -58,6 +180,8 @@ pub struct OverloadCandidate {
     pub return_type: TypeShape,
     /// Specificity score for ranking (higher = more specific)
     pub specificity: u32,
+    /// Extraction-time arity record; unknown stays neutral on arity.
+    pub arity: ParamArity,
 }
 
 impl OverloadCandidate {
@@ -149,11 +273,11 @@ impl OverloadSet {
         if arg_types.is_empty() {
             return self.candidates.first();
         }
-        // 1. Filter: parameter count must match
+        // 1. Filter: arity record must accept the call (unknown stays neutral)
         let mut filtered: Vec<&OverloadCandidate> = self
             .candidates
             .iter()
-            .filter(|c| c.parameter_types.len() == arg_types.len())
+            .filter(|c| c.arity.accepts(arg_types.len()))
             .collect();
         if filtered.is_empty() {
             return None;
@@ -258,7 +382,7 @@ impl OverloadSet {
         let mut filtered: Vec<&OverloadCandidate> = self
             .candidates
             .iter()
-            .filter(|c| c.parameter_types.len() == arg_types.len())
+            .filter(|c| c.arity.accepts(arg_types.len()))
             .collect();
         if filtered.is_empty() {
             return None;
@@ -330,7 +454,7 @@ impl OverloadSet {
         let mut filtered: Vec<&OverloadCandidate> = self
             .candidates
             .iter()
-            .filter(|c| c.parameter_types.len() == arg_types.len())
+            .filter(|c| c.arity.accepts(arg_types.len()))
             .collect();
         if filtered.is_empty() {
             return None;
@@ -411,25 +535,14 @@ impl OverloadSet {
         language: Language,
     ) -> OverloadScore {
         let mut score = OverloadScore::default();
-        let param_count = candidate.parameter_types.len();
         let arg_count = arg_types.len();
-        // Only Python and Rust rest-parameter shapes are modeled; remaining
-        // languages use exact arity until their varargs syntax is designed.
-        let is_varargs = matches!(language, Language::Python | Language::Rust);
-        let min_params = if is_varargs {
-            param_count.saturating_sub(1)
-        } else {
-            param_count
-        };
-        if is_varargs {
-            if arg_count < min_params {
-                score.incompatible += 1;
-                return score;
-            }
-        } else if arg_count != param_count {
+        // Arity comes from the extraction-time record (per-language rest
+        // markers plus defaults); unknown records stay neutral here.
+        if !candidate.arity.accepts(arg_count) {
             score.incompatible += 1;
             return score;
         }
+        let is_varargs = candidate.arity.is_varargs;
         let compatibility = TypeCompatibility::new_for_language(language);
         for (i, arg_type_opt) in arg_types.iter().enumerate() {
             if let Some(arg_type) = *arg_type_opt {
@@ -453,7 +566,10 @@ impl OverloadSet {
                             }
                         }
                     }
-                } else if is_varargs {
+                } else if is_varargs || (candidate.arity.known && i < candidate.arity.total) {
+                    // Extra arguments collected by a rest parameter, or
+                    // positions the extractor left untyped: neutral instead
+                    // of a false mismatch.
                     score.coerce_matches += 1;
                 } else {
                     score.incompatible += 1;
@@ -559,12 +675,14 @@ mod tests {
             parameter_types: vec![named("string")],
             return_type: named("number"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
         set.add_candidate(OverloadCandidate {
             entity_id: EntityId(2),
             parameter_types: vec![named("number")],
             return_type: named("string"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
 
         let arg = named("string");
@@ -584,6 +702,7 @@ mod tests {
             parameter_types: vec![named("string")],
             return_type: named("void"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
         let arg = named("number");
         let resolved = set.resolve(&[Some(&arg)]);
@@ -599,6 +718,7 @@ mod tests {
             parameter_types: vec![named("string"), named("number")],
             return_type: named("void"),
             specificity: 10,
+            arity: ParamArity::exact(2),
         });
         let arg = named("string");
         let resolved = set.resolve(&[Some(&arg)]);
@@ -620,12 +740,14 @@ mod tests {
             parameter_types: vec![TypeShape::Param("T".to_string())],
             return_type: TypeShape::Param("T".to_string()),
             specificity: 5,
+            arity: ParamArity::exact(1),
         });
         set.add_candidate(OverloadCandidate {
             entity_id: EntityId(2),
             parameter_types: vec![named("number")],
             return_type: named("string"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
 
         let arg = named("string");
@@ -644,12 +766,14 @@ mod tests {
             parameter_types: vec![named("int")],
             return_type: named("int"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
         set.add_candidate(OverloadCandidate {
             entity_id: EntityId(11),
             parameter_types: vec![named("string")],
             return_type: named("string"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
 
         let arg_int = named("int");
@@ -674,12 +798,14 @@ mod tests {
             parameter_types: vec![TypeShape::Param("T".to_string())],
             return_type: named("void"),
             specificity: 5,
+            arity: ParamArity::exact(1),
         });
         set.add_candidate(OverloadCandidate {
             entity_id: EntityId(2),
             parameter_types: vec![named("string")],
             return_type: named("void"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
         let arg = named("string");
         let mut params = HashMap::new();
@@ -695,6 +821,7 @@ mod tests {
             parameter_types: vec![named("string"), named("number")],
             return_type: named("boolean"),
             specificity: 10,
+            arity: ParamArity::exact(2),
         };
         assert_eq!(
             format_overload_signature("parse", &candidate),
@@ -710,12 +837,14 @@ mod tests {
             parameter_types: vec![named("string")],
             return_type: named("number"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
         set.add_candidate(OverloadCandidate {
             entity_id: EntityId(2),
             parameter_types: vec![named("number")],
             return_type: named("string"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
         let arg = named("string");
         let (entity_id, signature) = set
@@ -757,12 +886,14 @@ mod tests {
             parameter_types: vec![TypeShape::Param("T".to_string())],
             return_type: TypeShape::Param("T".to_string()),
             specificity: 5,
+            arity: ParamArity::exact(1),
         });
         set.add_candidate(OverloadCandidate {
             entity_id: EntityId(2),
             parameter_types: vec![named("number")],
             return_type: named("string"),
             specificity: 10,
+            arity: ParamArity::exact(1),
         });
         let arg = named("string");
         let mut bindings = HashMap::new();
@@ -783,5 +914,285 @@ mod tests {
         let bindings = build_shape_bindings(&["T".to_string()], &[actual]);
         let instantiated = instantiate_type_shape(&declared, &bindings);
         assert_eq!(type_shape_to_string(&instantiated), "Pair<Integer, String>");
+    }
+
+    #[test]
+    fn test_param_arity_accepts_bounds() {
+        assert!(ParamArity::exact(2).accepts(2));
+        assert!(!ParamArity::exact(2).accepts(1));
+        assert!(!ParamArity::exact(2).accepts(3));
+        assert!(ParamArity::exact(0).accepts(0));
+        assert!(!ParamArity::exact(0).accepts(1));
+        assert!(ParamArity::unknown().accepts(0));
+        assert!(ParamArity::unknown().accepts(7));
+        let varargs = ParamArity {
+            total: 2,
+            required: 1,
+            is_varargs: true,
+            known: true,
+        };
+        assert!(!varargs.accepts(0));
+        assert!(varargs.accepts(1));
+        assert!(varargs.accepts(2));
+        assert!(varargs.accepts(9));
+        let optional = ParamArity {
+            total: 2,
+            required: 1,
+            is_varargs: false,
+            known: true,
+        };
+        assert!(!optional.accepts(0));
+        assert!(optional.accepts(1));
+        assert!(optional.accepts(2));
+        assert!(!optional.accepts(3));
+    }
+
+    /// Sync guard: every parsable language owns a conscious rest-parameter
+    /// decision. Add a positive sample (extend the per-language arm) or an
+    /// explicit exact entry when extending `Language::ast_parsable_languages`.
+    #[test]
+    fn test_is_varargs_param_covers_all_parsable_languages() {
+        use cce_types::language::Language;
+        // (language, declared name, declared type): each must read varargs.
+        let positives: &[(Language, &str, Option<&str>)] = &[
+            (Language::Python, "*args", None),
+            (Language::Python, "**kwargs", None),
+            (Language::Rust, "...", None),
+            (Language::JavaScript, "...args", None),
+            (Language::TypeScript, "...args", Some("any[]")),
+            (Language::Jsx, "...args", None),
+            (Language::Tsx, "...args", None),
+            (Language::Java, "args", Some("String...")),
+            (Language::Java, "...args", None),
+            (Language::Kotlin, "vararg args", Some("Int")),
+            (Language::Scala, "args", Some("String*")),
+            (Language::CSharp, "args", Some("params int[]")),
+            (Language::Go, "args", Some("...int")),
+            (Language::C, "...", None),
+            (Language::Cpp, "...", None),
+            (Language::Cpp, "args", Some("Args...")),
+            (Language::Php, "...$args", None),
+            (Language::Ruby, "*args", None),
+            (Language::Ruby, "&block", None),
+            (Language::Lua, "...", None),
+        ];
+        // Languages without rest syntax stay exact. Dart optional parameters
+        // are default-driven, templates carry no signatures, Bash
+        // overloading is out of scope.
+        let exact: &[Language] = &[
+            Language::Dart,
+            Language::Bash,
+            Language::Html,
+            Language::Css,
+            Language::Vue,
+            Language::Svelte,
+            Language::Ejs,
+        ];
+        for language in Language::ast_parsable_languages() {
+            let has_positive = positives.iter().any(|(lang, _, _)| lang == language);
+            if has_positive {
+                continue;
+            }
+            assert!(
+                exact.contains(language),
+                "{language:?} is parsable but has no varargs decision: \
+                 add a positive sample or an explicit exact entry"
+            );
+        }
+        for (language, name, ty) in positives {
+            assert!(
+                is_varargs_param(name, *ty, *language),
+                "{name:?} ({ty:?}) must read as varargs for {language:?}"
+            );
+        }
+        // Near misses stay exact (precision over recall).
+        let negatives: &[(Language, &str, Option<&str>)] = &[
+            (Language::Python, "args", None),
+            (Language::Rust, "args", Some("&[T]")),
+            (Language::Java, "args", Some("String")),
+            (Language::Scala, "args", Some("Int")),
+            (Language::Go, "args", Some("int")),
+            (Language::Ruby, "args", None),
+            (Language::Dart, "args", Some("List<int>")),
+            (Language::Bash, "$@", None),
+            (Language::Html, "...args", None),
+        ];
+        for (language, name, ty) in negatives {
+            assert!(
+                !is_varargs_param(name, *ty, *language),
+                "{name:?} ({ty:?}) must stay exact for {language:?}"
+            );
+        }
+        // Native plugin languages stay conservative without host data.
+        assert!(!is_varargs_param(
+            "...args",
+            None,
+            Language::Custom(u32::MAX)
+        ));
+    }
+
+    /// Remapped plugin languages inherit their host rest-parameter rule.
+    #[test]
+    fn test_is_varargs_param_remap_inherits_host() {
+        use cce_types::language::{
+            Language, clear_plugin_languages, register_plugin_language,
+            register_remap_plugin_language,
+        };
+        clear_plugin_languages();
+        let remapped = register_remap_plugin_language(
+            "varargs-remap-guard",
+            &["varg".to_string()],
+            &Language::Java.to_string(),
+        );
+        let native = register_plugin_language("varargs-native-guard", &["varn".to_string()]);
+        assert!(is_varargs_param(
+            "args",
+            Some("String..."),
+            Language::Custom(remapped)
+        ));
+        assert!(!is_varargs_param(
+            "args",
+            Some("String..."),
+            Language::Custom(native)
+        ));
+        clear_plugin_languages();
+    }
+
+    #[test]
+    fn test_resolve_with_score_accepts_varargs_extras() {
+        use cce_types::language::Language;
+        // Java `void log(String... parts)`: one declared entry, rest open.
+        let mut set = OverloadSet::new("log".to_string(), "Logger".to_string());
+        set.add_candidate(OverloadCandidate {
+            entity_id: EntityId(1),
+            parameter_types: vec![named("String")],
+            return_type: named("void"),
+            specificity: 10,
+            arity: ParamArity {
+                total: 1,
+                required: 0,
+                is_varargs: true,
+                known: true,
+            },
+        });
+        for count in [0, 1, 3] {
+            let args: Vec<Option<TypeShape>> = (0..count).map(|_| Some(named("String"))).collect();
+            let refs: Vec<Option<&TypeShape>> = args.iter().map(|a| a.as_ref()).collect();
+            let winner = set
+                .resolve_with_score(&refs, None, Language::Java)
+                .expect("varargs accepts any count");
+            assert_eq!(winner.entity_id, EntityId(1));
+        }
+    }
+
+    #[test]
+    fn test_resolve_accepts_defaulted_arity_range() {
+        // `f(a, b=1)`: one or two arguments dispatch, three do not.
+        let mut set = OverloadSet::new("f".to_string(), String::new());
+        set.add_candidate(OverloadCandidate {
+            entity_id: EntityId(1),
+            parameter_types: vec![named("int"), named("int")],
+            return_type: named("void"),
+            specificity: 10,
+            arity: ParamArity {
+                total: 2,
+                required: 1,
+                is_varargs: false,
+                known: true,
+            },
+        });
+        let one = named("int");
+        assert!(set.resolve(&[Some(&one)]).is_some());
+        let two = [Some(one.clone()), Some(one.clone())];
+        let refs: Vec<Option<&TypeShape>> = two.iter().map(|a| a.as_ref()).collect();
+        assert!(set.resolve(&refs).is_some());
+        let three = [Some(one.clone()), Some(one.clone()), Some(one.clone())];
+        let refs: Vec<Option<&TypeShape>> = three.iter().map(|a| a.as_ref()).collect();
+        assert!(set.resolve(&refs).is_none());
+    }
+
+    #[test]
+    fn test_rust_plain_params_stay_exact() {
+        // Rust has no C-style variadics; only a bare `...` marker counts.
+        // The previous language-wide leniency is intentionally removed.
+        use cce_types::language::Language;
+        let mut set = OverloadSet::new("f".to_string(), String::new());
+        set.add_candidate(OverloadCandidate {
+            entity_id: EntityId(1),
+            parameter_types: vec![named("int"), named("int")],
+            return_type: named("void"),
+            specificity: 10,
+            arity: ParamArity::exact(2),
+        });
+        let args = [named("int"), named("int"), named("int")];
+        let refs: Vec<Option<&TypeShape>> = args.iter().map(Some).collect();
+        assert!(
+            set.resolve_with_score(&refs, None, Language::Rust)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_entity_param_arity_counts_defaults_and_rest() {
+        use cce_types::entity::meta_keys;
+        use cce_types::language::Language;
+        use cce_types::{Entity, EntityKind, Span};
+        let mut rest = Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "f".to_string(),
+            Span::default(),
+        );
+        rest.parameters = vec![
+            ("a".to_string(), Some("int".to_string())),
+            ("args".to_string(), Some("String...".to_string())),
+        ];
+        assert_eq!(
+            entity_param_arity(&rest, Language::Java),
+            ParamArity {
+                total: 2,
+                required: 1,
+                is_varargs: true,
+                known: true,
+            }
+        );
+        let mut defaulted = Entity::new(
+            EntityId(2),
+            EntityKind::Function,
+            "g".to_string(),
+            Span::default(),
+        );
+        defaulted.parameters = vec![
+            ("a".to_string(), Some("int".to_string())),
+            ("b".to_string(), Some("int".to_string())),
+        ];
+        defaulted.metadata.insert(
+            meta_keys::PARAM_DEFAULTS.to_string(),
+            r#"[["b", "1"]]"#.to_string(),
+        );
+        assert_eq!(
+            entity_param_arity(&defaulted, Language::Python),
+            ParamArity {
+                total: 2,
+                required: 1,
+                is_varargs: false,
+                known: true,
+            }
+        );
+        let bare = Entity::new(
+            EntityId(3),
+            EntityKind::Function,
+            "h".to_string(),
+            Span::default(),
+        );
+        assert_eq!(
+            entity_param_arity(&bare, Language::Go),
+            ParamArity {
+                total: 0,
+                required: 0,
+                is_varargs: false,
+                known: true,
+            }
+        );
     }
 }

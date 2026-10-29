@@ -54,6 +54,15 @@ pub(super) fn strip_syntax_noise(text: &str, profile: NoiseProfile) -> String {
     if profile.weaken_lua_return {
         current = weaken_lua_return(&current);
     }
+    if profile.strip_kotlin_markers {
+        current = strip_kotlin_markers(&current);
+    }
+    if profile.strip_scala_markers {
+        current = strip_scala_markers(&current);
+    }
+    if profile.strip_dart_markers {
+        current = strip_dart_markers(&current);
+    }
     let mut cleaned = current.replace(" .", ".");
     cleaned = cleaned.replace(" ;", ";");
     // Collapse horizontal whitespace artifacts left by block removal while
@@ -624,6 +633,100 @@ fn is_ruby_visibility_marker(line: &str) -> bool {
     matches!(line.trim(), "private" | "protected" | "public")
 }
 
+/// Strip Kotlin JVM-interop annotation lines.
+///
+/// Sampling basis: in-repo Kotlin snippets use these markers on factory
+/// and interop declarations; the annotated declaration keeps its own text
+/// so no business logic leaves the fragment. Whole-line matches only, so
+/// a marker sharing a line with a declaration is never touched.
+fn strip_kotlin_markers(text: &str) -> String {
+    let mut out = Vec::with_capacity(text.lines().count());
+    for line in text.lines() {
+        if is_kotlin_interop_annotation(line.trim()) {
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    let joined = out.join("\n");
+    if joined.trim().is_empty() && !text.trim().is_empty() {
+        return text.to_string();
+    }
+    joined
+}
+
+fn is_kotlin_interop_annotation(line: &str) -> bool {
+    const BARE: &[&str] = &["@JvmStatic", "@JvmOverloads", "@JvmField", "@JvmSynthetic"];
+    if BARE.contains(&line) {
+        return true;
+    }
+    const WITH_ARGS: &[&str] = &["@JvmName", "@Throws"];
+    WITH_ARGS.iter().any(|marker| {
+        line == *marker
+            || line
+                .strip_prefix(marker)
+                .is_some_and(|rest| rest.starts_with('('))
+    })
+}
+
+/// Strip Scala compiler-hint annotation lines.
+///
+/// Sampling basis mirrors the Kotlin markers: storage and codegen hints
+/// (`@inline`, `@specialized`, `@transient`, `@volatile`,
+/// `@SerialVersionUID`) carry no domain signal. Semantics-bearing markers
+/// (`@throws`, `sealed`, `implicit`, `override`) are intentionally kept.
+/// Whole-line matches only.
+fn strip_scala_markers(text: &str) -> String {
+    let mut out = Vec::with_capacity(text.lines().count());
+    for line in text.lines() {
+        if is_scala_compiler_hint(line.trim()) {
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    let joined = out.join("\n");
+    if joined.trim().is_empty() && !text.trim().is_empty() {
+        return text.to_string();
+    }
+    joined
+}
+
+fn is_scala_compiler_hint(line: &str) -> bool {
+    const BARE: &[&str] = &["@inline", "@specialized", "@transient", "@volatile"];
+    if BARE.contains(&line) {
+        return true;
+    }
+    line == "@SerialVersionUID" || line.starts_with("@SerialVersionUID(")
+}
+
+/// Strip Dart override markers and lint-suppression comments.
+///
+/// `@override` mirrors the Java rule (the annotated member keeps its
+/// text); `// ignore:` directives mirror the Ruby magic-comment rule.
+/// Whole-line matches only, so trailing comments keep their line.
+fn strip_dart_markers(text: &str) -> String {
+    let mut out = Vec::with_capacity(text.lines().count());
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed == "@override" {
+            continue;
+        }
+        if is_dart_ignore_comment(trimmed) {
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    let joined = out.join("\n");
+    if joined.trim().is_empty() && !text.trim().is_empty() {
+        return text.to_string();
+    }
+    joined
+}
+
+fn is_dart_ignore_comment(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.starts_with("// ignore_for_file:") || lower.starts_with("// ignore:")
+}
+
 /// Weaken Lua module return-table wrappers while keeping return names.
 fn weaken_lua_return(text: &str) -> String {
     let mut out = Vec::with_capacity(text.lines().count());
@@ -950,6 +1053,60 @@ mod tests {
     }
 
     #[test]
+    fn strip_kotlin_markers_denoise() {
+        let source = "@JvmStatic\nfun create(name: String): Widget {\nreturn Widget(name)\n}";
+        let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Kotlin));
+        assert!(!cleaned.contains("@JvmStatic"), "got: {cleaned}");
+        assert!(cleaned.contains("fun create"), "got: {cleaned}");
+        assert!(cleaned.contains("Widget(name)"), "got: {cleaned}");
+    }
+
+    #[test]
+    fn strip_kotlin_reverse_keeps_same_line_marker() {
+        // A marker sharing its line with a declaration is never touched.
+        let source = "@JvmStatic fun create(): Widget";
+        let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Kotlin));
+        assert!(cleaned.contains("@JvmStatic"), "got: {cleaned}");
+    }
+
+    #[test]
+    fn strip_scala_markers_denoise() {
+        let source = "@inline\ndef hash(s: String): Int {\nvar h = 0\nh\n}";
+        let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Scala));
+        assert!(!cleaned.contains("@inline"), "got: {cleaned}");
+        assert!(cleaned.contains("def hash"), "got: {cleaned}");
+        assert!(cleaned.contains("var h = 0"), "got: {cleaned}");
+    }
+
+    #[test]
+    fn strip_scala_reverse_keeps_semantic_markers() {
+        // Exception contracts stay: only compiler and storage hints strip.
+        let source = "@throws[IOException]\ndef load(): Data";
+        let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Scala));
+        assert!(cleaned.contains("@throws"), "got: {cleaned}");
+        assert!(cleaned.contains("def load"), "got: {cleaned}");
+    }
+
+    #[test]
+    fn strip_dart_markers_denoise() {
+        let source = "@override\nString describe() {\nreturn name;\n}\n// ignore: unused_element";
+        let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Dart));
+        assert!(!cleaned.contains("@override"), "got: {cleaned}");
+        assert!(!cleaned.contains("ignore:"), "got: {cleaned}");
+        assert!(cleaned.contains("describe()"), "got: {cleaned}");
+        assert!(cleaned.contains("return name;"), "got: {cleaned}");
+    }
+
+    #[test]
+    fn strip_dart_reverse_keeps_trailing_comment() {
+        // A marker with trailing content is not a pure marker line.
+        let source = "@override // reason\nString describe()";
+        let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Dart));
+        assert!(cleaned.contains("@override"), "got: {cleaned}");
+        assert!(cleaned.contains("describe()"), "got: {cleaned}");
+    }
+
+    #[test]
     fn strip_empty_guard_keeps_original() {
         let source = "#!/bin/bash";
         let cleaned = strip_syntax_noise(source, NoiseProfile::for_language(Language::Bash));
@@ -978,6 +1135,9 @@ mod tests {
             Language::Php,
             Language::Ruby,
             Language::Lua,
+            Language::Kotlin,
+            Language::Scala,
+            Language::Dart,
         ]
         .into_iter()
         .collect();
@@ -987,9 +1147,6 @@ mod tests {
             Language::Vue,
             Language::Svelte,
             Language::Ejs,
-            Language::Kotlin,
-            Language::Scala,
-            Language::Dart,
         ];
         for language in Language::ast_parsable_languages() {
             let profile = NoiseProfile::for_language(*language);

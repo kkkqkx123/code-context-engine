@@ -61,6 +61,21 @@ pub struct NoiseProfile {
     pub strip_ruby_markers: bool,
     /// Weaken Lua module return-table wrappers while keeping return names.
     pub weaken_lua_return: bool,
+    /// Strip Kotlin JVM-interop annotation lines.
+    /// Platform markers only (`@JvmStatic`, `@JvmOverloads`, `@JvmField`,
+    /// `@JvmName`, `@Throws`); the annotated declaration keeps its text.
+    /// Decided by sampling over in-repo snippets: whole-line matches are
+    /// unambiguous, and dropping them never removes business logic.
+    pub strip_kotlin_markers: bool,
+    /// Strip Scala compiler-hint annotation lines.
+    /// Storage/codegen hints only (`@inline`, `@specialized`,
+    /// `@transient`, `@volatile`, `@SerialVersionUID`); same sampling
+    /// basis and whole-line guard as the Kotlin markers.
+    pub strip_scala_markers: bool,
+    /// Strip Dart override markers and lint-suppression comments.
+    /// `@override` mirrors the Java rule; `// ignore:` directives mirror
+    /// the Ruby magic-comment rule. Whole-line matches only.
+    pub strip_dart_markers: bool,
 }
 
 impl NoiseProfile {
@@ -118,6 +133,18 @@ impl NoiseProfile {
                 weaken_lua_return: true,
                 ..Self::none()
             },
+            Language::Kotlin => Self {
+                strip_kotlin_markers: true,
+                ..Self::none()
+            },
+            Language::Scala => Self {
+                strip_scala_markers: true,
+                ..Self::none()
+            },
+            Language::Dart => Self {
+                strip_dart_markers: true,
+                ..Self::none()
+            },
             _ => Self::none(),
         }
     }
@@ -142,6 +169,9 @@ impl NoiseProfile {
             strip_php_markers: false,
             strip_ruby_markers: false,
             weaken_lua_return: false,
+            strip_kotlin_markers: false,
+            strip_scala_markers: false,
+            strip_dart_markers: false,
         }
     }
 
@@ -161,6 +191,9 @@ impl NoiseProfile {
             || self.strip_php_markers
             || self.strip_ruby_markers
             || self.weaken_lua_return
+            || self.strip_kotlin_markers
+            || self.strip_scala_markers
+            || self.strip_dart_markers
     }
 }
 
@@ -223,6 +256,22 @@ mod tests {
     }
 
     #[test]
+    fn test_batch_three_profiles_enable_own_rules() {
+        // Sampling batch: JVM-interop markers, compiler-hint annotations
+        // and override/lint markers. Each rule is whole-line and
+        // independently tested in the syntax-strip suite.
+        assert!(NoiseProfile::for_language(Language::Kotlin).strip_kotlin_markers);
+        assert!(NoiseProfile::for_language(Language::Scala).strip_scala_markers);
+        assert!(NoiseProfile::for_language(Language::Dart).strip_dart_markers);
+        for language in [Language::Kotlin, Language::Scala, Language::Dart] {
+            assert!(
+                NoiseProfile::for_language(language).has_language_rules(),
+                "{language:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_pending_and_template_languages_stay_off() {
         for language in [
             Language::Html,
@@ -230,9 +279,6 @@ mod tests {
             Language::Vue,
             Language::Svelte,
             Language::Ejs,
-            Language::Kotlin,
-            Language::Scala,
-            Language::Dart,
             Language::Unknown,
         ] {
             let profile = NoiseProfile::for_language(language);
@@ -297,14 +343,29 @@ mod tests {
                     profile.weaken_lua_return,
                     "{language:?} must enable Lua return weakening"
                 ),
+                Language::Kotlin => assert!(
+                    profile.strip_kotlin_markers
+                        && !profile.strip_scala_markers
+                        && !profile.strip_dart_markers,
+                    "{language:?} must enable Kotlin markers only"
+                ),
+                Language::Scala => assert!(
+                    profile.strip_scala_markers
+                        && !profile.strip_kotlin_markers
+                        && !profile.strip_dart_markers,
+                    "{language:?} must enable Scala markers only"
+                ),
+                Language::Dart => assert!(
+                    profile.strip_dart_markers
+                        && !profile.strip_kotlin_markers
+                        && !profile.strip_scala_markers,
+                    "{language:?} must enable Dart markers only"
+                ),
                 Language::Html
                 | Language::Css
                 | Language::Vue
                 | Language::Svelte
-                | Language::Ejs
-                | Language::Kotlin
-                | Language::Scala
-                | Language::Dart => assert_eq!(
+                | Language::Ejs => assert_eq!(
                     profile,
                     NoiseProfile::none(),
                     "{language:?} stays all-off by design (pending evaluation or template/style)"

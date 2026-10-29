@@ -151,6 +151,15 @@ pub struct ProjectPluginConfig {
     /// - `warn`: register it, log a warning (parse-time validation still applies).
     #[serde(default)]
     pub grammar_abi_policy: Option<GrammarAbiPolicy>,
+
+    /// Policy when a plugin language ships without a `LangHeuristics`
+    /// companion scoped to it (no stdlib/test-file/entity-kind provider).
+    /// - `warn` (default): register the language, log a warning. Entity
+    ///   stdlib classification for its files stays conservative.
+    /// - `deny`: refuse to register the plugin language (strict projects
+    ///   and CI gates). The refusal is logged as a warning.
+    #[serde(default)]
+    pub missing_heuristics_policy: Option<MissingHeuristicsPolicy>,
 }
 
 /// Policy for plugin extension claims conflicting with built-in languages.
@@ -170,6 +179,15 @@ pub enum GrammarAbiPolicy {
     #[default]
     Deny,
     Warn,
+}
+
+/// Policy for plugin languages missing a `LangHeuristics` companion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MissingHeuristicsPolicy {
+    #[default]
+    Warn,
+    Deny,
 }
 
 /// Project-level embedder configuration

@@ -118,6 +118,28 @@ impl AstToNlConverter {
         let registry = self.plugin_registry.as_ref()?;
         registry.vocabulary_for(file_path, Some(&language.to_string()))
     }
+
+    /// Bare boilerplate callees contributed by language plugins.
+    ///
+    /// Returns `None` for built-in languages (their tables stay pure) and
+    /// when no plugin answers. Custom languages consult `LangHeuristics`
+    /// bare-methods hooks; the first non-empty answer wins.
+    pub(crate) fn bare_methods_for(
+        &self,
+        file_path: &str,
+        language: Language,
+    ) -> Option<Vec<String>> {
+        if !matches!(language, Language::Custom(_)) {
+            return None;
+        }
+        let registry = self.plugin_registry.as_ref()?;
+        let methods = crate::plugin::heuristics::plugin_bare_methods(
+            registry,
+            Some(file_path),
+            Some(language.to_string().as_str()),
+        );
+        (!methods.is_empty()).then_some(methods)
+    }
 }
 
 impl Default for AstToNlConverter {

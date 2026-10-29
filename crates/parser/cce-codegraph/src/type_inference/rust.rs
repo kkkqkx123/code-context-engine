@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use super::control_flow::shared::{extract_balanced_parens, is_valid_ident};
 use super::extractors::{extract_field_type, extract_variable_type};
+use super::overload::entity_param_arity;
 use super::traits::LanguageTypeInferer;
 use super::types::{
     InferenceOrigin, ScopedTypeContext, TypeBinding, TypeShape, add_polarity_aware_narrowings,
@@ -107,6 +108,7 @@ impl LanguageTypeInferer for RustTypeInferer {
                     if !param_bindings.is_empty() {
                         ctx.add_parameter_types(entity.id, param_bindings);
                     }
+                    ctx.set_param_arity(entity.id, entity_param_arity(entity, ctx.language()));
 
                     // Rust-specific: infer method receiver type from parent impl block
                     if let Some(parent_id) = entity.parent {

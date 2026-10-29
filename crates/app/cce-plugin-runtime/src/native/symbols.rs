@@ -177,6 +177,22 @@ pub(crate) const ENTITY_KIND: AbiSymbol = AbiSymbol {
     name: "cce_plugin_entity_kind",
     bytes: b"cce_plugin_entity_kind\0",
 };
+pub(crate) const HAS_STDLIB_CALL_HEURISTIC: AbiSymbol = AbiSymbol {
+    name: "cce_plugin_has_stdlib_call_heuristic",
+    bytes: b"cce_plugin_has_stdlib_call_heuristic\0",
+};
+pub(crate) const CLASSIFY_STDLIB_CALL: AbiSymbol = AbiSymbol {
+    name: "cce_plugin_classify_stdlib_call",
+    bytes: b"cce_plugin_classify_stdlib_call\0",
+};
+pub(crate) const HAS_BARE_METHODS_HEURISTIC: AbiSymbol = AbiSymbol {
+    name: "cce_plugin_has_bare_methods_heuristic",
+    bytes: b"cce_plugin_has_bare_methods_heuristic\0",
+};
+pub(crate) const BARE_BOILERPLATE_METHODS: AbiSymbol = AbiSymbol {
+    name: "cce_plugin_bare_boilerplate_methods",
+    bytes: b"cce_plugin_bare_boilerplate_methods\0",
+};
 
 // ── Relation and symbol extraction ──
 pub(crate) const HAS_RELATION_EXTRACT: AbiSymbol = AbiSymbol {
