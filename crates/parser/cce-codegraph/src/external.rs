@@ -36,6 +36,9 @@ pub enum ImportResolutionStrategy {
 
 impl ImportResolutionStrategy {
     /// Determine the strategy for a given language.
+    ///
+    /// Shell, template and unknown languages share the module-level fallback
+    /// until dedicated resolution semantics are designed.
     pub fn for_language(language: Language) -> Self {
         match language {
             Language::Rust => Self::SymbolLevel,

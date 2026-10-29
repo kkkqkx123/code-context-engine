@@ -163,9 +163,12 @@ impl SymbolTableBuilder {
     /// Uses language-specific patterns to identify internal imports:
     /// - Rust: `crate::`, `self::`, `super::` prefixes
     /// - Python: relative imports (starting with `.`)
-    /// - JavaScript/TypeScript: relative imports (starting with `./` or `../`)
+    /// - JavaScript family: relative imports (starting with `./` or `../`)
     /// - Go: relative imports (starting with `.`)
     /// - C/C++: relative includes (quoted paths, not angle-bracket system headers)
+    ///
+    /// Remaining languages conservatively return false until per-language
+    /// internal module rules are designed.
     fn is_internal_import(source: &str, language: Language) -> bool {
         match language {
             Language::Rust => {

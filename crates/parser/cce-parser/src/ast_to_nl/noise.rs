@@ -99,4 +99,26 @@ mod tests {
             assert!(!profile.strip_macro_repetition, "{language:?}");
         }
     }
+
+    #[test]
+    fn test_noise_profile_covers_all_parsable_languages() {
+        for language in Language::ast_parsable_languages() {
+            let profile = NoiseProfile::for_language(*language);
+            if *language == Language::Rust {
+                assert!(
+                    profile.unwrap_unsafe_blocks
+                        && profile.strip_deref_markers
+                        && profile.filter_safety_boilerplate
+                        && profile.strip_macro_repetition,
+                    "Rust must enable all syntax rules"
+                );
+            } else {
+                assert_eq!(
+                    profile,
+                    NoiseProfile::none(),
+                    "{language:?} has no language-specific noise rules by design"
+                );
+            }
+        }
+    }
 }

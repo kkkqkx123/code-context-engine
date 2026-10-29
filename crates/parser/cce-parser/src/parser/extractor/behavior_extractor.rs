@@ -37,6 +37,10 @@ impl BehaviorExtractor {
     }
 
     /// Check if this language currently supports behavior queries.
+    ///
+    /// Template languages without dedicated query schemes stay unsupported and
+    /// flow through embedded block parsing. Svelte is included while Vue
+    /// remains embedded-only; the asymmetry reflects current scheme coverage.
     pub fn supports_language(language: &Language) -> bool {
         matches!(
             language,

@@ -413,6 +413,8 @@ impl OverloadSet {
         let mut score = OverloadScore::default();
         let param_count = candidate.parameter_types.len();
         let arg_count = arg_types.len();
+        // Only Python and Rust rest-parameter shapes are modeled; remaining
+        // languages use exact arity until their varargs syntax is designed.
         let is_varargs = matches!(language, Language::Python | Language::Rust);
         let min_params = if is_varargs {
             param_count.saturating_sub(1)

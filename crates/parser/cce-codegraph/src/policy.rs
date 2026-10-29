@@ -16,6 +16,11 @@ use cce_types::language::Language;
 use crate::symbol::{ScopeContext, Visibility};
 
 /// Dispatch visibility signal parsing to the language-specific table.
+///
+/// Languages without a dedicated signal table share the generic catch-all.
+/// This is intentional for C, PHP, Ruby, Bash and Lua: C has no visibility
+/// keywords, PHP and Ruby resolve through extracted modifiers first, and
+/// shell dialects have no visibility system.
 pub fn visibility_from_signal(signal: &str, language: &Language) -> Option<Visibility> {
     // Kotlin modifiers differ from Java: `open` is orthogonal to visibility
     // (an `open class` is still public) while `internal` is Kotlin-specific.
@@ -431,6 +436,16 @@ mod tests {
         assert_eq!(visibility_from_name("foo", &Language::Bash), None);
         let def = ScopeContext::new("a.sh", "");
         assert!(is_visible(&Visibility::Private, &def, &def, Language::Bash));
+    }
+
+    // C has no visibility keywords and shares the generic catch-all.
+    #[test]
+    fn c_generic_signal_and_naming() {
+        assert_eq!(
+            visibility_from_signal("public", &Language::C),
+            Some(Visibility::Public)
+        );
+        assert_eq!(visibility_from_name("foo", &Language::C), None);
     }
 
     // Lua has no real visibility model; everything resolves to public/visible.

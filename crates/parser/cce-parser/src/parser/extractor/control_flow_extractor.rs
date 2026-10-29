@@ -35,6 +35,9 @@ impl ControlFlowExtractor {
     }
 
     /// Check if this language currently supports control-flow queries.
+    ///
+    /// Template languages stay unsupported and flow through embedded block
+    /// parsing, matching the behavior extractor gating.
     pub fn supports_language(language: &Language) -> bool {
         matches!(
             language,

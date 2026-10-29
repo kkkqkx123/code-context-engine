@@ -80,8 +80,12 @@ impl StdlibDetector {
     }
 
     /// Check if a type is from the standard library (merged from symbol_classifier)
+    ///
+    /// Shell and scripting languages without a static type system conservatively
+    /// return false. Remapped plugin languages inherit their host tables.
     pub fn is_stdlib_type(name: &str, language: &Language) -> bool {
-        match language {
+        let effective = effective_language(language);
+        match &effective {
             Language::C => CStdlibDetector::is_stdlib_type(name),
             Language::Cpp => CppStdlibDetector::is_stdlib_type(name),
             Language::Go => GoStdlibDetector::is_stdlib_type(name),
@@ -102,16 +106,24 @@ impl StdlibDetector {
     }
 
     /// Check if a trait is from the standard library (merged from symbol_classifier)
+    ///
+    /// Only Rust exposes traits as a language concept; other languages
+    /// conservatively return false. Remapped plugin languages inherit host tables.
     pub fn is_stdlib_trait(name: &str, language: &Language) -> bool {
-        match language {
+        let effective = effective_language(language);
+        match &effective {
             Language::Rust => RustStdlibDetector::is_stdlib_trait(name),
             _ => false, // Rust-specific feature
         }
     }
 
     /// Check if a constant is from the standard library
+    ///
+    /// Only languages with dedicated constant tables participate; the rest
+    /// conservatively return false. Remapped plugin languages inherit host tables.
     pub fn is_stdlib_constant(name: &str, language: &Language) -> bool {
-        match language {
+        let effective = effective_language(language);
+        match &effective {
             Language::C => CStdlibDetector::is_stdlib_constant(name),
             Language::Cpp => CppStdlibDetector::is_stdlib_constant(name),
             Language::CSharp => CSharpStdlibDetector::is_stdlib_constant(name),
@@ -977,6 +989,22 @@ mod tests {
         assert!(!StdlibDetector::is_stdlib_call(
             "Vec::new",
             &Language::Custom(u32::MAX)
+        ));
+        assert!(StdlibDetector::is_stdlib_type(
+            "Vec",
+            &Language::Custom(remapped)
+        ));
+        assert!(!StdlibDetector::is_stdlib_type(
+            "Vec",
+            &Language::Custom(native)
+        ));
+        assert!(StdlibDetector::is_stdlib_trait(
+            "Clone",
+            &Language::Custom(remapped)
+        ));
+        assert!(!StdlibDetector::is_stdlib_trait(
+            "Clone",
+            &Language::Custom(native)
         ));
         clear_plugin_languages();
     }

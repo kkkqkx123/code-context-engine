@@ -83,20 +83,6 @@ impl Visibility {
         crate::policy::is_visible(self, from_scope, defined_in, language)
     }
 
-    /// Get the most permissive visibility for a language's default
-    pub fn default_for_language(language: Language) -> Self {
-        match language {
-            Language::Rust => Visibility::Private,
-            Language::Java => Visibility::Package, // package-private
-            Language::Go => Visibility::Public,    // exported if uppercase
-            Language::CSharp => Visibility::Private,
-            Language::Cpp => Visibility::Private,
-            Language::Python => Visibility::Public,
-            Language::JavaScript | Language::TypeScript => Visibility::Public,
-            _ => Visibility::Public,
-        }
-    }
-
     /// Check if this visibility level is at least as permissive as other
     pub fn is_at_least(&self, other: &Visibility) -> bool {
         use Visibility::*;

@@ -79,19 +79,46 @@ pub fn mark_stdlib(entity: &mut Entity, language: &Language) {
 
     if detection_result {
         is_stdlib = true;
-        // Determine category based on entity kind (best guess for semantic meaning)
-        category = Some(match entity.kind {
+        let coarse = match entity.kind {
             EntityKind::Struct | EntityKind::Class => StdlibCategory::Collection,
             EntityKind::Function | EntityKind::Method => StdlibCategory::Utility,
             EntityKind::Trait => StdlibCategory::Trait,
             EntityKind::Constant => StdlibCategory::Other,
             EntityKind::Macro => StdlibCategory::Macro,
             _ => StdlibCategory::Other,
-        });
+        };
+        category = Some(fine_stdlib_category(name, language).unwrap_or(coarse));
     }
 
     entity.is_stdlib = is_stdlib;
     entity.stdlib_category = category;
+}
+
+/// Reuse the per-language category tables so entity and relation layers agree.
+///
+/// Template languages conservatively return none. Remapped plugin languages
+/// inherit their host language tables through effective language resolution.
+fn fine_stdlib_category(name: &str, language: &Language) -> Option<StdlibCategory> {
+    match cce_types::language::effective_language(language) {
+        Language::Rust => crate::parser::stdlib::rust::RustStdlibDetector::get_category(name),
+        Language::Python => crate::parser::stdlib::python::PythonStdlibDetector::get_category(name),
+        Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+            crate::parser::stdlib::javascript::JavaScriptStdlibDetector::get_category(name)
+        }
+        Language::Go => crate::parser::stdlib::go::GoStdlibDetector::get_category(name),
+        Language::Java => crate::parser::stdlib::java::JavaStdlibDetector::get_category(name),
+        Language::CSharp => crate::parser::stdlib::csharp::CSharpStdlibDetector::get_category(name),
+        Language::C => crate::parser::stdlib::c::CStdlibDetector::get_category(name),
+        Language::Cpp => crate::parser::stdlib::cpp::CppStdlibDetector::get_category(name),
+        Language::Kotlin => crate::parser::stdlib::kotlin::KotlinStdlibDetector::get_category(name),
+        Language::Scala => crate::parser::stdlib::scala::ScalaStdlibDetector::get_category(name),
+        Language::Dart => crate::parser::stdlib::dart::DartStdlibDetector::get_category(name),
+        Language::Ruby => crate::parser::stdlib::ruby::RubyStdlibDetector::get_category(name),
+        Language::Php => crate::parser::stdlib::php::PhpStdlibDetector::get_category(name),
+        Language::Lua => crate::parser::stdlib::lua::LuaStdlibDetector::get_category(name),
+        Language::Bash => crate::parser::stdlib::bash::BashStdlibDetector::get_category(name),
+        _ => None,
+    }
 }
 
 /// Parse a stdlib category string from plugin metadata.
@@ -179,5 +206,21 @@ mod tests {
         };
         mark_stdlib(&mut entity, &Language::Rust);
         assert!(entity.is_stdlib);
+    }
+
+    #[test]
+    fn test_mark_stdlib_prefers_fine_category() {
+        use cce_types::entity::EntityKind;
+        let mut entity = Entity {
+            name: "print".to_string(),
+            kind: EntityKind::Function,
+            ..Default::default()
+        };
+        mark_stdlib(&mut entity, &Language::Python);
+        assert!(entity.is_stdlib);
+        assert_eq!(
+            entity.stdlib_category,
+            Some(crate::grouper::types::StdlibCategory::Io)
+        );
     }
 }

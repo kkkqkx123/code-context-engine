@@ -405,21 +405,27 @@ fn classify_stdlib_category(
         | cce_types::Language::Jsx
         | cce_types::Language::Tsx => {
             crate::parser::stdlib::javascript::JavaScriptStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
         }
         cce_types::Language::Rust => {
             crate::parser::stdlib::rust::RustStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
         }
         cce_types::Language::Python => {
             crate::parser::stdlib::python::PythonStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
         }
         cce_types::Language::Go => {
             crate::parser::stdlib::go::GoStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
         }
         cce_types::Language::Java => {
             crate::parser::stdlib::java::JavaStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
         }
         cce_types::Language::CSharp => {
             crate::parser::stdlib::csharp::CSharpStdlibDetector::get_category(callee_name)
+                .or(Some(StdlibCategory::Other))
         }
         cce_types::Language::C => {
             crate::parser::stdlib::c::CStdlibDetector::get_category(callee_name)

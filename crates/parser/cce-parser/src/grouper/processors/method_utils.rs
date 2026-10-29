@@ -59,6 +59,9 @@ impl GetterSetterDetector {
         MethodType::ComplexMethod
     }
 
+    /// Property detection relies on the query scheme emitting Property kinds.
+    /// Only C# and Kotlin add name and shape heuristics on top; remaining
+    /// languages conservatively depend on the emitted kind.
     pub fn is_property(&self, entity: &Entity, language: &Language) -> bool {
         if entity.kind == EntityKind::Property {
             return true;

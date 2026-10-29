@@ -1,4 +1,4 @@
-//! Filter for shadowed `require()` calls in JavaScript/TypeScript.
+//! Filter for shadowed `require()` calls in the JavaScript family.
 //!
 //! The tree-sitter query matches on identifier text only, so a locally bound
 //! `require` (parameter or variable) still fires the dependency pattern.
@@ -20,7 +20,10 @@ pub(crate) fn is_shadowed_require(
     entities: &[Entity],
     language: &Language,
 ) -> bool {
-    if !matches!(language, Language::JavaScript | Language::TypeScript) {
+    if !matches!(
+        language,
+        Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx
+    ) {
         return false;
     }
     if !dep_capture.name.contains("dependency.require") {
@@ -67,4 +70,60 @@ pub(crate) fn is_shadowed_require(
     entities
         .iter()
         .any(|e| e.name == "require" && e.span.start_byte < call_byte)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cce_types::Span;
+    use cce_types::entity::{EntityId, EntityKind};
+
+    fn shadowed_fixture() -> (QueryMatch, Capture, Vec<Entity>) {
+        let dep = Capture {
+            name: "dependency.require".to_string(),
+            text: "require".to_string(),
+            start_byte: 50,
+            end_byte: 57,
+            start_point: (0, 50),
+            end_point: (0, 57),
+        };
+        let func = Capture {
+            name: "dependency.require.function".to_string(),
+            text: "require".to_string(),
+            start_byte: 50,
+            end_byte: 57,
+            start_point: (0, 50),
+            end_point: (0, 57),
+        };
+        let mat = QueryMatch {
+            index: 0,
+            pattern_index: 0,
+            captures: vec![dep.clone(), func],
+        };
+        let mut enclosing = Entity::new(
+            EntityId(1),
+            EntityKind::Function,
+            "outer".to_string(),
+            Span::new(0, 100, 0, 0, 0, 100),
+        );
+        enclosing.parameters = vec![("require".to_string(), None)];
+        (mat, dep, vec![enclosing])
+    }
+
+    #[test]
+    fn test_shadowed_require_js_family_parity() {
+        let (mat, dep, entities) = shadowed_fixture();
+        for language in [
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Jsx,
+            Language::Tsx,
+        ] {
+            assert!(
+                is_shadowed_require(&mat, &dep, &entities, &language),
+                "shadowed require must filter for {language:?}"
+            );
+        }
+        assert!(!is_shadowed_require(&mat, &dep, &entities, &Language::Rust));
+    }
 }

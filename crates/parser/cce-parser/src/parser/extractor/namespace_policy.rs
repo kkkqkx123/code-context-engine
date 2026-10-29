@@ -112,6 +112,9 @@ impl NamespacePolicy for CppNamespacePolicy {
 }
 
 /// Get the namespace policy for a language, if it has namespace semantics.
+///
+/// Only languages with explicit namespace blocks participate. Remaining
+/// languages resolve through module paths and conservatively return none.
 pub fn namespace_policy_for(lang: Language) -> Option<Box<dyn NamespacePolicy>> {
     match lang {
         Language::CSharp => Some(Box::new(CSharpNamespacePolicy)),

@@ -57,6 +57,10 @@ impl ExtractionContext {
     }
 
     /// Resolve relative import to absolute path.
+    ///
+    /// Only languages with a well-defined relative module syntax participate.
+    /// Remaining languages conservatively return none until per-language
+    /// semantics are designed. The JavaScript family shares one resolver.
     pub fn resolve_relative_import(
         &self,
         relative_path: &str,
@@ -64,7 +68,9 @@ impl ExtractionContext {
     ) -> Option<String> {
         match language {
             Language::Python => self.resolve_python_relative(relative_path),
-            Language::JavaScript | Language::TypeScript => self.resolve_js_relative(relative_path),
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+                self.resolve_js_relative(relative_path)
+            }
             Language::Rust => self.resolve_rust_relative(relative_path),
             Language::Go => self.resolve_go_relative(relative_path),
             _ => None,
@@ -72,6 +78,10 @@ impl ExtractionContext {
     }
 
     /// Classify an import as internal or external.
+    ///
+    /// Only languages with explicit package prefix semantics participate.
+    /// Remaining languages conservatively return false until per-language
+    /// internal module rules are designed.
     pub fn is_internal_import(&self, import_path: &str, language: Language) -> bool {
         if let Some(ref package) = self.package_declaration {
             match language {

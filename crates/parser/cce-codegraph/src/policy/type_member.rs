@@ -9,6 +9,11 @@ use crate::symbol_table::type_index::TypeMemberIndex;
 use cce_types::entity::Entity;
 use cce_types::language::Language;
 
+/// Build the per-file type member index.
+///
+/// C#, C++ and Dart reuse the Java backend as a deliberate simplification.
+/// Remaining languages use the generic parent-based fallback until dedicated
+/// backends are designed.
 pub fn build_type_index_for_file(
     entities: &[Entity],
     module_path: &str,

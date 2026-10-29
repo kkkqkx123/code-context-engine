@@ -55,24 +55,16 @@ impl StdlibEntityInfo {
 /// Standard library entity detector
 ///
 /// Detects standard library entities and provides semantic information
-/// for compression optimization.
-pub struct StdlibEntityDetector {
-    /// Rust standard library detector
-    rust_detector: RustStdlibDetector,
-    /// Python standard library detector
-    python_detector: PythonStdlibDetector,
-    /// JavaScript standard library detector
-    javascript_detector: JavaScriptStdlibDetector,
-}
+/// for compression optimization. Detection delegates to the authoritative
+/// tables in `cce-stdlib`, mirroring the relation extraction dispatch so
+/// both layers agree on the supported language set. Template languages
+/// carry no stdlib entities of their own and conservatively return none.
+pub struct StdlibEntityDetector;
 
 impl StdlibEntityDetector {
     /// Create a new StdlibEntityDetector
     pub fn new() -> Self {
-        Self {
-            rust_detector: RustStdlibDetector::new(),
-            python_detector: PythonStdlibDetector::new(),
-            javascript_detector: JavaScriptStdlibDetector::new(),
-        }
+        Self
     }
 
     /// Detect if an entity is a standard library entity
@@ -81,26 +73,25 @@ impl StdlibEntityDetector {
         entity: &Entity,
         language: &Language,
     ) -> Option<StdlibEntityInfo> {
-        // Remapped plugin languages inherit their host grammar's detectors.
-        match &cce_types::language::effective_language(language) {
-            Language::Rust => self.rust_detector.detect(entity),
-            Language::Python => self.python_detector.detect(entity),
-            Language::JavaScript | Language::TypeScript => self.javascript_detector.detect(entity),
-            _ => None,
-        }
+        let category = self.get_stdlib_category(&entity.name, language)?;
+        let full_name = match cce_types::language::effective_language(language) {
+            Language::Rust => format!("std::{}", entity.name),
+            _ => entity.name.clone(),
+        };
+        Some(StdlibEntityInfo::new(
+            entity.id,
+            full_name,
+            entity.name.clone(),
+            category,
+        ))
     }
 
     /// Check if a name is a standard library entity
     pub fn is_stdlib_name(&self, name: &str, language: &Language) -> bool {
-        // Remapped plugin languages inherit their host grammar's detectors.
-        match &cce_types::language::effective_language(language) {
-            Language::Rust => self.rust_detector.is_stdlib_name(name),
-            Language::Python => self.python_detector.is_stdlib_name(name),
-            Language::JavaScript | Language::TypeScript => {
-                self.javascript_detector.is_stdlib_name(name)
-            }
-            _ => false,
+        if self.get_stdlib_category(name, language).is_some() {
+            return true;
         }
+        cce_stdlib::StdlibDetector::is_stdlib_call(name, language)
     }
 
     /// Get the category for a stdlib name
@@ -109,12 +100,24 @@ impl StdlibEntityDetector {
     /// or None if it's not recognized.
     pub fn get_stdlib_category(&self, name: &str, language: &Language) -> Option<StdlibCategory> {
         // Remapped plugin languages inherit their host grammar's detectors.
-        match &cce_types::language::effective_language(language) {
-            Language::Rust => self.rust_detector.get_category(name),
-            Language::Python => self.python_detector.get_category(name),
-            Language::JavaScript | Language::TypeScript => {
-                self.javascript_detector.get_category(name)
+        match cce_types::language::effective_language(language) {
+            Language::Rust => cce_stdlib::rust::RustStdlibDetector::get_category(name),
+            Language::Python => cce_stdlib::python::PythonStdlibDetector::get_category(name),
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
+                cce_stdlib::javascript::JavaScriptStdlibDetector::get_category(name)
             }
+            Language::Go => cce_stdlib::go::GoStdlibDetector::get_category(name),
+            Language::Java => cce_stdlib::java::JavaStdlibDetector::get_category(name),
+            Language::CSharp => cce_stdlib::csharp::CSharpStdlibDetector::get_category(name),
+            Language::C => cce_stdlib::c::CStdlibDetector::get_category(name),
+            Language::Cpp => cce_stdlib::cpp::CppStdlibDetector::get_category(name),
+            Language::Kotlin => cce_stdlib::kotlin::KotlinStdlibDetector::get_category(name),
+            Language::Scala => cce_stdlib::scala::ScalaStdlibDetector::get_category(name),
+            Language::Dart => cce_stdlib::dart::DartStdlibDetector::get_category(name),
+            Language::Ruby => cce_stdlib::ruby::RubyStdlibDetector::get_category(name),
+            Language::Php => cce_stdlib::php::PhpStdlibDetector::get_category(name),
+            Language::Lua => cce_stdlib::lua::LuaStdlibDetector::get_category(name),
+            Language::Bash => cce_stdlib::bash::BashStdlibDetector::get_category(name),
             _ => None,
         }
     }
@@ -128,117 +131,6 @@ impl StdlibEntityDetector {
 impl Default for StdlibEntityDetector {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Rust standard library detector
-///
-/// Delegates all detection to the authoritative source in parser/stdlib/rust.rs
-/// This ensures single source of truth for stdlib definitions.
-struct RustStdlibDetector;
-
-impl RustStdlibDetector {
-    /// Create a new RustStdlibDetector
-    fn new() -> Self {
-        Self
-    }
-
-    /// Detect if an entity is a Rust standard library entity
-    fn detect(&self, entity: &Entity) -> Option<StdlibEntityInfo> {
-        let name = &entity.name;
-
-        // Delegate to the standalone stdlib detector crate
-        let category = cce_stdlib::rust::RustStdlibDetector::get_category(name)?;
-
-        Some(StdlibEntityInfo::new(
-            entity.id,
-            format!("std::{}", name),
-            name.clone(),
-            category,
-        ))
-    }
-
-    /// Check if a name is a Rust standard library entity
-    fn is_stdlib_name(&self, name: &str) -> bool {
-        cce_stdlib::rust::RustStdlibDetector::is_stdlib_name(name)
-    }
-
-    /// Get the category for a Rust stdlib name
-    fn get_category(&self, name: &str) -> Option<StdlibCategory> {
-        cce_stdlib::rust::RustStdlibDetector::get_category(name)
-    }
-}
-
-/// Python standard library detector
-struct PythonStdlibDetector;
-
-impl PythonStdlibDetector {
-    /// Create a new PythonStdlibDetector
-    fn new() -> Self {
-        Self
-    }
-
-    /// Detect if an entity is a Python standard library entity
-    fn detect(&self, entity: &Entity) -> Option<StdlibEntityInfo> {
-        let name = &entity.name;
-
-        // Delegate to the standalone stdlib detector crate
-        let category = cce_stdlib::python::PythonStdlibDetector::get_category(name)?;
-
-        Some(StdlibEntityInfo::new(
-            entity.id,
-            name.clone(),
-            name.clone(),
-            category,
-        ))
-    }
-
-    /// Check if a name is a Python standard library entity
-    fn is_stdlib_name(&self, name: &str) -> bool {
-        cce_stdlib::python::PythonStdlibDetector::is_stdlib_name(name)
-    }
-
-    /// Get the category for a Python stdlib name
-    fn get_category(&self, name: &str) -> Option<StdlibCategory> {
-        cce_stdlib::python::PythonStdlibDetector::get_category(name)
-    }
-}
-
-/// JavaScript standard library detector
-///
-/// Delegates all detection to the authoritative source in parser/stdlib/javascript.rs
-/// This ensures single source of truth for stdlib definitions.
-struct JavaScriptStdlibDetector;
-
-impl JavaScriptStdlibDetector {
-    /// Create a new JavaScriptStdlibDetector
-    fn new() -> Self {
-        Self
-    }
-
-    /// Detect if an entity is a JavaScript standard library entity
-    fn detect(&self, entity: &Entity) -> Option<StdlibEntityInfo> {
-        let name = &entity.name;
-
-        // Delegate to the standalone stdlib detector crate
-        let category = cce_stdlib::javascript::JavaScriptStdlibDetector::get_category(name)?;
-
-        Some(StdlibEntityInfo::new(
-            entity.id,
-            name.clone(),
-            name.clone(),
-            category,
-        ))
-    }
-
-    /// Check if a name is a JavaScript standard library entity
-    fn is_stdlib_name(&self, name: &str) -> bool {
-        cce_stdlib::javascript::JavaScriptStdlibDetector::get_category(name).is_some()
-    }
-
-    /// Get the category for a JavaScript stdlib name
-    fn get_category(&self, name: &str) -> Option<StdlibCategory> {
-        cce_stdlib::javascript::JavaScriptStdlibDetector::get_category(name)
     }
 }
 
@@ -416,5 +308,60 @@ mod tests {
         let info = detector.detect_stdlib_entity(&entity, &Language::TypeScript);
         assert!(info.is_some());
         assert_eq!(info.unwrap().category, StdlibCategory::Utility);
+    }
+
+    #[test]
+    fn test_grouper_stdlib_covers_all_supported_languages() {
+        let detector = StdlibEntityDetector::new();
+        let template = [
+            Language::Html,
+            Language::Css,
+            Language::Vue,
+            Language::Svelte,
+            Language::Ejs,
+        ];
+        let sentinels: &[(Language, &str)] = &[
+            (Language::Bash, "echo"),
+            (Language::C, "printf"),
+            (Language::Cpp, "cout"),
+            (Language::CSharp, "Console.WriteLine"),
+            (Language::Dart, "print"),
+            (Language::Go, "fmt.Println"),
+            (Language::Java, "System.out.println"),
+            (Language::JavaScript, "console.log"),
+            (Language::TypeScript, "console.log"),
+            (Language::Jsx, "console.log"),
+            (Language::Tsx, "console.log"),
+            (Language::Kotlin, "listOf"),
+            (Language::Lua, "string.format"),
+            (Language::Php, "strlen"),
+            (Language::Python, "print"),
+            (Language::Ruby, "puts"),
+            (Language::Rust, "Vec::new"),
+            (Language::Scala, "println"),
+        ];
+        for language in Language::ast_parsable_languages() {
+            if template.contains(language) {
+                let entity = create_test_entity("something");
+                assert!(
+                    detector.detect_stdlib_entity(&entity, language).is_none(),
+                    "template language {language:?} must stay conservative"
+                );
+                continue;
+            }
+            let (_, sentinel) = sentinels
+                .iter()
+                .find(|(lang, _)| lang == language)
+                .unwrap_or_else(|| panic!("{language:?} has no grouper sentinel"));
+            let entity = create_test_entity(sentinel);
+            assert!(
+                detector.detect_stdlib_entity(&entity, language).is_some(),
+                "sentinel {sentinel} not recognized for {language:?}"
+            );
+            assert!(
+                detector.get_stdlib_category(sentinel, language).is_some(),
+                "category missing for {sentinel} in {language:?}"
+            );
+        }
     }
 }

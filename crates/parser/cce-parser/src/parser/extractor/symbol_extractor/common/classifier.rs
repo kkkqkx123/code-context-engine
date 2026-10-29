@@ -93,7 +93,7 @@ impl ImportClassifier {
             Language::Java => {
                 path.starts_with("java.") || path.starts_with("javax.") || path.starts_with("jdk.")
             }
-            Language::JavaScript | Language::TypeScript => {
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
                 JavaScriptStdlibDetector::is_node_stdlib(path)
             }
             Language::Go => {
@@ -146,7 +146,7 @@ impl ImportClassifier {
             Language::Java | Language::Kotlin | Language::Scala => {
                 path.split('.').next().map(|s| s.to_string())
             }
-            Language::JavaScript | Language::TypeScript => {
+            Language::JavaScript | Language::TypeScript | Language::Jsx | Language::Tsx => {
                 // Handle scoped packages: @org/package
                 if path.starts_with('@') {
                     Some(path.split('/').take(2).collect::<Vec<_>>().join("/"))
@@ -354,6 +354,34 @@ mod tests {
             ImportClassifier::classify_batch(std::slice::from_ref(&import), &context, Language::C);
         let classification = &results[0];
         assert_eq!(classification.class, ImportClass::ExternalPackage);
+    }
+
+    #[test]
+    fn test_js_family_import_parity() {
+        let context = ExtractionContext::default();
+        for language in [
+            Language::JavaScript,
+            Language::TypeScript,
+            Language::Jsx,
+            Language::Tsx,
+        ] {
+            let import = StandardizedImport::new(ImportKind::SymbolImport, "fs");
+            let results =
+                ImportClassifier::classify_batch(std::slice::from_ref(&import), &context, language);
+            assert_eq!(
+                results[0].class,
+                ImportClass::StandardLibrary,
+                "fs must be stdlib for {language:?}"
+            );
+            let scoped = StandardizedImport::new(ImportKind::SymbolImport, "@types/node");
+            let results =
+                ImportClassifier::classify_batch(std::slice::from_ref(&scoped), &context, language);
+            assert_eq!(
+                results[0].metadata.package_name,
+                Some("@types/node".to_string()),
+                "scoped package must parse for {language:?}"
+            );
+        }
     }
 
     #[test]

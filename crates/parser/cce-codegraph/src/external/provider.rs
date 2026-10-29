@@ -195,6 +195,29 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_registry_conservative_missing() {
+        // C and C++ resolve through header parsing rather than package
+        // providers; shell, template and style languages have no provider
+        // by design and stay conservative.
+        for language in [
+            Language::C,
+            Language::Cpp,
+            Language::Bash,
+            Language::Lua,
+            Language::Html,
+            Language::Css,
+            Language::Vue,
+            Language::Svelte,
+            Language::Ejs,
+        ] {
+            assert!(
+                !ProviderRegistry::has_provider(language),
+                "{language:?} must stay without a package provider"
+            );
+        }
+    }
+
+    #[test]
     fn test_rust_provider_discover_cargo_path_dep() {
         let tmp = std::env::temp_dir().join("cce_test_path_dep");
         let _ = std::fs::create_dir_all(&tmp);
